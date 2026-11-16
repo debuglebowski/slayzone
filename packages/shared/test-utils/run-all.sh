@@ -739,6 +739,7 @@ run_harness packages/domains/worktrees/src/server/ignored-index.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-trees.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-tree-routing.test.ts
 run_harness packages/domains/worktrees/src/server/paged-diffs.test.ts
+run_harness packages/domains/worktrees/src/server/spool-command.test.ts
 run_harness packages/domains/worktrees/src/server/git-text-routing.test.ts
 run_harness packages/domains/worktrees/src/server/output-tail.test.ts
 run_harness packages/domains/worktrees/src/server/commits-pages.test.ts

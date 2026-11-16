@@ -6,7 +6,7 @@
  * files' eager preview (now in batches too; an older computer's whole record still
  * works).
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   GIT_TEXT_EXPIRED,
   type GitFileDiffsPage,
@@ -88,6 +88,102 @@ async function idle(loader: DiffTextLoader) {
 }
 
 describe('DiffTextLoader', () => {
+  it.each(
+    ['refresh', 'remove', 'untracked-remove', 'untracked-replace'].flatMap((change) =>
+      ['success', 'failure'].map((outcome) => ({ change, outcome }))
+    )
+  )('discards old load-rest $outcome after $change', async ({ change, outcome }) => {
+    let finish!: (page: GitTextPage) => void
+    let fail!: (err: Error) => void
+    const rest = new Promise<GitTextPage>((resolve, reject) => {
+      finish = resolve
+      fail = reject
+    })
+    let version = 'OLD'
+    const text = vi.fn(async (_src: GitTextSource, cursor: string | null): Promise<GitTextPage> => {
+      if (cursor === 'next') return rest
+      return { text: version, cursor: cursor === null ? 'next' : null, totalBytes: 100 }
+    })
+    const loader = new DiffTextLoader(
+      {
+        filesPage: async () => ({ diffs: {}, deferred: [], large: ['big.txt'] }),
+        untrackedPage: async () => ({ $paged: true, diffs: {}, deferred: [], large: ['big.txt'] }),
+        text
+      },
+      { opts: {} }
+    )
+    const untracked = change.startsWith('untracked-')
+    const key = `${untracked ? '?' : 'u'}:big.txt`
+    const snapshot = (fingerprint: string) =>
+      untracked
+        ? snap({ untrackedFiles: ['big.txt'] })
+        : snap({ deferred: { unstaged: ['big.txt'], staged: [], renamedFrom: {}, fingerprint } })
+    loader.sync(snapshot('f1'))
+    await idle(loader)
+    const loading = loader.loadRest(key).then(
+      () => null,
+      (err: Error) => err
+    )
+    version = 'NEW'
+    if (change === 'refresh') loader.sync(snapshot('f2'))
+    else {
+      loader.sync(snap({}))
+      if (change === 'untracked-replace') loader.sync(snapshot('f1'))
+    }
+    await vi.waitFor(() => {
+      if (change === 'refresh' || change === 'untracked-replace')
+        expect(loader.getSnapshot().get(key)?.text).toBe('NEW')
+      else expect(loader.getSnapshot().has(key)).toBe(false)
+    })
+    const current = loader.getSnapshot().get(key)
+    if (outcome === 'failure') fail(new Error('old read failed'))
+    else finish({ text: 'OLD-REST', cursor: 'old-last', totalBytes: 100 })
+    expect(await loading).toBeNull()
+    expect(loader.getSnapshot().get(key)).toBe(current)
+    expect(text.mock.calls.some(([, cursor]) => cursor === 'old-last')).toBe(false)
+    loader.dispose()
+  })
+
+  it('a current load-rest failure preserves its first page and retry control', async () => {
+    const f = source()
+    const read = f.s.text
+    f.s.text = (src, cursor) =>
+      cursor === null ? read(src, cursor) : Promise.reject(new Error('read failed'))
+    const loader = new DiffTextLoader(f.s, { opts: {} })
+    loader.sync(snap({ untrackedFiles: ['big.txt'] }))
+    await idle(loader)
+    const first = loader.getSnapshot().get('?:big.txt')!
+    await expect(loader.loadRest('?:big.txt')).rejects.toThrow('read failed')
+    expect(loader.getSnapshot().get('?:big.txt')).toEqual({
+      ...first,
+      loading: false,
+      failed: true
+    })
+    loader.dispose()
+  })
+
+  it('an unrelated tracked fingerprint change keeps an untracked load-rest current', async () => {
+    const f = source()
+    const loader = new DiffTextLoader(f.s, { opts: {} })
+    loader.sync(snap({ untrackedFiles: ['big.txt'] }))
+    await idle(loader)
+    const loading = loader.loadRest('?:big.txt')
+    loader.sync(
+      snap({
+        untrackedFiles: ['big.txt'],
+        deferred: { unstaged: [], staged: [], renamedFrom: {}, fingerprint: 'new' }
+      })
+    )
+    await loading
+    expect(loader.getSnapshot().get('?:big.txt')).toEqual({
+      text: f.bigWhole,
+      rest: null,
+      loading: false,
+      failed: false
+    })
+    loader.dispose()
+  })
+
   it('fetches a paged snapshot’s deferred files in batches until all are in', async () => {
     const f = source({ batch: 2 })
     const loader = new DiffTextLoader(f.s, { opts: { contextLines: '3' } })

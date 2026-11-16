@@ -1,7 +1,9 @@
 // eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: hubSpawnSync runs worktree setup scripts + submodule update synchronously and can block the hub for minutes; convert callers to hubSpawn.
 import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { createWriteStream } from 'fs'
+import { unlink } from 'fs/promises'
 import { basename } from 'path'
+import { finished } from 'stream/promises'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/record'
 import type { DiagnosticEvent, DiagnosticSource } from '@slayzone/diagnostics/shared'
 import { gitCommand, mergePathLists } from '@slayzone/platform'
@@ -314,67 +316,100 @@ function gitFailure(label: string, code: number | null, stderr: string): Error {
  * Run `command args`, handing stdout to `onData` chunk by chunk. `onData` returning
  * false stops it: the process is killed, the rest of its output ignored, and the
  * run counts as answered (`stopped`). A non-ok exit of a run that was not stopped
- * rejects like {@link execGit}. Logged like {@link execAsync}.
+ * rejects like {@link execGit}. An async sink backpressures stdout until it settles.
+ * Logged like {@link execAsync}.
  */
-function streamCommand(
+async function streamCommand(
   command: string,
   args: string[],
   opts: StreamOptions,
-  onData: (chunk: Buffer) => boolean
+  onData: (chunk: Buffer) => boolean | Promise<boolean>,
+  signal?: AbortSignal
 ): Promise<{ stopped: boolean; bytes: number; code: number | null }> {
-  return new Promise((resolve, reject) => {
-    const label = `${command} ${args.join(' ')}`
-    const startedAt = Date.now()
-    const child = hubSpawn(command, args, {
-      cwd: opts.cwd,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    let stopped = false
-    let bytes = 0
-    const stderr: string[] = []
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (stopped) return
-      bytes += chunk.length
-      if (!onData(chunk)) {
-        stopped = true
-        child.kill('SIGTERM')
-      }
-    })
-    child.stderr.on('data', (data: Buffer) => stderr.push(data.toString()))
-    child.on('error', (err) => {
-      gitDiagnostic({
-        level: 'error',
-        source: 'git',
-        event: 'git.spawn_failed',
-        message: `could not start ${command}: ${err.message}`,
-        payload: { command: label, cwd: opts.cwd, durationMs: Date.now() - startedAt }
-      })
-      reject(err)
-    })
-    child.on('close', (code) => {
-      const ok = stopped || (code !== null && (opts.okExitCodes ?? [0]).includes(code))
-      const stderrStr = stderr.join('')
-      gitDiagnostic({
-        level: ok ? 'info' : 'error',
-        source: 'git',
-        event: ok ? 'git.command' : 'git.command_failed',
-        message: ok ? label : stderrStr.trim() || `command failed: ${label}`,
-        payload: {
-          command: label,
-          cwd: opts.cwd,
-          durationMs: Date.now() - startedAt,
-          success: ok,
-          exitCode: code,
-          bytes,
-          ...(stopped && { stoppedAtBudget: true }),
-          ...(!ok && { stderr: trimOutput(stderrStr) })
-        }
-      })
-      if (ok) resolve({ stopped, bytes, code })
-      else reject(gitFailure(label, code, stderrStr))
+  const label = `${command} ${args.join(' ')}`
+  const startedAt = Date.now()
+  const child = hubSpawn(command, args, {
+    cwd: opts.cwd,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  let stopped = false
+  let bytes = 0
+  const stderr: string[] = []
+  let spawnError: Error | undefined
+  let killTimer: ReturnType<typeof setTimeout> | undefined
+  const stop = () => {
+    if (killTimer || child.exitCode !== null || child.signalCode !== null) return
+    child.kill('SIGTERM')
+    // A failed sink must not leave a producer that ignores SIGTERM running.
+    killTimer = setTimeout(() => child.kill('SIGKILL'), 1000)
+    killTimer.unref()
+  }
+  const closed = new Promise<number | null>((resolve) => child.once('close', resolve))
+  child.stderr.on('data', (data: Buffer) => stderr.push(data.toString()))
+  child.on('error', (err) => {
+    spawnError = err
+    gitDiagnostic({
+      level: 'error',
+      source: 'git',
+      event: 'git.spawn_failed',
+      message: `could not start ${command}: ${err.message}`,
+      payload: { command: label, cwd: opts.cwd, durationMs: Date.now() - startedAt }
     })
   })
+  signal?.addEventListener('abort', stop, { once: true })
+  if (signal?.aborted) stop()
+  let failed = false
+  let failure: unknown
+  try {
+    // Readable's bounded buffer propagates a stalled sink back to the pipe/child.
+    for await (const chunk of child.stdout) {
+      if (signal?.aborted) break
+      bytes += chunk.length
+      if (!(await onData(chunk))) {
+        stopped = true
+        stop()
+        break
+      }
+    }
+  } catch (err) {
+    failed = true
+    failure = err
+    stop()
+  }
+  const code = await closed
+  clearTimeout(killTimer)
+  signal?.removeEventListener('abort', stop)
+  const error = signal?.aborted ? signal.reason : failed ? failure : spawnError
+  const ok =
+    !failed &&
+    !spawnError &&
+    !signal?.aborted &&
+    (stopped || (code !== null && (opts.okExitCodes ?? [0]).includes(code)))
+  const stderrStr = stderr.join('')
+  gitDiagnostic({
+    level: ok ? 'info' : 'error',
+    source: 'git',
+    event: ok ? 'git.command' : 'git.command_failed',
+    message: ok
+      ? label
+      : error instanceof Error
+        ? error.message
+        : stderrStr.trim() || `command failed: ${label}`,
+    payload: {
+      command: label,
+      cwd: opts.cwd,
+      durationMs: Date.now() - startedAt,
+      success: ok,
+      exitCode: code,
+      bytes,
+      ...(stopped && { stoppedAtBudget: true }),
+      ...(!ok && { stderr: trimOutput(stderrStr) })
+    }
+  })
+  if (signal?.aborted || failed || spawnError) throw error
+  if (!ok) throw gitFailure(label, code, stderrStr)
+  return { stopped, bytes, code }
 }
 
 /**
@@ -447,34 +482,39 @@ function fileSectionStarts(patch: Buffer): number[] {
  * `command args`'s whole output written to `file` (streamed, with back-pressure:
  * never held in memory). Resolves with its size.
  */
-export function spoolCommand(
+export async function spoolCommand(
   command: string,
   args: string[],
   opts: StreamOptions,
   file: string
 ): Promise<number> {
   const out = createWriteStream(file, { mode: 0o600 })
-  let pending = Promise.resolve()
-  const run = streamCommand(command, args, opts, (chunk) => {
-    pending = pending.then(
-      () =>
-        new Promise<void>((resolve, reject) => {
+  const closed = new Promise<void>((resolve) => out.once('close', resolve))
+  const abort = new AbortController()
+  out.once('error', (err) => abort.abort(err))
+  const done = finished(out, { cleanup: true })
+  // Attach immediately: an open/write error may precede the producer's first byte.
+  void done.catch(() => undefined)
+  try {
+    const { bytes } = await streamCommand(
+      command,
+      args,
+      opts,
+      async (chunk) => {
+        await new Promise<void>((resolve, reject) => {
           out.write(chunk, (err) => (err ? reject(err) : resolve()))
         })
+        return true
+      },
+      abort.signal
     )
-    return true
-  })
-  return run.then(
-    async ({ bytes }) => {
-      await pending
-      await new Promise<void>((resolve, reject) =>
-        out.end((err?: Error | null) => (err ? reject(err) : resolve()))
-      )
-      return bytes
-    },
-    async (err) => {
-      out.destroy()
-      throw err
-    }
-  )
+    out.end()
+    await done
+    return bytes
+  } catch (err) {
+    out.destroy()
+    await closed
+    await unlink(file).catch(() => undefined)
+    throw err
+  }
 }

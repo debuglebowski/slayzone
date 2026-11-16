@@ -251,16 +251,31 @@ export class DiffTextLoader {
     const start = this.texts.get(key)
     const src = this.sources.get(key)
     if (!start?.rest || !src || start.loading) return
-    this.update((t) => t.set(key, { ...start, loading: true, failed: false }))
+    const gen = this.generation
+    const entry = { ...start, loading: true, failed: false }
+    const current = () =>
+      !this.disposed &&
+      (key.startsWith('?:') || gen === this.generation) &&
+      this.sources.get(key) === src &&
+      this.texts.get(key) === entry
+    this.update((t) => t.set(key, entry))
     this.running++
     try {
-      const text = await readRestOfText((cursor) => this.source.text(src, cursor), {
-        text: start.text,
-        cursor: start.rest.cursor
-      })
-      if (this.disposed) return
+      const text = await readRestOfText(
+        (cursor) => {
+          if (!current())
+            return Promise.reject(new DOMException('Diff read superseded', 'AbortError'))
+          return this.source.text(src, cursor)
+        },
+        {
+          text: start.text,
+          cursor: start.rest.cursor
+        }
+      )
+      if (!current()) return
       this.update((t) => t.set(key, { text, rest: null, loading: false, failed: false }))
     } catch (err) {
+      if (!current()) return
       this.update((t) => t.set(key, { ...start, loading: false, failed: true }))
       throw err
     } finally {

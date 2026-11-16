@@ -22,7 +22,10 @@ const env = {
   GIT_AUTHOR_NAME: 'T',
   GIT_AUTHOR_EMAIL: 't@t',
   GIT_COMMITTER_NAME: 'T',
-  GIT_COMMITTER_EMAIL: 't@t'
+  GIT_COMMITTER_EMAIL: 't@t',
+  // Keep %ar stable across pages; freshly made commits otherwise age by seconds.
+  GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
+  GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z'
 }
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env }).toString()
 let repo: string

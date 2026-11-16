@@ -218,6 +218,85 @@ describe('untracked files, paged', () => {
 })
 
 describe('readGitText: a large text read page by page', () => {
+  it('invalid UTF-8 keeps whole-read decoding and always advances the cursor', async () => {
+    const spool = new GitTextSpool()
+    const bytes = Buffer.concat([Buffer.from('xx'), Buffer.alloc(24, 0x80), Buffer.from('tail')])
+    const file = join(repo, 'invalid-unicode-spool')
+    writeFileSync(file, bytes)
+    const id = spool.hold(file, repo, bytes.length)
+    let cursor: string | null = `${id}:0`
+    let actual = ''
+    for (let n = 0; cursor !== null && n < bytes.length; n++) {
+      const page = await readGitText(
+        spool,
+        repo,
+        { kind: 'untrackedDiff', filePath: 'unused' },
+        cursor,
+        { maxBytes: 4 }
+      )
+      expect(page.text.length).toBeGreaterThan(0)
+      actual += page.text
+      cursor = page.cursor
+    }
+    expect(cursor).toBeNull()
+    expect(actual).toBe(bytes.toString('utf8'))
+  })
+
+  it.each(['é', '€', '😀'])(
+    'a giant %s line is byte-exact across production 4 MiB pages',
+    async (char) => {
+      const spool = new GitTextSpool()
+      const text = `xxx${char.repeat(Math.ceil((2 * PAGE_MAX_BYTES) / Buffer.byteLength(char)))}\n`
+      const file = join(repo, `unicode-spool-${Buffer.byteLength(char)}`)
+      writeFileSync(file, text)
+      const id = spool.hold(file, repo, Buffer.byteLength(text))
+      let cursor: string | null = `${id}:0`
+      const pages: string[] = []
+      do {
+        const page = await readGitText(
+          spool,
+          repo,
+          { kind: 'untrackedDiff', filePath: 'unused' },
+          cursor
+        )
+        expect(Buffer.byteLength(page.text)).toBeLessThanOrEqual(PAGE_MAX_BYTES)
+        pages.push(page.text)
+        cursor = page.cursor
+      } while (cursor !== null)
+      expect(pages.length).toBeGreaterThan(2)
+      expect(Buffer.from(pages.join('')).equals(Buffer.from(text))).toBe(true)
+      expect(spool.size).toBe(0)
+    }
+  )
+
+  it.each([1, 2, 3, 4, 5])(
+    'a tiny %s-byte test budget still makes progress by whole code points',
+    async (maxBytes) => {
+      const spool = new GitTextSpool()
+      const text = 'aé€😀b\n'
+      const file = join(repo, `small-unicode-spool-${maxBytes}`)
+      writeFileSync(file, text)
+      const id = spool.hold(file, repo, Buffer.byteLength(text))
+      let cursor: string | null = `${id}:0`
+      let actual = ''
+      for (let n = 0; cursor !== null && n < Buffer.byteLength(text); n++) {
+        const page = await readGitText(
+          spool,
+          repo,
+          { kind: 'untrackedDiff', filePath: 'unused' },
+          cursor,
+          { maxBytes }
+        )
+        expect(page.text.length).toBeGreaterThan(0)
+        expect(Buffer.byteLength(page.text)).toBeLessThanOrEqual(Math.max(4, maxBytes))
+        actual += page.text
+        cursor = page.cursor
+      }
+      expect(cursor).toBeNull()
+      expect(actual).toBe(text)
+    }
+  )
+
   const read = async (spool: GitTextSpool, source: Parameters<typeof readGitText>[2]) => {
     let text = ''
     let pages = 0

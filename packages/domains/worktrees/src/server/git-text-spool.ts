@@ -150,13 +150,38 @@ async function pageAt(
   maxBytes: number
 ): Promise<{ text: string; end: number }> {
   const fd = await open(file, 'r')
-  const buf = Buffer.alloc(Math.min(maxBytes, size - offset))
-  const { bytesRead } = await fd.read(buf, 0, buf.length, offset).finally(() => fd.close())
-  let n = bytesRead
+  // The first byte AFTER the budget tells us whether the cut splits a code point.
+  const buf = Buffer.alloc(Math.min(maxBytes + 1, size - offset))
+  let bytesRead = 0
+  try {
+    while (bytesRead < buf.length) {
+      const part = await fd.read(buf, bytesRead, buf.length - bytesRead, offset + bytesRead)
+      if (!part.bytesRead) throw new Error(`${GIT_TEXT_EXPIRED}: diff spool ended early`)
+      bytesRead += part.bytesRead
+    }
+  } finally {
+    await fd.close()
+  }
+  let n = Math.min(maxBytes, bytesRead)
   if (offset + n < size) {
     const nl = buf.lastIndexOf(10, n - 1)
     if (nl >= 0) n = nl + 1
-    else while (n > 0 && (buf[n] & 0xc0) === 0x80) n-- // one giant line: a char boundary
+    else {
+      // A code point has at most 3 continuation bytes. Malformed runs must still
+      // advance and keep Buffer's whole-read replacement-character behavior.
+      let start = n
+      while (start > 0 && n - start < 3 && (buf[start] & 0xc0) === 0x80) start--
+      const lead = buf[start]
+      const width =
+        lead >= 0xc2 && lead <= 0xdf
+          ? 2
+          : lead >= 0xe0 && lead <= 0xef
+            ? 3
+            : lead >= 0xf0 && lead <= 0xf4
+              ? 4
+              : 1
+      if (start + width > n) n = start
+    }
   }
   return { text: buf.subarray(0, n).toString('utf8'), end: offset + n }
 }
@@ -173,7 +198,8 @@ export async function readGitText(
   cursor: string | null,
   opts: { maxBytes?: number } = {}
 ): Promise<GitTextPage> {
-  const maxBytes = Math.max(1, Math.min(opts.maxBytes ?? DIFF_PAGE_BYTES, DIFF_PAGE_BYTES))
+  // Even a tiny test budget must fit one complete UTF-8 code point (at most 4 bytes).
+  const maxBytes = Math.max(4, Math.min(opts.maxBytes ?? DIFF_PAGE_BYTES, DIFF_PAGE_BYTES))
   if (cursor !== null) {
     const m = /^([0-9a-f]{32}):(\d+)$/.exec(cursor)
     if (!m) throw new Error(`${GIT_TEXT_EXPIRED}: malformed cursor`)
