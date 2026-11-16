@@ -37,6 +37,7 @@
     "./sqlite-worker-host": "./src/sqlite-worker-host.ts",
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
+    "./request-abort": "./src/request-abort.ts",
     "./security-log": "./src/security-log.ts",
     "./path-scope": "./src/path-scope.ts",
     "./computer-frame-limit": "./src/computer-frame-limit.ts",

@@ -4,11 +4,18 @@ import type { SerializedError } from '@slayzone/platform/sqlite-worker'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import type { ArtifactVersion, AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 import type { ChatMetadataUpdate } from './local-data'
+import type { ChatAttachment } from '@slayzone/terminal-contracts'
+import { chatAttachmentSchema, chatRouteSchema } from '../shared'
+import { chatStorageDigest } from './storage-digest'
 
 export type PublicationRoute = { id: string; epoch: number }
 export type StagedPublicationRef = { sha256: string; size: number; uploadId?: string }
 type Input = { staged: StagedPublicationRef; data?: never } | { data: string; staged?: never }
 export type PublicationIntent =
+  | {
+      method: 'attachment.put'
+      args: [{ ref: ChatAttachment; staged: StagedPublicationRef; data?: never }]
+    }
   | {
       method: 'uploadArtifactBlob'
       args: [Input & { taskId: string; title: string; folderId?: string | null }]
@@ -58,6 +65,7 @@ export type InspectPublication = {
   intent: PublicationIntent
 }
 export type PublicationValue =
+  | { method: 'attachment.put'; result: ChatAttachment }
   | { method: 'uploadArtifactBlob'; result: TaskArtifact | null }
   | {
       method: 'writeArtifactContent'
@@ -114,7 +122,7 @@ const inline = z
   .string()
   .max(14_000_000)
   .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
-export const publicationRouteSchema = z.object({ id, epoch: integer }).strict()
+export const publicationRouteSchema = chatRouteSchema.strict()
 const upload = { taskId: id, title: z.string().min(1).max(512), folderId: id.nullish() }
 const write = {
   artifactId: id,
@@ -126,6 +134,12 @@ const write = {
     .optional()
 }
 export const publicationIntentSchema: z.ZodType<PublicationIntent> = z.union([
+  z
+    .object({
+      method: z.literal('attachment.put'),
+      args: z.tuple([z.object({ ref: chatAttachmentSchema, staged }).strict()])
+    })
+    .strict(),
   z
     .object({
       method: z.literal('uploadArtifactBlob'),
@@ -151,6 +165,17 @@ export const publicationIntentSchema: z.ZodType<PublicationIntent> = z.union([
     })
     .strict()
 ])
+
+/** Owned staging has its own begin-operation binding; its uploadId is also a
+ * stable consumption receipt key when older callers have no attachment op id. */
+export function attachmentPublicationRequest(
+  route: PublicationRoute,
+  ref: ChatAttachment,
+  staged: StagedPublicationRef
+): InspectPublication {
+  const intent: PublicationIntent = { method: 'attachment.put', args: [{ ref, staged }] }
+  return { route, intent, operationId: staged.uploadId ?? chatStorageDigest({ route, intent }) }
+}
 export const inspectPublicationSchema = z
   .object({ route: publicationRouteSchema, operationId: id, intent: publicationIntentSchema })
   .strict()

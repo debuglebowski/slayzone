@@ -115,11 +115,21 @@ function storeFilesHolding(root: string, text: string): string[] {
 
 test('concurrent erasures share one off-thread rewrite; a user compaction waits for it', async () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'computer-erasure-'))
+  let entered!: () => void
+  const rewriteStarted = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  let both: Promise<unknown> | undefined
   const r = createComputerChatRuntime({
     stateDir,
     hubScope: 'hub',
     computerId: 'pc',
-    blobBackfill: { automatic: false }
+    blobBackfill: { automatic: false },
+    compaction: {
+      onPhase: (phase) => {
+        if (phase === 'worker-started') entered()
+      }
+    }
   })
   try {
     for (const taskId of ['alice', 'bob', 'carol']) {
@@ -149,8 +159,10 @@ test('concurrent erasures share one off-thread rewrite; a user compaction waits 
     await r.applyTaskLifecycle('alice', 'deleted', 2)
     await r.applyTaskLifecycle('bob', 'deleted', 2)
     const vacuums = countVacuums(r)
-    const both = Promise.all([r.eraseTask('alice', 2), r.eraseTask('bob', 2)])
-    await new Promise((resolve) => setImmediate(resolve))
+    both = Promise.all([r.eraseTask('alice', 2), r.eraseTask('bob', 2)])
+    void both.catch(() => undefined)
+    // Owned staging drains asynchronously before the existing off-thread rewrite.
+    await rewriteStarted
     expect(() => r.compaction.start()).toThrow(/erasure/i)
     expect(await both).toEqual([
       { taskId: 'alice', revision: 2, erased: true },
@@ -161,6 +173,7 @@ test('concurrent erasures share one off-thread rewrite; a user compaction waits 
     expect(storeFilesHolding(stateDir, 'bob secret')).toEqual([])
     expect(r.storage.read('carol', -1)).toHaveLength(20)
   } finally {
+    await both?.catch(() => undefined)
     await r.close()
     rmSync(stateDir, { recursive: true, force: true })
   }

@@ -171,6 +171,44 @@ describe('socketPeer', () => {
   })
 })
 
+it('local connector relay carries cancellation by request id into the host handler', async () => {
+  const [a, b] = await socketPair()
+  let entered!: () => void, finish!: () => void, signal: AbortSignal | undefined
+  const accepted = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const held = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  const host = socketPeer(a, {
+    request: async (_method, _params, _actor, current) => {
+      signal = current
+      entered()
+      await held
+      return 'finished'
+    }
+  })
+  const connector = socketPeer(b)
+  const abort = new AbortController()
+  try {
+    const pending = connector.rpc.request('dispatch', {}, 0, undefined, abort.signal)
+    void pending.catch(() => undefined)
+    await accepted
+    expect(signal?.aborted).toBe(false)
+    const cancelled = new Promise<void>((resolve) =>
+      signal!.addEventListener('abort', () => resolve(), { once: true })
+    )
+    abort.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await cancelled
+    expect(signal?.aborted).toBe(true)
+  } finally {
+    finish()
+    host.close()
+    connector.close()
+  }
+})
+
 function socketPair(): Promise<[Socket, Socket]> {
   return new Promise((resolve, reject) => {
     const server = createServer((serverSide) => {

@@ -1,3 +1,4 @@
+import { runWithRequestAbort } from '@slayzone/platform/request-abort'
 import { initTRPC, TRPCError } from '@trpc/server'
 import {
   peerAddress,
@@ -65,19 +66,19 @@ export const mergeRouters = t.mergeRouters
  * down (`computer.pty.spawn`, …) carry the caller's user id, peer address and
  * procedure path. A no-op for behavior: it only sets the async context.
  */
-const securityContext = t.middleware(async ({ ctx, next, path, type }) => {
+const securityContext = t.middleware(async ({ ctx, next, path, type, signal }) => {
   const sc: SecurityContext = {
     actor: ctx.principal?.userId ?? null,
     ip: peerAddress(ctx.req),
     route: `trpc ${path}`
   }
-  const result = await runWithSecurityContext(sc, () => next())
+  const result = await runWithRequestAbort(signal, () => runWithSecurityContext(sc, () => next()))
   // A subscription's body runs LATER — when it is subscribed to, or each time its
   // generator is pulled — outside the scope above, i.e. with no caller: its requests
   // to computers then passed the gateway's owner check as the hub's own work (K7).
   // Carry the caller into it.
   if (type === 'subscription' && result.ok) {
-    return { ...result, data: withSecurityContext(sc, result.data) }
+    return { ...result, data: withSecurityContext(sc, result.data, signal) }
   }
   return result
 })
@@ -87,7 +88,9 @@ const securityContext = t.middleware(async ({ ctx, next, path, type }) => {
  * `sc`: the observable's subscribe function, each `next()` of the iterator. Work the
  * body starts from there inherits it (AsyncLocalStorage follows promises).
  */
-function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
+function withSecurityContext(sc: SecurityContext, data: unknown, signal?: AbortSignal): unknown {
+  const withinRequest = <T>(action: () => T) =>
+    runWithRequestAbort(signal, () => runWithSecurityContext(sc, action))
   // An observable is what tRPC itself takes for one (`isObservable`): an object with
   // `subscribe`. Recognised and rebuilt here without `@trpc/server/observable`, whose
   // second module copy upset unrelated module graphs in tests (the xterm addon's
@@ -98,7 +101,7 @@ function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
     }
     type Op = (prev: unknown) => unknown
     const wrapped = {
-      subscribe: (observer: unknown) => runWithSecurityContext(sc, () => inner.subscribe(observer)),
+      subscribe: (observer: unknown) => withinRequest(() => inner.subscribe(observer)),
       pipe: (...ops: Op[]): unknown => ops.reduce((prev: unknown, op) => op(prev), wrapped)
     }
     return wrapped
@@ -107,9 +110,9 @@ function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
     const inner = data as AsyncIterable<unknown>
     return {
       [Symbol.asyncIterator]() {
-        const it = runWithSecurityContext(sc, () => inner[Symbol.asyncIterator]())
+        const it = withinRequest(() => inner[Symbol.asyncIterator]())
         const within = <A extends unknown[], R>(fn: ((...a: A) => R) | undefined) =>
-          fn ? (...a: A) => runWithSecurityContext(sc, () => fn.apply(it, a)) : undefined
+          fn ? (...a: A) => withinRequest(() => fn.apply(it, a)) : undefined
         return {
           next: within(it.next)!,
           ...(it.return ? { return: within(it.return) } : {}),

@@ -118,7 +118,12 @@ export function socketPeer(
      */
     frameLimitBytes?: number
     onFrameTooLarge?: (info: FrameTooLargeInfo) => void
-    request?: (method: string, params: unknown, actor: unknown) => unknown | Promise<unknown>
+    request?: (
+      method: string,
+      params: unknown,
+      actor: unknown,
+      signal: AbortSignal
+    ) => unknown | Promise<unknown>
     notify?: (method: string, params: unknown) => void
   } = {}
 ): LocalPeer {
@@ -136,11 +141,11 @@ export function socketPeer(
         throw new Error('local connector unavailable or backpressured')
       socket.write(line + '\n')
     },
-    onPeerRequest: (method, params, id, actor) => {
+    onPeerRequest: (method, params, id, actor, signal) => {
       void Promise.resolve()
         .then(() => {
           if (!handlers.request) throw new Error('local method unavailable')
-          return handlers.request(method, params, actor)
+          return handlers.request(method, params, actor, signal)
         })
         .then(
           (result) => rpc.respond(id, result),

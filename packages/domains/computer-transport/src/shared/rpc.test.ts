@@ -30,6 +30,78 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('request abort over the existing duplex connection', () => {
+  it('cancels only its own live peer request and removes its local waiter', async () => {
+    const signals = new Map<string, AbortSignal>()
+    let client!: DuplexRpc
+    const peer = new DuplexRpc({
+      write: (line) => client.handleLine(line),
+      onPeerRequest(method, _params, _id, _actor, signal) {
+        signals.set(method, signal)
+      }
+    })
+    client = new DuplexRpc({ write: (line) => peer.handleLine(line) })
+    const abort = new AbortController()
+    const one = client.request('one', {}, 0, undefined, abort.signal)
+    const two = client.request('two', {}, 0)
+    void one.catch(() => undefined)
+    void two.catch(() => undefined)
+    try {
+      expect(signals.get('one')).toBeDefined()
+      abort.abort()
+      await expect(one).rejects.toMatchObject({ name: 'AbortError' })
+      expect(signals.get('one')?.aborted).toBe(true)
+      expect(signals.get('two')?.aborted).toBe(false)
+      expect(client.pendingCount).toBe(1)
+      peer.respond(2, 'kept')
+      expect(await two).toBe('kept')
+      expect(client.pendingCount).toBe(0)
+    } finally {
+      client.dispose()
+      peer.dispose()
+    }
+  })
+
+  it('never sends an already aborted request or a cancellation after its reply', async () => {
+    const { rpc, written } = makeRpc()
+    const aborted = new AbortController()
+    aborted.abort()
+    try {
+      await expect(rpc.request('absent', {}, 0, undefined, aborted.signal)).rejects.toMatchObject({
+        name: 'AbortError'
+      })
+      expect(written).toHaveLength(0)
+      const late = new AbortController()
+      const completed = rpc.request('complete', {}, 0, undefined, late.signal)
+      const id = JSON.parse(written[0]).id
+      rpc.handleLine(JSON.stringify({ id, result: true }))
+      expect(await completed).toBe(true)
+      late.abort()
+      expect(written).toHaveLength(1)
+    } finally {
+      rpc.dispose()
+    }
+  })
+
+  it('disposal aborts accepted inbound work while its owner remains responsible for cleanup', () => {
+    let signal: AbortSignal | undefined
+    const { rpc } = makeRpc({
+      onPeerRequest(_m, _p, _id, _actor, current) {
+        signal = current
+      }
+    })
+    try {
+      rpc.handleLine(JSON.stringify({ id: 'accepted', method: 'write' }))
+      expect(signal).toBeDefined()
+      expect(signal?.aborted).toBe(false)
+      rpc.dispose()
+      expect(signal?.aborted).toBe(true)
+    } finally {
+      rpc.dispose()
+    }
+  })
+})
+
 describe('DuplexRpc request/response correlation', () => {
   it('resolves out-of-order responses to the right callers', async () => {
     const { rpc, written } = makeRpc()

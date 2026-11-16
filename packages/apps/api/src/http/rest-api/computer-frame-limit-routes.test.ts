@@ -129,8 +129,6 @@ const COMPUTER_BACKED_ROUTE_FILES = [
   'artifacts/versions.ts',
   'artifacts/list.ts',
   'artifacts/search.ts',
-  'artifacts/export-pdf.ts',
-  'artifacts/export-png.ts',
   'files/raw.ts',
   'pty/buffer.ts',
   'tasks/create.ts',

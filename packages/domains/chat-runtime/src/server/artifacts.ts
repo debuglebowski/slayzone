@@ -1,14 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createArtifactPublicationOwner } from './artifact-publication-owner'
-import {
-  mkdtempSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  openSync,
-  closeSync,
-  fsyncSync
-} from 'node:fs'
+import { publicationIntentSchema } from './artifact-publication-protocol'
+import { deserializeError } from '@slayzone/platform/sqlite-worker'
+import { randomUUID } from 'node:crypto'
+import type { PublicationUploadLease } from './artifact-publication-client'
+import { existsSync, openSync, closeSync, fsyncSync } from 'node:fs'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
 import { isUnsafePathError } from '@slayzone/platform/safe-path'
@@ -42,14 +38,16 @@ const base64 = z
   .max(14_000_000)
   .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 /** Bytes staged on this computer (`upload-staging.ts`), by hash and size. */
-const stagedBytes = z.object({
-  uploadId: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .optional(),
-  sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-})
+const stagedBytes = z
+  .object({
+    uploadId: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+  })
+  .strict()
 const object = z.object({ artifactId: id })
 const author = z.object({ type: z.enum(['user', 'agent']).nullable(), id: z.string().nullable() })
 export const artifactMethodSchemas = {
@@ -69,6 +67,7 @@ export const artifactMethodSchemas = {
         staged: stagedBytes.optional(),
         folderId: id.nullish()
       })
+      .strict()
       .refine((v) => (v.data === undefined) !== (v.staged === undefined), {
         message: 'name inline data or staged bytes, exactly one'
       })
@@ -140,6 +139,7 @@ export const artifactMethodSchemas = {
         mutateRef: ref.optional(),
         author: author.optional()
       })
+      .strict()
       .refine((v) => (v.data === undefined) !== (v.staged === undefined), {
         message: 'name inline data or staged bytes, exactly one'
       })
@@ -246,13 +246,18 @@ export function createLocalArtifacts(
     mutationTail = next.catch(() => undefined)
     return next
   }
-  const publication = createArtifactPublicationOwner(storage, local, {
-    serialize,
-    identity: (owner, work) => context.run(owner, work),
-    failure: (error) => hooks.failure?.(error),
-    available: () => hooks.available?.(),
-    access: (taskId, work) => hooks.artifactAccess?.(taskId, work) ?? work()
-  })
+  const publication = createArtifactPublicationOwner(
+    storage,
+    local,
+    {
+      serialize,
+      identity: (owner, work) => context.run(owner, work),
+      failure: (error) => hooks.failure?.(error),
+      available: () => hooks.available?.(),
+      access: (taskId, work) => hooks.artifactAccess?.(taskId, work) ?? work()
+    },
+    attachments
+  )
   const { db, store } = storage.compose((raw) =>
     createStandaloneArtifacts(raw, storage.dir, () => {
       context.getStore()?.upload?.assertCurrent()
@@ -553,17 +558,6 @@ export function createLocalArtifacts(
       )
       if (req.method === 'updateArtifact') await checkFolder(first.folderId, taskId)
     }
-    if (
-      (req.method === 'uploadArtifactBlob' || req.method === 'writeArtifactContent') &&
-      first.staged !== undefined
-    ) {
-      // Delivered replay above needs no source. New staged work must use B5's
-      // inspected source grant and physical lease, never this compatibility path.
-      staging()
-      throw new Error(
-        'Staged artifact publication requires the canonical-owner upload lease adapter'
-      )
-    }
     if (!read) {
       storage.acceptCommand(owner.identity.id, req.route.epoch, req.operationId!, {
         method: req.method,
@@ -613,20 +607,6 @@ export function createLocalArtifacts(
           }))
         )
         result = null
-      } else if (req.method === 'uploadArtifactBlob') {
-        result = await store.uploadArtifactBlob(db, {
-          ...first,
-          bytes: Buffer.from(first.data, 'base64')
-        })
-      } else if (req.method === 'writeArtifactContent') {
-        const dir = mkdtempSync(join(storage.dir, '.write-')),
-          sourcePath = join(dir, 'content')
-        try {
-          writeFileSync(sourcePath, Buffer.from(first.data, 'base64'), { mode: 0o600 })
-          result = await store.writeArtifactContent(db, { ...first, sourcePath })
-        } finally {
-          rmSync(dir, { recursive: true, force: true })
-        }
       } else if (req.method === 'readBytesRange') {
         const r = await store.readArtifactBytesRange(db, first, args[1], args[2])
         result = r
@@ -796,6 +776,65 @@ export function createLocalArtifacts(
   async function invoke(raw: unknown): Promise<unknown> {
     if (closed) throw new Error('Artifact storage is closed')
     const req = computerArtifactRequestSchema.parse(raw)
+    if (req.method === 'uploadArtifactBlob' || req.method === 'writeArtifactContent') {
+      if (!req.operationId) throw new Error('Artifact mutation requires an operation id')
+      const intent = publicationIntentSchema.parse({
+        method: req.method,
+        args: artifactMethodSchemas[req.method].parse(req.args)
+      })
+      const inspection = await publication.inspect({
+        route: req.route,
+        operationId: req.operationId,
+        intent
+      })
+      if (inspection.kind === 'unconfirmed') throw deserializeError(inspection.error)
+      if (inspection.kind === 'replay') return inspection.value.result
+      const executionId = randomUUID()
+      let lease: PublicationUploadLease | undefined,
+        posted = false,
+        quiet = false,
+        consumed = false
+      let removeRevocation: (() => void) | undefined
+      try {
+        if (inspection.kind !== 'join' && intent.args[0].staged)
+          lease = await staging().reserveForPublication(intent.args[0].staged, inspection.context)
+        lease?.assertCurrent()
+        const signal = lease?.signal
+        if (signal) {
+          const revoke = () => {
+            void publication
+              .cancel({
+                owner: inspection.context.owner,
+                key: { conversationId: req.route.id, operationId: req.operationId! },
+                executionId,
+                reason: 'source-revoked'
+              })
+              .catch(() => undefined)
+          }
+          signal.addEventListener('abort', revoke, { once: true })
+          removeRevocation = () => signal.removeEventListener('abort', revoke)
+          if (signal.aborted) throw new Error('Publication source revoked')
+        }
+        posted = true
+        const settled = await publication.publish({
+          executionId,
+          context: inspection.context,
+          intent,
+          ...(lease ? { source: lease.grant } : {})
+        })
+        quiet = settled.quiescent
+        consumed = settled.outcome.kind === 'committed'
+        if (settled.outcome.kind !== 'committed') throw deserializeError(settled.outcome.error)
+        return settled.outcome.value.result
+      } finally {
+        // The native compatibility owner has no separate worker to retire. An
+        // unmatched failed native close must retain its source until process exit.
+        if (!posted || quiet) {
+          removeRevocation?.()
+          await lease?.release(consumed)
+        }
+      }
+    }
     const owner = storage.conversation(req.route.id)
     if (!owner || owner.state !== 'active' || owner.identity.epoch !== req.route.epoch)
       throw new Error('Artifact ownership is unavailable or deleted')

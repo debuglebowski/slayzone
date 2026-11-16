@@ -26,6 +26,14 @@ import { createComputerStoreClient } from './computer-store-client'
 import { createChatInvoker } from './invocation'
 import { createChatTaskAdmission } from './task-admission'
 import { createArtifactPublicationClient } from './artifact-publication-client'
+import { createUploadStaging } from './upload-staging'
+import { computerArtifactRequestSchema, artifactMethodSchemas } from './artifacts'
+import {
+  publicationIntentSchema,
+  attachmentPublicationRequest,
+  type InspectPublication
+} from './artifact-publication-protocol'
+import type { ComputerChatRequest } from './computer-request'
 import type { OnlineStoreData, HostCall, StoreNotification } from './computer-store-protocol'
 
 export type OpenComputerChatRuntimeOptions = Omit<
@@ -111,11 +119,13 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
   const tagged = new Map<string, Set<Promise<unknown>>>()
   let onFailureAdmission: { close(): void } | undefined
   let onFailurePublication: { close(): Promise<void> } | undefined
+  let onFailureUploads: { close(): Promise<void> } | undefined
   const latchFailure = (error: unknown) => {
     failure ??= error instanceof Error ? error : new Error(String(error))
     cancelPreparedControls()
     // Revoke permits already awaiting preparation, without releasing physical leases.
     onFailureAdmission?.close()
+    void onFailureUploads?.close().catch(() => undefined)
     void onFailurePublication?.close().catch(() => undefined)
   }
   let hostCall: ((request: HostCall) => Promise<unknown>) | null = null
@@ -190,6 +200,21 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         )
       }
     })
+    const uploads = createUploadStaging(storage.dir, {
+      automatic: true,
+      onSweepError: () => opts.log?.('chat upload expiry deferred; cleanup will retry'),
+      registerLifetime: () => storage.maintenance.registerSecondary('main upload staging'),
+      readOwner: async (route) => {
+        if (failure || stopped || closing)
+          throw failure ?? new Error('Chat runtime is shutting down')
+        const owner = await remote.control.uploadOwner(route)
+        if (failure || stopped || closing || taskAdmission.blocked(owner.taskId))
+          throw failure ?? new Error('Upload task admission is closed')
+        return owner
+      }
+    })
+    onFailureUploads = uploads
+    await uploads.ready()
     const artifactPublication = createArtifactPublicationClient(storage, {
       assertCurrent(ctx) {
         if (failure || stopped || closing || taskAdmission.blocked(ctx.taskId))
@@ -198,6 +223,22 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       failure: latchFailure
     })
     onFailurePublication = artifactPublication
+    async function runPublication(input: InspectPublication, request?: { signal?: AbortSignal }) {
+      if (request?.signal?.aborted) throw new Error('Artifact request aborted')
+      const execution = artifactPublication.start(input, uploads)
+      const abort = () => {
+        void execution.cancel('request-aborted').catch(() => undefined)
+      }
+      request?.signal?.addEventListener('abort', abort, { once: true })
+      if (request?.signal?.aborted) abort()
+      try {
+        const settled = await execution.result
+        if (settled.outcome.kind !== 'committed') throw deserializeError(settled.outcome.error)
+        return settled.outcome.value.result
+      } finally {
+        request?.signal?.removeEventListener('abort', abort)
+      }
+    }
     const drain = async (token: string) => {
       // A completed reader open can enqueue its first bounded page in a microtask.
       // isolation: fatal — One lease barrier must retain admission until every accepted operation drains.
@@ -507,7 +548,28 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       events: transport.chatEvents,
       queueEvents: queueRuntime.chatQueueEvents,
       ...remote,
+      uploads,
+      artifacts: {
+        ...remote.artifacts,
+        async invoke(raw: unknown, request?: { signal?: AbortSignal }) {
+          const req = computerArtifactRequestSchema.parse(raw)
+          if (req.method !== 'uploadArtifactBlob' && req.method !== 'writeArtifactContent')
+            return remote.artifacts.invoke(req)
+          if (!req.operationId) throw new Error('Artifact mutation requires an operation id')
+          const args = artifactMethodSchemas[req.method].parse(req.args)
+          const intent = publicationIntentSchema.parse({ method: req.method, args })
+          return runPublication({ route: req.route, operationId: req.operationId, intent }, request)
+        }
+      },
       artifactPublication,
+      putStagedAttachment(
+        req: Extract<ComputerChatRequest, { kind: 'attachment.put' }>,
+        request?: { signal?: AbortSignal }
+      ) {
+        if (!req.staged || req.data !== undefined)
+          throw new Error('Attachment put requires staged bytes')
+        return runPublication(attachmentPublicationRequest(req.route, req.ref, req.staged), request)
+      },
       authority: { scope: storage.readScope },
       taskAdmission,
       cancelPreparedControls,
@@ -754,6 +816,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         if (pending) return pending
         publicationVersion++
         transitions.add(value.from.tabId)
+        uploads.revokeConversation(value.from.id)
         const block = taskAdmission.block(value.from.taskId)
         const work = (async () => {
           await artifactPublication.cancelConversation(value.from.id)
@@ -778,6 +841,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       },
       async deleteConversation(identity: ConversationIdentity) {
         cancelPreparedControls(identity.taskId)
+        uploads.revokeConversation(identity.id)
         const block = taskAdmission.block(identity.taskId)
         try {
           const ending = transport.removeSession(identity.tabId)
@@ -787,6 +851,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
           await queueRuntime.settleTab(identity.tabId)
           await drainCalls(identity.taskId, identity.id)
           const parents = await remote.control.deleteConversation(identity)
+          await uploads.eraseConversation(identity.taskId, identity.id)
           bindings.delete(identity.tabId)
           for (const id of parents) transport.chatEvents.emit('threads-changed', id)
         } finally {
@@ -799,19 +864,26 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         revision: number
       ) {
         const previous = await storage.taskLifecycle(taskId)
-        if (previous.state === 'deleted')
-          return remote.control.applyLifecycle(taskId, state, revision)
+        if (previous.state === 'deleted') {
+          uploads.revokeTask(taskId)
+          await artifactPublication.cancelTask(taskId)
+          const applied = await remote.control.applyLifecycle(taskId, state, revision)
+          await uploads.eraseTask(taskId)
+          return applied
+        }
         if (previous.revision >= revision) return previous
         const block = taskAdmission.block(taskId)
         // A preparation may have arrived during the fresh worker read above.
         // Revoke it only after this current transition owns admission.
         if (state !== 'active') cancelPreparedControls(taskId)
+        uploads.revokeTask(taskId)
         try {
           const ending = state === 'active' ? Promise.resolve() : removeTaskSessions(taskId)
           await artifactPublication.cancelTask(taskId)
           await block.ready
           await ending
           const applied = await remote.control.applyLifecycle(taskId, state, revision)
+          if (applied.state === 'deleted') await uploads.eraseTask(taskId)
           if (applied.state !== 'active') forgetTask(taskId)
           return applied
         } finally {
@@ -821,16 +893,19 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       async eraseTask(taskId: string, revision: number, stopExternal?: () => Promise<void>) {
         cancelPreparedControls(taskId)
         const block = taskAdmission.block(taskId)
+        uploads.revokeTask(taskId)
         try {
           const ending = removeTaskSessions(taskId)
           await artifactPublication.cancelTask(taskId)
           await block.ready
           await ending
           const applied = await remote.control.prepareErasure(taskId, revision)
-          await stopExternal?.()
-          await remote.control.finishErasure(taskId)
-          forgetTask(taskId)
-          return { taskId, revision: applied.revision, erased: true as const }
+          return await uploads.withTaskErasure(taskId, async () => {
+            await stopExternal?.()
+            await remote.control.finishErasure(taskId)
+            forgetTask(taskId)
+            return { taskId, revision: applied.revision, erased: true as const }
+          })
         } finally {
           block.release()
         }
@@ -858,6 +933,8 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         return (closing ??= (async () => {
           taskAdmission.close()
           cancelPreparedControls()
+          const closingUploads = uploads.close()
+          void closingUploads.catch(() => undefined)
           const errors: unknown[] = []
           const attempt = async (work: () => unknown) => {
             try {
@@ -876,6 +953,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
           await stopping
           await attempt(() => invoke.settleAll())
           await attempt(() => drainCalls())
+          await attempt(() => closingUploads)
           await attempt(() => storage.close())
           stopped = true
           for (const lock of locks.values()) lock.release()
@@ -887,6 +965,8 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
     }
   } catch (error) {
     try {
+      await onFailurePublication?.close()
+      await onFailureUploads?.close()
       await storage.close()
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], 'Online runtime startup cleanup failed', {

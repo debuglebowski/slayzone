@@ -130,7 +130,12 @@ export interface HubDialerOptions {
    * `actor` is the request envelope's raw `actor` member (`undefined` from a pre-v3
    * hub) — see `requestActorSchema`. Validating it is the handler's job.
    */
-  onHubRequest?: (method: string, params: unknown, actor: unknown) => Promise<unknown> | unknown
+  onHubRequest?: (
+    method: string,
+    params: unknown,
+    actor: unknown,
+    signal?: AbortSignal
+  ) => Promise<unknown> | unknown
   /** Default 15s; `0` disables the loop. */
   heartbeatIntervalMs?: number
   /** Reply window for one heartbeat before the socket is torn down. Default 10s. */
@@ -307,8 +312,8 @@ export class HubDialer {
       write: (line) => {
         ws.send(line)
       },
-      onPeerRequest: (method, params, id, actor) =>
-        this.handleHubRequest(conn, method, params, id, actor),
+      onPeerRequest: (method, params, id, actor, signal) =>
+        this.handleHubRequest(conn, method, params, id, actor, signal),
       onNotification: (method, params) => this.events.emit('notification', { method, params }),
       onParseError: (line, err) => {
         this.log('computer dialer received malformed frame', { error: String(err), line })
@@ -614,7 +619,8 @@ export class HubDialer {
     method: string,
     params: unknown,
     id: string | number,
-    actor: unknown
+    actor: unknown,
+    signal: AbortSignal
   ): void {
     if (method === HubToComputerMethods.ping) {
       conn.rpc.respond(id, { ts: Date.now() })
@@ -631,7 +637,7 @@ export class HubDialer {
     }
     void (async () => {
       try {
-        const result = await handler(method, params, actor)
+        const result = await handler(method, params, actor, signal)
         conn.rpc.respond(id, result ?? null)
       } catch (err) {
         if (err instanceof RpcError) {

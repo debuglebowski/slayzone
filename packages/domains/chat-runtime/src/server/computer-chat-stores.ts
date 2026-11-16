@@ -20,6 +20,7 @@ import { prepareStoredTaskErasure } from './erase-stored-task'
 import type { ChatStorage } from './storage'
 import type { ComputerChatRuntimeOptions } from './computer-runtime'
 import { usageCursorStore } from './usage-cursors'
+import type { UploadStaging } from './upload-staging'
 
 const refuseTurnGit = () =>
   Promise.reject(new Error('Agent turns are unavailable on this computer'))
@@ -39,6 +40,7 @@ export function createChatStoreServices(
     failure?(error: unknown): void
     available?(): void
     artifactAccess?<T>(taskId: string, work: () => Promise<T>): Promise<T>
+    uploads?: UploadStaging
   } = {}
 ) {
   // Register before artifact purge listeners: every deletion delivery captures
@@ -110,7 +112,7 @@ export function createChatStoreServices(
   transfers.collectActivated()
   const sessionMoves = createSessionMoves(storage)
   const attachments = createLocalAttachments(storage, local)
-  const artifacts = createLocalArtifacts(storage, local, attachments, hooks)
+  const artifacts = createLocalArtifacts(storage, local, attachments, hooks, hooks.uploads)
   const backups = createChatBackups(storage, {
     automatic: !opts.maintenance,
     workerFactory: opts.compaction?.workerFactory

@@ -429,7 +429,7 @@ export async function startSessionHost(
     const peer = socketPeer(socket, {
       maxFrameBytes: () => (authenticated ? COMPUTER_FRAME_MAX_BYTES : 8192),
       onFrameTooLarge: (info) => log('local frame over the frame limit refused', { ...info }),
-      request: async (method, raw) => {
+      request: async (method, raw, _actor, signal) => {
         const params = (raw ?? {}) as Record<string, unknown>
         if (method === 'auth' && !auth) {
           if (params.role === 'supervisor' && sameSecret(params.token, secret)) {
@@ -497,7 +497,8 @@ export async function startSessionHost(
           return transport.options.onHubRequest?.(
             String(params.method),
             params.params,
-            params.actor
+            params.actor,
+            signal
           )
         }
         if (method === 'identity')

@@ -158,3 +158,36 @@ test('a chunk over one range, or a put naming both or neither, is refused', asyn
     })
   ).rejects.toThrow()
 })
+
+test('a staged attachment reaches the compiled owner bounded read port with byte-exact ranges', async () => {
+  const h = await setup()
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), randomBytes(BYTE_RANGE_MAX_CHUNK * 2)])
+  const staged = await stage(h, pdf, true)
+  const ref = await h.request({
+    kind: 'attachment.put',
+    route,
+    ref: {
+      artifactId: 'ranged',
+      name: 'doc.pdf',
+      kind: 'pdf',
+      mediaType: 'application/pdf',
+      size: pdf.length
+    },
+    staged
+  })
+  const chunks: Buffer[] = []
+  for (let offset = 0; offset < pdf.length; offset += BYTE_RANGE_MAX_CHUNK) {
+    const page = (await h.request({
+      kind: 'bytes.read',
+      source: { type: 'attachment', route, ref },
+      offset,
+      length: BYTE_RANGE_MAX_CHUNK
+    })) as { data: string; size: number; etag: string }
+    expect(page.size).toBe(pdf.length)
+    expect(page.etag).toBe(sha(pdf))
+    const bytes = Buffer.from(page.data, 'base64')
+    expect(bytes.length).toBeLessThanOrEqual(BYTE_RANGE_MAX_CHUNK)
+    chunks.push(bytes)
+  }
+  expect(Buffer.concat(chunks).equals(pdf)).toBe(true)
+})

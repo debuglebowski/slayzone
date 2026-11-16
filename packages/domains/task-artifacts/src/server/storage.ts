@@ -4,8 +4,10 @@ export { BlobStore } from './blob-store'
 export { createArtifactBackupProtection, type ArtifactBackupProtection } from './backup-pins'
 export { ensureWorkingCopySchema, recoverWorkingCopies } from './working-copy'
 export { registerArtifactPublication } from './working-copy'
+export { syncWorkingCopyDirectory } from './working-copy'
 export {
   prepareArtifactPublicationOutputs,
+  writeArtifactPublicationBlobInventory,
   commitPreparedArtifactPublication,
   newPublicationArtifactId,
   type PreparedArtifactMutation

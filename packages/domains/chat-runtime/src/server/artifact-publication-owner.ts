@@ -1,5 +1,8 @@
 /** One canonical writer, its existing artifact journal and immutable blob layout. */
 import { randomUUID, createHash } from 'node:crypto'
+import { renameSync } from 'node:fs'
+import { rememberPreparedAttachmentHash } from './erase-stored-task'
+import type { createLocalAttachments } from './attachments'
 import { lstat, open, realpath } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -12,6 +15,8 @@ import {
 import {
   commitPreparedArtifactPublication,
   prepareArtifactPublicationOutputs,
+  writeArtifactPublicationBlobInventory,
+  syncWorkingCopyDirectory,
   registerArtifactPublication,
   registerArtifactBlobLifetime,
   recoverWorkingCopies,
@@ -71,7 +76,8 @@ export function createArtifactPublicationOwner(
     failure(error: unknown): void
     available(): void
     access<T>(taskId: string, work: () => Promise<T>): Promise<T>
-  }
+  },
+  attachments: ReturnType<typeof createLocalAttachments>
 ) {
   const db = storage.compose((db) => db),
     instanceId = randomUUID()
@@ -89,14 +95,26 @@ export function createArtifactPublicationOwner(
   })
   function context(request: InspectPublication): PublicationContext {
     const current = storage.conversation(request.route.id)
-    if (!current || current.state !== 'active' || current.identity.epoch !== request.route.epoch)
+    const attachment = request.intent.method === 'attachment.put'
+    const prepared = attachment && current?.state === 'prepared'
+    if (
+      !current ||
+      (current.state !== 'active' && !prepared) ||
+      current.identity.epoch !== request.route.epoch
+    )
       throw new Error('Artifact ownership is unavailable or deleted')
     if (storage.getRecord(current.identity.id, 'settings', 'tab-transition-pending'))
       throw new Error('Artifact owner has a pending provider transition')
     const lifecycle = storage.taskLifecycle(current.identity.taskId)
-    if (lifecycle.state !== 'active') throw new Error('Task chat is paused or deleted')
+    if (lifecycle.state === 'deleted' || (lifecycle.state !== 'active' && !prepared))
+      throw new Error('Task chat is paused or deleted')
     const intent = request.intent
-    if (intent.method === 'uploadArtifactBlob') {
+    if (intent.method === 'attachment.put') {
+      const { ref, staged } = intent.args[0]
+      const key = staged.uploadId ?? chatStorageDigest({ route: request.route, intent })
+      if (request.operationId !== key) throw new Error('Attachment publication operation changed')
+      attachments.publicationReference(request.route, ref, staged.sha256, staged.size)
+    } else if (intent.method === 'uploadArtifactBlob') {
       const first = intent.args[0]
       if (first.taskId !== current.identity.taskId) throw new Error('Artifact task scope mismatch')
       if (
@@ -156,7 +174,13 @@ export function createArtifactPublicationOwner(
     }
     const receipt = storage.receipt(ctx.route.id, ctx.operationId)
     if (receipt) {
-      storage.acceptCommand(ctx.route.id, ctx.route.epoch, ctx.operationId, request.intent)
+      storage.acceptCommand(
+        ctx.route.id,
+        ctx.route.epoch,
+        ctx.operationId,
+        request.intent,
+        request.intent.method === 'attachment.put'
+      )
       if (receipt.resultExpired)
         throw new Error(
           'Artifact operation result expired under chat retention; operation was not repeated'
@@ -199,14 +223,15 @@ export function createArtifactPublicationOwner(
       if (
         binding.taskId !== ctx.taskId ||
         !same(binding.route, ctx.route) ||
-        binding.operationId !== ctx.operationId ||
+        (request.intent.method !== 'attachment.put' && binding.operationId !== ctx.operationId) ||
+        (request.intent.method === 'attachment.put' && ctx.operationId !== grant.ref.uploadId) ||
         binding.revision !== ctx.lifecycleRevision
       )
         throw new Error('Publication source binding mismatch')
       const uploadId = digest([
         ctx.taskId,
         { id: ctx.route.id, epoch: ctx.route.epoch },
-        ctx.operationId,
+        binding.operationId,
         binding.revision
       ])
       if (grant.ref.uploadId !== uploadId)
@@ -247,7 +272,7 @@ export function createArtifactPublicationOwner(
           value.version !== 1 ||
           value.taskId !== ctx.taskId ||
           !same(value.route, ctx.route) ||
-          value.operationId !== ctx.operationId ||
+          value.operationId !== binding.operationId ||
           value.revision !== binding.revision ||
           value.sha256 !== grant.ref.sha256 ||
           value.size !== grant.ref.size
@@ -353,7 +378,8 @@ export function createArtifactPublicationOwner(
               identity.id,
               identity.epoch,
               request.context.operationId,
-              request.intent
+              request.intent,
+              request.intent.method === 'attachment.put'
             )
             if (receipt.resultExpired)
               throw new Error(
@@ -376,107 +402,191 @@ export function createArtifactPublicationOwner(
           } else {
             const input = await source(job)
             const first = request.intent.args[0]
-            const mutation: PreparedArtifactMutation =
-              request.intent.method === 'uploadArtifactBlob'
-                ? {
-                    method: request.intent.method,
-                    taskId: request.intent.args[0].taskId,
-                    title: request.intent.args[0].title,
-                    folderId: request.intent.args[0].folderId,
-                    artifactId: newPublicationArtifactId()
-                  }
-                : {
-                    method: request.intent.method,
-                    artifactId: request.intent.args[0].artifactId,
-                    mutateRef: request.intent.args[0].mutateRef,
-                    mutateCurrent: request.intent.args[0].mutateCurrent,
-                    author: request.intent.args[0].author,
-                    taskId: identity.taskId,
-                    title: (
-                      db
-                        .prepare('SELECT title FROM task_artifacts WHERE id=?')
-                        .get(request.intent.args[0].artifactId) as { title: string }
-                    ).title
-                  }
-            job.phase = 'staging'
-            const files = await prepareArtifactPublicationFiles({
-              dataDir: storage.dir,
-              owner: {
-                taskId: identity.taskId,
-                conversationId: identity.id,
-                operationId: request.context.operationId,
-                intentHash: request.context.intentHash,
-                artifactId: mutation.artifactId
-              },
-              source: input,
-              jobId,
-              append: 'append' in first && first.append,
-              ...(mutation.method === 'writeArtifactContent'
-                ? {
-                    previous: {
-                      path: artifactFilePathIn(
-                        artifactsDirOf(storage.dir),
-                        identity.taskId,
-                        mutation.artifactId,
-                        mutation.title
-                      )
-                    }
-                  }
-                : {}),
-              assertCurrent: () => {
-                validate(job)
-              },
-              prepareOutputs: async (files) => {
-                validate(job)
-                storage.acceptCommand(
-                  identity.id,
-                  identity.epoch,
-                  request.context.operationId,
-                  request.intent
-                )
-                accepted = true
-                await prepareArtifactPublicationOutputs(storage.dir, files, () => {
+            if (request.intent.method === 'attachment.put') {
+              const { ref } = request.intent.args[0]
+              job.phase = 'staging'
+              const files = await prepareArtifactPublicationFiles({
+                dataDir: storage.dir,
+                jobId,
+                owner: {
+                  taskId: identity.taskId,
+                  conversationId: identity.id,
+                  operationId: request.context.operationId,
+                  intentHash: request.context.intentHash
+                },
+                source: input,
+                assertCurrent: () => {
                   validate(job)
-                })
-                await source(job)
-              }
-            })
-            validate(job)
-            job.phase = 'committing'
-            const metadata: ChatMetadataUpdate[] = []
-            const value = hooks.identity(identity, () =>
-              storage.transaction(() => {
-                validate(job)
-                const value = commitPreparedArtifactPublication(db, storage.dir, files, mutation)
-                const artifact =
-                  value.method === 'uploadArtifactBlob' ? value.result : value.result.artifact
-                if (artifact)
-                  metadata.push({
-                    ...local.metadata(identity.tabId, 'artifact-changed', {
-                      id: artifact.id,
-                      folderId: artifact.folder_id,
-                      order: artifact.order
-                    }),
-                    storeId: request.context.owner.storeId
+                },
+                prepareOutputs: async (files) => {
+                  validate(job)
+                  await attachments.validatePublicationFile(
+                    request.context.route,
+                    ref,
+                    files.after.path,
+                    files.after.sha256,
+                    files.after.size,
+                    () => {
+                      validate(job)
+                    }
+                  )
+                  await writeArtifactPublicationBlobInventory(files, () => {
+                    validate(job)
                   })
-                storage.completeCommand(
-                  identity.id,
-                  identity.epoch,
-                  request.context.operationId,
-                  value.result
-                )
-                return value
+                  storage.acceptCommand(
+                    identity.id,
+                    identity.epoch,
+                    request.context.operationId,
+                    request.intent,
+                    true
+                  )
+                  accepted = true
+                  storage.transaction(() =>
+                    rememberPreparedAttachmentHash(db, identity.taskId, files.after.sha256)
+                  )
+                  // An immutable flat blob can outlive a rolled-back receipt. Persist
+                  // its existing erasure retry evidence before its final rename.
+                  await fence()
+                  validate(job)
+                  await source(job)
+                }
               })
-            )
-            committed = true
-            job.phase = 'fencing'
-            await fence()
-            outcome = {
-              kind: 'committed',
-              value,
-              replayed: false,
-              durability: 'owner-flush',
-              metadata
+              validate(job)
+              job.phase = 'committing'
+              const value = hooks.identity(identity, () =>
+                storage.transaction(() => {
+                  validate(job)
+                  renameSync(files.after.path, storage.blobs.blobPath(files.after.sha256))
+                  syncWorkingCopyDirectory(storage.blobs.dir)
+                  const result = attachments.commitPublication(
+                    request.context.route,
+                    ref,
+                    files.after.sha256,
+                    files.after.size
+                  )
+                  storage.completeCommand(
+                    identity.id,
+                    identity.epoch,
+                    request.context.operationId,
+                    result,
+                    true
+                  )
+                  return { method: 'attachment.put' as const, result }
+                })
+              )
+              committed = true
+              job.phase = 'fencing'
+              await fence()
+              outcome = {
+                kind: 'committed',
+                value,
+                replayed: false,
+                durability: 'owner-flush',
+                metadata: []
+              }
+            } else {
+              const mutation: PreparedArtifactMutation =
+                request.intent.method === 'uploadArtifactBlob'
+                  ? {
+                      method: request.intent.method,
+                      taskId: request.intent.args[0].taskId,
+                      title: request.intent.args[0].title,
+                      folderId: request.intent.args[0].folderId,
+                      artifactId: newPublicationArtifactId()
+                    }
+                  : {
+                      method: request.intent.method,
+                      artifactId: request.intent.args[0].artifactId,
+                      mutateRef: request.intent.args[0].mutateRef,
+                      mutateCurrent: request.intent.args[0].mutateCurrent,
+                      author: request.intent.args[0].author,
+                      taskId: identity.taskId,
+                      title: (
+                        db
+                          .prepare('SELECT title FROM task_artifacts WHERE id=?')
+                          .get(request.intent.args[0].artifactId) as { title: string }
+                      ).title
+                    }
+              job.phase = 'staging'
+              const files = await prepareArtifactPublicationFiles({
+                dataDir: storage.dir,
+                owner: {
+                  taskId: identity.taskId,
+                  conversationId: identity.id,
+                  operationId: request.context.operationId,
+                  intentHash: request.context.intentHash,
+                  artifactId: mutation.artifactId
+                },
+                source: input,
+                jobId,
+                append: 'append' in first && first.append,
+                ...(mutation.method === 'writeArtifactContent'
+                  ? {
+                      previous: {
+                        path: artifactFilePathIn(
+                          artifactsDirOf(storage.dir),
+                          identity.taskId,
+                          mutation.artifactId,
+                          mutation.title
+                        )
+                      }
+                    }
+                  : {}),
+                assertCurrent: () => {
+                  validate(job)
+                },
+                prepareOutputs: async (files) => {
+                  validate(job)
+                  storage.acceptCommand(
+                    identity.id,
+                    identity.epoch,
+                    request.context.operationId,
+                    request.intent
+                  )
+                  accepted = true
+                  await prepareArtifactPublicationOutputs(storage.dir, files, () => {
+                    validate(job)
+                  })
+                  await source(job)
+                }
+              })
+              validate(job)
+              job.phase = 'committing'
+              const metadata: ChatMetadataUpdate[] = []
+              const value = hooks.identity(identity, () =>
+                storage.transaction(() => {
+                  validate(job)
+                  const value = commitPreparedArtifactPublication(db, storage.dir, files, mutation)
+                  const artifact =
+                    value.method === 'uploadArtifactBlob' ? value.result : value.result.artifact
+                  if (artifact)
+                    metadata.push({
+                      ...local.metadata(identity.tabId, 'artifact-changed', {
+                        id: artifact.id,
+                        folderId: artifact.folder_id,
+                        order: artifact.order
+                      }),
+                      storeId: request.context.owner.storeId
+                    })
+                  storage.completeCommand(
+                    identity.id,
+                    identity.epoch,
+                    request.context.operationId,
+                    value.result
+                  )
+                  return value
+                })
+              )
+              committed = true
+              job.phase = 'fencing'
+              await fence()
+              outcome = {
+                kind: 'committed',
+                value,
+                replayed: false,
+                durability: 'owner-flush',
+                metadata
+              }
             }
           }
         } catch (error) {

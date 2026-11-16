@@ -578,13 +578,22 @@ export function openChatStorage(opts: {
     mode: r.mode,
     epoch: r.epoch
   })
-  function requireOwner(id: string, epoch: number, allowFrozen = false): OwnerRow {
+  function requireOwner(
+    id: string,
+    epoch: number,
+    allowFrozen = false,
+    allowPrepared = false
+  ): OwnerRow {
     requireEpoch(epoch)
     const r = row(id)
     if (!r) throw new Error('Unknown conversation')
     if (r.state === 'deleted') throw new Error('Conversation deleted')
     if (r.epoch !== epoch) throw new Error('Stale ownership epoch')
-    if (r.state !== 'active' && !(allowFrozen && r.state === 'frozen'))
+    if (
+      r.state !== 'active' &&
+      !(allowFrozen && r.state === 'frozen') &&
+      !(allowPrepared && r.state === 'prepared')
+    )
       throw new Error(`Conversation ${r.state}`)
     return r
   }
@@ -1985,10 +1994,11 @@ export function openChatStorage(opts: {
       id: string,
       epoch: number,
       operationId: string,
-      input: unknown
+      input: unknown,
+      allowPrepared = false
     ): 'accepted' | 'duplicate' {
       return db.transaction(() => {
-        requireOwner(id, epoch)
+        requireOwner(id, epoch, false, allowPrepared)
         const hash = digest(input)
         const previous = db
           .prepare('SELECT hash FROM receipts WHERE conversation_id=? AND id=?')
@@ -2010,9 +2020,15 @@ export function openChatStorage(opts: {
         return 'accepted'
       })()
     },
-    completeCommand(id: string, epoch: number, operationId: string, result: unknown): void {
+    completeCommand(
+      id: string,
+      epoch: number,
+      operationId: string,
+      result: unknown,
+      allowPrepared = false
+    ): void {
       db.transaction(() => {
-        requireOwner(id, epoch)
+        requireOwner(id, epoch, false, allowPrepared)
         const changed = db
           .prepare(
             "UPDATE receipts SET state='delivered',result=CASE WHEN method='askSideQuestion' THEN 'null' ELSE ? END WHERE conversation_id=? AND id=?"

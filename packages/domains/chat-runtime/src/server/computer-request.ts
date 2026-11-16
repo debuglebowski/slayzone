@@ -1,3 +1,4 @@
+import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 /** Canonical computer chat request schema, shared by host validation and compiled owner groups. */
 import { z } from 'zod'
 import {
@@ -311,7 +312,65 @@ export const computerRequestSchema = z.discriminatedUnion('kind', [
     kind: z.literal('attachment.put'),
     route: chatRouteSchema,
     ref: chatAttachmentSchema,
-    data: z.string().max(14000000)
+    // Inline bytes (one frame's worth), or bytes staged with `upload.*` — exactly one.
+    data: z.string().max(14000000).optional(),
+    staged: z
+      .object({
+        uploadId: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+      })
+      .optional()
+  }),
+  // Staged uploads (FU1 S3): a file's bytes in chunks of ≤ 256 KiB, by hash + size.
+  z.object({
+    kind: z.literal('upload.begin'),
+    route: chatRouteSchema.optional(),
+    operationId: z.string().min(1).max(200).optional(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+  }),
+  z.object({
+    kind: z.literal('upload.chunk'),
+    route: chatRouteSchema.optional(),
+    uploadId: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    data: z.string().max(Math.ceil(BYTE_RANGE_MAX_CHUNK / 3) * 4)
+  }),
+  // One range (≤ 256 KiB) of an attachment or an archived file — the bounded twin of
+  // `attachment.read` / `archive.file` / `archive.attachment` (same checks).
+  z.object({
+    kind: z.literal('bytes.read'),
+    source: z.discriminatedUnion('type', [
+      z.object({
+        type: z.literal('attachment'),
+        route: chatRouteSchema,
+        ref: chatAttachmentSchema
+      }),
+      z.object({
+        type: z.literal('archive.file'),
+        archiveId: z.string().uuid(),
+        conversationId: z.string(),
+        artifactId: z.string().min(1).max(200),
+        contentHash: z.string().regex(/^[a-f0-9]{64}$/)
+      }),
+      z.object({
+        type: z.literal('archive.attachment'),
+        archiveId: z.string().uuid(),
+        conversationId: z.string(),
+        ref: chatAttachmentSchema
+      })
+    ]),
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    length: z.number().int().min(1).max(BYTE_RANGE_MAX_CHUNK)
   }),
   z.object({
     kind: z.literal('attachment.read'),

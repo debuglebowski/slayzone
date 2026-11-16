@@ -9,6 +9,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { open, type FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
@@ -272,7 +273,12 @@ test('erasure drains an actual asynchronous staged artifact writer before confir
   })) as { id: string }
   const secret = Buffer.from('late staged private artifact write')
   const staged = await stage(r, alice, 'write', secret)
-  const original = r.artifacts.store.writeArtifactContent.bind(r.artifacts.store)
+  const probePath = join(r.storage.dir, 'publication-sync-probe')
+  const probe = await open(probePath, 'w')
+  const prototype = Object.getPrototypeOf(probe)
+  const originalSync = prototype.sync
+  await probe.close()
+  rmSync(probePath)
   let entered!: () => void, resume!: () => void
   const waiting = new Promise<void>((resolve) => {
     entered = resolve
@@ -280,13 +286,18 @@ test('erasure drains an actual asynchronous staged artifact writer before confir
   const proceed = new Promise<void>((resolve) => {
     resume = resolve
   })
-  const mock = vi
-    .spyOn(r.artifacts.store, 'writeArtifactContent')
-    .mockImplementation(async (...args) => {
+  let held = false
+  const mock = vi.spyOn(prototype, 'sync').mockImplementation(async function (this: FileHandle) {
+    const info = await this.stat()
+    // Hold the actual prepared payload FD, after the body exists. Metadata and
+    // the previous image have different sizes in this fixture.
+    if (!held && info.isFile() && info.size === secret.length) {
+      held = true
       entered()
       await proceed
-      return original(...args)
-    })
+    }
+    return originalSync.call(this)
+  })
   const writing = r.artifacts
     .invoke({
       route: alice,

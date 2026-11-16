@@ -1,9 +1,9 @@
-# Canonical artifact publication backend (S6b2b5)
+# Canonical artifact publication (B5 / FU1 S19)
 
 This is the private backend for FU1's staging adapters. The production online runtime
 exposes `runtime.artifactPublication`. The existing public artifact method schemas
-still admit no source path. FU1 must connect its upload manager and final public
-invokes; these backend tests do not complete that integration or H2.
+admit no source path. S19 connects the real upload manager and final public invokes
+to this same owner, including staged attachments; no parallel writer or ledger.
 
 ## Main API
 
@@ -33,14 +33,21 @@ if (settlement.outcome.kind === 'committed') {
 ```
 
 `PublicationIntent` is the original validated `{ method, args }`, including the
-original staged ref and owned uploadId. Methods are `uploadArtifactBlob` and
-`writeArtifactContent`; the latter retains append/mutateCurrent/mutateRef/author.
+original staged ref and owned uploadId. Artifact methods are `uploadArtifactBlob`
+and `writeArtifactContent`; the latter retains append/mutateCurrent/mutateRef/author.
+Staged `attachment.put` uses the same execution/receipt/lifetime machinery, with
+`{ref, staged}` arguments. Its private receipt key is owned `uploadId`, or the
+existing digest of `{route,intent}` for legacy staging; the grant retains the original
+begin operation binding. Prepared attachments validate saved hash/type/metadata and
+may fill bytes while paused. Active attachments retain their existing limits. Immutable
+flat blob candidates enter existing erasure evidence before rename/receipt commit,
+so rollback/failed acknowledgement cannot leave untracked bytes.
 Inline requests use the existing bounded `data` string instead of `staged`, omit
 `uploads`, and decode only on the owner in aligned blocks. The existing14,000,000
 base64-character bound remains; staged files have no restored content-size cap.
 
 `uploads.reserveForPublication(ref, context)` returns the **exact** host-local
-`PublicationUploadLease`: `{ grant, assertCurrent(), release(consumed) }`. Register
+`PublicationUploadLease`: `{ grant, signal?, assertCurrent(), release(consumed) }`. Register
 pending reservation work before its first await. Reserve/stat/bind only; do not
 read/hash/decode the content on main. Existing validated `acquire` consumers retain
 their current API. Release must remain usable after admission closes or the owner
@@ -58,7 +65,10 @@ second reservation. Delivered replay is fenced and returned **before** staging i
 acquired, including when successful consumption removed the original source.
 The owner computes the receipt digest over the validated original intent using
 the existing sorted-key digest; transient paths/leases/instance IDs are excluded.
-Different original input retains the operation-ID-reuse error.
+Different original input retains the operation-ID-reuse error. Staging and private
+publication reuse the canonical `chatRouteSchema`, preserving public 500-character
+conversation identities; the actual public maximum conversation/tab/title/op test
+checks this boundary through replay. Operation/artifact IDs keep their existing limits.
 
 `PublicationContext` is owner-derived: logical storeId, random physical instanceId,
 connectionEpoch, route, taskId/tabId, lifecycleRevision, operationId and intentHash.
@@ -89,8 +99,8 @@ Reasons: request-aborted, source-revoked, lifecycle-fence, shutdown.
   staging cleanup failed: inspect its durable receipt instead.
 - Request-abort cancellation detaches one interested waiter and cancels shared work
   only after the last waiter leaves. Source/lifecycle/shutdown revocation cancels the
-  shared execution. **FU1 must connect upload-entry revocation and request abort to
-  execution.cancel**. A commit that already won remains committed after its fence.
+  shared execution. The production manager connects entry revocation to
+  `source-revoked`; the public handler connects request signals to `request-aborted`. A commit that already won remains committed after its fence.
 - Runtime lifecycle, conversation transition/deletion, erasure and close cancel/drain
   accepted publication executions. Erasure's existing `stopExternal` hook must then
   finish upload-manager erasure after exact leases drain, before acknowledgement.
@@ -127,10 +137,13 @@ No new global hub transaction registration, public RPC, writer or job ledger exi
 Protocol v9 `artifact.invoke/readBytesRange` also runs through this canonical owner.
 The peer `artifacts.readBytesChunk` response stays `{data,size,version}` with the shared
 8MiB raw-byte chunk cap; disk reads use at most256KiB. Blob verification and range reads
-retain the same descriptor. The verification cache keys its device/inode/size/mtime/
-ctime identity, never a later pathname's stamp; wire generation tokens retain their
-existing format. Working-file, legacy-file and current-blob fallback/error semantics
-remain unchanged. Runtime close drains accepted range reads before owner shutdown.
+retain the same descriptor. Verification-cache keys and public generation stamps
+include device/inode/size/mtime/ctime identity, never a later pathname's stamp.
+Cache publication follows successful hashing, the requested read and the final
+descriptor identity check; a changed descriptor cannot seed a verified-cache hit.
+Wire generation tokens retain their existing format. Working-file, legacy-file
+and current-blob fallback/error semantics remain unchanged. Runtime close drains
+accepted range reads before owner shutdown.
 
 The host's shared prefix fence drains all captured RPC settlements before the real
 FULL commit. Each caller retains its own validation/write error; a refused sibling
@@ -196,10 +209,38 @@ multi-hub dispatch ping/process stop remains responsive, with main SQLite/body I
 Portable file fault gates call/inject at real worker file APIs; they are not claims
 of a blocked OS filesystem syscall on Windows.
 
-FU1 final public-invoke/staging adapters and manager revocation/erasure wiring remain
-required. Also pending: final migrated4GB/contention/caller proof, real heartbeat/chat
-cancel and all-provider bounded/lossless/control ACK with stdout paused, S8 whole
-archive/temp/privacy serialization (separately owned), independent
-review/fix loop and current-main integration. This checkpoint is not whole H1/H2 DONE.
-Reviewed S7 unclean-start/swap recovery is integrated; it does not close those remaining
-acceptance requirements.
+S19 public-invoke/real-manager tests additionally prove final native fence failure,
+replay before reservation, same-operation/boundary/undo parity, request abort,
+erasure, failed-close physical exit/reopen, source replacement, epoch/revision
+fences, prepared attachment replay and actual compaction swap with epoch advance.
+The fallback-range regression now gates the real owner FD (same original 2s gate/5s
+test deadlines), verifies 17 bounded reads and zero synchronous main bytes, and
+checks process controls before the first page can reply. Native modes remain POSIX;
+the fallback descriptor probe also runs portably without the VFS extension.
+Request signals pass through REST/tRPC, gateway, duplex request-id cancellation,
+dialer, connector/session-host and final dispatch. The wire never carries a signal.
+
+The `public-*` modes exercise final public invokes with the real manager. The
+`native`, `portable`, `large`, `faults`, `relay` and `cache-*` modes retain backend
+publication proofs, including bounded completed-request bodies and their isolated
+old-retention negative control. The `range` mode exercises actual peer-v9 range
+dispatch over a backend-seeded artifact; `public-range` exercises the public FU1
+fallback. Main read-only metadata-directory opens for durable source cleanup are
+counted separately from forbidden body I/O. Actual main body opens remain guarded
+with a negative control; native SQLite syncs and synchronous main read bytes remain
+zero under their respective probes. The shared runner retains each separate test's
+original 5s Vitest budget and 25s native child timeout; fallback entry remains 2s.
+
+Reviewed parent S7 unclean-start/swap recovery and S8 serialized archive/privacy
+lifetimes are integrated backend contracts. Archive admission spans source lookup
+and complete reads, plus erasure/rewrite/compacted-marker/manifest/index completion.
+Its registered native FD remains live through the complete awaited erasure finish
+and post-await DB checks. Failed-close retries, recoverable quarantine, native-copy
+physical-exit barriers and explicit retained-snapshot policy remain authoritative.
+These parent native proofs remain alongside S19 public coverage; neither substitutes
+for final composed acceptance.
+
+Root dependencies remain: final migrated4GB/contention/caller proof, real heartbeat/chat
+cancel and all-provider bounded/lossless/control ACK with stdout paused, composed
+S7/S8 acceptance, independent review/fix loop and current-main integration. This
+checkpoint is not whole H1/H2 DONE.

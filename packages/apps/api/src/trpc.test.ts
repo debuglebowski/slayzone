@@ -26,6 +26,7 @@
 // The gate chain's tables, as `router.ts` registers them for the real app router.
 import './procedure-policy'
 import { describe, test, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
+import { currentRequestAbort } from '@slayzone/platform/request-abort'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { HubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import {
@@ -48,7 +49,8 @@ const testRouter = router({
     write: publicProcedure.query(() => 'write-ok'),
     create: publicProcedure.query(() => 'create-ok'),
     // Not in SCOPE_POLICY; called only by `full` principals or with the gate off.
-    whoami: publicProcedure.query(() => currentSecurityContext() ?? null)
+    whoami: publicProcedure.query(() => currentSecurityContext() ?? null),
+    abortSignal: openProcedure.query(() => currentRequestAbort())
   }),
   hub: router({
     describe: openProcedure.query(() => 'describe-ok')
@@ -242,4 +244,10 @@ describe('trpc auth + scope gate', () => {
       })
     })
   })
+})
+
+test('tRPC carries its actual request abort signal into computer calls', async () => {
+  const abort = new AbortController()
+  const caller = testRouter.createCaller({} as TrpcContext, { signal: abort.signal })
+  expect(await caller.pty.abortSignal()).toBe(abort.signal)
 })

@@ -34,6 +34,99 @@ async function setup(options: Parameters<typeof createUploadStaging>[1] = {}) {
   await s.sweep()
   return { dir, s, prototype }
 }
+
+test('async canonical authority is registered before its first await and close drains it', async () => {
+  let entered = false,
+    unblock!: () => void
+  const held = new Promise<void>((resolve) => {
+    unblock = resolve
+  })
+  unlocks.push(unblock)
+  const { s } = await setup({
+    validateOwner: undefined,
+    readOwner: async () => {
+      entered = true
+      await held
+      return { taskId: 'alice', revision: 1 }
+    }
+  })
+  const pending = begin(s)
+  void pending.catch(() => undefined)
+  await until(() => entered)
+  let closed = false
+  const closing = s.close().then(() => {
+    closed = true
+  })
+  await turn()
+  expect(closed).toBe(false)
+  unblock()
+  await expect(pending).rejects.toThrow(/closed/i)
+  await closing
+})
+
+test('actual staged-path reservation pins the exact incarnation without main body reads or hashing', async () => {
+  const { s, prototype } = await setup()
+  const begun = await begin(s)
+  const ref = { sha256: sha(bytes), size: bytes.length, uploadId: begun.uploadId! }
+  await s.chunk(ref.sha256, ref.size, 0, bytes, { route, uploadId: ref.uploadId })
+  const read = vi.spyOn(prototype, 'read').mockImplementation(async () => {
+    throw new Error('Publication reservation must not read body bytes on main')
+  })
+  const context = {
+    owner: { storeId: 'store', instanceId: 'instance', connectionEpoch: 0 },
+    route,
+    taskId: 'alice',
+    tabId: 'tab',
+    lifecycleRevision: 1,
+    operationId: 'operation',
+    intentHash: 'a'.repeat(64)
+  }
+  const one = await s.reserveForPublication(ref, context)
+  const two = await s.reserveForPublication(ref, context)
+  expect(one.grant.entryId).toBe(two.grant.entryId)
+  expect(one.grant.leaseId).not.toBe(two.grant.leaseId)
+  expect(one.grant).toMatchObject({
+    kind: 'staged-path',
+    ref,
+    identity: { size: bytes.length },
+    binding: { kind: 'owned', taskId: 'alice', route, operationId: 'operation', revision: 1 }
+  })
+  expect(read).not.toHaveBeenCalled()
+  let erased = false
+  const erasing = s.withTaskErasure('alice', async () => {
+    erased = true
+  })
+  await turn()
+  expect(one.signal.aborted).toBe(true)
+  expect(erased).toBe(false)
+  await one.release(false)
+  expect(erased).toBe(false)
+  await two.release(false)
+  await erasing
+  expect(erased).toBe(true)
+})
+
+test('old publication cleanup refuses a same-path replacement instead of deleting its incarnation', async () => {
+  const { s } = await setup()
+  const begun = await begin(s)
+  const ref = { sha256: sha(bytes), size: bytes.length, uploadId: begun.uploadId! }
+  await s.chunk(ref.sha256, ref.size, 0, bytes, { route, uploadId: ref.uploadId })
+  const context = {
+    owner: { storeId: 'store', instanceId: 'instance', connectionEpoch: 0 },
+    route,
+    taskId: 'alice',
+    tabId: 'tab',
+    lifecycleRevision: 1,
+    operationId: 'operation',
+    intentHash: 'a'.repeat(64)
+  }
+  const lease = await s.reserveForPublication(ref, context)
+  const { rename, writeFile } = await import('node:fs/promises')
+  await rename(lease.grant.path, lease.grant.path + '.old')
+  await writeFile(lease.grant.path, 'new incarnation')
+  await expect(lease.release(true)).rejects.toThrow(/replac|incarnation/i)
+  expect(await readFile(lease.grant.path, 'utf8')).toBe('new incarnation')
+})
 function gateSync(prototype: { sync(): Promise<void> }) {
   const original = prototype.sync
   let entered = false,
@@ -411,4 +504,21 @@ test('initialization durably links the upload directory before acknowledging off
   stores.push(s)
   await begin(s)
   if (process.platform !== 'win32') expect(firstSyncIsDirectory).toBe(true)
+})
+
+// A stale compatibility release has no authority over another manager's entry.
+test('closed manager late hash release cannot delete a fresh same-key incarnation', async () => {
+  const { dir, s } = await setup()
+  await s.begin(sha(bytes), bytes.length)
+  await s.chunk(sha(bytes), bytes.length, 0, bytes)
+  await s.release(sha(bytes), bytes.length)
+  await s.close()
+  const fresh = createUploadStaging(dir, { validateOwner: (r) => ({ taskId: r.id, revision: 1 }) })
+  stores.push(fresh)
+  await fresh.begin(sha(bytes), bytes.length)
+  await fresh.chunk(sha(bytes), bytes.length, 0, bytes)
+  await expect(s.release(sha(bytes), bytes.length)).rejects.toThrow(/closed/i)
+  const lease = await fresh.acquire({ sha256: sha(bytes), size: bytes.length }, route)
+  expect(await readFile(lease.path)).toEqual(bytes)
+  await lease.release(false)
 })

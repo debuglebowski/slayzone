@@ -7,6 +7,7 @@
  *   - a computer's own refusal (`refusedByComputer`) reaches the caller as a clean
  *     error and is audited as `denied` — also for methods with no audit event.
  */
+import { runWithRequestAbort } from '@slayzone/platform/request-abort'
 import { EventEmitter } from 'node:events'
 import type { WebSocket } from 'ws'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -266,6 +267,26 @@ it('late generation verification cannot replace a newer connector', async () => 
     await flush()
     expect(gateway.listComputers()[0].version).toBe('2.0.0')
     expect(old.response(2)?.error).toBeDefined()
+  } finally {
+    gateway.close()
+  }
+})
+
+it('carried request abort cancels exactly the delivered computer request id', async () => {
+  const { gateway, ws } = setup()
+  try {
+    const { computerId } = await enroll(ws)
+    const abort = new AbortController()
+    const pending = runWithRequestAbort(abort.signal, () =>
+      gateway.request(computerId, 'chat.request', { kind: 'inventory' }, 0)
+    )
+    void pending.catch(() => undefined)
+    await flush()
+    const sent = ws.requestOf('chat.request')!
+    expect(sent).toBeDefined()
+    abort.abort()
+    expect(ws.requestOf('$/cancelRequest')?.params).toEqual({ id: sent.id })
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   } finally {
     gateway.close()
   }

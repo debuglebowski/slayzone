@@ -560,50 +560,42 @@ fresh whole-FU2 review remain required.
   - **Older computers:** the hub still sends them inline. Over the cap the hub refuses before encoding, as a frame-too-large error (`hub/computer-uploads.ts`).
   - **Migration:** the legacy migration's `attachment.put` uses the same path through `createChatMigration({ attachmentBytes })`.
 
-- **Upload integration during backend replay.** The historical staging manager and
-  bounded `upload.begin` / `upload.chunk` validation are retained. The actual online
-  handler accepts a host-held `uploads` dependency; production injection and its
-  lifetime/erasure wiring remain S19 work. A missing injection refuses staging.
-  Standalone compatibility assembly keeps the existing composed services and B5
-  publication/lifecycle/erasure behavior, and exposes its staging dependency without
-  recreating native services. Artifact hooks retain their B5 failure, availability
-  and task-access callbacks alongside the historical upload dependency.
-  New staged final artifact/attachment requests explicitly refuse the old whole-file
-  compatibility consumers until the canonical-owner adapter is connected; existing
-  inline paths remain. Delivered artifact replay is checked before this refusal,
-  and a new staged refusal precedes command acceptance. No `take`/whole staged-file
-  Buffer or consume/release runs on main as a fallback. Final artifact invokes must
-  use `artifactPublication.start` with the original validated intent and exact
-  host-held source lease; attachment publication needs its existing ownership,
-  per-kind limits and prepared/active semantics on the same owner seam. Source
-  release still requires matched physical quiescence or owner exit, including
-  abort/erasure/close failures. See [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md).
-  Canonical request-schema consolidation, the later owned/durable staging replay
-  and final actual-invoke checks remain required; this partial merge is not H2 DONE.
+- **Canonical publication (S19).** `openComputerChatRuntime` constructs the main-held
+  async upload manager. Admission reads fresh authority through the compiled owner;
+  accepted staging/reservation work registers the existing secondary lifetime before
+  yielding. `computer-request.ts` owns all byte/upload/staged variants; the closed
+  store registry includes the attachment/archive range adapters. No manager, lease
+  callback, signal, source path or FD is accepted by public schemas or cloned to a worker.
+  Public `uploadArtifactBlob` / `writeArtifactContent` and staged `attachment.put`
+  use the existing `artifactPublication.start` backend. Main reserves/stat-checks
+  the exact entry incarnation; bounded body copy/hash/decode and durable publication
+  run in the canonical owner. Inline artifact input retains its 14M base64 bound;
+  staged artifacts retain arbitrary byte size. Attachment type/size rules and
+  active/prepared migration semantics remain authoritative on that same owner.
+  Receipt replay precedes source acquisition, including after successful consumption.
+  Source revocation, request abort, lifecycle/epoch changes, erase and close fence
+  publication. REST/tRPC request signals travel locally to the gateway; existing
+  duplex RPC sends only a matching request-id cancellation notification through
+  dialer/connector/session host. Cancellation is advisory, never proof of physical
+  quiescence. The exact source lease remains held until matched settlement or actual
+  `storage.exited`, followed by durable incarnation-bound source cleanup. Failed
+  native close terminates only that store owner before release; no main body fallback.
+  See [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md).
 
-  - **Mixed versions:** pre-FU1 computers still get inline bytes, with the over-cap refusal before encoding. Earlier bounded computers ignore ownership fields and omit the new acknowledgement; `withUploadedBytes` holds their shared hash slot through consumption. Owned acknowledgements release that compatibility gate early. Old hubs retain their legacy hash/size protocol on new computers, with idempotent chunks and pinned reads. Their unattributed staging cannot be assigned to a task: verified erasure refuses completion until leftovers are removed/expired. No false receipt is issued over unknown bytes.
-  - **Migration:** the attachment consume hook uses the same owned upload pipeline, including prepared routes and compatibility gating. Existing inline/default hooks remain supported. No chat schema migration.
-
-- **Owned staging and canonical publication during replay.** The durable async
-  owned-upload manager, manifest/incarnation checks, scope/operation binding,
-  revocation, live expiry and drainable release/erase/close behavior are retained.
-  Host upload calls forward the route/operation/uploadId pairs to the injected
-  main-held manager; a manager, lease callback or native handle is never cloned to
-  the worker. New staged final consumers still require the actual B5 adapter above;
-  their explicit partial-replay refusal must be removed by complete S19 integration
-  before merge. A refusal or size cap is not the final feature solution.
-  B5 preparing/adopted/claimed journal ownership, orphan blob hashes, shared pins,
-  unknown/quarantined preparation refusal and owned upload inventory all remain
-  authoritative for erasure. `prepareStoredTaskErasure` retains its optional root,
-  including the actual readable archive root. `finishStoredTaskErasure` now awaits
-  owned-upload removal/verification and returns `Promise<{ compact: boolean }>`;
-  callers must await it under the physical owner lifetime, then perform the existing
-  off-thread rebuild and mark completion before ACK. No transaction spans its file
-  awaits. Standalone and archive paths retain this ordering; the nonconflict
-  canonical control adapter still requires its await update after replay.
-  Online lifecycle/erasure must cancel/drain B5 publication before main-held upload
-  verification through the existing stopExternal seam. Logical RPC/cancel/close
-  failure cannot release a source: matched quiescence or physical owner exit remains
-  required. Production manager admission/injection, exact publication reservations,
-  canonical request/registry adapters and final lifetime/erasure tests remain S19.
-- **Final artifact publication remains open (FU1 r2 H2):** async staging does not make `uploadArtifactBlob`/`writeArtifactContent` finalization off-main. FU2 owns the sole worker-backed SQLite/composed-artifact migration. FU1 will adapt staged source-path consumption, captured ownership and main-held lease lifetimes to that owner after root sequences integration, with worker-local bounded FS/hash/durability/atomic publication tests. No competing DB worker or restored upload size cap.
+  - **Mixed versions:** pre-FU1 computers still get inline bytes, with over-cap refusal
+    before encoding. Earlier bounded computers ignore ownership fields and omit the
+    new acknowledgement; `withUploadedBytes` holds their shared hash slot through
+    consumption. Owned acknowledgements release that compatibility gate early. Old
+    hubs retain legacy hash/size staging with idempotent chunks and pinned reads.
+    Unattributed leftovers still refuse verified task erasure until removed/expired.
+  - **Erasure:** lifecycle closes admission and cancels/drains B5 jobs before manager
+    erasure. `withTaskErasure` retains the legacy admission fence through awaited
+    `finishStoredTaskErasure`, post-await native verification, off-thread rebuild and
+    final FULL acknowledgement. Preparing/adopted/claimed journals, orphan hashes,
+    immutable attachment candidates, shared pins, quarantines and readable archives
+    remain inventoried. No transaction spans file awaits. Standalone compatibility
+    uses the same B5 writer; production uses only the canonical online worker.
+  - **Integration boundary:** S19 has actual public manager/compiled-owner/native
+    fence, failure, replacement, lifecycle, erase, close and compaction-swap tests.
+    Root still integrates final FU2/S8/current-main and conducts independent R6 review;
+    this worktree checkpoint is not whole-candidate DONE/SHIP.

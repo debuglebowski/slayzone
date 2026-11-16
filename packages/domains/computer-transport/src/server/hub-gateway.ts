@@ -1,3 +1,4 @@
+import { currentRequestAbort } from '@slayzone/platform/request-abort'
 /**
  * Hub-side computer gateway. Owns every computer WebSocket that dialed in, speaks
  * the duplex JSON-RPC computer protocol over each, and exposes an addressable
@@ -285,7 +286,8 @@ export interface HubComputerGateway {
     computerId: string,
     method: string,
     params?: unknown,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal
   ): Promise<T>
   /** Fire-and-forget notification to a connected computer (no-op if absent). */
   notify(computerId: string, method: string, params?: unknown): void
@@ -1272,7 +1274,8 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       computerId: string,
       method: string,
       params?: unknown,
-      timeoutMs?: number
+      timeoutMs?: number,
+      signal = currentRequestAbort()
     ): Promise<T> {
       // The privileged ones are audited here, the single door (see hub-audit.ts). Actor,
       // ip and route come from the caller's request context, captured by the promise
@@ -1317,7 +1320,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       const send = () => {
         if (getConnection(computerId) !== conn || conn.closed)
           throw new Error('Computer connection changed before command delivery')
-        return conn.rpc.request<T>(method, params, timeoutMs, actor)
+        return conn.rpc.request<T>(method, params, timeoutMs, actor, signal)
       }
       const { authorizeRequest, beforeRequest } = options
       const startedAt = Date.now()
@@ -1328,7 +1331,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
               .then(() => authorizeRequest?.(computerId, method))
               .then(() => beforeRequest?.(computerId, method, params))
               .then(send)
-          : conn.rpc.request<T>(method, params, timeoutMs, actor)
+          : conn.rpc.request<T>(method, params, timeoutMs, actor, signal)
       )
         .catch((err: unknown) => {
           if (isFrameTooLargeError(err) && (err.data as { frame?: unknown })?.frame === 'reply') {

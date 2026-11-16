@@ -45,6 +45,27 @@ export function createComputerStoreControl(s: ChatStoreServices, jobs: ChatStore
     })
   }
   return {
+    uploadOwner(route: { id: string; epoch: number }) {
+      const owner = storage.conversation(route.id)
+      if (
+        !owner ||
+        owner.identity.epoch !== route.epoch ||
+        (owner.state !== 'active' && owner.state !== 'prepared')
+      )
+        throw new Error('Upload conversation ownership is unavailable or deleted')
+      const lifecycle = storage.taskLifecycle(owner.identity.taskId)
+      if (
+        lifecycle.state === 'deleted' ||
+        (lifecycle.state !== 'active' && owner.state !== 'prepared')
+      )
+        throw new Error('Upload task is paused or deleted')
+      return {
+        taskId: owner.identity.taskId,
+        revision: lifecycle.revision,
+        storeId: storage.storeId(),
+        connectionEpoch: storage.maintenance.connectionEpoch()
+      }
+    },
     async prepareClose() {
       await jobs.stop()
     },
@@ -136,7 +157,9 @@ export function createComputerStoreControl(s: ChatStoreServices, jobs: ChatStore
       s.artifacts.cleanupDeletedTasks(taskId)
       await s.artifacts.retryErasures(taskId)
       s.artifacts.collectGarbage()
-      const { compact } = storage.compose((db) => finishStoredTaskErasure(db, storage.dir, taskId))
+      const { compact } = await storage.compose((db) =>
+        finishStoredTaskErasure(db, storage.dir, taskId)
+      )
       if (compact) {
         await jobs.compaction.rebuildForErasure()
         storage.compose((db) => markStoredTaskErasureCompacted(db, taskId))

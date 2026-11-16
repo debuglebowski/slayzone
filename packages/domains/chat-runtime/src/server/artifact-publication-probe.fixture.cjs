@@ -6,7 +6,7 @@ const { syncBuiltinESMExports } = require('node:module')
 const { basename } = require('node:path')
 const body = (path) =>
   typeof path === 'string' &&
-  !path.endsWith('.json') &&
+  !['manifest.json', 'owner.json', 'blob.json'].includes(basename(path)) &&
   /[/\\]computer-runtime[/\\][a-f0-9]{64}[/\\](?:uploads|artifacts|blobs)[/\\]/.test(path)
 if (threads.isMainThread) {
   const shared = new SharedArrayBuffer(64)
@@ -15,8 +15,22 @@ if (threads.isMainThread) {
     : undefined
   if (cacheShared) global.__fu2PublicationCacheProbe = new Int32Array(cacheShared)
   global.__fu2PublicationProbe = new Int32Array(shared)
-  const rejectBody = (path) => {
+  const rejectBody = (path, operation, flags) => {
     if (global.__fu2PublicationProbe[8] && body(path)) {
+      // Durable host source cleanup may open a directory read-only to fsync its
+      // deletion. Count that metadata separately; JSON artifact bodies still count.
+      if (operation === 'open' || operation === 'openSync') {
+        let directory = false
+        try {
+          directory = fs.lstatSync(path).isDirectory()
+        } catch {
+          /* A missing path is not exempted from the body guard. */
+        }
+        if (directory && (flags === 'r' || flags === fs.constants.O_RDONLY)) {
+          Atomics.add(global.__fu2PublicationProbe, 14, 1)
+          return
+        }
+      }
       Atomics.add(global.__fu2PublicationProbe, 11, 1)
       throw new Error('Publication body I/O on main')
     }
@@ -31,16 +45,22 @@ if (threads.isMainThread) {
   ]) {
     const original = fs[key]
     fs[key] = function (path, ...args) {
-      rejectBody(path)
+      rejectBody(path, key, args[0])
       return Reflect.apply(original, this, [path, ...args])
     }
   }
   for (const key of ['readFile', 'writeFile', 'open']) {
     const original = fsp[key]
     fsp[key] = async (path, ...args) => {
-      rejectBody(path)
+      rejectBody(path, key, args[0])
       return original(path, ...args)
     }
+  }
+  const nativeRead = fs.readSync
+  fs.readSync = function (...args) {
+    const size = Reflect.apply(nativeRead, this, args)
+    if (global.__fu2PublicationProbe[8]) Atomics.add(global.__fu2PublicationProbe, 15, size)
+    return size
   }
   const Worker = threads.Worker
   threads.Worker = class extends Worker {
@@ -130,6 +150,7 @@ if (threads.isMainThread) {
       sync = file.sync.bind(file),
       close = file.close.bind(file)
     file.read = async (...input) => {
+      if (probe[8]) Atomics.add(probe, 13, 1)
       if (String(path).includes('blobs') && Atomics.compareExchange(probe, 0, 10, 0) === 10) {
         Atomics.store(probe, 1, 1)
         while (!Atomics.load(probe, 2)) await new Promise((resolve) => setTimeout(resolve, 1))

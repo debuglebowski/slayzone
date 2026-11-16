@@ -18,6 +18,7 @@ import type {
 
 export interface PublicationUploadLease {
   readonly grant: PublicationSourceGrant
+  readonly signal?: AbortSignal
   assertCurrent(): void
   release(consumed: boolean): Promise<void>
 }
@@ -145,6 +146,7 @@ export function createArtifactPublicationClient(
           error: unknown,
           termination: Promise<void> | undefined,
           cleanupFailed = false
+        let revokeSource: (() => void) | undefined
         try {
           lifetime = await registering
           let inspection = await call<Inspection>('inspect', request)
@@ -171,6 +173,13 @@ export function createArtifactPublicationClient(
                 throw new Error('Staged publication requires a trusted upload reservation')
               try {
                 lease = await uploads.reserveForPublication(first.staged, inspection.context)
+                const sourceSignal = lease.signal
+                if (sourceSignal) {
+                  const revoke = () => cancellation(accepted, 'source-revoked')
+                  sourceSignal.addEventListener('abort', revoke, { once: true })
+                  revokeSource = () => sourceSignal.removeEventListener('abort', revoke)
+                  if (sourceSignal.aborted) revoke()
+                }
               } catch (reservationError) {
                 // Another successful consumer may have removed the source after inspection.
                 const replay = await call<Inspection>('inspect', request)
@@ -258,6 +267,7 @@ export function createArtifactPublicationClient(
           accepted.inspectedDone()
           // Only a matched settlement, never-posted work, or actual exit reaches this point.
           accepted.quiet()
+          revokeSource?.()
           try {
             await lease?.release(settled?.outcome.kind === 'committed')
           } catch (cleanupError) {

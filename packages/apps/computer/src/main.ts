@@ -310,7 +310,7 @@ export interface HubRequestDispatch {
    * Route one hub→computer request to its handler. `actor` is the envelope's raw
    * `actor` member; a request without a valid one is refused (pre-v3 hub).
    */
-  handle(method: string, params: unknown, actor: unknown): Promise<unknown>
+  handle(method: string, params: unknown, actor: unknown, signal?: AbortSignal): Promise<unknown>
   /** Tear down live sessions/processes/fs watches (computer shutdown). */
   dispose(): Promise<void>
   isIdle(): boolean
@@ -538,7 +538,12 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   ])
 
   /** Exactly one log line per request, whatever its outcome. */
-  const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
+  const handle = async (
+    method: string,
+    params: unknown,
+    rawActor: unknown,
+    signal?: AbortSignal
+  ): Promise<unknown> => {
     const parsedActor = requestActorSchema.safeParse(rawActor)
     const actor = parsedActor.success ? parsedActor.data : null
     const record = (result: 'ok' | 'error' | 'refused', code?: number, reason?: string): void =>
@@ -562,7 +567,12 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       record('refused', err.code, err.message)
       throw err
     }
-    const entry0 = Object.hasOwn(table, method) ? table[method] : undefined
+    const entry0 =
+      method === HubToComputerMethods.chatRequest
+        ? (p: unknown) => chat.request(p, { signal })
+        : Object.hasOwn(table, method)
+          ? table[method]
+          : undefined
     // The path scope the hub authorized (§9 Phase 7b): every path judged while this
     // request is served must lie inside that task's / project's own folders here.
     const control =
@@ -967,11 +977,11 @@ export function startComputer(
       ...(secondary && refreshJoinTokenFor
         ? { refreshJoinToken: () => refreshJoinTokenFor(hubUrl) }
         : {}),
-      onHubRequest: async (method, params, actor) => {
+      onHubRequest: async (method, params, actor, signal) => {
         if (activation) await activation
         if (draining)
           throw new Error('computer is restarting for an upgrade; retry after reconnect')
-        return dispatch.handle(method, params, actor)
+        return dispatch.handle(method, params, actor, signal)
       },
       log
     })

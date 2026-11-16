@@ -24,9 +24,13 @@ export type StoreModels = {
   taskData: ChatStoreServices['taskData']
   transfers: ChatStoreServices['transfers']
   sessionMoves: ChatStoreServices['sessionMoves']
-  attachments: ChatStoreServices['attachments']
+  attachments: Omit<
+    ChatStoreServices['attachments'],
+    'publicationReference' | 'validatePublicationFile' | 'commitPublication'
+  >
   // Archive fault cleanup owns a local callback, never a serialized store call.
-  backups: Omit<ChatStoreServices['backups'], 'discardArchive'>
+  // Source paths and archive connection work stay worker-local.
+  backups: Omit<ChatStoreServices['backups'], 'discardArchive' | 'fileSource' | 'attachmentSource'>
   artifacts: Omit<ChatStoreServices['artifacts'], 'store' | 'db' | 'publication'>
   artifactPublication: Pick<
     ChatStoreServices['artifacts']['publication'],
@@ -252,7 +256,16 @@ export const STORE_METHODS = {
     'close'
   ],
   sessionMoves: ['exportTask', 'cliSessionIds', 'read', 'discard', 'forgetTask'],
-  attachments: ['reader.read', 'readBlob', 'putPrepared', 'missing', 'put', 'collectGarbage'],
+  attachments: [
+    'reader.read',
+    'readBlob',
+    'readFor',
+    'range',
+    'putPrepared',
+    'missing',
+    'put',
+    'collectGarbage'
+  ],
   backups: [
     'create',
     'list',
@@ -265,8 +278,10 @@ export const STORE_METHODS = {
     'read',
     'records',
     'attachment',
+    'attachmentRange',
     'blob',
     'file',
+    'fileRange',
     'eraseTask',
     'close'
   ],
@@ -299,6 +314,7 @@ export const STORE_METHODS = {
   prompts: ['list', 'summaries', 'capture'],
   usageCursors: ['all', 'seed', 'commit'],
   control: [
+    'uploadOwner',
     'prepareClose',
     'diagnosticsConfig',
     'configureDiagnostics',

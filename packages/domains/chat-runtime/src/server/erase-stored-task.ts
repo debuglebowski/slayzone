@@ -27,6 +27,36 @@ interface Candidates {
    *  that removes nothing more needs no new one. */
   compacted?: boolean
 }
+
+/** Reuse erasure's durable hash-only evidence for an immutable flat blob that may
+ * outlive a failed attachment receipt. No body/path or new job ledger is stored. */
+export function rememberPreparedAttachmentHash(
+  db: Database.Database,
+  taskId: string,
+  hash: string
+): void {
+  assertPathSafeId(taskId, 'taskId')
+  if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid prepared attachment hash')
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS task_erasure_checks(task_id TEXT PRIMARY KEY,candidates TEXT NOT NULL)'
+  )
+  const saved = db
+    .prepare('SELECT candidates FROM task_erasure_checks WHERE task_id=?')
+    .get(taskId) as { candidates: string } | undefined
+  const previous: Candidates = saved
+    ? JSON.parse(saved.candidates)
+    : { attachments: [], artifacts: [] }
+  db.prepare(
+    'INSERT INTO task_erasure_checks VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET candidates=excluded.candidates'
+  ).run(
+    taskId,
+    JSON.stringify({
+      ...previous,
+      compacted: false,
+      attachments: [...new Set([...previous.attachments, hash])]
+    })
+  )
+}
 const CONTENT_TABLES = [
   'provider_configs',
   'provider_config_seeds',
@@ -101,6 +131,7 @@ export function prepareStoredTaskErasure(
       attachments: [
         ...new Set([
           ...previous.attachments,
+          ...(root ? artifactPreparationBlobHashes(root, { taskIds: [taskId] }) : []),
           ...strings(
             db,
             // User attachments and event blobs (out-of-line payloads of saved events).

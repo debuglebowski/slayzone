@@ -99,14 +99,7 @@ export async function prepareArtifactPublicationOutputs(
   await durableCopy(files.after.path, join(files.directory, 'publish'))
   check()
   const final = new BlobStore(dataDir).blobPath(files.after.sha256)
-  await withPublicationFile(join(files.directory, 'blob.json'), 'wx', check, async (file) => {
-    await file.writeFile(
-      JSON.stringify({ version: 1, sha256: files.after.sha256, size: files.after.size })
-    )
-    await file.sync()
-  })
-  await syncPublicationDirectory(files.directory)
-  check()
+  await writeArtifactPublicationBlobInventory(files, check)
   if (!(await validBlob(final, files.after.sha256, files.after.size))) {
     check()
     await mkdir(dirname(final), { recursive: true, mode: 0o700 })
@@ -122,6 +115,21 @@ export async function prepareArtifactPublicationOutputs(
   await syncPublicationDirectory(files.directory)
   check()
   await syncPublicationDirectory(dataDir)
+  check()
+}
+
+/** Shared preparation attribution, including immutable chat attachment outputs. */
+export async function writeArtifactPublicationBlobInventory(
+  files: PreparedArtifactPublicationFiles,
+  check: () => void
+): Promise<void> {
+  await withPublicationFile(join(files.directory, 'blob.json'), 'wx', check, async (file) => {
+    await file.writeFile(
+      JSON.stringify({ version: 1, sha256: files.after.sha256, size: files.after.size })
+    )
+    await file.sync()
+  })
+  await syncPublicationDirectory(files.directory)
   check()
 }
 

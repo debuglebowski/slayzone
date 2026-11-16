@@ -4,6 +4,7 @@ import { createChatRetention } from './retention'
 import { parseChatInvocation, type ChatTabTransition } from '../shared'
 import { createChatInvoker } from './invocation'
 import { createUploadStaging } from './upload-staging'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
 import type { EventMarkerBackfillOptions } from './event-marker-backfill'
 import { createStorageCompaction, type StorageCompactionOptions } from './storage-compaction'
@@ -60,7 +61,11 @@ export interface ComputerChatRuntimeOptions {
 }
 
 export function createComputerChatRuntime(opts: ComputerChatRuntimeOptions) {
-  return assembleComputerChatRuntime(openChatStorage(opts), opts)
+  // Same canonical source root as the online owner; filesystem aliases must not
+  // produce noncanonical grants in stopped/standalone compatibility assembly.
+  mkdirSync(opts.stateDir, { recursive: true, mode: 0o700 })
+  const canonical = { ...opts, stateDir: realpathSync(opts.stateDir) }
+  return assembleComputerChatRuntime(openChatStorage(canonical), canonical)
 }
 
 /** Worker-local assembly: no second connection or callback crosses the owner boundary. */
@@ -69,26 +74,6 @@ export function assembleComputerChatRuntime(
   opts: ComputerChatRuntimeOptions
 ) {
   let sessionsChanged: (tabId: string) => void = () => undefined
-  const services = createChatStoreServices(storage, opts, {
-    sessionsChanged: (id) => sessionsChanged(id)
-  })
-  const {
-    diagnosticsConfig,
-    configureDiagnostics,
-    markerBackfill,
-    prompts,
-    turns,
-    ledger,
-    taskPaths,
-    local,
-    taskData,
-    transfers,
-    sessionMoves,
-    attachments,
-    artifacts,
-    backups,
-    workspaceStore
-  } = services
   const uploads = createUploadStaging(storage.dir, {
     automatic: !opts.maintenance,
     onSweepError: () => opts.log?.('chat upload expiry deferred; cleanup will retry'),
@@ -109,6 +94,27 @@ export function assembleComputerChatRuntime(
       return { taskId: owner.identity.taskId, revision: lifecycle.revision }
     }
   })
+  const services = createChatStoreServices(storage, opts, {
+    sessionsChanged: (id) => sessionsChanged(id),
+    uploads
+  })
+  const {
+    diagnosticsConfig,
+    configureDiagnostics,
+    markerBackfill,
+    prompts,
+    turns,
+    ledger,
+    taskPaths,
+    local,
+    taskData,
+    transfers,
+    sessionMoves,
+    attachments,
+    artifacts,
+    backups,
+    workspaceStore
+  } = services
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
   const userInputSessions = new Set<string>()

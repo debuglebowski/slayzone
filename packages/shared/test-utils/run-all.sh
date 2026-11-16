@@ -1210,6 +1210,7 @@ run_harness packages/apps/api/src/http/rest-api/switch-refusal.test.ts
 # A frame over the computer link limit (frameTooLarge) answers 413, never an opaque 500.
 run_harness packages/apps/api/src/http/rest-api/computer-frame-limit.test.ts
 run_harness packages/apps/api/src/http/rest-api/computer-frame-limit-routes.test.ts
+run_harness packages/apps/api/src/http/rest-api/request-abort.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/list.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read

@@ -1,3 +1,4 @@
+import { runWithRequestAbort } from '@slayzone/platform/request-abort'
 import type { Express, NextFunction, Request, Response } from 'express'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { peerAddress, routeOf, runWithSecurityContext } from '@slayzone/platform/security-log'
@@ -170,24 +171,47 @@ type Handler = (req: Request, res: Response, next: NextFunction) => unknown
  * entered around EACH handler, not once in the guard: a body parser's stream callbacks
  * do not keep an async context, so one set before it would be gone by the handler.
  */
+const requestAborts = new WeakMap<Request, AbortController>()
+function requestSignal(req: Request, res: Response): AbortSignal {
+  const existing = requestAborts.get(req)
+  if (existing) return existing.signal
+  const controller = new AbortController()
+  requestAborts.set(req, controller)
+  const abort = () => controller.abort()
+  const cleanup = () => {
+    req.off('aborted', abort)
+    res.off('close', close)
+    res.off('finish', cleanup)
+  }
+  const close = () => {
+    if (!res.writableFinished) abort()
+    cleanup()
+  }
+  req.once('aborted', abort)
+  res.once('close', close)
+  res.once('finish', cleanup)
+  if (req.aborted || (res.destroyed && !res.writableFinished)) abort()
+  return controller.signal
+}
 function carried(handler: unknown): unknown {
   if (typeof handler !== 'function') return handler
   const h = handler as Handler
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!getAuthGate()) return h(req, res, next)
-    const principal = restPrincipalOf(req)
-    if (!principal) return h(req, res, next)
-    const run = () => h(req, res, next)
-    const scope = requestScopes.get(req)
-    return runWithSecurityContext(
-      {
-        actor: principal.userId,
-        ip: peerAddress(req),
-        route: routeOf(req.method, req.originalUrl ?? req.url)
-      },
-      () => (scope ? runInOwnerScope(scope, run) : run())
-    )
-  }
+  return (req: Request, res: Response, next: NextFunction) =>
+    runWithRequestAbort(requestSignal(req, res), () => {
+      if (!getAuthGate()) return h(req, res, next)
+      const principal = restPrincipalOf(req)
+      if (!principal) return h(req, res, next)
+      const run = () => h(req, res, next)
+      const scope = requestScopes.get(req)
+      return runWithSecurityContext(
+        {
+          actor: principal.userId,
+          ip: peerAddress(req),
+          route: routeOf(req.method, req.originalUrl ?? req.url)
+        },
+        () => (scope ? runInOwnerScope(scope, run) : run())
+      )
+    })
 }
 
 /**

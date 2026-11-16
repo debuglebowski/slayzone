@@ -8,6 +8,8 @@ import {
 import type { ChatAttachmentReader } from '@slayzone/terminal/runtime'
 import type { ChatStorage } from './storage'
 import { readFileRangePage } from './blob-store'
+import { withPublicationFile } from '@slayzone/task-artifacts/publication-files'
+import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import type { ByteRangePage } from '@slayzone/platform/bounded-reads'
 import type { createLocalChatData } from './local-data'
 
@@ -66,10 +68,107 @@ export function createLocalAttachments(
       )
     if (!held) throw new Error('Attachment does not belong to this conversation')
   }
+  function publicationReference(
+    route: { id: string; epoch: number },
+    ref: ChatAttachment,
+    hash: string,
+    size: number
+  ) {
+    const owner = store.conversation(route.id)
+    if (
+      !owner ||
+      owner.identity.epoch !== route.epoch ||
+      (owner.state !== 'active' && owner.state !== 'prepared')
+    )
+      throw new Error('Attachment ownership mismatch')
+    if (owner.state === 'prepared') {
+      const record = store.getRecord<ChatAttachment>(
+        route.id,
+        'attachment',
+        `${ref.artifactId}:${ref.contentHash}`
+      )
+      if (
+        !record ||
+        !ref.contentHash ||
+        record.contentHash !== ref.contentHash ||
+        hash !== ref.contentHash
+      )
+        throw new Error('Migration attachment hash mismatch')
+      if (
+        record.size !== size ||
+        ref.size !== record.size ||
+        ref.name !== record.name ||
+        ref.kind !== record.kind ||
+        ref.mediaType !== record.mediaType
+      )
+        throw new Error('Migration attachment metadata does not match its saved bytes')
+      return { ...ref }
+    }
+    if (store.taskLifecycle(owner.identity.taskId).state !== 'active')
+      throw new Error('Attachment conversation is unavailable')
+    if (ref.contentHash && ref.contentHash !== hash) throw new Error('Attachment hash mismatch')
+    return { ...ref, contentHash: hash, size }
+  }
   return {
     dir,
     reader,
     readBlob,
+    // Worker-local preparation/commit ports. Never exposed by the closed async facade.
+    publicationReference,
+    async validatePublicationFile(
+      route: { id: string; epoch: number },
+      ref: ChatAttachment,
+      path: string,
+      hash: string,
+      size: number,
+      check: () => void
+    ) {
+      const sealed = publicationReference(route, ref, hash, size)
+      const prefix = await withPublicationFile(path, 'r', check, async (file) => {
+        const bytes = Buffer.alloc(Math.min(size, BYTE_RANGE_MAX_CHUNK))
+        let offset = 0
+        while (offset < bytes.length) {
+          const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset)
+          check()
+          if (!bytesRead) throw new Error('Attachment prepared bytes are incomplete')
+          offset += bytesRead
+        }
+        return bytes
+      })
+      const sniff = sniffAttachment(prefix, ref.name)
+      if (
+        sniff.kind === 'unsupported' ||
+        sniff.kind !== ref.kind ||
+        sniff.mediaType !== ref.mediaType
+      )
+        throw new Error(
+          store.conversation(route.id)?.state === 'prepared'
+            ? 'Migration attachment content does not match its saved type'
+            : 'Attachment content does not match its type'
+        )
+      const limit = attachmentSizeError(ref.kind, ref.name, size)
+      if (limit) throw new Error(limit)
+      check()
+      publicationReference(route, ref, hash, size)
+      return sealed
+    },
+    commitPublication(
+      route: { id: string; epoch: number },
+      ref: ChatAttachment,
+      hash: string,
+      size: number
+    ) {
+      const sealed = publicationReference(route, ref, hash, size)
+      const owner = store.conversation(route.id)!
+      if (owner.state === 'active')
+        store.putRecord(route.id, route.epoch, {
+          kind: 'attachment',
+          id: `${ref.artifactId}:${hash}`,
+          value: { ...sealed, taskId: owner.identity.taskId },
+          at: Date.now()
+        })
+      return sealed
+    },
     /** `ref`'s bytes for conversation `route` (`attachment.read`). */
     readFor(route: { id: string; epoch: number }, ref: ChatAttachment): Promise<Uint8Array> {
       checkHeld(route, ref)

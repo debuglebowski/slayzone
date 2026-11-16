@@ -103,7 +103,13 @@ export interface DuplexRpcOptions {
    * `actor` is the envelope's top-level `actor` member, raw (`undefined` when
    * absent) — see `requestActorSchema` in frames.ts. Validation is the caller's.
    */
-  onPeerRequest?: (method: string, params: unknown, id: JsonRpcId, actor: unknown) => void
+  onPeerRequest?: (
+    method: string,
+    params: unknown,
+    id: JsonRpcId,
+    actor: unknown,
+    signal: AbortSignal
+  ) => void
   /** Peer→local notification (method, no id). */
   onNotification?: (method: string, params: unknown) => void
   /** A correlated reply (including a refusal) proves this peer is still answering. */
@@ -143,6 +149,7 @@ interface PendingRequest {
   reject: (err: Error) => void
   /** Cancels the timeout; null when the request has none. */
   cancelTimeout: (() => void) | null
+  removeAbort: () => void
 }
 
 export const JSON_RPC_METHOD_NOT_FOUND = -32601
@@ -197,6 +204,7 @@ export class DuplexRpc {
   private readonly label: string
   private nextId = 1
   private readonly pending = new Map<JsonRpcId, PendingRequest>()
+  private readonly inboundAborts = new Map<JsonRpcId, AbortController>()
   private disposed = false
   private readonly timeouts: AwakeTimeouts
   /** Peer request id → method, until answered: names the method a refused reply was for. */
@@ -236,8 +244,10 @@ export class DuplexRpc {
     method: string,
     params?: unknown,
     timeoutMs?: number,
-    actor?: unknown
+    actor?: unknown,
+    signal?: AbortSignal
   ): Promise<T> {
+    if (signal?.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
     if (this.disposed) {
       return Promise.reject(new RpcDisposedError(this.label))
     }
@@ -257,12 +267,29 @@ export class DuplexRpc {
       this.reportTooLarge({ kind: 'request', method: name, id, bytes: encoded.bytes })
       return Promise.reject(frameTooLargeError('request', name, encoded.bytes, this.maxFrameBytes))
     }
+    if (signal?.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
     const envelope = encoded.line
     return new Promise<T>((resolve, reject) => {
+      const removeAbort = () => signal?.removeEventListener('abort', abort)
+      const abort = () => {
+        const pending = this.pending.get(id)
+        if (!pending) return
+        this.pending.delete(id)
+        pending.cancelTimeout?.()
+        removeAbort()
+        reject(new DOMException('Request aborted', 'AbortError'))
+        // Request cancellation is advisory. The peer still owns physical cleanup.
+        try {
+          this.notify('$/cancelRequest', { id })
+        } catch {
+          /* Transport already lost. */
+        }
+      }
       const cancelTimeout =
         effectiveTimeout > 0
           ? this.timeouts.set(() => {
               this.pending.delete(id)
+              removeAbort()
               reject(new RpcTimeoutError(method, effectiveTimeout, this.label))
             }, effectiveTimeout)
           : null
@@ -270,13 +297,16 @@ export class DuplexRpc {
         method: this.describe(method, params),
         resolve: resolve as (r: unknown) => void,
         reject,
-        cancelTimeout
+        cancelTimeout,
+        removeAbort
       })
+      signal?.addEventListener('abort', abort, { once: true })
       try {
         this.opts.write(envelope)
       } catch (err) {
         this.pending.delete(id)
         cancelTimeout?.()
+        removeAbort()
         reject(err instanceof Error ? err : new Error(String(err)))
       }
     })
@@ -337,6 +367,7 @@ export class DuplexRpc {
   ): void {
     const method = this.inboundMethods.get(id) ?? null
     this.inboundMethods.delete(id)
+    this.inboundAborts.delete(id)
     const encoded = this.encode(reply)
     if (encoded.kind === 'ok') {
       this.opts.write(encoded.line)
@@ -463,9 +494,19 @@ export class DuplexRpc {
 
     if (typeof msg.method === 'string') {
       if (hasId) {
+        const abort = new AbortController()
+        // Never replace an accepted request's cancellation identity.
+        if (this.inboundAborts.has(rawId as JsonRpcId)) return
         this.inboundMethods.set(rawId as JsonRpcId, this.describe(msg.method, msg.params))
+        this.inboundAborts.set(rawId as JsonRpcId, abort)
         if (this.opts.onPeerRequest) {
-          this.opts.onPeerRequest(msg.method, msg.params, rawId as JsonRpcId, msg.actor)
+          this.opts.onPeerRequest(
+            msg.method,
+            msg.params,
+            rawId as JsonRpcId,
+            msg.actor,
+            abort.signal
+          )
         } else {
           this.respondError(
             rawId as JsonRpcId,
@@ -473,6 +514,9 @@ export class DuplexRpc {
             `method not found: ${msg.method}`
           )
         }
+      } else if (msg.method === '$/cancelRequest') {
+        const id = (msg.params as { id?: unknown } | null)?.id
+        if (typeof id === 'string' || typeof id === 'number') this.inboundAborts.get(id)?.abort()
       } else {
         this.opts.onNotification?.(msg.method, msg.params)
       }
@@ -487,8 +531,11 @@ export class DuplexRpc {
     if (this.disposed) return
     this.disposed = true
     this.inboundMethods.clear()
+    for (const abort of this.inboundAborts.values()) abort.abort()
+    this.inboundAborts.clear()
     for (const [id, pending] of this.pending) {
       pending.cancelTimeout?.()
+      pending.removeAbort()
       pending.reject(new RpcDisposedError(this.label, reason))
       this.pending.delete(id)
     }
@@ -500,6 +547,7 @@ export class DuplexRpc {
     this.opts.onPeerResponse?.()
     this.pending.delete(id)
     pending.cancelTimeout?.()
+    pending.removeAbort()
     if ('error' in msg && msg.error) {
       const e = msg.error as JsonRpcErrorShape
       pending.reject(

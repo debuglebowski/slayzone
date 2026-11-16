@@ -151,7 +151,7 @@ export async function startConnector(
     connectorGeneration: grant.generation,
     credentialStore: createFileCredentialStore(hubHostFromUrl(config.hubUrl)),
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
-    onHubRequest: async (method, params, actor) => {
+    onHubRequest: async (method, params, actor, signal) => {
       const connection = authenticated
       await Promise.all([ready, connection.ready])
       if (stopped || connection !== authenticated)
@@ -161,7 +161,7 @@ export async function startConnector(
           -32001,
           'Computer update pending. Stop its running agents to finish the update; chat and new work are unavailable until then.'
         )
-      return host.rpc.request('dispatch', { method, params, actor })
+      return host.rpc.request('dispatch', { method, params, actor }, undefined, undefined, signal)
     },
     log: (message, meta) =>
       process.stdout.write(`[connector] ${message} ${JSON.stringify(meta ?? {})}\n`)

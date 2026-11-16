@@ -105,6 +105,8 @@ export function createStoreRequests(r: ChatStoreServices & ChatStoreJobs) {
           )
             throw new Error('Attachment ownership mismatch')
           if (req.kind === 'attachment.put') {
+            if (req.data === undefined)
+              throw new Error('Attachment staged input requires a trusted publication source')
             const bytes = Buffer.from(req.data, 'base64')
             if (owner.state === 'prepared') {
               r.attachments.putPrepared(req.route.id, req.route.epoch, req.ref, bytes)

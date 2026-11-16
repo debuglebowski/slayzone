@@ -1,6 +1,5 @@
 import { computerStorageWorkerEntry } from '../computer-worker-entry'
 import { createComputerTimelineWorkers } from '../timeline-worker'
-import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { isAbsolute, join, resolve } from 'node:path'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
@@ -19,18 +18,13 @@ import { chatTestRequestSchema, handleChatTesting } from './chat-testing'
 import {
   openComputerChatRuntime,
   type OnlineComputerChatRuntime,
-  type createComputerChatRuntime,
   computerRequestSchema,
   type ChatBootstrap,
   isStorageOnlyChatOwner,
   resolveChatScope
 } from '@slayzone/chat-runtime/server'
 import type { WirePathScope } from '@slayzone/platform/path-scope'
-import {
-  parseChatInvocation,
-  chatRouteSchema,
-  chatAttachmentSchema
-} from '@slayzone/chat-runtime/shared'
+import { parseChatInvocation } from '@slayzone/chat-runtime/shared'
 import {
   createRoutingChatBackend,
   type ComputerGatewayEvents,
@@ -127,76 +121,6 @@ import { createTurnGitIo } from './turn-git-io'
 import { createConversationHealIo } from './conversation-heal-io'
 import type { SpawnAdmission } from '../spawn-admission'
 
-// Retain canonical async-runtime requests and add FU1 bounded transfer validation.
-const requestSchema = z.discriminatedUnion('kind', [
-  ...computerRequestSchema.options.filter(
-    (option) => !option.shape.kind.safeParse('attachment.put').success
-  ),
-  z.object({
-    kind: z.literal('attachment.put'),
-    route: chatRouteSchema,
-    ref: chatAttachmentSchema,
-    // Inline bytes (one frame's worth), or bytes staged with `upload.*` — exactly one.
-    data: z.string().max(14000000).optional(),
-    staged: z
-      .object({
-        uploadId: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/)
-          .optional(),
-        sha256: z.string().regex(/^[a-f0-9]{64}$/),
-        size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-      })
-      .optional()
-  }),
-  // Staged uploads (FU1 S3): a file's bytes in chunks of ≤ 256 KiB, by hash + size.
-  z.object({
-    kind: z.literal('upload.begin'),
-    route: chatRouteSchema.optional(),
-    operationId: z.string().min(1).max(200).optional(),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-  }),
-  z.object({
-    kind: z.literal('upload.chunk'),
-    route: chatRouteSchema.optional(),
-    uploadId: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .optional(),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    data: z.string().max(Math.ceil(BYTE_RANGE_MAX_CHUNK / 3) * 4)
-  }),
-  // One range (≤ 256 KiB) of an attachment or an archived file — the bounded twin of
-  // `attachment.read` / `archive.file` / `archive.attachment` (same checks).
-  z.object({
-    kind: z.literal('bytes.read'),
-    source: z.discriminatedUnion('type', [
-      z.object({
-        type: z.literal('attachment'),
-        route: chatRouteSchema,
-        ref: chatAttachmentSchema
-      }),
-      z.object({
-        type: z.literal('archive.file'),
-        archiveId: z.string().uuid(),
-        conversationId: z.string(),
-        artifactId: z.string().min(1).max(200),
-        contentHash: z.string().regex(/^[a-f0-9]{64}$/)
-      }),
-      z.object({
-        type: z.literal('archive.attachment'),
-        archiveId: z.string().uuid(),
-        conversationId: z.string(),
-        ref: chatAttachmentSchema
-      })
-    ]),
-    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    length: z.number().int().min(1).max(BYTE_RANGE_MAX_CHUNK)
-  })
-])
 /**
  * Where a project's worktrees are made, from its folder HERE (B1): the default
  * `../<folder name>-workspaces` always, and the hub's configured `worktree_base_path`
@@ -268,8 +192,6 @@ export function createChatRuntimeHandlers(opts: {
   admission?: SpawnAdmission
   /** Tests only: starts provider processes (default: `child_process.spawn`). */
   spawnProcess?: ProcHandlerOptions['spawnProcess']
-  /** Host-held staging only; publication reserves its exact lease on the canonical owner seam. */
-  uploads?: ReturnType<typeof createComputerChatRuntime>['uploads']
   hasTaskWork?(taskId: string): boolean
   stopTask?(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
 }) {
@@ -545,8 +467,9 @@ export function createChatRuntimeHandlers(opts: {
     )
   }
 
-  async function request(raw: unknown): Promise<unknown> {
-    const req = requestSchema.parse(raw)
+  async function request(raw: unknown, options: { signal?: AbortSignal } = {}): Promise<unknown> {
+    options.signal?.throwIfAborted()
+    const req = computerRequestSchema.parse(raw)
     if (req.kind.startsWith('test.') && process.env.PLAYWRIGHT !== '1')
       throw new Error('test-only handler unavailable')
     if (req.kind !== 'test.reset' && req.kind.startsWith('test.'))
@@ -571,7 +494,8 @@ export function createChatRuntimeHandlers(opts: {
       }
     }
     const r = await runtime()
-    const result = await handle(req, r)
+    options.signal?.throwIfAborted()
+    const result = await handle(req, r, options)
     // The hub hands this data over (and may drop its copy) or records the change as
     // done: the reply waits for the canonical owner's real FULL fence. Read-only
     // requests and live fragments need no additional handover fence.
@@ -579,8 +503,9 @@ export function createChatRuntimeHandlers(opts: {
     return result
   }
   async function handle(
-    req: z.infer<typeof requestSchema>,
-    r: OnlineComputerChatRuntime
+    req: z.infer<typeof computerRequestSchema>,
+    r: OnlineComputerChatRuntime,
+    options: { signal?: AbortSignal }
   ): Promise<unknown> {
     switch (req.kind) {
       case 'control':
@@ -651,7 +576,7 @@ export function createChatRuntimeHandlers(opts: {
       case 'metadata.snapshot':
         return await r.artifacts.metadata(req.id)
       case 'artifact.invoke':
-        return await r.artifacts.invoke(req.value)
+        return await r.artifacts.invoke(req.value, options)
       case 'backup.list':
         return await r.backups.list()
       case 'backup.create':
@@ -845,8 +770,7 @@ export function createChatRuntimeHandlers(opts: {
       case 'upload.begin':
         if ((req.route === undefined) !== (req.operationId === undefined))
           throw new Error('Upload begin requires both route and operation id')
-        if (!opts.uploads) throw new Error('Online upload staging adapter is unavailable')
-        return await opts.uploads.begin(
+        return await r.uploads.begin(
           req.sha256,
           req.size,
           req.route ? { route: req.route, operationId: req.operationId! } : undefined
@@ -854,8 +778,7 @@ export function createChatRuntimeHandlers(opts: {
       case 'upload.chunk':
         if ((req.route === undefined) !== (req.uploadId === undefined))
           throw new Error('Upload chunk requires both route and upload id')
-        if (!opts.uploads) throw new Error('Online upload staging adapter is unavailable')
-        return await opts.uploads.chunk(
+        return await r.uploads.chunk(
           req.sha256,
           req.size,
           req.offset,
@@ -865,8 +788,8 @@ export function createChatRuntimeHandlers(opts: {
       case 'attachment.put': {
         if ((req.data === undefined) === (req.staged === undefined))
           throw new Error('Attachment put names inline data or staged bytes, exactly one')
-        if (req.data === undefined)
-          throw new Error('Staged attachments require the canonical-owner upload lease adapter')
+        if (req.staged) return await r.putStagedAttachment(req, options)
+        if (req.data === undefined) throw new Error('Attachment inline data is missing')
         return await r.requests.handle({ ...req, data: req.data })
       }
       case 'attachment.read':
