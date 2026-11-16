@@ -36,9 +36,26 @@ export type BrowserRelayRequest = BrowserRelayOp & {
 /** Largest result a relayed operation may return (well under the socket's frame cap). */
 export const BROWSER_RELAY_MAX_RESULT_BYTES = 32 * 1024 * 1024
 
+/**
+ * `cancel`: the hub gave up on a request (its deadline or the client's silence) — the
+ * client stops working on it and reporting progress.
+ */
 export type BrowserRelayFrame =
   | { type: 'hello'; hostId: string }
   | ({ type: 'request' } & BrowserRelayRequest)
+  | { type: 'cancel'; requestId: string }
+
+/**
+ * The longest each relayed op may take, progress or not. `execJs` matches the REST
+ * route's 10 s script limit plus margin; a page load gets minutes (slow sites are
+ * normal); the reads are quick.
+ */
+export const BROWSER_RELAY_OP_DEADLINE_MS: Record<BrowserRelayOp['op'], number> = {
+  execJs: 15_000,
+  loadUrl: 5 * 60_000,
+  getUrl: 15_000,
+  capturePng: 60_000
+}
 
 /** The client's answer. `capturePng` answers `{ pngBase64 }` (null = empty capture). */
 export type BrowserRelayReply =

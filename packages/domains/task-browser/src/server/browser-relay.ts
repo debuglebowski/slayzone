@@ -29,6 +29,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   BROWSER_RELAY_MAX_RESULT_BYTES,
+  BROWSER_RELAY_OP_DEADLINE_MS,
   type BrowserRelayFrame,
   type BrowserRelayOp,
   type BrowserRelayReply,
@@ -252,19 +253,43 @@ export class BrowserRelay {
     const targetTabId = tabId ?? host.activeTabId
     const requestId = randomUUID()
     return new Promise<unknown>((resolve, reject) => {
-      // A SILENCE limit, not a cap: the client reports progress while an operation
-      // runs (a slow page load), and each report re-arms it.
-      const expire = (): void => {
+      // Two limits: SILENCE (re-armed by each progress report — a slow page load is
+      // work, not silence) and an absolute DEADLINE per op that progress cannot extend
+      // (an abandoned `new Promise(() => {})` eval must end). Either one tells the host
+      // to stop.
+      const giveUp = (message: string): void => {
+        clearTimeout(pending.timer)
+        clearTimeout(deadline)
+        if (!this.requests.has(requestId)) return
         this.requests.delete(requestId)
         host.pending.delete(requestId)
-        reject(new Error('The client showing this browser tab did not answer in time.'))
+        try {
+          host.send({ type: 'cancel', requestId })
+        } catch {
+          /* the host is gone; nothing to stop */
+        }
+        reject(new Error(message))
       }
-      const timer = setTimeout(expire, this.requestTimeoutMs)
+      const expire = (): void =>
+        giveUp('The client showing this browser tab did not answer in time.')
+      const deadline = setTimeout(
+        () =>
+          giveUp(
+            `The browser operation did not finish within ${Math.round(BROWSER_RELAY_OP_DEADLINE_MS[op.op] / 1000)} s.`
+          ),
+        BROWSER_RELAY_OP_DEADLINE_MS[op.op]
+      )
       const pending: PendingRequest = {
         hostId: host.hostId,
-        resolve,
-        reject,
-        timer,
+        resolve: (v) => {
+          clearTimeout(deadline)
+          resolve(v)
+        },
+        reject: (e) => {
+          clearTimeout(deadline)
+          reject(e)
+        },
+        timer: setTimeout(expire, this.requestTimeoutMs),
         rearm: () => {
           clearTimeout(pending.timer)
           pending.timer = setTimeout(expire, this.requestTimeoutMs)
@@ -275,7 +300,8 @@ export class BrowserRelay {
       try {
         host.send({ type: 'request', requestId, taskId, tabId: targetTabId, origin, ...op })
       } catch (err) {
-        clearTimeout(timer)
+        clearTimeout(pending.timer)
+        clearTimeout(deadline)
         this.requests.delete(requestId)
         host.pending.delete(requestId)
         reject(err instanceof Error ? err : new Error(String(err)))

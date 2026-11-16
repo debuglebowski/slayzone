@@ -5,6 +5,7 @@ import { isNonPublicHostname } from '@slayzone/platform/browser-network'
 import { useStableCallback } from '@slayzone/ui'
 import {
   BROWSER_RELAY_MAX_RESULT_BYTES,
+  BROWSER_RELAY_OP_DEADLINE_MS,
   type BrowserRelayFrame,
   type BrowserRelayRequest
 } from '../shared'
@@ -51,6 +52,8 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
   const hubIsLocal = useHubIsLocal()
   const hostIdRef = useRef<string | null>(null)
   const lastUseRef = useRef(0)
+  /** requestId → stop its progress heartbeat. */
+  const heartbeatsRef = useRef(new Map<string, () => void>())
   const tabsRef = useRef(new Set<string>())
   const activeRef = useRef<string | null>(null)
 
@@ -82,6 +85,8 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
     // not cut the request off (its limit is on silence, not on duration).
     // Must fire while the window is hidden: agents drive the browser exactly then, and a
     // missed beat lets the hub cut a slow load off. Lives only as long as one request.
+    // Stops when the op settles, when the hub cancels it, or at the op's own deadline —
+    // never pinging on for an abandoned eval.
     // eslint-disable-next-line no-restricted-syntax
     const keepAlive = setInterval(() => {
       trpcClient.app.browserRelay.progress
@@ -90,6 +95,14 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
           /* the reply (or the hub's timeout) settles it */
         })
     }, PROGRESS_INTERVAL_MS)
+    const deadlineMs = BROWSER_RELAY_OP_DEADLINE_MS[req.op] ?? PROGRESS_INTERVAL_MS
+    const stop = (): void => {
+      clearInterval(keepAlive)
+      clearTimeout(deadline)
+      heartbeatsRef.current.delete(req.requestId)
+    }
+    const deadline = setTimeout(stop, deadlineMs)
+    heartbeatsRef.current.set(req.requestId, stop)
     runRelayRequest(host, req, {
       taskId,
       liveTabIds: tabsRef.current,
@@ -101,13 +114,17 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
         (err: unknown) =>
           settle({ ok: false, error: err instanceof Error ? err.message : String(err) })
       )
-      .finally(() => clearInterval(keepAlive))
+      .finally(stop)
   })
 
   const onFrame = useStableCallback((frame: BrowserRelayFrame) => {
     if (frame.type === 'hello') {
       hostIdRef.current = frame.hostId
       sync()
+      return
+    }
+    if (frame.type === 'cancel') {
+      heartbeatsRef.current.get(frame.requestId)?.()
       return
     }
     answer(frame)

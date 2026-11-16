@@ -5,6 +5,7 @@
 import { test, expect, vi } from 'vitest'
 import type { BrowserRelayFrame } from '../shared'
 import { BrowserRelay } from './browser-relay'
+import { BROWSER_RELAY_OP_DEADLINE_MS } from '../shared'
 
 function host(
   relay: BrowserRelay,
@@ -310,4 +311,51 @@ test('a desktop app connected for a user, per principal', () => {
   expect(relay.hasClient('alice')).toBe(true)
   off2()
   expect(relay.hasClient('alice')).toBe(false)
+})
+
+test('progress cannot keep a request alive past its op deadline; the host is told to stop', async () => {
+  vi.useFakeTimers()
+  try {
+    const relay = new BrowserRelay({ requestTimeoutMs: 1000 })
+    const a = host(relay, 't1')
+    relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
+    // An abandoned eval (`new Promise(() => {})`): the client keeps reporting progress.
+    const p = relay.run('t1', null, { op: 'execJs', code: 'new Promise(() => {})' }, 'elsewhere')
+    const [req] = a.requests()
+    const assertion = expect(p).rejects.toThrow(/did not finish/)
+    for (let i = 0; i < 40; i++) {
+      await vi.advanceTimersByTimeAsync(800)
+      try {
+        relay.progress(null, { hostId: a.hostId, requestId: req.requestId })
+      } catch {
+        /* settled */
+      }
+    }
+    await assertion
+    expect(a.frames).toContainEqual({ type: 'cancel', requestId: req.requestId })
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('a silence timeout also tells the host to stop', async () => {
+  vi.useFakeTimers()
+  try {
+    const relay = new BrowserRelay({ requestTimeoutMs: 1000 })
+    const a = host(relay, 't1')
+    relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
+    const p = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+    const [req] = a.requests()
+    const assertion = expect(p).rejects.toThrow(/did not answer/)
+    await vi.advanceTimersByTimeAsync(1001)
+    await assertion
+    expect(a.frames).toContainEqual({ type: 'cancel', requestId: req.requestId })
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('each op has an absolute deadline; a slow page load gets minutes', () => {
+  expect(BROWSER_RELAY_OP_DEADLINE_MS.execJs).toBeLessThanOrEqual(30_000)
+  expect(BROWSER_RELAY_OP_DEADLINE_MS.loadUrl).toBeGreaterThanOrEqual(120_000)
 })

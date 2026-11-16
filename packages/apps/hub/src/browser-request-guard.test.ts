@@ -7,7 +7,13 @@
  * admitted as same-origin or an allowed origin.
  */
 import { describe, expect, test } from 'vitest'
-import { apiRequestDecision, hostDecision, trpcUpgradeDecision } from './browser-request-guard.js'
+import {
+  apiRequestDecision,
+  hostDecision,
+  httpRequestRefusal,
+  isPublicPath,
+  trpcUpgradeDecision
+} from './browser-request-guard.js'
 
 const local = {
   loopbackBind: true,
@@ -106,8 +112,57 @@ describe('apiRequestDecision (/api, /mcp)', () => {
       )
     ).toBe('reject')
   })
-  test('a rebound hostname is refused even with no browser headers', () => {
-    expect(apiRequestDecision(req({ host: 'attacker.test:51100' }), local)).toBe('reject')
+  test('a native client under an unlisted name is admitted (rebinding needs a browser)', () => {
+    for (const host of ['mymac.local:51100', 'hub.tailnet.ts.net', 'localhost.:51100', 'proxy']) {
+      expect(apiRequestDecision(req({ host }), local)).toBe('accept')
+    }
+  })
+  test('a browser page under an unlisted name is refused, saying which name and how to allow it', () => {
+    const r = httpRequestRefusal(
+      { url: '/api/x', headers: { host: 'attacker.test:51100', 'sec-fetch-site': 'same-origin' } },
+      local
+    )
+    expect(r?.reason).toBe('host')
+    expect(r?.message).toMatch(/attacker\.test/)
+    expect(r?.message).toMatch(/SLAYZONE_HUB_ALLOWED_WEB_ORIGINS/)
+  })
+  test('each refusal says what was refused', () => {
+    expect(
+      httpRequestRefusal(
+        { url: '/api/x', headers: { host: 'h', 'x-slayzone-browser-panel': '1' } },
+        local
+      )?.reason
+    ).toBe('browser-panel')
+    expect(
+      httpRequestRefusal(
+        {
+          url: '/api/x',
+          method: 'POST',
+          headers: {
+            host: '127.0.0.1:1',
+            origin: 'https://evil.test',
+            'sec-fetch-site': 'cross-site',
+            'sec-fetch-mode': 'cors'
+          }
+        },
+        local
+      )?.message
+    ).toMatch(/evil\.test/)
+  })
+  test('every path is guarded except /health (fails closed), in any spelling', () => {
+    for (const url of ['/API/x', '/Mcp', '/api%2fx', '//api//x', '/', '/index.html', '/TRPC']) {
+      expect(
+        httpRequestRefusal({ url, headers: { host: 'h', 'x-slayzone-browser-panel': '1' } }, local)
+          ?.reason
+      ).toBe('browser-panel')
+    }
+    expect(
+      httpRequestRefusal(
+        { url: '/health', headers: { host: 'h', 'x-slayzone-browser-panel': '1' } },
+        local
+      )
+    ).toBeNull()
+    expect(isPublicPath('/HEALTH/')).toBe(true)
   })
   test("the hub's own page (web shell) is admitted: same-origin or an allowed origin", () => {
     expect(

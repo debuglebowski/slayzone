@@ -65,14 +65,14 @@ import {
   unregisterBrowserTab,
   setActiveBrowserTab,
   clearBrowserRegistry,
-  setBrowserNetworkGuard,
+  setBrowserNetworkPolicy,
   browserExecJs,
   browserLoadUrl,
   browserGetUrl,
   browserCapturePng
 } from './browser-registry'
 import { registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
-import { PrivateNetworkGuard } from './browser-private-network-guard'
+import { PanelNetworkPolicy, panelMarkerNeeded } from './browser-panel-policy'
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
 import {
   LOCAL_BROWSER_PARTITION,
@@ -799,7 +799,29 @@ let mainWindow: BrowserWindow | null = null
 const browserViewManager = new BrowserViewManager()
 /** Set once the panel sessions are configured (whenReady); validates + sets up a partition. */
 let ensurePanelPartition: ((partition: string) => Electron.Session) | null = null
-let browserNetworkGuardRef: PrivateNetworkGuard | null = null
+let browserNetworkPolicyRef: PanelNetworkPolicy | null = null
+/** Hostnames of every registered remote hub (for the panel marker), re-read at most every 10 s. */
+let hubHostsCache: { at: number; hosts: Set<string> } | null = null
+function registeredHubHosts(): Set<string> {
+  const now = Date.now()
+  if (hubHostsCache && now - hubHostsCache.at < 10_000) return hubHostsCache.hosts
+  const hosts = new Set<string>()
+  try {
+    const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+    for (const h of resolveHubRegistry(cfg)) {
+      if (!h.url) continue
+      try {
+        hosts.add(new URL(h.url).hostname.toLowerCase().replace(/^\[|\]$/g, ''))
+      } catch {
+        /* an unparseable entry names no host */
+      }
+    }
+  } catch {
+    /* no registry yet: only this machine's addresses get the marker */
+  }
+  hubHostsCache = { at: now, hosts }
+  return hosts
+}
 // Inline DevTools BrowserView system removed — using native docked DevTools via WebContentsView
 let linearSyncPoller: NodeJS.Timeout | null = null
 let discoveryPoller: NodeJS.Timeout | null = null
@@ -2966,9 +2988,11 @@ app
 
     // Strawberry-style: strip Electron from UA header on every request (belt-and-suspenders
     // alongside session.setUserAgent). No Sec-CH-UA override — let Chromium send native brands.
-    // And mark every request as a browser-panel page's: a hub refuses its API to it
-    // (hub browser-request-guard.ts) — no page in the panel may drive a hub, which is
-    // the loopback pivot. Set here, after page script, so a page cannot remove it.
+    // And mark a panel page's requests to where a hub may listen (this machine, its
+    // private network, a registered hub): a hub refuses its API to them (hub
+    // browser-request-guard.ts) — no page in the panel may drive a hub, which is the
+    // loopback pivot. Set here, after page script, so a page cannot remove it; other
+    // sites never see it.
     const panelRequestHeaders = (
       details: Electron.OnBeforeSendHeadersListenerDetails,
       cb: (resp: Electron.BeforeSendResponse) => void
@@ -2981,33 +3005,26 @@ app
         const cleaned = ua.replace(/\s*Electron\/\S+/i, '').replace(/\s*slayzone\/\S+/i, '')
         if (ua !== cleaned) details.requestHeaders[uaKey] = cleaned
       }
-      details.requestHeaders[BROWSER_PANEL_REQUEST_HEADER] = '1'
+      if (panelMarkerNeeded(details.url, registeredHubHosts())) {
+        details.requestHeaders[BROWSER_PANEL_REQUEST_HEADER] = '1'
+      }
       cb({ requestHeaders: details.requestHeaders })
     }
     browserSession.webRequest.onBeforeSendHeaders(panelRequestHeaders)
     webPanelSession.webRequest.onBeforeSendHeaders(panelRequestHeaders)
 
-    // What an untrusted `slay browser` caller can reach (browser-private-network-guard.ts):
-    // the guard sees every request before it is sent and the IP every response came from.
-    // Resolved through the tab session's own Chromium resolver: the same host cache
-    // the connection then uses, so a rebinding answer cannot differ between the two.
-    const browserNetworkGuard = new PrivateNetworkGuard(async (host, wcId) => {
+    // The session-level request policy of every panel session (browser-panel-policy.ts).
+    // Hostnames resolve through the tab session's own Chromium resolver: the host cache
+    // the connection then uses.
+    const browserNetworkPolicy = new PanelNetworkPolicy(async (host, wcId) => {
       const wc = wcId != null ? webContents.fromId(wcId) : undefined
       const sess = wc && !wc.isDestroyed() ? wc.session : browserSession
       return (await sess.resolveHost(host)).endpoints.map((e) => e.address)
     })
-    setBrowserNetworkGuard(browserNetworkGuard)
-    browserNetworkGuardRef = browserNetworkGuard
-    const noteRedirectIp = (details: Electron.OnBeforeRedirectListenerDetails) => {
-      if (typeof details.webContentsId !== 'number') return
-      browserNetworkGuard.noteRedirect(
-        details.webContentsId,
-        details.ip,
-        details.resourceType === 'mainFrame'
-      )
-    }
-    browserSession.webRequest.onBeforeRedirect(noteRedirectIp)
-    webPanelSession.webRequest.onBeforeRedirect(noteRedirectIp)
+    /** Sessions where every tab is untrusted: each remote hub's partition. */
+    const untrustedPanelSessions = new WeakSet<Electron.Session>()
+    setBrowserNetworkPolicy(browserNetworkPolicy, (wc) => untrustedPanelSessions.has(wc.session))
+    browserNetworkPolicyRef = browserNetworkPolicy
 
     const shouldCancelLoopbackHandoffRequest = (
       details: Electron.OnBeforeRequestListenerDetails
@@ -3034,33 +3051,41 @@ app
       return true
     }
 
-    const handleBeforeRequest = (
-      details: Electron.OnBeforeRequestListenerDetails,
-      callback: (response: Electron.CallbackResponse) => void
-    ) => {
-      // Redirect file:// → slz-file:// so local files load via our secure handler
-      if (details.url.startsWith('file://')) {
-        callback({ redirectURL: fileUrlToSlzFileUrl(details.url) })
-        return
+    // EVERY request of a panel session goes through the session-level policy first; only
+    // what it allows reaches the trusted handling below.
+    const panelBeforeRequest =
+      (untrustedSession: boolean) =>
+      (
+        details: Electron.OnBeforeRequestListenerDetails,
+        callback: (response: Electron.CallbackResponse) => void
+      ) => {
+        const wcId = typeof details.webContentsId === 'number' ? details.webContentsId : null
+        const wc = wcId !== null ? webContents.fromId(wcId) : undefined
+        browserNetworkPolicy
+          .decide(
+            {
+              url: details.url,
+              resourceType: details.resourceType,
+              webContentsId: wcId,
+              topUrl: wc && !wc.isDestroyed() ? wc.getURL() : ''
+            },
+            { untrustedSession }
+          )
+          .then(
+            (decision) => {
+              if (decision === 'block') return callback({ cancel: true })
+              // Redirect file:// → slz-file:// so local files load via our secure handler
+              if (details.url.startsWith('file://')) {
+                return callback({ redirectURL: fileUrlToSlzFileUrl(details.url) })
+              }
+              if (shouldCancelLoopbackHandoffRequest(details)) return callback({ cancel: true })
+              callback({ cancel: false })
+            },
+            () => callback({ cancel: true })
+          )
       }
-      if (shouldCancelLoopbackHandoffRequest(details)) {
-        callback({ cancel: true })
-        return
-      }
-      // A tab an untrusted caller drives reaches the public internet only — every
-      // request (redirects included) re-checked by name and DNS.
-      const wcId = details.webContentsId
-      if (typeof wcId === 'number' && browserNetworkGuard.isUntrusted(wcId)) {
-        browserNetworkGuard.shouldBlock(wcId, details.url).then(
-          (block) => callback({ cancel: block }),
-          () => callback({ cancel: true })
-        )
-        return
-      }
-      callback({ cancel: false })
-    }
-    browserSession.webRequest.onBeforeRequest(handleBeforeRequest)
-    webPanelSession.webRequest.onBeforeRequest(handleBeforeRequest)
+    browserSession.webRequest.onBeforeRequest(panelBeforeRequest(false))
+    webPanelSession.webRequest.onBeforeRequest(panelBeforeRequest(false))
 
     browserSession.protocol.handle('slz-file', slzFileHandler)
     webPanelSession.protocol.handle('slz-file', slzFileHandler)
@@ -3146,8 +3171,11 @@ app
     browserSession.setDevicePermissionHandler(panelDevicePermission)
 
     // A remote hub's tasks browse in that hub's OWN partition (task-browser
-    // browser-partition.ts), set up like the local one — minus extensions, which are
-    // installed on the local partition only — the first time a view or webview asks.
+    // browser-partition.ts), the first time a view or webview asks. EVERY tab there is
+    // untrusted (the remote hub and its agents drive it): the session-level policy
+    // allows public http(s) only, and the session gets NO app protocol at all — no
+    // slz-file:, no file:, no extension or blocking handlers (external app launches are
+    // refused by permission instead). Extensions stay on the local partition.
     const configuredPanelPartitions = new Set<string>([
       LOCAL_BROWSER_PARTITION,
       WEB_PANEL_PARTITION
@@ -3159,15 +3187,16 @@ app
       const sess = session.fromPartition(partition)
       if (configuredPanelPartitions.has(partition)) return sess
       configuredPanelPartitions.add(partition)
+      untrustedPanelSessions.add(sess)
       sess.setUserAgent(_chromeUa)
       sess.webRequest.onBeforeSendHeaders(panelRequestHeaders)
-      sess.webRequest.onBeforeRequest(handleBeforeRequest)
-      sess.webRequest.onBeforeRedirect(noteRedirectIp)
-      sess.protocol.handle('slz-file', slzFileHandler)
-      for (const scheme of BLOCKED_EXTERNAL_PROTOCOLS) sess.protocol.handle(scheme, blockProtocol)
-      sess.setPermissionRequestHandler(panelPermissionRequest)
-      sess.setPermissionCheckHandler(() => true)
-      sess.setDevicePermissionHandler(panelDevicePermission)
+      sess.webRequest.onBeforeRequest(panelBeforeRequest(true))
+      sess.setPermissionRequestHandler((wc, permission, callback) => {
+        if (permission === 'openExternal') return callback(false)
+        panelPermissionRequest(wc, permission, callback)
+      })
+      sess.setPermissionCheckHandler((_wc, permission) => permission !== 'openExternal')
+      sess.setDevicePermissionHandler(() => false)
       return sess
     }
     browserViewManager.setSessionResolver((partition) => ensurePanelPartition!(partition))
@@ -3401,7 +3430,7 @@ app
     // before any window loads so a renderer's subscribe is never dropped.
     const userNavigated = (viewId: string): void => {
       const wcId = browserViewManager.getWebContentsId(viewId)
-      if (wcId != null) browserNetworkGuardRef?.clearUntrusted(wcId)
+      if (wcId != null) browserNetworkPolicyRef?.clearUntrusted(wcId)
     }
     const browserHostImpl: BrowserHostImpl = {
       'view.create': (_s, opts) => browserViewManager.createView(opts),

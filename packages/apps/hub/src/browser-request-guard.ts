@@ -25,6 +25,7 @@
  */
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
 import { wsOriginDecision } from './ws-origin.js'
+import { routePathKey } from './rest-auth.js'
 
 export type GuardDecision = 'accept' | 'reject'
 
@@ -55,7 +56,10 @@ const header = (req: RequestLike, name: string): string | undefined => {
 
 /** The hostname of a `Host` header (`host[:port]`, `[v6]:port`), lower-cased. */
 function hostnameOf(host: string): string {
-  const h = host.trim().toLowerCase()
+  const h = host
+    .trim()
+    .toLowerCase()
+    .replace(/\.(?=:\d+$|$)/, '')
   if (h.startsWith('[')) return h.slice(1, h.indexOf(']'))
   const colon = h.lastIndexOf(':')
   return colon > 0 && h.indexOf(':') === colon ? h.slice(0, colon) : h
@@ -84,26 +88,79 @@ function sameHostOrigin(origin: string, host: string): boolean {
   }
 }
 
-/** A request to `/api/*` or `/mcp`. */
-export function apiRequestDecision(req: RequestLike, opts: BrowserGuardOptions): GuardDecision {
-  if (header(req, BROWSER_PANEL_REQUEST_HEADER) !== undefined) return 'reject'
+/** Why a request was refused — its own audit reason and a message that says what and why. */
+export interface GuardRefusal {
+  reason: 'browser-panel' | 'host' | 'origin'
+  message: string
+}
+
+/**
+ * Paths outside the guard: liveness only. EVERYTHING else — the API in any spelling
+ * express routes (`/API`, `/Mcp/`, `//api`, encoded separators), the web shell, `/trpc`
+ * over HTTP — is guarded: the decision fails closed.
+ */
+const PUBLIC_PATHS = new Set(['/health'])
+
+export function isPublicPath(url: string | undefined): boolean {
+  const key = routePathKey(url ?? '/')
+  return key !== null && PUBLIC_PATHS.has(key)
+}
+
+const PANEL_REFUSAL: GuardRefusal = {
+  reason: 'browser-panel',
+  message:
+    "Refused: this request comes from a page inside SlayZone's browser panel, which may not use a hub's API."
+}
+
+function hostRefusal(host: string | undefined): GuardRefusal {
+  return {
+    reason: 'host',
+    message: `Refused: a browser page asked for this hub under the name "${host ?? ''}", which it is not published under (DNS rebinding protection). To open the hub in a browser under that name, add its origin to SLAYZONE_HUB_ALLOWED_WEB_ORIGINS.`
+  }
+}
+
+function originRefusal(origin: string | undefined): GuardRefusal {
+  return {
+    reason: 'origin',
+    message: `Refused: a browser page from ${origin ? `"${origin}"` : 'another site'} is not this hub's own page.`
+  }
+}
+
+/** A request looks like a browser page: `Sec-Fetch-Site` (every current browser), or an
+ *  `Origin` with no fetch metadata at all (an older one). Node's fetch sends only
+ *  `Sec-Fetch-Mode`, React Native and the computer relay send neither. */
+function isBrowserPage(req: RequestLike): boolean {
+  const origin = header(req, 'origin')
+  return (
+    header(req, 'sec-fetch-site') !== undefined ||
+    (origin !== undefined && header(req, 'sec-fetch-mode') === undefined)
+  )
+}
+
+/**
+ * Any HTTP request to the hub (not `/trpc` upgrades — {@link trpcUpgradeRefusal}).
+ * Null = admitted (auth gates it next).
+ *
+ * The `Host` check applies to browser pages only: rebinding needs a browser, and a
+ * native client must keep reaching the hub under any name — a tailnet or LAN name, or
+ * a proxy that rewrites Host.
+ */
+export function httpRequestRefusal(
+  req: RequestLike & { url?: string },
+  opts: BrowserGuardOptions
+): GuardRefusal | null {
+  if (isPublicPath(req.url)) return null
+  if (header(req, BROWSER_PANEL_REQUEST_HEADER) !== undefined) return PANEL_REFUSAL
+  if (!isBrowserPage(req)) return null
   const host = header(req, 'host')
-  if (hostDecision(host, opts) === 'reject') return 'reject'
+  if (hostDecision(host, opts) === 'reject') return hostRefusal(host)
   const origin = header(req, 'origin')
   const site = header(req, 'sec-fetch-site')
-  // A browser page is what sends `Sec-Fetch-Site` (every current browser), or an
-  // `Origin` with no fetch metadata at all (an older one). Node's fetch sends
-  // `Sec-Fetch-Mode` but never `Sec-Fetch-Site`, so a native client that sets an
-  // `Origin` itself (better-auth's CSRF check wants one) stays native. Admitted; auth
-  // gates it next.
-  const browserPage =
-    site !== undefined || (origin !== undefined && header(req, 'sec-fetch-mode') === undefined)
-  if (!browserPage) return 'accept'
-  if (origin !== undefined && opts.allowedOrigins.includes(origin)) return 'accept'
+  if (origin !== undefined && opts.allowedOrigins.includes(origin)) return null
   // The hub's own page: same-origin fetch metadata, and an Origin (when sent) that is
   // this very host.
   const ownOrigin = origin === undefined || (host !== undefined && sameHostOrigin(origin, host))
-  if (site === 'same-origin' && ownOrigin) return 'accept'
+  if (site === 'same-origin' && ownOrigin) return null
   // An older browser with no fetch metadata, same-origin by Origin.
   if (
     site === undefined &&
@@ -111,25 +168,29 @@ export function apiRequestDecision(req: RequestLike, opts: BrowserGuardOptions):
     host !== undefined &&
     sameHostOrigin(origin, host)
   ) {
-    return 'accept'
+    return null
   }
-  // A top-level GET navigation (a link, an SSO redirect back to the hub) cannot read
-  // the response or change state.
+  // A top-level GET navigation (a link, an SSO redirect back to the hub, the address
+  // bar) cannot read the response or change state.
   const method = (req.method ?? 'GET').toUpperCase()
   if (header(req, 'sec-fetch-mode') === 'navigate' && (method === 'GET' || method === 'HEAD')) {
-    return 'accept'
+    return null
   }
-  return 'reject'
+  return originRefusal(origin)
 }
 
-/** A `/trpc` WebSocket upgrade. */
-export function trpcUpgradeDecision(req: RequestLike, opts: BrowserGuardOptions): GuardDecision {
-  if (header(req, BROWSER_PANEL_REQUEST_HEADER) !== undefined) return 'reject'
-  const host = header(req, 'host')
-  if (hostDecision(host, opts) === 'reject') return 'reject'
+/** A `/trpc` WebSocket upgrade. Null = admitted. A browser always sends `Origin` on a
+ *  WebSocket handshake, so no `Origin` means a native client: no Host check. */
+export function trpcUpgradeRefusal(
+  req: RequestLike,
+  opts: BrowserGuardOptions
+): GuardRefusal | null {
+  if (header(req, BROWSER_PANEL_REQUEST_HEADER) !== undefined) return PANEL_REFUSAL
   const origin = header(req, 'origin')
-  if (origin === undefined) return 'accept'
-  if (opts.allowedOrigins.includes(origin)) return 'accept'
+  if (origin === undefined) return null
+  const host = header(req, 'host')
+  if (hostDecision(host, opts) === 'reject') return hostRefusal(host)
+  if (opts.allowedOrigins.includes(origin)) return null
   // The desktop app's hub: a loopback page is admitted only as the hub's own page.
   // Any other local port is just another website on this machine (its renderer's
   // sockets carry no Origin at all).
@@ -138,13 +199,13 @@ export function trpcUpgradeDecision(req: RequestLike, opts: BrowserGuardOptions)
     try {
       u = new URL(origin)
     } catch {
-      return 'reject'
+      return originRefusal(origin)
     }
     if (
       (u.protocol === 'http:' || u.protocol === 'https:') &&
       LOOPBACK_NAMES.has(hostnameOf(u.host))
     ) {
-      return host !== undefined && sameHostOrigin(origin, host) ? 'accept' : 'reject'
+      return host !== undefined && sameHostOrigin(origin, host) ? null : originRefusal(origin)
     }
   }
   return wsOriginDecision({
@@ -152,5 +213,20 @@ export function trpcUpgradeDecision(req: RequestLike, opts: BrowserGuardOptions)
     requireLogin: opts.requireLogin,
     loopbackBind: opts.loopbackBind,
     allowedOrigins: opts.allowedOrigins
-  })
+  }) === 'accept'
+    ? null
+    : originRefusal(origin)
+}
+
+/** {@link httpRequestRefusal} as accept/reject, for an `/api` request by default. */
+export function apiRequestDecision(
+  req: RequestLike & { url?: string },
+  opts: BrowserGuardOptions
+): GuardDecision {
+  return httpRequestRefusal({ ...req, url: req.url ?? '/api/x' }, opts) ? 'reject' : 'accept'
+}
+
+/** {@link trpcUpgradeRefusal} as accept/reject. */
+export function trpcUpgradeDecision(req: RequestLike, opts: BrowserGuardOptions): GuardDecision {
+  return trpcUpgradeRefusal(req, opts) ? 'reject' : 'accept'
 }

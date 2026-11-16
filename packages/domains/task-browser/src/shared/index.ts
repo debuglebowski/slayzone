@@ -39,7 +39,7 @@ export type {
   BrowserRelayReply,
   BrowserRelayTabsState
 } from './browser-relay'
-export { BROWSER_RELAY_MAX_RESULT_BYTES } from './browser-relay'
+export { BROWSER_RELAY_MAX_RESULT_BYTES, BROWSER_RELAY_OP_DEADLINE_MS } from './browser-relay'
 export {
   LOCAL_BROWSER_PARTITION,
   WEB_PANEL_PARTITION,

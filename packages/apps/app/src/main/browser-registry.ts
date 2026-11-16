@@ -1,6 +1,6 @@
 import { webContents } from 'electron'
 import type { RelayedTabOpts } from '@slayzone/task-browser/shared'
-import type { PrivateNetworkGuard } from './browser-private-network-guard'
+import type { PanelNetworkPolicy } from './browser-panel-policy'
 
 /**
  * This client's (taskId, tabId) → live tab registry.
@@ -19,23 +19,32 @@ interface TaskEntry {
 
 const registry = new Map<string, TaskEntry>()
 
-let networkGuard: PrivateNetworkGuard | null = null
-const guardedContents = new Set<number>()
+let policy: PanelNetworkPolicy | null = null
+/** Whether a web contents lives in an untrusted (remote hub) session. */
+let isUntrustedSession: (wc: Electron.WebContents) => boolean = () => false
+const watchedContents = new Set<number>()
 
-/** The guard untrusted relayed ops run under (set once at boot). */
-export function setBrowserNetworkGuard(guard: PrivateNetworkGuard): void {
-  networkGuard = guard
+/** The session-level policy untrusted relayed ops run under (set once at boot). */
+export function setBrowserNetworkPolicy(
+  next: PanelNetworkPolicy,
+  untrustedSession: (wc: Electron.WebContents) => boolean
+): void {
+  policy = next
+  isUntrustedSession = untrustedSession
 }
 
-/** Track a tab's document commits for the guard's taint (once per web contents). */
-function watchForGuard(wc: Electron.WebContents): void {
-  if (guardedContents.has(wc.id)) return
-  guardedContents.add(wc.id)
+/** Track a tab's main-frame navigations for document provenance (once per web contents). */
+function watchForPolicy(wc: Electron.WebContents): void {
+  if (watchedContents.has(wc.id)) return
+  watchedContents.add(wc.id)
   const id = wc.id
-  wc.on('did-navigate', (_e, url) => networkGuard?.committed(id, url))
+  wc.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) policy?.navigationStarted(id)
+  })
+  wc.on('did-navigate', () => policy?.committed(id))
   wc.once('destroyed', () => {
-    guardedContents.delete(id)
-    networkGuard?.forget(id)
+    watchedContents.delete(id)
+    policy?.forget(id)
   })
 }
 
@@ -69,7 +78,7 @@ export function registerBrowserTab(taskId: string, tabId: string, webContentsId:
   entry.tabs.set(tabId, webContentsId)
   const wc = webContents.fromId(webContentsId)
   if (wc) {
-    watchForGuard(wc)
+    watchForPolicy(wc)
     wc.once('destroyed', () => {
       const e = registry.get(taskId)
       if (!e) return
@@ -114,15 +123,20 @@ function requireWc(taskId: string, tabId: string | null): Electron.WebContents {
   return wc
 }
 
-const LOCAL_ONLY =
-  'This tab has shown an address on this computer or its private network; it can only be read from this computer.'
+const NOT_POLICY_DOCUMENT =
+  'This tab shows a page opened on this computer, not by `slay browser`; it can only be read from this computer. Navigate the tab with `slay browser navigate` first.'
 
-/** An untrusted caller gets nothing from a tab that touched a non-public address. */
-async function refuseTainted(
+/**
+ * An untrusted caller reads only a document loaded under the untrusted session policy
+ * (browser-panel-policy.ts) — one that cannot contain anything that policy refuses.
+ */
+function refuseUnlessPolicyDocument(
   wc: Electron.WebContents,
   opts: RelayedTabOpts | undefined
-): Promise<void> {
-  if (opts?.untrusted && (await networkGuard?.isTainted(wc.id))) throw new Error(LOCAL_ONLY)
+): void {
+  if (!opts?.untrusted) return
+  if (!policy) throw new Error(NOT_POLICY_DOCUMENT)
+  if (!policy.isPolicyDocument(wc.id, isUntrustedSession(wc))) throw new Error(NOT_POLICY_DOCUMENT)
 }
 
 function refuseTooLarge(bytes: number, opts: RelayedTabOpts | undefined): void {
@@ -143,12 +157,8 @@ export async function browserExecJs(
   const wc = requireWc(taskId, tabId)
   const frame = wc.mainFrame
   if (!frame) throw new Error('No main frame')
-  await refuseTainted(wc, opts)
-  // Script an untrusted caller runs keeps its document restricted to the public
-  // internet until the user navigates the tab.
-  if (opts?.untrusted) networkGuard?.markUntrusted(wc.id)
+  refuseUnlessPolicyDocument(wc, opts)
   const result = await frame.executeJavaScript(code)
-  await refuseTainted(wc, opts)
   // Measured here, where the value is produced — before it is copied to the renderer
   // and serialized for the hub. Stops counting at the limit.
   if (opts?.maxResultBytes !== undefined) {
@@ -164,19 +174,14 @@ export async function browserLoadUrl(
   opts?: RelayedTabOpts
 ): Promise<void> {
   const wc = requireWc(taskId, tabId)
-  if (opts?.untrusted && networkGuard) {
-    await networkGuard.checkTarget(url, wc.id)
-    networkGuard.markUntrusted(wc.id)
+  if (opts?.untrusted) {
+    if (!policy) throw new Error('The browser is not ready.')
+    await policy.checkTarget(url, wc.id)
+    // From here every request of this tab — this load, its redirects, its page's own
+    // requests — is decided by the untrusted session policy, until the user navigates.
+    policy.markUntrusted(wc.id)
   }
   await wc.loadURL(url)
-  // Redirects and DNS answers are re-checked per request; the final page is checked
-  // by where its response actually came from.
-  if (opts?.untrusted && (await networkGuard?.isTainted(wc.id))) {
-    void wc.loadURL('about:blank').catch(() => {
-      /* leaving it is best effort; the caller already gets the refusal */
-    })
-    throw new Error('That page led to an address on this computer or its private network; refused.')
-  }
 }
 
 export async function browserGetUrl(
@@ -186,7 +191,7 @@ export async function browserGetUrl(
 ): Promise<string | null> {
   const wc = resolveWc(taskId, tabId ?? undefined)
   if (!wc) return null
-  await refuseTainted(wc, opts)
+  refuseUnlessPolicyDocument(wc, opts)
   return wc.getURL()
 }
 
@@ -197,7 +202,7 @@ export async function browserCapturePng(
   opts?: RelayedTabOpts
 ): Promise<Uint8Array | null> {
   const wc = requireWc(taskId, tabId)
-  await refuseTainted(wc, opts)
+  refuseUnlessPolicyDocument(wc, opts)
   const image = await wc.capturePage()
   if (image.isEmpty()) return null
   const png = image.toPNG()

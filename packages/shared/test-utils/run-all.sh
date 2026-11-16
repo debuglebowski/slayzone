@@ -289,6 +289,7 @@ run_harness packages/apps/api/src/routers/hub-local-paths.test.ts
 # iframe on the web" case is actually asserted.
 run_harness packages/apps/hub/src/ws-origin.test.ts
 run_harness packages/apps/hub/src/browser-request-guard.test.ts
+run_harness packages/apps/hub/src/browser-request-guard-server.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 # Agent-start tracker behind the sidebar's startup card (queued / booting per agent).
@@ -506,8 +507,8 @@ run_harness packages/shared/platform/src/client-settings.test.ts
 # The one-time move out of the shared DB. Copy-only, sentinel-gated, and it must
 # REFUSE the sentinel when read-back fails — a wrong "done" is permanent.
 run_harness packages/apps/app/src/main/client-settings-migration.test.ts
-# Untrusted browser callers reach public addresses only (DNS, rebinding taint)
-run_harness packages/apps/app/src/main/browser-private-network-guard.test.ts
+# Browser-panel session policy: what an untrusted caller's tab may request; local files only for local docs
+run_harness packages/apps/app/src/main/browser-panel-policy.test.ts
 run_harness packages/apps/app/src/main/browser-host-routing.test.ts
 # Criterion 4: the same migration against a COPY of a real store. Opt-in — no-ops
 # unless SLAYZONE_REAL_STORE_FIXTURE points at a real slayzone.sqlite. Asserts the
@@ -1461,6 +1462,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/browser-host.test.ts \
   packages/domains/task-browser/src/client/useBrowserEngagementForwarder.test.tsx \
   packages/domains/task-browser/src/client/useHubIsLocal.test.tsx \
+  packages/domains/task-browser/src/client/useBrowserRelayHost.test.tsx \
   packages/domains/task-browser/src/client/useBrowserFind.test.tsx \
   packages/domains/task-browser/src/client/useBrowserLock.test.tsx \
   packages/domains/task-browser/src/client/useBrowserImportUrls.test.tsx \

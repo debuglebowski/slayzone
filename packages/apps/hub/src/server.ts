@@ -73,8 +73,8 @@ import { parseCookieHeader, withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
 import { cookieOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
 import {
-  apiRequestDecision,
-  trpcUpgradeDecision,
+  httpRequestRefusal,
+  trpcUpgradeRefusal,
   type BrowserGuardOptions
 } from './browser-request-guard.js'
 import { createWebSessionRoutes } from './web-session-routes.js'
@@ -581,26 +581,26 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     isCookieOriginAllowed,
     next: dispatchRequest
   })
-  // The API is for native clients and the hub's own page only (browser-request-guard.ts):
-  // never a page inside SlayZone's browser panel, another site, or a rebound hostname.
-  // In front of auth, for direct and CLI-relayed requests alike.
+  // No browser page may drive the hub except its own (browser-request-guard.ts): never a
+  // page inside SlayZone's browser panel, another site, or a rebound hostname. On EVERY
+  // path but /health, in any spelling express routes — it fails closed.
   const gatedDispatch = (req: IncomingMessage, res: ServerResponse): void => {
-    const path = (req.url ?? '').split('?')[0]
-    const isApi =
-      path.startsWith('/api/') || path === '/api' || path === '/mcp' || path.startsWith('/mcp/')
-    if (isApi && apiRequestDecision(req, browserGuard) === 'reject') {
+    const refusal = httpRequestRefusal(req, browserGuard)
+    if (refusal) {
       securityEvent({
         event: 'authz.denied',
         outcome: 'denied',
         actor: null,
         ip: clientAddress(req),
         route: routeOf(req.method, req.url),
-        detail: { reason: 'browser-page', origin: req.headers.origin ?? null }
+        detail: {
+          reason: refusal.reason,
+          origin: req.headers.origin ?? null,
+          host: req.headers.host ?? null
+        }
       })
       res.writeHead(403, { 'content-type': 'application/json' })
-      res.end(
-        JSON.stringify({ error: 'This hub API does not accept requests from a browser page.' })
-      )
+      res.end(JSON.stringify({ error: refusal.message, reason: refusal.reason }))
       return
     }
     authGatedDispatch(req, res)
@@ -677,16 +677,17 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
       // DNS-rebind must not reach the full app router — native/loopback origins only.
       const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
-      if (trpcUpgradeDecision(req, browserGuard) === 'reject') {
-        // A browser page from another origin (or a DNS rebind) tried to open the full
-        // app router — the signature this guard exists for, so it is audited (T-03).
+      const refusal = trpcUpgradeRefusal(req, browserGuard)
+      if (refusal) {
+        // A browser page from another origin, a panel page or a DNS rebind tried to open
+        // the full app router — the signature this guard exists for, so it is audited (T-03).
         securityEvent({
           event: 'authz.denied',
           outcome: 'denied',
           actor: null,
           ip: clientAddress(req),
           route: routeOf(req.method, req.url),
-          detail: { reason: 'origin', origin: origin ?? null }
+          detail: { reason: refusal.reason, origin: origin ?? null, host: req.headers.host ?? null }
         })
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
         socket.destroy()
