@@ -10,12 +10,7 @@ import {
   exportArtifact,
   TEXT_LABELS_NOTICE
 } from './export-artifact'
-import {
-  type ExportRenderPage,
-  type ExportRenderReply,
-  HTML_PRINT_POLICY,
-  htmlPrintDocument
-} from './render-pages'
+import type { ExportPageSink, ExportRenderPage, ExportRenderReply } from './render-pages'
 
 jest.mock('expo-print', () => ({ printToFileAsync: jest.fn() }))
 jest.mock('expo-sharing', () => ({ shareAsync: jest.fn() }))
@@ -68,15 +63,33 @@ jest.mock('expo-file-system', () => {
     delete() {
       mockFs.log.push(['rm', this.uri])
       mockFs.files.delete(this.uri)
+      mockFs.bytes.delete(this.uri)
     }
     async move(to: { uri: string }) {
       mockFs.log.push(['move', this.uri, to.uri])
       this.uri = to.uri
     }
+    open(mode: string) {
+      const uri = this.uri
+      mockFs.log.push(['open', uri, mode])
+      if (mode === 'wt' || !mockFs.bytes.has(uri)) mockFs.bytes.set(uri, [])
+      let open = true
+      return {
+        writeBytesSync(bytes: Uint8Array) {
+          if (!open) throw new Error('closed')
+          mockFs.bytes.get(uri)?.push(bytes.slice())
+        },
+        close() {
+          open = false
+          mockFs.log.push(['close', uri])
+        }
+      }
+    }
   }
   return {
     Directory: FakeDirectory,
     File: FakeFile,
+    FileMode: { Truncate: 'wt', WriteOnly: 'w' },
     Paths: { cache: { uri: 'file:///cache/' } }
   }
 })
@@ -84,8 +97,13 @@ jest.mock('expo-file-system', () => {
 const mockFs = {
   dirs: new Set<string>(),
   files: new Map<string, { content: string; encoding: string }>(),
+  /** What was written through a file handle (`File.open`), chunk by chunk. */
+  bytes: new Map<string, Uint8Array[]>(),
   log: [] as unknown[][]
 }
+/** A file written through its handle, as text (a PDF's structure is ASCII). */
+const bytesOf = (uri: string) =>
+  (mockFs.bytes.get(uri) ?? []).map((b) => Buffer.from(b).toString('latin1')).join('')
 const OUT = `file:///cache/${EXPORT_DIR}`
 /** `<OUT>/<this export's own folder>/<name>`. */
 const inExportDir = (name: string) =>
@@ -98,21 +116,31 @@ const asData = (html: string) =>
   JSON.stringify(html).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
 const share = jest.mocked(shareAsync)
 
+/** An html artifact's page pictures, drawn: handed to the render's sink one by one. */
+interface Drawn {
+  drawn: string[]
+  textLabels: boolean
+}
+const drawn = (pages: string[], textLabels = false): Drawn => ({ drawn: pages, textLabels })
+
 /** A renderer that answers each page with the next reply, and the pages it got. */
 function renderer(
-  ...replies: ExportRenderReply[]
+  ...replies: (ExportRenderReply | Drawn)[]
 ): ExportArtifactDeps & { pages: string[]; rendered: ExportRenderPage[] } {
   const pages: string[] = []
   const rendered: ExportRenderPage[] = []
   return {
     pages,
     rendered,
-    render: jest.fn(async (page: ExportRenderPage) => {
+    render: jest.fn(async (page: ExportRenderPage, sink?: ExportPageSink) => {
       pages.push(page.html)
       rendered.push(page)
       const reply = replies.shift()
       if (!reply) throw new Error('unexpected render')
-      return reply
+      if (!('drawn' in reply)) return reply
+      if (!sink) throw new Error('pages drawn with nowhere to go')
+      reply.drawn.forEach((picture, i) => sink.page(i, picture))
+      return { type: 'pages' as const, count: reply.drawn.length, textLabels: reply.textLabels }
     }),
     mermaidScript: jest.fn(async () => 'globalThis.mermaid={/*bundle*/}'),
     html2canvasScript: jest.fn(async () => 'window.html2canvas=function(){/*bundle*/}'),
@@ -123,6 +151,7 @@ function renderer(
 beforeEach(() => {
   mockFs.dirs.clear()
   mockFs.files.clear()
+  mockFs.bytes.clear()
   mockFs.log.length = 0
   print.mockReset()
   print.mockResolvedValue({ uri: 'file:///cache/Print/0F.pdf', numberOfPages: 1 })
@@ -310,10 +339,16 @@ describe('exportArtifact: PDF', () => {
       title: 'report.html',
       format: 'pdf' as const
     }
-    const PAGES = ['QUJD', 'REVGRw==']
+    /** A 1x1 picture, as a canvas gives it (RGBA). */
+    const PICTURE =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const PAGES = [PICTURE, PICTURE]
 
-    it('prints the pages its scripts drew, as pictures, and nothing else', async () => {
-      const deps = renderer({ type: 'pages', pages: PAGES, textLabels: false })
+    // Follow-up N3: the pages are written into the PDF as they come (`pages-pdf.ts`),
+    // never held together: expo-print, which takes one HTML string with every picture
+    // in it, is not used for them.
+    it('writes the pages its scripts drew into the PDF as they come, pictures and nothing else', async () => {
+      const deps = renderer(drawn(PAGES))
       const uri = await exportArtifact(report, deps)
       // Rendered in the host page with html2canvas, at the printed page's width.
       expect(deps.rendered).toHaveLength(1)
@@ -321,12 +356,22 @@ describe('exportArtifact: PDF', () => {
       expect(deps.pages[0]).toContain('<script>window.html2canvas=function(){/*bundle*/}</script>')
       expect(deps.pages[0]).toContain('sandbox="allow-scripts"')
       expect(deps.rendered[0].viewport).toEqual({ width: 539, height: 780 })
-      const printed = print.mock.calls[0][0]?.html
-      expect(printed).toBe(htmlPrintDocument(PAGES))
-      expect(printed).toContain(`content="${HTML_PRINT_POLICY}"`)
-      expect(printed).not.toContain('chart')
-      expect(printed).not.toContain('draw()')
+      expect(print).not.toHaveBeenCalled()
       expect(uri).toMatch(inExportDir('report.pdf'))
+      const pdf = bytesOf(uri)
+      expect(pdf.startsWith('%PDF-1.4\n')).toBe(true)
+      expect(pdf.endsWith('%%EOF\n')).toBe(true)
+      expect(pdf).toContain('/Type /Pages /Kids [5 0 R 8 0 R] /Count 2')
+      expect(pdf.match(/\/Subtype \/Image/g)).toHaveLength(2)
+      expect(pdf).not.toContain('chart')
+      expect(pdf).not.toContain('draw()')
+      // Opened truncated, written, closed; shared once whole.
+      expect(mockFs.log).toContainEqual(['open', uri, 'wt'])
+      expect(mockFs.log).toContainEqual(['close', uri])
+      expect(share).toHaveBeenCalledWith(
+        uri,
+        expect.objectContaining({ mimeType: 'application/pdf' })
+      )
       expect(deps.mermaidScript).not.toHaveBeenCalled()
       expect(deps.onNotice).not.toHaveBeenCalled()
     })
@@ -335,7 +380,7 @@ describe('exportArtifact: PDF', () => {
     // drawing): exported, and the person told the labels may look different — under the
     // toolbar, before the share sheet opens.
     it('drawn with text labels: exported, with a notice before the share sheet', async () => {
-      const deps = renderer({ type: 'pages', pages: PAGES, textLabels: true })
+      const deps = renderer(drawn(PAGES, true))
       const order: string[] = []
       deps.onNotice = (notice: string) => {
         order.push(notice)
@@ -343,8 +388,8 @@ describe('exportArtifact: PDF', () => {
       share.mockImplementationOnce(async () => {
         order.push('share')
       })
-      await exportArtifact(report, deps)
-      expect(print.mock.calls[0][0]?.html).toBe(htmlPrintDocument(PAGES))
+      const uri = await exportArtifact(report, deps)
+      expect(bytesOf(uri)).toContain('/Count 2')
       expect(order).toEqual([TEXT_LABELS_NOTICE, 'share'])
       expect(TEXT_LABELS_NOTICE).toMatch(/labels/i)
     })
@@ -375,6 +420,46 @@ describe('exportArtifact: PDF', () => {
         'Rendering the export took too long.'
       )
       expect(print).not.toHaveBeenCalled()
+    })
+
+    it('drawn again from the top (a restart): only the second drawing is in the PDF', async () => {
+      const deps = renderer()
+      deps.render = jest.fn(async (_page: ExportRenderPage, sink?: ExportPageSink) => {
+        sink?.page(0, PICTURE)
+        sink?.page(1, PICTURE)
+        sink?.restart()
+        sink?.page(0, PICTURE)
+        return { type: 'pages' as const, count: 1, textLabels: true }
+      })
+      const uri = await exportArtifact(report, deps)
+      const pdf = bytesOf(uri)
+      expect(pdf.match(/%PDF-1\.4/g)).toHaveLength(1)
+      expect(pdf).toContain('/Count 1')
+      expect(pdf.match(/\/Subtype \/Image/g)).toHaveLength(1)
+    })
+
+    it('a page count the PDF does not hold fails the export, its file removed', async () => {
+      const deps = renderer()
+      deps.render = jest.fn(async (_page: ExportRenderPage, sink?: ExportPageSink) => {
+        sink?.page(0, PICTURE)
+        return { type: 'pages' as const, count: 2, textLabels: false }
+      })
+      await expect(exportArtifact(report, deps)).rejects.toThrow(/1 of its 2 pages/)
+      expect(mockFs.bytes.size).toBe(0)
+      expect(share).not.toHaveBeenCalled()
+    })
+
+    it('a failed render leaves no partial PDF, its file closed', async () => {
+      const deps = renderer()
+      deps.render = jest.fn(async (_page: ExportRenderPage, sink?: ExportPageSink) => {
+        sink?.page(0, PICTURE)
+        return { type: 'error' as const, code: 'render' as const, message: 'no body' }
+      })
+      await expect(exportArtifact(report, deps)).rejects.toThrow(
+        "Couldn't render the page: no body"
+      )
+      expect(mockFs.bytes.size).toBe(0)
+      expect(mockFs.log.filter((e) => e[0] === 'close')).toHaveLength(1)
     })
 
     it('a reply of another kind is no page', async () => {
@@ -513,13 +598,15 @@ describe('exportArtifact: the viewer closed (its abort signal)', () => {
     const deps = renderer()
     deps.render = jest.fn(async () => {
       controller.abort()
-      return { type: 'pages' as const, pages: ['QUJD'], textLabels: false }
+      return { type: 'pages' as const, count: 1, textLabels: false }
     })
     await expect(exportArtifact(report, { ...deps, signal: controller.signal })).rejects.toThrow(
       CANCELLED
     )
     expect(print).not.toHaveBeenCalled()
     expect(share).not.toHaveBeenCalled()
+    // The PDF begun for its pages is removed.
+    expect(mockFs.bytes.size).toBe(0)
   })
 
   it('closed while printing: the PDF is removed, the share sheet never opens', async () => {
@@ -569,5 +656,97 @@ describe('exportArtifact: the viewer closed (its abort signal)', () => {
     ).rejects.toThrow(CANCELLED)
     expect(mockFs.files.size).toBe(0)
     expect(share).not.toHaveBeenCalled()
+  })
+
+  // Follow-up N2: the viewer closed while the bundled script was first read from disk.
+  // The export stops there: no render is asked for (it would never settle), and the
+  // export settles, its folder no longer protected from the next sweep.
+  const firstReads = [
+    {
+      name: 'html → PDF (html2canvas)',
+      request: { content: '<p>r</p>', mode: 'html-preview', title: 'r.html', format: 'pdf' },
+      script: 'html2canvasScript'
+    },
+    {
+      name: 'mermaid → PDF',
+      request: {
+        content: 'graph TD; A-->B',
+        mode: 'mermaid-preview',
+        title: 'd.mmd',
+        format: 'pdf'
+      },
+      script: 'mermaidScript'
+    },
+    {
+      name: 'mermaid → PNG',
+      request: {
+        content: 'graph TD; A-->B',
+        mode: 'mermaid-preview',
+        title: 'd.mmd',
+        format: 'png'
+      },
+      script: 'mermaidScript'
+    },
+    {
+      name: 'mermaid → HTML',
+      request: {
+        content: 'graph TD; A-->B',
+        mode: 'mermaid-preview',
+        title: 'd.mmd',
+        format: 'html'
+      },
+      script: 'mermaidScript'
+    }
+  ] as const
+
+  it.each(firstReads)(
+    '$name: closed during the script read, no render is asked for',
+    async ({ request, script }) => {
+      const controller = new AbortController()
+      const deps = renderer()
+      deps[script] = jest.fn(async () => {
+        controller.abort()
+        return '/* bundle */'
+      })
+      await expect(exportArtifact(request, { ...deps, signal: controller.signal })).rejects.toThrow(
+        CANCELLED
+      )
+      expect(deps.render).not.toHaveBeenCalled()
+      expect(print).not.toHaveBeenCalled()
+      expect(share).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(firstReads)(
+    '$name: a script read that never ends still ends the export on close',
+    async ({ request, script }) => {
+      const controller = new AbortController()
+      const deps = renderer()
+      deps[script] = jest.fn(() => new Promise<string>(() => undefined))
+      const done = exportArtifact(request, { ...deps, signal: controller.signal })
+      await new Promise((r) => setTimeout(r, 0))
+      controller.abort()
+      await expect(done).rejects.toThrow(CANCELLED)
+      expect(deps.render).not.toHaveBeenCalled()
+      expect(share).not.toHaveBeenCalled()
+    }
+  )
+
+  it('a render that never settles still ends the export on close, and its folder is swept next time', async () => {
+    mockFs.dirs.add(OUT)
+    const controller = new AbortController()
+    const deps = renderer()
+    deps.render = jest.fn(() => new Promise<ExportRenderReply>(() => undefined))
+    const done = exportArtifact(report, { ...deps, signal: controller.signal })
+    await new Promise((r) => setTimeout(r, 0))
+    const [, firstDir] =
+      mockFs.log.find((e) => e[0] === 'mkdir' && String(e[1]).startsWith(`${OUT}/`)) ?? []
+    controller.abort()
+    await expect(done).rejects.toThrow(CANCELLED)
+    await exportArtifact(
+      { content: '# x', mode: 'markdown', title: 'n.md', format: 'html' },
+      renderer()
+    )
+    expect(mockFs.log).toContainEqual(['rmdir', firstDir])
   })
 })

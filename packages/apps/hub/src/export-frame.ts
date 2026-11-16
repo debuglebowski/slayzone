@@ -26,8 +26,10 @@
  *      with `waitForReady`, it has flagged itself ready (`data-export-ready="1"`, the
  *      mermaid document's flag) — or after `deadlineMs` — it reports
  *      `{ slayzoneExport: id, state: 'ready', images: { total, loaded }, drawn }` and
- *      prints, in one task, and reports `{ slayzoneExport: id, state: 'done' }` on
- *      `afterprint`. A failure reports `{ slayzoneExport: id, state: 'error', message }`.
+ *      prints (with the window's own print, taken before the document is written), in
+ *      one task, and reports `{ slayzoneExport: id, state: 'done' }` on `afterprint`.
+ *      A failure reports `{ slayzoneExport: id, state: 'error', message }`; so does a
+ *      print() that opened no dialog (no `beforeprint`/`afterprint`).
  *   A navigation away from the document (meta refresh, `location.href`, a link) ends
  *   the export: reported as `{ slayzoneExport: id, state: 'navigated' }` when the
  *   bootstrap sees it start, and nothing is printed. The next document is not this
@@ -51,11 +53,23 @@ export const EXPORT_FRAME_PATH = '/export-frame'
  */
 export const EXPORT_FRAME_VERSION = 2
 
+/** The frame called print() and the browser opened no dialog. */
+export const PRINT_NOT_OPENED =
+  'The browser did not open its print dialog, so nothing was printed. Try exporting again.'
+/** How long after print() returns a dialog may still open (beforeprint) before that is a failure. */
+const PRINT_OPEN_GRACE_MS = 5_000
+
 const BOOTSTRAP = `(function () {
   'use strict';
   var host = window.parent;
   if (host === window) return;
   silenceDialogs(window);
+  // The window's own print/focus, taken before any document of the artifact's runs:
+  // a hand-written report often defines a global "function print" (or focus), which
+  // replaces the window's. Not locked like the dialogs: a locked global makes such a
+  // report's whole script fail to run.
+  var nativePrint = window.print;
+  var nativeFocus = window.focus;
   var taken = false;
   function post(message) { host.postMessage(message, '*'); }
   window.addEventListener('message', function (event) {
@@ -150,15 +164,32 @@ const BOOTSTRAP = `(function () {
           drawn: drawn(),
           images: { total: images.length, loaded: loaded }
         });
+        // The dialog opening fires beforeprint; its closing, afterprint. A print()
+        // the browser ignored fires neither: that fails the export now, instead of
+        // the shell waiting out its backstop for a dialog that never opened.
+        var opened = false;
+        var closed = false;
+        window.addEventListener('beforeprint', function () { opened = true; }, true);
         window.addEventListener('afterprint', function () {
+          if (closed) return;
+          closed = true;
           post({ slayzoneExport: id, state: 'done' });
-        }, { once: true });
+        }, true);
         try {
-          window.focus();
-          window.print();
+          if (typeof nativeFocus === 'function') nativeFocus.call(window);
+          nativePrint.call(window);
         } catch (err) {
           fail(err);
+          return;
         }
+        // Some engines block in print() while the dialog is open; others (headless
+        // Chromium) return at once and fire beforeprint/afterprint right after. A
+        // dialog that has not opened within the grace period never will.
+        if (opened || closed) return;
+        setTimeout(function () {
+          if (opened || closed || left) return;
+          fail(new Error(${JSON.stringify(PRINT_NOT_OPENED)}));
+        }, ${PRINT_OPEN_GRACE_MS});
       }, 0);
     }
     check();

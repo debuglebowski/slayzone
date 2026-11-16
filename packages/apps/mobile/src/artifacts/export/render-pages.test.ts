@@ -6,10 +6,8 @@ import {
   collectExportReply,
   EXPORT_MESSAGE_MAX_CHARS,
   HTML_MESSAGE_MAX_CHARS,
-  HTML_PRINT_POLICY,
   HTML_SETTLE,
   htmlArtifactDocument,
-  htmlPrintDocument,
   htmlRasterPage,
   mermaidSvgPage,
   parseExportRenderMessage,
@@ -174,47 +172,85 @@ describe('parseExportRenderMessage', () => {
   })
 })
 
-describe("collectExportReply: an html render's pages, put together", () => {
+describe("collectExportReply: an html render's pages, handed on as they come", () => {
   const page = (index: number, base64 = 'QUJD') => ({ type: 'page' as const, index, base64 })
+  /** A sink that records what it was handed. */
+  function sink() {
+    const log: string[] = []
+    return {
+      log,
+      page: jest.fn((index: number, base64: string) => {
+        log.push(`${index}:${base64}`)
+      }),
+      restart: jest.fn(() => {
+        log.push('restart')
+      })
+    }
+  }
 
-  it('collects the pages in order and answers at their end', () => {
-    const take = collectExportReply()
+  // Follow-up N3: no page is kept here: each goes to the sink (the PDF being written)
+  // the moment it comes, and the reply only counts them.
+  it('hands each page on in order, keeping none, and answers with their count at the end', () => {
+    const s = sink()
+    const take = collectExportReply(s)
     expect(take({ type: 'progress' })).toBeNull()
     expect(take(page(0, 'QUJD'))).toBeNull()
+    expect(s.log).toEqual(['0:QUJD'])
     expect(take(page(1, 'REVG'))).toBeNull()
     expect(take({ type: 'pages-end', count: 2, textLabels: false })).toEqual({
       type: 'pages',
-      pages: ['QUJD', 'REVG'],
+      count: 2,
       textLabels: false
     })
+    expect(s.log).toEqual(['0:QUJD', '1:REVG'])
   })
 
   it('a restart drops the pages so far (drawn again with text labels)', () => {
-    const take = collectExportReply()
+    const s = sink()
+    const take = collectExportReply(s)
     take(page(0, 'T0xE'))
     expect(take({ type: 'restart' })).toBeNull()
     take(page(0, 'TkVX'))
     expect(take({ type: 'pages-end', count: 1, textLabels: true })).toEqual({
       type: 'pages',
-      pages: ['TkVX'],
+      count: 1,
       textLabels: true
     })
+    expect(s.log).toEqual(['0:T0xE', 'restart', '0:TkVX'])
   })
 
   it('a page out of order, a missing page or no page at all is an error', () => {
-    let take = collectExportReply()
+    let take = collectExportReply(sink())
     expect(take(page(1))).toMatchObject({ type: 'error', code: 'render' })
-    take = collectExportReply()
+    take = collectExportReply(sink())
     take(page(0))
     expect(take({ type: 'pages-end', count: 2, textLabels: false })).toMatchObject({
       type: 'error',
       code: 'render'
     })
-    take = collectExportReply()
+    take = collectExportReply(sink())
     expect(take({ type: 'pages-end', count: 0, textLabels: false })).toMatchObject({
       type: 'error',
       code: 'render'
     })
+  })
+
+  it('a page the sink refuses (not a picture it can read) is an error, with its reason', () => {
+    const take = collectExportReply({
+      page: () => {
+        throw new Error('A page picture is not a PNG the export can read (no signature).')
+      },
+      restart: () => undefined
+    })
+    expect(take(page(0))).toEqual({
+      type: 'error',
+      code: 'render',
+      message: 'A page picture is not a PNG the export can read (no signature).'
+    })
+  })
+
+  it('a render with nowhere to put pages refuses them', () => {
+    expect(collectExportReply()(page(0))).toMatchObject({ type: 'error', code: 'render' })
   })
 
   it('a reply of another page passes straight through', () => {
@@ -717,28 +753,5 @@ describe('htmlArtifactDocument: the snapshot script posts the settled DOM to the
     const p = load(htmlArtifactDocument('x', 't'), () => undefined)
     jest.advanceTimersByTime(HTML_SETTLE.maxLoadMs + 200)
     expect(p.posted).toMatchObject([{ message: { type: 'slz-export-snapshot' } }])
-  })
-})
-
-describe('htmlPrintDocument: the page pictures, and nothing else', () => {
-  it('one picture per sheet, behind a policy that loads nothing else', () => {
-    const doc = htmlPrintDocument(['QUJD', 'REVG'])
-    expect(
-      doc.startsWith('<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy"')
-    ).toBe(true)
-    expect(doc).toContain(`content="${HTML_PRINT_POLICY}"`)
-    expect(HTML_PRINT_POLICY).toContain("default-src 'none'")
-    expect(HTML_PRINT_POLICY).toContain('img-src data:')
-    expect(HTML_PRINT_POLICY).not.toMatch(/https?:/)
-    expect(doc).toContain(
-      '<body><img alt="" src="data:image/png;base64,QUJD"><img alt="" src="data:image/png;base64,REVG"></body>'
-    )
-    expect(doc).toContain('img + img { break-before: page; }')
-  })
-
-  it('refuses anything that is not base64 (no markup can be written in)', () => {
-    expect(() => htmlPrintDocument(['QUJD"><iframe src=x>'])).toThrow('not a PNG')
-    expect(() => htmlPrintDocument([''])).toThrow('not a PNG')
-    expect(() => htmlPrintDocument([])).toThrow('no pages')
   })
 })

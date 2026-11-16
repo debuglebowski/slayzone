@@ -526,6 +526,33 @@ test.describe('web shell — artifact export renders in the browser', () => {
     }
   })
 
+  // Follow-up N1: a hand-written report often defines its own global print (and focus),
+  // which replaces the window's. The frame prints with the window's own; before, the
+  // export waited 30 minutes for a dialog that never opened, then reported success.
+  test("html → PDF: an artifact's own print/focus do not stop it printing", async () => {
+    const probe = `<!doctype html><html><body><p>report</p><script>
+      function print() { parent.postMessage({ probe: 'own-print' }, '*') }
+      function focus() { throw new Error('focus is the report\\'s') }
+    </script></body></html>`
+    const before = (await received(page)).length
+    const res = await exportInPage(page, {
+      format: 'pdf',
+      mode: 'html-preview',
+      title: 'own-print.html',
+      content: probe
+    })
+    expect(res, 'printed').toEqual({ ok: true })
+    const after = (await received(page)).slice(before)
+    expect(
+      after.filter((m) => m.data?.probe === 'own-print'),
+      "the report's print not called"
+    ).toEqual([])
+    expect(
+      after.some((m) => m.data?.state === 'done'),
+      'the dialog closed'
+    ).toBe(true)
+  })
+
   // Review 9, F2: the export frame can be navigated to a new document (meta refresh,
   // location.href to http: or data:). That document is a fresh window WITHOUT the
   // bootstrap's dialog lock; with the shell's `allow-modals` it could raise a password

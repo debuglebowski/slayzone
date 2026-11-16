@@ -24,7 +24,8 @@ afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
  * `inspector-crash` (Inspector.targetCrashed on the page session), `target-crash`
  * (browser-level Target.targetCrashed), `detach` (Target.detachedFromTarget) or
  * `vanish` (no event; the target is simply gone from Target.getTargets).
- * `VERSION_DELAY_MS` delays every Browser.getVersion answer; `LOG_FILE` records each
+ * `VERSION_DELAY_MS` delays every Browser.getVersion answer, `TARGETS_DELAY_MS` every
+ * Target.getTargets answer (a page command's liveness check); `LOG_FILE` records each
  * method received, one per line.
  * `PAGE_SPINS_ON_PRINT`: once a print starts the page's own commands (Runtime.evaluate)
  * go unanswered and the print never finishes, while the browser keeps answering (a
@@ -38,6 +39,7 @@ const hang = process.env.HANG_AFTER_PRINT === '1'
 const chunks = Number(process.env.PDF_CHUNKS || 3)
 const onPrint = process.env.ON_PRINT || ''
 const versionDelay = Number(process.env.VERSION_DELAY_MS || 0)
+const targetsDelay = Number(process.env.TARGETS_DELAY_MS || 0)
 const log = process.env.LOG_FILE
 const spinOnPrint = process.env.PAGE_SPINS_ON_PRINT === '1'
 const evalDelay = Number(process.env.EVAL_DELAY_MS || 0)
@@ -59,9 +61,11 @@ fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
     if (hung) continue
     switch (m.method) {
       case 'Browser.getVersion': setTimeout(() => reply(m.id, { product: 'Fake/1' }), versionDelay); break
-      case 'Target.getTargets':
-        reply(m.id, { targetInfos: targetGone ? [] : [{ targetId: 't1', type: 'page' }] })
+      case 'Target.getTargets': {
+        const targetInfos = targetGone ? [] : [{ targetId: 't1', type: 'page' }]
+        setTimeout(() => reply(m.id, { targetInfos }), targetsDelay)
         break
+      }
       case 'Target.createTarget': reply(m.id, { targetId: 't1' }); break
       case 'Target.attachToTarget': reply(m.id, { sessionId: 's1' }); break
       case 'Page.getFrameTree': reply(m.id, { frameTree: { frame: { id: 'f1' } } }); break
@@ -113,7 +117,7 @@ describe.skipIf(process.platform === 'win32')('C1: large PDFs', () => {
     const pdf = await withEnv({ PRINT_DELAY_MS: '1500', PDF_CHUNKS: '4' }, () =>
       renderPdf(exe, '<p>x</p>', {
         waitReady: false,
-        browser: { commandTimeoutMs: 300, livenessIntervalMs: 200 }
+        browser: { commandTimeoutMs: 300, livenessIntervalMs: 200, livenessTimeoutMs: 10_000 }
       })
     )
     expect(pdf.subarray(0, 8).toString()).toBe('%PDF-1.7')
@@ -181,7 +185,7 @@ describe.skipIf(process.platform === 'win32')('#2: a page crash fails a long ren
         withEnv({ ON_PRINT: how }, () =>
           renderPdf(exe, '<p>x</p>', {
             waitReady: false,
-            browser: { commandTimeoutMs: 300, livenessIntervalMs: 200 }
+            browser: { commandTimeoutMs: 300, livenessIntervalMs: 200, livenessTimeoutMs: 10_000 }
           })
         )
       ).rejects.toThrow(/page (crashed|closed) while rendering/)
@@ -201,7 +205,7 @@ describe.skipIf(process.platform === 'win32')(
       // probe answered at 300 ms. Nothing may poll after that.
       const b = await withEnv(
         { PRINT_DELAY_MS: '250', VERSION_DELAY_MS: '100', LOG_FILE: log },
-        () => launchBrowser(exe, { livenessIntervalMs: 200 })
+        () => launchBrowser(exe, { livenessIntervalMs: 200, livenessTimeoutMs: 10_000 })
       )
       try {
         await b.sendLong('Page.printToPDF', {}, 's1')
@@ -235,6 +239,7 @@ describe.skipIf(process.platform === 'win32')('#3: a page that stops answering m
           browser: {
             commandTimeoutMs: 300,
             livenessIntervalMs: 200,
+            livenessTimeoutMs: 10_000,
             stallMs: 1_000,
             stallProbeIntervalMs: 100
           }
@@ -251,6 +256,7 @@ describe.skipIf(process.platform === 'win32')('#3: a page that stops answering m
         browser: {
           commandTimeoutMs: 5_000,
           livenessIntervalMs: 200,
+          livenessTimeoutMs: 10_000,
           stallMs: 1_500,
           stallProbeIntervalMs: 100
         }
@@ -342,4 +348,32 @@ describe.skipIf(process.platform === 'win32')('review 9: a page given up on', ()
       expect(prefs.download.default_directory).toBe('/somewhere/else')
     }, 30_000)
   })
+})
+
+// Follow-up N5: the tests above check liveness every 200 ms; its answer had the same
+// 200 ms to arrive, and on a loaded machine it sometimes didn't ("the browser stopped
+// responding"). The answer's deadline is its own option now (default: the interval).
+describe.skipIf(process.platform === 'win32')('N5: the liveness deadline is its own', () => {
+  test('a liveness answer slower than the interval but within its deadline does not fail the print', async () => {
+    const exe = fake('slow-liveness')
+    const pdf = await withEnv({ PRINT_DELAY_MS: '1500', TARGETS_DELAY_MS: '400' }, () =>
+      renderPdf(exe, '<p>x</p>', {
+        waitReady: false,
+        browser: { commandTimeoutMs: 5_000, livenessIntervalMs: 200, livenessTimeoutMs: 5_000 }
+      })
+    )
+    expect(pdf.subarray(0, 8).toString()).toBe('%PDF-1.7')
+  }, 30_000)
+
+  test('one past its deadline still fails it', async () => {
+    const exe = fake('late-liveness')
+    await expect(
+      withEnv({ PRINT_DELAY_MS: '10000', TARGETS_DELAY_MS: '2000' }, () =>
+        renderPdf(exe, '<p>x</p>', {
+          waitReady: false,
+          browser: { commandTimeoutMs: 5_000, livenessIntervalMs: 200, livenessTimeoutMs: 500 }
+        })
+      )
+    ).rejects.toThrow(/stopped responding/)
+  }, 30_000)
 })

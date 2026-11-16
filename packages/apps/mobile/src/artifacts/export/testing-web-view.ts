@@ -23,6 +23,8 @@ import { join } from 'node:path'
 import type * as Jsdom from 'jsdom'
 import {
   collectExportReply,
+  exportAckScript,
+  type ExportPageSink,
   type ExportRenderMessage,
   type ExportRenderPage,
   type ExportRenderReply,
@@ -65,7 +67,22 @@ export interface WebViewOptions {
   timeoutMs?: number
   /** The page's window before its scripts run. */
   beforeScripts?: (window: JsdomWindow) => void
+  /**
+   * Tell the page each time a page of it was taken, as the app does (`exportAckScript`,
+   * injected): default true. False: only `HostPage.ack` does.
+   */
+  ack?: boolean
+  /** Where its pages go as they come, besides the harness's own record. */
+  sink?: ExportPageSink
 }
+
+/**
+ * A reply as the app put it together, an html artifact's pages included (the app hands
+ * them on and keeps only their count; the harness keeps them for the test).
+ */
+export type HarnessReply =
+  | Exclude<ExportRenderReply, { type: 'pages' }>
+  | { type: 'pages'; pages: string[]; textLabels: boolean }
 
 /** The html2canvas build the app ships (the config plugin's), as the page embeds it. */
 export const HTML2CANVAS_BUILD: string = (() => {
@@ -147,24 +164,42 @@ export interface HostPage {
    * Every reply the page posted (its messages with its token, put together as the app
    * does: `collectExportReply`), each such message, and every message at all.
    */
-  replies: ExportRenderReply[]
+  replies: HarnessReply[]
+  /** The replies as the app's renderer answers them (`collectExportReply`). */
+  answers: ExportRenderReply[]
   received: ExportRenderMessage[]
   messages: string[]
   /** A message to the page as if from `source` (default: its artifact frame). */
   post: (data: unknown, source?: unknown) => void
   /** Errors the page's scripts threw. */
   errors: string[]
+  /** Tell the page the app has taken `count` of its pages in all (`exportAckScript`). */
+  ack: (count: number) => void
 }
 
 /** The page loaded on its own: its frames don't run (`post` speaks for them). */
 export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {}): HostPage {
-  const replies: ExportRenderReply[] = []
+  const replies: HarnessReply[] = []
+  const answers: ExportRenderReply[] = []
   const received: ExportRenderMessage[] = []
   const messages: string[] = []
   const errors: string[] = []
   const virtualConsole = new VirtualConsole()
   virtualConsole.on('jsdomError', (error) => errors.push(String(error.stack ?? error)))
-  const take = collectExportReply()
+  let pages: string[] = []
+  let taken = 0
+  const take = collectExportReply({
+    page: (index, base64) => {
+      options.sink?.page(index, base64)
+      pages[index] = base64
+    },
+    restart: () => {
+      options.sink?.restart()
+      pages = []
+    }
+  })
+  let hostWindow: JsdomWindow | null = null
+  const ack = (count: number) => hostWindow?.eval(exportAckScript(count))
   const receive = (data: unknown) => {
     messages.push(String(data))
     const message = parseExportRenderMessage(String(data), page.token, page.maxMessageChars)
@@ -172,7 +207,21 @@ export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {
     received.push(message)
     options.onMessage?.(message)
     const reply = take(message)
-    if (reply) replies.push(reply)
+    if (!reply) {
+      if (message.type === 'page' && options.ack !== false) {
+        // As the app injects it: after the page was taken, not inside its message.
+        taken += 1
+        const count = taken
+        setTimeout(() => ack(count), 0)
+      }
+      return
+    }
+    answers.push(reply)
+    replies.push(
+      reply.type === 'pages'
+        ? { type: 'pages', pages: [...pages], textLabels: reply.textLabels }
+        : reply
+    )
   }
   const host = new JSDOM(page.html, {
     runScripts: 'dangerously',
@@ -190,6 +239,7 @@ export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {
       options.beforeScripts?.(window)
     }
   })
+  hostWindow = host.window
   const { document, MessageEvent } = host.window
   // Each frame the page adds, and each frame added in one of those (html2canvas's copy).
   const watchFrames = (window: JsdomWindow) => {
@@ -211,9 +261,11 @@ export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {
   return {
     window: host.window,
     replies,
+    answers,
     received,
     messages,
     errors,
+    ack,
     post: (data, source = artifactFrame?.contentWindow) => {
       // Structured clone: the page gets a copy.
       const copy = JSON.parse(JSON.stringify(data)) as unknown
@@ -224,9 +276,13 @@ export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {
   }
 }
 
-/** `render(page)`: the page and its sandboxed frames run; resolves with the first reply. */
+/**
+ * `render(page, sink)`: the page and its sandboxed frames run, its pages to `sink`;
+ * resolves with the first reply, as the app's renderer answers it.
+ */
 export function webViewRender(
   page: ExportRenderPage,
+  sink?: ExportPageSink,
   options: WebViewOptions = {}
 ): Promise<ExportRenderReply> {
   return new Promise((resolve, reject) => {
@@ -240,7 +296,7 @@ export function webViewRender(
       for (const window of windows) window.close()
       settle()
     }
-    const host = loadHostPage(page, options)
+    const host = loadHostPage(page, { ...options, sink })
     windows.push(host.window)
     const timer = setTimeout(
       () =>
@@ -250,7 +306,7 @@ export function webViewRender(
       options.timeoutMs ?? 10_000
     )
     const poll = setInterval(() => {
-      const reply = host.replies[0]
+      const reply = host.answers[0]
       if (reply) finish(() => resolve(reply))
     }, 10)
 

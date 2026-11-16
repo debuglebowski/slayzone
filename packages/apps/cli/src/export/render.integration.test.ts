@@ -294,6 +294,32 @@ describe.skipIf(!BROWSER)('an html artifact cannot save files (review 9, F1)', (
     expectNothingSaved()
   })
 
+  // Follow-up N4: an <a download> to an http(s) URL is a download too, not a navigation:
+  // denied (its request blocked, nothing fetched) and the export goes on, as on desktop.
+  // On load and in beforeprint (during printToPDF).
+  test('an <a download> click to an http URL (on load, in beforeprint) saves nothing; the PDF is produced', {
+    timeout: 90_000
+  }, async () => {
+    seedDownloadDir()
+    server.hits.length = 0
+    const html = `<!DOCTYPE html><p>report</p><script>
+      function save(path) {
+        const a = document.createElement('a'); a.href = '${server.origin()}' + path; a.download = 'slay-f1-http.txt'
+        document.body.appendChild(a); a.click()
+      }
+      save('/file?on-load')
+      addEventListener('beforeprint', () => save('/file?in-beforeprint'))
+    </script><img src="${server.origin()}/slow.png">`
+    const pdf = await renderPdf(BROWSER as string, html, {
+      waitReady: false,
+      browser: { commandTimeoutMs: 30_000, downloadDir: downloads }
+    })
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expectNothingSaved()
+    expect(server.hits.filter((h) => h.startsWith('/file'))).toEqual([])
+  })
+
   // A navigation of the document itself (here: to a data: URL Chrome turns into a
   // download): refused, and the export fails — it never prints another page (F2).
   test('a data: navigation that would download saves nothing; the export fails clearly', {

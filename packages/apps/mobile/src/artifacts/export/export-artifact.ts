@@ -13,8 +13,10 @@
  *   is parsed inert and moved in without what navigates). A mermaid diagram is drawn
  *   first in the hidden web view (`render-pages.ts`) and printed as the static SVG it
  *   became; an html artifact runs there in the viewer's sandbox (the view is unmounted
- *   when it goes silent, a page that loops included) and is drawn there page by page:
- *   the PDF is those page pictures, nothing else — no text to select or search, no links
+ *   when it goes silent, a page that loops included) and is drawn there page by page,
+ *   each page written into the PDF as it comes (`pages-pdf.ts`, not expo-print: no page
+ *   count makes the export hold more than a few pictures): the PDF is those page
+ *   pictures, nothing else — no text to select or search, no links
  *   (what html2canvas can't draw is missing: a picture from a site that doesn't allow it
  *   to be read, a frame's content, a WebGL scene). An SVG with HTML in it that WebKit
  *   won't let be read back is drawn again with its HTML as text, and the person told.
@@ -34,15 +36,16 @@ import {
   needsMermaidScript
 } from '@slayzone/task-artifacts/export-html'
 import { RENDER_MODE_INFO, type RenderMode } from '@slayzone/task-contracts/types'
-import { Directory, File, Paths } from 'expo-file-system'
+import { Directory, File, type FileHandle, FileMode, Paths } from 'expo-file-system'
 import { printToFileAsync } from 'expo-print'
 import { shareAsync } from 'expo-sharing'
 import { canExport, EXPORT_FILE_TYPES, exportFileName, formatLabel } from './export-formats'
+import { base64ToBytes, PagesPdf } from './pages-pdf'
 import { printDocument } from './print-document'
 import {
+  type ExportPageSink,
   type ExportRenderPage,
   type ExportRenderReply,
-  htmlPrintDocument,
   htmlRasterPage,
   mermaidSvgPage,
   pngCapturePage
@@ -63,8 +66,11 @@ export interface ExportRequest {
 }
 
 export interface ExportArtifactDeps {
-  /** Loads a page in the hidden web view; its reply (`use-export-renderer.ts`). */
-  render: (page: ExportRenderPage) => Promise<ExportRenderReply>
+  /**
+   * Loads a page in the hidden web view; its reply (`use-export-renderer.ts`). An html
+   * artifact's pages go to `sink` as they come.
+   */
+  render: (page: ExportRenderPage, sink?: ExportPageSink) => Promise<ExportRenderReply>
   /** mermaid's browser build (`page-assets.ts`). */
   mermaidScript: () => Promise<string>
   /** html2canvas's browser build (`page-assets.ts`): draws an html artifact's pages. */
@@ -121,6 +127,30 @@ function stopIfClosed(deps: ExportArtifactDeps): void {
   if (deps.signal?.aborted) throw new Error(EXPORT_CANCELLED_MESSAGE)
 }
 
+/**
+ * `work`, unless the viewer closes first: then the export stops at once, whatever
+ * `work` is still doing (a script read from disk, a render whose view is gone, a print).
+ * Every step that waits goes through this, so a closed viewer never leaves the export
+ * — and its folder, protected from sweeps while it runs — pending.
+ */
+function untilClosed<T>(work: Promise<T>, deps: ExportArtifactDeps): Promise<T> {
+  const signal = deps.signal
+  if (!signal) return work
+  if (signal.aborted) {
+    // Settled by nobody else: a late failure of `work` must not go unhandled.
+    work.catch(() => undefined)
+    return Promise.reject(new Error(EXPORT_CANCELLED_MESSAGE))
+  }
+  let onAbort: (() => void) | undefined
+  const closed = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new Error(EXPORT_CANCELLED_MESSAGE))
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  return Promise.race([work, closed]).finally(() => {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  })
+}
+
 async function exportInto(
   target: File,
   request: ExportRequest,
@@ -130,25 +160,24 @@ async function exportInto(
   let notice: string | null = null
   switch (format) {
     case 'html': {
-      const mermaid = needsMermaidScript(mode) ? await deps.mermaidScript() : null
+      const mermaid = needsMermaidScript(mode)
+        ? await untilClosed(deps.mermaidScript(), deps)
+        : null
       stopIfClosed(deps)
       target.create({ overwrite: true })
       await target.write(buildDocumentHtml(content, mode, title, mermaid, { standalone: true }))
       break
     }
     case 'pdf': {
-      let html: string
       if (mode === 'html-preview') {
-        const drawn = await drawHtmlPages(content, title, deps)
-        if (drawn.textLabels) notice = TEXT_LABELS_NOTICE
-        html = htmlPrintDocument(drawn.pages)
-      } else {
-        html = printDocument(
-          mode === 'mermaid-preview'
-            ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
-            : buildDocumentHtml(content, mode, title)
-        )
+        if (await writeHtmlPagesPdf(target, content, title, deps)) notice = TEXT_LABELS_NOTICE
+        break
       }
+      const html = printDocument(
+        mode === 'mermaid-preview'
+          ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
+          : buildDocumentHtml(content, mode, title)
+      )
       stopIfClosed(deps)
       if (printsInFlight === 0) sweepLeftoverPrints()
       printsInFlight++
@@ -158,15 +187,19 @@ async function exportInto(
         height: A4.height,
         margins: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN }
       })
-      const printed = await withTimeout(
-        job,
-        deps.printTimeoutMs ?? EXPORT_PRINT_TIMEOUT_MS,
-        'Printing the PDF took too long.'
+      const printed = await untilClosed(
+        withTimeout(
+          job,
+          deps.printTimeoutMs ?? EXPORT_PRINT_TIMEOUT_MS,
+          'Printing the PDF took too long.'
+        ),
+        deps
       )
         // Done or given up: either way its file is no longer one to protect.
         .finally(() => printsInFlight--)
         .catch((err: unknown) => {
-          // Given up: the PDF, if it ever lands, is nobody's — removed when it does.
+          // Given up (timed out, or the viewer closed): the PDF, if it ever lands, is
+          // nobody's — removed when it does.
           job.then((late) => removeQuietly(new File(late.uri))).catch(() => undefined)
           throw err
         })
@@ -251,9 +284,9 @@ async function drawMermaid(
   deps: ExportArtifactDeps,
   htmlLabels: boolean
 ): Promise<string> {
-  const reply = await deps.render(
-    mermaidSvgPage(source, await deps.mermaidScript(), { htmlLabels })
-  )
+  const script = await untilClosed(deps.mermaidScript(), deps)
+  stopIfClosed(deps)
+  const reply = await untilClosed(deps.render(mermaidSvgPage(source, script, { htmlLabels })), deps)
   if (reply.type === 'svg') return reply.svg
   throw new Error(
     `Couldn't draw the diagram: ${reply.type === 'error' ? reply.message : 'no diagram came back.'}`
@@ -261,24 +294,103 @@ async function drawMermaid(
 }
 
 /**
- * An html artifact's pages as its scripts drew them (PNGs, base64), from the hidden web
- * view; `textLabels`: an SVG's HTML labels drawn as plain text.
+ * An html artifact's PDF, written into `target`: its pages as its scripts drew them, from
+ * the hidden web view, each written out as it comes (`pages-pdf.ts`) and none kept —
+ * however many pages, the export holds about one. Resolves with whether an SVG's HTML
+ * labels were drawn as plain text. A failure, or a closed viewer, leaves no partial PDF.
  */
-async function drawHtmlPages(
+async function writeHtmlPagesPdf(
+  target: File,
   content: string,
   title: string,
   deps: ExportArtifactDeps
-): Promise<{ pages: string[]; textLabels: boolean }> {
-  const reply = await deps.render(htmlRasterPage(content, title, await deps.html2canvasScript()))
-  if (reply.type === 'pages') return { pages: reply.pages, textLabels: reply.textLabels }
-  if (reply.type === 'error' && reply.code === 'tainted') {
-    throw new Error(
-      "This page draws something this device won't let the export read back, so it can't be made into a PDF here."
+): Promise<boolean> {
+  const script = await untilClosed(deps.html2canvasScript(), deps)
+  stopIfClosed(deps)
+  const pdf = openPagesPdf(target)
+  try {
+    const reply = await untilClosed(
+      deps.render(htmlRasterPage(content, title, script), pdf.sink),
+      deps
     )
+    if (reply.type === 'error' && reply.code === 'tainted') {
+      throw new Error(
+        "This page draws something this device won't let the export read back, so it can't be made into a PDF here."
+      )
+    }
+    if (reply.type !== 'pages') {
+      throw new Error(
+        `Couldn't render the page: ${reply.type === 'error' ? reply.message : 'no page came back.'}`
+      )
+    }
+    if (reply.count !== pdf.pageCount) {
+      throw new Error(`The export sent ${pdf.pageCount} of its ${reply.count} pages.`)
+    }
+    stopIfClosed(deps)
+    pdf.finish()
+    return reply.textLabels
+  } catch (err) {
+    pdf.discard()
+    throw err
   }
-  throw new Error(
-    `Couldn't render the page: ${reply.type === 'error' ? reply.message : 'no page came back.'}`
-  )
+}
+
+/** The sheet the pictures go on: A4, desktop's 1cm margins (as the printed PDFs). */
+const SHEET = { width: A4.width, height: A4.height, margin: MARGIN }
+
+/**
+ * `target` opened for a PDF of page pictures: `sink` takes the render's pages (a restart
+ * starts the file again), `finish` completes and closes it, `discard` closes and removes
+ * it. After either, a page that still comes is refused.
+ */
+function openPagesPdf(target: File): {
+  sink: ExportPageSink
+  readonly pageCount: number
+  finish: () => void
+  discard: () => void
+} {
+  let handle: FileHandle | null = null
+  let pdf: PagesPdf
+  let done = false
+  const start = () => {
+    handle?.close()
+    target.create({ overwrite: true })
+    const opened = target.open(FileMode.Truncate)
+    handle = opened
+    pdf = new PagesPdf({ write: (bytes) => opened.writeBytesSync(bytes) }, SHEET)
+  }
+  const close = () => {
+    done = true
+    try {
+      handle?.close()
+    } catch {
+      // Closed already.
+    }
+    handle = null
+  }
+  start()
+  return {
+    sink: {
+      page: (_index, base64) => {
+        if (done) throw new Error(EXPORT_CANCELLED_MESSAGE)
+        pdf.addPage(base64ToBytes(base64))
+      },
+      restart: () => {
+        if (!done) start()
+      }
+    },
+    get pageCount() {
+      return pdf.pageCount
+    },
+    finish: () => {
+      pdf.finish()
+      close()
+    },
+    discard: () => {
+      close()
+      removeQuietly(target)
+    }
+  }
 }
 
 /** The PNG's bytes (base64) of an SVG artifact or a mermaid diagram. */
@@ -289,11 +401,13 @@ async function drawPng(
   deps: ExportArtifactDeps
 ): Promise<string> {
   const mermaid = mode === 'mermaid-preview'
-  let reply = await deps.render(
-    pngCapturePage(mermaid ? await drawMermaid(content, deps, true) : content, title)
-  )
+  const svg = mermaid ? await drawMermaid(content, deps, true) : content
+  stopIfClosed(deps)
+  let reply = await untilClosed(deps.render(pngCapturePage(svg, title)), deps)
   if (mermaid && reply.type === 'error' && reply.code === 'tainted') {
-    reply = await deps.render(pngCapturePage(await drawMermaid(content, deps, false), title))
+    const textSvg = await drawMermaid(content, deps, false)
+    stopIfClosed(deps)
+    reply = await untilClosed(deps.render(pngCapturePage(textSvg, title)), deps)
   }
   if (reply.type === 'png') return reply.base64
   if (reply.type === 'error' && reply.code === 'tainted') {

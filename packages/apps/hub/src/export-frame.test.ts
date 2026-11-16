@@ -70,7 +70,13 @@ test('the no-ops cannot be deleted, overwritten or redefined', () => {
 type Listener = (event: unknown) => void
 
 /** A window + document pair that runs the bootstrap through a render. */
-function bootRender() {
+function bootRender({
+  dialogOpens = true,
+  dialogLater = false
+}: {
+  dialogOpens?: boolean
+  dialogLater?: boolean
+} = {}) {
   const posted: Record<string, unknown>[] = []
   const listeners = new Map<string, Set<Listener>>()
   const parent = { postMessage: (message: Record<string, unknown>) => posted.push(message) }
@@ -82,8 +88,19 @@ function bootRender() {
     parent,
     length: 0,
     focus: () => {},
-    // What had been posted when the dialog opened.
-    print: vi.fn(() => printed.push([...posted])),
+    // What had been posted when the dialog opened. A dialog that opens fires
+    // beforeprint, and afterprint once it closes (print() blocks until then).
+    print: vi.fn(() => {
+      printed.push([...posted])
+      if (!dialogOpens) return
+      const open = () => {
+        dispatch('beforeprint')
+        dispatch('afterprint')
+      }
+      // Headless Chromium returns from print() at once and fires both right after.
+      if (dialogLater) setTimeout(open, 200)
+      else open()
+    }),
     addEventListener: (type: string, fn: Listener) => {
       if (!listeners.has(type)) listeners.set(type, new Set())
       listeners.get(type)?.add(fn)
@@ -201,6 +218,76 @@ test('a navigation the document starts while it is being written is seen too', a
     expect(posted).toContainEqual({ slayzoneExport: 'id-1', state: 'navigated' })
     await vi.advanceTimersByTimeAsync(60_000)
     expect(win.print).not.toHaveBeenCalled()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+// Follow-up N1: a hand-written html report often defines its own global `print`
+// (or `focus`), which replaces the window's. The bootstrap prints with the window's
+// own, taken before the document is written; and a print that never opened the
+// dialog fails the export instead of leaving it pending for 30 minutes.
+test("the document's own print/focus do not replace the window's: the native print is called", async () => {
+  vi.useFakeTimers()
+  try {
+    const { win, doc, posted, send } = bootRender()
+    const nativePrint = win.print as ReturnType<typeof vi.fn>
+    const ownPrint = vi.fn()
+    // `<script>function print(m) {…} function focus() { throw … }</script>`
+    doc.write.mockImplementation(() => {
+      win.print = ownPrint
+      win.focus = () => {
+        throw new Error("focus is the report's")
+      }
+    })
+    send()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(ownPrint).not.toHaveBeenCalled()
+    expect(nativePrint).toHaveBeenCalledTimes(1)
+    expect(posted.filter((m) => m.state === 'error')).toEqual([])
+    expect(posted).toContainEqual({ slayzoneExport: 'id-1', state: 'done' })
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('a print that never opened the dialog fails the export clearly', async () => {
+  vi.useFakeTimers()
+  try {
+    const { win, posted, send } = bootRender({ dialogOpens: false })
+    send()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(win.print).toHaveBeenCalledTimes(1)
+    const errors = posted.filter((m) => m.state === 'error')
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0].message)).toMatch(/print dialog/i)
+    expect(posted.some((m) => m.state === 'done')).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('a dialog that opens reports done once, when it closes, and no error', async () => {
+  vi.useFakeTimers()
+  try {
+    const { posted, send } = bootRender()
+    send()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(posted.filter((m) => m.state === 'done')).toHaveLength(1)
+    expect(posted.filter((m) => m.state === 'error')).toEqual([])
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('a dialog that opens a moment after print() returns (headless Chromium) is no failure', async () => {
+  vi.useFakeTimers()
+  try {
+    const { posted, send } = bootRender({ dialogLater: true })
+    send()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(posted.filter((m) => m.state === 'done')).toHaveLength(1)
+    expect(posted.filter((m) => m.state === 'error')).toEqual([])
   } finally {
     vi.useRealTimers()
   }

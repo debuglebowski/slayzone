@@ -121,6 +121,12 @@ export interface LaunchOptions {
   commandTimeoutMs?: number
   /** How often a long command checks the browser still answers (default 30 s). */
   livenessIntervalMs?: number
+  /**
+   * How long one such check may go unanswered before the browser counts as stopped
+   * (default: `livenessIntervalMs`). Its own setting: a short interval (tests) must not
+   * mean a short deadline, which a loaded machine misses.
+   */
+  livenessTimeoutMs?: number
   /** After the browser exits, how long its pipes may stay open (default 2 s). */
   exitGraceMs?: number
   /**
@@ -236,6 +242,7 @@ export async function launchBrowser(
 ): Promise<Browser> {
   const commandTimeoutMs = opts.commandTimeoutMs ?? COMMAND_TIMEOUT_MS
   const livenessIntervalMs = opts.livenessIntervalMs ?? LIVENESS_INTERVAL_MS
+  const livenessTimeoutMs = opts.livenessTimeoutMs ?? livenessIntervalMs
   const exitGraceMs = opts.exitGraceMs ?? EXIT_GRACE_MS
   const stallMs = opts.stallMs ?? STALL_MS
   const stallProbeIntervalMs = opts.stallProbeIntervalMs ?? STALL_PROBE_INTERVAL_MS
@@ -432,14 +439,14 @@ export async function launchBrowser(
   async function alive(sessionId: string | undefined): Promise<boolean> {
     const targetId = sessionId ? sessionTargets.get(sessionId) : undefined
     if (!targetId) {
-      await send('Browser.getVersion', {}, undefined, livenessIntervalMs)
+      await send('Browser.getVersion', {}, undefined, livenessTimeoutMs)
       return true
     }
     const { targetInfos } = await send<{ targetInfos?: Array<{ targetId?: unknown }> }>(
       'Target.getTargets',
       {},
       undefined,
-      livenessIntervalMs
+      livenessTimeoutMs
     )
     return Array.isArray(targetInfos) && targetInfos.some((t) => t?.targetId === targetId)
   }

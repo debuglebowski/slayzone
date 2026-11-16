@@ -1132,6 +1132,9 @@ importers:
       expo-web-browser:
         specifier: ~58.0.7
         version: 58.0.7(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
       html2canvas-pro:
         specifier: 2.6.0
         version: 2.6.0

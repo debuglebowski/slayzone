@@ -16,11 +16,12 @@
  * - `htmlRasterPage`: an html artifact, run as the viewer runs it — in an
  *   `<iframe sandbox="allow-scripts">` inside a host page of ours, so its dialogs never
  *   reach the app as native alerts — then drawn page by page as PNGs (html2canvas, in
- *   the host), each page sent to the app as soon as it is drawn. The export prints only
- *   those pictures (`htmlPrintDocument`): nothing the artifact wrote is ever parsed by
- *   expo-print's web view (no navigation policy, no cancel). The artifact runs only
- *   here, where a page that loops (and so says nothing) is unmounted at the renderer's
- *   idle timeout.
+ *   the host), each page sent to the app as soon as it is drawn, and none drawn further
+ *   while {@link HTML_PAGES_AHEAD} wait on the app. The app writes each picture into the
+ *   PDF as it comes (`pages-pdf.ts`), and the PDF holds only those pictures: nothing the
+ *   artifact wrote is ever parsed by expo-print's web view (no navigation policy, no
+ *   cancel). The artifact runs only here, where a page that loops (and so says nothing)
+ *   is unmounted at the renderer's idle timeout.
  *
  * The mermaid and PNG pages run only their own scripts (a nonce'd policy, as the
  * viewer's pages): a script inside an artifact's SVG never runs. Every page has a token
@@ -60,13 +61,26 @@ export type ExportRenderReply =
   /** The PNG's bytes, base64, and its size in pixels (`pngCapturePage`). */
   | { type: 'png'; base64: string; width: number; height: number }
   /**
-   * The html artifact's pages, each a PNG's bytes, base64 (`htmlRasterPage`).
+   * The html artifact's pages were all drawn: `count` of them, each handed to the
+   * render's {@link ExportPageSink} as it came (`htmlRasterPage`; none is kept here).
    * `textLabels`: drawn again with an SVG's HTML labels as plain SVG text (WebKit would
    * not let a drawing of them be read back), so they may look different.
    */
-  | { type: 'pages'; pages: string[]; textLabels: boolean }
+  | { type: 'pages'; count: number; textLabels: boolean }
   /** `render`: nothing could be drawn (`message` says why); `tainted`: see above. */
   | { type: 'error'; code: ExportRenderErrorCode; message: string }
+
+/**
+ * Where an html artifact's pages go as they come (the PDF being written, `pages-pdf.ts`):
+ * each is taken before the next arrives, and dropped. A page it can't take (it throws)
+ * fails the render with its reason.
+ */
+export interface ExportPageSink {
+  /** The `index`th page picture (from 0, in order): PNG bytes, base64. */
+  page: (index: number, base64: string) => void
+  /** The pages so far are dropped: the page is drawn again from its top. */
+  restart: () => void
+}
 
 /** What a page posts: a reply, or (an html artifact's page) a step towards one. */
 export type ExportRenderMessage =
@@ -315,9 +329,9 @@ export const HTML_COPY_FONT_WAIT_MS = 3000
 
 /**
  * The page an html artifact is laid out and cut at, in CSS pixels: A4 (595 × 842 pt)
- * less expo-print's 1cm (28 pt) margins is 539 × 786 pt. The print scales each picture
- * to the sheet's width (`htmlPrintDocument`); at 780/539 of that width at most, it is
- * shorter than the sheet, so rounding never pushes one onto a second sheet.
+ * less desktop's 1cm (28 pt) margins is 539 × 786 pt. The PDF scales each picture to the
+ * sheet's printable width (`PagesPdf`); at 780/539 of that width at most, it is shorter
+ * than the sheet, so it always fits one.
  */
 export const HTML_PAGE = { width: 539, height: 780 } as const
 
@@ -338,6 +352,23 @@ export const HTML_MESSAGE_MAX_CHARS =
  * 16.7M-pixel canvas limit).
  */
 const PAGES_PER_DRAW = 4
+/**
+ * How far an html artifact's page may run ahead of the app: it draws no further while
+ * this many pages it sent wait for the app to take them (each one a picture of up to
+ * ~9 MB, in the bridge or in the app). So however long the report, at most this many
+ * plus one drawing's pages are ever on their way.
+ */
+export const HTML_PAGES_AHEAD = PAGES_PER_DRAW
+
+/**
+ * The host page's function the app calls (`exportAckScript`, injected into the page) once
+ * it has taken pages: how many it has taken in all, restarts included.
+ */
+const ACK_FUNCTION = '__slzExportAck'
+
+/** The script the app injects into an html artifact's host page: it has taken `count` pages in all. */
+export const exportAckScript = (count: number): string =>
+  `window.${ACK_FUNCTION}&&window.${ACK_FUNCTION}(${Math.floor(count)});true;`
 /** A page ends at a blank band in its last fifth when there is one: no line cut in half. */
 const SOFT_BREAK = 0.2
 
@@ -710,6 +741,24 @@ const hostScript = (token: string): string => `(function () {
   // Exported pages are paper, not app chrome: white whatever the theme.
   var PAPER = 'white';
 
+  // The app says how many pages it has taken in all (restarts included); a drawing waits
+  // while AHEAD pages or more are still on their way to it.
+  var AHEAD = ${HTML_PAGES_AHEAD};
+  var posted = 0, taken = 0, waiting = null;
+  window.${ACK_FUNCTION} = function (count) {
+    if (typeof count !== 'number' || !(count > taken)) return;
+    taken = Math.min(count, posted);
+    if (waiting && posted - taken < AHEAD) {
+      var go = waiting;
+      waiting = null;
+      go();
+    }
+  };
+  function room() {
+    if (posted - taken < AHEAD) return Promise.resolve();
+    return new Promise(function (resolve) { waiting = resolve; });
+  }
+
   // Each page goes to the app as soon as it is cut: one message a page, each one a sign
   // of progress for the app's idle timer.
   var sent = 0;
@@ -726,6 +775,7 @@ const hostScript = (token: string): string => `(function () {
     if (url.indexOf(prefix) !== 0 || url.length === prefix.length) throw new Error('A page is too large to draw.');
     post({ type: 'page', index: sent, base64: url.slice(prefix.length) });
     sent++;
+    posted++;
   }
 
   // Cuts a drawing of the page from \`top\` into pages, sending each; returns the CSS
@@ -758,11 +808,11 @@ const hostScript = (token: string): string => `(function () {
       if (top >= total) return Promise.resolve();
       var height = Math.min(PAGE * PER_DRAW, total - top);
       var last = top + height >= total;
-      return drawPart(doc, {
+      return room().then(function () { return drawPart(doc, {
         x: 0, y: top, width: W, height: height, windowWidth: W, windowHeight: PAGE,
         scrollX: 0, scrollY: 0, scale: SCALE, backgroundColor: PAPER,
         useCORS: true, logging: false, imageTimeout: 10000
-      }).then(function (canvas) {
+      }); }).then(function (canvas) {
         top += cut(canvas, last);
         return next();
       });
@@ -927,30 +977,6 @@ export function htmlRasterPage(
 /** A page picture: PNG bytes as base64, nothing else. */
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 
-/** The printer's policy: it loads the page pictures (inline) and nothing else. */
-export const HTML_PRINT_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-inline'"
-
-/**
- * The document expo-print prints for an html artifact: its page pictures, one per
- * sheet, and nothing of the artifact's — no markup, no text, no URL. Each picture is
- * checked to be base64 before it is written into the document.
- */
-export function htmlPrintDocument(pages: readonly string[]): string {
-  if (pages.length === 0) throw new Error('htmlPrintDocument: no pages')
-  for (const page of pages) {
-    if (!BASE64.test(page)) throw new Error('htmlPrintDocument: a page is not a PNG')
-  }
-  const pictures = pages.map((page) => `<img alt="" src="data:image/png;base64,${page}">`)
-  return [
-    '<!DOCTYPE html><html><head>',
-    `<meta http-equiv="Content-Security-Policy" content="${HTML_PRINT_POLICY}">`,
-    '<style>html, body { margin: 0; padding: 0; background: #fff; }',
-    ' img { display: block; width: 100%; height: auto; break-inside: avoid; }',
-    ' img + img { break-before: page; }</style>',
-    `</head><body>${pictures.join('')}</body></html>`
-  ].join('')
-}
-
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0
 
@@ -1010,12 +1036,15 @@ export function parseExportRenderMessage(
 
 /**
  * A render's messages put together: `take(message)` answers with the reply once there is
- * one, else null. An html artifact's pages come one a message, in order (a `restart`
- * drops those so far), and answer as `pages` at their end; a page out of order, or an end
- * that doesn't count the pages sent, is an error.
+ * one, else null. An html artifact's pages come one a message, in order, and go to `sink`
+ * as they come (a `restart` drops those so far); their end answers `pages` with their
+ * count. A page out of order, one `sink` refuses, a page with no `sink` to take it, or an
+ * end that doesn't count the pages sent, is an error.
  */
-export function collectExportReply(): (message: ExportRenderMessage) => ExportRenderReply | null {
-  let pages: string[] = []
+export function collectExportReply(
+  sink?: ExportPageSink
+): (message: ExportRenderMessage) => ExportRenderReply | null {
+  let count = 0
   const broken = (message: string): ExportRenderReply => ({
     type: 'error',
     code: 'render',
@@ -1026,17 +1055,24 @@ export function collectExportReply(): (message: ExportRenderMessage) => ExportRe
       case 'progress':
         return null
       case 'restart':
-        pages = []
+        count = 0
+        sink?.restart()
         return null
       case 'page':
-        if (message.index !== pages.length) return broken('A page of the export came out of order.')
-        pages.push(message.base64)
+        if (!sink) return broken('This export takes no pages.')
+        if (message.index !== count) return broken('A page of the export came out of order.')
+        try {
+          sink.page(message.index, message.base64)
+        } catch (err) {
+          return broken(err instanceof Error ? err.message : String(err))
+        }
+        count++
         return null
       case 'pages-end':
-        if (message.count === 0 || message.count !== pages.length) {
-          return broken(`The export sent ${pages.length} of its ${message.count} pages.`)
+        if (message.count === 0 || message.count !== count) {
+          return broken(`The export sent ${count} of its ${message.count} pages.`)
         }
-        return { type: 'pages', pages, textLabels: message.textLabels }
+        return { type: 'pages', count, textLabels: message.textLabels }
       default:
         return message
     }
