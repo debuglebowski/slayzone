@@ -7,13 +7,18 @@
  * reads, as before. REST can stream the ranges (`openArtifactReader`).
  */
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { createArtifactStore } from '@slayzone/task-artifacts/server'
+import {
+  artifactsRouter,
+  getArtifactStorage,
+  setArtifactStorage,
+  createArtifactStore
+} from '@slayzone/task-artifacts/server'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
@@ -181,5 +186,42 @@ describe('a bounded computer: every byte read in ranges', () => {
     bounded = false
     expect(await open(h.slayDb, artifactId, { kind: 'bytes' })).toBeNull()
     bounded = true
+  })
+
+  it('the desktop/mobile readContent route preserves working-copy, fallback and corrupt-text parity', async () => {
+    const dataRoot = join(dir, 'hub')
+    const previous = getArtifactStorage(dataRoot)
+    setArtifactStorage(dataRoot, stores.ranged)
+    const caller = artifactsRouter.createCaller({ db: h.slayDb, dataRoot })
+    const text = 'public fallback text ✓\n'.repeat(30000)
+    await stores.whole.updateArtifact(h.slayDb, { id: artifactId, content: text })
+    await stores.whole.createArtifactVersion(h.slayDb, { artifactId })
+    const version = await stores.whole.getCurrentArtifactVersion(h.slayDb, { artifactId })
+    const walk = (root: string): string[] =>
+      readdirSync(root, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(join(root, e.name)) : [join(root, e.name)]
+      )
+    const files = walk(join(dir, 'pc'))
+    const working = files.find(
+      (p) => p.includes('/artifacts/') && p.split('/').pop()!.startsWith(artifactId)
+    )!
+    const blob = files.find(
+      (p) => p.includes('/blobs/') && p.endsWith(version!.content_hash.slice(2))
+    )!
+    try {
+      // A working copy wins even if the old immutable blob is corrupt.
+      writeFileSync(blob, 'tampered')
+      expect(await caller.readContent({ id: artifactId })).toBe(text)
+      writeFileSync(blob, text)
+      unlinkSync(working)
+      expect(await caller.readContent({ id: artifactId })).toBe(text)
+      writeFileSync(blob, 'tampered')
+      expect(await caller.readContent({ id: artifactId })).toBe('')
+      const legacy = await both((s) => s.readArtifactContent(h.slayDb, artifactId))
+      expect(legacy.ranged).toBe(legacy.whole)
+      expect(legacy.whole).toBe('')
+    } finally {
+      setArtifactStorage(dataRoot, previous)
+    }
   })
 })

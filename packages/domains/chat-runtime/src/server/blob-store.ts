@@ -1,3 +1,5 @@
+import { open as openAsync, lstat as lstatAsync } from 'node:fs/promises'
+import { setImmediate as yieldTurn } from 'node:timers/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
@@ -59,28 +61,76 @@ export function readFileRangePage(
   }
 }
 
-/** Whether the file at `path` hashes to `hash` (read in chunks, never whole); false when unreadable. */
-export function fileHashMatches(path: string, hash: string): boolean {
-  let fd: number
+/**
+ * Fallback text is empty when its immutable version is corrupt/unreadable. Verify
+ * with bounded async reads, retaining only the requested first range on the same
+ * descriptor. No reopen can substitute unverified bytes between hash and reply.
+ * The caller owns this lifetime and checks route/lifecycle after each await.
+ */
+export async function readVerifiedFirstRange(
+  path: string,
+  hash: string,
+  length: number,
+  assertCurrent: () => void = () => undefined
+): Promise<ByteRangePage> {
+  if (!Number.isSafeInteger(length) || length < 1 || length > BYTE_RANGE_MAX_CHUNK)
+    throw new Error(`Invalid range length (1..${BYTE_RANGE_MAX_CHUNK})`)
+  let before: Awaited<ReturnType<typeof lstatAsync>>
   try {
-    fd = openSync(path, 'r')
+    before = await lstatAsync(path)
   } catch {
-    return false
+    return EMPTY_RANGE_PAGE
+  }
+  assertCurrent()
+  if (!before.isFile()) return EMPTY_RANGE_PAGE
+  let file: Awaited<ReturnType<typeof openAsync>>
+  try {
+    file = await openAsync(path, 'r')
+  } catch {
+    return EMPTY_RANGE_PAGE
   }
   try {
-    const h = createHash('sha256')
-    const buffer = Buffer.allocUnsafe(BYTE_RANGE_MAX_CHUNK)
-    for (
-      let n = readSync(fd, buffer, 0, buffer.length, null);
-      n > 0;
-      n = readSync(fd, buffer, 0, buffer.length, null)
-    )
-      h.update(buffer.subarray(0, n))
-    return h.digest('hex') === hash
-  } catch {
-    return false
+    assertCurrent()
+    let stat: Awaited<ReturnType<typeof file.stat>>
+    try {
+      stat = await file.stat()
+    } catch {
+      return EMPTY_RANGE_PAGE
+    }
+    assertCurrent()
+    if (!stat.isFile() || before.dev !== stat.dev || before.ino !== stat.ino)
+      return EMPTY_RANGE_PAGE
+    const hasher = createHash('sha256'),
+      buffer = Buffer.allocUnsafe(BYTE_RANGE_MAX_CHUNK)
+    const prefix = Buffer.alloc(Math.min(length, stat.size))
+    let offset = 0
+    for (;;) {
+      let bytesRead: number
+      try {
+        ;({ bytesRead } = await file.read(buffer, 0, buffer.length, offset))
+      } catch {
+        return EMPTY_RANGE_PAGE
+      }
+      assertCurrent()
+      if (!bytesRead) break
+      if (offset + bytesRead > stat.size) return EMPTY_RANGE_PAGE
+      if (offset < prefix.length)
+        buffer.copy(prefix, offset, 0, Math.min(bytesRead, prefix.length - offset))
+      offset += bytesRead
+      hasher.update(buffer.subarray(0, bytesRead))
+      await yieldTurn()
+      assertCurrent()
+    }
+    if (offset !== stat.size || hasher.digest('hex') !== hash) return EMPTY_RANGE_PAGE
+    return {
+      data: prefix.toString('base64'),
+      offset: 0,
+      size: stat.size,
+      eof: prefix.length === stat.size,
+      etag: hash
+    }
   } finally {
-    closeSync(fd)
+    await file.close()
   }
 }
 

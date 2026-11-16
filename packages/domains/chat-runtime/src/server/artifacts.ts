@@ -27,7 +27,7 @@ import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import { chatAttachmentSchema, chatRouteSchema } from '../shared'
 import { bumpTaskStateVersion, type ChatStorage } from './storage'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
-import { EMPTY_RANGE_PAGE, fileHashMatches, readFileRangePage } from './blob-store'
+import { EMPTY_RANGE_PAGE, readVerifiedFirstRange, readFileRangePage } from './blob-store'
 import type { createLocalChatData } from './local-data'
 import type { createLocalAttachments } from './attachments'
 import type { UploadLease, UploadStaging } from './upload-staging'
@@ -459,6 +459,25 @@ export function createLocalArtifacts(
       args = artifactMethodSchemas[req.method].parse(req.args) as any[],
       first = args[0]
     const read = reads.has(req.method)
+    const readLifecycle = req.method === 'readRange' ? storage.taskLifecycle(taskId) : undefined
+    function assertReadCurrent() {
+      if (closed) throw new Error('Artifact storage is closed')
+      const current = storage.conversation(req.route.id)
+      const life = storage.taskLifecycle(taskId)
+      if (
+        !current ||
+        current.state !== 'active' ||
+        current.identity.epoch !== req.route.epoch ||
+        current.identity.taskId !== taskId ||
+        life.state === 'deleted' ||
+        life.revision !== readLifecycle?.revision
+      )
+        throw new Error('Artifact ownership or lifecycle changed')
+      const artifact = storage.compose((db) =>
+        db.prepare('SELECT task_id FROM task_artifacts WHERE id=?').get(first)
+      ) as { task_id: string } | undefined
+      if (!artifact || artifact.task_id !== taskId) throw new Error('Artifact is outside this task')
+    }
     let moveSelection: { artifactIds: string[]; folderIds: string[] } | undefined
     if (!read && storage.taskLifecycle(taskId).state !== 'active')
       throw new Error('Task chat is paused or deleted')
@@ -551,7 +570,7 @@ export function createLocalArtifacts(
         args
       })
     }
-    return context.run(owner.identity, async () => {
+    const work = context.run(owner.identity, async () => {
       let result: unknown
       if (req.method === 'importFolder') {
         const existing = await db.get<{ task_id: string; kind: string }>(
@@ -627,22 +646,24 @@ export function createLocalArtifacts(
         }
       } else if (req.method === 'readRange') {
         const [, spec, offset, length] = args
+        assertReadCurrent()
         const source = await store.resolveArtifactReadSource(db, first, spec)
+        assertReadCurrent()
         if (source.kind === 'missing' || source.kind === 'empty') {
           if (offset !== 0) throw new Error('Range offset past the end')
           result = {
             ...EMPTY_RANGE_PAGE,
             ...(source.kind === 'missing' ? { missing: true } : {})
           }
-        } else if (
-          spec.kind === 'content' &&
-          source.kind === 'blob' &&
-          offset === 0 &&
-          !fileHashMatches(source.path, source.version.content_hash)
-        ) {
-          // The text read answers '' when the current version cannot be read (as
-          // `readArtifactContent`, which catches it): a corrupt or unreadable blob.
-          result = EMPTY_RANGE_PAGE
+        } else if (spec.kind === 'content' && source.kind === 'blob' && offset === 0) {
+          const page = await readVerifiedFirstRange(
+            source.path,
+            source.version.content_hash,
+            length,
+            assertReadCurrent
+          )
+          assertReadCurrent()
+          result = page.etag === 'empty' ? page : { ...page, version: source.version }
         } else {
           const hash = source.kind === 'blob' ? source.version.content_hash : undefined
           const page = readFileRangePage(source.path, offset, length, hash)
@@ -761,17 +782,33 @@ export function createLocalArtifacts(
       }
       return result
     })
+    return work.then((result) => {
+      if (req.method === 'readRange') assertReadCurrent()
+      return result
+    })
   }
   function staging(): UploadStaging {
     if (!uploads) throw new Error('Staged uploads are not available on this computer')
     return uploads
   }
   const inFlight = new Map<string, { input: string; result: Promise<unknown> }>()
+  const rangeReads = new Set<{ taskId: string; result: Promise<unknown> }>()
   async function invoke(raw: unknown): Promise<unknown> {
+    if (closed) throw new Error('Artifact storage is closed')
     const req = computerArtifactRequestSchema.parse(raw)
     const owner = storage.conversation(req.route.id)
     if (!owner || owner.state !== 'active' || owner.identity.epoch !== req.route.epoch)
       throw new Error('Artifact ownership is unavailable or deleted')
+    if (req.method === 'readRange') {
+      const result = execute(req)
+      const record = { taskId: owner.identity.taskId, result }
+      rangeReads.add(record)
+      try {
+        return await result
+      } finally {
+        rangeReads.delete(record)
+      }
+    }
     if (reads.has(req.method) || !req.operationId) return execute(req)
     const input = JSON.stringify({
       method: req.method,
@@ -796,11 +833,18 @@ export function createLocalArtifacts(
     async close() {
       closed = true
       if (cleanupTimer) clearTimeout(cleanupTimer)
-      await publication.close()
-      await mutationTail
+      try {
+        await publication.close()
+        await mutationTail
+      } finally {
+        await Promise.allSettled([...rangeReads].map((r) => r.result))
+      }
       await erasureRetries.close()
     },
     async retryErasures(taskId: string) {
+      await Promise.allSettled(
+        [...rangeReads].filter((r) => r.taskId === taskId).map((r) => r.result)
+      )
       // isolation: fatal — only this task's own erasure jobs: any unfinished one means its erasure is not done
       for (const row of await db.all<{ id: string; manifest: string }>(
         "SELECT id,manifest FROM content_erasure_jobs WHERE state='incomplete'"

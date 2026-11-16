@@ -1216,6 +1216,8 @@ run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
 run_harness packages/apps/api/src/http/rest-api/artifacts/content.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/stream-ranges.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/stream-chunks.test.ts
+run_harness packages/apps/computer/src/handlers/content-range-responsiveness.test.ts
 # Workspace file raw bytes routed to the owning computer (slz-file:// previews on a remote hub).
 run_harness packages/apps/api/src/http/rest-api/files/raw.test.ts
 # Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of

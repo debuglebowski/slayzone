@@ -533,15 +533,22 @@ fresh whole-FU2 review remain required.
   admission. Legacy whole reads and bounded range reads share worker-local source
   resolvers; ownership lookup and the complete body read run inside the same
   `withArchive` action and registered native connection. A queued erasure/restore
-  cannot pass between source resolution and byte consumption. The new range
-  callbacks are synchronous bounded reads, so the synchronous native connection
-  helper encloses their entire work; it never closes around an unawaited read.
+  cannot pass between source resolution and byte consumption. Bounded range
+  callbacks remain synchronous; the native connection helper encloses their
+  entire work and retains its native FD and secondary registration through an
+  async action's settlement. Archive erasure awaits the complete finish action,
+  including post-await database checks, before native close and subsequent
+  rewrite/compacted-marker/manifest/index publication.
   S8 physical-namespace privacy inventory, failed-close ownership, recovery,
   serialized erasure/rewrite/manifest/index, retained snapshots and native-copy
-  lifetime exclusions remain authoritative. Future async erasure finish replay
-  must preserve the native registration through its whole awaited action and
-  post-await database checks. Closed port registration, async caller adaptation
+  lifetime exclusions remain authoritative. Later async actions must likewise
+  preserve the native registration through all awaited work and post-await
+  database checks. Closed port registration, remaining async caller adaptation
   and final completed-tree checks remain later integration work.
+
+- **Fallback text verification (FU1 r2 H1):** when `content` has no working copy, the first range verifies the complete immutable version with async 256 KiB reads and event-loop yields. Only the requested prefix is retained, on the same descriptor used for verification; corrupt/unreadable content answers empty text. Route/epoch, lifecycle revision and artifact task membership revalidate after I/O. Active range work drains before task erasure receipts and storage close. Desktop/mobile `artifacts.readContent` share this path; a present working copy remains the preferred source.
+
+- **HTTP download cleanup (FU1 r2 M1):** `streamChunks` aborts a pending backpressure drain wait when the response closes. Early loop exit unwinds the async source; its `finally` removes the response-close listener and aborts remaining event waits. Streaming errors retain the existing before/after-headers response behavior.
 
 - **Uploads are staged in chunks (FU1 S3, 2026-11-15).**
   - **What changed:** a hub used to send an artifact upload, a content write or an attachment as one base64 frame, capped at 14,000,000 chars by the schemas. It now stages the bytes with `upload.begin` / `upload.chunk` (≤ 256 KiB each), then consumes them through the same artifact/attachment validation as inline bytes.
@@ -599,3 +606,4 @@ fresh whole-FU2 review remain required.
   failure cannot release a source: matched quiescence or physical owner exit remains
   required. Production manager admission/injection, exact publication reservations,
   canonical request/registry adapters and final lifetime/erasure tests remain S19.
+- **Final artifact publication remains open (FU1 r2 H2):** async staging does not make `uploadArtifactBlob`/`writeArtifactContent` finalization off-main. FU2 owns the sole worker-backed SQLite/composed-artifact migration. FU1 will adapt staged source-path consumption, captured ownership and main-held lease lifetimes to that owner after root sequences integration, with worker-local bounded FS/hash/durability/atomic publication tests. No competing DB worker or restored upload size cap.

@@ -5,11 +5,12 @@
  * bounded-reads`), with the same ownership checks as the whole reads, and the
  * ranges put together equal the whole read exactly.
  */
+import { open, type FileHandle } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, sep } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BYTE_RANGE_MAX_CHUNK,
   type ByteRangePage,
@@ -372,4 +373,95 @@ describe('content parity with readArtifactContent', () => {
       Buffer.from((await readAll(r, a.id, { kind: 'version', ref: 1 })).bytes).toString()
     ).toBe('bytes text')
   })
+
+  it('an asynchronously unreadable fallback preserves empty-string parity', async () => {
+    const { r, a, working, blob } = await setup('unreadable fallback')
+    removeWorking(working())
+    const handle = await open(blob, 'r'),
+      prototype = Object.getPrototypeOf(handle)
+    await handle.close()
+    vi.spyOn(prototype, 'read').mockRejectedValueOnce(new Error('simulated EIO'))
+    try {
+      expect(await ranged(r, a.id)).toBe('')
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it.each(['paused', 'epoch', 'moved', 'erased', 'closed'] as const)(
+    'delayed fallback verification obeys %s fences and drains its native handle',
+    async (state) => {
+      const { r, a, working, blob } = await setup('private fallback content'.repeat(30000))
+      removeWorking(working())
+      const handle = await open(blob, 'r'),
+        prototype = Object.getPrototypeOf(handle)
+      await handle.close()
+      const read = prototype.read
+      let resume!: () => void,
+        entered = false
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve
+      })
+      vi.spyOn(prototype, 'read').mockImplementationOnce(async function (
+        this: FileHandle,
+        ...args: unknown[]
+      ) {
+        entered = true
+        await gate
+        return read.apply(this, args)
+      })
+      const reading = r.artifacts
+        .invoke({
+          route,
+          method: 'readRange',
+          args: [a.id, { kind: 'content' }, 0, BYTE_RANGE_MAX_CHUNK]
+        })
+        .then(
+          (value) => value,
+          (error: Error) => error
+        )
+      let drain: Promise<unknown> | undefined,
+        drained = false
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true), { timeout: 2000 })
+        if (state === 'paused') await r.applyTaskLifecycle('t', 'paused', 2)
+        if (state === 'epoch')
+          r.storage.compose((db) =>
+            db.prepare("UPDATE conversations SET epoch=2 WHERE id='c'").run()
+          )
+        if (state === 'moved')
+          await r.artifacts.invoke({
+            route: { id: 'c2', epoch: 1 },
+            method: 'moveToTask',
+            operationId: 'move',
+            args: [{ sourceTaskId: 't', artifactIds: [a.id], folderIds: [], destFolderId: null }]
+          })
+        if (state === 'erased' || state === 'closed') {
+          drain = (state === 'erased' ? r.eraseTask('t', 2) : r.close()).then((result) => {
+            drained = true
+            return result
+          })
+          await new Promise((resolve) => setTimeout(resolve, 25))
+          expect(drained).toBe(false)
+        }
+        resume()
+        const failure = await reading
+        expect(failure).toBeInstanceOf(Error)
+        expect(failure).toMatchObject({
+          message:
+            state === 'closed'
+              ? 'Artifact storage is closed'
+              : state === 'moved'
+                ? 'Artifact is outside this task'
+                : 'Artifact ownership or lifecycle changed'
+        })
+        await drain
+      } finally {
+        resume()
+        await reading
+        await drain
+        vi.restoreAllMocks()
+      }
+    }
+  )
 })
