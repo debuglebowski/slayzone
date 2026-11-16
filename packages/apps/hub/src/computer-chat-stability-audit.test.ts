@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process'
 import Database from 'better-sqlite3'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
@@ -11,11 +12,12 @@ import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixtu
 import { createComputerChatServices } from './computer-chat'
 import { deleteComputer, replaceComputer, revokeComputer } from '@slayzone/computers/server'
 import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
-import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
+import * as storageOwners from '../../../domains/chat-runtime/src/server/storage-owner'
+import type { AsyncChatStorage } from '../../../domains/chat-runtime/src/server/storage-owner'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
 
-async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
+async function fixture(opts: { spawnProcess?: typeof spawn; workerPath?: string } = {}) {
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-stability-integration-'))
   // Any provider spawn resolves `claude` to the scripted fake, never to a real
@@ -29,6 +31,7 @@ async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
     createFixtureChatRuntime({
       taskFolder: () => dir,
       stateDir: dir,
+      workerPath: opts.workerPath,
       hubScope: 'hub',
       computerId: () => 'pc',
       getProjectPaths: () => null,
@@ -433,62 +436,75 @@ test('audit: deleting the old computer lets the re-enrolled one adopt the chat a
   }
 })
 
-/**
- * Every statement on chat storage that reads `records`, as it runs during `run`: its
- * SQL, its parameters, the database it ran on and how many rows reached JavaScript.
- * The computer runtime runs in this process, so its better-sqlite3 handle is seen here.
- */
-async function recordsReads(run: () => Promise<unknown>) {
-  const proto = Database.prototype as unknown as {
-    prepare(this: Database.Database, sql: string): Database.Statement
-  }
-  const realPrepare = proto.prepare
+type RecordsMeasurement = {
+  threadId: number
+  reads: Array<{ sql: string; params: unknown[]; path: string; rows: number; plan: string[] }>
+  parsed: number[]
+}
+
+/** Observe execution on the existing canonical writer; main must do no native work. */
+async function recordsReads(storage: AsyncChatStorage, run: () => Promise<unknown>) {
+  await storage.db.get('SELECT audit_metadata_begin()')
+  const native = (['prepare', 'exec', 'pragma', 'backup', 'close'] as const).map((method) =>
+    vi.spyOn(Database.prototype, method)
+  )
   const realParse = JSON.parse
-  const reads: Array<{ sql: string; params: unknown[]; db: Database.Database; rows: number }> = []
-  const parsed: number[] = []
-  proto.prepare = function (sql) {
-    const stmt = realPrepare.call(this, sql)
-    if (/\bFROM records\b/.test(sql)) {
-      const all = stmt.all.bind(stmt)
-      const db = this
-      stmt.all = ((...params: unknown[]) => {
-        const rows = all(...params) as unknown[]
-        reads.push({ sql, params, db, rows: rows.length })
-        return rows
-      }) as typeof stmt.all
-    }
-    return stmt
-  }
+  const mainParsed: number[] = []
   JSON.parse = ((text: string, reviver?: Parameters<typeof JSON.parse>[1]) => {
-    parsed.push(typeof text === 'string' ? text.length : 0)
+    mainParsed.push(typeof text === 'string' ? text.length : 0)
     return realParse(text, reviver)
   }) as typeof JSON.parse
   let result: unknown
+  let mainNativeCalls: number[] = []
   try {
     result = await run()
   } finally {
-    proto.prepare = realPrepare
+    mainNativeCalls = native.map((spy) => spy.mock.calls.length)
+    for (const spy of native) spy.mockRestore()
     JSON.parse = realParse
   }
+  const report = await storage.db.get<{ report: string }>('SELECT audit_metadata_end() AS report')
   return {
+    ...(JSON.parse(report!.report) as RecordsMeasurement),
     result,
-    reads: reads.map((read) => ({
-      ...read,
-      /** How SQLite visits `records` for it (EXPLAIN QUERY PLAN, same parameters). */
-      plan: (
-        realPrepare.call(read.db, `EXPLAIN QUERY PLAN ${read.sql}`).all(...read.params) as Array<{
-          detail: string
-        }>
-      ).map((row) => row.detail)
-    })),
-    /** Lengths of every string JSON.parse was handed. */
-    parsed
+    mainNativeCalls,
+    mainParsed
   }
 }
 
 test('audit measurement: pending metadata reads scale with retained diagnostic payload', async () => {
-  const f = await fixture()
-  let raw: ReturnType<typeof openChatStorage> | undefined
+  // The fixture instruments the native driver, then loads the actual shipped worker.
+  // Assert its relevant inputs too: a stale bundle cannot make a source fault pass.
+  const bundle = fileURLToPath(new URL('../../computer/dist/bin.cjs', import.meta.url))
+  const map = JSON.parse(readFileSync(bundle + '.map', 'utf8')) as {
+    sources: string[]
+    sourcesContent: string[]
+  }
+  for (const source of [
+    '../../../domains/chat-runtime/src/server/storage.ts',
+    '../../../domains/chat-runtime/src/server/local-data.ts',
+    '../../../domains/chat-runtime/src/server/computer-online-stores.ts'
+  ]) {
+    const path = fileURLToPath(new URL(source, import.meta.url))
+    const index = map.sources.findIndex((entry) => resolve(dirname(bundle), entry) === path)
+    expect(index, `packaged worker includes ${source}`).toBeGreaterThanOrEqual(0)
+    expect(map.sourcesContent[index], `packaged worker matches ${source}`).toBe(
+      readFileSync(path, 'utf8')
+    )
+  }
+  const f = await fixture({
+    workerPath: fileURLToPath(
+      new URL('./computer-chat-metadata.worker.fixture.cjs', import.meta.url)
+    )
+  })
+  let raw: AsyncChatStorage | undefined
+  const openOwner = storageOwners.openChatStorageOwner
+  const capture = vi
+    .spyOn(storageOwners, 'openChatStorageOwner')
+    .mockImplementation(async (opts) => {
+      raw = await openOwner(opts)
+      return raw
+    })
   try {
     f.db
       .prepare(
@@ -498,36 +514,50 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
     const hub = f.services()
     await hub.relay.ops.saveTabDraft('tab', { text: 'draft', attachments: [] })
     const owner = (await hub.ownership.forTab('tab'))!
-    raw = openChatStorage({ stateDir: f.dir, hubScope: 'hub' })
+    expect(raw, 'the actual online canonical owner').toBeDefined()
     const pending = [0, 1, 2].map((n) => ({ sequence: n, audit: `pending-${n}` }))
-    raw.transaction(() => {
-      for (const value of pending)
-        raw!.putRecord(owner.id, owner.epoch, {
-          kind: 'settings',
-          id: `metadata:audit-${value.sequence}`,
-          value,
-          at: value.sequence
-        })
-    })
+    for (const value of pending)
+      await raw!.putRecord(owner.id, owner.epoch, {
+        kind: 'settings',
+        id: `metadata:audit-${value.sequence}`,
+        value,
+        at: value.sequence
+      })
     const pendingMetadata = () => f.request({ kind: 'pendingMetadata' })
-    const baseline = await recordsReads(pendingMetadata)
+    const baseline = await recordsReads(raw!, pendingMetadata)
     // Stamped with the chat database they count in when sent.
-    const stamped = pending.map((value) => ({ ...value, storeId: raw!.storeId() }))
+    const storeId = await raw!.storeId()
+    const stamped = pending.map((value) => ({ ...value, storeId }))
     expect(baseline.result, 'the pending metadata').toEqual(stamped)
 
     // 32 MiB of retained diagnostics beside it.
     const payload = 'x'.repeat(128 * 1024)
-    raw.transaction(() => {
-      for (let n = 0; n < 256; n++)
-        raw!.putRecord(owner.id, owner.epoch, {
-          kind: 'settings',
-          id: `diagnostic:audit-${n}`,
-          value: { payload },
-          at: n
-        })
-    })
-    const retained = await recordsReads(pendingMetadata)
+    for (let n = 0; n < 256; n++)
+      await raw!.putRecord(owner.id, owner.epoch, {
+        kind: 'settings',
+        id: `diagnostic:audit-${n}`,
+        value: { payload },
+        at: n
+      })
+    expect(
+      await raw!.db.get<{ rows: number; bytes: number }>(
+        "SELECT count(*) AS rows,sum(length(value)) AS bytes FROM records WHERE kind='settings' AND id GLOB 'diagnostic:audit-*'"
+      ),
+      'retained diagnostic corpus exists on the measured owner'
+    ).toEqual({ rows: 256, bytes: 256 * JSON.stringify({ payload }).length })
+    const retained = await recordsReads(raw!, pendingMetadata)
     expect(retained.result, 'the same pending metadata').toEqual(stamped)
+
+    const thread = await raw!.db.get<{ n: number }>('SELECT chat_storage_owner_thread() AS n')
+    expect(thread!.n, 'actual worker thread').toBeGreaterThan(0)
+    for (const measurement of [baseline, retained]) {
+      expect(measurement.threadId).toBe(thread!.n)
+      expect(measurement.mainNativeCalls, 'zero native SQLite work on main').toEqual([
+        0, 0, 0, 0, 0
+      ])
+      expect(measurement.reads.every((read) => read.path === raw!.path)).toBe(true)
+      expect(measurement.mainParsed.filter((length) => length >= payload.length)).toEqual([])
+    }
 
     expect(retained.reads.length, 'the read goes through chat storage').toBeGreaterThan(0)
     // The same statements, the same rows reaching JavaScript: none of the diagnostics.
@@ -553,9 +583,37 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
       retained.parsed.filter((length) => length >= payload.length),
       'no diagnostic payload is deserialized'
     ).toEqual([])
+    expect(retained.parsed, 'worker deserialization is observed').toHaveLength(pending.length)
+    expect(await raw!.storeId(), 'fixture never rotates the live store identity').toBe(storeId)
+    expect(await raw!.conversation(owner.id)).toMatchObject({
+      identity: { id: owner.id, epoch: owner.epoch },
+      state: 'active'
+    })
+    expect(await hub.relay.ops.getTabState('tab')).toMatchObject({ draft: { text: 'draft' } })
+    expect(await raw!.getRecord(owner.id, 'settings', 'diagnostic:audit-255')).toEqual({ payload })
+    expect(capture, 'reuse the one canonical owner').toHaveBeenCalledTimes(1)
+    process.stdout.write(
+      'metadata audit proof ' +
+        JSON.stringify({
+          canonicalThread: thread!.n,
+          diagnosticRows: 256,
+          diagnosticPayloadBytes: 256 * payload.length,
+          baselineRows: baseline.reads.map((read) => read.rows),
+          retainedRows: retained.reads.map((read) => read.rows),
+          plan: retained.reads.map((read) => read.plan),
+          workerParsed: retained.parsed,
+          mainNativeCalls: retained.mainNativeCalls,
+          stableStoreId: true,
+          preservedDraft: true
+        }) +
+        '\n'
+    )
   } finally {
-    raw?.close()
-    await f.close()
+    try {
+      await f.close()
+    } finally {
+      capture.mockRestore()
+    }
   }
 })
 
