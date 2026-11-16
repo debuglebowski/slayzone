@@ -567,7 +567,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     // request is served must lie inside that task's / project's own folders here.
     const control =
       method === HubToComputerMethods.chatRequest &&
-      ['control', 'control.prepare', 'control.cancel'].includes(
+      ['control', 'control.prepare', 'control.cancel', 'control.renew'].includes(
         String((params as { kind?: unknown } | null)?.kind)
       )
     const independent = storeIndependentControls.has(method) || control
@@ -759,6 +759,7 @@ export function startComputer(
     chatStorageCompaction: true,
     chatProcessControls: true,
     chatControlInvocations: true,
+    chatControlLeases: true,
     capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own

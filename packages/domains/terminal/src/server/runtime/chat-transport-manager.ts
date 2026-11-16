@@ -444,6 +444,8 @@ export interface ChatSessionInfo {
 export interface PreparedChatControl {
   spawnId: string
   acknowledged: Promise<unknown>
+  onPhysicalExit(listener: () => void): () => void
+  ownsPhysicalStop(): boolean
   run<T>(work: () => T | Promise<T>): Promise<T>
   close(): void
 }
@@ -907,9 +909,29 @@ export function createChatTransport(
   /** Closing tabs' final writes, awaited before the same tab is hydrated again. */
   const closing = new Map<string, { tab: ChatTab; work: Promise<void>; failed: boolean }>()
   const pendingProcessControls = new WeakMap<ChatTab, Promise<void>>()
+  type ControlGroup = {
+    tab: ChatTab
+    proc: ChatProcess
+    boundary: ReturnType<ChatProcess['outputBoundary']>
+    cut: { candidate: PoppedMessage | null | undefined }
+    refs: number
+    released: boolean
+    previousStopping: boolean
+    ack?: Promise<unknown>
+    ackSettled: boolean
+    ackFailed: boolean
+    stop?: Promise<unknown>
+    unwatchExit?: () => void
+    resume(): void
+    tail: Promise<void>
+    decisionMade: boolean
+    removed: boolean
+  }
+  const controlGroups = new WeakMap<ChatTab, ControlGroup>()
   const controlContinuation = new AsyncLocalStorage<{
     tab: ChatTab
     proc: ChatProcess
+    group: ControlGroup
     ack: Promise<unknown>
     release(): void
     used: boolean
@@ -2930,6 +2952,7 @@ export function createChatTransport(
    * No tab yet: hydrates one and starts it.
    */
   async function respawn(tabId: string, nextOpts: CreateChatOpts): Promise<ChatSessionInfo> {
+    assertCapturedControlGeneration()
     const tab = tabs.get(tabId)
     if (!tab || tab.closed) {
       await hydrateSession(nextOpts)
@@ -2952,6 +2975,7 @@ export function createChatTransport(
     } = {}
   ): Promise<void> {
     while (tab.respawning) await tab.respawning.catch(() => undefined)
+    assertCapturedControlGeneration()
     const run = (async (): Promise<void> => {
       const old = tab.proc
       if (old && !old.ended) {
@@ -3174,65 +3198,148 @@ export function createChatTransport(
     tabId: string,
     method: 'interrupt' | 'abortAndPop' | 'kill' | 'remove'
   ): PreparedChatControl | null {
-    const tab = tabs.get(tabId),
-      proc = liveProcess(tabId)
-    if (!tab || !proc) return null
-    if (pendingProcessControls.has(tab))
-      throw new Error('A chat control is already pending for this generation')
-    const stoppingProcess = method === 'kill' || method === 'remove'
-    const boundary = stoppingProcess
-        ? {
-            ready: Promise.resolve(),
-            release: () => {
-              // Physical process stop has no provider-turn decision boundary.
-            }
-          }
-        : proc.outputBoundary(),
-      previousStopping = proc.stoppingTurn
-    let running = false,
-      resume!: () => void
-    const waiting = new Promise<void>((r) => {
-      resume = r
-    })
-    pendingProcessControls.set(tab, waiting)
-    const release = () => {
-      boundary.release()
-      if (pendingProcessControls.get(tab) === waiting) pendingProcessControls.delete(tab)
-      resume()
+    const tab = tabs.get(tabId)
+    if (!tab) return null
+    let group = controlGroups.get(tab)
+    const proc = group?.proc ?? liveProcess(tabId)
+    if (!proc || (!group && proc.physicallyExited)) return null
+    if (group && (group.released || group.proc !== tab.proc || proc.replaced))
+      throw new Error('Chat control generation changed')
+    if (!group) {
+      let resume!: () => void
+      const waiting = new Promise<void>((r) => {
+        resume = r
+      })
+      const cut: { candidate: PoppedMessage | null | undefined } = { candidate: undefined }
+      group = {
+        tab,
+        proc,
+        cut,
+        boundary: proc.outputBoundary(() => {
+          cut.candidate = peekTrailingUserMessage(tab)
+        }),
+        refs: 0,
+        released: false,
+        previousStopping: proc.stoppingTurn,
+        ackSettled: false,
+        ackFailed: false,
+        resume,
+        tail: Promise.resolve(),
+        decisionMade: false,
+        removed: false
+      }
+      controlGroups.set(tab, group)
+      pendingProcessControls.set(tab, waiting)
+      const captured = group
+      captured.unwatchExit = proc.onPhysicalExit(() => finishControlGroup(captured))
     }
+    const captured = group,
+      stoppingProcess = method === 'kill' || method === 'remove'
+    captured.refs++
     proc.stoppingTurn = true
-    const acknowledged = stoppingProcess
-      ? controlSession(tabId, proc.spawnId, 'kill')
-      : sendControlRequest(tabId, { subtype: 'interrupt' }, STOP_INTERRUPT_TIMEOUT_MS)
-    void acknowledged.catch(() => {
-      // Keep the causal cut until durable fallback decides to replace this
-      // generation. A refused/timeout ACK is reused as a failure, never retried
-      // against a later turn.
-    })
+    if (stoppingProcess && !captured.stop)
+      captured.stop = controlSession(tabId, proc.spawnId, 'kill')
+    if (!stoppingProcess && !captured.ack && !captured.stop) {
+      captured.ack = sendControlRequest(tabId, { subtype: 'interrupt' }, STOP_INTERRUPT_TIMEOUT_MS)
+      void captured.ack.then(
+        () => {
+          captured.ackSettled = true
+          finishControlGroup(captured)
+        },
+        () => {
+          captured.ackSettled = true
+          captured.ackFailed = true
+          finishControlGroup(captured)
+        }
+      )
+    }
+    if (captured.stop)
+      void captured.stop.catch(() => {
+        // An unconfirmed physical stop retains its generation fence until actual exit.
+      })
+    const acknowledged = stoppingProcess ? captured.stop! : (captured.stop ?? captured.ack!)
+    let closed = false
     return {
       spawnId: proc.spawnId,
       acknowledged,
+      onPhysicalExit: (listener) => proc.onPhysicalExit(listener),
+      ownsPhysicalStop: () => !!captured.stop,
       async run<T>(work: () => T | Promise<T>): Promise<T> {
-        await boundary.ready.catch((error) => {
-          if (!proc.ended || proc.replaced) throw error
+        let releaseTurn!: () => void
+        const previous = captured.tail
+        captured.tail = new Promise<void>((r) => {
+          releaseTurn = r
         })
-        if (tabs.get(tabId) !== tab || tab.proc !== proc || proc.replaced || tab.closed)
-          throw new Error('Chat control generation changed before durable continuation')
-        running = true
         try {
-          return await controlContinuation.run(
-            { tab, proc, ack: acknowledged, release, used: false },
+          await previous
+          await captured.boundary.ready
+          const current = tabs.get(tabId),
+            ownsRemoval = captured.removed && !current
+          if (
+            closed ||
+            captured.released ||
+            tab.proc !== proc ||
+            (proc.replaced && !ownsRemoval) ||
+            (current !== tab && !ownsRemoval)
+          )
+            throw new Error('Chat control generation changed before durable continuation')
+          const result = await controlContinuation.run(
+            {
+              tab,
+              proc,
+              group: captured,
+              ack: captured.ack ?? acknowledged,
+              release: captured.boundary.release,
+              used: false
+            },
             work
           )
+          if (method === 'remove') captured.removed = true
+          return result
         } finally {
-          release()
+          captured.boundary.release()
+          releaseTurn()
         }
       },
       close() {
-        release()
-        if (!running && tab.proc === proc) proc.stoppingTurn = previousStopping
+        if (closed) return
+        closed = true
+        captured.refs--
+        finishControlGroup(captured)
       }
     }
+  }
+
+  /** Revalidate at the actual effect, after any handler data/workspace await. */
+  function assertCapturedControlGeneration(): void {
+    const captured = controlContinuation.getStore()
+    if (!captured) return
+    const current = tabs.get(captured.tab.tabId)
+    if (!current && captured.group.removed) return
+    if (current !== captured.tab || current.proc !== captured.proc)
+      throw new Error('Chat control generation changed before effect')
+  }
+
+  function finishControlGroup(group: ControlGroup): void {
+    if (group.refs || group.released) return
+    group.boundary.release()
+    if (!group.proc.physicallyExited) {
+      if (group.stop || (group.ack && !group.ackSettled)) return
+      if (group.ackFailed) {
+        group.stop = controlSession(group.tab.tabId, group.proc.spawnId, 'kill')
+        void group.stop.catch(() => {
+          // Keep unknown physical ownership; actual exit settles the fence.
+        })
+        return
+      }
+    }
+    group.released = true
+    group.unwatchExit?.()
+    if (controlGroups.get(group.tab) === group) controlGroups.delete(group.tab)
+    pendingProcessControls.delete(group.tab)
+    group.resume()
+    if (!group.decisionMade && group.tab.proc === group.proc)
+      group.proc.stoppingTurn = group.previousStopping
   }
 
   /** Existing process only: never hydrate, read paths, persist receipts or respawn. */
@@ -3488,7 +3595,7 @@ export function createChatTransport(
     return popped ? { popped: true, text: popped.text } : { popped: false, text: null }
   }
 
-  function popTrailingUserMessage(tab: ChatTab): PoppedMessage | null {
+  function peekTrailingUserMessage(tab: ChatTab): PoppedMessage | null {
     if (tab.turnProgress) return null
     let found: PoppedMessage | null = null
     const events = tab.log.events
@@ -3516,6 +3623,15 @@ export function createChatTransport(
       const oldest = tab.outbox.oldestInFlight()
       if (oldest !== null && oldest !== found.id) return null
     }
+    return found
+  }
+
+  function popTrailingUserMessage(
+    tab: ChatTab,
+    candidate?: PoppedMessage | null
+  ): PoppedMessage | null {
+    const found = candidate === undefined ? peekTrailingUserMessage(tab) : candidate
+    if (!found) return null
     routeHostEvent(tab, {
       kind: 'user-message-popped',
       text: found.text,
@@ -3582,6 +3698,8 @@ export function createChatTransport(
       interruptTimeoutMs?: number
     }
   ): Promise<StopTurnResult> {
+    const continuation = controlContinuation.getStore()
+    if (continuation?.group.removed) return stopResult(null, 'interrupt')
     const tab = tabs.get(tabId)
     if (!tab || tab.closed) {
       // Nothing hydrated: there is no turn to stop; start a process, as before.
@@ -3589,11 +3707,14 @@ export function createChatTransport(
       return stopResult(null, 'respawn')
     }
     const caps = chatCapabilitiesForMode(tab.mode)
-    const proc = liveProcess(tabId)
-    const continuation = controlContinuation.getStore()
+    const proc = continuation?.proc ?? liveProcess(tabId)
     if (continuation && (continuation.tab !== tab || continuation.proc !== tab.proc))
       throw new Error('Chat control generation changed before stop')
-    const popped = opts.restorePrompt ? popTrailingUserMessage(tab) : null
+    if (continuation?.group.decisionMade) return stopResult(null, 'interrupt')
+    if (continuation) continuation.group.decisionMade = true
+    const popped = opts.restorePrompt
+      ? popTrailingUserMessage(tab, continuation?.group.cut.candidate)
+      : null
     const reach = popped?.id ? tab.outbox.reach(popped.id) : null
     if (!popped) {
       const pending = tab.outbox.oldestInFlight()
@@ -3606,10 +3727,15 @@ export function createChatTransport(
     // none may create a later provider turn after the captured ACK.
     if (continuation) for (const id of tab.outbox.pendingWrites()) tab.outbox.cancel(id)
 
+    if (continuation && proc?.physicallyExited) {
+      continuation.release()
+      return stopResult(popped, 'interrupt')
+    }
+
     if (!proc || !caps.liveInterrupt || !proc.driver.applyControl) {
       continuation?.release()
-      await respawn(tabId, await opts.respawnOpts())
-      if (popped?.id && caps.rewind) await forgetPopped(tab, popped.id)
+      const replacement = await respawn(tabId, await opts.respawnOpts())
+      if (popped?.id && caps.rewind) await forgetPopped(tab, popped.id, replacement.spawnId)
       return stopResult(popped, 'respawn')
     }
 
@@ -3650,8 +3776,8 @@ export function createChatTransport(
           error: toErrorMessage(err)
         }
       )
-      await respawn(tabId, await opts.respawnOpts())
-      if (popped?.id) await forgetPopped(tab, popped.id)
+      const replacement = await respawn(tabId, await opts.respawnOpts())
+      if (popped?.id) await forgetPopped(tab, popped.id, replacement.spawnId)
       return stopResult(popped, 'respawn')
     }
 
@@ -3665,7 +3791,7 @@ export function createChatTransport(
         .applyControl({ subtype: 'interrupt' }, STOP_FOLLOW_UP_TIMEOUT_MS)
         .catch(() => undefined)
     }
-    if (popped?.id) await forgetPopped(tab, popped.id)
+    if (popped?.id) await forgetPopped(tab, popped.id, proc.spawnId)
     return stopResult(popped, 'interrupt')
   }
 
@@ -3704,10 +3830,12 @@ export function createChatTransport(
    * `target_not_found` means it never had it — fine either way; anything else is
    * shown, since Claude may still remember a message the timeline no longer has.
    */
-  async function forgetPopped(tab: ChatTab, id: string): Promise<void> {
+  async function forgetPopped(tab: ChatTab, id: string, expectedSpawnId?: string): Promise<void> {
     const proc = liveProcess(tab.tabId)
     let problem: string | null = null
-    if (!proc?.driver.applyControl) {
+    if (expectedSpawnId && proc?.spawnId !== expectedSpawnId) {
+      problem = 'Chat control generation changed before stopped-message rewind'
+    } else if (!proc?.driver.applyControl) {
       problem = `${tab.backend.displayName} is not running`
     } else {
       try {
@@ -4225,6 +4353,7 @@ export function createChatTransport(
   }
 
   function kill(tabId: string): void {
+    assertCapturedControlGeneration()
     const tab = tabs.get(tabId)
     if (!tab) return
     if (tab.ended) return
@@ -4253,6 +4382,7 @@ export function createChatTransport(
    * are written, and a later hydrate of the same tab waits for that.
    */
   function removeSession(tabId: string): Promise<void> {
+    assertCapturedControlGeneration()
     const tab = tabs.get(tabId)
     if (!tab) {
       const pending = closing.get(tabId)
@@ -4508,8 +4638,15 @@ export function createChatTransport(
   }
 
   function getSessionInfo(tabId: string): ChatSessionInfo | null {
-    const tab = tabs.get(tabId)
-    return tab ? toInfo(tab) : null
+    const captured = controlContinuation.getStore()
+    const tab =
+      tabs.get(tabId) ??
+      (captured?.group.removed && captured.tab.tabId === tabId ? captured.tab : undefined)
+    return tab
+      ? captured?.group.removed
+        ? { ...toInfo(tab), ended: true, pid: null }
+        : toInfo(tab)
+      : null
   }
 
   function toInfo(tab: ChatTab): ChatSessionInfo {

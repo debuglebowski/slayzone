@@ -14,6 +14,7 @@ import {
   parseChatInvocation,
   chatProcessControlSchema,
   chatControlPreparationSchema,
+  CHAT_CONTROL_PREPARATION_LEASE_MS,
   type ChatInvocation,
   type ChatTabTransition,
   type ConversationIdentity
@@ -47,6 +48,8 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
     control: PreparedChatControl
     cancelled: boolean
     committing: boolean
+    lease?: ReturnType<typeof setTimeout>
+    unwatchPhysical?: () => void
     work?: Promise<unknown>
   }
   const prepared = new Map<string, Prepared>()
@@ -58,9 +61,21 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
     !!a && (['id', 'taskId', 'tabId', 'mode', 'epoch'] as const).every((key) => a[key] === b[key])
   const isControlled = (tab: string) => [...prepared.values()].some((p) => p.identity.tabId === tab)
   function releasePrepared(token: string, entry: Prepared) {
+    clearTimeout(entry.lease)
+    entry.unwatchPhysical?.()
     entry.control.close()
     if (prepared.get(token) === entry) prepared.delete(token)
     if (!closing && !stopped && !failure) resumeQueue(entry.identity.tabId)
+  }
+  function renewPrepared(token: string, entry: Prepared) {
+    clearTimeout(entry.lease)
+    if (entry.committing) return
+    entry.lease = setTimeout(() => {
+      if (prepared.get(token) !== entry || entry.committing) return
+      entry.cancelled = true
+      releasePrepared(token, entry)
+    }, CHAT_CONTROL_PREPARATION_LEASE_MS)
+    entry.lease.unref?.()
   }
   function cancelPreparedControls(taskId?: string, onlyUncommitted = false, tabId?: string) {
     for (const [token, entry] of prepared) {
@@ -499,6 +514,18 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       async prepareControl(input: unknown) {
         const req = chatControlPreparationSchema.parse(input),
           identity = req.identity
+        if (req.kind === 'control.cancel') {
+          const entry = prepared.get(req.token)
+          if (entry && !sameIdentity(entry.identity, identity))
+            throw new Error('Chat control token ownership mismatch')
+          // Authenticated owner cleanup remains valid after admission closes. A
+          // caller cannot cancel already committing work or erase its receipt.
+          if (entry && !entry.committing) {
+            entry.cancelled = true
+            releasePrepared(req.token, entry)
+          }
+          return { ok: true }
+        }
         if (
           failure ||
           stopped ||
@@ -509,11 +536,11 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
           !sameIdentity(bindings.get(identity.tabId), identity)
         )
           throw failure ?? new Error('Chat control ownership/admission mismatch')
-        if (req.kind === 'control.cancel') {
+        if (req.kind === 'control.renew') {
           const entry = prepared.get(req.token)
-          if (entry && !sameIdentity(entry.identity, identity))
-            throw new Error('Chat control token ownership mismatch')
-          if (entry && !entry.committing) releasePrepared(req.token, entry)
+          if (!entry || entry.cancelled || !sameIdentity(entry.identity, identity))
+            throw new Error('Chat control lease is stale')
+          renewPrepared(req.token, entry)
           return { ok: true }
         }
         const call = parseChatInvocation(req.value),
@@ -539,15 +566,17 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         )
         if (existing && existing[1].input !== fingerprint)
           throw new Error('Control operation id reused with different input')
+        if (req.token && prepared.has(req.token) && existing?.[0] !== req.token)
+          throw new Error('Chat control token is already owned')
+        if (existing && req.token && existing[0] !== req.token)
+          throw new Error('Chat control request token changed')
         if (!existing) {
-          if (isControlled(identity.tabId))
-            throw new Error('A chat control is already pending for this generation')
           const control = transport.prepareDurableControl(
             identity.tabId,
             call.method as 'interrupt' | 'abortAndPop' | 'kill' | 'remove'
           )
           if (!control) return { available: false }
-          const token = randomUUID(),
+          const token = req.token ?? randomUUID(),
             entry: Prepared = {
               identity: { ...identity },
               call,
@@ -557,6 +586,17 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
               committing: false
             }
           prepared.set(token, entry)
+          renewPrepared(token, entry)
+          entry.unwatchPhysical = control.onPhysicalExit(() => {
+            if (
+              !entry.committing &&
+              !control.ownsPhysicalStop?.() &&
+              prepared.get(token) === entry
+            ) {
+              entry.cancelled = true
+              releasePrepared(token, entry)
+            }
+          })
           existing = [token, entry]
         }
         const [token, entry] = existing
@@ -685,6 +725,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
           return Promise.reject(new Error('Chat control token is stale or mismatched'))
         if (entry.work) return entry.work
         entry.committing = true
+        clearTimeout(entry.lease)
         const work = committing
           .run(entry, () => run())
           .finally(() => releasePrepared(parsed.controlToken!, entry))

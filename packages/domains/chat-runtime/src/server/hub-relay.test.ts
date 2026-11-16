@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
+import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +14,7 @@ import { applyComputerRetirements } from './hub-retirements'
 import { computerStanding } from '@slayzone/computers/server'
 import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
 
-test.each([undefined, false, true])(
+test.each([undefined, false, true, 'legacy', 'idle'])(
   'public abort prepares only with host continuation capability (%s), then awaits durable pop result',
   async (capability) => {
     const h = await createTestHarness()
@@ -46,10 +49,11 @@ test.each([undefined, false, true])(
       const request: ChatComputerRequest = async (_pc, raw) => {
         const r = raw as Record<string, unknown>
         requests.push(r)
+        if (r.kind === 'control.prepare' && capability === 'idle') return { available: false }
         if (r.kind === 'control.prepare')
           return {
             available: true,
-            token: '11111111-1111-4111-8111-111111111111',
+            token: (r as { token: string }).token,
             spawnId: 'spawn',
             acknowledged: true,
             pendingDurability: true
@@ -58,6 +62,7 @@ test.each([undefined, false, true])(
           return { ok: true, identity: (r.value as { identity: unknown }).identity }
         if (r.kind === 'pendingMetadata') return []
         if (r.kind === 'invoke') return result
+        if (r.kind === 'control.renew') return { ok: true }
         if (r.kind === 'control.cancel') return { ok: true }
         throw new Error('Unexpected public control request')
       }
@@ -66,7 +71,9 @@ test.each([undefined, false, true])(
         ownership,
         request,
         stopRequest: request,
-        chatControlInvocations: () => capability === true,
+        chatControlInvocations: () =>
+          capability === true || capability === 'legacy' || capability === 'idle',
+        chatControlLeases: () => capability === true || capability === 'idle',
         bootstrap: async (owner: HubChatOwnership) => {
           entering()
           await held
@@ -97,15 +104,24 @@ test.each([undefined, false, true])(
         })
       void stopping.catch(() => undefined)
       await entered
-      expect(requests.filter((x) => x.kind === 'control.prepare')).toHaveLength(capability ? 1 : 0)
+      expect(requests.filter((x) => x.kind === 'control.prepare')).toHaveLength(
+        capability === true || capability === 'idle' ? 1 : 0
+      )
       expect(finished).toBe(false)
+      // A successful prepare response can have consumed almost its entire
+      // original lease in transit. Refresh ownership before blocked bootstrap.
+      expect(requests.filter((x) => x.kind === 'control.renew')).toHaveLength(
+        capability === true ? 1 : 0
+      )
       release()
       expect(await stopping).toEqual(result)
       const invoke = requests.find((x) => x.kind === 'invoke') as {
         value: { controlToken?: string }
       }
       expect(invoke.value.controlToken).toBe(
-        capability ? '11111111-1111-4111-8111-111111111111' : undefined
+        capability === true
+          ? (requests.find((x) => x.kind === 'control.prepare') as { token: string }).token
+          : undefined
       )
     } finally {
       release()
@@ -1142,3 +1158,112 @@ test('opening a chat on a re-enrolled computer recovers its successor, not the g
     h.cleanup()
   }
 })
+
+test.each(['before', 'during'])(
+  'configured owner cleanup escapes %s caller abort, retaining actor and task scope',
+  async (when) => {
+    const h = await createTestHarness(),
+      callerAbort = new AsyncLocalStorage<AbortSignal>(),
+      controller = new AbortController()
+    let entered!: () => void, reply: ((value: unknown) => void) | undefined
+    const preparing = new Promise<void>((r) => {
+        entered = r
+      }),
+      requests: Array<{ kind: string; token?: string }> = []
+    const fault = new Error('fixture caller aborted')
+    const contexts: Array<{ actor: unknown; scope: unknown }> = []
+    try {
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      const ownership = createChatOwnershipStore(h.slayDb)
+      await ownership.register({
+        id: 'c',
+        taskId: 'task',
+        tabId: 'tab',
+        mode: 'claude-chat',
+        computerId: 'pc',
+        epoch: 1
+      })
+      const request: ChatComputerRequest = async (_pc, raw) => {
+        if (callerAbort.getStore()?.aborted) throw fault
+        const req = raw as { kind: string; token?: string }
+        requests.push(req)
+        if (req.kind === 'control.prepare') {
+          entered()
+          return new Promise((r) => {
+            reply = r
+          })
+        }
+        if (req.kind === 'control.cancel') {
+          contexts.push({ actor: currentSecurityContext()?.actor, scope: currentPathScope() })
+          return { ok: true }
+        }
+        throw new Error('No durable invocation is allowed after caller abort')
+      }
+      const relay = createHubChatRelay({
+        db: h.slayDb,
+        ownership,
+        request,
+        stopRequest: request,
+        controlCleanupRequest: (pc, raw) => callerAbort.exit(() => request(pc, raw)),
+        controlSignal: () => callerAbort.getStore(),
+        chatControlInvocations: () => true,
+        chatControlLeases: () => true,
+        resolveComputer: async () => 'pc',
+        defaultComputer: async () => 'pc',
+        bootstrap: async () => {
+          throw new Error('Aborted request must not bootstrap')
+        },
+        migrate: async () => {
+          throw new Error('No migration')
+        },
+        onSessionsChanged: () => {
+          /* No renderer. */
+        }
+      })
+      if (when === 'before') controller.abort(fault)
+      const result = runWithSecurityContext(
+        { actor: 'authorized-user', ip: null, route: 'test abort cleanup' },
+        () =>
+          runInPathScope({ kind: 'task', taskId: 'task', projectId: null }, () =>
+            callerAbort.run(controller.signal, () =>
+              relay.ops.interrupt({
+                taskId: 'task',
+                tabId: 'tab',
+                mode: 'claude-chat',
+                cwd: '/tmp'
+              })
+            )
+          )
+      )
+      void result.catch(() => undefined)
+      if (when === 'during') {
+        await preparing
+        controller.abort(fault)
+      }
+      await expect(result).rejects.toBe(fault)
+      expect(requests.filter((r) => r.kind === 'control.cancel')).toHaveLength(1)
+      expect(contexts).toEqual([
+        { actor: 'authorized-user', scope: { kind: 'task', taskId: 'task', projectId: null } }
+      ])
+      expect(requests.filter((r) => r.kind === 'control.prepare')).toHaveLength(
+        when === 'during' ? 1 : 0
+      )
+      if (when === 'during') {
+        expect(requests.at(-1)?.token).toBe(requests[0].token)
+        reply!({
+          available: true,
+          token: requests[0].token,
+          spawnId: 'old',
+          acknowledged: true,
+          pendingDurability: true
+        })
+      }
+      expect(requests.some((r) => r.kind === 'invoke')).toBe(false)
+    } finally {
+      reply?.({ available: false })
+      h.cleanup()
+    }
+  }
+)

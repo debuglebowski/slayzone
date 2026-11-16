@@ -114,6 +114,7 @@ export interface ComputerDescriptor {
   chatStorageCompaction?: boolean
   chatProcessControls?: boolean
   chatControlInvocations?: boolean
+  chatControlLeases?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -816,6 +817,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatStorageCompaction: parsed.data.chatStorageCompaction === true,
       chatProcessControls: parsed.data.chatProcessControls === true,
       chatControlInvocations: parsed.data.chatControlInvocations === true,
+      chatControlLeases: parsed.data.chatControlLeases === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -987,6 +989,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatStorageCompaction: parsed.data.chatStorageCompaction === true,
       chatProcessControls: parsed.data.chatProcessControls === true,
       chatControlInvocations: parsed.data.chatControlInvocations === true,
+      chatControlLeases: parsed.data.chatControlLeases === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

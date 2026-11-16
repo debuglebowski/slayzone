@@ -96,7 +96,7 @@ test.each([false, true])(
     // busy. Restore its historical identity and chat request schemas.
     const entry = retainedEntry(root, HOST_CONTRACT_VERSION)
     let source = readFileSync(entry, 'utf8').replace(
-      /^[ \t]+(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll|chatStorageCompaction|chatProcessControls|chatControlInvocations): true,\n/gm,
+      /^[ \t]+(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll|chatStorageCompaction|chatProcessControls|chatControlInvocations|chatControlLeases): true,\n/gm,
       (line) => (rawControls && line.includes('chatProcessControls') ? line : '')
     )
     const tuple = /^([ \t]+)timelinePages: external_exports\.tuple\(\[[\s\S]*?\n\1\]\),/m.exec(
@@ -223,7 +223,8 @@ test.each([false, true])(
           promptSummariesAll: false,
           chatStorageCompaction: false,
           chatProcessControls: rawControls,
-          chatControlInvocations: false
+          chatControlInvocations: false,
+          chatControlLeases: false
         })
         expect(await control!.rpc.request('health')).toMatchObject({
           pid: health.pid,

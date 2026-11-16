@@ -131,6 +131,7 @@ export class ChatProcess implements OutboxProcess {
   /** Physical process stop is independent of storage/pipe drain. */
   readonly physicalExit: Promise<void>
   private physicalEnded = false
+  private readonly physicalExitListeners = new Set<() => void>()
   private resolvePhysical!: () => void
 
   private readonly hooks: ChatProcessHooks
@@ -146,7 +147,7 @@ export class ChatProcess implements OutboxProcess {
   private readonly output: ChatOutputSpool
   private readonly boundaries = new Map<
     string,
-    { enter(): void; release(): void; gate: Promise<void> }
+    { enter(): void; release(): void; resume(): void; gate: Promise<void> }
   >()
   private outputFailure: Error | null = null
   private stderrBuf = ''
@@ -351,7 +352,7 @@ export class ChatProcess implements OutboxProcess {
 
   /** A causal cut in accepted stdout. Later records spill while the durable
    * control operation waits for admission; protocol ACKs keep their own lane. */
-  outputBoundary() {
+  outputBoundary(capture?: () => void) {
     const id = randomUUID()
     let enter!: () => void,
       reject!: (error: Error) => void,
@@ -360,6 +361,7 @@ export class ChatProcess implements OutboxProcess {
     const ready = new Promise<void>((yes, no) => {
       enter = () => {
         entered = true
+        capture?.()
         yes()
       }
       reject = no
@@ -373,9 +375,9 @@ export class ChatProcess implements OutboxProcess {
       resume()
       if (!entered) reject(new Error('Chat control output boundary was cancelled'))
     }
-    this.boundaries.set(id, { enter, release, gate })
+    this.boundaries.set(id, { enter, release, resume, gate })
     this.output.push(JSON.stringify(['boundary', id]))
-    return { ready, release }
+    return { ready, release, resume }
   }
 
   holdOutputUntil(work: Promise<unknown>): void {
@@ -548,9 +550,32 @@ export class ChatProcess implements OutboxProcess {
     )
   }
 
+  get physicallyExited(): boolean {
+    return this.physicalEnded
+  }
+
+  onPhysicalExit(listener: () => void): () => void {
+    if (this.physicalEnded) {
+      listener()
+      return () => {
+        /* Already observed. */
+      }
+    }
+    this.physicalExitListeners.add(listener)
+    return () => {
+      this.physicalExitListeners.delete(listener)
+    }
+  }
+
   private markPhysicalExit(): void {
+    if (this.physicalEnded) return
     this.physicalEnded = true
+    // Physical exit cannot wait for a control cut to drain. Keep its marker for
+    // a committing decision to capture the prefix, but unblock the output gate.
+    for (const boundary of this.boundaries.values()) boundary.resume()
     this.resolvePhysical()
+    for (const listener of [...this.physicalExitListeners]) listener()
+    this.physicalExitListeners.clear()
   }
 
   private bufferStderr(chunk: string): void {

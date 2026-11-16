@@ -31,12 +31,22 @@ export const chatProcessControlSchema = z
   })
   .strict()
 export type ChatProcessControl = z.infer<typeof chatProcessControlSchema>
+/** Uncommitted request lease, matching the existing 30-second RPC horizon. */
+export const CHAT_CONTROL_PREPARATION_LEASE_MS = 30_000
 export const chatControlPreparationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('control.prepare'),
+      token: z.string().uuid().optional(),
       identity: chatIdentitySchema.strict(),
       value: z.unknown()
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('control.renew'),
+      identity: chatIdentitySchema.strict(),
+      token: z.string().uuid()
     })
     .strict(),
   z

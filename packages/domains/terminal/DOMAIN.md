@@ -561,3 +561,15 @@ killed live agents. Every read that returns saved events or timeline rows is a
 page with a cursor; whole reads remain only for older hubs and clients, built from
 pages. Computers advertise `chatHistoryPages` (hello/enroll, additive); the hub
 asks an older computer for its whole read and answers it as the last page.
+
+Prepared controls for one captured generation share one causal stdout cut,
+provider interrupt result and outbox fence. Distinct public commands each retain
+their durable invocation/receipt and execute in order; kill/remove can escalate
+that generation physically before storage unblocks. Physical exit resumes the
+cut gate while preserving the marker's prefix capture, so process exit cannot
+wait on its own output drain. The first durable stop uses that captured prefix;
+later group decisions coalesce without interrupting or respawning a newer turn.
+The outbox fence remains until all group owners settle. Abandoning a control
+with unknown provider ACK retains the write fence until ACK/physical settlement;
+a refused/timed-out ACK stops the captured process before that fence releases.
+Physical ownership is still retained when actual exit cannot be confirmed.

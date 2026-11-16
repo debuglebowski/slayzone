@@ -1175,6 +1175,9 @@ export function composeServer(opts: {
     chatControlInvocations: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
         ?.chatControlInvocations === true,
+    chatControlLeases: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatControlLeases ===
+      true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),

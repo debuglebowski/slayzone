@@ -135,6 +135,10 @@ export function createComputerChatServices(opts: {
   recovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
   chatControlInvocations?(computerId: string): boolean
+  chatControlLeases?(computerId: string): boolean
+  /** Authorized owner cleanup must run outside caller abort ALS, retaining security/path scope. */
+  controlCleanupRequest?: ChatComputerRequest
+  controlSignal?(): AbortSignal | undefined
   /** Whether the computer answers chat history in bounded pages (its `chatHistoryPages`). */
   chatHistoryPages?(computerId: string): boolean
   /** Whether the computer answers a task's prompt summaries in one request (FU5). */

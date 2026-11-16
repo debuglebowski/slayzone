@@ -29,6 +29,7 @@ import {
   chatQueueOperationSchemas,
   parseChatInvocation,
   chatPreparedControlSchema,
+  CHAT_CONTROL_PREPARATION_LEASE_MS,
   CHAT_READ_OPERATIONS,
   COMPUTER_OWNED_CHAT_KEYS,
   type ChatOperation,
@@ -123,6 +124,11 @@ export function createHubChatRelay(opts: {
   chatRuntimeReady?(computerId: string): boolean
   /** Host supports causal prepare + durable control continuations, beyond raw ACKs. */
   chatControlInvocations?(computerId: string): boolean
+  /** Caller-minted cancellation identity and renewable uncommitted request lease. */
+  chatControlLeases?(computerId: string): boolean
+  /** Owner lifetime: do not inherit an already-aborted caller's request ALS. Keep actor/path scope. */
+  controlCleanupRequest?: ChatComputerRequest
+  controlSignal?(): AbortSignal | undefined
   /**
    * Whether this computer answers bounded history pages (`getEventPage`,
    * `getReplayPage`; it advertised `chatHistoryPages`). False/absent: an older
@@ -1303,7 +1309,34 @@ export function createHubChatRelay(opts: {
     let admission: QueueAdmission | undefined
     let renewal: ReturnType<typeof setInterval> | undefined
     let renewing = false
-    let preparedControl: { token: string; owner: HubChatOwnership } | undefined
+    let preparedControl: { token: string; owner: HubChatOwnership; active: boolean } | undefined
+    let controlRenewal: ReturnType<typeof setInterval> | undefined,
+      controlRenewing = false,
+      controlError: unknown
+    let abortSignal: AbortSignal | undefined,
+      onAbort: (() => void) | undefined,
+      aborted: Promise<never> | undefined
+    const controlWait = <T>(work: Promise<T>): Promise<T> =>
+      aborted ? Promise.race([work, aborted]) : work
+    const renewControl = async () => {
+      if (!preparedControl?.active) return
+      const { token, owner: o } = preparedControl
+      return (opts.stopRequest ?? opts.request)(o.computerId!, {
+        kind: 'control.renew',
+        token,
+        identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
+      })
+    }
+    const cancelControl = async () => {
+      if (!preparedControl) return
+      const { token, owner: o } = preparedControl
+      await (opts.controlCleanupRequest ?? opts.stopRequest ?? opts.request)(o.computerId!, {
+        kind: 'control.cancel',
+        token,
+        identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
+      })
+    }
+
     const queueControl = (name: string, values: unknown[], id: string = randomUUID()) => {
       if (!owner?.computerId) throw new Error('Queue ownership unavailable')
       return opts.request(owner.computerId, {
@@ -1326,6 +1359,7 @@ export function createHubChatRelay(opts: {
           existing?.computerId &&
           existing.state === 'active' &&
           opts.chatControlInvocations?.(existing.computerId) === true &&
+          opts.chatControlLeases?.(existing.computerId) === true &&
           opts.chatRuntimeReady?.(existing.computerId) !== false
         ) {
           await opts.gate?.(existing.computerId, existing.taskId)
@@ -1345,26 +1379,62 @@ export function createHubChatRelay(opts: {
               (context as { mode: string }).mode !== existing.mode)
           )
             throw new Error('Chat stop ownership mismatch')
-          const result = chatPreparedControlSchema.parse(
-            await (opts.stopRequest ?? opts.request)(existing.computerId, {
-              kind: 'control.prepare',
-              identity: {
-                id: existing.id,
-                taskId: existing.taskId,
-                tabId: existing.tabId,
-                mode: existing.mode,
-                epoch: existing.epoch
-              },
-              value: call
+          // Known before any RPC await: timeout, caller abort and a lost/late
+          // response all retain the same authorized cancellation identity.
+          preparedControl = { owner: existing, token: randomUUID(), active: false }
+          abortSignal = opts.controlSignal?.()
+          if (abortSignal) {
+            aborted = new Promise<never>((_yes, no) => {
+              onAbort = () => no(abortSignal!.reason ?? new Error('Chat control caller aborted'))
+              if (abortSignal!.aborted) onAbort()
+              else abortSignal!.addEventListener('abort', onAbort, { once: true })
             })
+            void aborted.catch(() => undefined)
+            if (abortSignal.aborted) await aborted
+          }
+          const result = chatPreparedControlSchema.parse(
+            await controlWait(
+              (opts.stopRequest ?? opts.request)(existing.computerId, {
+                kind: 'control.prepare',
+                token: preparedControl.token,
+                identity: {
+                  id: existing.id,
+                  taskId: existing.taskId,
+                  tabId: existing.tabId,
+                  mode: existing.mode,
+                  epoch: existing.epoch
+                },
+                value: call
+              })
+            )
           )
           if (result.available) {
-            if (typeof result.token !== 'string') throw new Error('Invalid prepared chat control')
-            preparedControl = { token: result.token, owner: existing }
+            if (result.token !== preparedControl.token)
+              throw new Error('Prepared chat control request identity changed')
+            preparedControl.active = true
+            // The prepare response can consume most of its initial lease in
+            // transit. Establish a fresh owner lease before any blocked wait.
+            await controlWait(renewControl())
+            controlRenewal = setInterval(() => {
+              if (controlRenewing || !preparedControl) return
+              controlRenewing = true
+              void renewControl()
+                .catch((error) => {
+                  controlError = error
+                  clearInterval(controlRenewal)
+                  void cancelControl().catch(() => {
+                    // Independent host lease still bounds a lost cleanup frame.
+                  })
+                })
+                .finally(() => {
+                  controlRenewing = false
+                })
+            }, CHAT_CONTROL_PREPARATION_LEASE_MS / 3)
+            controlRenewal.unref?.()
           }
         }
       }
-      if (entry) await entry.ready
+      if (entry) await controlWait(entry.ready)
       if (
         (target === 'ops' && ['kill', 'abortAndPop'].includes(method)) ||
         (target === 'queue' && method === 'clear')
@@ -1423,7 +1493,7 @@ export function createHubChatRelay(opts: {
             : result
         }
       }
-      owner = await route(target, method, args)
+      owner = await controlWait(route(target, method, args))
       if (
         preparedControl &&
         (['id', 'taskId', 'tabId', 'mode', 'epoch', 'computerId'] as const).some(
@@ -1443,7 +1513,7 @@ export function createHubChatRelay(opts: {
             'Chat provider changed before queue admission; message was not submitted.'
           )
       }
-      if (target !== 'ops' || !historyReadMethods.has(method)) await sync(owner)
+      if (target !== 'ops' || !historyReadMethods.has(method)) await controlWait(sync(owner))
       if (target === 'queue' && method === 'push') {
         // Reserve order before transferring files. Later requests can commit
         // behind this slot, but the computer cannot drain past its pending head.
@@ -1477,7 +1547,7 @@ export function createHubChatRelay(opts: {
         renewal.unref?.()
         entry?.release()
       }
-      await opts.beforeInvoke?.(owner, method, args)
+      await controlWait(Promise.resolve(opts.beforeInvoke?.(owner, method, args)))
       if (target === 'ops' && PAGED_HISTORY_METHODS.has(method))
         return await historyRead(owner, method, args)
       // `startRow` only to a computer that knows it (an older one refuses a 5-tuple),
@@ -1492,17 +1562,20 @@ export function createHubChatRelay(opts: {
         args = args.slice(0, 4)
       const read =
         target === 'queue' ? method === 'list' : CHAT_READ_OPERATIONS.has(method as ChatOperation)
-      const result = await opts.request(owner.computerId!, {
-        kind: 'invoke',
-        value: {
-          route: { id: owner.id, epoch: owner.epoch },
-          target,
-          method,
-          args,
-          ...(!read ? { operationId: commandId } : {}),
-          ...(preparedControl ? { controlToken: preparedControl.token } : {})
-        }
-      })
+      if (controlError) throw controlError
+      const result = await controlWait(
+        opts.request(owner.computerId!, {
+          kind: 'invoke',
+          value: {
+            route: { id: owner.id, epoch: owner.epoch },
+            target,
+            method,
+            args,
+            ...(!read ? { operationId: commandId } : {}),
+            ...(preparedControl?.active ? { controlToken: preparedControl.token } : {})
+          }
+        })
+      )
       if (!read) {
         await drainMetadata(owner.computerId!, false, undefined, undefined, owner.id)
         if (['continueInTerminal', 'releaseConversation', 'remove', 'kill'].includes(method))
@@ -1528,18 +1601,13 @@ export function createHubChatRelay(opts: {
       }
       throw error
     } finally {
-      if (preparedControl) {
-        const p = preparedControl,
-          o = p.owner
-        await (opts.stopRequest ?? opts.request)(o.computerId!, {
-          kind: 'control.cancel',
-          token: p.token,
-          identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
-        }).catch(() => {
-          // Disconnect releases uncommitted preparation on its owning computer;
-          // an admitted durable invocation retains its ordinary completion path.
+      clearInterval(controlRenewal)
+      if (onAbort) abortSignal?.removeEventListener('abort', onAbort)
+      if (preparedControl)
+        await cancelControl().catch(() => {
+          // Cleanup has an owner lifetime independent of caller abort. Lost frames
+          // are also covered by the uncommitted host lease and physical exit.
         })
-      }
       if (renewal) clearInterval(renewal)
       entry?.release()
     }

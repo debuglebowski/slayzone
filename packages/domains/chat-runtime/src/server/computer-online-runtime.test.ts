@@ -354,6 +354,10 @@ test('a lifecycle transition revokes a preparation admitted while its fresh life
     })
     vi.spyOn(runtime.transport, 'prepareDurableControl').mockReturnValue({
       spawnId: 'held-generation',
+      onPhysicalExit: () => () => {
+        /* Fixture has no process. */
+      },
+      ownsPhysicalStop: () => false,
       acknowledged: Promise.resolve(),
       close,
       run: async (work) => work()

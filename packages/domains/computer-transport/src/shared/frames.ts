@@ -264,6 +264,7 @@ export const enrollParamsSchema = z.object({
   chatStorageCompaction: z.boolean().optional(),
   chatProcessControls: z.boolean().optional(),
   chatControlInvocations: z.boolean().optional(),
+  chatControlLeases: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -330,6 +331,7 @@ export const helloParamsSchema = z.object({
   chatStorageCompaction: z.boolean().optional(),
   chatProcessControls: z.boolean().optional(),
   chatControlInvocations: z.boolean().optional(),
+  chatControlLeases: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

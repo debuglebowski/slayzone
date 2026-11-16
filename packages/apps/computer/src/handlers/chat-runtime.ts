@@ -509,6 +509,7 @@ export function createChatRuntimeHandlers(opts: {
         return r.processControl(req)
       case 'control.prepare':
       case 'control.cancel':
+      case 'control.renew':
         return r.prepareControl(req)
       case 'relay.watch':
         relay.configure(req.all, req.tabIds)

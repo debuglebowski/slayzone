@@ -22,6 +22,10 @@ import { setChatDeps } from '../../../domains/terminal/src/server/chat-router-de
 
 const [root, extension, mode = 'claude-chat'] = process.argv.slice(2)
 let phase = 'setup'
+const r1Case = process.env.SLAYZONE_TEST_CONTROL_LIFETIME_CASE
+let holdPrepare = false,
+  heldPrepare: { token: string; spawnId: string } | undefined,
+  releasePrepare: (() => void) | undefined
 setSecurityLogSink(() => {
   // Keep fixture stdout a single metrics record; no audit contents are exported.
 })
@@ -116,6 +120,17 @@ async function connected(hubScope: string) {
       if (JSON.parse(data.toString()).method === C.heartbeat) heartbeats++
     })
   )
+  let completedBursts = 0
+  hub.gateway.events.on('event', (ev) => {
+    if (ev.name !== 'chat-runtime') return
+    const p = ev.payload as {
+      type?: string
+      live?: number
+      event?: { kind?: string; text?: string }
+    }
+    if (p?.type === 'event' && p.live === undefined && p.event?.text === '1199:' + 'é'.repeat(1024))
+      completedBursts++
+  })
   let computerId: string | null = null
   const dialer = new HubDialer({
     url: hub.url,
@@ -125,7 +140,8 @@ async function connected(hubScope: string) {
       version: 'fixture',
       capabilities: ['fs', 'proc'],
       chatProcessControls: true,
-      chatControlInvocations: true
+      chatControlInvocations: true,
+      chatControlLeases: true
     },
     credentialStore: createMemoryCredentialStore(),
     joinToken: 'jt-valid',
@@ -149,6 +165,31 @@ async function connected(hubScope: string) {
       binOverrideDir: bin
     }
   })
+  if (r1Case && hubScope === 'native-a') {
+    const handle = dispatch.handle
+    dispatch.handle = async (method, params, actor) => {
+      if (
+        r1Case === 'lost' &&
+        method === M.chatRequest &&
+        (params as { kind?: string })?.kind === 'control.cancel'
+      )
+        throw new Error('fixture dropped cleanup frame before delivery')
+      const result = await handle(method, params, actor)
+      if (
+        holdPrepare &&
+        method === M.chatRequest &&
+        (params as { kind?: string })?.kind === 'control.prepare' &&
+        (result as { available?: boolean })?.available
+      ) {
+        holdPrepare = false
+        heldPrepare = result as typeof heldPrepare
+        return new Promise((resolve) => {
+          releasePrepare = () => resolve(result)
+        })
+      }
+      return result
+    }
+  }
   dialer.events.on('disconnected', ({ reason }) => dispatch.hubDisconnected(String(reason)))
   const ready = dialer.events.once('connected')
   dialer.start()
@@ -169,6 +210,7 @@ async function connected(hubScope: string) {
     dispatch,
     request,
     beats: () => heartbeats,
+    completedBursts: () => completedBursts,
     async close() {
       await dialer.stop()
       await dispatch.dispose()
@@ -230,6 +272,7 @@ async function run() {
           }
         })) as { spawnId: string; pid: number }
       )
+      await h.request(M.chatRequest, { kind: 'relay.watch', all: true, tabIds: [] })
       await h.request(M.procSpawn, {
         sessionId: 'same-id',
         spawnId: 'one',
@@ -274,6 +317,7 @@ async function run() {
     void pending.at(-1)!.catch(() => undefined)
     // Observe real frames from both automatic heartbeat loops during the fence.
     const beats = [a.beats(), b.beats()]
+    const firstBurst = a.completedBursts()
     writeFileSync(join(root, 'burst-a'), 'go')
     const at = Date.now()
     await a.request(M.ping, {})
@@ -331,6 +375,7 @@ async function run() {
     const blockedHeartbeats = [a.beats() - beats[0], b.beats() - beats[1]]
     control('SELECT block_sync(0) n')
     await Promise.all(pending)
+    await until(() => a.completedBursts() > firstBurst)
     // Read through the normal network history API, after its accepted spool
     // prefix drains. Every provider byte becomes the original ordered event.
     const page = (await a.request(
@@ -380,7 +425,7 @@ async function run() {
       const request = async (_pc: string, raw: unknown) => {
         const req = raw as (typeof wires)[number]
         wires.push(req)
-        const result = await a.request(M.chatRequest, raw, true, 8000)
+        const result = await a.request(M.chatRequest, raw, true, r1Case ? 30000 : 8000)
         if (req.kind === 'control.prepare') wires.push({ kind: 'ACK', ...(result as object) })
         return result
       }
@@ -402,6 +447,7 @@ async function run() {
         request,
         stopRequest: request,
         chatControlInvocations: () => true,
+        chatControlLeases: () => true,
         chatRuntimeReady: () => true,
         resolveComputer: async () => a.computerId,
         defaultComputer: async () => a.computerId,
@@ -443,6 +489,208 @@ async function run() {
         principal: { userId: 'native-public', role: 'admin', scopes: ['full'] }
       })
       const opts = { tabId: 'tab', taskId: 't', mode, cwd: root }
+      if (r1Case) {
+        phase = 'r1-' + r1Case
+        const sentCount = () =>
+          existsSync(join(root, 'sent-a'))
+            ? readFileSync(join(root, 'sent-a'), 'utf8').split('sent').length - 1
+            : 0
+        const n = sentCount()
+        await caller.send({
+          tabId: 'tab',
+          message: { id: 'r1-user', content: [{ type: 'text', text: 'r1 original' }] }
+        })
+        await until(() => sentCount() > n)
+        const ackCount = () => readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1
+        const beforeAck = ackCount(),
+          beforeBeats = [a.beats(), b.beats()],
+          started = Date.now()
+        if (r1Case === 'concurrent') {
+          control('SELECT block_sync(1) n')
+          const fence = a.request(
+            M.chatRequest,
+            {
+              kind: 'invoke',
+              value: {
+                route: { id: 'c', epoch: 1 },
+                target: 'ops',
+                method: 'saveTabDraft',
+                operationId: 'r1-full',
+                args: ['tab', { text: 'r1 block', attachments: [] }]
+              }
+            },
+            true,
+            8000
+          )
+          pending.push(fence)
+          void fence.catch(() => undefined)
+          await until(() => !!control('SELECT sync_blocked() n'))
+          const first = caller.interrupt(opts)
+          pending.push(first)
+          void first.catch(() => undefined)
+          await until(() => ackCount() === beforeAck + 1)
+          const errors: string[] = [],
+            overlap = [
+              caller.abortAndPop(opts),
+              caller.kill({ tabId: 'tab' }),
+              caller.remove({ tabId: 'tab' })
+            ]
+          let settled = 0
+          for (const work of overlap) {
+            pending.push(work)
+            void work.then(
+              () => {
+                settled++
+              },
+              (e) => {
+                errors.push(String(e))
+                settled++
+              }
+            )
+          }
+          const dead = () => {
+            try {
+              process.kill(infos[0].pid, 0)
+              return false
+            } catch {
+              return true
+            }
+          }
+          await until(() => errors.length > 0 || dead())
+          assert.deepEqual(errors, [], 'distinct public stops must not be refused')
+          assert(dead(), 'physical escalation must precede FULL release')
+          assert.equal(settled, 0)
+          await a.request(M.ping, {})
+          await b.request(M.ping, {})
+          control('SELECT block_sync(0) n')
+          await fence
+          await first
+          await Promise.all(overlap)
+          assert.equal(ackCount(), beforeAck + 1, 'same generation must receive only one interrupt')
+          assert.equal(overlap.length, 3)
+          const invokes = wires.filter(
+            (w) =>
+              w.kind === 'invoke' &&
+              ['interrupt', 'abortAndPop', 'kill', 'remove'].includes(w.value?.method ?? '')
+          )
+          assert.equal(new Set(invokes.map((w) => w.value?.operationId)).size, 4)
+        } else {
+          holdPrepare = true
+          const first = caller.interrupt(opts)
+          void first.catch(() => undefined)
+          await until(() => !!heldPrepare)
+          assert.equal(ackCount(), beforeAck + 1, 'fixture held a real provider ACK reply')
+          if (r1Case === 'exit') {
+            // Real physical exit must revoke an abandoned preparation even
+            // while that generation's accepted output/SQLite drain is blocked.
+            control('SELECT block_sync(1) n')
+            const fence = a.request(
+              M.chatRequest,
+              {
+                kind: 'invoke',
+                value: {
+                  route: { id: 'c', epoch: 1 },
+                  target: 'ops',
+                  method: 'saveTabDraft',
+                  operationId: 'exit-full',
+                  args: ['tab', { text: 'exit fence', attachments: [] }]
+                }
+              },
+              true,
+              8000
+            )
+            pending.push(fence)
+            void fence.catch(() => undefined)
+            await until(() => !!control('SELECT sync_blocked() n'))
+            await a.request(M.chatRequest, {
+              kind: 'control',
+              identity,
+              spawnId: infos[0].spawnId,
+              action: 'kill'
+            })
+            assert.throws(() => process.kill(infos[0].pid, 0))
+            const cut = wires.length
+            let failed: unknown,
+              done = false
+            const killing = caller.kill({ tabId: 'tab' }).then((value) => {
+              done = true
+              return value
+            })
+            void killing.catch((error) => {
+              failed = error
+            })
+            await until(
+              () =>
+                !!failed ||
+                wires
+                  .slice(cut)
+                  .some(
+                    (w) => w.kind === 'ACK' && (w as { available?: boolean }).available === false
+                  )
+            )
+            assert.equal(
+              failed,
+              undefined,
+              'physical exit must release isControlled without waiting for drain'
+            )
+            assert.equal(done, false)
+            await a.request(M.ping, {})
+            await b.request(M.ping, {})
+            control('SELECT block_sync(0) n')
+            await fence
+            await killing // Original public request still owns its original 30-second RPC deadline.
+          }
+          await assert.rejects(first, /timed? ?out|timeout/i)
+          assert(Date.now() - started >= 30000, 'production RPC deadline must remain 30 seconds')
+          if (r1Case === 'late') {
+            releasePrepare!()
+            await a.request(M.ping, {})
+          }
+          assert.equal(a.dialer.state, 'connected')
+          assert.equal(b.dialer.state, 'connected')
+          await a.request(M.ping, {})
+          await b.request(M.ping, {})
+          assert(
+            wires.some((w) => w.kind === 'control.cancel'),
+            'caller knows cancellation identity before reply'
+          )
+          if (r1Case === 'exit') await caller.restart(opts)
+          else await caller.interrupt(opts) // Old implementation immediately refuses this valid call.
+          const next = sentCount()
+          await caller.send({
+            tabId: 'tab',
+            message: { id: 'r1-next', content: [{ type: 'text', text: 'r1 next' }] }
+          })
+          await until(() => sentCount() > next)
+          const old = wires.find((w) => w.kind === 'control.prepare')!
+          const count = ackCount()
+          await assert.rejects(
+            a.request(M.chatRequest, {
+              kind: 'invoke',
+              value: { ...old.value, controlToken: heldPrepare!.token }
+            }),
+            /stale|unconfirmed/i
+          )
+          assert.equal(ackCount(), count, 'expired token must not interrupt the next turn')
+          await caller.interrupt(opts)
+        }
+        console.log(
+          JSON.stringify({
+            r1Case,
+            provider: mode,
+            actualPublicCaller: true,
+            actualNetwork: true,
+            actualOnlineRuntime: true,
+            packagedWorker: true,
+            recovered: true,
+            losslessEvents: texts.length,
+            elapsedMs: Date.now() - started,
+            heartbeats: [a.beats() - beforeBeats[0], b.beats() - beforeBeats[1]],
+            mainSyncs: control('SELECT sync_count() n') - startSyncs
+          })
+        )
+        return
+      }
       // Real public submission and durable queue, before the writer's next FULL.
       await caller.send({
         tabId: 'tab',
@@ -602,6 +850,7 @@ async function run() {
       await until(() => !!control('SELECT sync_blocked() n'))
       const burstCut = wires.length,
         burstAcks = readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1
+      const publicBurst = a.completedBursts()
       writeFileSync(join(root, 'burst-a'), 'go')
       let burstDone = false
       const bursting = caller.interrupt(opts).then((value) => {
@@ -617,6 +866,7 @@ async function run() {
       control('SELECT block_sync(0) n')
       await burstFence
       await bursting
+      await until(() => a.completedBursts() > publicBurst)
       const burstPage = await caller.getBufferSince({
         tabId: 'tab',
         afterSeq: afterBurstSeq,

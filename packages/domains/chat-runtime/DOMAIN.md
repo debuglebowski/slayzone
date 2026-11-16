@@ -461,11 +461,44 @@ dropped, or restored when it is the only copy).
   preparation; disconnect revokes uncommitted preparation only. This adds no
   storage owner, history scan, cached filesystem authorization or callback wire.
 
+- Controls R1: `chatControlLeases` gates caller-minted preparation tokens and
+  renewable uncommitted request ownership. It comes from the implementing host and
+  is forwarded in both hello and enroll. Missing/false keeps ordinary invocation
+  and maintenance-stop fallback. It is separate from the retained
+  `chatControlInvocations` capability: a 233-only host cannot accept lease fields.
+  The hub knows its token before awaiting prepare, cancels on failure/abort even
+  if the response is lost or late, and immediately refreshes a successful
+  preparation before bootstrap, then renews the live request every 10 seconds.
+  The computer expires an uncommitted token after 30 seconds without renewal.
+  Entering normal invoke clears expiry; committing command/receipt work keeps its
+  ordinary lifetime and is never expired/reexecuted by this lease.
+
+  Physical generation exit revokes uncommitted preparations independently of
+  accepted output/SQLite/file drain. Exit listeners are removable and detached
+  on every release, not accumulated Promise callbacks. Explicit same-group
+  kill/remove escalation retains its live, renewable command owners and reaches
+  the captured process immediately. Their durable effects remain ordered, with
+  one causal prefix/provider decision per generation group and a receipt for
+  each command. No later user/outbox/queue turn can cross that group's fence.
+  Effects recheck captured identity/generation; stale controls cannot act on a
+  replacement or a later turn.
+
+  `controlCleanupRequest` is an authorized owner-lifetime integration seam: it
+  must escape only caller request-abort context while retaining actor and path
+  scope. `controlSignal` can expose caller cancellation for the relay's waits.
+  The future FU1 requestAbort ALS integration must wire those seams and verify
+  an already-aborted default gateway request in combined R6. The controls-source
+  tests prove the configured seam with isolated abort ALS; that future FU1
+  composition is absent here and is not claimed measured. Host expiry remains
+  independent of a lost cleanup frame. These controls do not release unknown
+  physical/FD/durable ownership or fabricate public completion.
+
 The S8 archive/privacy and S7 recovery contracts remain in force alongside this
-public-control wiring and the B5 canonical-worker publication protocol. Their
-scoped native evidence does not replace final composed control, close, readiness
-and publication acceptance. Lease/concurrent-stop follow-ups, metadata review
-follow-ups and peer-browser integration remain separate composition work. The
-verified filesystem runtime-error recovery does not close the historical parallel
-FS deadline RED2 gate or attribute it to a product defect. Final composed gates and
+public-control wiring, caller-known leases/concurrent-stop escalation and the B5
+canonical-worker publication protocol. Their scoped native evidence does not
+replace final composed control, close, readiness and publication acceptance.
+Metadata review follow-ups, current-main S514 peer-browser integration and the FU1
+request-abort ALS cleanup seam remain separate composition work. The verified
+filesystem runtime-error recovery does not close the historical parallel FS
+deadline RED2 gate or attribute it to a product defect. Final composed gates and
 fresh whole-FU2 review remain required.
