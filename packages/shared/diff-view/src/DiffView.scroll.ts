@@ -8,25 +8,32 @@ import { useCallback, useEffect, useRef } from 'react'
 // mode in GitDiffPanel) — virtualizing here would conflict with the outer
 // virtualizer's position tracking. Return null in that case so the caller can
 // fall back to plain rendering and let the outer virtualizer do its job.
-export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+export function findScrollLayout(
+  el: HTMLElement | null
+): { parent: HTMLElement; nested: boolean } | null {
   let cur = el?.parentElement ?? null
   let sawAbsolute = false
-  let nearest: { element: HTMLElement; nested: boolean } | null = null
+  let nearest: { parent: HTMLElement; nested: boolean } | null = null
   while (cur) {
     const style = window.getComputedStyle(cur)
     if (style.position === 'absolute') sawAbsolute = true
     const overflowY = style.overflowY
     if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
-      nearest ??= { element: cur, nested: sawAbsolute }
+      nearest ??= { parent: cur, nested: sawAbsolute }
       // overflow-x:auto also computes overflow-y:auto. Such a wrapper can grow
       // to the entire diff's height: using it mounts every row and makes Activity
       // ref cleanup quadratic. Prefer the ancestor with a real vertical viewport.
-      if (cur.scrollHeight > cur.clientHeight) return sawAbsolute ? null : cur
+      if (cur.scrollHeight > cur.clientHeight) return { parent: cur, nested: sawAbsolute }
     }
     cur = cur.parentElement
   }
   // Keep the previous nearest-declared behavior when nothing overflows yet.
-  return nearest && !nearest.nested ? nearest.element : null
+  return nearest
+}
+
+export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  const layout = findScrollLayout(el)
+  return layout && !layout.nested ? layout.parent : null
 }
 
 // ---- Horizontal scroll sync (side-by-side, !wrap) ----

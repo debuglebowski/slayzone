@@ -1573,6 +1573,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/files-changed/WorkspaceChangesRow.test.tsx \
   packages/shared/diff-view/src/DiffView.line-action.test.tsx \
   packages/shared/diff-view/src/DiffView.scroll.test.ts \
+  packages/domains/task-artifacts/src/client/DiffPreview.viewport.test.tsx \
   packages/domains/task-terminals/src/client/chat/diff-comments/diff-comments.test.tsx \
   packages/domains/task-terminals/src/client/chat/RewindPicker.test.tsx \
   packages/domains/task-terminals/src/client/chat/ComposerSubAgents.test.tsx \

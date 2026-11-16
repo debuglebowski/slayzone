@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { findScrollParent } from './DiffView.scroll'
+import { type ListLayout, observeListLayout } from './DiffView.layout'
 
 // ---- Virtualized row list (shared for unified + sbs) ----
 
@@ -12,8 +12,6 @@ interface VirtualRowListProps<Row> {
   className?: string
 }
 
-type ScrollState = { parent: HTMLElement; nested: false } | { parent: null; nested: true } | null
-
 export function VirtualRowList<Row>({
   rows,
   renderRow,
@@ -21,18 +19,24 @@ export function VirtualRowList<Row>({
   rowKey,
   className
 }: VirtualRowListProps<Row>) {
-  const sentinelRef = useRef<HTMLDivElement | null>(null)
-  const [scrollState, setScrollState] = useState<ScrollState>(null)
-
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
+  const [layout, setLayout] = useState<ListLayout | null>(null)
   useLayoutEffect(() => {
-    const parent = findScrollParent(sentinelRef.current)
-    if (parent) setScrollState({ parent, nested: false })
-    else setScrollState({ parent: null, nested: true })
-  }, [])
-
-  const parent = scrollState?.nested === false ? scrollState.parent : null
+    if (!element) return
+    return observeListLayout(element, (next) => {
+      setLayout((previous) =>
+        previous?.parent === next.parent && Math.abs(previous.offset - next.offset) < 0.01
+          ? previous
+          : next
+      )
+    })
+  }, [element])
+  const parent = layout?.parent ?? null
+  const offset = layout?.offset ?? 0
   const virtualizer = useVirtualizer({
     count: rows.length,
+    // TanStack includes this origin in item starts and excludes it from total size.
+    scrollMargin: offset,
     getScrollElement: () => parent,
     estimateSize: () => estimateSize,
     overscan: 8,
@@ -40,18 +44,18 @@ export function VirtualRowList<Row>({
   })
 
   // Measurement frame: until scroll state known, reserve space with estimate.
-  if (scrollState === null) {
+  if (layout === null) {
     return (
-      <div ref={sentinelRef} className={className} style={{ height: rows.length * estimateSize }} />
+      <div ref={setElement} className={className} style={{ height: rows.length * estimateSize }} />
     )
   }
 
   // Nested inside an outer virtualizer (e.g. GitDiffPanel continuous-flow mode)
   // — fall back to plain rendering. Outer virtualizer keeps offscreen files
   // unmounted, which handles the large-diff case at the file granularity.
-  if (scrollState.nested) {
+  if (layout.parent === null) {
     return (
-      <div ref={sentinelRef} className={className}>
+      <div ref={setElement} className={className}>
         {rows.map((r, i) => (
           <div key={rowKey(r)}>{renderRow(r, i)}</div>
         ))}
@@ -62,7 +66,7 @@ export function VirtualRowList<Row>({
   const items = virtualizer.getVirtualItems()
   return (
     <div
-      ref={sentinelRef}
+      ref={setElement}
       className={className}
       style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}
     >
@@ -76,7 +80,7 @@ export function VirtualRowList<Row>({
             top: 0,
             left: 0,
             right: 0,
-            transform: `translateY(${v.start}px)`
+            transform: `translateY(${v.start - offset}px)`
           }}
         >
           {renderRow(rows[v.index], v.index)}
