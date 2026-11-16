@@ -81,5 +81,6 @@ export { ChatStorageSwapRefused, type ChatStoreFileStats } from './storage'
 export {
   openChatStorageOwner,
   type AsyncChatStorage,
+  type AsyncChatExportReader,
   type OpenStorageOwnerOptions
 } from './storage-owner'

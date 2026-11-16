@@ -913,8 +913,8 @@ export function openChatStorage(opts: {
     }
     if (checkpoint !== null) put.run(id, 'checkpoint', checkpoint, at)
   }
-  /** Open export read snapshots (`openExportReader`), closed with the store. */
-  const exportReaders = new Set<ChatExportReader>()
+  /** Owned export cleanup, including partial failures; retried when the store closes. */
+  const exportReaders = new Set<() => void>()
   function nextSeq(id: string): number {
     const last = (
       db
@@ -1083,7 +1083,7 @@ export function openChatStorage(opts: {
     },
     close() {
       if (!closed) {
-        for (const reader of [...exportReaders]) reader.close()
+        for (const closeReader of [...exportReaders]) closeReader()
         // Its files are free when this returns (callers remove them right after).
         checkpointer.closeSync()
         connection.current().close()
@@ -1097,7 +1097,7 @@ export function openChatStorage(opts: {
      */
     async shutdown(): Promise<void> {
       if (closed) return
-      for (const reader of [...exportReaders]) reader.close()
+      for (const closeReader of [...exportReaders]) closeReader()
       if (opts.ownerWorker) {
         // A real FULL commit of the clean mark includes every earlier NORMAL frame.
         db.pragma('synchronous = FULL')
@@ -2065,26 +2065,30 @@ export function openChatStorage(opts: {
      */
     openExportReader(id: string, epoch: number, migrationId: string): ChatExportReader {
       const conn = new Database(path, { readonly: true, fileMustExist: true })
+      const secondary = maintenance.registerSecondary('chat export reader')
       let lease: { release(): void } | undefined
       let renew: ReturnType<typeof setInterval> | undefined
-      let reader: ChatExportReader | undefined
       let open = true
+      let disposed = false
       const live = () => {
         if (!open) throw new Error('Export reader closed')
       }
       const close = () => {
-        if (!open) return
+        if (disposed) return
         open = false
         if (renew) clearInterval(renew)
-        if (reader) exportReaders.delete(reader)
-        // Closing rolls back this read-only transaction. Release the lease even
-        // if connection cleanup fails; initialization uses this same path.
+        // Retain the secondary and cleanup callback if native close fails: the
+        // connection still owns its snapshot. Shutdown can retry physical close.
+        conn.close()
+        disposed = true
+        exportReaders.delete(close)
         try {
-          conn.close()
-        } finally {
           if (!closed) lease?.release()
+        } finally {
+          secondary.release()
         }
       }
+      exportReaders.add(close)
       try {
         conn.pragma('busy_timeout = 5000')
         // The snapshot starts with the transaction's first read.
@@ -2096,7 +2100,7 @@ export function openChatStorage(opts: {
           throw new Error('Migration must freeze source first')
         const leaseId = `export:${migrationId}:${id}:${randomUUID()}`
         lease = api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
-        reader = {
+        const reader: ChatExportReader = {
           identity: identity(r),
           migrationId,
           eventCount: (
@@ -2140,15 +2144,23 @@ export function openChatStorage(opts: {
           },
           close
         }
-        exportReaders.add(reader)
-        // No renewal or registry entry can outlive a failed construction.
+        // Renew only after construction succeeds; the cleanup callback already
+        // owns partial failures and stays registered until physical close.
         renew = setInterval(() => {
           if (open && !closed) api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
         }, EXPORT_LEASE_MS / 3)
         renew.unref?.()
         return reader
       } catch (error) {
-        close()
+        try {
+          close()
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'Export reader initialization cleanup failed',
+            { cause: error }
+          )
+        }
         throw error
       }
     },

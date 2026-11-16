@@ -89,6 +89,146 @@ test('one owner per file; close waits for writer/checkpointer release before reo
   expect(await next.storeId()).toBe(id)
 })
 
+test('owned export snapshots retain worker-local readers and close without a lease cycle', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  await owner.append('c', 1, event('snapshot'))
+  await expect(owner.openExportReader('c', 1, 'move')).rejects.toThrow(/freeze/i)
+  expect(await owner.maintenance.secondaryConnections()).toEqual([])
+  expect(await owner.hasBlobLeases()).toBe(false)
+  await owner.freeze('c', 1, 'move')
+  const reader = await owner.openExportReader('c', 1, 'move')
+  expect(reader.eventCount).toBe(1)
+  expect(await owner.hasExportReaders()).toBe(true)
+  expect(await owner.maintenance.secondaryConnections()).toHaveLength(1)
+  await owner.unfreeze('c', 1, 'move')
+  await owner.append('c', 1, event('after snapshot'))
+  expect((await reader.eventPage(-1)).events.map((row) => row.event)).toEqual([event('snapshot')])
+  await reader.close()
+  await reader.close()
+  expect(await owner.maintenance.secondaryConnections()).toEqual([])
+  await owner.freeze('c', 1, 'second')
+  const abandoned = await owner.openExportReader('c', 1, 'second')
+  const closing = owner.close()
+  await Promise.all([closing, abandoned.close(), owner.exited])
+  await expect(abandoned.eventPage(-1)).rejects.toThrow(/closed/i)
+})
+
+test('owner fences await paced timeline mutations and retain metadata and ownership checks', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  const pages = Array.from({ length: 8 }, (_, page) => ({
+    page,
+    value: JSON.stringify({ rows: 'x'.repeat(1_000_000) }),
+    summary: JSON.stringify({ page }),
+    searchText: `needle ${page}`
+  }))
+  let settled = false
+  const writing = owner
+    .writeTimeline('c', 1, {
+      dropPagesFrom: 0,
+      pages,
+      checkpoint: '{"seq":0}'
+    })
+    .then(() => {
+      settled = true
+    })
+  await owner.flush()
+  expect(settled).toBe(true)
+  await writing
+  expect(await owner.timelinePageIds('c')).toEqual(pages.map((p) => p.page))
+  expect(await owner.searchTimelinePages('c', 1, 'needle')).toEqual(pages.map((p) => p.page))
+  await expect(
+    owner.writeTimeline('c', 2, { dropPagesFrom: 0, pages: [], checkpoint: null })
+  ).rejects.toThrow(/epoch/i)
+})
+
+test('export fault identity survives the private worker boundary', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  const sha256 = 'a'.repeat(64)
+  await owner.recordExportBlobFault(
+    'c',
+    Object.assign(new Error('missing image'), {
+      name: 'EventBlobUnavailableError',
+      sha256
+    })
+  )
+  expect(await owner.listFaults()).toContainEqual(
+    expect.objectContaining({
+      item_key: `c:${sha256}`,
+      fingerprint: sha256,
+      kind: 'structural'
+    })
+  )
+})
+
+test('snapshot blob failure stays caller-recorded exactly once across the worker boundary', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  const stored = await owner.extractEventBlobs({
+    kind: 'tool-result',
+    toolUseId: 'image',
+    isError: false,
+    structured: null,
+    rawContent: [
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: Buffer.alloc(4096, 7).toString('base64')
+        }
+      }
+    ]
+  })
+  await owner.appendAt('c', 1, 0, stored, Date.now())
+  const [sha256] = await owner.eventBlobHashes()
+  rmSync(join(owner.dir, 'blobs', sha256))
+  await owner.freeze('c', 1, 'move')
+  const reader = await owner.openExportReader('c', 1, 'move')
+  const error = await reader.resolve(stored).catch((error: unknown) => error)
+  expect(error).toMatchObject({ name: 'EventBlobUnavailableError', sha256 })
+  expect(await owner.listFaults()).toEqual([])
+  await owner.recordExportBlobFault('c', error)
+  expect(await owner.listFaults()).toHaveLength(1)
+  await reader.close()
+})
+
+test('legacy row headers and marker backfill execute on the same owner as timeline metadata', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  await owner.append('c', 1, { kind: 'user-message', id: 'prompt', text: 'kept prompt' })
+  await owner.db.exec(
+    'UPDATE events SET blob_form=0; DELETE FROM event_markers; DELETE FROM event_marker_coverage'
+  )
+  expect(await owner.legacyEventSizes('c', -1, 10)).toEqual([{ seq: 0, bytes: expect.any(Number) }])
+  expect(JSON.parse((await owner.legacyEvent('c', 0))!.event)).toMatchObject({
+    text: 'kept prompt'
+  })
+  expect(await owner.uncoveredMarkerConversations()).toContain('c')
+  expect(
+    await owner.backfillEventMarkers('c', -1, { maxBytes: 4096, maxEvents: 10 })
+  ).toMatchObject({ done: true, through: 0 })
+  expect(await owner.uncoveredMarkerConversations()).toEqual([])
+  expect(await owner.db.get('SELECT count(*) n FROM event_markers')).toEqual({ n: 1 })
+})
+
+test('close drains an accepted paced write and its deferred fence before physical exit', async () => {
+  const dir = root()
+  const owner = await open(dir)
+  await owner.createConversation(identity)
+  const writing = owner.writeTimeline('c', 1, {
+    dropPagesFrom: 0,
+    pages: [{ page: 0, value: '{"rows":"[]"}', summary: '{}', searchText: '' }],
+    checkpoint: '{"seq":7}'
+  })
+  const fencing = owner.flush()
+  await Promise.all([writing, fencing, owner.close(), owner.exited])
+  const reopened = await open(dir)
+  expect(await reopened.timelineRecord('c', 'checkpoint')).toBe('{"seq":7}')
+})
+
 test('failed startup releases control resources and the next valid owner can open', async () => {
   const dir = root()
   await expect(openChatStorageOwner({ stateDir: dir, hubScope: '', workerPath })).rejects.toThrow(

@@ -267,3 +267,14 @@ dropped, or restored when it is the only copy).
   helper lifetimes end. Single-bin dispatch selects storage before CLI initialization.
   Legacy runtime/event callers still await migration; generic control-route/scope
   responsiveness and streaming/transaction/blob/fault adapters remain required.
+
+- 2026-11-16 (fu-2 R1, S6b2b1): the async owner includes inherited encoded timeline,
+  metadata/marker and legacy-row APIs. Export snapshots stay on that owner behind
+  private tokens; only metadata and bounded pages cross threads. Every native export
+  reader registers a secondary, including failed construction cleanup. Failed physical
+  close retains its registration and retry callback; shutdown drains readers before
+  its clean mark. Host fences await the captured pending asynchronous mutations before
+  posting the real FULL fence; close releases pauses before draining deferred fences.
+  `exited` exposes physical owner exit independently from lease-dependent cleanup.
+  Production runtime/composed-store callers still require cutover; these adapters and
+  tests do not complete H1/H2 or prove actual computer control responsiveness.

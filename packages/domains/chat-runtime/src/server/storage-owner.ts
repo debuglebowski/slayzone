@@ -10,10 +10,13 @@ import {
 } from '@slayzone/platform/sqlite-worker'
 import { attachCheckpointer } from './checkpointer'
 import { chatStorageDigest } from './storage-digest'
-import type { ChatStorage } from './storage'
+import type { ChatExportReader, ChatStorage } from './storage'
 import {
   CHAT_STORAGE_OWNER_KIND,
   STORAGE_METHODS,
+  type ExportReaderOpened,
+  type ExportReaderMethod,
+  type ExportReaderCall,
   type StorageOwnerData,
   type StorageMethod,
   type StorageCall,
@@ -31,6 +34,8 @@ type AsyncMethods<T> = {
     : never
 }
 type SimpleStorage = Pick<ChatStorage, StorageMethod>
+export type AsyncChatExportReader = Omit<ChatExportReader, ExportReaderMethod | 'close'> &
+  AsyncMethods<Pick<ChatExportReader, ExportReaderMethod | 'close'>>
 export type AsyncChatStorage = Omit<
   AsyncMethods<SimpleStorage>,
   'getRecord' | 'maintenanceCursor' | 'queueMessageIdentity'
@@ -38,6 +43,12 @@ export type AsyncChatStorage = Omit<
   readonly dir: string
   readonly path: string
   readonly db: SlayzoneDb<StorageOwnerTxnRegistry>
+  /** Physical writer exit, independent from lease-dependent close/cleanup. */
+  readonly exited: Promise<void>
+  openExportReader(
+    ...args: Parameters<ChatStorage['openExportReader']>
+  ): Promise<AsyncChatExportReader>
+  recordExportBlobFault(id: string, error: unknown): Promise<void>
   getRecord<T>(...args: Parameters<ChatStorage['getRecord']>): Promise<T | null>
   maintenanceCursor<T>(key: string): Promise<T | null>
   queueMessageIdentity<T>(
@@ -187,6 +198,18 @@ export async function openChatStorageOwner(
     throw error
   }
   let issued = 0
+  const pending = new Set<Promise<unknown>>()
+  const fences = new Set<Promise<void>>()
+  const track = <T>(work: () => Promise<T>): Promise<T> => {
+    issued++
+    const result = work()
+    pending.add(result)
+    void result.then(
+      () => pending.delete(result),
+      () => pending.delete(result)
+    )
+    return result
+  }
   const db = new Proxy(raw as SlayzoneDb<StorageOwnerTxnRegistry>, {
     get(target, key) {
       if (key === 'close') return () => close()
@@ -194,26 +217,22 @@ export async function openChatStorageOwner(
         return (sql: string) => ({
           get: (...args: unknown[]) => {
             if (closing || stopped) return Promise.reject(new Error('Chat storage is closed'))
-            issued++
-            return target.prepare(sql).get(...args)
+            return track(() => target.prepare(sql).get(...args))
           },
           all: (...args: unknown[]) => {
             if (closing || stopped) return Promise.reject(new Error('Chat storage is closed'))
-            issued++
-            return target.prepare(sql).all(...args)
+            return track(() => target.prepare(sql).all(...args))
           },
           run: (...args: unknown[]) => {
             if (closing || stopped) return Promise.reject(new Error('Chat storage is closed'))
-            issued++
-            return target.prepare(sql).run(...args)
+            return track(() => target.prepare(sql).run(...args))
           }
         })
       const value = Reflect.get(target, key, target)
       if (typeof value !== 'function') return value
       return (...args: unknown[]) => {
         if (closing || stopped) return Promise.reject(new Error('Chat storage is closed'))
-        issued++
-        return Reflect.apply(value, target, args)
+        return track(() => Promise.resolve(Reflect.apply(value, target, args)))
       }
     }
   })
@@ -227,12 +246,16 @@ export async function openChatStorageOwner(
     const through = issued
     if (flushing && flushing.through >= through) return flushing.promise
     // A flush is not a new mutation: concurrent callers of the same prefix share it.
-    const promise = raw.namedTxn('chatStorage.flush', {})
+    // Named operations may yield between bounded native slices. A fence covers
+    // their completed commits, not merely the worker's receipt of their message.
+    const promise = Promise.all([...pending]).then(() => raw.namedTxn('chatStorage.flush', {}))
+    fences.add(promise)
     const current = { through, promise }
     flushing = current
     void promise
       .finally(() => {
         if (flushing === current) flushing = null
+        fences.delete(promise)
       })
       .catch(() => undefined)
     return promise
@@ -245,6 +268,14 @@ export async function openChatStorageOwner(
       let primary: unknown
       try {
         await raw.namedTxn('chatStorage.prepareClose', {})
+        // Release a paused fence before waiting for accepted work; waiting in
+        // the reverse order would make close wait on its own pause.
+        const settled = await Promise.allSettled([...pending, ...fences])
+        const failures = settled.flatMap((entry) =>
+          entry.status === 'rejected' ? [entry.reason] : []
+        )
+        if (failures.length)
+          throw new AggregateError(failures, 'Accepted storage work failed', { cause: failures[0] })
       } catch (error) {
         primary = error
       }
@@ -331,6 +362,50 @@ export async function openChatStorageOwner(
       dir,
       path,
       db,
+      exited: raw.exited,
+      async openExportReader(
+        ...args: Parameters<ChatStorage['openExportReader']>
+      ): Promise<AsyncChatExportReader> {
+        const { token, ...metadata } = (await db.namedTxn('chatStorage.exportReader', {
+          operation: 'open',
+          args
+        })) as ExportReaderOpened
+        let readerClosing: Promise<void> | null = null
+        const read = <K extends ExportReaderMethod>(
+          method: K,
+          args: Parameters<ChatExportReader[K]>
+        ) => {
+          if (readerClosing) return Promise.reject(new Error('Export reader closed'))
+          return db.namedTxn('chatStorage.exportReader', {
+            operation: 'read',
+            token,
+            call: { method, args }
+          } as ExportReaderCall) as Promise<ReturnType<ChatExportReader[K]>>
+        }
+        return {
+          ...metadata,
+          eventPage: (after) => read('eventPage', [after]),
+          recordPage: (after) => read('recordPage', [after]),
+          receiptPage: (after) => read('receiptPage', [after]),
+          resolve: (event) => read('resolve', [event]),
+          close(): Promise<void> {
+            return (readerClosing ??= (async () => {
+              // These readers belong to the writer, not external helper leases.
+              // Its shutdown closes them; never wait for public close to release
+              // a lifetime that public close is itself waiting for.
+              if (closing || stopped || terminated || unexpected) {
+                await raw.exited
+                return
+              }
+              await track(() =>
+                raw.namedTxn('chatStorage.exportReader', { operation: 'close', token })
+              )
+            })())
+          }
+        }
+      },
+      recordExportBlobFault: (id: string, error: unknown) =>
+        db.namedTxn('chatStorage.exportFault', { id, error: serializeError(error) }),
       flush,
       close,
       async shutdown() {

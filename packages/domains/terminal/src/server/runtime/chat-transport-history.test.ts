@@ -334,3 +334,50 @@ test('openTimeline answers the events saved while its snapshot waited within a p
   // The snapshot plus its events reach exactly the live part's start.
   expect(opened.events.at(-1)?.seq ?? opened.snapshot.seq).toBe(opened.live.afterSeq)
 })
+
+test('opening a timeline waits for accepted delayed commits before snapshot and bounded tail', async () => {
+  const rows: BufferedEvent[] = []
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let writing = false
+  const h = transportHarness({
+    deps: {
+      timelineStore: () => memoryTimelineStore(),
+      eventStore: {
+        ...mgr.memoryChatEventReads(() => rows),
+        insert: async (_tab, seq, event, at) => {
+          if (event.kind === 'assistant-text') {
+            writing = true
+            await gate
+          }
+          rows.push({ seq, event, at })
+          return 'inserted'
+        }
+      }
+    }
+  })
+  await startTab()
+  emitLine(h.fakes[0], sj.text('delayed-text'))
+  await until(() => writing)
+  let finished = false
+  const opening = mgr.openTimeline(TAB_OPTS.tabId, TIMELINE_PROJECTION_VERSION).then((value) => {
+    finished = true
+    return value
+  })
+  try {
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(finished).toBe(false)
+  } finally {
+    release()
+  }
+  const opened = await opening
+  expect(opened.kind).toBe('paged')
+  if (opened.kind !== 'paged') return
+  expect(JSON.stringify(opened)).toContain('delayed-text')
+  expect(
+    opened.events.reduce((bytes, e) => bytes + jsonByteLength(e.event), 0)
+  ).toBeLessThanOrEqual(CHAT_HISTORY_PAGE_MAX_BYTES)
+  expect(opened.events.at(-1)?.seq ?? opened.snapshot.seq).toBe(opened.live.afterSeq)
+})

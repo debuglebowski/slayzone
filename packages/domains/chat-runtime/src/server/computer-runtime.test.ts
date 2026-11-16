@@ -27,6 +27,23 @@ const bootstrap = {
 }
 const createOpts = { taskId: 'task-a', tabId: 'tab-a', mode: 'claude-chat', cwd: '/tmp' }
 
+test('failed cleanup still drains marker backfill and preserves its original error on repeated close', async () => {
+  const { r } = runtime()
+  runtimes.splice(runtimes.indexOf(r), 1)
+  const failure = new Error('compaction close failed')
+  const closeCompaction = r.compaction.close.bind(r.compaction)
+  vi.spyOn(r.compaction, 'close').mockImplementation(async () => {
+    await closeCompaction()
+    throw failure
+  })
+  const marker = vi.spyOn(r.markerBackfill, 'close')
+  const closing = r.close()
+  await expect(closing).rejects.toBe(failure)
+  expect(marker).toHaveBeenCalledOnce()
+  expect(r.close()).toBe(closing)
+  expect(() => r.storage.inventory()).toThrow(/closed|not open/i)
+})
+
 test('project relocation updates cached chat folders and preserves drafts', async () => {
   const { r } = runtime()
   r.bootstrap(bootstrap)

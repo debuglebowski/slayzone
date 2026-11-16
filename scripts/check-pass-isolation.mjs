@@ -210,6 +210,7 @@ export function violationsInSource(file, source) {
  */
 const STARTUP_FILES = [
   'packages/apps/computer/src/bin.ts',
+  'packages/apps/computer/src/cli-main.ts',
   'packages/apps/computer/src/session-host.ts',
   'packages/apps/computer/src/hook-journal.ts',
   'packages/apps/computer/src/connector.ts',

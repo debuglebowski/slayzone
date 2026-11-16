@@ -1134,11 +1134,21 @@ test('canonical history left by async event write errors is retained; restored e
       { events: [], nextSeq: 0 },
       { onWriteError: () => failed++ }
     )
-    const history = buildLongSession({ events: 4000, seed: 21, askEveryTool: true }).map((e) =>
-      log.append(e.kind === 'assistant-text' ? { ...e, text: 'SOURCE-ONLY-HISTORY:' + e.text } : e)
+    // Model residue ALREADY STORED by the historical publish-before-insert bug.
+    // Today's log must reject this failure, never manufacture that residue again.
+    const history = buildLongSession({ events: 4000, seed: 21, askEveryTool: true }).map(
+      (e, seq) => ({
+        seq,
+        at: Date.now(),
+        event: e.kind === 'assistant-text' ? { ...e, text: 'SOURCE-ONLY-HISTORY:' + e.text } : e
+      })
     )
-    await log.flush()
-    expect(failed).toBe(history.length)
+    await expect(log.append(history[0].event)).rejects.toThrow('injected write error')
+    await expect(log.flush()).rejects.toThrow('injected write error')
+    await expect(log.append(history[1].event)).rejects.toThrow('injected write error')
+    expect(failed).toBe(1)
+    expect(log.events).toEqual([])
+    expect(log.lastSeq).toBe(-1)
     f.h.db.exec('DROP TRIGGER fail_legacy_event')
     const projection = await TimelineProjection.open({
       store: {

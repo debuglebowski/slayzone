@@ -12,6 +12,7 @@ import {
   type BufferedEvent,
   type ChatEventPersistence
 } from './chat-events-store'
+import { historyReadTurns } from './history-turns'
 
 const noReads = {
   readPage: async () => ({ events: [], bytes: [], more: false }),
@@ -51,6 +52,52 @@ const range = (from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => from + i)
 
 const text = (t: string): AgentEvent => ({ kind: 'stderr', text: t })
+
+test('a history turn never waits for a newer writer that needs that same scheduler', async () => {
+  let entered!: () => void, release!: () => void, escape!: () => void
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const fallback = new Promise<void>((resolve) => {
+    escape = resolve
+  })
+  const blocker = historyReadTurns.take(async () => {
+    entered()
+    await gate
+  })
+  await started
+  const log = new ChatEventLog(
+    'tab',
+    {
+      ...noReads,
+      insert: async () => {
+        await Promise.race([historyReadTurns.take(async () => undefined), fallback])
+        return 'inserted'
+      }
+    },
+    { events: [{ seq: 1, event: text('committed') }], nextSeq: 2 },
+    { cap: 1 }
+  )
+  const reading = log.readPage(-1)
+  await new Promise((resolve) => setImmediate(resolve))
+  const writing = log.append(text('later'))
+  await new Promise((resolve) => setImmediate(resolve))
+  release()
+  try {
+    expect(
+      await Promise.race([
+        reading.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500))
+      ])
+    ).toBe(true)
+  } finally {
+    escape()
+  }
+  await Promise.all([blocker, reading, writing])
+})
 
 test('an async append exposes no sequence or cached row before the insert commits', async () => {
   let commit!: () => void

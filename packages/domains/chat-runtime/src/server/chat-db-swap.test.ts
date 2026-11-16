@@ -18,7 +18,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { agentTurnsStore } from './agent-turns'
 import { createComputerChatRuntime } from './computer-runtime'
 import { openChatStorage, type ChatStorage } from './storage'
@@ -71,6 +71,56 @@ async function swap(store: ChatStorage, copy: string) {
 }
 const leftovers = (store: ChatStorage) =>
   readdirSync(store.dir).filter((n) => n.startsWith('chat.sqlite.'))
+
+test('export readers register secondaries, including failed initialization and shutdown cleanup', async () => {
+  const { store } = open()
+  store.createConversation(identity)
+  expect(() => store.openExportReader(identity.id, 1, 'not-frozen')).toThrow()
+  expect(store.maintenance.secondaryConnections()).toEqual([])
+  expect(store.hasBlobLeases()).toBe(false)
+  store.freeze(identity.id, 1, 'move')
+  const reader = store.openExportReader(identity.id, 1, 'move')
+  try {
+    expect(store.maintenance.secondaryConnections()).toHaveLength(1)
+    await store.maintenance.pauseCheckpointer()
+    expect(() => store.maintenance.swapIn(store.maintenance.tempPath())).toThrow(/secondary/i)
+  } finally {
+    reader.close()
+  }
+  expect(store.maintenance.secondaryConnections()).toEqual([])
+  store.openExportReader(identity.id, 1, 'move')
+  await store.shutdown()
+  expect(store.hasExportReaders()).toBe(false)
+  expect(store.maintenance.secondaryConnections()).toEqual([])
+})
+
+test('a failed native reader close keeps its registration until physical close can retry', async () => {
+  const { store } = open()
+  store.createConversation(identity)
+  store.freeze(identity.id, 1, 'move')
+  const reader = store.openExportReader(identity.id, 1, 'move')
+  const original = Database.prototype.close
+  let failed: Database.Database | undefined
+  const fault = vi.spyOn(Database.prototype, 'close').mockImplementation(function (
+    this: Database.Database
+  ) {
+    if (this.readonly) {
+      failed = this
+      throw new Error('native reader close failed')
+    }
+    return original.call(this)
+  })
+  try {
+    expect(() => reader.close()).toThrow('native reader close failed')
+    expect(store.maintenance.secondaryConnections()).toHaveLength(1)
+    expect(store.hasExportReaders()).toBe(true)
+  } finally {
+    fault.mockRestore()
+    await store.shutdown()
+    if (failed?.open) original.call(failed)
+  }
+  expect(store.maintenance.secondaryConnections()).toEqual([])
+})
 
 describe('swappable chat store connection', () => {
   test('a handle kept from compose reaches the new file after a swap', async () => {
