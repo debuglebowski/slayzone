@@ -1009,6 +1009,7 @@ run_harness packages/domains/chat-runtime/src/server/storage-compaction-crash.te
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-online-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/control-preparation-lifetime.test.ts
+run_harness packages/domains/chat-runtime/src/server/computer-online-startup.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifact-publication.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
 # Event blobs: tool-result base64 moved to the blob store, pinned, GC/retention/erasure/backups.

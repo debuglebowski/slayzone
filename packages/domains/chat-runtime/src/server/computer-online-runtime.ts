@@ -120,6 +120,9 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
   let onFailureAdmission: { close(): void } | undefined
   let onFailurePublication: { close(): Promise<void> } | undefined
   let onFailureUploads: { close(): Promise<void> } | undefined
+  let onFailureTransport: Pick<ReturnType<typeof createChatTransport>, 'shutdownAll'> | undefined
+  let onFailureQueue: Pick<ReturnType<typeof createChatQueueRuntime>, 'close'> | undefined
+  let onFailureInvoke: Pick<ReturnType<typeof createChatInvoker>, 'settleAll'> | undefined
   const latchFailure = (error: unknown) => {
     failure ??= error instanceof Error ? error : new Error(String(error))
     cancelPreparedControls()
@@ -152,6 +155,10 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       latchFailure(error)
       for (const lock of locks.values()) lock.release()
     }
+  })
+  let ownerExited = false
+  void storage.exited.then(() => {
+    ownerExited = true
   })
   try {
     if (failure) throw failure
@@ -304,6 +311,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       },
       conversations
     )
+    onFailureTransport = transport
     const queueRuntime = createChatQueueRuntime({
       ...transport,
       ensureSpawned: async (tabId) => {
@@ -329,6 +337,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         !lockedTabs.has(tabId) &&
         transport.isReadyForQueuedMessage(tabId)
     })
+    onFailureQueue = queueRuntime
     resumeQueue = (tab) => {
       void queueRuntime.drainChatQueue(null, tab, local.queue).catch(() => {
         // A concurrent lifecycle close owns admission; its queue stays stored.
@@ -364,6 +373,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         return entry.control.run(work)
       }
     })
+    onFailureInvoke = invoke
     const changed = (tabId: string) => {
       queueRuntime.notifyChatQueueChanged(tabId)
       transport.chatEvents.emit('threads-changed', tabId)
@@ -964,15 +974,45 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       }
     }
   } catch (error) {
-    try {
-      await onFailurePublication?.close()
-      await onFailureUploads?.close()
-      await storage.close()
-    } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], 'Online runtime startup cleanup failed', {
-        cause: error
-      })
+    stopped = true
+    notification = null
+    failure ??= error instanceof Error ? error : new Error(String(error))
+    const errors: unknown[] = [error]
+    const attempt = async (work: () => unknown) => {
+      try {
+        await work()
+      } catch (cleanupError) {
+        errors.push(cleanupError)
+      }
     }
+    // Every acquired resource is attempted, even if an earlier ready/close failed.
+    // Controllers drain while their canonical native owner is still available.
+    await attempt(() => onFailureAdmission?.close())
+    await attempt(() => onFailurePublication?.close())
+    await attempt(() => onFailureQueue?.close())
+    await attempt(async () => {
+      const result = await onFailureTransport?.shutdownAll()
+      if (result && (result.errors.length || result.timedOut))
+        throw new AggregateError(result.errors, 'Startup transport cleanup failed', {
+          cause: result
+        })
+    })
+    await attempt(() => onFailureInvoke?.settleAll())
+    await attempt(() => onFailureUploads?.close())
+    await attempt(() => storage.close())
+    if (!ownerExited) {
+      // A generic close rejection cannot prove physical retirement. Retire only
+      // this factory's owner; exit is independent of lease-dependent cleanup.
+      const terminating = Promise.resolve().then(() => storage.terminate())
+      void terminating.catch(() => undefined)
+      await storage.exited
+      await attempt(() => terminating)
+    }
+    await storage.exited
+    hostCall = null
+    for (const lock of locks.values()) lock.release()
+    if (errors.length > 1)
+      throw new AggregateError(errors, 'Online runtime startup cleanup failed', { cause: error })
     throw error
   }
 }
