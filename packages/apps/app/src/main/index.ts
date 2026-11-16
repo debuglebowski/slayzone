@@ -81,6 +81,7 @@ import {
   type PanelRequest
 } from './browser-panel-policy'
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
+import { USER_LINK_ACTIVATION_CHANNEL } from '../shared/browser-link-activation-channel'
 import {
   LOCAL_BROWSER_PARTITION,
   WEB_PANEL_PARTITION,
@@ -1884,6 +1885,7 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'reload-browser'))) {
       event.preventDefault()
+      userLocalAccess.reloadShortcutPressed()
       menuEvents.emit('reload-browser')
     }
 
@@ -2223,6 +2225,7 @@ app
               accelerator: 'CmdOrCtrl+R',
               registerAccelerator: false,
               click: () => {
+                userLocalAccess.reloadShortcutPressed()
                 menuEvents.emit('reload-browser')
               }
             },
@@ -3093,7 +3096,9 @@ app
               url: details.url,
               resourceType: details.resourceType,
               webContentsId: wcId,
-              topUrl: wc && !wc.isDestroyed() ? wc.getURL() : ''
+              topUrl: wc && !wc.isDestroyed() ? wc.getURL() : '',
+              method: details.method,
+              requestId: details.id
             },
             { untrustedSession, resolveIn: sess, userAccess }
           )
@@ -3223,14 +3228,11 @@ app
       sess.setUserAgent(_chromeUa)
       sess.webRequest.onBeforeSendHeaders(panelRequestHeaders)
       // The user's own tabs on a remote hub reach local addresses on the user's own act
-      // (typed, back/forward/reload, a click); never an isolated (agent) partition or a
-      // remote hub's web panels, whose pages the hub picks.
+      // (typed, back/forward, the user's reload, a click on that link) and the user-opened
+      // local page's own navigations; never an isolated (agent) partition or a remote
+      // hub's web panels, whose pages the hub picks.
       const userAccess = isRemoteUserBrowserPartition(partition)
-        ? (req: PanelRequest, nonPublic: boolean) =>
-            userLocalAccess.allows(req, {
-              nonPublic,
-              gesture: req.webContentsId !== null && panelGestures.hasRecent(req.webContentsId)
-            })
+        ? (req: PanelRequest, nonPublic: boolean) => userLocalAccess.allows(req, { nonPublic })
         : undefined
       sess.webRequest.onBeforeRequest(panelBeforeRequest(true, sess, userAccess))
       // Deny by default: nothing sensitive (camera/mic, clipboard, MIDI, devices, …)
@@ -3244,6 +3246,8 @@ app
     }
     browserViewManager.setSessionResolver((partition) => ensurePanelPartition!(partition))
     browserViewManager.setUserActedCheck((id) => panelGestures.consume(id))
+    // The reload shortcut pressed inside a tab: main saw the key itself.
+    browserViewManager.setUserReloadHook((id) => userLocalAccess.userNavigates(id, null))
 
     // Initialize Chrome Web Store support for service worker lifecycle management.
     const extensionsPath = join(app.getPath('userData'), 'Extensions')
@@ -3505,8 +3509,11 @@ app
         userNavigated(viewId, null)
         return browserViewManager.goForward(viewId)
       },
-      'view.reload': (_s, viewId, ignoreCache) => {
-        userNavigated(viewId, null)
+      // A reload is the user's only from the panel's button, or for the app's reload
+      // shortcut main itself saw — never a hub's `reload-browser` event alone.
+      'view.reload': (_s, viewId, ignoreCache, trigger) => {
+        const wcId = browserViewManager.getWebContentsId(viewId)
+        if (wcId != null) userLocalAccess.userReloads(wcId, trigger)
         return browserViewManager.reload(viewId, ignoreCache)
       },
       'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
@@ -4255,6 +4262,14 @@ app
         gestures: panelGestures,
         untrusted: untrustedPanelSessions.has(sender.session)
       })
+    // A plain link click in a panel page (its preload, sync, before the navigation):
+    // believed only right after real input main received in that tab — one per act.
+    ipcMain.on(USER_LINK_ACTIVATION_CHANNEL, (event, url: unknown) => {
+      event.returnValue = null
+      if (typeof url !== 'string' || event.senderFrame !== event.sender.mainFrame) return
+      if (!panelGestures.consume(event.sender.id)) return
+      userLocalAccess.userActivatesLink(event.sender.id, url)
+    })
     ipcMain.on(
       'browser:request-create-task-from-link',
       (event, payload: { url?: unknown; linkText?: unknown }) => {

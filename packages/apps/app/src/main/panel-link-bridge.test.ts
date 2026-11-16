@@ -57,17 +57,3 @@ describe('the system browser only from the user’s own tab', () => {
     expect(linkBridgeAllowed('create-task', 1, { gestures: g, untrusted: true })).toBe(true)
   })
 })
-
-describe('hasRecent: a non-consuming look (navigation by the user)', () => {
-  test('true right after an act, without using it up; false once stale', () => {
-    const { g, advance } = tracker()
-    expect(g.hasRecent(1)).toBe(false)
-    g.noteInput(1, 'mouseDown')
-    expect(g.hasRecent(1)).toBe(true)
-    expect(g.hasRecent(1)).toBe(true)
-    expect(linkBridgeAllowed('create-task', 1, { gestures: g, untrusted: false })).toBe(true)
-    g.noteInput(1, 'mouseDown')
-    advance(GESTURE_WINDOW_MS + 1)
-    expect(g.hasRecent(1)).toBe(false)
-  })
-})

@@ -87,6 +87,15 @@ export interface BrowserViewEvent {
 }
 
 /**
+ * Who asked a browser view to reload — for the client host's "the user asked for it"
+ * rule (a remote hub's tabs reach this machine's addresses only on the user's act):
+ *  - `panel`: the panel's own reload control, clicked in this app;
+ *  - `shortcut`: the app's reload-browser shortcut as the renderer heard it. That event
+ *    can also come from a hub, so the host counts it only if it saw the shortcut itself.
+ */
+export type BrowserReloadTrigger = 'panel' | 'shortcut'
+
+/**
  * Every operation the client-local host answers. Keys are the wire method names.
  *
  * `view.*`    one WebContentsView (task browser tab or web panel), by view id.
@@ -109,7 +118,8 @@ export interface BrowserHostMethods {
   'view.navigate': (viewId: string, url: string) => void
   'view.goBack': (viewId: string) => void
   'view.goForward': (viewId: string) => void
-  'view.reload': (viewId: string, ignoreCache?: boolean) => void
+  /** `trigger` says who asked (`BrowserReloadTrigger`); omitted = not the user. */
+  'view.reload': (viewId: string, ignoreCache?: boolean, trigger?: BrowserReloadTrigger) => void
   'view.stop': (viewId: string) => void
   'view.executeJs': (viewId: string, code: string) => unknown
   'view.insertCss': (viewId: string, css: string) => string

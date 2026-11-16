@@ -186,3 +186,284 @@ test.describe('The user’s own tab on a remote hub reaches this machine on the 
     await invoke(mainWindow, 'view.destroy', [viewId])
   })
 })
+
+/**
+ * Follow-ups N1–N3 to review 7, in a real remote-user-partition view. Each case reads
+ * the main-frame outcome off the web contents itself: `did-fail-load` (the network
+ * policy cancelled it) or `did-finish-load` (loaded).
+ */
+test.describe('The user’s own remote-hub tab: what counts as the user’s act', () => {
+  type Invoke = (m: string, a: unknown[]) => Promise<unknown>
+  const invokeIn =
+    (mainWindow: import('@playwright/test').Page): Invoke =>
+    (m, a) =>
+      mainWindow.evaluate(
+        ({ m, a }) =>
+          (
+            window as unknown as {
+              api: { browserHost: { invoke: (m: string, a: unknown[]) => Promise<unknown> } }
+            }
+          ).api.browserHost.invoke(m, a),
+        { m, a }
+      )
+
+  /** A public page (served into the session at a public IP literal): `?html=` is its body. */
+  const publicPage = (html: string): string =>
+    `https://93.184.216.34/page?html=${encodeURIComponent(html)}`
+
+  async function openUserTab(
+    mainWindow: import('@playwright/test').Page,
+    electronApp: import('@playwright/test').ElectronApplication,
+    name: string
+  ): Promise<{ viewId: string; wcId: number }> {
+    const invoke = invokeIn(mainWindow)
+    const viewId = (await invoke('view.create', [
+      {
+        taskId: 'remote-user-tab-acts-e2e',
+        tabId: `remote-user-${name}`,
+        partition: REMOTE_USER_TABS,
+        url: 'about:blank',
+        kind: 'browser-tab',
+        bounds: { x: 0, y: 0, width: 400, height: 300 }
+      }
+    ])) as string
+    const wcId = (await invoke('view.getWebContentsId', [viewId])) as number
+    await electronApp.evaluate(({ session }, p) => {
+      const s = session.fromPartition(p)
+      if (s.protocol.isProtocolHandled('https')) return
+      s.protocol.handle('https', (request) => {
+        const html = new URL(request.url).searchParams.get('html') ?? ''
+        return new Response(`<!doctype html><title>public</title><body>${html}</body>`, {
+          headers: { 'content-type': 'text/html' }
+        })
+      })
+    }, REMOTE_USER_TABS)
+    return { viewId, wcId }
+  }
+
+  /** Runs `trigger`, then reports how the tab's next main-frame load ended. A blocked
+   *  load resolves only once its error page has finished too, so that page's own
+   *  `did-finish-load` never leaks into the next outcome. */
+  async function outcome(
+    electronApp: import('@playwright/test').ElectronApplication,
+    wcId: number,
+    trigger: () => Promise<unknown>
+  ): Promise<string> {
+    await electronApp.evaluate(({ webContents }, id) => {
+      const wc = webContents.fromId(id)!
+      ;(globalThis as Record<string, unknown>).__navOutcome = new Promise<string>((resolve) => {
+        let blocked: string | null = null
+        let timer = setTimeout(() => finish('timeout'), 10_000)
+        const fail = (
+          _e: unknown,
+          code: number,
+          _d: string,
+          _u: string,
+          isMainFrame: boolean
+        ): void => {
+          if (!isMainFrame || code === -3 || blocked) return
+          blocked = `blocked:${code}`
+          clearTimeout(timer)
+          timer = setTimeout(() => finish(blocked!), 3_000)
+        }
+        const ok = (): void => finish(blocked ?? `loaded:${wc.getURL()}`)
+        const stopped = (): void => {
+          if (blocked) finish(blocked)
+        }
+        function finish(r: string): void {
+          clearTimeout(timer)
+          wc.off('did-fail-load', fail)
+          wc.off('did-finish-load', ok)
+          wc.off('did-stop-loading', stopped)
+          resolve(r)
+        }
+        wc.on('did-fail-load', fail)
+        wc.on('did-finish-load', ok)
+        wc.on('did-stop-loading', stopped)
+      })
+    }, wcId)
+    await trigger()
+    return (await electronApp.evaluate(
+      () => (globalThis as Record<string, unknown>).__navOutcome
+    )) as string
+  }
+
+  const loadFromMain = (
+    electronApp: import('@playwright/test').ElectronApplication,
+    wcId: number,
+    url: string
+  ) =>
+    electronApp.evaluate(
+      ({ webContents }, { id, url }) =>
+        webContents
+          .fromId(id)!
+          .loadURL(url)
+          .catch(() => undefined),
+      { id: wcId, url }
+    )
+  const pageRuns = (
+    electronApp: import('@playwright/test').ElectronApplication,
+    wcId: number,
+    code: string
+  ) =>
+    electronApp.evaluate(
+      ({ webContents }, { id, c }) => {
+        void webContents
+          .fromId(id)!
+          .executeJavaScript(c)
+          .catch(() => undefined)
+      },
+      { id: wcId, c: code }
+    )
+  const click = (
+    electronApp: import('@playwright/test').ElectronApplication,
+    wcId: number,
+    x: number,
+    y: number
+  ) =>
+    electronApp.evaluate(
+      ({ webContents }, { id, x, y }) => {
+        const wc = webContents.fromId(id)!
+        wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+        wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+      },
+      { id: wcId, x, y }
+    )
+
+  test('N1: a local page the user opened follows its own redirect, reloads, navigates and posts to itself', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const invoke = invokeIn(mainWindow)
+    const base = (await getTestUrl('/')).replace(/\/$/, '')
+    const { viewId, wcId } = await openUserTab(mainWindow, electronApp, 'n1')
+
+    // Typed: `/redirect` answers 302 → `/title-after-redirect`.
+    expect(
+      await outcome(electronApp, wcId, () =>
+        invoke('view.navigate', [viewId, `${base}/redirect?to=/title-after-redirect`])
+      )
+    ).toBe(`loaded:${base}/title-after-redirect`)
+    // The page reloads itself (a dev server's full reload), no input.
+    expect(
+      await outcome(electronApp, wcId, () => pageRuns(electronApp, wcId, 'location.reload()'))
+    ).toBe(`loaded:${base}/title-after-redirect`)
+    // In-app navigation, later, no input.
+    await new Promise((r) => setTimeout(r, 5_500))
+    expect(
+      await outcome(electronApp, wcId, () =>
+        pageRuns(electronApp, wcId, `location.href = '/title-in-app'`)
+      )
+    ).toBe(`loaded:${base}/title-in-app`)
+    // Its own form posts to itself.
+    expect(
+      await outcome(electronApp, wcId, () =>
+        pageRuns(
+          electronApp,
+          wcId,
+          `const f = document.createElement('form'); f.method = 'post'; f.action = '/title-posted'; document.body.append(f); f.submit()`
+        )
+      )
+    ).toBe(`loaded:${base}/title-posted`)
+    // But not to another local address by itself.
+    const other = base.replace('127.0.0.1', 'localhost')
+    expect(
+      await outcome(electronApp, wcId, () =>
+        pageRuns(electronApp, wcId, `location.href = '${other}/title-other'`)
+      )
+    ).toMatch(/^blocked:/)
+    await invoke('view.destroy', [viewId])
+  })
+
+  test('N2: input on a public page lets it reach no local address; a click on the link does', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const invoke = invokeIn(mainWindow)
+    const base = (await getTestUrl('/')).replace(/\/$/, '')
+    const { viewId, wcId } = await openUserTab(mainWindow, electronApp, 'n2')
+    const page = publicPage(
+      `<a id="l" href="${base}/title-clicked" style="position:fixed;left:0;top:0;width:200px;height:100px;display:block">open</a>`
+    )
+    const freshPublicPage = async () =>
+      expect(await outcome(electronApp, wcId, () => loadFromMain(electronApp, wcId, page))).toBe(
+        `loaded:${page}`
+      )
+
+    // The user clicks the page (not a link); right after, the page POSTs to this machine.
+    await freshPublicPage()
+    await click(electronApp, wcId, 300, 250)
+    expect(
+      await outcome(electronApp, wcId, () =>
+        pageRuns(
+          electronApp,
+          wcId,
+          `const f = document.createElement('form'); f.method = 'post'; f.action = '${base}/title-csrf'; document.body.append(f); f.submit()`
+        )
+      )
+    ).toMatch(/^blocked:/)
+    // … or navigates there by GET.
+    await freshPublicPage()
+    await click(electronApp, wcId, 300, 250)
+    expect(
+      await outcome(electronApp, wcId, () =>
+        pageRuns(electronApp, wcId, `location.href = '${base}/title-self'`)
+      )
+    ).toMatch(/^blocked:/)
+    // The user clicks the local link itself: it opens.
+    await freshPublicPage()
+    expect(await outcome(electronApp, wcId, () => click(electronApp, wcId, 50, 50))).toBe(
+      `loaded:${base}/title-clicked`
+    )
+    await invoke('view.destroy', [viewId])
+  })
+
+  test('N3: a reload the hub asks for opens no planted local URL; the user’s own reload does', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const invoke = invokeIn(mainWindow)
+    const local = await getTestUrl('/title-planted')
+    const first = await openUserTab(mainWindow, electronApp, 'n3')
+    let viewId = first.viewId
+    const wcId = first.wcId
+
+    // Planted (not the user): blocked.
+    expect(await outcome(electronApp, wcId, () => loadFromMain(electronApp, wcId, local))).toMatch(
+      /^blocked:/
+    )
+    // The hub's `reload-browser` event reaches the renderer as an app-shortcut reload,
+    // with no shortcut main itself saw: still blocked.
+    expect(
+      await outcome(electronApp, wcId, () => invoke('view.reload', [viewId, false, 'shortcut']))
+    ).toMatch(/^blocked:/)
+    // The user presses the reload shortcut in the tab (main sees it).
+    const mod: 'meta' | 'control' = process.platform === 'darwin' ? 'meta' : 'control'
+    expect(
+      await outcome(electronApp, wcId, () =>
+        electronApp.evaluate(
+          ({ webContents }, { id, mod }) => {
+            webContents
+              .fromId(id)!
+              .sendInputEvent({ type: 'keyDown', keyCode: 'R', modifiers: [mod] })
+          },
+          { id: wcId, mod }
+        )
+      )
+    ).toBe(`loaded:${local}`)
+    await invoke('view.destroy', [viewId])
+
+    // Planted in a fresh tab; the panel's own reload button.
+    const fresh = await openUserTab(mainWindow, electronApp, 'n3b')
+    expect(
+      await outcome(electronApp, fresh.wcId, () => loadFromMain(electronApp, fresh.wcId, local))
+    ).toMatch(/^blocked:/)
+    expect(
+      await outcome(electronApp, fresh.wcId, () =>
+        invoke('view.reload', [fresh.viewId, false, 'panel'])
+      )
+    ).toBe(`loaded:${local}`)
+    viewId = fresh.viewId
+    await invoke('view.destroy', [viewId])
+  })
+})

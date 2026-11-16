@@ -111,7 +111,7 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
         if (viewId) callBrowserHost('view.goForward', viewId)
       },
       reload: (ignoreCache?: boolean) => {
-        if (viewId) callBrowserHost('view.reload', viewId, ignoreCache)
+        if (viewId) callBrowserHost('view.reload', viewId, ignoreCache, 'panel')
       },
       stop: () => {
         if (viewId) callBrowserHost('view.stop', viewId)

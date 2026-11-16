@@ -28,6 +28,7 @@ export type {
   BrowserHostMethod,
   BrowserHostEvents,
   BrowserHostEvent,
+  BrowserReloadTrigger,
   RelayedTabOpts
 } from './browser-host'
 export { BROWSER_HOST_METHODS } from './browser-host'

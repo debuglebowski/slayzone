@@ -181,6 +181,11 @@ export class BrowserViewManager {
   setUserActedCheck(check: (webContentsId: number) => boolean): void {
     this.userActed = check
   }
+  /** The user reloads a web contents with the reload shortcut main received in it. */
+  private onUserReload: ((webContentsId: number) => void) | null = null
+  setUserReloadHook(hook: (webContentsId: number) => void): void {
+    this.onUserReload = hook
+  }
   /** viewId → ts of the last deliberate focus request (focus API / CLI click).
    * The nav focus-steal guard treats focus gains near these as intentional. */
   private explicitFocusAt = new Map<string, number>()
@@ -1518,6 +1523,7 @@ export class BrowserViewManager {
 
       // Mod+R reloads THIS browser view; Mod+Shift+R the app (renderer).
       if (action.kind === 'reload-view') {
+        this.onUserReload?.(wc.id)
         wc.reload()
         return
       }

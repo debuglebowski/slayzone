@@ -8,6 +8,10 @@
  * act allows one call. Opening in the system browser (leaving SlayZone) additionally
  * needs a tab that is the user's own: never one an untrusted caller drives, nor any
  * tab of a remote hub's partition.
+ *
+ * The same tracker vouches for the preload's report of a plain link click
+ * (`browser-link-activation.ts` → `UserLocalAccess.userActivatesLink`): one act, one
+ * report.
  */
 
 /** How long after an input event a bridge call still counts as the user's act
@@ -45,12 +49,6 @@ export class UserGestureTracker {
     if (at === undefined) return false
     this.last.delete(webContentsId)
     return this.now() - at <= this.windowMs
-  }
-
-  /** A recent user act in this web contents, WITHOUT using it up (navigation). */
-  hasRecent(webContentsId: number): boolean {
-    const at = this.last.get(webContentsId)
-    return at !== undefined && this.now() - at <= this.windowMs
   }
 
   forget(webContentsId: number): void {

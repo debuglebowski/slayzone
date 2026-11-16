@@ -154,7 +154,8 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
         ) as HTMLElement | null
         const viewId = placeholder?.dataset.viewId
         if (viewId) {
-          callBrowserHost('view.reload', viewId)
+          // The hub's event: the host counts it as the user's only if it saw the key.
+          callBrowserHost('view.reload', viewId, undefined, 'shortcut')
           return
         }
         // Fallback: webview (multi-device grid). <webview> is an Electron custom

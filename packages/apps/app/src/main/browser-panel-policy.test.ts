@@ -247,14 +247,14 @@ describe('untrusted sessions: permissions are deny-by-default (review 5 HIGH)', 
 
 describe('the user’s own remote-hub tabs: local addresses only on the user’s own act (review 6 F2)', () => {
   const WC = 7
-  const setup = (gesture = false) => {
+  const setup = () => {
     let t = 1_000
     const access = new UserLocalAccess(() => t)
     const p = policy()
     const decide = (url: string, over: Partial<PanelRequest> = {}) =>
       p.decide(req(url, over), {
         untrustedSession: true,
-        userAccess: (r, nonPublic) => access.allows(r, { nonPublic, gesture })
+        userAccess: (r, nonPublic) => access.allows(r, { nonPublic })
       })
     return { access, decide, advance: (ms: number) => (t += ms) }
   }
@@ -274,10 +274,6 @@ describe('the user’s own remote-hub tabs: local addresses only on the user’s
     access.userNavigates(WC, 'http://localhost:3000/')
     expect(await decide('http://192.168.1.1/', main)).toBe('block')
     expect(await decide('http://localhost:3000/', main)).toBe('block')
-  })
-  test('a user click (real input) may open a local link', async () => {
-    const { decide } = setup(true)
-    expect(await decide('http://localhost:5173/', main)).toBe('allow')
   })
   test('back / forward / reload from the panel are the user’s act', async () => {
     const { access, decide } = setup()
@@ -310,5 +306,178 @@ describe('the user’s own remote-hub tabs: local addresses only on the user’s
     expect(
       await policy().decide(req('http://localhost:3000/', main), { untrustedSession: true })
     ).toBe('block')
+  })
+})
+
+describe('a local page the user opened keeps working (follow-up N1)', () => {
+  const WC = 7
+  const setup = () => {
+    let t = 1_000
+    const access = new UserLocalAccess(() => t)
+    const p = policy()
+    const decide = (url: string, over: Partial<PanelRequest> = {}) =>
+      p.decide(req(url, over), {
+        untrustedSession: true,
+        userAccess: (r, nonPublic) => access.allows(r, { nonPublic })
+      })
+    return { access, decide, advance: (ms: number) => (t += ms) }
+  }
+  const nav = (topUrl: string, requestId: number, method = 'GET') => ({
+    resourceType: 'mainFrame',
+    topUrl,
+    requestId,
+    method
+  })
+  const BEFORE = 'https://public.test/page'
+  const APP = 'http://localhost:3000/'
+
+  test('its own redirect hops load (same request), to another local server too', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, APP)
+    expect(await decide(APP, nav(BEFORE, 1))).toBe('allow')
+    // `/` → 302 `/login`: the same request again, the old page still on top.
+    expect(await decide('http://localhost:3000/login', nav(BEFORE, 1))).toBe('allow')
+    // → 302 to a local auth server: the user's own server chose it.
+    expect(await decide('http://127.0.0.1:8080/auth', nav(BEFORE, 1))).toBe('allow')
+    // That page's own resources load.
+    expect(
+      await decide('http://127.0.0.1:8080/auth.js', {
+        resourceType: 'script',
+        topUrl: 'http://127.0.0.1:8080/auth'
+      })
+    ).toBe('allow')
+  })
+  test('a public hop breaks the chain: a public server never picks a local target', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, APP)
+    expect(await decide(APP, nav(BEFORE, 1))).toBe('allow')
+    expect(await decide('https://public.test/bounce', nav(BEFORE, 1))).toBe('allow')
+    expect(await decide('http://localhost:3000/admin', nav(BEFORE, 1))).toBe('block')
+  })
+  test('the page reloads itself, navigates in-app (GET or its own form POST), any time later', async () => {
+    const { access, decide, advance } = setup()
+    access.userNavigates(WC, APP)
+    expect(await decide(APP, nav(BEFORE, 1))).toBe('allow')
+    advance(60_000)
+    // location.reload(), a dev server's full reload, meta refresh.
+    expect(await decide(APP, nav(APP, 2))).toBe('allow')
+    // In-app navigation, no input at all.
+    expect(await decide('http://localhost:3000/settings', nav(APP, 3))).toBe('allow')
+    // Its own login form posts to itself.
+    expect(await decide('http://localhost:3000/login', nav(APP, 4, 'POST'))).toBe('allow')
+  })
+  test('the page does not navigate itself to another local address', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, APP)
+    expect(await decide(APP, nav(BEFORE, 1))).toBe('allow')
+    expect(await decide('http://192.168.1.1/', nav(APP, 2))).toBe('block')
+    expect(await decide('http://192.168.1.1/apply', nav(APP, 3, 'POST'))).toBe('block')
+  })
+  test('a public server redirecting into the local page the user still has on top: blocked', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, APP)
+    expect(await decide(APP, nav(BEFORE, 1))).toBe('allow')
+    // The user types a public address; before it commits, the old local page is on top.
+    access.userNavigates(WC, 'https://public.test/')
+    expect(await decide('https://public.test/', nav(APP, 2))).toBe('allow')
+    expect(await decide('http://localhost:3000/delete-all', nav(APP, 2))).toBe('block')
+  })
+  test('a page on the user-opened origin, gone public, gets nothing local back', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, APP)
+    expect(await decide(APP, nav(BEFORE, 1))).toBe('allow')
+    // The page left for a public site; that site navigates to the local app.
+    expect(await decide('https://public.test/', nav(APP, 2))).toBe('allow')
+    expect(await decide(APP, nav('https://public.test/', 3))).toBe('block')
+  })
+})
+
+describe('a link counts only when the user clicked THAT link (follow-up N2)', () => {
+  const WC = 7
+  const setup = () => {
+    let t = 1_000
+    const access = new UserLocalAccess(() => t)
+    const p = policy()
+    const decide = (url: string, over: Partial<PanelRequest> = {}) =>
+      p.decide(req(url, over), {
+        untrustedSession: true,
+        userAccess: (r, nonPublic) => access.allows(r, { nonPublic })
+      })
+    return { access, decide, advance: (ms: number) => (t += ms) }
+  }
+  const nav = (requestId: number, method = 'GET') => ({
+    resourceType: 'mainFrame',
+    topUrl: 'https://public.test/page',
+    requestId,
+    method
+  })
+
+  test('the clicked link opens (GET, that URL, fragment aside)', async () => {
+    const { access, decide } = setup()
+    access.userActivatesLink(WC, 'http://localhost:5173/docs#intro')
+    expect(await decide('http://localhost:5173/docs', nav(1))).toBe('allow')
+  })
+  test('the page cannot swap the target, POST to it, or reuse the click', async () => {
+    const { access, decide, advance } = setup()
+    access.userActivatesLink(WC, 'http://localhost:5173/')
+    expect(await decide('http://192.168.1.1/apply', nav(1))).toBe('block')
+    access.userActivatesLink(WC, 'http://192.168.1.1/apply')
+    expect(await decide('http://192.168.1.1/apply', nav(2, 'POST'))).toBe('block')
+    access.userActivatesLink(WC, 'http://localhost:5173/')
+    expect(await decide('http://localhost:5173/', nav(3))).toBe('allow')
+    // Now the user's page: it navigates on its own origin.
+    expect(
+      await decide('http://localhost:5173/next', { ...nav(4), topUrl: 'http://localhost:5173/' })
+    ).toBe('allow')
+    access.userActivatesLink(WC, 'http://192.168.1.2/')
+    advance(11_000)
+    expect(await decide('http://192.168.1.2/', nav(5))).toBe('block')
+  })
+  test('input alone grants nothing: a page navigating itself to LAN right after a click', async () => {
+    const { decide } = setup()
+    // No link activation recorded — only the click on the page itself.
+    expect(await decide('http://192.168.1.1/', nav(1))).toBe('block')
+    expect(await decide('http://192.168.1.1/apply', nav(2, 'POST'))).toBe('block')
+  })
+})
+
+describe('a reload is the user’s act only when the user asked for it (follow-up N3)', () => {
+  const WC = 7
+  const setup = () => {
+    let t = 1_000
+    const access = new UserLocalAccess(() => t)
+    const p = policy()
+    const decide = (url: string) =>
+      p.decide(req(url, { resourceType: 'mainFrame', topUrl: url }), {
+        untrustedSession: true,
+        userAccess: (r, nonPublic) => access.allows(r, { nonPublic })
+      })
+    return { access, decide, advance: (ms: number) => (t += ms) }
+  }
+  const PLANTED = 'http://localhost:3000/'
+
+  test('a hub’s reload-browser event (no shortcut main saw) does not open a planted URL', async () => {
+    const { access, decide } = setup()
+    access.userReloads(WC, 'shortcut')
+    expect(await decide(PLANTED)).toBe('block')
+    access.userReloads(WC, undefined)
+    expect(await decide(PLANTED)).toBe('block')
+  })
+  test('the reload shortcut main itself saw: once, and not stale', async () => {
+    const { access, decide, advance } = setup()
+    access.reloadShortcutPressed()
+    access.userReloads(WC, 'shortcut')
+    expect(await decide(PLANTED)).toBe('allow')
+    access.userReloads(WC, 'shortcut')
+    expect(await decide('http://192.168.1.1/')).toBe('block')
+    access.reloadShortcutPressed()
+    advance(11_000)
+    access.userReloads(WC, 'shortcut')
+    expect(await decide('http://192.168.1.2/')).toBe('block')
+  })
+  test('the panel’s own reload button is the user’s act', async () => {
+    const { access, decide } = setup()
+    access.userReloads(WC, 'panel')
+    expect(await decide(PLANTED)).toBe('allow')
   })
 })

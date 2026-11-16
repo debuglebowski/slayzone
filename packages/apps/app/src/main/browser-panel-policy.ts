@@ -1,4 +1,5 @@
 import { isNonPublicHostname, parseIp, isNonPublicIp } from '@slayzone/platform/browser-network'
+import type { BrowserReloadTrigger } from '@slayzone/task-browser/shared'
 
 /** Resolve a hostname to its addresses — Electron main passes the tab session's own
  *  Chromium resolver (`session.resolveHost`), the host cache its connections use.
@@ -19,6 +20,10 @@ export interface PanelRequest {
   webContentsId: number | null
   /** The URL of the tab's top-level document (empty while the first one loads). */
   topUrl: string
+  /** HTTP method (`GET`, `POST`, …); absent = unknown. */
+  method?: string
+  /** Electron's request id: the same for every redirect hop of one request. */
+  requestId?: number
 }
 
 const WEB = new Set(['http:', 'https:', 'ws:', 'wss:'])
@@ -163,24 +168,43 @@ function parse(raw: string): URL | null {
  * The user's own tabs in a REMOTE hub's partition run under the untrusted policy (the
  * hub plants their stored URLs), yet the user should reach localhost / their LAN from
  * them — a local dev server, say. So a non-public address is allowed there only on the
- * user's own act, never on anything the hub or a page starts by itself:
+ * user's own act, never on anything the hub or a public page starts by itself.
  *
- *  - a main-frame navigation the user started: typed in the address bar (that address,
- *    once), back / forward / reload from the panel, or right after real input in the tab
- *    (a click on a link) — and its origin becomes one the user opened in that tab;
- *  - any request of a page whose top document is such a user-opened local origin (the
- *    user's own local page, loading its resources and calling its APIs).
+ * A main-frame request to a non-public address is allowed when it is:
+ *  - the user's navigation from the panel: typed in the address bar (that origin, once),
+ *    back / forward, or a reload the user asked for ({@link userReloads}: the panel's
+ *    button, or the reload shortcut main itself saw — never a hub's `reload-browser`);
+ *  - a click on THAT link: the tab's preload reports a trusted click on a link, main
+ *    accepts it only right after real input it received, and only a GET to exactly that
+ *    URL uses it, once — input alone grants nothing, and a page never POSTs its way in;
+ *  - a redirect hop of a request allowed above (same request id): the user's own local
+ *    server picked the target. A public hop ends the chain;
+ *  - the local page the user opened navigating on its own origin — reload, redirect-free
+ *    in-app navigation, its own form POST — at any time later (a page on a user-opened
+ *    origin is the user's page, which is also why its subresources load).
+ * The origin so reached becomes one the user opened in that tab, and every request of
+ * a page whose top document is on such an origin loads.
  *
- * A stored URL loading at start, a page navigating itself, or a public page's request
- * to this machine (local-network CSRF) stays blocked. Isolated partitions (the agents'
- * tabs) never get this. Pure; `now` injected.
+ * Still blocked: a stored URL loading at start, a public page navigating or POSTing
+ * itself to this machine (with or without the user's input on it), a public server
+ * redirecting there, the user's local page navigating itself to ANOTHER local address,
+ * a hub's reload. Chromium itself refuses a cross-origin iframe's top navigation with no
+ * user activation. Isolated partitions (the agents' tabs) never get this. Pure; `now`
+ * injected.
  */
 export class UserLocalAccess {
   /** A pending user navigation per web contents: the typed URL, or null (back /
    *  forward / reload: whichever URL it lands on). Spent by the next main frame. */
   private readonly pending = new Map<number, { url: string | null; at: number }>()
+  /** The link the user just clicked, per web contents (URL without fragment). */
+  private readonly links = new Map<number, { url: string; at: number }>()
+  /** The main-frame request last seen per web contents, and whether it was let through
+   *  to a non-public address (its redirect hops follow that). */
+  private readonly lastMain = new Map<number, { requestId: number; granted: boolean }>()
   /** Non-public origins the user opened, per web contents. */
   private readonly opened = new Map<number, Set<string>>()
+  /** When main last saw the app's reload shortcut (key or menu), not yet used. */
+  private shortcutAt: number | null = null
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -192,30 +216,82 @@ export class UserLocalAccess {
     this.pending.set(webContentsId, { url, at: this.now() })
   }
 
-  allows(req: PanelRequest, ctx: { nonPublic: boolean; gesture: boolean }): boolean {
+  /** Main itself saw the app's reload shortcut (its key, or the menu item). */
+  reloadShortcutPressed(): void {
+    this.shortcutAt = this.now()
+  }
+
+  /** The renderer reloads this tab. `undefined`: not the user's act. */
+  userReloads(webContentsId: number, trigger: BrowserReloadTrigger | undefined): void {
+    if (trigger === 'panel') return this.userNavigates(webContentsId, null)
+    if (trigger !== 'shortcut') return
+    const at = this.shortcutAt
+    this.shortcutAt = null
+    if (at !== null && this.now() - at <= this.windowMs) this.userNavigates(webContentsId, null)
+  }
+
+  /** The user clicked a link to `url` in this tab (main checked the input was real). */
+  userActivatesLink(webContentsId: number, url: string): void {
+    const bare = withoutFragment(url)
+    if (bare) this.links.set(webContentsId, { url: bare, at: this.now() })
+  }
+
+  allows(req: PanelRequest, ctx: { nonPublic: boolean }): boolean {
     const id = req.webContentsId
     if (id === null) return false
     const origin = originOf(req.url)
-    if (req.resourceType === 'mainFrame') {
-      const p = this.pending.get(id)
-      this.pending.delete(id)
-      if (!ctx.nonPublic || !origin) return false
-      const typed =
-        !!p && this.now() - p.at <= this.windowMs && (p.url === null || originOf(p.url) === origin)
-      if (!typed && !ctx.gesture) return false
-      let set = this.opened.get(id)
-      if (!set) this.opened.set(id, (set = new Set()))
-      set.add(origin)
+    if (req.resourceType !== 'mainFrame') {
+      const top = originOf(req.topUrl)
+      return ctx.nonPublic && !!top && (this.opened.get(id)?.has(top) ?? false)
+    }
+    const previous = this.lastMain.get(id)
+    const redirectHop = req.requestId !== undefined && previous?.requestId === req.requestId
+    // A new navigation spends the pending act and link, whatever its target.
+    const asked = redirectHop ? !!previous?.granted : this.newNavigationAllowed(id, req, origin)
+    const granted = ctx.nonPublic && !!origin && asked
+    if (req.requestId !== undefined) this.lastMain.set(id, { requestId: req.requestId, granted })
+    if (!granted || !origin) return false
+    let set = this.opened.get(id)
+    if (!set) this.opened.set(id, (set = new Set()))
+    set.add(origin)
+    return true
+  }
+
+  /** A main-frame navigation's first hop: spends the pending act and link. */
+  private newNavigationAllowed(id: number, req: PanelRequest, origin: string | null): boolean {
+    const now = this.now()
+    const p = this.pending.get(id)
+    const link = this.links.get(id)
+    this.pending.delete(id)
+    this.links.delete(id)
+    if (p && now - p.at <= this.windowMs && (p.url === null || originOf(p.url) === origin)) {
+      return true
+    }
+    if (
+      link &&
+      now - link.at <= this.windowMs &&
+      (req.method ?? 'GET').toUpperCase() === 'GET' &&
+      withoutFragment(req.url) === link.url
+    ) {
       return true
     }
     const top = originOf(req.topUrl)
-    return ctx.nonPublic && !!top && (this.opened.get(id)?.has(top) ?? false)
+    return !!origin && top === origin && (this.opened.get(id)?.has(origin) ?? false)
   }
 
   forget(webContentsId: number): void {
     this.pending.delete(webContentsId)
+    this.links.delete(webContentsId)
+    this.lastMain.delete(webContentsId)
     this.opened.delete(webContentsId)
   }
+}
+
+function withoutFragment(raw: string): string | null {
+  const u = parse(raw)
+  if (!u) return null
+  u.hash = ''
+  return u.href
 }
 
 function originOf(raw: string): string | null {

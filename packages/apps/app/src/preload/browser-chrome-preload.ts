@@ -13,6 +13,10 @@ import {
   BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
   type BrowserModifiedLinkPayload
 } from './browser-link-task-capture'
+import {
+  installUserLinkActivationReport,
+  USER_LINK_ACTIVATION_CHANNEL
+} from './browser-link-activation'
 
 webFrame.setVisualZoomLevelLimits(1, 3)
 
@@ -28,6 +32,12 @@ function sendModifiedLinkPayload(payload: BrowserModifiedLinkPayload): void {
 }
 
 contextBridge.exposeInMainWorld(BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY, sendModifiedLinkPayload)
+
+// A plain click on a link, told to main before the navigation starts (sync), so main
+// knows the user asked for THAT URL (browser-link-activation.ts, UserLocalAccess).
+installUserLinkActivationReport((url) => {
+  ipcRenderer.sendSync(USER_LINK_ACTIVATION_CHANNEL, url)
+})
 
 if ('executeInMainWorld' in contextBridge) {
   contextBridge.executeInMainWorld({
