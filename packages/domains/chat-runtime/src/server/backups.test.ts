@@ -75,10 +75,10 @@ test('backup includes consistent history and blobs; restore is a separate read-o
     await r.applyTaskLifecycle('task', 'deleted', 1)
     const archive = await r.backups.restore(backup.id)
     expect(r.storage.conversation('c')).toMatchObject({ state: 'deleted' })
-    expect(r.backups.read(archive.id, 'c', -1, 10).events).toMatchObject([
+    expect((await r.backups.read(archive.id, 'c', -1, 10)).events).toMatchObject([
       { seq: 0, at: 123, event: { text: 'backup history' } }
     ])
-    expect(Buffer.from(r.backups.attachment(archive.id, 'c', ref))).toEqual(bytes)
+    expect(Buffer.from(await r.backups.attachment(archive.id, 'c', ref))).toEqual(bytes)
     expect(r.backups.listArchives()).toMatchObject([
       { id: archive.id, readOnly: true, providerResumable: false }
     ])
@@ -162,7 +162,7 @@ test('deleting live history during a snapshot cannot collect its referenced blob
     release()
     const backup = await pending,
       archive = await r.backups.restore(backup.id)
-    expect(r.backups.attachment(archive.id, 'c', ref)).toEqual(bytes)
+    expect(await r.backups.attachment(archive.id, 'c', ref)).toEqual(bytes)
     r.attachments.collectGarbage()
   } finally {
     release()
@@ -291,9 +291,9 @@ test('archives expose unattached task files and every saved version, scoped to t
     const backup = await r.backups.create(),
       archive = await r.backups.restore(backup.id)
     await r.applyTaskLifecycle('t', 'deleted', 1)
-    const rows = r.backups
-      .records(archive.id, 'c')
-      .records.filter((row) => row.kind === 'artifact-version')
+    const rows = (await r.backups.records(archive.id, 'c')).records.filter(
+      (row) => row.kind === 'artifact-version'
+    )
     expect(rows).toHaveLength(2)
     const files = rows.map(
       (row) => row.value as { artifactId: string; contentHash: string; name: string }
@@ -304,18 +304,20 @@ test('archives expose unattached task files and every saved version, scoped to t
       ])
     )
     expect(
-      files.map((file) =>
-        r.backups.file(archive.id, 'c', file.artifactId, file.contentHash).data.toString()
+      await Promise.all(
+        files.map(async (file) =>
+          (await r.backups.file(archive.id, 'c', file.artifactId, file.contentHash)).data.toString()
+        )
       )
     ).toEqual(['first version', 'second version'])
-    expect(() => r.backups.file(archive.id, 'other', artifact.id, files[0].contentHash)).toThrow(
-      /belong|owner|scope/i
-    )
-    const first = r.backups.records(archive.id, 'c').records[0]
+    await expect(
+      r.backups.file(archive.id, 'other', artifact.id, files[0].contentHash)
+    ).rejects.toThrow(/belong|owner|scope/i)
+    const first = (await r.backups.records(archive.id, 'c')).records[0]
     expect(
-      r.backups
-        .records(archive.id, 'c', first.cursor)
-        .records.every((row) => row.cursor > first.cursor)
+      (await r.backups.records(archive.id, 'c', first.cursor)).records.every(
+        (row) => row.cursor > first.cursor
+      )
     ).toBe(true)
   } finally {
     await r.close()

@@ -1082,6 +1082,7 @@ export function openChatStorage(opts: {
     close() {
       if (!closed) {
         for (const closeReader of [...exportReaders]) closeReader()
+        maintenance.closeSecondaries()
         // Failed native closes retain ownership for a later close retry.
         checkpointer.closeSync()
         const errors: unknown[] = []
@@ -2665,7 +2666,7 @@ export function openChatStorage(opts: {
    * Connection lifecycle for storage maintenance (compaction): the live file's size,
    * other connections on it, and the swap that replaces it. See DOMAIN.md.
    */
-  const secondaries = new Map<symbol, string>()
+  const secondaries = new Map<symbol, { label: string; close?(): void }>()
   let connectionEpoch = 0
   const maintenance = {
     connectionEpoch: () => connectionEpoch,
@@ -2727,13 +2728,27 @@ export function openChatStorage(opts: {
      * Every OTHER connection on the live file (a read-only export reader, a compaction
      * reader) registers for its lifetime: the swap never runs while one is open.
      */
-    registerSecondary(label: string): { release(): void } {
+    registerSecondary(label: string, close?: () => void): { release(): void } {
       const token = Symbol(label)
-      secondaries.set(token, label)
+      secondaries.set(token, { label, close })
       return { release: () => void secondaries.delete(token) }
     },
+    /** Retry retained native closes. Async copy helpers retain their own exit lease. */
+    closeSecondaries(label?: string): void {
+      const errors: unknown[] = []
+      for (const entry of [...secondaries.values()]) {
+        if (label !== undefined && entry.label !== label) continue
+        try {
+          entry.close?.()
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+      if (errors.length)
+        throw new AggregateError(errors, 'Secondary connection close failed', { cause: errors[0] })
+    },
     secondaryConnections(): string[] {
-      return [...secondaries.values()]
+      return [...secondaries.values()].map((entry) => entry.label)
     },
     /**
      * Replace the live file with `compacted` (a finished, settled copy of THIS store in
@@ -2762,7 +2777,7 @@ export function openChatStorage(opts: {
         )
       if (secondaries.size)
         throw new ChatStorageSwapRefused(
-          `a secondary connection is open (${[...secondaries.values()].join(', ')})`,
+          `a secondary connection is open (${maintenance.secondaryConnections().join(', ')})`,
           true
         )
       if (checkpointer.active)

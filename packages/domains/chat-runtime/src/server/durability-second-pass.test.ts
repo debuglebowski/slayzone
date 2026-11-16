@@ -332,9 +332,9 @@ test.each(['future-schema', 'missing-events-table', 'invalid-event-json'] as con
     if (result.status === 'fulfilled') {
       const archive = result.value
       if (fault === 'missing-events-table')
-        expect(() => r.backups.read(archive.id, 'chat')).toThrow(/no such table.*events/)
+        await expect(r.backups.read(archive.id, 'chat')).rejects.toThrow(/no such table.*events/)
       if (fault === 'invalid-event-json')
-        expect(() => r.backups.read(archive.id, 'chat')).toThrow(SyntaxError)
+        await expect(r.backups.read(archive.id, 'chat')).rejects.toThrow(SyntaxError)
     }
     expect(result.status, 'Readable history must be verified before archive publication').toBe(
       'rejected'
@@ -394,9 +394,14 @@ test('control: original-artifact snapshots survive live mutation, deletion and G
     const backup = await work,
       archive = await r.backups.restore(backup.id)
     expect(
-      r.backups
-        .file(archive.id, 'files', artifact.id, sha(Buffer.from('snapshot version A')))
-        .data.toString()
+      (
+        await r.backups.file(
+          archive.id,
+          'files',
+          artifact.id,
+          sha(Buffer.from('snapshot version A'))
+        )
+      ).data.toString()
     ).toBe('snapshot version A')
     expect(r.storage.conversation('chat')?.state).toBe('deleted')
   } finally {

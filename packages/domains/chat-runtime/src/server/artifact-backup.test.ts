@@ -96,9 +96,9 @@ test.each(['pruned', 'external'] as const)(
       const backup = await backupWork
       const archive = await r.backups.restore(backup.id)
       expect(
-        r.backups.file(archive.id, identity.id, artifact.id, sha(original)).data.toString()
+        (await r.backups.file(archive.id, identity.id, artifact.id, sha(original))).data.toString()
       ).toBe(original)
-      expect(r.backups.records(archive.id, identity.id).records).toEqual(
+      expect((await r.backups.records(archive.id, identity.id)).records).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             kind: 'artifact-original',
@@ -206,7 +206,7 @@ test('backup immediately after prune rollback restores quarantined historical by
     const archive = await r.backups.restore(backup.id)
     for (const content of ['A', 'B', 'C'])
       expect(
-        r.backups.file(archive.id, identity.id, artifact.id, sha(content)).data.toString()
+        (await r.backups.file(archive.id, identity.id, artifact.id, sha(content))).data.toString()
       ).toBe(content)
   } finally {
     await r.close()
@@ -283,9 +283,9 @@ test.each(['v2-missing-working', 'v1-version-only'] as const)(
       } else {
         const archive = await r.backups.restore(backup.id)
         expect(
-          r.backups.file(archive.id, identity.id, artifact.id, sha(content)).data.toString()
+          (await r.backups.file(archive.id, identity.id, artifact.id, sha(content))).data.toString()
         ).toBe(content)
-        const records = r.backups.records(archive.id, identity.id).records
+        const records = (await r.backups.records(archive.id, identity.id)).records
         expect(records.filter((record) => record.kind === 'artifact-version')).toHaveLength(1)
         expect(records.filter((record) => record.kind === 'artifact-original')).toEqual([])
       }
@@ -322,7 +322,7 @@ test('concurrent manual backups preserve identical originals without racing thei
     for (const backup of backups) {
       const archive = await r.backups.restore(backup.id)
       expect(
-        r.backups.file(archive.id, identity.id, artifact.id, sha(content)).data.toString()
+        (await r.backups.file(archive.id, identity.id, artifact.id, sha(content))).data.toString()
       ).toBe(content)
     }
   } finally {

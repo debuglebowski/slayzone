@@ -8,8 +8,12 @@ export function createStorageCopyBroker(post: (message: HostControl) => void) {
   return {
     async request(request: CopyControl): Promise<unknown> {
       if (request.operation === 'copy-start') {
-        if (closing) throw new Error('Storage copy broker is closed')
         if (copies.has(request.token)) throw new Error('Storage copy already exists')
+        if (closing) {
+          // No physical thread was accepted; release the owner's reserved lifetime.
+          post({ type: 'copy-exit', token: request.token })
+          throw new Error('Storage copy broker is closed')
+        }
         const { token, spec } = request
         const copy = startCompactionWorker({
           ...spec,

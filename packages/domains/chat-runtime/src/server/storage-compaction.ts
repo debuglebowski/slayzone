@@ -32,8 +32,16 @@
  * deleted, live untouched) by cancel, close, or `abort` — content erasure aborts it:
  * the copy was taken from a snapshot that still held the erased content.
  */
-import { closeSync, existsSync, fsyncSync, openSync, renameSync, rmSync } from 'node:fs'
-import { dirname } from 'node:path'
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  rmSync
+} from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
@@ -161,6 +169,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
 
   let closed = false
   let job: ComputerChatStorageJob | null = null
+  let jobFailure: unknown
   let running: Promise<void> | null = null
   let stop: { reason: string; phase: 'cancelled' } | null = null
   // Settles when the current job is told to stop: awaits on the worker race it, so a
@@ -232,6 +241,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         )
     }
     stop = null
+    jobFailure = undefined
     stopSignal = deferred()
     job = {
       id: randomUUID(),
@@ -267,7 +277,8 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         )
       })
       .catch((error: unknown) => {
-        if (error instanceof Stopped || stop) {
+        jobFailure = error
+        if (error instanceof Stopped) {
           Object.assign(current, { phase: 'cancelled', message: stop?.reason ?? 'Cancelled' })
           log(`[chat-compaction] ${current.kind} stopped: ${current.message}`)
         } else {
@@ -419,6 +430,13 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
       db.pragma('foreign_keys = OFF')
       try {
         db.transaction(() => {
+          // A BUSY native close may leave the already-finalized copy for another
+          // window. Replay authoritative derived rows with its triggers disabled,
+          // just as during the initial copy (never fire them twice).
+          for (const { name } of db
+            .prepare("SELECT name FROM compaction.sqlite_master WHERE type='trigger'")
+            .all() as Array<{ name: string }>)
+            db.exec(`DROP TRIGGER compaction.${ident(name)}`)
           const whole = new Set<string>()
           for (const key of keys) {
             const t = tables.get(key[0] as string)
@@ -488,6 +506,33 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
   const blocked = () => store.hasBlobLeases() || store.maintenance.secondaryConnections().length > 0
 
   async function rebuild(current: ComputerChatStorageJob, liveBytes: number): Promise<number> {
+    // A previous cancel/failure may have physically exited but failed to unlink
+    // its copy. Every retry must remove those older snapshots before a fresh
+    // rewrite can certify erasure. Never clean while an accepted reader is alive.
+    if (store.maintenance.secondaryConnections().includes(READER))
+      throw new Error('An earlier compaction helper has not exited')
+    const stale = readdirSync(store.dir).filter((name) =>
+      name.startsWith(`${basename(store.path)}.compact-`)
+    )
+    const staleErrors: unknown[] = []
+    for (const name of stale) {
+      try {
+        rmSync(join(store.dir, name), { force: true })
+      } catch (error) {
+        staleErrors.push(error)
+      }
+    }
+    if (stale.length) {
+      try {
+        syncDirSync(store.dir)
+      } catch (error) {
+        staleErrors.push(error)
+      }
+    }
+    if (staleErrors.length)
+      throw new AggregateError(staleErrors, 'Abandoned compaction copy cleanup failed', {
+        cause: staleErrors[0]
+      })
     const out = store.maintenance.tempPath()
     const list = describeTables(db)
     const tables = new Map(list.map((t) => [t.name, t]))
@@ -503,23 +548,23 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
       paused = false
       store.maintenance.resumeCheckpointer()
     }
-    // Set when the job ends without a swap: only then is the copy garbage.
-    let abandoned = false
     let workerAlive = false
     const discard = () => {
+      const errors: unknown[] = []
       for (const suffix of ['', '-journal', '-wal', '-shm'])
         try {
           rmSync(`${out}${suffix}`, { force: true })
-        } catch {
-          // Still open (Windows): removed when the worker exits, or at the next boot.
+        } catch (error) {
+          errors.push(error)
         }
+      if (errors.length)
+        throw new AggregateError(errors, 'Compaction copy cleanup failed', { cause: errors[0] })
     }
     const spawn = (mode: 'build' | 'resume') => {
       workerAlive = true
       return spawnWorker(mode, out, list, {
         exit() {
           workerAlive = false
-          if (abandoned) discard()
         },
         progress(bytes) {
           if (current.phase === 'copying')
@@ -531,7 +576,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         }
       })
     }
-    try {
+    const perform = async () => {
       worker = spawn('build')
       hook('worker-started')
       triggers = await until(worker.ready)
@@ -615,22 +660,57 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         store.checkpoint()
         return holdMs
       }
-    } finally {
-      resume()
-      if (worker) {
-        const exit = worker.terminate()
-        // Between messages it exits at once: wait, so the copy is gone when the job
-        // settles. Inside quick_check it cannot: its exit removes it.
-        if (!worker.busyNative()) await exit
+    }
+    let failure: unknown
+    let holdMs: number | undefined
+    try {
+      holdMs = await perform()
+    } catch (error) {
+      failure = error
+    }
+    const cleanup: unknown[] = []
+    {
+      try {
+        resume()
+      } catch (error) {
+        cleanup.push(error)
+      }
+      // The async operation mutates this handle across awaits; read it after
+      // perform settles rather than retaining a pre-operation narrowed value.
+      const activeWorker = (): WorkerHandle | null => worker
+      const pendingWorker = activeWorker()
+      if (pendingWorker) {
+        // A rejected request/cancel is not physical quiescence. Main's broker
+        // retains the accepted reader/checker until its actual thread exit.
+        try {
+          await pendingWorker.terminate()
+        } catch (error) {
+          cleanup.push(error)
+        }
       }
       if (!swapped) {
-        abandoned = true
-        dropCapture(capture)
-        // A worker still inside quick_check holds the copy: its exit
-        // removes it then (and boot removes any `compact-*` left by a kill).
-        if (!workerAlive) discard()
+        try {
+          dropCapture(capture)
+        } catch (error) {
+          cleanup.push(error)
+        }
+        if (!workerAlive) {
+          try {
+            discard()
+          } catch (error) {
+            cleanup.push(error)
+          }
+        } else cleanup.push(new Error('Compaction copy worker has not exited'))
       }
     }
+    if (cleanup.length)
+      throw new AggregateError(
+        failure === undefined ? cleanup : [failure, ...cleanup],
+        'Compaction cleanup failed',
+        { cause: failure ?? cleanup[0] }
+      )
+    if (failure !== undefined) throw failure
+    return holdMs!
   }
 
   // ── content erasure ──────────────────────────────────────────────────────
@@ -655,7 +735,8 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         await running?.catch(() => undefined)
         const ended = job?.id === started.id ? job : null
         if (ended?.phase === 'done') erasureDone = Math.max(erasureDone, gen)
-        else if (ended?.phase === 'failed') throw new Error(ended.message ?? 'Compaction failed')
+        else if (ended?.phase === 'failed')
+          throw jobFailure ?? new Error(ended.message ?? 'Compaction failed')
         // Cancelled: a newer erasure (run again) or closing (throws above).
       }
     })
@@ -753,48 +834,99 @@ export async function rebuildStoreFile(
     syncBytes: 16 * MiB,
     pauseMs: 25
   },
-  workerFactory: CompactionWorkerFactory = startCompactionWorker
+  workerFactory: CompactionWorkerFactory = startCompactionWorker,
+  register?: (close?: () => void) => { release(): void }
 ): Promise<void> {
-  // Settle the WAL first (an archive opened in WAL mode): the last close removes it.
+  // Archive probes/readers share the canonical secondary registry too. Failed
+  // native closes remain registered, with a retry callback, until physically closed.
   const probe = new Database(path, { fileMustExist: true })
-  let tables: TableInfo[]
+  const probeRegistration = register?.(closeProbe)
+  function closeProbe() {
+    try {
+      if (probe.open) probe.close()
+    } finally {
+      if (!probe.open) probeRegistration?.release()
+    }
+  }
+  let tables: TableInfo[] | undefined
+  let failure: unknown
   try {
     probe.pragma('wal_checkpoint(TRUNCATE)')
     tables = describeTables(probe)
-  } finally {
-    probe.close()
+  } catch (error) {
+    failure = error
   }
+  try {
+    closeProbe()
+  } catch (cleanup) {
+    if (failure !== undefined)
+      throw new AggregateError([failure, cleanup], 'Archive probe cleanup failed', {
+        cause: failure
+      })
+    throw cleanup
+  }
+  if (failure !== undefined) throw failure
   if (existsSync(`${path}-wal`)) throw new Error('The store file is still open elsewhere')
   const out = `${path}.compact-${randomUUID()}`
-  const discard = () => {
-    for (const suffix of ['', '-journal', '-wal', '-shm'])
-      rmSync(`${out}${suffix}`, { force: true })
-  }
-  const worker = workerFactory({
-    mode: 'file',
-    live: path,
-    out,
-    tables,
-    throttle,
-    exit: () => undefined,
-    progress: () => undefined
-  })
+  let worker: WorkerHandle | undefined
+  let exited = false
   try {
+    worker = workerFactory({
+      mode: 'file',
+      live: path,
+      out,
+      tables: tables!,
+      throttle,
+      registration: register?.(),
+      exit: () => {
+        exited = true
+      },
+      progress: () => undefined
+    })
     await worker.ready
     const check = await worker.finish(true)
     if (check !== 'ok') throw new Error(`The rewritten copy failed its check (${check})`)
-  } catch (error) {
-    // Closed by its own exit (finish) or ended now; the copy is free once it exited.
     await worker.terminate()
-    discard()
-    throw error
+    if (!exited) throw new Error('Archive copy worker has not exited')
+    rmSync(`${path}-shm`, { force: true })
+    renameSync(out, path)
+    syncDirSync(dirname(path))
+  } catch (error) {
+    failure = error
   }
-  await worker.terminate()
-  // Same name, same directory: the rename replaces it atomically.
-  rmSync(`${path}-shm`, { force: true })
-  renameSync(out, path)
-  syncDirSync(dirname(path))
+  const errors: unknown[] = []
+  {
+    if (worker) {
+      try {
+        await worker.terminate()
+      } catch (cleanup) {
+        errors.push(cleanup)
+      }
+    }
+    if (exited) {
+      for (const suffix of ['', '-journal', '-wal', '-shm']) {
+        try {
+          rmSync(`${out}${suffix}`, { force: true })
+        } catch (cleanup) {
+          errors.push(cleanup)
+        }
+      }
+      try {
+        syncDirSync(dirname(path))
+      } catch (cleanup) {
+        errors.push(cleanup)
+      }
+    }
+  }
+  if (errors.length)
+    throw new AggregateError(
+      failure === undefined ? errors : [failure, ...errors],
+      'Archive rewrite cleanup failed',
+      { cause: failure ?? errors[0] }
+    )
+  if (failure !== undefined) throw failure
 }
+
 function syncDirSync(dir: string) {
   if (process.platform === 'win32') return
   const fd = openSync(dir, 'r')

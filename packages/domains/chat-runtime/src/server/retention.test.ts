@@ -358,7 +358,7 @@ test('manual backups retain readable expired history without restoring live prov
   await r.retention.runNow(now)
   expect(r.storage.read('c', -1)).toEqual([])
   const archive = await r.backups.restore(backup.id)
-  expect(r.backups.read(archive.id, 'c').events).toMatchObject([
+  expect((await r.backups.read(archive.id, 'c')).events).toMatchObject([
     { event: { text: 'backup-only marker' } }
   ])
   expect(archive.providerResumable).toBe(false)

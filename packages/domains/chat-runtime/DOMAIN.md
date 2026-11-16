@@ -393,3 +393,26 @@ dropped, or restored when it is the only copy).
   SQLite xSync calls. Direct storage fault/crash fixtures exercise core recovery
   boundaries; they are not actual computer control-route responsiveness proof.
   Full composed FU2 acceptance and archive recovery/serialization (S8) stay separate.
+
+
+- 2026-11-16 (fu-2 R1, S8): restored archives serialize the complete native
+  delete/rewrite/compacted-marker/manifest/index lifetime with reads and restore
+  publication. Admission precedes awaits; close drains accepted operations. Every
+  physical namespace is checked during verified erasure, independent of the index
+  fingerprint. Affected reads recover abandoned copies before opening. WAL/hot
+  journals settle before sidecar cleanup; orphan rewrites, pre-swap files and
+  erasure manifests cannot survive a successful erase. Unknown residue or corrupt
+  attribution refuses erasure, retaining recoverable quarantine; task-id absence
+  in damaged bytes is not an absence proof. Explicit backup snapshots retain their
+  existing policy. Failed unpublished restores retain their staging attribution.
+  Archive readers/probes and failed native closes use the existing secondary
+  registry; native copy helpers remain in main's broker until physical exit.
+- S8 shared compactor integration: every retry disables the copy's restored
+  triggers before delta replay, including worker resume, then restores their exact
+  SQL and checks the complete schema. Markers, timeline metadata and state versions
+  are copied authoritatively, never re-derived by firing triggers twice. Cancel,
+  close and failed requests drain the accepted native helper before settling;
+  cleanup failures preserve their causes and block verified erasure. Later rebuilds
+  remove abandoned snapshots before certifying erasure. macOS/POSIX native VFS and
+  real archive SIGKILL tests cover these paths; Windows native execution and parent
+  composed/control-route/4GB acceptance remain outside this slice.

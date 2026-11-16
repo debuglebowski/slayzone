@@ -40,14 +40,28 @@ let live = null
 let out = null
 const statements = new Map()
 function closeAll() {
+  const errors = []
   for (const db of [out, live]) {
-    try { if (db && db.open) db.close() } catch {}
+    try { if (db && db.open) db.close() } catch (error) { errors.push(error) }
   }
-  out = live = null
+  if (out && !out.open) out = null
+  if (live && !live.open) live = null
+  if (errors.length) throw new AggregateError(errors, 'Copy native close failed', { cause: errors[0] })
+}
+function encodeError(error) {
+  if (!(error instanceof Error)) return { name: 'Error', message: String(error) }
+  const props = {}
+  for (const [key, value] of Object.entries(error))
+    if (value === null || ['string','number','boolean','bigint'].includes(typeof value)) props[key] = value
+  return { name: error.name, message: error.message, stack: error.stack, props,
+    ...(error.cause === undefined ? {} : { cause: encodeError(error.cause) }),
+    ...(error instanceof AggregateError ? { errors: error.errors.map(encodeError) } : {}) }
 }
 function fail(error) {
-  closeAll()
-  parentPort.postMessage({ t: 'error', message: String((error && error.message) || error) })
+  try { closeAll() } catch (cleanup) {
+    error = new AggregateError([error, cleanup], 'Copy worker cleanup failed', { cause: error })
+  }
+  parentPort.postMessage({ t: 'error', error: encodeError(error) })
   parentPort.close()
 }
 function prepared(table) {
@@ -194,6 +208,12 @@ try {
     out = new Database(workerData.out, { fileMustExist: true })
     out.pragma('synchronous = OFF')
     out.pragma('foreign_keys = OFF')
+    // A previous final window may have installed these before a BUSY close.
+    // Catch-up copies derived rows too; their source triggers must not run again.
+    out.transaction(() => {
+      for (const t of out.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all())
+        out.exec('DROP TRIGGER ' + ident(t.name))
+    })()
   }
   out.pragma('secure_delete = ON')
   parentPort.postMessage({ t: 'ready', triggers })

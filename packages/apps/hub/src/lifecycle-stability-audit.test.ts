@@ -334,7 +334,7 @@ test.each(['wrong-scope', 'duplicate-file', 'missing-database', 'corrupt-blob'] 
     writeFileSync(f.manifestPath, JSON.stringify(f.manifest))
     await expect(f.r.backups.restore(f.backup.id)).rejects.toThrow()
     expect(f.r.backups.listArchives()).toHaveLength(1)
-    expect(f.r.backups.attachment(good.id, 'c', f.ref)).toEqual(f.bytes)
+    expect(await f.r.backups.attachment(good.id, 'c', f.ref)).toEqual(f.bytes)
   }
 )
 

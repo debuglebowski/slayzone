@@ -28,7 +28,8 @@ import {
 import {
   eraseQuarantinedForTask,
   fileFingerprint,
-  quarantineMove
+  quarantineMove,
+  listQuarantine
 } from '@slayzone/platform/quarantine'
 import { basename, join, resolve, sep } from 'node:path'
 import { createReadStream, promises as fsAsync } from 'node:fs'
@@ -58,10 +59,13 @@ import {
 import type { CompactionWorkerFactory } from './compaction-worker-host'
 import { rebuildStoreFile } from './storage-compaction'
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
-const activeBackupStaging = new Set<string>()
+const activeBackupStaging = new Map<string, string | null>()
 
-function collectAbandonedStaging(root: string) {
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
+function collectAbandonedStaging(
+  root: string,
+  entries = readdirSync(root, { withFileTypes: true })
+) {
+  for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const match = /^\.pending-(?:(\d+)-)?([a-f0-9-]{36})$/.exec(entry.name)
     if (!match || !UUID.test(match[2])) continue
@@ -183,13 +187,149 @@ export function createChatBackups(
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   mkdirSync(archiveDir, { recursive: true, mode: 0o700 })
   collectAbandonedStaging(dir)
-  collectAbandonedStaging(archiveDir)
+  // Preserve startup cleanup without allowing one damaged archive namespace to
+  // prevent this hub's live store and controls from opening. Erasure retries each
+  // failed namespace and cannot acknowledge while its bytes remain.
+  forEachIsolatedSync(
+    readdirSync(archiveDir, { withFileTypes: true }).filter((entry) =>
+      entry.name.startsWith('.pending-')
+    ),
+    {
+      pass: 'chat-archive-recovery',
+      key: (entry) => entry.name,
+      ledger: store.faults,
+      ignoreGate: true
+    },
+    (entry) => collectAbandonedStaging(archiveDir, [entry])
+  )
   const folder = (root: string, id: string) => {
     if (!UUID.test(id)) throw new Error('Invalid backup id')
     const path = join(root, id)
     if (existsSync(path) && lstatSync(path).isSymbolicLink())
       throw new Error('Backup symlinks are not allowed')
     return path
+  }
+  const archiveLabel = (id: string) => `chat archive ${id}`
+  function archiveConnection(file: string, id: string, readonly = false) {
+    const db = new Database(file, { readonly, fileMustExist: true })
+    const registration = store.maintenance.registerSecondary(archiveLabel(id), close)
+    function close() {
+      try {
+        if (db.open) db.close()
+      } finally {
+        if (!db.open) registration.release()
+      }
+    }
+    return { db, close }
+  }
+  function withArchiveConnection<T>(
+    file: string,
+    id: string,
+    readonly: boolean,
+    action: (db: Database.Database) => T
+  ): T {
+    const native = archiveConnection(file, id, readonly)
+    let failure: unknown
+    let value: T | undefined
+    try {
+      value = action(native.db)
+    } catch (error) {
+      failure = error
+    }
+    try {
+      native.close()
+    } catch (cleanup) {
+      if (failure !== undefined)
+        throw new AggregateError([failure, cleanup], 'Archive connection cleanup failed', {
+          cause: failure
+        })
+      throw cleanup
+    }
+    if (failure !== undefined) throw failure
+    return value as T
+  }
+
+  // Queues own the entire operation, including native exit and publication. Reserve
+  // synchronously; later reads/erasures/close cannot pass an admitted operation.
+  const archiveWork = new Map<string, Promise<unknown>>()
+  let erasing = 0
+  const erasureWork = new Set<Promise<void>>()
+  function inArchive<T>(id: string, action: () => T | Promise<T>): Promise<T> {
+    const previous = archiveWork.get(id) ?? Promise.resolve()
+    const work = previous
+      .catch(() => undefined)
+      .then(() => {
+        store.maintenance.closeSecondaries(archiveLabel(id))
+        if (store.maintenance.secondaryConnections().includes(archiveLabel(id)))
+          throw new Error('Archive native helper has not exited')
+        // A failed unpublished restore keeps its staging namespace attributed to
+        // this same queue until the retained reader really closes. No live copy is
+        // unlinked, and a rejected restore cannot disappear from privacy inventory.
+        for (const [path, owner] of activeBackupStaging) {
+          if (owner !== id || !path.startsWith(archiveDir + sep)) continue
+          rmSync(path, { recursive: true, force: true })
+          activeBackupStaging.delete(path)
+        }
+        return action()
+      })
+    archiveWork.set(id, work)
+    void work
+      .finally(() => {
+        if (archiveWork.get(id) === work) archiveWork.delete(id)
+      })
+      .catch(() => undefined)
+    return work
+  }
+  function removeResidue(path: string) {
+    const info = lstatSync(path)
+    if (!info.isFile() || info.isSymbolicLink())
+      throw new Error(`Unknown archive residue: ${basename(path)}`)
+    rmSync(path)
+    if (existsSync(path)) throw new Error('Archive residue remains')
+  }
+  function recoverArchive(id: string) {
+    const path = folder(archiveDir, id)
+    const file = join(path, 'chat.sqlite')
+    const pre = `${file}.pre-compact`
+    if (!existsSync(file) && existsSync(pre)) {
+      if (!lstatSync(pre).isFile() || lstatSync(pre).isSymbolicLink())
+        throw new Error('Unknown archive recovery file')
+      renameSync(pre, file)
+      for (const suffix of ['-wal', '-shm', '-journal'])
+        if (existsSync(`${pre}${suffix}`)) renameSync(`${pre}${suffix}`, `${file}${suffix}`)
+    }
+    // Settle real WAL/hot journals before unlinking any sidecar. A failed close
+    // stays in the existing secondary registry and fences only this archive.
+    if (existsSync(file)) {
+      withArchiveConnection(fileWithin(path, 'chat.sqlite'), id, false, (db) => {
+        db.pragma('wal_checkpoint(TRUNCATE)')
+      })
+      if (existsSync(`${file}-wal`)) throw new Error('Archive is still open elsewhere')
+    }
+    for (const name of readdirSync(path)) {
+      if (
+        name.startsWith('chat.sqlite.compact-') ||
+        name.startsWith('chat.sqlite.pre-compact') ||
+        /^chat\.sqlite-(journal|wal|shm)$/.test(name) ||
+        /^\.erasure-.*\.json$/.test(name)
+      )
+        removeResidue(join(path, name))
+      else if (
+        !['chat.sqlite', 'manifest.json', 'archive.json', 'blobs', 'artifacts', 'assets'].includes(
+          name
+        )
+      )
+        throw new Error(`Unattributed archive residue: ${name}`)
+    }
+    // Durable cleanup precedes privacy acknowledgement, including unchanged indexes.
+    if (process.platform !== 'win32') {
+      const fd = openSync(path, 'r')
+      try {
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+    }
   }
   function manifest(root: string, id: string): Manifest {
     const path = folder(root, id),
@@ -230,7 +370,7 @@ export function createChatBackups(
       throw new Error('Archive descriptor mismatch')
     return value
   }
-  async function verifyContent(m: Manifest, path: string) {
+  async function verifyContent(m: Manifest, path: string, archiveId?: string) {
     if (!m.files.some((f) => f.path === 'chat.sqlite'))
       throw new Error('Backup database is missing')
     for (const file of m.files) {
@@ -242,10 +382,13 @@ export function createChatBackups(
       )
         throw new Error('Backup hash integrity failure')
     }
-    const db = new Database(fileWithin(path, 'chat.sqlite'), {
-      readonly: true,
-      fileMustExist: true
-    })
+    const native = archiveId
+      ? archiveConnection(fileWithin(path, 'chat.sqlite'), archiveId, true)
+      : undefined
+    const db =
+      native?.db ??
+      new Database(fileWithin(path, 'chat.sqlite'), { readonly: true, fileMustExist: true })
+    let failure: unknown
     try {
       if (db.pragma('quick_check', { simple: true }) !== 'ok')
         throw new Error('Backup database integrity failure')
@@ -386,9 +529,20 @@ export function createChatBackups(
             row.content_hash,
             row.size
           )
-    } finally {
-      db.close()
+    } catch (error) {
+      failure = error
     }
+    try {
+      if (native) native.close()
+      else db.close()
+    } catch (cleanup) {
+      if (failure !== undefined)
+        throw new AggregateError([failure, cleanup], 'Archive verification cleanup failed', {
+          cause: failure
+        })
+      throw cleanup
+    }
+    if (failure !== undefined) throw failure
     return m
   }
   async function verify(root: string, id: string) {
@@ -457,7 +611,7 @@ export function createChatBackups(
       const lease = store.acquireBlobLease(id, 60_000),
         renew = setInterval(() => store.acquireBlobLease(id, 60_000), 20_000)
       renew.unref()
-      activeBackupStaging.add(temp)
+      activeBackupStaging.set(temp, null)
       let originals: Awaited<ReturnType<typeof captureArtifactWorkingFiles>> | undefined
       try {
         originals = await captureArtifactWorkingFiles(store, join(temp, '.working'))
@@ -687,6 +841,7 @@ export function createChatBackups(
     },
     async restore(backupId: string, id: string = randomUUID()): Promise<ComputerChatArchive> {
       if (closed) throw new Error('Backup service is closed')
+      if (erasing) throw new Error('Archive erasure is in progress; retry restore later')
       const source = folder(dir, backupId),
         target = folder(archiveDir, id)
       const running = restoring.get(id)
@@ -695,8 +850,9 @@ export function createChatBackups(
         return running.work
       }
       restorePins.set(backupId, (restorePins.get(backupId) ?? 0) + 1)
-      const work = (async () => {
+      const work = inArchive(id, async () => {
         if (existsSync(target)) {
+          recoverArchive(id)
           const existing = archiveDescriptor(id)
           if (existing.backupId !== backupId) throw new Error('Archive id conflict')
           return existing
@@ -704,7 +860,7 @@ export function createChatBackups(
         const m = await verify(dir, backupId),
           temp = join(archiveDir, `.pending-${process.pid}-${randomUUID()}`)
         mkdirSync(temp, { mode: 0o700 })
-        activeBackupStaging.add(temp)
+        activeBackupStaging.set(temp, id)
         try {
           for (const file of m.files) {
             const dest = join(temp, file.path)
@@ -712,7 +868,7 @@ export function createChatBackups(
             await copyDurable(fileWithin(source, file.path), dest)
           }
           // Verify the actual copy before publishing; the source may have changed during copying.
-          await verifyContent(m, temp)
+          await verifyContent(m, temp, id)
           durableJson(join(temp, 'manifest.json'), m)
           const archive: ComputerChatArchive = {
             id,
@@ -727,12 +883,20 @@ export function createChatBackups(
           await syncDir(archiveDir)
           return archive
         } catch (error) {
-          rmSync(temp, { recursive: true, force: true })
+          try {
+            store.maintenance.closeSecondaries(archiveLabel(id))
+            rmSync(temp, { recursive: true, force: true })
+          } catch (cleanup) {
+            throw new AggregateError([error, cleanup], 'Archive restore cleanup failed', {
+              cause: error
+            })
+          }
           throw error
         } finally {
-          activeBackupStaging.delete(temp)
+          if (!store.maintenance.secondaryConnections().includes(archiveLabel(id)))
+            activeBackupStaging.delete(temp)
         }
-      })().finally(() => {
+      }).finally(() => {
         restoring.delete(id)
         const pins = restorePins.get(backupId)! - 1
         if (pins) restorePins.set(backupId, pins)
@@ -761,13 +925,21 @@ export function createChatBackups(
         .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
     },
     conversations(id: string) {
-      return withArchive(id, (db) =>
-        db
-          .prepare(
-            "SELECT id,task_id AS taskId,tab_id AS tabId,mode,CASE WHEN tab_id LIKE 'artifact-store:%' THEN 'Task files' END AS title,(SELECT count(*) FROM events e WHERE e.conversation_id=c.id) AS events FROM conversations c WHERE state<>'deleted' AND task_id NOT LIKE '\\_\\_%' ESCAPE '\\' ORDER BY task_id,tab_id"
-          )
-          .all()
-      ) as Array<{ id: string; taskId: string; tabId: string; mode: string; events: number }>
+      return withArchive(
+        id,
+        (db) =>
+          db
+            .prepare(
+              "SELECT id,task_id AS taskId,tab_id AS tabId,mode,CASE WHEN tab_id LIKE 'artifact-store:%' THEN 'Task files' END AS title,(SELECT count(*) FROM events e WHERE e.conversation_id=c.id) AS events FROM conversations c WHERE state<>'deleted' AND task_id NOT LIKE '\\_\\_%' ESCAPE '\\' ORDER BY task_id,tab_id"
+            )
+            .all() as Array<{
+            id: string
+            taskId: string
+            tabId: string
+            mode: string
+            events: number
+          }>
+      )
     },
     read(id: string, conversationId: string, afterSeq = -1, limit = 200) {
       if (
@@ -957,56 +1129,121 @@ export function createChatBackups(
         return { name: row.name, data: readFileSync(path) }
       })
     },
-    async eraseTask(taskId: string) {
-      // Finish already-started copies before cleaning readable restored copies.
-      // Retained backup snapshots keep their normal retention policy.
-      await Promise.all([...restoring.values()].map((r) => r.work))
-      const unchecked = await refreshArchiveIndex()
-      const holding = store.compose(
-        (raw) =>
-          raw.prepare('SELECT archive_id FROM archive_tasks WHERE task_id=?').all(taskId) as Array<{
-            archive_id: string
-          }>
-      )
-      // One archive at a time: a damaged archive is set aside (or recorded) and
-      // the others are still erased. Only THIS task's erasure reports a failure.
-      const erased = await forEachIsolated(
-        holding.map((row) => row.archive_id),
-        {
-          pass: 'chat-archive-erasure',
-          key: (id) => id,
-          taskId: () => taskId,
-          ledger: store.faults,
-          ignoreGate: true,
-          isFatal: isStorageFatal
-        },
-        async (id) => {
-          try {
-            await eraseFromArchive(id, taskId)
-          } catch (raw) {
-            // A corrupt archive database is the archive's damage, not this disk's.
-            const error = asItemDamage(raw)
-            if (classifyFault(error) === 'structural') quarantineArchive(id, error)
-            else throw error
-          }
+    eraseTask(taskId: string): Promise<void> {
+      if (closed) return Promise.reject(new Error('Backup service is closed'))
+      erasing++
+      const work = (async () => {
+        try {
+          // Include physical directories regardless of manifest/index/fingerprint, as
+          // well as restores admitted before the first await. Later restores refuse.
+          const stagedOwners = [...activeBackupStaging]
+            .filter(([path, owner]) => owner && path.startsWith(archiveDir + sep))
+            .map(([, owner]) => owner!)
+          const ids = [
+            ...new Set([...readdirSync(archiveDir), ...restoring.keys(), ...stagedOwners])
+          ].sort()
+          let turn: Promise<unknown> = Promise.resolve()
+          const admitted = ids.map((id) => {
+            if (activeBackupStaging.has(join(archiveDir, id))) return Promise.resolve()
+            const previous = turn
+            const work = inArchive(id, async () => {
+              await previous.catch(() => undefined)
+              if (/^\.pending-/.test(id)) {
+                collectAbandonedStaging(archiveDir)
+                if (existsSync(join(archiveDir, id)))
+                  throw new Error('Archive staging writer is still active')
+                return
+              }
+              if (!UUID.test(id)) throw new Error(`Unattributed archive namespace: ${id}`)
+              try {
+                if (!existsSync(folder(archiveDir, id))) return
+                recoverArchive(id)
+                indexArchive(
+                  id,
+                  fileFingerprint(join(archiveDir, id, 'manifest.json')) ?? 'missing'
+                )
+                await eraseFromArchive(id, taskId)
+              } catch (raw) {
+                const error = asItemDamage(raw)
+                if (classifyFault(error) === 'structural' || isMissingFile(error))
+                  quarantineArchive(id, error)
+                else throw error
+              }
+            })
+            turn = work
+            return work
+          })
+          for (const work of admitted) void work.catch(() => undefined)
+          // All queues above reserve admission synchronously; fault recording may await.
+          const erased = await forEachIsolated(
+            admitted.map((work, i) => ({ work, id: ids[i] })),
+            {
+              pass: 'chat-archive-erasure',
+              key: (item) => item.id,
+              taskId: () => taskId,
+              ledger: store.faults,
+              ignoreGate: true,
+              isFatal: isStorageFatal
+            },
+            (item) => item.work
+          )
+          await syncDir(archiveDir)
+          const quarantinedArchives = listQuarantine(store.dir).filter(
+            (entry) => entry.pass === ARCHIVE_QUARANTINE_PASS
+          )
+          eraseQuarantinedForTask(store.dir, taskId)
+          for (const parent of new Set(
+            quarantinedArchives.map((entry) => resolve(entry.payloadPath, '../..'))
+          ))
+            await syncDir(parent)
+          // Raw task-id absence in a corrupt copy is not proof of absence of secret
+          // bytes. Keep unknown copies recoverable, and refuse this erasure truthfully.
+          const unknown = listQuarantine(store.dir).filter(
+            (entry) => entry.pass === ARCHIVE_QUARANTINE_PASS
+          )
+          const failed = [...erased.failed.map((f) => f.key), ...unknown.map((entry) => entry.id)]
+          if (failed.length)
+            throw new AggregateError(
+              erased.failed.map((f) => f.error),
+              `Restored archive could not be erased yet (${failed.join(', ')}); retrying later`,
+              { cause: erased.failed[0]?.error }
+            )
+        } finally {
+          erasing--
         }
-      )
-      // Unreadable archives cannot be inspected row by row: any whose raw bytes
-      // name the task is deleted outright (the user's erasure wins over a copy
-      // that can no longer be read anyway).
-      eraseQuarantinedForTask(store.dir, taskId)
-      const failed = [...erased.failed.map((f) => f.key), ...unchecked]
-      if (failed.length)
-        throw new Error(
-          `Restored archive could not be erased yet (${failed.join(', ')}); retrying later`
-        )
+      })()
+      erasureWork.add(work)
+      void work.finally(() => erasureWork.delete(work)).catch(() => undefined)
+      return work
     },
     async close() {
       closed = true
       if (timer) clearTimeout(timer)
-      await Promise.allSettled([...pending.values(), ...[...restoring.values()].map((r) => r.work)])
+      const results = await Promise.allSettled([
+        ...pending.values(),
+        ...erasureWork,
+        ...archiveWork.values(),
+        ...[...restoring.values()].map((r) => r.work)
+      ])
+      const failures = results
+        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+        .map((r) => r.reason)
+      for (const label of new Set(
+        store.maintenance
+          .secondaryConnections()
+          .filter((label) => label.startsWith('chat archive '))
+      )) {
+        try {
+          store.maintenance.closeSecondaries(label)
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+      if (failures.length)
+        throw new AggregateError(failures, 'Archive shutdown failed', { cause: failures[0] })
     }
   }
+
   /** Moves an unreadable restored archive out of the archive list into quarantine. */
   function quarantineArchive(id: string, error: unknown) {
     quarantineMove(store.dir, {
@@ -1016,70 +1253,24 @@ export function createChatBackups(
     })
     store.compose((raw) => raw.prepare('DELETE FROM archive_index WHERE archive_id=?').run(id))
   }
-  /**
-   * Brings the archive→task index up to date: an archive is (re)read only when
-   * its manifest changed since it was indexed. An archive that cannot be read is
-   * quarantined (structural) or recorded (transient). Returns the ids that could
-   * not be checked this time: an erasure cannot rule them out.
-   */
-  async function refreshArchiveIndex(): Promise<string[]> {
-    const ids = readdirSync(archiveDir).filter((id) => UUID.test(id))
-    const indexed = new Map(
-      store
-        .compose(
-          (raw) =>
-            raw.prepare('SELECT archive_id,fingerprint FROM archive_index').all() as Array<{
-              archive_id: string
-              fingerprint: string
-            }>
-        )
-        .map((row) => [row.archive_id, row.fingerprint])
-    )
-    store.compose((raw) => {
-      for (const id of indexed.keys())
-        if (!ids.includes(id)) raw.prepare('DELETE FROM archive_index WHERE archive_id=?').run(id)
-    })
-    const fingerprintOf = (id: string) =>
-      fileFingerprint(join(archiveDir, id, 'manifest.json')) ?? 'missing'
-    const report = await forEachIsolated(
-      ids.filter((id) => indexed.get(id) !== fingerprintOf(id)),
-      {
-        pass: 'chat-archive-index',
-        key: (id) => id,
-        ledger: store.faults,
-        ignoreGate: true,
-        isFatal: isStorageFatal
-      },
-      (id) => {
+  function indexArchive(id: string, fingerprint: string) {
+    manifest(archiveDir, id)
+    const taskIds = withArchiveConnection(
+      fileWithin(folder(archiveDir, id), 'chat.sqlite'),
+      id,
+      true,
+      (db) => {
         try {
-          indexArchive(id, fingerprintOf(id))
-        } catch (raw) {
-          const error = asItemDamage(raw)
-          if (classifyFault(error) === 'structural' || isMissingFile(error))
-            quarantineArchive(id, error)
-          else throw error
+          return (
+            db.prepare('SELECT DISTINCT task_id FROM conversations').all() as Array<{
+              task_id: string
+            }>
+          ).map((row) => row.task_id)
+        } catch (error) {
+          throw new StructuralFaultError('Archive database cannot be read', { cause: error })
         }
       }
     )
-    return report.failed.map((f) => f.key)
-  }
-  function indexArchive(id: string, fingerprint: string) {
-    manifest(archiveDir, id)
-    const db = new Database(fileWithin(folder(archiveDir, id), 'chat.sqlite'), {
-      readonly: true,
-      fileMustExist: true
-    })
-    let taskIds: string[]
-    try {
-      taskIds = (
-        db.prepare('SELECT DISTINCT task_id FROM conversations').all() as Array<{ task_id: string }>
-      ).map((row) => row.task_id)
-    } catch (error) {
-      // A file that is not a readable chat database is the archive's own damage.
-      throw new StructuralFaultError('Archive database cannot be read', { cause: error })
-    } finally {
-      db.close()
-    }
     store.transaction(() =>
       store.compose((raw) => {
         raw.prepare('DELETE FROM archive_index WHERE archive_id=?').run(id)
@@ -1093,10 +1284,11 @@ export function createChatBackups(
     const path = folder(archiveDir, id),
       m = manifest(archiveDir, id)
     const file = fileWithin(path, 'chat.sqlite')
-    const db = new Database(file, { fileMustExist: true })
-    let compact = false
-    try {
-      if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId)) return
+    let present = false
+    const compact = withArchiveConnection(file, id, false, (db) => {
+      if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId))
+        return false
+      present = true
       // A restored copy has no live backup writer; copied leases are stale.
       db.exec('DELETE FROM blob_leases')
       if (
@@ -1106,22 +1298,19 @@ export function createChatBackups(
       )
         db.exec('DELETE FROM artifact_blob_leases')
       prepareStoredTaskErasure(db, taskId, path)
-      ;({ compact } = finishStoredTaskErasure(db, path, taskId))
-    } finally {
-      db.close()
-    }
+      return finishStoredTaskErasure(db, path, taskId).compact
+    })
+    if (!present) return
     // The whole archive file is rewritten off the main thread (stale copies of the
     // erased rows), then marked: a retry after a crash rewrites again.
     if (compact) {
-      await rebuildStoreFile(file, undefined, options.workerFactory)
-      const rewritten = new Database(file, { fileMustExist: true })
-      try {
-        // No fsync on this thread: a lost flag only means another rewrite next time.
-        rewritten.pragma('synchronous = OFF')
-        markStoredTaskErasureCompacted(rewritten, taskId)
-      } finally {
-        rewritten.close()
-      }
+      await rebuildStoreFile(file, undefined, options.workerFactory, (close) =>
+        store.maintenance.registerSecondary(archiveLabel(id), close)
+      )
+      withArchiveConnection(file, id, false, (db) => {
+        db.pragma('synchronous = FULL')
+        markStoredTaskErasureCompacted(db, taskId)
+      })
     }
     // Archive manifests describe the remaining readable files. Rebuild after
     // every retry, including a crash between DB cleanup and manifest publish.
@@ -1147,18 +1336,15 @@ export function createChatBackups(
       raw.prepare('DELETE FROM archive_tasks WHERE archive_id=? AND task_id=?').run(id, taskId)
     )
   }
-  function withArchive<T>(id: string, read: (db: Database.Database) => T): T {
-    const path = folder(archiveDir, id)
-    archiveDescriptor(id)
-    const db = new Database(fileWithin(path, 'chat.sqlite'), {
-      readonly: true,
-      fileMustExist: true
+  function withArchive<T>(id: string, read: (db: Database.Database) => T): Promise<T> {
+    if (closed) return Promise.reject(new Error('Backup service is closed'))
+    folder(archiveDir, id)
+    return inArchive(id, () => {
+      recoverArchive(id)
+      const path = folder(archiveDir, id)
+      archiveDescriptor(id)
+      return withArchiveConnection(fileWithin(path, 'chat.sqlite'), id, true, read)
     })
-    try {
-      return read(db)
-    } finally {
-      db.close()
-    }
   }
   return api
 }

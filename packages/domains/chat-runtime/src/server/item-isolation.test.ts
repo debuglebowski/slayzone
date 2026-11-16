@@ -118,7 +118,7 @@ async function seedTwoTasksAndArchives(r: ReturnType<typeof runtime>['r'], state
   return { good, broken }
 }
 
-test('erasure: an unreadable archive that never held the task does not block it', async () => {
+test('erasure: unknown attribution in unreadable archive refuses success without blocking readable archives', async () => {
   const { dir, r } = runtime()
   try {
     const { good, broken } = await seedTwoTasksAndArchives(r, dir)
@@ -134,7 +134,7 @@ test('erasure: an unreadable archive that never held the task does not block it'
       env: {}
     })
     await r.applyTaskLifecycle('carol', 'deleted', 2)
-    await expect(r.eraseTask('carol', 2)).resolves.toMatchObject({ erased: true })
+    await expect(r.eraseTask('carol', 2)).rejects.toThrow(/archive/i)
     // The unreadable archive is set aside and listed for the user; the readable one stays.
     expect(listQuarantine(r.storage.dir)).toMatchObject([{ pass: 'chat-archive' }])
     expect(r.backups.listArchives().map((a) => a.id)).toEqual([good.id])
@@ -150,7 +150,7 @@ test('erasure: an unreadable archive holding the task is deleted with it; readab
     writeFileSync(join(r.backups.archiveDir, broken.id, 'manifest.json'), '{"torn')
     await r.applyTaskLifecycle('alice', 'deleted', 2)
     await expect(r.eraseTask('alice', 2)).resolves.toMatchObject({ erased: true })
-    expect(r.backups.conversations(good.id).map((c) => c.taskId)).toEqual(['bob'])
+    expect((await r.backups.conversations(good.id)).map((c) => c.taskId)).toEqual(['bob'])
     expect(existsSync(join(r.backups.archiveDir, broken.id))).toBe(false)
     expect(listQuarantine(r.storage.dir)).toEqual([])
   } finally {

@@ -60,8 +60,10 @@ test('computer erasure verifies local history, originals and sealed files while 
     expect(existsSync(join(r.storage.dir, 'blobs', files.alice.hash))).toBe(false)
     expect(r.storage.read('alice', -1)).toEqual([])
     expect(r.storage.read('bob', -1)).toHaveLength(1)
-    expect(r.backups.conversations(archive.id).some((c) => c.taskId === 'alice')).toBe(false)
-    expect(r.backups.conversations(archive.id).some((c) => c.taskId === 'bob')).toBe(true)
+    expect((await r.backups.conversations(archive.id)).some((c) => c.taskId === 'alice')).toBe(
+      false
+    )
+    expect((await r.backups.conversations(archive.id)).some((c) => c.taskId === 'bob')).toBe(true)
     expect(r.backups.list().some((b) => b.id === backup.id)).toBe(true)
     expect(
       readFileSync(join(r.storage.dir, 'chat.sqlite')).includes(Buffer.from('alice secret'))

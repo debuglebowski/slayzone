@@ -431,6 +431,10 @@ test.skipIf(process.platform === 'win32')(
       }
     )
     const result = JSON.parse(output)
+    console.log(
+      'S8 native proof',
+      JSON.stringify({ mainSyncs: result.mainSyncs, ...result.archives })
+    )
     expect(result).toMatchObject({
       actualStore: true,
       packagedWorker: true,
@@ -445,7 +449,19 @@ test.skipIf(process.platform === 'win32')(
       recoveredSwap: true,
       successfulSwap: true,
       uncleanRotation: true,
-      rotationWaitedForSync: true
+      rotationWaitedForSync: true,
+      archives: {
+        cancelledCopyWaitedForNativeExit: true,
+        archiveCloseWaitedForNativeExit: true,
+        blockedNativeArchive: true,
+        canonicalWriterUsable: true,
+        otherHubUsable: true,
+        noErasureAckAfterDeath: true,
+        replacementWaitedForPhysicalCopyExit: true,
+        nativeCopyFilesAfterExit: 0,
+        concurrentRetryPreservedOtherTask: true,
+        retainedBackup: true
+      }
     })
     expect(result.deathFenceSyncs).toBeGreaterThan(0)
   }

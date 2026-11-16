@@ -8,7 +8,9 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, test } from 'vitest'
+import fs from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { openChatStorage, type ChatStorage } from './storage'
 import {
@@ -23,6 +25,8 @@ const stores: ChatStorage[] = []
 const services: StorageCompaction[] = []
 const runtimes: Array<ReturnType<typeof createComputerChatRuntime>> = []
 afterEach(async () => {
+  vi.restoreAllMocks()
+  syncBuiltinESMExports()
   for (const r of runtimes.splice(0)) await r.close()
   for (const s of services.splice(0)) await s.close()
   for (const s of stores.splice(0)) s.close()
@@ -101,8 +105,198 @@ const leftovers = (store: ChatStorage) =>
   readdirSync(store.dir).filter((n) => n.startsWith('chat.sqlite.'))
 
 describe('rebuild', () => {
+  test('cancelled native copy cleanup failure retains cause; verified retry removes every abandoned secret copy', async () => {
+    const { store } = seeded(0, 1)
+    store.append(identity.id, 1, text('abandoned cancelled secret'))
+    const original = fs.rmSync
+    const failure = Object.assign(new Error('copy unlink refused'), { code: 'EACCES' })
+    let refuse = true
+    const spy = vi.spyOn(fs, 'rmSync').mockImplementation((path, options) => {
+      if (refuse && String(path).startsWith(`${store.path}.compact-`)) throw failure
+      return original(path, options)
+    })
+    syncBuiltinESMExports()
+    let cancel = true
+    const c = compaction(store, {
+      onPhase(phase) {
+        if (phase === 'copied' && cancel) c.cancel()
+      }
+    })
+    try {
+      c.start()
+      await c.idle()
+      expect(c.status().job?.phase).toBe('failed')
+      expect(leftovers(store).length).toBeGreaterThan(0)
+      store.compose((db) =>
+        db.prepare("DELETE FROM events WHERE event LIKE '%abandoned cancelled secret%'").run()
+      )
+      cancel = false
+      await expect(c.rebuildForErasure()).rejects.toMatchObject({
+        errors: expect.arrayContaining([failure])
+      })
+      refuse = false
+      await c.rebuildForErasure()
+      expect(leftovers(store)).toEqual([])
+      expect(readFileSync(store.path).includes(Buffer.from('abandoned cancelled secret'))).toBe(
+        false
+      )
+    } finally {
+      refuse = false
+      spy.mockRestore()
+      syncBuiltinESMExports()
+    }
+  })
+
+  test.each(['closed', 'linked', 'renamed'] as const)(
+    'failed %s window then retry conserves exact derived schema/rows/stateVersion',
+    async (boundary) => {
+      const { store } = seeded(0, 1)
+      await store.writeTimeline(identity.id, 1, {
+        dropPagesFrom: null,
+        pages: [
+          { page: 0, value: '{"rows":[]}', summary: '{"kept":true}', searchText: 'kept search' }
+        ],
+        checkpoint: '{"seq":0}'
+      })
+      let armed = true
+      let expected = ''
+      let version = 0
+      let schema: unknown
+      const c = compaction(store, {
+        onPhase(phase) {
+          if (phase === 'copied') {
+            store.append(identity.id, 1, { kind: 'user-message', text: `window ${armed}` })
+            store.putRecord(identity.id, 1, {
+              kind: 'timeline',
+              id: 'page:0',
+              value: { rows: [], armed },
+              at: 1
+            })
+            store.compose((db) =>
+              db
+                .prepare('INSERT INTO timeline_page_metadata VALUES(?,?,?,?)')
+                .run(identity.id, 'page:0', '{"kept":true}', 'kept search')
+            )
+          }
+          if (phase === 'verified') {
+            expected = fingerprint(store)
+            version = store.stateVersion(identity.taskId)
+            schema = store.compose((db) =>
+              db
+                .prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')
+                .all()
+            )
+          }
+          if (phase === boundary && armed) {
+            armed = false
+            throw new Error(`failed ${boundary} window`)
+          }
+        }
+      })
+      c.start()
+      await c.idle()
+      expect(c.status().job).toMatchObject({
+        phase: 'failed',
+        message: expect.stringContaining(`failed ${boundary} window`)
+      })
+      expect(fingerprint(store)).toBe(expected)
+      expect(store.stateVersion(identity.taskId)).toBe(version)
+      c.start()
+      await c.idle()
+      expect(c.status().job?.phase).toBe('done')
+      expect(fingerprint(store)).toBe(expected)
+      expect(store.stateVersion(identity.taskId)).toBe(version)
+      expect(
+        store.compose((db) =>
+          db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+        )
+      ).toEqual(schema)
+      expect(
+        store.compose((db) => db.prepare('SELECT count(*) n FROM timeline_page_metadata').get())
+      ).toEqual({ n: 1 })
+      expect(
+        store.compose((db) => db.prepare('SELECT count(*) n FROM event_markers').get())
+      ).toEqual({ n: 2 })
+    }
+  )
+
+  test.each([false, true])(
+    'native BUSY retry preserves exact schema and derived data (worker resume: %s)',
+    async (resume) => {
+      const { store } = seeded(0, 1)
+      const epoch = store.maintenance.connectionEpoch()
+      let iterator: IterableIterator<unknown> | undefined
+      let refusals = 0
+      let expected = ''
+      let schema: unknown
+      const write = (n: number) => {
+        store.append(identity.id, 1, { kind: 'user-message', text: `prompt ${n}` })
+        store.putRecord(identity.id, 1, { kind: 'timeline', id: `page:${n}`, value: { n }, at: n })
+        store.compose((db) =>
+          db
+            .prepare('INSERT OR REPLACE INTO timeline_page_metadata VALUES(?,?,?,?)')
+            .run(identity.id, `page:${n}`, '{}', `search ${n}`)
+        )
+      }
+      const c = compaction(store, {
+        finalKeys: resume ? 4 : 256,
+        idleMs: 1,
+        onPhase(phase) {
+          if (phase === 'copied') write(0)
+          if (phase === 'verified') {
+            expected = fingerprint(store)
+            schema = store.compose((db) =>
+              db
+                .prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')
+                .all()
+            )
+          }
+          if (phase === 'verified' && refusals === 0 && !iterator) {
+            iterator = store.compose((db) => db.prepare('SELECT * FROM events').iterate())
+            iterator.next()
+          }
+          if (phase === 'waiting' && iterator) {
+            expect(store.maintenance.connectionEpoch()).toBe(epoch)
+            iterator.return?.()
+            iterator = undefined
+            refusals++
+            for (let n = 1; n <= (resume ? 8 : 1); n++) write(n)
+          }
+        }
+      })
+      try {
+        c.start()
+        await c.idle()
+      } finally {
+        iterator?.return?.()
+      }
+      expect(refusals).toBe(1)
+      expect(c.status().job).toMatchObject({ phase: 'done' })
+      expect(store.maintenance.connectionEpoch()).toBe(epoch + 1)
+      expect(
+        store.compose((db) =>
+          db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+        )
+      ).toEqual(schema)
+      expect(fingerprint(store)).toBe(expected)
+      expect(
+        store.compose((db) => db.prepare('SELECT count(*) n FROM event_markers').get())
+      ).toEqual({ n: resume ? 9 : 2 })
+      expect(
+        store.compose((db) => db.prepare('SELECT count(*) n FROM timeline_page_metadata').get())
+      ).toEqual({ n: resume ? 9 : 2 })
+      expect(leftovers(store)).toEqual([])
+    }
+  )
+
   test('returns the free pages, switches to incremental, keeps every row and trigger', async () => {
     const { store } = seeded()
+    await store.maintenance.pauseCheckpointer()
+    try {
+      checkpointHere(store)
+    } finally {
+      store.maintenance.resumeCheckpointer()
+    }
     const before = fingerprint(store)
     const sizeBefore = statSync(store.path).size
     const c = compaction(store)

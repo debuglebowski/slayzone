@@ -93,7 +93,7 @@ test('upgrade repairs a retained imported reference after its source pin was del
   )
   const backup = await reopened.backups.create(),
     archive = await reopened.backups.restore(backup.id)
-  expect(reopened.backups.attachment(archive.id, 'destination', ref).toString()).toBe(
+  expect((await reopened.backups.attachment(archive.id, 'destination', ref)).toString()).toBe(
     'sealed imported attachment'
   )
 })
@@ -172,7 +172,9 @@ test('backup refuses malformed live content and preserves its previous verified 
   await expect(r.backups.create()).rejects.toThrow(/JSON|integrity/i)
   expect(r.backups.list().map((b) => b.id)).toEqual([previous.id])
   const archive = await r.backups.restore(previous.id)
-  expect(r.backups.read(archive.id, 'source').events[0].event).toMatchObject({ text: 'recover me' })
+  expect((await r.backups.read(archive.id, 'source')).events[0].event).toMatchObject({
+    text: 'recover me'
+  })
 })
 
 test('backup refuses a retained user attachment whose owning pin is missing', async () => {

@@ -967,6 +967,7 @@ run_harness packages/apps/hub/src/computer-chat.test.ts
 run_harness packages/apps/hub/src/store-rollback-recovery.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
+run_harness packages/domains/chat-runtime/src/server/archive-privacy.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
 # §5: lifecycle revisions never trusted as proof (rebase, inventory, idempotent erasure).
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle-rebase.test.ts

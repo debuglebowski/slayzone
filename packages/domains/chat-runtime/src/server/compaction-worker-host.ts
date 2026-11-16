@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { COMPACTION_WORKER_SOURCE } from './compaction-worker'
+import { deserializeError, type SerializedError } from '@slayzone/platform/sqlite-worker'
 
 export interface TableInfo {
   name: string
@@ -112,7 +113,7 @@ export function startCompactionWorker(spec: CompactionWorkerSpec): WorkerHandle 
       return
     }
     if (m.t === 'error') {
-      settle(new Error(m.message))
+      settle(deserializeError(m.error))
     } else {
       settle(m)
     }
@@ -128,7 +129,11 @@ export function startCompactionWorker(spec: CompactionWorkerSpec): WorkerHandle 
     }
     try {
       if (waiting) settle(new Error('The compaction worker stopped'))
-      on.exit()
+      try {
+        on.exit()
+      } catch (error) {
+        settle(error instanceof Error ? error : new Error(String(error)))
+      }
     } finally {
       markExited()
     }
@@ -178,4 +183,4 @@ type WorkerMessage =
   | { t: 'copied' }
   | { t: 'progress'; bytes: number }
   | { t: 'finished'; check: string }
-  | { t: 'error'; message: string }
+  | { t: 'error'; error: SerializedError }

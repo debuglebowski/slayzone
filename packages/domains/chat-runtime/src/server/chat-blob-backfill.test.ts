@@ -271,21 +271,31 @@ test('never runs while a backup holds its blob lease; a backup taken mid-run is 
   expect(forms(r, 'task-a').every((f) => f === 1)).toBe(true)
   // The mid-run backup restores, and every row it holds reads back to the original.
   const archive = await r.backups.restore(backupId!)
-  const archived = r.backups.read(archive.id, 'task-a', -1, 100).events
+  const archived = (await r.backups.read(archive.id, 'task-a', -1, 100)).events
   expect(archived).toHaveLength(6)
-  for (const e of archived)
-    expect(
-      resolveChatBlobs(e.event, (ref) => {
-        let data = '',
-          offset = 0
-        for (;;) {
-          const chunk = r.backups.blob(archive.id, 'task-a', ref.sha256, offset)
-          data += chunk.data
-          offset += Buffer.from(chunk.data, 'base64').length
-          if (offset >= chunk.size) return Buffer.from(data, 'base64').toString('base64')
-        }
-      })
-    ).toEqual(screenshot(png(50 + e.seq, 64 * 1024)))
+  for (const e of archived) {
+    const hashes = new Set<string>()
+    JSON.stringify(e.event, (_key, value) => {
+      if (isChatBlobRef(value)) hashes.add(value.$chatBlob.sha256)
+      return value
+    })
+    const blobs = new Map<string, string>()
+    for (const hash of hashes) {
+      const chunks: Buffer[] = []
+      let offset = 0
+      for (;;) {
+        const chunk = await r.backups.blob(archive.id, 'task-a', hash, offset)
+        const bytes = Buffer.from(chunk.data, 'base64')
+        chunks.push(bytes)
+        offset += bytes.length
+        if (offset >= chunk.size) break
+      }
+      blobs.set(hash, Buffer.concat(chunks).toString('base64'))
+    }
+    expect(resolveChatBlobs(e.event, (ref) => blobs.get(ref.sha256)!)).toEqual(
+      screenshot(png(50 + e.seq, 64 * 1024))
+    )
+  }
 })
 
 test('a task erased mid-run leaves no images behind; the other task completes', async () => {

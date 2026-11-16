@@ -378,7 +378,7 @@ describe('runtime', () => {
     r.storage.append('task-a', 1, screenshot(bytes), 1)
     const backup = await r.backups.create('manual')
     const archive = await r.backups.restore(backup.id)
-    const [archived] = r.backups.read(archive.id, 'task-a', -1, 10).events
+    const [archived] = (await r.backups.read(archive.id, 'task-a', -1, 10)).events
     expect(isChatBlobRef(refOf(archived.event))).toBe(true)
     // A pre-v13 archive (no blob_form column): its rows are raw, served escaped.
     const printed = {
@@ -397,12 +397,12 @@ describe('runtime', () => {
     )
     const legacyBackup = await r.backups.create('manual')
     const legacyArchive = await r.backups.restore(legacyBackup.id)
-    const [legacy] = r.backups.read(legacyArchive.id, 'task-b', -1, 10).events
+    const [legacy] = (await r.backups.read(legacyArchive.id, 'task-b', -1, 10)).events
     expect(isChatBlobRef((legacy.event as { rawContent: unknown[] }).rawContent[0])).toBe(false)
     expect(resolveChatBlobs(legacy.event, () => 'never')).toEqual(printed)
-    const chunk = r.backups.blob(archive.id, 'task-a', sha(bytes), 0)
+    const chunk = await r.backups.blob(archive.id, 'task-a', sha(bytes), 0)
     expect(Buffer.from(chunk.data, 'base64')).toEqual(bytes)
-    expect(() => r.backups.blob(archive.id, 'task-b', sha(bytes), 0)).toThrow()
+    await expect(r.backups.blob(archive.id, 'task-b', sha(bytes), 0)).rejects.toThrow()
   })
 })
 

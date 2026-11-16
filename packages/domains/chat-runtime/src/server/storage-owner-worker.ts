@@ -284,8 +284,11 @@ function createCheckpointerBridge(port: StorageOwnerData['control']) {
       },
       busyNative: () => state === 'finishing',
       async terminate() {
-        await send({ operation: 'copy-terminate', token })
-        await physicalExit
+        try {
+          await send({ operation: 'copy-terminate', token })
+        } finally {
+          await physicalExit
+        }
       }
     }
   }

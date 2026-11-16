@@ -148,6 +148,11 @@ const event = (text) => ({ kind: 'assistant-text', messageId: text, text })
     } finally {
       await reopened.close()
     }
+    const archives = await require('./archive-privacy.native.fixture.cjs')(
+      root,
+      workerPath,
+      counter
+    )
     const end = count()
     assert.equal(end.main - start.main, 0)
     console.log(
@@ -167,7 +172,8 @@ const event = (text) => ({ kind: 'assistant-text', messageId: text, text })
         recoveredSwap: true,
         successfulSwap: true,
         uncleanRotation: true,
-        rotationWaitedForSync: true
+        rotationWaitedForSync: true,
+        archives
       })
     )
   } finally {

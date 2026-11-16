@@ -165,8 +165,10 @@ test('a revoked/offline computer erases only the issued hub/task scope and retur
     try {
       expect(check.storage.read('alice', -1)).toEqual([])
       expect(check.storage.read('bob', -1)).toHaveLength(1)
-      expect(check.backups.conversations(archive.id).map((c) => c.taskId)).toContain('bob')
-      expect(check.backups.conversations(archive.id).map((c) => c.taskId)).not.toContain('alice')
+      expect((await check.backups.conversations(archive.id)).map((c) => c.taskId)).toContain('bob')
+      expect((await check.backups.conversations(archive.id)).map((c) => c.taskId)).not.toContain(
+        'alice'
+      )
       expect(check.backups.list().some((b) => b.id === backup.id)).toBe(true)
       expect(existsSync(join(check.storage.dir, 'artifacts', 'alice'))).toBe(false)
       expect(existsSync(join(check.storage.dir, 'blobs', files.alice))).toBe(false)

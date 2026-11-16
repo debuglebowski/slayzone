@@ -616,17 +616,17 @@ test('control: archive paging returns every sparse event and mixed record exactl
   let afterSeq = -1
   for (let pages = 0; ; pages++) {
     expect(pages).toBeLessThan(100)
-    const page = r.backups.read(archive.id, 'root', afterSeq, 37)
+    const page = await r.backups.read(archive.id, 'root', afterSeq, 37)
     seqs.push(...page.events.map((row) => row.seq))
     if (!page.hasMore) break
     expect(page.nextSeq).toBeGreaterThan(afterSeq)
     afterSeq = page.nextSeq
   }
-  const rows: ReturnType<typeof r.backups.records>['records'] = []
+  const rows: Awaited<ReturnType<typeof r.backups.records>>['records'] = []
   let cursor = 0
   for (let pages = 0; ; pages++) {
     expect(pages).toBeLessThan(100)
-    const page = r.backups.records(archive.id, 'root', cursor)
+    const page = await r.backups.records(archive.id, 'root', cursor)
     expect(page.records.length).toBeGreaterThan(0)
     rows.push(...page.records)
     if (!page.hasMore) break
@@ -706,7 +706,7 @@ test('control: sealed historical attachment survives original-version prune, ori
   expect(Buffer.from(await next.attachments.reader.read(ref)).toString()).toBe('pinned v1')
   const backup = await next.backups.create()
   const archive = await next.backups.restore(backup.id)
-  expect(next.backups.attachment(archive.id, 'root', ref).toString()).toBe('pinned v1')
+  expect((await next.backups.attachment(archive.id, 'root', ref)).toString()).toBe('pinned v1')
 })
 
 test('control: reset clears events, queue and timeline, fences late old-child output, and preserves native session provenance', async () => {
