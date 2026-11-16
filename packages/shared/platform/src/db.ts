@@ -1,4 +1,4 @@
-import type { TxnName, TxnParams, TxnResult } from './txn-registry-map'
+import type { TxnName, TxnParams, TxnResult, TxnRegistry } from './txn-registry-map'
 
 /** SQLite PRAGMAs required for all connections to the SlayZone database. */
 export const DB_PRAGMAS = [
@@ -44,7 +44,7 @@ export interface PreparedBridge {
  * read-modify-write logic) so they run atomically inside the worker and never
  * split across the thread boundary.
  */
-export interface SlayzoneDb {
+export interface SlayzoneDb<Registry = TxnRegistry> {
   get<T = unknown>(sql: string, params?: unknown[]): Promise<T | undefined>
   all<T = unknown>(sql: string, params?: unknown[]): Promise<T[]>
   run(sql: string, params?: unknown[]): Promise<RunResult>
@@ -54,9 +54,13 @@ export interface SlayzoneDb {
    * Invoke a pre-registered named transaction. `name` is keyed off the
    * `TxnRegistry` map (augmented by each domain), so the params shape and the
    * resolved result type are inferred from the registered impl — no generic to
-   * pass, no `as` casts. Unknown names are a compile error.
+   * pass, no `as` casts. Unknown names are a compile error. A private database may
+   * supply its own registry without adding those commands to the application DB.
    */
-  namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>>
+  namedTxn<K extends TxnName<Registry>>(
+    name: K,
+    params: TxnParams<K, Registry>
+  ): Promise<Awaited<TxnResult<K, Registry>>>
   /** Online backup of the live connection to `destPath` (manual/restore backups). */
   backup(destPath: string): Promise<void>
   prepare(sql: string): PreparedBridge

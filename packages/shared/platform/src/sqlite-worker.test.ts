@@ -5,6 +5,7 @@
  * `db.test.ts`; this pins the failure paths no real DB produces on demand.
  */
 import { fileURLToPath } from 'node:url'
+import { MessageChannel } from 'node:worker_threads'
 import { expect, test, vi } from 'vitest'
 import type { SlayzoneDb } from './db'
 import { openSqliteWorker } from './sqlite-worker'
@@ -176,5 +177,69 @@ test('close resolves only after the worker exits, not merely after its close rep
   } finally {
     Atomics.store(gate, 0, 2)
     await closing
+  }
+})
+
+test('failed startup waits for actual exit before another owner may start', async () => {
+  const gate = new Int32Array(new SharedArrayBuffer(4))
+  let settled = false
+  const opening = openSqliteWorker({
+    label: 'failed startup',
+    workerPath: FIXTURE,
+    workerData: { mode: 'delayed-init-error', gate }
+  })
+  const result = opening.then(
+    () => null,
+    (error) => {
+      settled = true
+      return error
+    }
+  )
+  try {
+    await vi.waitFor(() => expect(Atomics.load(gate, 0)).toBe(1))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(settled).toBe(false)
+  } finally {
+    Atomics.store(gate, 0, 2)
+  }
+  expect(await result).toMatchObject({ code: 'SQLITE_CANTOPEN' })
+})
+
+test('worker data can transfer an owned control port', async () => {
+  const { port1, port2 } = new MessageChannel()
+  const message = new Promise((resolve) => port1.once('message', resolve))
+  try {
+    const db = await openSqliteWorker({
+      label: 'port owner',
+      workerPath: FIXTURE,
+      workerData: { mode: 'port-probe', port: port2 },
+      transferList: [port2]
+    })
+    try {
+      expect(await message).toBe('worker-owned')
+    } finally {
+      await db.close()
+    }
+  } finally {
+    port1.close()
+    port2.close()
+  }
+})
+
+test('an owner can terminate only its worker, await exit, and reject pending/later calls', async () => {
+  const db = await openSqliteWorker({
+    label: 'terminated owner',
+    workerPath: FIXTURE,
+    workerData: { mode: 'echo' }
+  })
+  try {
+    expect(db).toHaveProperty('terminate', expect.any(Function))
+    const pending = expect(db.get('slow')).rejects.toThrow(/exited unexpectedly/)
+    await db.terminate()
+    await pending
+    await db.exited
+    await expect(db.get('echo')).rejects.toThrow(/exited unexpectedly/)
+  } finally {
+    await db.close()
   }
 })

@@ -1,6 +1,9 @@
 import { isDeepStrictEqual } from 'node:util'
 import Database from 'better-sqlite3'
 import { createHash, randomUUID } from 'node:crypto'
+import { isMainThread } from 'node:worker_threads'
+import { chatStorageDigest as digest } from './storage-digest'
+import { commitStorageFence } from './storage-fence'
 import {
   chmodSync,
   closeSync,
@@ -20,7 +23,7 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { createSwappableDb } from './chat-db-handle'
-import { attachCheckpointer, type CheckpointResult } from './checkpointer'
+import { attachCheckpointer, type CheckpointResult, type StoreCheckpointer } from './checkpointer'
 import { uptime } from 'node:os'
 import {
   createSyncFaultLedger,
@@ -56,22 +59,7 @@ import { CHAT_RECORD_KINDS } from '../shared'
 import type { EncodedTimelineWrite } from '@slayzone/terminal/timeline-records'
 import { historyReadTurns } from '@slayzone/terminal/history-turns'
 
-function digest(value: unknown): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify(value, (_key, v) =>
-        v && typeof v === 'object' && !Array.isArray(v)
-          ? Object.fromEntries(
-              Object.keys(v)
-                .sort()
-                .map((key) => [key, v[key]])
-            )
-          : v
-      )
-    )
-    .digest('hex')
-}
-export { digest as chatStorageDigest }
+export { chatStorageDigest } from './storage-digest'
 function requireEpoch(epoch: number): void {
   if (!Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Invalid ownership epoch')
 }
@@ -348,7 +336,19 @@ export function openChatStorage(opts: {
   machineBootedAt?: number
   /** WAL sync / checkpoint cadence of the off-thread checkpointer (ms). Default 1000. */
   checkpointIntervalMs?: number
+  /** Internal owner-worker binding. Never serialized: the worker constructs its local bridge. */
+  ownerWorker?: {
+    createCheckpointer(
+      path: string,
+      hooks: {
+        intervalMs?: number
+        onFailure(message: string): void
+        onRecovered(): void
+      }
+    ): StoreCheckpointer
+  }
 }) {
+  if (opts.ownerWorker && isMainThread) throw new Error('Chat storage owner must run on a worker')
   if (!opts.hubScope.trim()) throw new Error('Hub storage scope is required')
   const dir = join(opts.stateDir, 'computer-runtime', digest(opts.hubScope))
   mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -1098,6 +1098,16 @@ export function openChatStorage(opts: {
     async shutdown(): Promise<void> {
       if (closed) return
       for (const reader of [...exportReaders]) reader.close()
+      if (opts.ownerWorker) {
+        // A real FULL commit of the clean mark includes every earlier NORMAL frame.
+        db.pragma('synchronous = FULL')
+        saveSession(true)
+        const active = checkpointer.active
+        await checkpointer.close(true)
+        if (!active) db.pragma('wal_checkpoint(TRUNCATE)')
+        api.close()
+        return
+      }
       saveSession(true)
       if (checkpointer.active) await checkpointer.close(true).catch(() => undefined)
       else db.pragma('wal_checkpoint(TRUNCATE)')
@@ -1111,7 +1121,11 @@ export function openChatStorage(opts: {
     async flush(): Promise<void> {
       if (closed) throw new Error('Chat storage is closed')
       while (resumed) await resumed.promise
-      if (inline || !checkpointer.active) return // FULL commits: already durable
+      if (opts.ownerWorker) {
+        commitStorageFence(db, { resumeNormal: !inline && checkpointer.active })
+        return
+      }
+      if (inline || !checkpointer.active) return // Legacy S5 path, removed by full caller migration.
       await checkpointer.flush()
     },
     conversation(id: string): ChatOwnership | null {
@@ -2585,14 +2599,32 @@ export function openChatStorage(opts: {
   }
   // ── the off-thread checkpointer (S5) ─────────────────────────────────────
   /** The checkpointer failed: this connection makes its own commits durable again. */
-  let inline = false
+  let inline = !!opts.ownerWorker
   /** Set while it is paused (a swap): `flush` waits for the resume. */
   let resumed: { promise: Promise<void>; resolve(): void } | null = null
-  const checkpointer = attachCheckpointer(path, {
+  const checkpointer = (opts.ownerWorker?.createCheckpointer ?? attachCheckpointer)(path, {
     intervalMs: opts.checkpointIntervalMs,
+    onRecovered: () => {
+      if (closed || !opts.ownerWorker) return
+      try {
+        commitStorageFence(db, { resumeNormal: true })
+        inline = false
+      } catch (error) {
+        inline = true
+        console.error('[chat-storage] recovered checkpointer fence failed:', error)
+      }
+    },
     onFailure: (message) => {
-      if (inline || closed) return
+      if (closed || (inline && !opts.ownerWorker)) return
       inline = true
+      if (opts.ownerWorker) {
+        try {
+          commitStorageFence(db)
+        } catch (error) {
+          console.error('[chat-storage] durability fence failed:', error)
+        }
+        return
+      }
       db.pragma('synchronous = FULL')
       db.pragma('wal_autocheckpoint = 1000')
       console.error(`[chat-storage] checkpointer unavailable (${message}); committing with FULL`)
@@ -2604,10 +2636,23 @@ export function openChatStorage(opts: {
    * other connections on it, and the swap that replaces it. See DOMAIN.md.
    */
   const secondaries = new Map<symbol, string>()
+  let connectionEpoch = 0
   const maintenance = {
+    connectionEpoch: () => connectionEpoch,
+    /** Owner admission is already closed; let accepted fences drain before native close. */
+    releasePauseForClose() {
+      if (!opts.ownerWorker) throw new Error('Only an owner worker may release a shutdown pause')
+      const waiting = resumed
+      resumed = null
+      waiting?.resolve()
+    },
     /** Before a swap: the checkpointer syncs, checkpoints and closes its connection. */
     async pauseCheckpointer(): Promise<void> {
-      if (inline || !checkpointer.active) return
+      if (!opts.ownerWorker && (inline || !checkpointer.active)) return
+      if (opts.ownerWorker) {
+        inline = true
+        db.pragma('synchronous = FULL')
+      }
       if (!resumed) {
         let resolve: () => void = () => undefined
         const promise = new Promise<void>((r) => {
@@ -2615,7 +2660,7 @@ export function openChatStorage(opts: {
         })
         resumed = { promise, resolve }
       }
-      await checkpointer.checkpoint().catch(() => undefined)
+      if (checkpointer.active) await checkpointer.checkpoint().catch(() => undefined)
       await checkpointer.close(false)
     },
     /** After a swap (or a refused one): open again on the live file. */
@@ -2623,7 +2668,7 @@ export function openChatStorage(opts: {
       if (closed) return
       const waiting = resumed
       resumed = null
-      if (!inline) void checkpointer.open()
+      if (opts.ownerWorker || !inline) void checkpointer.open()
       waiting?.resolve()
     },
     /** A checkpoint now, off this thread (complete unless a reader holds old frames). */
@@ -2733,6 +2778,7 @@ export function openChatStorage(opts: {
         throw error
       }
       connection.replace(next)
+      connectionEpoch++
       // Not synced: a `.pre-compact` link a crash brings back is removed at boot.
       unlinkSync(pre)
       return { holdMs: performance.now() - started }

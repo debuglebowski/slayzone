@@ -978,6 +978,8 @@ run_harness packages/domains/chat-runtime/src/server/timeline-storage-bounded.te
 run_harness packages/domains/chat-runtime/src/server/chat-db-swap.test.ts
 run_harness packages/domains/chat-runtime/src/server/chat-durability.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-fence.test.ts
+run_harness packages/domains/chat-runtime/src/server/storage-owner.test.ts
+run_harness packages/domains/chat-runtime/src/server/checkpointer.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-compaction.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-compaction-crash.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts

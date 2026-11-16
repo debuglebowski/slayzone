@@ -20,9 +20,9 @@ it('defers a rebuilt same-version host until work stops, including with auto-upg
   )
   const original = { entry: join(root, 'computer.cjs'), version: '1.0.0' }
   const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
-    .replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "1.0.0";')
-    .replace(/var COMPUTER_BUILD_ID = [^;]+;/, 'var COMPUTER_BUILD_ID = "rebuilt-same-version";')
-  expect(source).toContain('var COMPUTER_BUILD_ID = "rebuilt-same-version";')
+    .replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "1.0.0";')
+    .replace(/\b((?:var )?COMPUTER_BUILD_ID) = [^;]+;/, '$1 = "rebuilt-same-version";')
+  expect(source.includes('COMPUTER_BUILD_ID = "rebuilt-same-version";')).toBe(true)
   writeFileSync(original.entry, source)
   const hub = await startLoopbackHub({ floodLimits: false })
   const config = {

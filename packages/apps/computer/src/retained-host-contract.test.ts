@@ -27,12 +27,12 @@ const actor = { userId: null, route: null }
  * retained host; only the historical contract number/payload schemas differ. */
 function retainedEntry(root: string, contract: number) {
   let source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
-    .replace(/var HOST_CONTRACT_VERSION = \d+;/, `var HOST_CONTRACT_VERSION = ${contract};`)
+    .replace(/\b((?:var )?HOST_CONTRACT_VERSION) = \d+;/, `$1 = ${contract};`)
     .replace(
       /\bCOMPUTER_PROTOCOL_VERSION = \d+;/,
       `COMPUTER_PROTOCOL_VERSION = ${COMPUTER_PROTOCOL_VERSION - 1};`
     )
-  expect(source).toContain(`var HOST_CONTRACT_VERSION = ${contract};`)
+  expect(source.includes(`HOST_CONTRACT_VERSION = ${contract};`)).toBe(true)
   expect(source).toContain(`COMPUTER_PROTOCOL_VERSION = ${COMPUTER_PROTOCOL_VERSION - 1};`)
   source = source
     .replace(
@@ -44,9 +44,11 @@ function retainedEntry(root: string, contract: number) {
       'saveTabDraft: external_exports.tuple([id, chatDraftSchema]),'
     )
   expect(source).toContain('getTabState: external_exports.tuple([id]),')
-  const queue = /var queueOptions = ([\s\S]*?)\nvar chatQueueOperationSchemas/.exec(source)
+  const queue = /(?:var )?queueOptions = ([\s\S]*?)\n\s*(?:var )?chatQueueOperationSchemas/.exec(
+    source
+  )
   expect(queue).not.toBeNull()
-  source = source.replace(queue![0], queue![0].replace(/^ {2}expectedMode:.*\n/m, ''))
+  source = source.replace(queue![0], queue![0].replace(/^[ \t]+expectedMode:.*\n/m, ''))
   const entry = join(root, `retained-v${contract}.cjs`)
   writeFileSync(entry, source)
   return entry
@@ -541,17 +543,14 @@ test('supervisor defers retained v2 replacement while busy, then publishes v3 ho
   writeFileSync(
     oldEntry,
     readFileSync(oldEntry, 'utf8').replace(
-      /var COMPUTER_VERSION = [^;]+;/,
-      'var COMPUTER_VERSION = "1.0.0";'
+      /\b((?:var )?COMPUTER_VERSION) = [^;]+;/,
+      '$1 = "1.0.0";'
     )
   )
   const candidate = join(root, 'current-v3.cjs')
   const current = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
-    .replace(
-      /var HOST_CONTRACT_VERSION = \d+;/,
-      `var HOST_CONTRACT_VERSION = ${HOST_CONTRACT_VERSION};`
-    )
-    .replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "1.0.0";')
+    .replace(/\b((?:var )?HOST_CONTRACT_VERSION) = \d+;/, `$1 = ${HOST_CONTRACT_VERSION};`)
+    .replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "1.0.0";')
   writeFileSync(candidate, current)
   let output = ''
   const child = spawn(process.execPath, [oldEntry, '--session-host'], {

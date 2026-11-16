@@ -60,10 +60,7 @@ it('hub protocol upgrade → fatal old hello → exact release → same enrollme
   const badEntry = join(root, 'bad.cjs')
   // Build fixtures from the actual standalone bundle. Only release/protocol differ.
   const versioned = (version: string) =>
-    source.replace(
-      /var COMPUTER_VERSION = [^;]+;/,
-      `var COMPUTER_VERSION = ${JSON.stringify(version)};`
-    )
+    source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, `$1 = ${JSON.stringify(version)};`)
   writeFileSync(
     oldEntry,
     versioned('1.0.0').replace(
@@ -210,16 +207,13 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
   )
   const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
   const oldEntry = join(root, 'old.cjs')
-  writeFileSync(
-    oldEntry,
-    source.replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "1.0.0";')
-  )
+  writeFileSync(oldEntry, source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "1.0.0";'))
   const runtime = join(root, 'computer-runtime')
   const targetEntry = releaseEntry(runtime, '2.0.0')
   mkdirSync(dirname(targetEntry), { recursive: true })
   writeFileSync(
     targetEntry,
-    source.replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "2.0.0";')
+    source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "2.0.0";')
   )
   const server = http.createServer((_req, res) =>
     res.end(JSON.stringify({ ok: true, version: '2.0.0' }))
@@ -318,16 +312,10 @@ it('hub upgrade, failed candidate, retry and supervisor restart preserve active 
   )
   const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
   const oldEntry = join(root, 'old.cjs')
-  writeFileSync(
-    oldEntry,
-    source.replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "1.0.0";')
-  )
+  writeFileSync(oldEntry, source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "1.0.0";'))
   const target = releaseEntry(join(root, 'computer-runtime'), '2.0.0')
   mkdirSync(dirname(target), { recursive: true })
-  writeFileSync(
-    target,
-    source.replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "2.0.0";')
-  )
+  writeFileSync(target, source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "2.0.0";'))
   let release = '1.0.0'
   let failCandidate = true
   const server = http.createServer((_req, res) =>
@@ -458,18 +446,15 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
     process.platform === 'win32' ? 'junction' : 'dir'
   )
   const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
-    .replace('var INTERVAL_MS = 3e4;', 'var INTERVAL_MS = 100;')
+    .replace(/\b((?:var )?INTERVAL_MS) = 3e4;/, '$1 = 100;')
     .replace(/deps\w*\.probationMs \?\? 6e4/, '50')
   const oldEntry = join(root, 'original.cjs')
-  writeFileSync(
-    oldEntry,
-    source.replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "1.0.0";')
-  )
+  writeFileSync(oldEntry, source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "1.0.0";'))
   const targetEntry = releaseEntry(join(root, 'computer-runtime'), '2.0.0')
   mkdirSync(dirname(targetEntry), { recursive: true })
   writeFileSync(
     targetEntry,
-    source.replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "2.0.0";')
+    source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "2.0.0";')
   )
   let release = '1.0.0'
   const server = http.createServer((_req, res) =>
@@ -617,7 +602,7 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
     process.platform === 'win32' ? 'junction' : 'dir'
   )
   const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
-    .replace('var INTERVAL_MS = 3e4;', 'var INTERVAL_MS = 100;')
+    .replace(/\b((?:var )?INTERVAL_MS) = 3e4;/, '$1 = 100;')
     .replace(
       '#!/usr/bin/env node',
       `#!/usr/bin/env node\nif(process.argv.includes('--supervisor')) require('node:fs').writeFileSync(require('node:path').join(process.env.SLAYZONE_ROOT,'supervisor-pid'),String(process.pid));`

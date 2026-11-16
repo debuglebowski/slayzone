@@ -2,15 +2,17 @@
  * The chat stores' WAL syncs and checkpoints, off the computer's main thread (fu-2 S5).
  *
  * A store's own connection commits with `synchronous = NORMAL` and never checkpoints
- * (`wal_autocheckpoint = 0`): a commit appends to the WAL and returns, no fsync. Under
+ * (`wal_autocheckpoint = 0`). WAL restart still syncs a header on that writer; the
+ * new storage owner moves the writer off main and uses FULL marker commits for acks.
+ * Under
  * disk contention one FULL commit held the main thread 32 s (FU4) — longer than the
  * hub's heartbeat timeout. This worker, one per process for every store, holds a second
  * connection per store and:
  *   - every `intervalMs` (1 s) fsyncs the store's WAL and runs a PASSIVE checkpoint
  *     (never blocks a writer; the main connection resets the WAL on a later write, and
  *     `journal_size_limit` caps it) — commits are durable within about a second;
- *   - on `sync` fsyncs the WAL now: the barrier behind `storage.flush()`, awaited where
- *     the hub must not learn of a change a power loss could undo;
+ *   - on `sync` fsyncs the WAL now (legacy storage.flush only; owner fences never
+ *     depend on the checkpointer's raw file descriptor);
  *   - on `close` (final) runs a TRUNCATE checkpoint and closes: a normal quit loses nothing.
  * A process crash loses nothing either way (the WAL is in the OS cache); only an OS
  * crash or power loss can lose the commits of the last second.
@@ -49,31 +51,50 @@ function tick(s) {
     syncWal(s)
     checkpoint(s, 'PASSIVE')
   } catch (error) {
+    // Retire this registration before main can retry or swap the file. A cleanup
+    // failure instead kills the helper; its exit releases every native handle.
+    close(s, false)
     parentPort.postMessage({ t: 'failed', id: s.id, message: describe(error) })
   }
 }
 function close(s, final) {
   clearInterval(s.timer)
+  let failure
   try {
     if (final) {
       s.db.pragma('busy_timeout = 5000')
       checkpoint(s, 'TRUNCATE')
     }
-  } finally {
-    if (s.walFd !== null) fs.closeSync(s.walFd)
-    s.db.close()
-    stores.delete(s.id)
+  } catch (error) {
+    failure = error
   }
+  const cleanup = []
+  try { if (s.walFd !== null) fs.closeSync(s.walFd) } catch (error) { cleanup.push(error) }
+  try { s.db.close() } catch (error) { cleanup.push(error) }
+  if (cleanup.length) throw Object.assign(
+    new AggregateError([...(failure ? [failure] : []), ...cleanup], 'checkpointer cleanup failed'),
+    { retire: true }
+  )
+  stores.delete(s.id)
+  if (failure) throw failure
 }
 parentPort.on('message', (m) => {
   const s = stores.get(m.id)
   try {
     if (m.t === 'open') {
+      if (s) throw new Error('checkpointer already open')
       const db = new Database(m.path, { fileMustExist: true })
       // Checkpoints sync the WAL before copying it and the database after: here, not
       // on the store's own thread. PASSIVE never waits for (or blocks) a writer.
-      db.pragma('synchronous = NORMAL')
-      db.pragma('busy_timeout = 0')
+      try {
+        db.pragma('synchronous = NORMAL')
+        db.pragma('busy_timeout = 0')
+      } catch (error) {
+        try { db.close() } catch (cleanup) {
+          throw Object.assign(new AggregateError([error, cleanup], 'checkpointer cleanup failed'), { retire: true })
+        }
+        throw error
+      }
       const entry = { id: m.id, path: m.path, db, walFd: null, timer: null }
       entry.timer = setInterval(() => tick(entry), m.intervalMs)
       stores.set(m.id, entry)
@@ -90,6 +111,8 @@ parentPort.on('message', (m) => {
       reply(m.req, { ok: true })
     }
   } catch (error) {
+    // No failure acknowledgement before native resources are physically released.
+    if (error && error.retire) throw error
     reply(m.req, { ok: false, message: describe(error) })
   } finally {
     // A synchronous close waits on this flag (the store's own close).
@@ -163,8 +186,13 @@ function thread() {
     state.pending.clear()
     for (const fail of state.failed.values()) fail(message)
   }
-  worker.on('error', (error) => lost(`checkpointer failed: ${error.message}`))
-  worker.on('exit', () => lost('checkpointer stopped'))
+  let failure: string | undefined
+  worker.on('error', (error) => {
+    failure = `checkpointer failed: ${error.message}`
+  })
+  // An error notification precedes exit. Keep ownership/pending calls until all
+  // native file handles have actually gone, then permit a replacement generation.
+  worker.on('exit', () => lost(failure ?? 'checkpointer stopped'))
   shared = state
   return state
 }
@@ -251,6 +279,7 @@ export function attachCheckpointer(
     async close(final) {
       if (!active) return
       await opening
+      if (!active) return
       active = false
       shared?.failed.delete(id)
       await expect({ t: 'close', final })

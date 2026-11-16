@@ -77,3 +77,9 @@ export {
   type StorageCompactionOptions
 } from './storage-compaction'
 export { ChatStorageSwapRefused, type ChatStoreFileStats } from './storage'
+
+export {
+  openChatStorageOwner,
+  type AsyncChatStorage,
+  type OpenStorageOwnerOptions
+} from './storage-owner'

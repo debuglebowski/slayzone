@@ -174,14 +174,18 @@ old blocks to the filesystem). Backups keep erased content by design.
 
 Connection lifecycle: the store owns ONE read-write connection (`openChatConnection`:
 WAL, synchronous NORMAL, `wal_autocheckpoint` 0, secure_delete, `journal_size_limit`
-64 MiB). It never fsyncs or checkpoints: one off-thread checkpointer per process
+64 MiB). NORMAL still syncs a reused WAL header on its writer thread; the current
+legacy runtime therefore does not yet meet the no-main-thread-sync goal (R1 H1).
+One off-thread checkpointer per process
 (`checkpointer.ts`, its own connection per store) fsyncs each store's WAL and runs a
 PASSIVE checkpoint every second; `storage.flush()` is the barrier (an off-thread WAL
 sync) the computer awaits before answering a request whose data the hub hands over or
 records as done (`durableAck`, apps/computer chat-runtime handler) — never for live
 output. `shutdown()` marks the store clean and truncates the WAL off-thread. If the
 checkpointer dies the store falls back to FULL commits with autocheckpoint on its own
-connection. **Durability window: a process crash loses nothing; an OS crash or power
+connection; that pragma switch alone does not fence the older NORMAL tail (R1 H2).
+The worker-owned replacement below is awaiting complete caller migration.
+**Durability window: a process crash loses nothing; an OS crash or power
 loss can lose the commits of the last ~1 s that no durable ack covered.** A start
 after such an unclean stop on another machine boot rotates the store id, so the hub
 re-reads every conversation (another database = rollback) and clients reload: they
@@ -238,7 +242,8 @@ dropped, or restored when it is the only copy).
   test whose stale copy survives a plain delete with secure_delete and is gone after
   the rewrite; the erasure waits for the rewrite. A rebuild needs about the live data
   size free on disk — an in-place VACUUM needed the same in temporary space.
-- 2026-11-15 (fu-2, S5): no fsync on the computer's main thread in steady state. A
+- 2026-11-15 (fu-2, S5; corrected by R1 below): targeted no fsync on the computer's
+  main thread in steady state, but NORMAL WAL reuse still syncs on its writer. A
   FULL commit waited 32 s behind a disk backlog (FU4), longer than the hub's 10 s
   heartbeat timeout. NORMAL + off-thread checkpointer + durable acks keep every
   hand-over durable before it is acknowledged; live output is unchanged. Measured with
@@ -254,3 +259,11 @@ dropped, or restored when it is the only copy).
   `storage-fence.ts` supplies a real FULL marker commit for an owner worker. It is
   not yet wired into the live runtime: S5's main-thread WAL restart sync and unsafe
   inactive-checkpointer flush remain pending the full S6 caller/event migration.
+
+- 2026-11-16 (fu-2 R1, S6b1): actual storage-owner entry + async host facade, using
+  the main-owned shared checkpointer through a private MessagePort. The opt-in owner
+  profile opens/migrates/restarts WAL/closes on its worker, executes real FULL fences,
+  coalesces only the same issued prefix, and retains file ownership until registered
+  helper lifetimes end. Single-bin dispatch selects storage before CLI initialization.
+  Legacy runtime/event callers still await migration; generic control-route/scope
+  responsiveness and streaming/transaction/blob/fault adapters remain required.

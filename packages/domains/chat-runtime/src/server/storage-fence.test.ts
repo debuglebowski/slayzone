@@ -15,7 +15,9 @@ test('a fence makes a real, fresh maintenance write; NORMAL is restored only on 
     const first = commitStorageFence(db, { resumeNormal: true })
     const second = commitStorageFence(db, { resumeNormal: true })
     expect(first).not.toBe(second)
-    expect(db.prepare('SELECT value FROM maintenance_cursors').get()).toEqual({ value: second })
+    expect(db.prepare('SELECT value FROM maintenance_cursors').get()).toEqual({
+      value: JSON.stringify(second)
+    })
     expect(db.pragma('synchronous', { simple: true })).toBe(1)
     commitStorageFence(db)
     expect(db.pragma('synchronous', { simple: true })).toBe(2)

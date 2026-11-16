@@ -5,7 +5,7 @@ const { parentPort, workerData } = require('node:worker_threads')
 
 const mode = workerData.mode
 
-if (mode === 'init-error') {
+if (mode === 'init-error' || mode === 'delayed-init-error') {
   parentPort.postMessage({
     type: 'init-error',
     error: {
@@ -14,12 +14,24 @@ if (mode === 'init-error') {
       props: { code: 'SQLITE_CANTOPEN' }
     }
   })
-  parentPort.close()
+  if (mode === 'delayed-init-error') {
+    Atomics.store(workerData.gate, 0, 1)
+    const poll = setInterval(() => {
+      if (Atomics.load(workerData.gate, 0) === 2) {
+        clearInterval(poll)
+        parentPort.close()
+      }
+    }, 5)
+  } else parentPort.close()
 } else if (mode === 'exit-before-ready') {
   process.exit(3)
 } else if (mode === 'throw-before-ready') {
   throw new Error('startup blew up')
 } else {
+  if (mode === 'port-probe') {
+    workerData.port.postMessage('worker-owned')
+    workerData.port.close()
+  }
   parentPort.on('message', (req) => {
     if (req.type === 'close') {
       parentPort.postMessage({ id: req.id, ok: true, result: undefined })

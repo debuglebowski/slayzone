@@ -20,7 +20,7 @@ export function commitStorageFence(
     db.prepare(
       `INSERT INTO maintenance_cursors(id,value) VALUES('storage-durable-prefix-v1',?)
        ON CONFLICT(id) DO UPDATE SET value=excluded.value`
-    ).run(nonce)
+    ).run(JSON.stringify(nonce))
   }).immediate()
   if (opts.resumeNormal) db.pragma('synchronous = NORMAL')
   return nonce

@@ -59,16 +59,26 @@ type AugmentationNotLoaded =
   'TxnRegistry augmentation not loaded in this program: the file calling db.namedTxn(...) must `import type {} from` the module whose `*Txns` object defines the txn'
 
 /** A registered transaction name (or a loud remedy if the map isn't loaded). */
-export type TxnName = [keyof TxnRegistry] extends [never]
+export type TxnName<Registry = TxnRegistry> = [keyof Registry] extends [never]
   ? AugmentationNotLoaded
-  : keyof TxnRegistry
+  : keyof Registry
 
 /** The params type for a given transaction name. */
-export type TxnParams<K extends TxnName> = K extends keyof TxnRegistry
-  ? Parameters<TxnRegistry[K]>[0]
+export type TxnParams<
+  K extends TxnName<Registry>,
+  Registry = TxnRegistry
+> = K extends keyof Registry
+  ? Registry[K] extends (...args: infer A) => unknown
+    ? A[0]
+    : never
   : never
 
 /** The (possibly-sync) result type for a given transaction name. */
-export type TxnResult<K extends TxnName> = K extends keyof TxnRegistry
-  ? ReturnType<TxnRegistry[K]>
+export type TxnResult<
+  K extends TxnName<Registry>,
+  Registry = TxnRegistry
+> = K extends keyof Registry
+  ? Registry[K] extends (...args: never[]) => infer R
+    ? R
+    : never
   : never

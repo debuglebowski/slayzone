@@ -14,9 +14,9 @@
  * An idle worker does not keep the process alive (it is `unref`'d whenever no
  * call is pending), matching a synchronous handle, which never held the loop.
  */
-import { SHARE_ENV, Worker } from 'node:worker_threads'
+import { SHARE_ENV, Worker, type TransferListItem } from 'node:worker_threads'
 import type { BatchOp, PreparedBridge, RunResult, SlayzoneDb } from './db'
-import type { TxnName, TxnParams, TxnResult } from './txn-registry-map'
+import type { TxnName, TxnParams, TxnResult, TxnRegistry } from './txn-registry-map'
 import {
   deserializeError,
   reviveBuffers,
@@ -31,6 +31,8 @@ export type OpenSqliteWorkerOptions = {
   workerPath: string
   /** Handed to the worker's `open`. Resolve paths/flags here; keep it cloneable. */
   workerData: unknown
+  /** Owned control channels handed to the SQLite worker, never cloned/shared implicitly. */
+  transferList?: readonly TransferListItem[]
   /**
    * The worker died after startup (out of memory, an uncaught throw). Every pending
    * and later call rejects with `err` either way; this is the owner's chance to
@@ -52,14 +54,26 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; call
  * Spawn the worker and resolve once its startup (`open`) finished. A startup throw
  * rejects with that error (message + code), and the worker is gone.
  */
-export function openSqliteWorker(opts: OpenSqliteWorkerOptions): Promise<SlayzoneDb> {
+export interface SqliteWorkerHandle<Registry = TxnRegistry> extends SlayzoneDb<Registry> {
+  readonly exited: Promise<void>
+  /** Emergency disposal of this database owner only. Pending calls reject; waits actual exit. */
+  terminate(): Promise<void>
+}
+
+export function openSqliteWorker<Registry = TxnRegistry>(
+  opts: OpenSqliteWorkerOptions
+): Promise<SqliteWorkerHandle<Registry>> {
   const callSite = new Error()
-  return new Promise<SlayzoneDb>((resolve, reject) => {
+  return new Promise<SqliteWorkerHandle<Registry>>((resolve, reject) => {
     let worker: Worker
     try {
       // SHARE_ENV: the worker reads the same live `process.env` the rest of the
       // process does (a migration reads a hub switch from env), as in-process code did.
-      worker = new Worker(opts.workerPath, { workerData: opts.workerData, env: SHARE_ENV })
+      worker = new Worker(opts.workerPath, {
+        workerData: opts.workerData,
+        transferList: opts.transferList ? [...opts.transferList] : undefined,
+        env: SHARE_ENV
+      })
     } catch (err) {
       reject(err)
       return
@@ -75,8 +89,17 @@ export function openSqliteWorker(opts: OpenSqliteWorkerOptions): Promise<Slayzon
       if (!('type' in msg) || settled) return
       settled = true
       cleanup()
-      if (msg.type === 'ready') resolve(new SqliteWorkerDb(worker, opts))
-      else reject(deserializeError(msg.error, callSite))
+      if (msg.type === 'ready') resolve(new SqliteWorkerDb<Registry>(worker, opts))
+      else {
+        const failure = deserializeError(msg.error, callSite)
+        // Init-error precedes native cleanup/exit, just like a close reply. Keep
+        // ownership until the worker is gone before allowing a retry.
+        worker.on('error', onError)
+        worker.once('exit', () => {
+          worker.off('error', onError)
+          reject(failure)
+        })
+      }
     }
     const onError = (err: Error): void => {
       cause = err
@@ -96,13 +119,13 @@ export function openSqliteWorker(opts: OpenSqliteWorkerOptions): Promise<Slayzon
   })
 }
 
-class SqliteWorkerDb implements SlayzoneDb {
+class SqliteWorkerDb<Registry> implements SqliteWorkerHandle<Registry> {
   private readonly pending = new Map<number, Pending>()
   private nextId = 0
   private closed = false
   private closing: Promise<void> | null = null
   private dead: Error | null = null
-  private readonly exited: Promise<void>
+  readonly exited: Promise<void>
 
   constructor(
     private readonly worker: Worker,
@@ -198,8 +221,15 @@ class SqliteWorkerDb implements SlayzoneDb {
     return this.send<unknown[]>({ type: 'batch-txn', ops })
   }
 
-  namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>> {
-    return this.send<Awaited<TxnResult<K>>>({ type: 'named-txn', name: String(name), params })
+  namedTxn<K extends TxnName<Registry>>(
+    name: K,
+    params: TxnParams<K, Registry>
+  ): Promise<Awaited<TxnResult<K, Registry>>> {
+    return this.send<Awaited<TxnResult<K, Registry>>>({
+      type: 'named-txn',
+      name: String(name),
+      params
+    })
   }
 
   backup(destPath: string): Promise<void> {
@@ -236,4 +266,13 @@ class SqliteWorkerDb implements SlayzoneDb {
     )
     return this.closing
   }
+
+  async terminate(): Promise<void> {
+    this.worker.ref()
+    await this.worker.terminate()
+    await this.exited
+  }
 }
+
+export { serializeError, deserializeError } from './sqlite-worker-protocol'
+export type { SerializedError } from './sqlite-worker-protocol'
