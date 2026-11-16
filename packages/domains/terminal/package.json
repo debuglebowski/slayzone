@@ -22,6 +22,7 @@
     "./client/terminal-mru": "./src/client/terminal-mru.ts",
     "./agents": "./src/server/agents/index.ts",
     "./reducer": "./src/shared/chat-timeline.ts",
+    "./chat-lifecycle": "./src/shared/chat-lifecycle.ts",
     "./chat-prompts": "./src/shared/chat-prompts.ts",
     "./chat-transcript": "./src/shared/chat-transcript.ts",
     "./chat-history": "./src/shared/chat-history-reader.ts",

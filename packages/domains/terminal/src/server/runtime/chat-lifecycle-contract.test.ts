@@ -120,6 +120,11 @@ class Contract {
       context
     ).toEqual(this.users)
     expect(replayIndexProblems(this.live), context).toEqual([])
+    const shadow = mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)
+    expect(shadow?.disabled, context).toBe(false)
+    expect(shadow?.snapshot.state, context).toBe(status.state)
+    expect(shadow?.snapshot.turnOpen, context).toBe(status.turnOpen)
+    expect(shadow?.mismatches, context).toBe(0)
     if (!this.open) {
       expect(sorted(selectBackgroundSubAgents(this.live).map((h) => h.toolUseId)), context).toEqual(
         sorted(this.helpers)
@@ -346,6 +351,79 @@ test('replaced process cannot overwrite a new turn with late tools, prompts, or 
   await c.check('late events from replaced process')
   expect(c.h.broadcasts).toHaveLength(before)
   await c.finish()
+})
+
+test('legacy mode disables the observer for the whole session without changing behavior', async () => {
+  const h = transportHarness()
+  await mgr.hydrateSession({ ...TAB_OPTS, lifecycleMode: 'legacy' })
+  await mgr.ensureSpawned(TAB_OPTS.tabId)
+  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)).toBeNull()
+  await sendAndStart(h.fakes[0], 'legacy-user')
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'running', turnOpen: true })
+  emitLine(h.fakes[0], sj.success())
+  emitLine(h.fakes[0], sj.lifecycle('legacy-user', 'completed'))
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)).toBeNull()
+})
+
+test('an intentional shadow disagreement cannot change approval handling or production state', async () => {
+  const records: Array<{ event: string; payload?: unknown }> = []
+  const h = transportHarness({ deps: { diagnostic: (_tab, record) => records.push(record) } })
+  await startTab()
+  const c = new Contract(h, h.fakes[0])
+  await c.metadata()
+  await c.start()
+  await c.launch()
+  await c.finish()
+  const requestId = 'PRIVATE-request-id'
+  const request = sj.canUseTool(requestId, 'PRIVATE-tool-id')
+  request.request.input.command = 'PRIVATE-command-content'
+  emitLine(c.child, request)
+  await until(() => mgr.isSessionAwaitingUserInput(TAB_OPTS.tabId))
+  expect(
+    mgr.respondToPermissionRequest(TAB_OPTS.tabId, {
+      requestId,
+      decision: { behavior: 'allow', updatedInput: {} }
+    })
+  ).toBe(true)
+  await flush()
+  // Known legacy difference: resolving a background-only prompt unconditionally
+  // starts the parent's spinner. The candidate preserves its idle main turn.
+  // Shadow mode reports this discrepancy, and has no authority to change it.
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({
+    state: 'running',
+    pendingRequestIds: []
+  })
+  const shadow = mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)!
+  expect(shadow.snapshot).toMatchObject({ state: 'idle', main: null, reportedState: 'background' })
+  expect(shadow.mismatches).toBeGreaterThan(0)
+  const differences = records.filter((record) => record.event === 'chat.lifecycle_shadow_mismatch')
+  expect(differences).toHaveLength(1)
+  expect(JSON.stringify(differences)).not.toContain('PRIVATE')
+})
+
+test('a delayed native acknowledgement updates shadow delivery without another provider event', async () => {
+  const h = transportHarness()
+  await startTab()
+  await sendAndStart(h.fakes[0], 'delayed-ack')
+  emitLine(h.fakes[0], sj.success())
+  await until(() => mgr.getSessionTerminalState(TAB_OPTS.tabId) === 'idle')
+  await flush()
+  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.snapshot).toMatchObject({
+    state: 'idle',
+    outboxInFlight: 1,
+    turnOpen: true,
+    readyForMessage: false
+  })
+  emitLine(h.fakes[0], sj.lifecycle('delayed-ack', 'completed'))
+  await flush()
+  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.snapshot).toMatchObject({
+    state: 'idle',
+    outboxInFlight: 0,
+    turnOpen: false,
+    readyForMessage: true
+  })
+  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.mismatches).toBe(0)
 })
 
 /** Xorshift32: reproducible scheduling, not random wall-clock sleeps. */

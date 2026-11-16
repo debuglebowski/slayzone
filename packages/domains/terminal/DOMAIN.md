@@ -103,6 +103,33 @@ budget. This occurred before task completion, separately from the completion
 lifecycle bug fixed for task `e06a3842`. The logs establish watchdog cancellation,
 not whether inference was still progressing during those silent periods.
 
+### Chat lifecycle migration
+
+`shared/chat-lifecycle.ts` is a pure, versioned lifecycle model. Inputs identify
+the tab, process generation, revision, and main/child actor; attributed ends also
+identify their turn. Main work, pending prompts, background helpers/jobs and
+outbox admission remain independent. The existing outbox owns delivery; the model
+does not infer acknowledgement from a spinner or transcript counter.
+
+The computer's transport observes this model in `ChatLifecycleShadow`; production
+state, queueing, prompts, Stop, and UI still use the existing runtime. A session's
+`CreateChatOpts.lifecycleMode` is chosen at hydration (`shadow` by default;
+`legacy` disables observation). Comparisons run after synchronous operations
+settle. Diagnostics keep only counts/flags and field names, capped at eight
+distinct reports per process. Observer or diagnostics failure never controls chat.
+Unchanged token fragments cause no extra comparison.
+
+Host message IDs and inferred autonomous IDs currently identify candidate turns.
+Native Codex turn identity remains fenced in its driver; not every normalized
+event carries a provider turn ID yet. Authoritative cutover still requires those
+attributions and migration of all status consumers together. Known disagreement:
+legacy approval resolution can reopen an idle parent after a background-only
+prompt; the candidate preserves its idle main turn and reports the difference.
+
+`pnpm test:chat:lifecycle` runs the shared contracts, generated/exhaustive orderings,
+provider races, live/replay parity, observer failure/privacy/bounds, and renderer
+reconnect/dedup checks. Tests never use the caller's live app or provider account.
+
 ### Workspace changes in chat
 
 Chat keeps exact native file-tool edits separate from saved net workspace changes.
@@ -305,6 +332,7 @@ within `idleTimeoutMs`, the session transitions to `'idle'`.
 
 DOM-free subpaths (the mobile app bundles them into React Native; `packages/apps/mobile/src/shared-logic.test.ts` imports them there):
 - `./reducer` - chat timeline reducer (`chat-timeline.ts`)
+- `./chat-lifecycle` - pure candidate lifecycle reducer and versioned snapshots (shadow migration)
 - `./chat-prompts` - prompt model of the timeline (`chat-prompts.ts`)
 - `./terminal-themes` - terminal colour themes
 - `./suppress-device-status` - xterm parser hooks that stop device-status / XTVERSION replies

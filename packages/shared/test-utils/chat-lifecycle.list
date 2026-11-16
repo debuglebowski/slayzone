@@ -1,4 +1,6 @@
 packages/domains/terminal/src/server/runtime/chat-lifecycle-contract.test.ts
+packages/domains/terminal/src/shared/chat-lifecycle.test.ts
+packages/domains/terminal/src/server/runtime/chat-lifecycle-shadow.test.ts
 packages/domains/terminal/src/server/runtime/chat-transport-background-work.test.ts
 packages/domains/terminal/src/server/runtime/chat-transport-history.test.ts
 packages/domains/terminal/src/server/runtime/chat-transport-turn-status.test.ts
