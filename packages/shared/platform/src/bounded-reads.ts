@@ -156,7 +156,9 @@ function decodeBase64(data: string): Uint8Array {
  * Yields each range's bytes in order. Refuses (throws) a range at another offset,
  * a source whose `etag`/`size` changes ({@link ByteSourceChangedError}), a range
  * that makes no progress, an end before `size`, bytes beyond it, and — with
- * `sha256` — a whole that does not hash to the expected digest.
+ * `sha256` — a whole that does not hash to the expected digest. The range reaching
+ * `size` must confirm EOF; final size/hash checks run before yielding its bytes,
+ * so an integrity failure cannot complete a streamed Content-Length response.
  */
 export async function* readByteRanges(
   fetch: (offset: number, length: number) => Promise<ByteRangePage>,
@@ -177,10 +179,7 @@ export async function* readByteRanges(
     if (offset + bytes.length > identity.size) throw new Error('byte read: data beyond its size')
     if (bytes.length === 0 && !page.eof) throw new Error('byte read: range made no progress')
     offset += bytes.length
-    if (bytes.length > 0) {
-      hasher?.update(bytes)
-      yield bytes
-    }
+    if (bytes.length > 0) hasher?.update(bytes)
     if (page.eof) {
       if (offset !== identity.size) throw new Error('byte read: source ended before its size')
       const expected =
@@ -191,8 +190,13 @@ export async function* readByteRanges(
           : (opts.sha256?.expect ?? null)
       if (hasher && expected !== null && hasher.digest() !== expected.toLowerCase())
         throw new Error('byte read: sha256 mismatch')
+      // HTTP clients may accept Content-Length bytes before the generator resumes.
+      // Final size/hash checks must finish before those last bytes leave this iterator.
+      if (bytes.length > 0) yield bytes
       return
     }
+    if (offset === identity.size) throw new Error('byte read: source reached its size without eof')
+    if (bytes.length > 0) yield bytes
   }
 }
 

@@ -14,7 +14,6 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { createComputerChatRuntime } from './computer-runtime'
 import { createUploadStaging } from './upload-staging'
-import { uploadBytesFor } from '../../../../apps/hub/src/computer-uploads'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { eraseContent } from '@slayzone/content-erasure/server'
 
@@ -378,57 +377,6 @@ test('expiry filesystem failures are reported and retried without escaping the t
   rmSync(join(dir, 'uploads'), { recursive: true })
   await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0))
 })
-
-test.each([true, false])(
-  'parallel identical uploads complete with owned mode=%s, even across consumers',
-  async (owned) => {
-    const r = runtime()
-    bootstrap(r, 'alice')
-    bootstrap(r, 'bob')
-    const bytes = Buffer.alloc(600_000, 65)
-    const send = async (raw: unknown) => {
-      const p = raw as {
-        kind: string
-        sha256: string
-        size: number
-        offset: number
-        data: string
-        route?: Route
-        operationId?: string
-        uploadId?: string
-      }
-      return p.kind === 'upload.begin'
-        ? await r.uploads.begin(
-            p.sha256,
-            p.size,
-            p.route ? { route: p.route, operationId: p.operationId! } : undefined
-          )
-        : await r.uploads.chunk(
-            p.sha256,
-            p.size,
-            p.offset,
-            Buffer.from(p.data, 'base64'),
-            p.uploadId ? { route: p.route!, uploadId: p.uploadId } : undefined
-          )
-    }
-    const results = await Promise.allSettled(
-      [alice, bob].map(async (route) => {
-        const result = await uploadBytesFor({
-          bounded: true,
-          source: bytes,
-          send,
-          ...(owned ? { owner: { route, operationId: `upload-${route.id}` } } : {})
-        })
-        if (!('staged' in result)) throw new Error('expected staged bytes')
-        const lease = await acquire(r.uploads, result.staged, route)
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        expect(readFileSync(lease.path).equals(bytes)).toBe(true)
-        await lease.release()
-      })
-    )
-    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
-  }
-)
 
 test('legacy unattributed staging prevents a false verified erasure receipt', async () => {
   const r = runtime()

@@ -127,8 +127,12 @@ describe('readByteRanges', () => {
 
   it('yields chunk by chunk (a caller can stream it on)', async () => {
     const src = source(bytes)
-    const sizes: number[] = []
-    for await (const chunk of readByteRanges(src.fetch)) sizes.push(chunk.length)
+    const iterator = readByteRanges(src.fetch, { sha256: { expect: hex(bytes), create: sha256 } })
+    const first = await iterator.next()
+    expect(src.calls.length).toBe(1) // No prefetch while the streaming caller is paused.
+    expect(first.done).toBe(false)
+    const sizes = [first.value!.length]
+    for await (const chunk of iterator) sizes.push(chunk.length)
     expect(sizes).toEqual([BYTE_RANGE_MAX_CHUNK, BYTE_RANGE_MAX_CHUNK, 1234])
   })
 
@@ -194,5 +198,56 @@ describe('readByteRanges', () => {
       size: 10
     })
     await expect(collectByteRanges(over)).rejects.toThrow(/beyond its size/)
+  })
+
+  it.each([1, BYTE_RANGE_MAX_CHUNK, BYTE_RANGE_MAX_CHUNK * 2 + 123])(
+    'withholds the final range until its hash validates (size=%s)',
+    async (size) => {
+      const body = Buffer.alloc(size, 7)
+      const got: Uint8Array[] = []
+      const reading = async () => {
+        for await (const part of readByteRanges(source(body, '0'.repeat(64)).fetch, {
+          sha256: { expect: 'etag', create: sha256 }
+        }))
+          got.push(part)
+      }
+      await expect(reading()).rejects.toThrow(/sha256/)
+      expect(got.reduce((sum, b) => sum + b.length, 0)).toBe(
+        Math.floor((size - 1) / BYTE_RANGE_MAX_CHUNK) * BYTE_RANGE_MAX_CHUNK
+      )
+    }
+  )
+
+  it('rejects an early EOF before publishing that range', async () => {
+    const iterator = readByteRanges(async (offset, length) => ({
+      ...(await source(bytes).fetch(offset, length)),
+      eof: true
+    }))
+    const result = await iterator.next().then(
+      () => 'yielded bytes',
+      (error: Error) => error.message
+    )
+    expect(result).toMatch(/before its size/)
+  })
+
+  it('withholds a range reaching the declared size without confirmed EOF', async () => {
+    const body = Buffer.alloc(BYTE_RANGE_MAX_CHUNK * 2, 9)
+    const got: Uint8Array[] = []
+    const reading = async () => {
+      for await (const part of readByteRanges(async (offset, length) => {
+        if (offset === body.length) throw new Error('EOF not confirmed')
+        return { ...(await source(body).fetch(offset, length)), eof: false }
+      }))
+        got.push(part)
+    }
+    await expect(reading()).rejects.toThrow(/eof/i)
+    expect(got.reduce((sum, b) => sum + b.length, 0)).toBe(BYTE_RANGE_MAX_CHUNK)
+  })
+
+  it('validates an empty immutable source before completing', async () => {
+    const iterator = readByteRanges(source(new Uint8Array(), '0'.repeat(64)).fetch, {
+      sha256: { expect: 'etag', create: sha256 }
+    })
+    await expect(iterator.next()).rejects.toThrow(/sha256/)
   })
 })

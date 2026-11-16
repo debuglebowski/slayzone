@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import { expect, test, vi } from 'vitest'
-import { withUploadedBytes, type UploadBytes } from './computer-uploads'
+import { uploadBytesFor, withUploadedBytes, type UploadBytes } from './computer-uploads'
 
 const bytes = Buffer.alloc(600_000, 65)
 function receiver(owned: boolean) {
@@ -153,3 +157,81 @@ test('a stable operation resumes after a lost chunk acknowledgement', async () =
   })
   expect(remote.offsets).toEqual([0, 262144, 524288])
 })
+
+// This crosses hub upload negotiation and computer-owned staging, so it belongs
+// to the composing app, which depends on chat-runtime (never the reverse).
+test.each([true, false])(
+  'parallel identical uploads complete with owned mode=%s, even across consumers',
+  async (owned) => {
+    const root = await mkdtemp(join(tmpdir(), 'hub-upload-concurrent-'))
+    const r = createComputerChatRuntime({
+      stateDir: root,
+      hubScope: 'hub',
+      computerId: 'pc',
+      maintenance: true
+    })
+    const routes = [
+      { id: 'alice', epoch: 1 },
+      { id: 'bob', epoch: 1 }
+    ]
+    try {
+      for (const { id } of routes)
+        r.bootstrap({
+          identity: { id, taskId: id, tabId: `${id}-tab`, mode: 'claude-chat', epoch: 1 },
+          projectId: null,
+          cwd: r.storage.dir,
+          revision: 1,
+          providerConfig: {},
+          defaultFlags: null,
+          env: {}
+        })
+      const send = async (raw: unknown) => {
+        const p = raw as {
+          kind: string
+          sha256: string
+          size: number
+          offset: number
+          data: string
+          route?: { id: string; epoch: number }
+          operationId?: string
+          uploadId?: string
+        }
+        return p.kind === 'upload.begin'
+          ? r.uploads.begin(
+              p.sha256,
+              p.size,
+              p.route ? { route: p.route, operationId: p.operationId! } : undefined
+            )
+          : r.uploads.chunk(
+              p.sha256,
+              p.size,
+              p.offset,
+              Buffer.from(p.data, 'base64'),
+              p.uploadId ? { route: p.route!, uploadId: p.uploadId } : undefined
+            )
+      }
+      const results = await Promise.allSettled(
+        routes.map(async (route) => {
+          const result = await uploadBytesFor({
+            bounded: true,
+            source: bytes,
+            send,
+            ...(owned ? { owner: { route, operationId: `upload-${route.id}` } } : {})
+          })
+          if (!('staged' in result)) throw new Error('expected staged bytes')
+          const lease = await r.uploads.acquire(result.staged, route)
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            expect((await readFile(lease.path)).equals(bytes)).toBe(true)
+          } finally {
+            await lease.release()
+          }
+        })
+      )
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    } finally {
+      await r.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+)
