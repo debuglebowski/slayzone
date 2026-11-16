@@ -172,6 +172,7 @@ export {
   findOnPath,
   type LoginShellPathProbe
 } from './login-shell-path'
+export { createCommandResolver, gitCommand, resolveCommand } from './resolve-command'
 // Re-export so main-process code can pull URL helpers from the main barrel.
 // Renderer code MUST import from '@slayzone/platform/slz-file-url' to avoid
 // pulling node:fs into the browser bundle.
@@ -179,8 +180,13 @@ export {
   SLZ_FILE_HOST,
   SLZ_FILE_PREFIX,
   toSlzFileUrl,
+  toSlzSourceUrl,
+  toArtifactFileUrl,
+  parseSlzFileUrl,
   fileUrlToSlzFileUrl,
-  slzFileUrlToFileUrl
+  slzFileUrlToFileUrl,
+  type SlzFileSource,
+  type ParsedSlzFileUrl
 } from './slz-file-url'
 export {
   buildEmulatedMediaParams,
@@ -201,3 +207,44 @@ export {
   type IpcUnchangedSentinel,
   type SenderLifecycle
 } from './ipc-dedup'
+export {
+  asItemDamage,
+  classifyFault,
+  createAsyncFaultLedger,
+  createSyncFaultLedger,
+  faultAllowsRun,
+  faultBackoffMs,
+  forEachIsolated,
+  forEachIsolatedSync,
+  isStorageFatal,
+  ITEM_FAULTS_DDL,
+  StructuralFaultError,
+  toError,
+  type FaultInput,
+  type FaultKind,
+  type FaultLedger,
+  type FaultScope,
+  type IsolationOptions,
+  type IsolationReport,
+  type ItemFailure,
+  type ItemFaultRow,
+  type SyncFaultLedger,
+  type SyncIsolationOptions
+} from './isolation'
+export {
+  discardQuarantine,
+  eraseQuarantinedForTask,
+  fileFingerprint,
+  listQuarantine,
+  QUARANTINE_DIR,
+  quarantineMove,
+  quarantineWrite,
+  readJsonArraySalvage,
+  readJsonTolerant,
+  restoreQuarantine,
+  scanJsonArrayElements,
+  type QuarantineEntry,
+  type QuarantineMeta,
+  type SalvagedArray,
+  type TolerantRead
+} from './quarantine'

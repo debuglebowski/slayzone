@@ -40,6 +40,9 @@ run_harness packages/shared/test-utils/caller-env.test.ts
 # Fixture reaper: a test killed before its finally (timeout, SIGKILL'd worker) must not
 # leave its spawned supervisors respawning forever against a dead hub.
 run_harness packages/shared/test-utils/fixture-reaper.test.ts
+# Leak guard: a file that leaves processes running in its own temp dirs fails, and they
+# are killed (fixture-guard.ts, installed for every harness file by harness-setup.ts).
+run_harness packages/shared/test-utils/fixture-guard.test.ts
 
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
@@ -56,27 +59,47 @@ run_harness packages/domains/projects/src/server/project-folders.test.ts
 run_harness packages/domains/projects/src/server/task-automation.test.ts
 # Project-group ordering — pure named txns (shared top-level sort_order space).
 run_harness packages/domains/projects/src/server/project-groups-txns.test.ts
-run_harness packages/domains/task/src/server/ops/conversation-id-heal.test.ts
 run_harness packages/domains/task/src/server/conversation-healer.test.ts
-run_harness packages/domains/task/src/server/ops/task-conversations.test.ts
-run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
+run_harness packages/domains/task/src/server/ops/permanent-delete.test.ts
+run_harness packages/domains/content-erasure/src/server/erasure.test.ts
+run_harness packages/domains/task-artifacts/src/server/permanent-delete.test.ts
+# Backup pins stay rebuildable for erased tasks; a failed re-pin keeps the old pins.
+run_harness packages/domains/task-artifacts/src/server/backup-pins.test.ts
+run_harness packages/domains/content-erasure/src/server/admin.test.ts
+run_harness packages/domains/content-erasure/src/server/restore.test.ts
+run_harness packages/domains/content-erasure/src/server/router.test.ts
+run_harness packages/domains/chat-runtime/src/server/computer-erasure.test.ts
+run_harness packages/domains/diagnostics/src/server/content-erasure.test.ts
+# Erasure compaction: deferred/coalesced VACUUM, no repeated local steps or acked re-sends,
+# retry backoff; diagnostics and computer stores VACUUM only when something was erased.
+run_harness packages/domains/content-erasure/src/server/compaction.test.ts
+run_harness packages/domains/diagnostics/src/server/content-erasure-compaction.test.ts
+run_harness packages/domains/chat-runtime/src/server/erase-stored-task.test.ts
+run_harness packages/apps/computer/src/offline-erasure.test.ts
+# P3: a torn hook journal / corrupt generations file never stops the host; a hub-rejected event is quarantined.
+run_harness packages/apps/computer/src/boot-isolation.test.ts
+run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
+run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
+run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
+run_vitest_files 'cross-hub move engine: steps, pause, fail, crash recovery' packages/domains/task/src/client/task-move-engine.test.ts packages/domains/task/src/client/task-move-steps-sessions.test.ts
+# Every client delete asks first (subtasks too) and reports blocked/incomplete/failed
+# results instead of dropping them; a refused delete keeps the task (and its window).
+run_vitest_files 'task delete confirmation + result handling' \
+  packages/domains/task/src/client/DeleteTaskDialog.test.tsx \
+  packages/domains/task/src/client/useSubTasks.test.tsx \
+  packages/domains/task/src/client/useTaskPath.test.tsx \
+  packages/domains/task/src/client/task-detail/TaskOverviewRow.test.tsx \
+  packages/domains/tasks/src/client/TaskContextMenu.delete.test.tsx
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
-run_harness packages/domains/task/src/server/ops/agent-sessions.test.ts
-run_harness packages/domains/task/src/server/ops/shared-session-claims.test.ts
 # Entity-model B — one-row-per-spawn session lifecycle (spawn→confirm→dead→bind).
-run_harness packages/domains/task/src/server/ops/agent-sessions-lifecycle.test.ts
 # v151 `in-band-clear` origin — CHECK-widening table rebuild. Guards the data copy
 # (both tables are DROPped and recreated) + enum↔CHECK sync.
-run_harness packages/domains/task/src/server/ops/in-band-clear-migration.test.ts
 # listTaskSessions — sessions-sidebar grouping + reset cutoff (was unregistered).
-run_harness packages/domains/task/src/server/ops/list-task-sessions.test.ts
 # v156 `user-selected` origin (session switch) + v157 session_deletions tombstones
 # (session delete). Covers the CHECK-widening rebuild's data copy AND the ops.
-run_harness packages/domains/task/src/server/ops/session-switch-delete.test.ts
+# Terminal agent sessions are scoped per tab (v201): resolve/reset/pick/prune per tab.
 # agent-prompts capture + the deleted-session filter on listPromptsForTask.
-run_harness packages/domains/agent-turns/src/server/prompt-capture.test.ts
-run_harness packages/domains/agent-turns/src/server/chat-prompt-recorder.test.ts
 run_harness packages/domains/task-terminals/src/server/task-terminals-router.test.ts
 # Wave-1 hub/computer split — exec-domain DB access moved behind injectable ops seams.
 run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
@@ -89,9 +112,6 @@ run_harness packages/domains/terminal/src/server/runtime/chat-attachment-guard.t
 run_harness packages/domains/terminal/src/server/runtime/pty-session-ledger.test.ts
 run_harness packages/domains/task/src/server/ops/worktree-exec-adapters.test.ts
 run_harness packages/domains/task/src/server/ops/exec-boundary.test.ts
-# Artifact export routes after the inversion: served by the HUB against ctx.db,
-# reaching the desktop over AppDeps for the offscreen render alone.
-run_harness packages/apps/api/src/http/rest-api/artifacts/export.test.ts
 # GHSA-27r3-jxmh-p828: compressed request bodies are refused 415 on /mcp and /api/*
 # (one compressed frame + trailing bytes crashed the process); one way to build a parser.
 run_harness packages/apps/api/src/http/json-body.test.ts
@@ -101,7 +121,8 @@ run_harness packages/apps/api/src/path-ids.test.ts
 # worktree computer state for the Trash purge (R5-1)
 run_harness packages/apps/hub/src/worktree-computer-state.test.ts
 # Trash purge waits for the worktree computer (R5-1)
-run_harness packages/domains/task/src/server/ops/startup-purge-computer.test.ts
+# Trash purge removes a worktree on the computer it was made on (R6 follow-up)
+run_harness packages/apps/hub/src/trash-purge-worktree-owner.test.ts
 # machine-local settings never exported or imported (R3-2)
 run_harness packages/apps/api/src/export-import-machine-local.test.ts
 # Final review H1: cron catch-up waits for the computer, runs once on connect.
@@ -137,6 +158,11 @@ run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
 run_harness packages/apps/hub/src/direct-link.test.ts
+run_harness packages/apps/hub/src/trpc-connections.test.ts
+# An open /trpc socket fenced by persisted IdP-role state changed by another runtime.
+run_harness packages/apps/hub/src/trpc-live-fence.test.ts
+# The IdP-role mode through native hub routes + the shared contract's acceptance suite.
+run_harness packages/apps/hub/src/idp-roles-acceptance.test.ts
 run_harness packages/apps/hub/src/chat-direct-write.test.ts
 run_harness packages/apps/hub/src/chat-relay-watch.test.ts
 run_harness packages/apps/hub/src/user-access.test.ts
@@ -146,6 +172,24 @@ run_harness packages/apps/hub/src/computer-new-work.test.ts
 # (refresh, legacy paths → pending, widen, deliver, default backfill) and user folder
 # changes, serialized per computer so a refresh can never undo a folder just set.
 run_harness packages/apps/hub/src/computer-project-sync.test.ts
+# P3: hub erasure fan-out — one task fails alone; partial replies survive an unreachable computer.
+run_harness packages/apps/hub/src/erasure-fanout.test.ts
+run_harness packages/apps/hub/src/computer-data-handoff.test.ts
+run_harness packages/apps/hub/src/computer-task-paths.test.ts
+run_harness packages/apps/hub/src/computer-session-owners.test.ts
+run_harness packages/apps/hub/src/terminal-disposal.test.ts
+# A task-scoped request (spawn, exec, file/git read) waits for the task's staged paths.
+run_harness packages/apps/hub/src/task-path-request-gate.test.ts
+# A restored chat's invoke delivers its staged settings first; open chats re-read them.
+run_harness packages/apps/hub/src/computer-chat-settings-handoff.test.ts
+run_harness packages/apps/hub/src/computer-task-data.test.ts
+# Calls needing a computer wait for the local computer to enroll after boot (never the hub disk).
+run_harness packages/apps/hub/src/local-computer-boot-gate.test.ts
+# §9 Phase 8: the hub boot drops the legacy chat tables once every chat migrated; a
+# failed drop is a Needs-attention fault, never a failed boot.
+run_harness packages/apps/hub/src/legacy-chat-tables-boot.test.ts
+# P3 Needs attention: computer faults mirrored to the hub (snapshot replace), Retry/Discard, per-hub visibility.
+run_harness packages/apps/hub/src/item-faults.test.ts
 # The hub composes the schema boot (migrations + domain boot steps).
 run_harness packages/apps/hub/src/bootstrap-schema.test.ts
 # Schema ownership: the hub migrates in EVERY mode. Pins that openServerDatabase
@@ -286,7 +330,6 @@ run_harness packages/apps/hub/src/web-sessions.test.ts
 # Password sign-in off (T-10): every password route 403s with the switch code before the
 # gate; break-glass (O-9) opens/closes with the switch over real hub-auth + app DB.
 run_harness packages/apps/hub/src/password-switch.test.ts
-run_harness packages/domains/task-contracts/src/provider-config-history.test.ts
 run_harness packages/domains/task-contracts/src/conversation-heal.test.ts
 run_harness packages/domains/task/src/client/card-water-fill.test.ts
 # Workflow columns — statuses shared by several projects (bulk status menu).
@@ -299,9 +342,11 @@ run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_harness packages/domains/terminal/src/client/catch-up-merge.test.ts
 run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
+run_harness packages/domains/sidebar/src/views/treeGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
+run_harness packages/domains/tasks/src/client/scratch-task.test.ts
 # listForTask scoping — null taskId (Home/project view) must not leak other projects' processes.
 run_harness packages/domains/processes/src/server/process-manager.test.ts
 # Background processes on a computer: async resolve per spawn, no hub pid work, timer errors become status.
@@ -316,11 +361,15 @@ run_harness packages/domains/processes/src/server/process-switch.test.ts
 run_harness packages/domains/processes/src/server/process-routed-lifecycle.test.ts
 # Processes switched off but routed to computers: rows load, starts go to the computer.
 run_harness packages/domains/processes/src/server/process-switch-routed.test.ts
+# Spawn preparer (local roots widened before a spawn) + written listener.
+run_harness packages/domains/processes/src/server/process-spawn-preparer.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-routing.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
 run_harness packages/domains/file-editor/src/server/watcher.test.ts
 run_harness packages/domains/file-editor/src/server/workspace-fs-none.test.ts
+# Raw byte slices of a workspace file (GET /api/files/raw streams previews from them).
+run_harness packages/domains/file-editor/src/server/read-bytes.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
@@ -343,7 +392,12 @@ run_harness_node packages/domains/computer-runtime/src/runtime.test.ts
 # A closed window's warm-pool tab counts are dropped (after a reconnect grace).
 run_harness packages/apps/hub/src/warm-window-sockets.test.ts
 run_harness packages/apps/hub/src/web-assets.test.ts
+run_harness packages/apps/hub/src/export-frame.test.ts
 # Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
+# git is spawned by absolute path (cached per PATH, re-resolved when PATH changes or the
+# binary is gone); no production code spawns a bare `git`.
+run_harness packages/shared/platform/src/resolve-command.test.ts
+run_harness packages/shared/platform/src/git-command-sites.test.ts
 run_harness packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
 run_harness packages/shared/platform/src/hub-discovery.test.ts
@@ -423,6 +477,22 @@ run_harness packages/shared/platform/src/dirs.test.ts
 run_harness packages/shared/platform/src/config-prompt.test.ts
 # CLI author context resolves from SLAYZONE_AGENT_ID (the injected var), not AGENT_MODE.
 run_harness packages/apps/cli/src/commands/tasks/cli-author.test.ts
+# `slay tasks artifacts download --type pdf|png|html` renders on the CLI's machine:
+# browser discovery per OS, the Chrome for Testing install (fake fetch) + its zip
+# reader, the missing-library hint, the export branching (all pure), then real
+# renders in a locally installed Chrome (skipped when the machine has none).
+run_harness packages/apps/cli/src/export/browser.test.ts
+run_harness packages/apps/cli/src/export/cdp.test.ts
+run_harness packages/apps/cli/src/export/export-csp.integration.test.ts
+run_harness packages/apps/cli/src/export/cdp-protocol.test.ts
+run_harness packages/apps/cli/src/export/browser-install.test.ts
+run_harness packages/apps/cli/src/export/zip-extract.test.ts
+run_harness packages/apps/cli/src/export/missing-libs.test.ts
+run_harness packages/apps/cli/src/export/export-artifact.test.ts
+run_harness packages/apps/cli/src/export/render.integration.test.ts
+run_harness packages/apps/cli/src/export/render.test.ts
+run_harness packages/apps/cli/src/export/signal-cleanup.test.ts
+run_harness packages/apps/cli/src/save-file.test.ts
 # Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
 run_harness packages/apps/api/src/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
@@ -438,6 +508,8 @@ run_harness packages/apps/app/src/main/client-settings-migration.test.ts
 # bad line from repeating the storage-migration incident.
 run_harness packages/apps/app/src/main/client-settings-migration.realstore.test.ts
 run_harness packages/apps/app/src/main/document-link-bridge.test.ts
+# slz-file:// previews: local paths off disk, hub/computer files fetched from their hub.
+run_harness packages/apps/app/src/main/slz-file-handler.test.ts
 # The desktop app's one Convex deployment (renderer + its hub): the build's URL, or the
 # PLAYWRIGHT-only SLAYZONE_E2E_CONVEX_ADDRESS override (a bad value throws, never falls back).
 run_harness packages/apps/app/src/main/convex-deployment.test.ts
@@ -451,7 +523,6 @@ run_harness packages/apps/app/src/main/convex-deployment.test.ts
 run_harness packages/shared/db-migrations/src/history-migration.test.ts
 run_harness packages/shared/db-migrations/src/v140-task-state-migration.test.ts
 run_harness packages/shared/db-migrations/src/v147-agent-sessions-migration.test.ts
-run_harness packages/domains/task/src/server/v148-agent-sessions-runtime-migration.test.ts
 # A v145 (v0.35.0) database with orphan rows must still migrate; and the whole chain
 # v145 → latest must not lose a row in any table.
 run_harness packages/shared/db-migrations/src/orphan-rows-migration.test.ts
@@ -483,6 +554,30 @@ run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migratio
 run_harness packages/shared/db-migrations/src/v193-agent-sessions-conversation-index-migration.test.ts
 # v192: terminal_modes → agents, *.terminal_mode → agent_id, default_terminal_mode → default_agent_id.
 run_harness packages/shared/db-migrations/src/v192-agent-id-rename-migration.test.ts
+# v199: content-erasure fences reinstalled (hub-backup pins writable); every task_id/tab_id table fenced.
+run_harness packages/shared/db-migrations/src/v199-content-erasure-fences-migration.test.ts
+# v201: sessions per terminal tab; backfill to the main tab + recovery work list.
+run_harness packages/shared/db-migrations/src/v201-session-tab-scope-migration.test.ts
+run_harness packages/shared/db-migrations/src/v200-chat-ownership-retirements-migration.test.ts
+# v202: chat metadata receipts, store id on the cursor, unavailable-on-computer file marks.
+run_harness packages/shared/db-migrations/src/v202-metadata-receipts-migration.test.ts
+# v203: per-item fault ledger; frozen DDL = live ledger DDL; erased tasks gain no faults.
+run_harness packages/shared/db-migrations/src/v203-item-faults-migration.test.ts
+# v204: computer_data_handoff staging (computer-only data moves to its computer), fenced.
+run_harness packages/shared/db-migrations/src/v204-computer-data-handoff-migration.test.ts
+run_harness packages/shared/db-migrations/src/v205-chat-settings-on-computer-migration.test.ts
+# v206: the agent-session ledger moves to the computer (robustness plan §9).
+run_harness packages/shared/db-migrations/src/v206-session-ledger-to-computer-migration.test.ts
+run_harness packages/shared/db-migrations/src/v207-prompts-turns-to-computer-migration.test.ts
+run_harness packages/shared/db-migrations/src/v208-drop-provider-bindings-queue-routes-migration.test.ts
+run_harness packages/shared/db-migrations/src/v209-usage-cursors-to-computer-migration.test.ts
+run_harness packages/shared/db-migrations/src/v210-task-paths-to-computer-migration.test.ts
+run_harness packages/shared/db-migrations/src/v211-drop-hub-task-paths-migration.test.ts
+run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migration.test.ts
+run_harness packages/shared/db-migrations/src/v215-computer-retirement-chains-reason-codes-migration.test.ts
+run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
+run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts
+run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -491,6 +586,8 @@ run_harness packages/apps/app/src/main/lifecycle/quit-reap-child.test.ts
 run_harness packages/apps/app/src/main/lifecycle/unload-veto.test.ts
 # Background update checks never leave a rejection unhandled (pilot: startup unhandled_rejection).
 run_harness packages/apps/app/src/main/auto-updater.test.ts
+run_harness packages/apps/app/src/main/client-save.test.ts
+run_harness packages/apps/app/src/main/artifact-export.electron.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
 # The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).
@@ -535,12 +632,20 @@ run_harness packages/apps/app/src/main/dev-launcher-contract.test.ts
 run_harness scripts/release/update-manifest.test.mjs
 # Linux glibc-floor release gate (#165): ELF symbol-version parser + floor check.
 run_harness scripts/release/check-glibc-floor.test.mjs
+# Native-arch release gate: cross-built releases ship the TARGET arch's natives
+# (node-datachannel's per-platform binary) — Mach-O/PE/ELF header reader + package check.
+run_harness scripts/release/check-native-arch.test.mjs
 # `pnpm lint:trpc-deps`: flags a useMutation() result object bare in a hook dep array
 # (by `*Mutation` name and by binding, multi-line arrays included); quiet on stable forms.
 run_harness scripts/check-trpc-stable-deps.test.mjs
 # `pnpm lint:workspace-cycles`: a dependency edge inside a package cycle must be in the
 # baseline, and a baseline edge no longer in a cycle must be removed (shrink-only).
 run_harness scripts/check-workspace-cycles.test.mjs
+# P3 guard: pass loops must be isolated (forEachIsolated / try-catch / `isolation: fatal — why`).
+run_harness scripts/check-pass-isolation.test.mjs
+# `pnpm lint:task-computer` (review 2 S5): a second copy of "which computer is this
+# task's" (COALESCE of pin/holder + project default, or the TS ?? chain) fails.
+run_harness scripts/check-task-computer-resolver.test.mjs
 # `pnpm lint:tsconfig-hermetic`: tsconfig include/files/references/paths/extends entries
 # and typechecked sources' relative imports resolve inside the package or a workspace
 # package it depends on (transitively).
@@ -567,6 +672,9 @@ run_harness packages/shared/platform/src/startup-deadline.test.ts
 # Event-loop stall detector: a frozen main thread is reported after it thaws,
 # with the stacks / child processes / CPU split that name the cause.
 run_harness packages/shared/platform/src/event-loop-stall.test.ts
+# A computer's own main-thread stall, reported over its socket, becomes the hub diagnostic computer.event_loop_stall.
+run_harness packages/apps/hub/src/computer-stall-consumer.test.ts
+run_harness packages/apps/hub/src/tab-change-coalescer.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
 # computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_harness packages/shared/platform/src/device-status-queries.test.ts
@@ -597,12 +705,15 @@ run_harness packages/apps/api/src/http/rest-api/computers/direct-addresses.test.
 # Loopback operator account routes (`slay hub users`). The routes never touch the DB
 # (the hubUsers capability is stubbed).
 run_harness packages/apps/api/src/http/rest-api/hub/users.test.ts
+# Content erasure's own REST route (never break-glass's: O-6); GET reads, POST changes.
+run_harness packages/apps/api/src/http/rest-api/hub/content-erasure.test.ts
 run_harness packages/apps/api/src/http/rest-api/hub/web-login.test.ts
 run_harness packages/apps/api/src/routers/integrations.test.ts
 run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
 run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 run_harness packages/domains/worktrees/src/server/git-ops.test.ts
+run_harness packages/domains/worktrees/src/server/git-command.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
@@ -611,7 +722,6 @@ run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.
-run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-recording.test.ts
@@ -624,6 +734,19 @@ run_harness packages/domains/terminal/src/server/chat-threads-store.test.ts
 run_harness packages/domains/terminal/src/server/pty-router.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
 run_harness packages/apps/api/src/routers/task.test.ts
+# Moving tasks to another project: subtree, detach, tags, re-home; update/updateMany delegate to it.
+run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
+run_harness packages/apps/api/src/routers/task-duplicate.test.ts
+# Moving tasks to another hub (source side): journal steps, pause/resume/fail/cancel, the write lock, redirects.
+run_harness packages/apps/api/src/routers/task-moves.test.ts
+run_harness packages/domains/task/src/server/copy-snapshot-files.test.ts
+# Moving tasks between two hubs end to end: rows with ids, hidden until commit, release, and back.
+run_harness packages/apps/api/src/routers/task-moves-two-hubs.test.ts
+# Moving a whole project between two hubs: its own rows, settings and icon with ids,
+# hidden/locked while moving, cancel, move back, empty project, refusals.
+run_harness packages/apps/api/src/routers/project-moves-two-hubs.test.ts
+# Every table holding project or task rows is carried by a move or left behind on purpose.
+run_harness packages/apps/api/src/routers/move-tables-classified.test.ts
 # Order/blocker, tag and artifact writes signal notify.onTasksChanged naming their tasks
 # (they emitted nothing, so other clients never saw them live); a burst stays merged.
 run_harness packages/apps/api/src/routers/task-change-signals.test.ts
@@ -641,8 +764,12 @@ run_harness packages/domains/automations/src/server/engine.test.ts
 run_harness packages/domains/automations/src/server/engine-routing.test.ts
 run_harness packages/domains/test-panel/src/server/scan-routing.test.ts
 run_harness packages/domains/usage-analytics/src/server/usage-routing.test.ts
+run_harness packages/domains/usage-analytics/src/server/collector.test.ts
+run_harness packages/domains/usage-analytics/src/server/parser-ids.test.ts
 run_harness packages/domains/usage-analytics/src/server/codex-usage-attribution.test.ts
 run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
+# Sessions a previous hub run left running: listed with the reason, attached again or stopped.
+run_harness packages/apps/api/src/http/rest-api/pty/unattached.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
@@ -768,38 +895,84 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
+run_harness packages/domains/chat-runtime/src/server/session-moves.test.ts
+# A move's export streamed from a read snapshot, byte-identical (FU4).
+run_harness packages/domains/chat-runtime/src/server/session-move-export.test.ts
 run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/thread-close.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
+# P3: one bad item never stops a computer pass (task cleanup, archive erasure, retention…).
+run_harness packages/domains/chat-runtime/src/server/item-isolation.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
+# Hub ↔ computer history reads are bounded pages (whole reads assembled from them); an
+# older computer without `chatHistoryPages` gets the whole read it knows, as one last page.
+run_harness packages/domains/chat-runtime/src/server/hub-relay-history-pages.test.ts
+# Chat robustness 2026-11-09: retirements, provider-switch supersession, consistency rules.
+run_harness packages/domains/chat-runtime/src/server/hub-retirements.test.ts
+run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
+# The agent-session ledger on the computer (§9): per-tab scope, resets/deletions
+# as delivered intents, one task per provider session, the spawn lifecycle.
+run_harness packages/domains/chat-runtime/src/server/session-ledger.test.ts
+run_harness packages/domains/chat-runtime/src/server/agent-turns.test.ts
+run_harness packages/domains/chat-runtime/src/server/prompts.test.ts
+run_harness packages/domains/chat-runtime/src/server/event-markers.test.ts
+run_harness packages/domains/chat-runtime/src/server/event-marker-backfill.test.ts
+run_harness packages/domains/chat-runtime/src/server/task-paths.test.ts
+# Hub hand-off kinds on the computer: task-conversation, legacy-conversation-history, chat-settings (S6).
+run_harness packages/domains/chat-runtime/src/server/handoff-imports.test.ts
+run_harness packages/domains/chat-runtime/src/server/usage-cursors.test.ts
+run_harness packages/domains/chat-runtime/src/server/conversation-heal.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-consistency-handoff.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-consistency-task-paths.test.ts
+run_harness packages/domains/chat-runtime/src/server/legacy-tables.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-consistency-chat-settings.test.ts
+run_harness packages/domains/chat-runtime/src/server/provider-settings-authority.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-provider-transition.test.ts
+run_harness packages/domains/chat-runtime/src/server/hub-consistency.test.ts
+# §5: metadata stamps never trusted as proof (rollback → re-read; receipts; store id).
+run_harness packages/domains/chat-runtime/src/server/hub-metadata-rollback.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-history-progress.test.ts
 run_harness packages/apps/hub/src/chat-compaction.test.ts
 run_harness packages/apps/hub/src/chat-diagnostics.test.ts
 run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts
 run_harness packages/apps/hub/src/computer-artifacts.test.ts
+# Decision 4: files a restored computer no longer holds stay listed as unavailable.
+run_harness packages/apps/hub/src/computer-artifacts-unavailable.test.ts
 run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifacts.test.ts
 run_harness packages/domains/task-artifacts/src/server/standalone.test.ts
-run_harness packages/domains/task/src/server/artifact-downloads.test.ts
 run_harness packages/apps/hub/src/computer-chat.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
+# §5: lifecycle revisions never trusted as proof (rebase, inventory, idempotent erasure).
+run_harness packages/domains/chat-runtime/src/server/hub-lifecycle-rebase.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-recovery.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
+run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
+run_harness packages/domains/chat-runtime/src/server/timeline-storage-bounded.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
+# Event blobs: tool-result base64 moved to the blob store, pinned, GC/retention/erasure/backups.
+run_harness packages/domains/chat-runtime/src/server/event-blobs.test.ts
+# Backfill of pre-v13 inline rows: verified in-place rewrite, slices, resume, backup/erasure/retention exclusion.
+run_harness packages/domains/chat-runtime/src/server/chat-blob-backfill.test.ts
+# Timeline records: no page loaded to drop/list/search; drops in byte-bounded steps (FU4).
+run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
 # Migration, recovery and failure-atomicity regressions from the storage audits.
 run_harness packages/apps/hub/src/computer-chat-stability-audit.test.ts
 run_harness packages/apps/hub/src/artifacts-second-pass.test.ts
 run_harness packages/apps/hub/src/runtime-second-pass.test.ts
 run_harness packages/apps/hub/src/artifact-api-third-pass.test.ts
 run_harness packages/apps/hub/src/remote-third-pass.test.ts
-run_harness packages/apps/hub/src/historical-supervisor.test.ts
+# Alone (run_harness_solo): the ACTUAL historical supervisor rolls a busy host through
+# an upgrade, three computer boots in a row inside 15 s windows; next to the other suites
+# it passed at load ~100 and failed at ~215 (reproduced with CPU burners alone).
+run_harness_solo packages/apps/hub/src/historical-supervisor.test.ts
 run_harness packages/apps/hub/src/historical-chat-migration.test.ts
 # Optional private snapshots are supplied explicitly; default runs never read live state.
 run_harness packages/apps/hub/src/real-corpus-stability-audit.test.ts
@@ -810,8 +983,17 @@ run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
 run_harness packages/apps/hub/src/recovery-second-pass.test.ts
 run_harness packages/apps/hub/src/computer-chat-isolation.test.ts
+# One bad conversation/task fails alone during computer recovery; restart soak.
+run_harness packages/apps/hub/src/computer-recovery-isolation.test.ts
+run_harness packages/apps/hub/src/chat-restart-soak.test.ts
 run_harness packages/apps/hub/src/shared-session-ownership.test.ts
 run_harness packages/apps/hub/src/shared-session-repair.test.ts
+# One-time recovery of secondary-tab sessions after v201 (incident fixture: deploy → bf71421e).
+run_harness packages/apps/hub/src/session-tab-recovery.test.ts
+# Consistency rules for per-tab terminal sessions (v201).
+run_harness packages/domains/chat-runtime/src/server/hub-consistency-sessions.test.ts
+# Consistency rules for §5 (metadata cursor, file/queue drift, lifecycle divergence).
+run_harness packages/domains/chat-runtime/src/server/hub-consistency-versions.test.ts
 run_harness packages/apps/hub/src/computer-chat-live-task-fallback.test.ts
 run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
 run_harness packages/apps/hub/src/content-third-pass.test.ts
@@ -839,6 +1021,8 @@ run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
 run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
 # Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
+# Which of a task's agents are mid-reply: the CLI completion guard.
+run_harness packages/domains/terminal/src/server/task-agent-activity.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts
 # Spawn CLI-version hint (summarized thinking) + command tasks through the transport (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-command-tasks.test.ts
@@ -870,6 +1054,8 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # The hub mirrors owner-detected pty output (signals) instead of parsing it.
 run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
+# Replacing a session (agent switch, restart): the outgoing exit's deferred cleanup leaves the new one registered.
+run_harness packages/domains/terminal/src/server/runtime/pty-replace-cleanup.test.ts
 # Round-6 review regression L2: relay requests run as the hub; a failed one is asked again.
 run_harness packages/domains/terminal/src/server/runtime/review-regressions-relay.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
@@ -877,6 +1063,15 @@ run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
 run_harness packages/domains/terminal/src/server/runtime/createpty-resume-location.test.ts
 run_harness packages/domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts
+# An agent that dies mid-session unasked is resumed in place, not buried under a recovery shell.
+run_harness packages/domains/terminal/src/server/runtime/pty-auto-resume.test.ts
+# A hub restart: the session a previous run left running is adopted (attached), never
+# re-launched or replaced; what cannot be adopted is surfaced with attach/stop.
+run_harness packages/domains/terminal/src/server/runtime/pty-attach.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-adoption-handoff.test.ts
+run_harness packages/domains/terminal/src/server/runtime/unattached-sessions.test.ts
+run_harness packages/domains/terminal/src/server/runtime/keyed-serializer.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-store-kill.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 
@@ -939,6 +1134,9 @@ run_harness packages/apps/api/src/http/rest-api/tasks/progress.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/reset-conversation.test.ts
 # /api/chat/* (slay chat) against a stub chat runtime: addressing, prompts, send, wait outcomes.
 run_harness packages/apps/api/src/http/rest-api/chat/chat.test.ts
+# Chat REST routes read history in bounded pages (projection snapshot / event pages), never
+# one whole-history answer; each route equals its whole-history result.
+run_harness packages/apps/api/src/http/rest-api/chat/chat-history-bounded.test.ts
 # /api/agent/* (slay agent): one surface dispatching to the chat core or the pty runtime.
 run_harness packages/apps/api/src/http/rest-api/agent/agent.test.ts
 run_harness packages/apps/api/src/http/rest-api/tags/crud.test.ts
@@ -951,11 +1149,15 @@ run_harness packages/apps/api/src/http/rest-api/templates/crud.test.ts
 run_harness packages/apps/api/src/http/rest-api/panels/crud.test.ts
 run_harness packages/apps/api/src/http/rest-api/automations/crud.test.ts
 run_harness packages/apps/api/src/http/rest-api/switch-refusal.test.ts
+# A frame over the computer link limit (frameTooLarge) answers 413, never an opaque 500.
+run_harness packages/apps/api/src/http/rest-api/computer-frame-limit.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/list.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
 # paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
 run_harness packages/apps/api/src/http/rest-api/artifacts/content.test.ts
+# Workspace file raw bytes routed to the owning computer (slz-file:// previews on a remote hub).
+run_harness packages/apps/api/src/http/rest-api/files/raw.test.ts
 # Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of
 # the streamed write/append bodies and the blob-streamed version read, plus the
 # `Error [CODE]: …` 400 contract the CLI prints verbatim.
@@ -992,6 +1194,10 @@ run_harness packages/apps/cli/test/cli-read-rest.test.ts
 run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
 run_harness packages/apps/cli/src/commands/completions.test.ts
+run_harness packages/apps/cli/src/commands/transfers.test.ts
+# `slay pty`: unattached sessions in `list`, `unattached`, `attach`, `kill` (its --json unchanged).
+run_harness packages/apps/cli/src/commands/pty.test.ts
+run_harness packages/apps/api/src/http/rest-api/transfers.test.ts
 # Wave-3.5 CLI artifact commands routed through REST — metadata AND content
 # (read/create/upload/delete/download), incl. a no-local-database suite.
 run_harness packages/apps/cli/test/cli-artifacts-rest.test.ts
@@ -1069,6 +1275,8 @@ run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
 run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
+run_harness packages/domains/task/src/server/ops/chat-starting-values.test.ts
+run_harness packages/domains/task/src/server/ops/task-paths-delegate.test.ts
 run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
@@ -1077,8 +1285,13 @@ run_harness packages/domains/task/src/shared/main-terminal.test.ts
 # task.startMainAgent: the hub starts a task's main agent (pty or chat) only when none is
 # live, once under concurrent calls, with the cwd resolved on the hub.
 run_harness packages/domains/task/src/server/main-agent.test.ts
+# agentSessions.current: its computer offline is PRECONDITION_FAILED, never "no session" (S8).
+run_harness packages/domains/task/src/server/agent-sessions-router.test.ts
+run_harness packages/domains/task-contracts/src/api/update.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
+# Render modes: video is inferred from its extension and stays binary (never read as text).
+run_harness packages/domains/task-contracts/src/render-modes.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
@@ -1089,10 +1302,13 @@ run_harness packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
 # Timeline checkpoint: decode + rest of events = full replay; reducer version hash guard.
 run_harness packages/domains/terminal/src/shared/chat-timeline-checkpoint.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-timeline-projection.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-timeline-worker.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-workspace-tracker.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-workspace.integration.test.ts
 run_harness packages/domains/terminal/src/server/workspace-changes-store.test.ts
 run_harness packages/domains/terminal/src/shared/workspace-changes.test.ts
+# Chat commands wait for the tab's latest hydrate (a reload's too); a failed one holds nothing.
+run_harness packages/domains/terminal/src/shared/chat-session-ready.test.ts
 run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts
@@ -1127,6 +1343,10 @@ run_harness packages/domains/terminal/src/server/skills.test.ts
 run_harness packages/domains/terminal/src/server/commands.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-event-handler.test.ts
 run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
+# Chat blob refs: base64 payloads stored out-of-line; lossless, forged refs escaped.
+run_harness packages/domains/terminal-contracts/src/chat-blobs.test.ts
+# Archived conversation export resolves stored images back inline (v13 export = v12 export).
+run_harness packages/domains/settings/src/client/tabs/archive-export.test.ts
 run_harness packages/domains/terminal-contracts/src/api-retry.test.ts
 # The conversation ids a fresh agent spawn passes (desktop terminal + hub startMainAgent).
 run_harness packages/domains/terminal-contracts/src/spawn-conversation-ids.test.ts
@@ -1136,6 +1356,8 @@ run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model-catalog.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
+# The chat availability message: a known unavailable reason (a removed computer) is shown.
+run_harness packages/domains/terminal-contracts/src/computer-chat.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-pinned-message.test.ts
@@ -1144,6 +1366,7 @@ run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
 run_harness packages/shared/diff-view/src/parse-diff.test.ts
+run_harness packages/domains/file-editor/src/client/long-lines.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts
 run_harness packages/domains/worktrees/src/server/list-project-repos.test.ts
 run_harness packages/domains/worktrees/src/server/remove-worktree.test.ts
@@ -1154,6 +1377,10 @@ run_harness packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts \
+  "event-loop measurement of many chats' timeline projections (machine-dependent, minutes); run it by hand, see its header"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/blob-backfill.perf.test.ts \
+  "event-loop + read-count measurement of the blob backfill (machine-dependent, minutes); run it by hand, see its header"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the
 # app's vitest config, not the node harness config above. The app
@@ -1179,17 +1406,24 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/runtime.test.ts \
   packages/shared/transport/src/client/compactBytes.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
+  packages/apps/web-shell/src/artifact-export.test.ts \
+  packages/apps/web-shell/src/client-save.test.ts \
+  packages/apps/web-shell/src/zip-stream.test.ts \
+  packages/apps/web-shell/src/mermaid-export-source.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/connectPacing.test.ts \
+  packages/shared/transport/src/client/connectHandshake.test.ts \
+  packages/shared/transport/src/client/wsReconnect.test.ts \
   packages/shared/transport/src/client/direct-link.test.ts \
   packages/shared/transport/src/client/direct-lease-keeper.test.ts \
   packages/shared/transport/src/direct/rtc-channel.test.ts \
   packages/shared/transport/src/client/direct-rtc.test.ts \
   packages/shared/transport/src/client/direct-write-order.test.ts \
   packages/shared/transport/src/client/direct-pty-read.test.ts \
+  packages/shared/transport/src/client/direct-task-data.test.ts \
   packages/shared/transport/src/client/direct-connection.test.ts \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
@@ -1203,6 +1437,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/search/src/SearchDialog.algorithm.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
+  packages/domains/task/src/client/coalesced-invalidate.test.ts \
+  packages/domains/task/src/client/task-detail/useWorkspacePathProbe.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/terminal-first.test.ts \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
@@ -1211,6 +1447,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/task-browser/src/client/browser-host.test.ts \
   packages/domains/task-browser/src/client/useBrowserFind.test.tsx \
+  packages/domains/task-browser/src/client/useBrowserLock.test.tsx \
   packages/domains/task-browser/src/client/useBrowserImportUrls.test.tsx \
   packages/domains/task-browser/src/client/DeviceWebview.test.tsx \
   packages/domains/terminal/src/client/useChatSession.test.tsx \
@@ -1229,12 +1466,15 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/ui/src/use-stable-poll.test.ts \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerFaults.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerUnattachedSessions.test.tsx \
   packages/domains/settings/src/client/HubIssueBanners.test.tsx \
   packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \
   packages/domains/projects/src/client/useProjectLockState.test.tsx \
   packages/domains/terminal/src/client/BackgroundJobsBanner.test.tsx \
   packages/domains/ai-config/src/client/state-sync-hooks.test.tsx \
+  packages/domains/ai-config/src/client/stale-skill-counts.hub.test.tsx \
   packages/domains/ai-config/src/client/state-sync-components.test.tsx \
   packages/domains/ai-config/src/client/context-manager-slots.test.tsx \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
@@ -1246,6 +1486,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/useSharedCardHeights.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
+  packages/apps/app/src/renderer/src/app-shell/useProjectPathGuard.hub.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
@@ -1293,13 +1534,16 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.api-retry.test.tsx \
   packages/domains/task-terminals/src/client/chat/AssistantAnswer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/codex-file-citations.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-activity.test.ts \
   packages/domains/task-terminals/src/client/chat/chat-ui-components.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatFontSizeControl.test.tsx \
   packages/domains/task-terminals/src/client/chat/conversation-actions.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
+  packages/domains/task-terminals/src/client/chat/chat-info-read.test.tsx \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/TerminalSplitGroup.test.tsx \
@@ -1350,13 +1594,17 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tasks/src/client/KanbanListView.test.tsx \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
   packages/domains/terminal/src/client/TerminalDeadOverlay.test.tsx \
+  packages/domains/terminal/src/client/useUnattachedSession.test.tsx \
   packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/terminal/src/client/useAgents.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
+  packages/domains/worktrees/src/client/WorktreesTab.test.tsx \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
+  packages/domains/worktrees/src/client/scope-outside-panel.test.tsx \
+  packages/domains/worktrees/src/client/project-wide-scope.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.poll.test.tsx \
   packages/domains/worktrees/src/client/ProjectGeneralTab.test.tsx \
@@ -1394,6 +1642,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/trpc-server/src/trpc-transformer.test.ts \
   packages/shared/trpc-server/src/wire-bytes.test.ts \
   packages/shared/trpc-server/src/subscription-security-context.test.ts \
+  packages/shared/trpc-server/src/computer-refusal.test.ts \
+  packages/shared/trpc-server/src/unknown-scope.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 
@@ -1418,6 +1668,8 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/usePanelSizes.test.ts \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
+  packages/domains/worktrees/src/client/git-diff-store.scope.test.tsx \
+  packages/domains/worktrees/src/client/git-diff-store.hub.test.tsx \
   packages/shared/diff-view/src/highlight.test.ts \
   packages/shared/diff-view/src/parse-diff.cache.test.ts \
   packages/domains/worktrees/src/shared/worktree-color.test.ts \
@@ -1446,6 +1698,8 @@ run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/computer-connect-refetch.test.ts \
   packages/domains/sidebar/src/startup-progress-text.test.ts \
   packages/domains/task-terminals/src/client/chat/chat-loading.test.ts \
+  packages/domains/task-terminals/src/client/chat/chat-restoration-queue.test.ts \
+  packages/domains/task-terminals/src/client/chat/chat-restoration.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts
@@ -1460,6 +1714,7 @@ run_vitest_files "vitest (role gate)" \
 run_vitest_files "vitest (owner checks)" \
   packages/apps/api/src/owner-policy.test.ts \
   packages/apps/api/src/http-owner-policy.test.ts \
+  packages/apps/api/src/unattached-owner.test.ts \
   packages/apps/api/src/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no

@@ -27,6 +27,26 @@ const bootstrap = {
 }
 const createOpts = { taskId: 'task-a', tabId: 'tab-a', mode: 'claude-chat', cwd: '/tmp' }
 
+test('project relocation updates cached chat folders and preserves drafts', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  await r.ops.hydrate(createOpts)
+  r.taskPaths.handle({
+    op: 'set',
+    taskId: 'task-a',
+    projectId: 'project-a',
+    baseDir: '/tmp/subdir',
+    at: 1
+  })
+  await r.ops.saveTabDraft('tab-a', { text: 'keep this draft', attachments: [] })
+  await r.relocateProject('project-a', '/tmp', '/new', (p) =>
+    p === '/tmp' ? '/new' : p.replace('/tmp/', '/new/')
+  )
+  expect(r.transport.getSessionInfo('tab-a')?.cwd).toBe('/new')
+  expect(r.taskPaths.get('task-a')?.baseDir).toBe('/new/subdir')
+  expect((await r.ops.getTabState('tab-a'))?.draft.text).toBe('keep this draft')
+})
+
 test('drafts persist on computer and restore without a hub database', async () => {
   const { r, stateDir } = runtime()
   r.bootstrap(bootstrap)
@@ -232,11 +252,13 @@ test('a failed timeline page write rolls back all pages and its checkpoint', asy
     pages: [page(0, 'old')],
     checkpoint: { version: 'v', seq: 0, data: 'old' }
   })
-  const original = r.storage.putRecord.bind(r.storage)
-  r.storage.putRecord = (id, epoch, record) => {
-    if (record.kind === 'timeline' && record.id === 'page:1') throw new Error('disk full')
-    return original(id, epoch, record)
-  }
+  r.storage.compose((db) =>
+    db.exec(`
+    CREATE TEMP TRIGGER fail_timeline_page BEFORE INSERT ON records
+    WHEN NEW.kind='timeline' AND NEW.id='page:1'
+    BEGIN SELECT RAISE(ABORT, 'disk full'); END;
+  `)
+  )
   await expect(
     r.local.data.saveTimeline('tab-a', {
       dropPagesFrom: 0,
@@ -307,7 +329,14 @@ test('queue handoff survives a crash until its user-message event commits', asyn
     1
   )
   expect(await next.local.queue.list('tab-a')).toEqual([])
-  expect((await next.local.data.loadChatEvents('tab-a'))[0].event).toMatchObject({
+  expect(
+    (
+      await next.local.data.loadChatEventsPage('tab-a', -1, Number.MAX_SAFE_INTEGER, {
+        maxBytes: 1024 * 1024,
+        maxEvents: 100
+      })
+    ).events[0].event
+  ).toMatchObject({
     id: 'queued-message',
     text: 'hello'
   })
@@ -458,34 +487,44 @@ test('Trash pauses chat without losing drafts or queue; final purge cannot be un
   ).toThrow(/deleted/i)
 })
 
-test('deleted native sessions remain excluded after newer and stale bootstraps', async () => {
+const deletion = (mode: string, conversationId: string) => ({
+  op: 'applySessionIntents',
+  args: {
+    resets: [],
+    deletions: [
+      { id: `del-${mode}-${conversationId}`, taskId: 'task-a', mode, conversationId, createdAt: 1 }
+    ]
+  }
+})
+
+test('a delivered deletion keeps a session excluded across newer and stale bootstraps', async () => {
   const { r } = runtime()
-  r.bootstrap({
-    ...bootstrap,
-    honoredConversations: ['native'],
-    providerConfig: { chatConversationId: 'native' }
+  r.bootstrap({ ...bootstrap, providerConfig: {} })
+  await r.local.data.recordConversation({
+    taskId: 'task-a',
+    mode: 'claude-chat',
+    conversationId: 'native',
+    origin: 'slay-spawned-fresh',
+    legacyJsonField: 'chatConversationId'
   })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(true)
-  r.bootstrap({
-    ...bootstrap,
-    revision: 2,
-    providerConfig: {},
-    deletedConversations: [{ mode: 'claude-chat', conversationId: 'native' }]
-  })
+  await r.ledger.handle(deletion('claude-chat', 'native'))
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
-  r.bootstrap({
-    ...bootstrap,
-    honoredConversations: ['native'],
-    providerConfig: { chatConversationId: 'native' }
-  })
+  r.bootstrap({ ...bootstrap, revision: 2, providerConfig: { chatConversationId: 'native' } })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
 })
 
-test('historical session proof preserves source mode and respects later deletion', async () => {
+test('a ledger session is honored for its own mode and leaves with a delivered deletion', async () => {
   const { r } = runtime()
-  r.bootstrap({
-    ...bootstrap,
-    honoredSessions: [{ mode: 'claude-code', conversationId: 'terminal-old' }]
+  r.bootstrap(bootstrap)
+  await r.ledger.handle({
+    op: 'recordConversation',
+    args: {
+      taskId: 'task-a',
+      mode: 'claude-code',
+      conversationId: 'terminal-old',
+      origin: 'slay-spawned-resume'
+    }
   })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-code', 'terminal-old')).toBe(
     true
@@ -493,24 +532,12 @@ test('historical session proof preserves source mode and respects later deletion
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'terminal-old')).toBe(
     false
   )
-  await r.local.data.recordConversation({
-    taskId: 'task-a',
-    mode: 'claude-code',
-    conversationId: 'terminal-new',
-    origin: 'slay-spawned-fresh'
-  })
-  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'terminal-new')).toBe(
-    false
-  )
-  r.bootstrap({
-    ...bootstrap,
-    revision: 2,
-    honoredSessions: [{ mode: 'claude-code', conversationId: 'terminal-old' }],
-    deletedConversations: [{ mode: 'claude-code', conversationId: 'terminal-old' }]
-  })
+  expect(await r.local.data.getCurrentConversationId('task-a', 'claude-code')).toBe('terminal-old')
+  await r.ledger.handle(deletion('claude-code', 'terminal-old'))
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-code', 'terminal-old')).toBe(
     false
   )
+  expect(await r.local.data.getCurrentConversationId('task-a', 'claude-code')).toBeNull()
 })
 
 test('computer bootstrap preserves user default settings added on main', async () => {
@@ -559,4 +586,58 @@ test('side questions and live-setting guards use the injected transport', async 
   await expect(ops.setModel({ ...createOpts, chatModel: 'sonnet' })).rejects.toThrow(
     /during this turn/
   )
+})
+
+test('user message lookup (Codex history import) reads only the wanted messages, a window at a time', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  const save = r.local.data.persistChatEventSync!
+  // ~24 MB of screenshot-sized output around two messages.
+  let seq = 0
+  save(
+    'tab-a',
+    seq++,
+    {
+      kind: 'user-message',
+      id: 'm-old',
+      text: 'first',
+      content: [{ type: 'text', text: 'first' }]
+    },
+    1
+  )
+  for (let i = 0; i < 24; i++)
+    save('tab-a', seq++, { kind: 'stderr', text: `${i}:${'x'.repeat(1_000_000)}` }, 1)
+  save(
+    'tab-a',
+    seq++,
+    {
+      kind: 'user-message',
+      id: 'm-new',
+      text: 'second',
+      content: [{ type: 'text', text: 'second' }]
+    },
+    1
+  )
+  // Another task on the loop: it runs whenever the lookup gives the loop back.
+  let ticks = 0
+  let stop = false
+  const spin = () => {
+    ticks++
+    if (!stop) setImmediate(spin)
+  }
+  setImmediate(spin)
+  const parse = vi.spyOn(JSON, 'parse')
+  try {
+    const found = await r.local.data.loadUserMessageContent!('task-a', ['m-old', 'm-new', 'm-none'])
+    expect([...found.keys()].sort()).toEqual(['m-new', 'm-old'])
+    expect(found.get('m-new')).toEqual([{ type: 'text', text: 'second' }])
+    // Only rows holding a wanted id were parsed: never the screenshots.
+    const parsed = parse.mock.calls.map(([text]) => String(text).length)
+    expect(Math.max(0, ...parsed)).toBeLessThan(100_000)
+  } finally {
+    parse.mockRestore()
+    stop = true
+  }
+  // The loop ran between the windows (24 MB is several 4 MiB windows).
+  expect(ticks).toBeGreaterThan(3)
 })

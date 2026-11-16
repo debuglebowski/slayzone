@@ -19,6 +19,7 @@ function hub() {
       chat: {
         openTimeline: { query: q('openTimeline') },
         getReplay: { query: q('getReplay') },
+        readBlob: { query: q('readBlob') },
         timelinePages: { query: q('timelinePages') },
         searchTimeline: { query: q('searchTimeline') },
         respondPermission: { mutate: q('respondPermission') },
@@ -42,6 +43,7 @@ function direct(fail?: { code?: string }) {
       chat: {
         openTimeline: { query: q('openTimeline') },
         getReplay: { query: q('getReplay') },
+        readBlob: { query: q('readBlob') },
         timelinePages: { query: q('timelinePages') },
         searchTimeline: { query: q('searchTimeline') },
         respondPermission: { mutate: q('respondPermission') },
@@ -68,12 +70,13 @@ describe('chatViaDirect', () => {
     await c.openTimeline({ tabId: 't', version: 'v' })
     await c.timelinePages({ tabId: 't', pages: [0], asOfSeq: 1, epoch: 1 })
     await c.searchTimeline({ tabId: 't', query: 'q' })
+    await c.readBlob({ tabId: 't', sha256: 'a'.repeat(64), offset: 0 })
     await c.respondPermission({
       tabId: 't',
       args: { requestId: 'r', decision: { behavior: 'allow' } }
     })
     await c.sendToolResult({ tabId: 't', args: { toolUseId: 'u', content: 'c' } })
-    expect(d.calls).toEqual(['openTimeline', 'timelinePages', 'searchTimeline'])
+    expect(d.calls).toEqual(['openTimeline', 'timelinePages', 'searchTimeline', 'readBlob'])
     expect(h.calls).toEqual(['respondPermission', 'sendToolResult'])
   })
 

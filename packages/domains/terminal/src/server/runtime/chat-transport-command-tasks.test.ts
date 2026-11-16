@@ -105,7 +105,7 @@ function harness(): Harness {
       h.broadcasts.push({ event, ...(live !== undefined ? { live } : {}) }),
     broadcastExit: () => {},
     broadcastStateChange: () => {},
-    eventStore: { load: async () => [], insert: async () => 'inserted', readRange: async () => [] }
+    eventStore: { insert: async () => 'inserted', ...mgr.memoryChatEventReads(() => []) }
   })
   return h
 }

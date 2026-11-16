@@ -20,6 +20,8 @@ interface AddProjectMcpDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectPath: string
+  /** Whose config this is: the call's path scope (§9 Phase 7c). */
+  projectId: string
   availableProviders: McpTarget[]
   onAdded: () => void
   editTarget?: EditTarget | null
@@ -30,6 +32,7 @@ export function AddProjectMcpDialog({
   open,
   onOpenChange,
   projectPath,
+  projectId,
   availableProviders,
   onAdded,
   editTarget,
@@ -85,6 +88,7 @@ export function AddProjectMcpDialog({
       if (keyChanged && editProviders) {
         for (const provider of editProviders) {
           await trpcClient.aiConfig.removeMcpServer.mutate({
+            projectId,
             projectPath,
             provider,
             serverKey: editTarget.originalKey
@@ -95,6 +99,7 @@ export function AddProjectMcpDialog({
       for (const [provider, enabled] of Object.entries(providers)) {
         if (!enabled) continue
         await trpcClient.aiConfig.writeMcpServer.mutate({
+          projectId,
           projectPath,
           provider: provider as McpTarget,
           serverKey: serverKey.trim(),

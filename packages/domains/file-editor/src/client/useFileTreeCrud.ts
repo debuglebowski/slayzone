@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { useTrack } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
-import { useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceScope } from './workspace-target'
 
 export interface CreatingState {
   parentPath: string
@@ -41,7 +41,7 @@ export function useFileTreeCrud({
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   // mutateAsync is identity-stable across renders (the mutation objects are not).
   const { mutateAsync: createFile } = useMutation(trpc.fileEditor.createFile.mutationOptions())
   const { mutateAsync: createDir } = useMutation(trpc.fileEditor.createDir.mutationOptions())
@@ -75,14 +75,14 @@ export function useFileTreeCrud({
       try {
         if (creating.type === 'file') {
           await createFile({
-            ...target,
+            ...requireScope(scope),
             rootPath: projectPath,
             filePath: newPath
           })
           track('file_created')
         } else {
           await createDir({
-            ...target,
+            ...requireScope(scope),
             rootPath: projectPath,
             dirPath: newPath
           })
@@ -97,7 +97,7 @@ export function useFileTreeCrud({
       }
       setCreating(null)
     },
-    [creating, projectPath, loadDir, onOpenFile, createFile, createDir, target, track]
+    [creating, projectPath, loadDir, onOpenFile, createFile, createDir, scope, track]
   )
 
   const handleRename = useCallback(
@@ -109,7 +109,7 @@ export function useFileTreeCrud({
       const parentDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${newName.trim()}` : newName.trim()
       try {
-        await renamePath({ ...target, rootPath: projectPath, oldPath, newPath })
+        await renamePath({ ...requireScope(scope), rootPath: projectPath, oldPath, newPath })
         track('file_renamed')
         if (onFileRenamed) onFileRenamed(oldPath, newPath)
         const srcPrefix = oldPath + '/'
@@ -135,7 +135,7 @@ export function useFileTreeCrud({
       }
       setRenaming(null)
     },
-    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renamePath, target, track]
+    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renamePath, scope, track]
   )
 
   const executeDelete = useCallback(
@@ -143,7 +143,7 @@ export function useFileTreeCrud({
       const dirsToReload = new Set<string>()
       for (const p of paths) {
         try {
-          await deletePath({ ...target, rootPath: projectPath, targetPath: p })
+          await deletePath({ ...requireScope(scope), rootPath: projectPath, targetPath: p })
           track('file_deleted')
           dirsToReload.add(parentDirOf(p))
         } catch (err) {
@@ -153,7 +153,7 @@ export function useFileTreeCrud({
       setSelectedPaths(new Set())
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, loadDir, setSelectedPaths, deletePath, target, track]
+    [projectPath, loadDir, setSelectedPaths, deletePath, scope, track]
   )
 
   const handleDeleteSelected = useCallback(

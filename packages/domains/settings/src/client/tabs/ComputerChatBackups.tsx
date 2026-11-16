@@ -27,6 +27,7 @@ import {
   AlertDialogAction
 } from '@slayzone/ui'
 import {
+  chatBlobJsonReplacer,
   userMessageAttachments,
   type ArchivedArtifactVersion,
   type ArchivedArtifactOriginal,
@@ -35,6 +36,7 @@ import {
   type QueuedChatMessage
 } from '@slayzone/terminal-contracts'
 import { useTRPC, useTRPCClient } from '../trpc'
+import { collectArchivedConversation } from './archive-export'
 
 function download(data: Blob, name: string) {
   const url = URL.createObjectURL(data),
@@ -56,8 +58,8 @@ export function ComputerChatBackups() {
       <CardHeader>
         <CardTitle>Computer chat backups</CardTitle>
         <CardDescription>
-          Each computer backs up its conversations and attached files. Restore opens a read-only
-          archive; agent sessions cannot be resumed from it.
+          Each computer backs up its conversations and attached files. Backups can contain content
+          erased later. Restore opens a read-only archive; agent sessions cannot be resumed from it.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -412,7 +414,8 @@ function ArchiveConversation(target: {
             <p className="whitespace-pre-wrap break-words">{event.text}</p>
           ) : (
             <pre className="whitespace-pre-wrap break-all text-xs">
-              {JSON.stringify(event, null, 2)}
+              {/* Stored images print as `[image/png · 120 KB]` (the export holds their bytes). */}
+              {JSON.stringify(event, chatBlobJsonReplacer, 2)}
             </pre>
           )}
           {event.kind === 'user-message' &&
@@ -459,7 +462,7 @@ function ArchiveConversation(target: {
           <details key={record.cursor}>
             <summary className="text-sm">Saved {record.kind}</summary>
             <pre className="whitespace-pre-wrap break-all text-xs">
-              {JSON.stringify(record.value, null, 2)}
+              {JSON.stringify(record.value, chatBlobJsonReplacer, 2)}
             </pre>
           </details>
         )
@@ -507,77 +510,9 @@ async function exportArchivedConversation(
   api: ReturnType<typeof useTRPCClient>,
   target: { computerId: string; archiveId: string; conversationId: string }
 ) {
-  const allEvents: Array<{ seq: number; at: number; event: AgentEvent }> = [],
-    allRecords: Array<{ cursor: number; kind: string; id: string; value: unknown }> = []
-  let afterSeq = -1,
-    afterCursor = 0
-  while (true) {
-    const page = await api.chat.archives.read.query({ ...target, afterSeq })
-    allEvents.push(...page.events)
-    if (!page.hasMore) break
-    afterSeq = page.nextSeq
-  }
-  while (true) {
-    const page = await api.chat.archives.records.query({ ...target, afterCursor })
-    allRecords.push(...page.records)
-    if (!page.hasMore) break
-    afterCursor = page.nextCursor
-  }
-  const refs = new Map<string, ChatAttachment>()
-  for (const { event } of allEvents)
-    if (event.kind === 'user-message')
-      for (const ref of userMessageAttachments(event.content ?? []))
-        refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-  for (const record of allRecords)
-    if (record.kind === 'draft') {
-      const draft = record.value as { draft?: { attachments?: ChatAttachment[] } }
-      for (const ref of draft.draft?.attachments ?? [])
-        refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-    } else if (record.kind === 'queue') {
-      for (const ref of userMessageAttachments((record.value as QueuedChatMessage).content ?? []))
-        refs.set(`${ref.artifactId}:${ref.contentHash ?? ''}`, ref)
-    }
-  const attachments: Array<{ ref: ChatAttachment; data: string }> = []
-  for (const ref of refs.values())
-    attachments.push({ ref, ...(await api.chat.archives.attachment.query({ ...target, ref })) })
-  const files: Array<{
-    version: ArchivedArtifactVersion | ArchivedArtifactOriginal
-    name: string
-    data: string
-  }> = []
-  for (const record of allRecords) {
-    if (record.kind !== 'artifact-version' && record.kind !== 'artifact-original') continue
-    const version = record.value as ArchivedArtifactVersion | ArchivedArtifactOriginal
-    files.push({
-      version,
-      ...(await api.chat.archives.file.query({
-        ...target,
-        artifactId: version.artifactId,
-        contentHash: version.contentHash
-      }))
-    })
-  }
+  const exported = await collectArchivedConversation(api, target)
   download(
-    new Blob(
-      [
-        JSON.stringify(
-          {
-            format: 'slayzone-chat-archive',
-            version: 1,
-            readOnly: true,
-            providerResumable: false,
-            ...target,
-            events: allEvents,
-            records: allRecords,
-            attachments,
-            files
-          },
-          null,
-          2
-        )
-      ],
-      { type: 'application/json' }
-    ),
+    new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }),
     `chat-${target.conversationId}.json`
   )
 }

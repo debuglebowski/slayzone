@@ -1,3 +1,4 @@
+import { registerTransferRoutes } from './transfers'
 import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { withAdminGate } from './admin-routes'
@@ -43,13 +44,11 @@ import { registerPanelsCrudRoutes } from './panels/crud'
 import { registerAutomationsCrudRoutes } from './automations/crud'
 import { registerArtifactsListRoute } from './artifacts/list'
 import { registerArtifactsContentRoutes } from './artifacts/content'
+import { registerFilesRawRoute } from './files/raw'
 import { registerArtifactsCrudRoutes } from './artifacts/crud'
 import { registerArtifactsSearchRoute } from './artifacts/search'
 import { registerArtifactsVersionsRoutes } from './artifacts/versions'
 import { registerOpenArtifactRoute } from './artifacts/open'
-import { registerArtifactsExportPdfRoute } from './artifacts/export-pdf'
-import { registerArtifactsExportPngRoute } from './artifacts/export-png'
-import { registerArtifactsExportHtmlRoute } from './artifacts/export-html'
 import { registerAutomationsRunRoute } from './automations/run'
 import { registerPtyListRoute } from './pty/list'
 import { registerPtyBufferRoute } from './pty/buffer'
@@ -58,6 +57,7 @@ import { registerPtyWaitRoute } from './pty/wait'
 import { registerPtyWriteRoute } from './pty/write'
 import { registerPtySubmitRoute } from './pty/submit'
 import { registerPtyKillRoute } from './pty/kill'
+import { registerPtyUnattachedRoutes } from './pty/unattached'
 import { registerPtyRespawnRoute } from './pty/respawn'
 import { registerPtyStartRoute } from './pty/start'
 import { registerChatRoutes } from './chat'
@@ -79,14 +79,20 @@ import { registerComputersListRoute } from './computers/list'
 import { registerComputersDirectAddressesRoute } from './computers/direct-addresses'
 import { registerHubUsersRoutes } from './hub/users'
 import { registerHubComputersRoute } from './hub/computers'
+import { registerHubContentErasureRoutes } from './hub/content-erasure'
 import { registerWebLoginRoute } from './hub/web-login'
+
+import { withMoveLockGate } from '../move-lock-gates'
 
 export type { RestApiDeps } from './types'
 
 export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // Every route below gets the account-role guard for its own `METHOD path` (T-15),
   // then the owner guard (T-18): a `user` route touches only the caller's content.
-  const app = withOwnerGate(withAdminGate(rawApp), deps.db)
+  // Then the move lock: a write to a task moving to another hub is refused (409).
+  const app = withMoveLockGate(withOwnerGate(withAdminGate(rawApp), deps.db), deps.db)
+
+  registerTransferRoutes(app, deps)
 
   // Notify
   registerNotifyRoute(app, deps)
@@ -159,9 +165,10 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerArtifactsContentRoutes(app, deps)
   registerArtifactsVersionsRoutes(app, deps)
   registerArtifactsCrudRoutes(app, deps)
-  registerArtifactsExportPdfRoute(app, deps)
-  registerArtifactsExportPngRoute(app, deps)
-  registerArtifactsExportHtmlRoute(app, deps)
+
+  // Workspace files: raw bytes from the computer that owns the workspace (previews
+  // the desktop's slz-file:// handler cannot read from its own disk).
+  registerFilesRawRoute(app, deps)
 
   // Automations
   registerAutomationsRunRoute(app, deps)
@@ -175,6 +182,7 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerPtyWriteRoute(app, deps)
   registerPtySubmitRoute(app, deps)
   registerPtyKillRoute(app, deps)
+  registerPtyUnattachedRoutes(app, deps)
   registerPtyRespawnRoute(app, deps)
   registerPtyStartRoute(app, deps)
 
@@ -198,6 +206,9 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // only way to create an account now that public signup is closed. 503 where
   // hub-auth is absent (the Electron host) or its init failed.
   registerHubUsersRoutes(app, deps)
+  // Erasing a disabled account's content (`slay hub users erase-content …`). Its own
+  // path, behind the ordinary bearer gate: never reachable by a break-glass session.
+  registerHubContentErasureRoutes(app, deps)
   // Revoke / unrevoke a computer (`slay hub computers`, a break-glass session). Admin only.
   registerHubComputersRoute(app, deps)
 

@@ -83,7 +83,7 @@ export type HealthProbeResult = {
    * app signs in through the browser, device sign-in), `password` = email + password.
    * Undefined when the hub is too old to report switches (treat as password-only).
    */
-  signIn?: { sso: boolean; password: boolean }
+  signIn?: { sso: boolean; password: boolean; ssoLabel?: string }
 }
 
 export type HubLoginResult = { ok: true; token: string } | { ok: false; error: string }

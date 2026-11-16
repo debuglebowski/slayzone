@@ -119,6 +119,12 @@ is offline its scrollback is unavailable: clients show "Computer offline" and ca
 up from their last seq on reconnect. Idle-close stays a hub decision over the
 mirrored state.
 
+Computers keep their ptys when the hub restarts. The restarted hub adopts each
+session its previous run left running into its tab (`pty.adopt`, or `adoptLive` on
+the tab's own start) instead of starting or replacing one; what it cannot adopt
+stays running and is listed for the user to attach or stop (terminal DOMAIN.md,
+"Hub restart: adopt, else surface").
+
 ### Task CLI on a computer
 
 The computer gives each PTY or process a loopback CLI relay address and a session
@@ -217,5 +223,5 @@ To change the app icon:
 | SQLite + better-sqlite3 | Cross-process, sync access |
 | node-pty | Real PTY for Claude Code CLI |
 | Clara philosophy | AI-comprehensible codebase structure |
-| IPC→tRPC transport migration (8 slices) | Renderer transport is tRPC-over-WebSocket end to end. The preload bridge is bootstrap-only and must not grow: server URL/mode, relaunch/boot settings, boot marks, and native file-path extraction. Domain calls, browser/window/menu events, diagnostics, settings, terminal, and task data go through `@slayzone/transport`. REST remains only for CLI/MCP loopback APIs. Guard: `pnpm lint:window-api`. |
+| IPC→tRPC transport migration (8 slices) | Renderer transport is tRPC-over-WebSocket end to end. The preload bridge carries only bootstrap and client-local host work, never domain calls: server URL/mode, relaunch/boot settings, boot marks, native file-path extraction, and work that must happen on the device the person uses whatever hub it talks to (direct-link preparation; artifact PDF/PNG/HTML export, which the desktop renders offscreen and the web shell prints through the browser; saving artifact file/folder/zip downloads, whose bytes the client read from the hub). Each such capability is optional on the contract (`electron-bootstrap-contract.ts`) and read through `electronBootstrap` with a fallback. Domain calls, browser/window/menu events, diagnostics, settings, terminal, and task data go through `@slayzone/transport`. REST remains only for CLI/MCP loopback APIs. Guard: `pnpm lint:window-api`. |
 | Client-local browser panel | The browser panel's web views live on the client (Electron main) and the panel drives them directly over the preload's generic `window.api.browserHost` (`invoke` + `on`; typed by `@slayzone/task-browser/shared` `BrowserHostMethods`). The hub never touches a live view: it stores the tab list (`tasks.browser_tabs`) and runs `app.browserRelay` — which client owns a task's live tabs (the one used last) and a request/reply channel the REST `/api/browser/*` routes (`slay browser`) ride to reach it. Same on a local and a remote hub; no `/cap` involved. |

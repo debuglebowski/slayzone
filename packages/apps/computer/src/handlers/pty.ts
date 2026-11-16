@@ -32,6 +32,7 @@ import {
   ptyGetBufferSinceParamsSchema,
   ptyKillParamsSchema,
   type PtyListResult,
+  type PtyDetectedSnapshot,
   ptyPrioritizeParamsSchema,
   type PtySpawnParams,
   type PtyWarmSpawnParams,
@@ -43,6 +44,7 @@ import {
   type PtyDoctorResult,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
+  ptyAdoptParamsSchema,
   ptyWarmKillParamsSchema,
   ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
@@ -110,17 +112,24 @@ const MAX_BUFFER_SIZE = 750 * 1024
  */
 const APPENDED_PIECE_CHARS = 16 * 1024
 
-/** `text` into `buffer` as chunks of at most {@link APPENDED_PIECE_CHARS}. */
-function appendInPieces(buffer: RingBuffer, text: string): void {
+/** `text` as pieces of at most {@link APPENDED_PIECE_CHARS}. */
+function inPieces(text: string): string[] {
+  const pieces: string[] = []
   let at = 0
   while (at < text.length) {
     let end = Math.min(at + APPENDED_PIECE_CHARS, text.length)
     // Never split a surrogate pair across chunks.
     const code = text.charCodeAt(end - 1)
     if (end < text.length && code >= 0xd800 && code <= 0xdbff) end--
-    buffer.append(text.slice(at, end))
+    pieces.push(text.slice(at, end))
     at = end
   }
+  return pieces
+}
+
+/** `text` into `buffer` as chunks of at most {@link APPENDED_PIECE_CHARS}. */
+function appendInPieces(buffer: RingBuffer, text: string): void {
+  for (const piece of inPieces(text)) buffer.append(piece)
 }
 
 /**
@@ -232,6 +241,10 @@ interface PtySession {
   stopping?: Promise<void>
   /** Keeps a task terminal's output on disk (see pty-history.ts). */
   history?: PtyHistoryTracker
+  /** The terminal mode its detection runs as (`pty.list`: a restarted hub adopts by it). */
+  mode?: string
+  /** A later attempt took this process over (`pty.adopt` / `adoptLive`): see `takeOver`. */
+  adopted?: boolean
 }
 
 /**
@@ -265,7 +278,10 @@ export interface PtyHandlers {
   /** What direct-link clients reach (docs/direct-link.md). */
   direct: DirectPtyService
   hasWork(): boolean
+  /** Pids of this hub's live pty processes (stall reports name only a hub's own). */
+  ownedPids(): number[]
   hasTaskWork(taskId: string): boolean
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
   /** End the task's terminals; `deleted` (purged) also forgets their saved output. */
   stopTask(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
   handlers: HubMethodTable
@@ -440,9 +456,14 @@ export function createPtyHandlers(
     return session.stopping
   }
 
-  async function stopBeforeReplacement(id: string): Promise<void> {
+  /**
+   * Stop the session a new spawn replaces. Answers its buffer when its output was
+   * being saved: the next start restores from it — the file is up to a flush behind
+   * (its final write is still in flight).
+   */
+  async function stopBeforeReplacement(id: string): Promise<RingBuffer | undefined> {
     const old = sessions.get(id)
-    if (!old) return
+    if (!old) return undefined
     old.replacing = true
     try {
       await stopPty(old)
@@ -450,6 +471,7 @@ export function createPtyHandlers(
       old.replacing = false
       throw err
     }
+    return old.history ? old.buffer : undefined
   }
 
   /**
@@ -482,8 +504,7 @@ export function createPtyHandlers(
   function trackHistory(session: PtySession): void {
     if (!options.history || session.warm || !session.taskId || session.history) return
     const buffer = session.buffer
-    session.history =
-      options.history.track(session.taskId, session.id, () => buffer.toString()) ?? undefined
+    session.history = options.history.track(session.taskId, session.id, buffer) ?? undefined
   }
 
   /** Stop saving a session's output and delete what was saved. */
@@ -516,6 +537,7 @@ export function createPtyHandlers(
       buffer?: RingBuffer
     }
   ): PtySession {
+    ctx.assertWorkAllowed?.()
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
     if (opts.taskId && !opts.warm) taskOfSession.set(id, opts.taskId)
     const cwd = resolveCwd(opts)
@@ -637,6 +659,7 @@ export function createPtyHandlers(
   /** Start output detection for a session; ids are read live (warm adopt rekeys). */
   function attachSignals(session: PtySession, detection: PtyDetectionParams): void {
     session.signals?.dispose()
+    session.mode = detection.mode
     session.signals = createPtySessionSignals({
       // The latest theme the hub pushed wins over the one it spawned with.
       params: { ...detection, ...(theme ? { theme } : {}) },
@@ -707,6 +730,7 @@ export function createPtyHandlers(
     void session.history?.close()
     if (session.replacing) {
       tombstones.add(session.id, {
+        taskId: session.taskId,
         spawnId: session.spawnId,
         pid: session.proc.pid,
         exitCode,
@@ -730,6 +754,7 @@ export function createPtyHandlers(
       ...(reason ? { reason } : {})
     })
     tombstones.add(session.id, {
+      taskId: session.taskId,
       spawnId: session.spawnId,
       pid: session.proc.pid,
       exitCode,
@@ -770,9 +795,20 @@ export function createPtyHandlers(
     slot.release()
   }
 
-  type SpawnReply = { pid: number; startupDeadline?: true; detection?: true; seq?: number }
+  type SpawnReply = {
+    pid: number
+    startupDeadline?: true
+    detection?: true
+    seq?: number
+    adopted?: { seq: number; detected?: PtyDetectedSnapshot }
+    replacedLive?: { spawnId?: string; reason: string }
+  }
 
-  function startSession(params: PtySpawnParams): SpawnReply {
+  /**
+   * `replaced`: the buffer of the session this spawn replaced, when its output was
+   * being saved (see {@link stopBeforeReplacement}).
+   */
+  function startSession(params: PtySpawnParams, replaced?: RingBuffer): SpawnReply {
     const shell = params.computerShell ? resolveUserShell() : params.command
     const args = params.computerShell
       ? [
@@ -780,24 +816,45 @@ export function createPtyHandlers(
           ...(params.computerShellCommand ? ['-c', params.computerShellCommand] : [])
         ]
       : params.args
+    // What this session showed last: the replaced process's buffer, else the saved file.
+    const previousOutput = (): string | null => {
+      if (!params.taskId || !options.history) return null
+      if (replaced) return replaced.toString() || null
+      return options.history.load(params.taskId, params.sessionId)
+    }
     // A continuing spawn keeps the session's scrollback: the reaped attempt's
     // buffer (seq continues), then the hub's preamble, then the new process.
     let carried: RingBuffer | undefined
     if (params.carryOutput) {
       const { fromSpawnId, afterSeq } = params.carryOutput
       carried =
-        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ??
-        new RingBuffer(MAX_BUFFER_SIZE)
-      // No buffer left to continue: numbering continues where the hub's reached (M2).
+        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ?? undefined
+      if (!carried) {
+        carried = new RingBuffer(MAX_BUFFER_SIZE)
+        // No buffer left to continue (this computer restarted, the carry window
+        // closed): the saved output stands in for it — else the scrollback is only
+        // the preamble, and the next save overwrites the file with that. It takes
+        // the seqs up to `afterSeq`, which the hub already has: never streamed to a
+        // terminal still showing it, never in a backfill after it, yet in every
+        // replay. History with more pieces than that runs on past `afterSeq`, still
+        // within the seq the reply names (output the hub treats as delivered).
+        const saved = previousOutput()
+        if (saved) {
+          const pieces = inPieces(restoredPrefix(saved))
+          if (afterSeq !== undefined) carried.continueAfter(afterSeq - pieces.length)
+          for (const piece of pieces) carried.append(piece)
+        }
+      }
+      // Numbering continues where the hub's reached (M2).
       if (afterSeq !== undefined) carried.continueAfter(afterSeq)
       if (params.carryOutput.preamble) appendInPieces(carried, params.carryOutput.preamble)
     }
     // A fresh start of a task terminal begins with what it showed last time (the
-    // computer restarted since). Never for a continuing spawn — the hub still shows
-    // that output — nor an agent resume, which reprints its own conversation.
+    // computer restarted since, or the process was replaced). Never for a continuing
+    // spawn — handled above — nor an agent resume, which reprints its own conversation.
     let restored: RingBuffer | undefined
-    if (!carried && params.taskId && options.history && !params.detection?.resuming) {
-      const saved = options.history.load(params.taskId, params.sessionId)
+    if (!carried && !params.detection?.resuming) {
+      const saved = previousOutput()
       if (saved) {
         restored = new RingBuffer(MAX_BUFFER_SIZE)
         appendInPieces(restored, restoredPrefix(saved))
@@ -912,7 +969,8 @@ export function createPtyHandlers(
         return {
           pid: live.proc.pid,
           ...(live.deadline ? { startupDeadline: true as const } : {}),
-          ...(live.signals ? { detection: true as const } : {})
+          ...(live.signals ? { detection: true as const } : {}),
+          ...(live.adopted ? { adopted: adoptedView(live) } : {})
         }
       }
       if (tombstones.ran(params.sessionId, params.spawnId)) {
@@ -924,6 +982,110 @@ export function createPtyHandlers(
         )
       }
     }
+    // A restarted hub's first spawn of a session this computer still runs from its
+    // previous run: take the running process over rather than replace (kill) it.
+    let replacedLive: SpawnReply['replacedLive']
+    if (params.adoptLive && params.spawnId !== undefined) {
+      const live = sessions.get(params.sessionId)
+      if (live && !live.warm && live.spawnId !== params.spawnId) {
+        const refusal = adoptRefusal(live, {
+          taskId: params.taskId,
+          mode: params.adoptLive.mode
+        })
+        if (!refusal) {
+          takeOver(live, params.spawnId, params.relay)
+          return { pid: live.proc.pid, detection: true, adopted: adoptedView(live) }
+        }
+        replacedLive = { ...(live.spawnId ? { spawnId: live.spawnId } : {}), reason: refusal }
+        ctx.log('pty adoptLive refused: replacing', {
+          sessionId: params.sessionId,
+          reason: refusal
+        })
+      }
+    }
+    const reply = startOrReplace(params)
+    if (!replacedLive) return reply
+    const said = replacedLive
+    return Promise.resolve(reply).then((r) => ({ ...(r as SpawnReply), replacedLive: said }))
+  }
+
+  /** Why `live` cannot be taken over by a new attempt (null: it can). */
+  function adoptRefusal(
+    live: PtySession,
+    want: { taskId?: string; mode?: string; fromSpawnId?: string }
+  ): string | null {
+    if (live.warm || live.replacing || live.stopping) return 'not-running'
+    // Another start for the id is already on its way: that one replaces it.
+    if (starts.has(live.id) || queued.has(live.id)) return 'start-in-flight'
+    if (want.fromSpawnId !== undefined && live.spawnId !== want.fromSpawnId) return 'not-running'
+    if (want.taskId && live.taskId && want.taskId !== live.taskId) return 'task-mismatch'
+    if (!live.signals) return 'no-detection'
+    if (want.mode && live.mode && want.mode !== live.mode) return 'mode-mismatch'
+    return null
+  }
+
+  /**
+   * The process answers to `spawnId` from now on — writes, kills, its output and
+   * signals (all read the session's ids live) — exactly like a warm adopt's rekey.
+   * Nothing starts or stops; its buffer, seq and detection carry on.
+   */
+  function takeOver(live: PtySession, spawnId: string, relay: boolean | undefined): void {
+    const previous = live.spawnId
+    live.spawnId = spawnId
+    live.adopted = true
+    if (relay !== undefined) live.relay = relay
+    ctx.log('pty taken over by a new attempt', {
+      sessionId: live.id,
+      pid: live.proc.pid,
+      previousSpawnId: previous ?? null,
+      spawnId
+    })
+  }
+
+  const adoptedView = (live: PtySession): { seq: number; detected?: PtyDetectedSnapshot } => ({
+    seq: live.buffer.getCurrentSeq(),
+    ...(live.signals ? { detected: live.signals.snapshot() } : {})
+  })
+
+  /** `pty.adopt`: see `ptyAdoptParamsSchema`. */
+  function adopt(rawParams: unknown): {
+    pid: number
+    seq: number
+    detection: true
+    detected?: PtyDetectedSnapshot
+  } {
+    const params = ptyAdoptParamsSchema.parse(rawParams)
+    if (params.taskId) options.assertTaskActive?.(params.taskId)
+    const live = sessions.get(params.sessionId)
+    if (live && !live.warm && live.spawnId === params.spawnId) {
+      // A re-sent adopt whose reply was lost: already this attempt.
+      return { pid: live.proc.pid, detection: true, ...adoptedView(live) }
+    }
+    const refusal = live
+      ? adoptRefusal(live, {
+          taskId: params.taskId,
+          mode: params.mode,
+          fromSpawnId: params.fromSpawnId
+        })
+      : 'not-running'
+    if (refusal || !live) {
+      const why: Record<string, string> = {
+        'not-running': `attempt ${params.fromSpawnId} is not running`,
+        'start-in-flight': 'another start of it is in flight',
+        'task-mismatch': 'it belongs to another task',
+        'no-detection': 'it runs no output detection',
+        'mode-mismatch': `it runs as mode ${live?.mode ?? '?'}, not ${params.mode ?? '?'}`
+      }
+      throw new RpcError(
+        ComputerTransportErrorCodes.sessionNotAdoptable,
+        `pty.adopt ${params.sessionId}: ${why[refusal ?? 'not-running'] ?? refusal ?? 'refused'}`
+      )
+    }
+    takeOver(live, params.spawnId, params.relay)
+    return { pid: live.proc.pid, detection: true, ...adoptedView(live) }
+  }
+
+  function startOrReplace(params: PtySpawnParams): SpawnReply | Promise<unknown> {
     if (params.admission === undefined) {
       // Not an agent start (or an older hub): start now. A start still queued
       // under this id is superseded by this one, like a live session would be.
@@ -935,9 +1097,9 @@ export function createPtyHandlers(
               params.spawnId,
               params.taskId,
               async (assertActive) => {
-                await stopBeforeReplacement(params.sessionId)
+                const replaced = await stopBeforeReplacement(params.sessionId)
                 assertActive()
-                return startSession(params)
+                return startSession(params, replaced)
               }
             )
           : startSession(params)
@@ -954,13 +1116,16 @@ export function createPtyHandlers(
         params.spawnId,
         params.taskId,
         async (assertActive) => {
-          await stopBeforeReplacement(params.sessionId)
+          const replaced = await stopBeforeReplacement(params.sessionId)
           assertActive()
-          return startSession({
-            ...params,
-            ...(item.cols !== undefined ? { cols: item.cols } : {}),
-            ...(item.rows !== undefined ? { rows: item.rows } : {})
-          })
+          return startSession(
+            {
+              ...params,
+              ...(item.cols !== undefined ? { cols: item.cols } : {}),
+              ...(item.rows !== undefined ? { rows: item.rows } : {})
+            },
+            replaced
+          )
         }
       )
       const session = sessions.get(params.sessionId)!
@@ -1153,6 +1318,7 @@ export function createPtyHandlers(
       // warm session never streamed, so no seq of it has reached anyone.
       session.signals?.absorb(session.buffer.toString())
       session.buffer.rewriteUnstreamed(filterBufferData)
+      session.history?.rewritten()
     }
     // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
     // sentinel the hub's gap detector starts from, so an adopt with no output
@@ -1208,7 +1374,7 @@ export function createPtyHandlers(
     return { warms }
   }
 
-  async function kill(rawParams: unknown): Promise<{ ok: true }> {
+  async function kill(rawParams: unknown): Promise<{ ok: true; killed: boolean }> {
     const params = ptyKillParamsSchema.parse(rawParams)
     const starting = starts.get(params.sessionId)
     if (starting && (params.spawnId === undefined || starting.spawnId === params.spawnId)) {
@@ -1230,6 +1396,7 @@ export function createPtyHandlers(
         reason: 'killed-before-start'
       })
       tombstones.add(params.sessionId, {
+        taskId: pending.taskId,
         spawnId: pending.spawnId,
         exitCode: null,
         signal: params.signal ?? 'SIGHUP',
@@ -1246,19 +1413,21 @@ export function createPtyHandlers(
         await forgetHistory(params.sessionId, live.taskId)
         await stopPty(live, params.signal)
       }
-      return { ok: true }
+      return { ok: true, killed: true }
     }
     if (!live || (params.spawnId !== undefined && live.spawnId !== params.spawnId)) {
       // Idempotent: the session may already have exited (network race). Its saved
       // output goes all the same: the hub ended the session (closed, restarted).
       if (!live) await forgetHistory(params.sessionId, undefined)
       ctx.log('pty kill on unknown session', { sessionId: params.sessionId })
-      return { ok: true }
+      // Nothing stopped: the hub learns that the attempt it named is not what runs
+      // here (exited, or taken over by another attempt meanwhile).
+      return { ok: true, killed: false }
     }
     // The hub ended it (a closed tab, a restart): its output goes, as in memory.
     await forgetHistory(params.sessionId, live.taskId)
     await stopPty(live, params.signal)
-    return { ok: true }
+    return { ok: true, killed: true }
   }
 
   function resize(rawParams: unknown): { ok: true } {
@@ -1314,13 +1483,14 @@ export function createPtyHandlers(
     session.proc.write(data)
     // What a relayed write tells this computer with `watchConversationId`.
     if (facts.statusCommand) session.signals?.watchConversationId()
-    if (facts.esc || facts.submitted !== null) {
+    if (facts.esc || facts.submitted !== null || facts.interrupt) {
       const payload: PtyInputPayload = {
         sessionId: session.id,
         ...(session.spawnId ? { spawnId: session.spawnId } : {}),
         submitted: facts.submitted,
         esc: facts.esc,
-        statusCommand: facts.statusCommand
+        statusCommand: facts.statusCommand,
+        ...(facts.interrupt ? { interrupt: true } : {})
       }
       ctx.dialer.notify(ComputerNotificationMethods.event, {
         name: PTY_INPUT_EVENT_NAME,
@@ -1389,8 +1559,15 @@ export function createPtyHandlers(
         // no special case on either side.
         seq: session.buffer.getCurrentSeq(),
         ...(session.signals
-          ? { detection: true as const, detected: session.signals.snapshot() }
-          : {})
+          ? {
+              detection: true as const,
+              detected: session.signals.snapshot(),
+              // What a restarted hub needs to adopt it into the right tab.
+              ...(session.mode ? { mode: session.mode } : {}),
+              startedAt: session.startedAt
+            }
+          : {}),
+        ...(session.adopted ? { adopted: true as const } : {})
       })
     }
     return { sessions: live, exited: tombstones.list() }
@@ -1461,7 +1638,9 @@ export function createPtyHandlers(
     if (!buffer) return { clearedSeq: -1 }
     const clearedSeq = buffer.getCurrentSeq()
     buffer.clear()
-    sessions.get(params.sessionId)?.history?.changed()
+    const history = sessions.get(params.sessionId)?.history
+    history?.rewritten()
+    history?.changed()
     return { clearedSeq }
   }
 
@@ -1523,6 +1702,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyForget]: forget,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
+    [HubToComputerMethods.ptyAdopt]: adopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,
     [HubToComputerMethods.ptyWarmList]: warmList
   }
@@ -1580,6 +1760,11 @@ export function createPtyHandlers(
   return {
     direct,
     hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
+    ownedPids: () =>
+      [...sessions.values()]
+        .map((session) => session.proc.pid)
+        .filter((pid): pid is number => typeof pid === 'number'),
+    hasFolderWork: (contains) => [...sessions.values()].some((session) => contains(session.cwd)),
     hasTaskWork: (taskId: string) =>
       [...sessions.values(), ...queued.values()].some((s) =>
         belongsToTask(s.id, taskId, s.taskId)
@@ -1605,6 +1790,7 @@ export function createPtyHandlers(
       )
       await Promise.allSettled(waiting.map(([, s]) => s.promise))
       if (purge) await options.history?.forgetTask(taskId)
+      if (state === 'deleted') tombstones.forgetTask(taskId)
     },
     handlers,
     disposeAll,

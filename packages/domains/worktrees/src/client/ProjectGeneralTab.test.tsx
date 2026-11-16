@@ -29,7 +29,7 @@ let statusNow = CLEAN
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => {
   const q = (fn: (input: { path?: string; repoPath?: string }) => Promise<unknown>) => ({
     queryOptions: (input: { path?: string; repoPath?: string }) => ({ queryFn: () => fn(input) })
@@ -59,7 +59,12 @@ vi.mock('@slayzone/transport/client', () => {
     settings: { get: q(async () => null), set: { mutationOptions: () => ({}) } }
   }
   const trpcClient = {}
-  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient, useSubscription: () => undefined }
+  return {
+    useHubId: () => null,
+    useTRPC: () => trpc,
+    useTRPCClient: () => trpcClient,
+    useSubscription: () => undefined
+  }
 })
 vi.mock('@tanstack/react-query', () => {
   const mutation = { mutate: () => {}, mutateAsync: async () => undefined }
@@ -126,10 +131,10 @@ beforeEach(() => {
   graphState.refresh.mockClear()
   _setGitDiffStoreTransport({
     getWorkingDiff: () => new Promise(() => {}),
-    watchStart: async (path) => {
+    watchStart: async (_scope, path) => {
       watchStarts.push(path)
     },
-    watchStop: async (path) => {
+    watchStop: async (_scope, path) => {
       watchStops.push(path)
     }
   })

@@ -15,6 +15,7 @@ import {
 } from '@slayzone/computers/labels'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import {
+  ArrowLeftRight,
   FolderCog,
   Loader2,
   Plus,
@@ -28,6 +29,10 @@ import {
 import { useComputerActions } from './ComputerActions'
 import { MachineLabel } from './MachineLabel'
 import { ComputerName } from './ComputerName'
+import { ComputerFaults } from './ComputerFaults'
+import { ComputerUnattachedSessions } from './ComputerUnattachedSessions'
+import { ComputerTakeovers, computerLabel } from './ComputerTakeovers'
+import { HubUsersSection } from './HubUsersSection'
 
 /**
  * A hub, as a card that owns its computers.
@@ -344,6 +349,7 @@ export function HubCard({
   const {
     showMintedToken,
     requestDelete,
+    requestReplace,
     requestEditRoots,
     requestRestart,
     requestStart,
@@ -389,6 +395,35 @@ export function HubCard({
   const ownComputerId = ownComputerIdProp ?? ownOnThisHub?.computerId ?? null
 
   const deleteMutation = useMutation(trpc.computers.delete.mutationOptions())
+  const replaceMutation = useMutation(trpc.computers.replace.mutationOptions())
+  // Offers to replace an offline computer with the one holding its chats (the same
+  // machine enrolled again). Polled like the list: a reconnect is what produces them.
+  // A hub older than this offers none (the query fails quietly).
+  const takeoversQuery = useQuery({
+    ...trpc.computers.takeovers.queryOptions(),
+    refetchInterval: 5000,
+    retry: false
+  })
+  const takeovers = takeoversQuery.data ?? []
+
+  /**
+   * Replace `former` with a successor the user picks among this hub's other computers
+   * (`preselect`: the one a takeover offer names). Hub-bound like delete.
+   */
+  const askReplace = (former: { id: string; name: string }, preselect?: string): void => {
+    requestReplace({
+      former: { id: former.id, label: computerLabel(former, computers) },
+      options: computers
+        .filter((c) => c.id !== former.id)
+        .map((c) => ({ id: c.id, label: computerLabel(c, computers), connected: c.connected })),
+      preselect,
+      replace: async (successorId) => {
+        await replaceMutation.mutateAsync({ computerId: former.id, successorId })
+        void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
+        void queryClient.invalidateQueries(trpc.computers.takeovers.queryFilter())
+      }
+    })
+  }
   const setDisabledMutation = useMutation(trpc.computers.setDisabled.mutationOptions())
 
   /** This app's own computer on this hub: never deleted, and on the local hub never
@@ -547,6 +582,11 @@ export function HubCard({
           ) : (
             <ComputersHeading note={note()} noteTestId="hub-computers-summary" />
           )}
+          <ComputerTakeovers
+            takeovers={takeovers}
+            computers={computers}
+            onReplace={(t) => askReplace(t.former, t.successor.id)}
+          />
           {/* `table-fixed`: with no column headers the values are the only thing
               setting width, so auto layout would re-flow the whole rail whenever a
               computer name changed length. */}
@@ -610,6 +650,8 @@ export function HubCard({
                       )}
                     </div>
                     <OutdatedNote computer={computer} />
+                    <ComputerFaults computerId={computer.id} />
+                    <ComputerUnattachedSessions computerId={computer.id} />
                   </td>
                   {/* The same component the hub header uses, so the dot, the
                       truncation and the tone are identical rather than merely
@@ -698,6 +740,22 @@ export function HubCard({
                           )}
                         </Button>
                       )}
+                      {/* Replace: an OFFLINE computer whose machine enrolled again under a
+                        new id (its credentials lost) — its work moves to the new row. Not
+                        a connected one (it is still itself), not the app's own. */}
+                      {!computer.connected &&
+                        !isOwnComputer(computer) &&
+                        computers.some((c) => c.id !== computer.id) && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Replace with… — this machine was enrolled again under a new id"
+                            onClick={() => askReplace(computer)}
+                            data-testid="computer-replace"
+                          >
+                            <ArrowLeftRight className="size-3.5" />
+                          </Button>
+                        )}
                       {/* The app's own computer is never deleted, on any hub: the app
                         joins every hub it lists, so it would only enroll it again —
                         and on the local hub nothing on this machine could run until
@@ -902,6 +960,9 @@ export function HubCard({
               )}
             </tbody>
           </table>
+          {/* The hub's own (backups, erasure, project sync): admin only, else nothing. */}
+          <ComputerFaults computerId={null} title="This hub needs attention" />
+          <HubUsersSection />
         </>
       }
     />

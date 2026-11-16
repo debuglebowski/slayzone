@@ -84,7 +84,7 @@ interface TreeSidebarProps {
   createInputRef: (node: HTMLInputElement | null) => void
   renameInputRef: RefObject<HTMLInputElement | null>
   preventAutoFocus: (e: Event) => void
-  willCreateRef: RefObject<boolean>
+  inputTakesFocusRef: RefObject<boolean>
   // Drag-drop
   dropTargetFolder: string | null
   handleFolderDragOver: (folderId: string) => (e: React.DragEvent) => void
@@ -144,7 +144,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
     createInputRef,
     renameInputRef,
     preventAutoFocus,
-    willCreateRef,
+    inputTakesFocusRef,
     dropTargetFolder,
     handleFolderDragOver,
     handleFolderDragLeave,
@@ -254,7 +254,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
                   <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
                     <ContextMenuItem
                       onSelect={() => {
-                        willCreateRef.current = true
+                        inputTakesFocusRef.current = true
                         setCreating({ parentFolderId: folder.id, type: 'file' })
                       }}
                     >
@@ -262,7 +262,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
                     </ContextMenuItem>
                     <ContextMenuItem
                       onSelect={() => {
-                        willCreateRef.current = true
+                        inputTakesFocusRef.current = true
                         setCreating({ parentFolderId: folder.id, type: 'folder' })
                       }}
                     >
@@ -370,7 +370,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         )}
                       </button>
                     </ContextMenuTrigger>
-                    <ContextMenuContent>
+                    <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
                       <ContextMenuItem
                         onSelect={() => handleArtifactCut(getEffectiveArtifactIds(artifact.id))}
                       >
@@ -525,7 +525,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
       <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
         <ContextMenuItem
           onSelect={() => {
-            willCreateRef.current = true
+            inputTakesFocusRef.current = true
             setCreating({ parentFolderId: null, type: 'file' })
           }}
         >
@@ -533,7 +533,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
         </ContextMenuItem>
         <ContextMenuItem
           onSelect={() => {
-            willCreateRef.current = true
+            inputTakesFocusRef.current = true
             setCreating({ parentFolderId: null, type: 'folder' })
           }}
         >

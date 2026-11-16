@@ -1,7 +1,7 @@
 import { existsSync, createReadStream, readFileSync, realpathSync } from 'fs'
-import { open, readdir, stat } from 'fs/promises'
+import { open, readdir, realpath, stat } from 'fs/promises'
 import { homedir } from 'os'
-import { join } from 'path'
+import { isAbsolute, join, relative } from 'path'
 import { createInterface } from 'readline'
 
 /**
@@ -75,7 +75,9 @@ export interface ClaudeTranscriptLocation {
    * The folder the session last worked in, when it is NOT the folder the caller
    * asked about: a session that used EnterWorktree keeps its transcript only under
    * the worktree's project dir. Set only when that folder exists, passes
-   * `isAllowedDir`, and is the folder whose project dir holds the file (so the
+   * `isAllowedDir`, lies inside the folder asked about (a worktree of it — never
+   * another project's folder, which a task moved away from still has), and is the
+   * folder whose project dir holds the file (so the
    * CLI started there finds it in its own project dir). Null = resume in the
    * folder asked about (the file is there, or no recorded folder qualifies; the
    * CLI then finds a cross-project session by id itself).
@@ -213,10 +215,18 @@ export async function locateClaudeTranscript(
   const qualifies =
     recorded != null &&
     recorded !== hintCwd &&
+    (hintCwd === '' || (await isSameOrInside(recorded, hintCwd))) &&
     (opts.isAllowedDir?.(recorded) ?? true) &&
     (await isDirectory(recorded)) &&
     projectDirNamesFor(recorded).includes(best.dirName)
   return { path: best.path, resumeCwd: qualifies ? recorded : null }
+}
+
+/** `dir` is `root` or a folder inside it (symlinks resolved where they exist). */
+async function isSameOrInside(dir: string, root: string): Promise<boolean> {
+  const real = (p: string): Promise<string> => realpath(p).catch(() => p)
+  const rel = relative(await real(root), await real(dir))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
 export interface ClaudeTranscriptMeta {

@@ -2,14 +2,16 @@
  * Claude Code chat: compaction, local slash-command output, the context meter,
  * the CLI's own `/` commands and prompt history — as a reopened chat shows them.
  *
- * No agent subprocess: the session is seeded straight into `chat_events` (shapes
+ * No agent subprocess: the session is seeded straight into the chat's event log on its computer (`chat.testSeedEvents`) (shapes
  * from the recorded CLI 2.1.312 transcripts in terminal/test/fixtures/claude-stream/
- * chatui-*.ndjson) and the task's prompt history into `agent_prompts`, which
- * chat.hydrate + the composer load without spawning (startup = manual). Nothing
+ * chatui-*.ndjson) and the task's prompt history onto its computer (where prompts
+ * live, robustness plan §9), which chat.hydrate + the composer load without
+ * spawning (startup = manual). Nothing
  * here presses Enter on a command — that would start a real CLI.
  */
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { seedChatEvents } from '../fixtures/chat-seed'
 
 const MODEL = 'claude-haiku-5-5'
 
@@ -100,7 +102,7 @@ const PROMPTS = [
 test.describe('Claude chat: compaction, context meter, slash commands, prompt history', () => {
   let taskId = ''
 
-  test.beforeAll(async ({ mainWindow, electronApp }) => {
+  test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     await mainWindow.evaluate(() =>
       window
@@ -131,27 +133,22 @@ test.describe('Claude chat: compaction, context meter, slash commands, prompt hi
       return tab.id
     }, taskId)
 
-    await electronApp.evaluate(
-      async ({}, { tab, task, evs, prompts }) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        for (const [seq, ev] of evs.entries()) {
-          await db.run('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)', [
-            tab,
-            seq,
-            JSON.stringify(ev)
-          ])
-        }
-        for (const [i, p] of prompts.entries()) {
-          await db.run(
-            `INSERT INTO agent_prompts (id, task_id, agent_id, cli_session_id, text, created_at)
-             VALUES (?, ?, ?, NULL, ?, ?)`,
-            [`seeded-prompt-${i}`, task, p.agent, p.text, p.at]
-          )
-        }
-      },
-      { tab: tabId, task: taskId, evs: EVENTS, prompts: PROMPTS }
+    // Seeded on the chat's computer, where chat history lives (robustness plan §9;
+    // the hub's legacy chat tables are gone once nothing is left to migrate).
+    await seedChatEvents(mainWindow, tabId, EVENTS)
+    await mainWindow.evaluate(
+      ({ task, prompts }) =>
+        window.getTrpcVanillaClient().chat.testSeedPrompts.mutate({
+          taskId: task,
+          prompts: prompts.map((p, i) => ({
+            id: `seeded-prompt-${i}`,
+            agentId: p.agent,
+            cliSessionId: null,
+            text: p.text,
+            createdAt: p.at
+          }))
+        }),
+      { task: taskId, prompts: PROMPTS }
     )
     await s.refreshData()
     await openTaskViaSearch(mainWindow, 'Chat compaction task')

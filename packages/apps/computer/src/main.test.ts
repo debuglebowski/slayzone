@@ -1,5 +1,6 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { join } from 'node:path'
 import {
   HubDialer,
@@ -13,9 +14,12 @@ import {
   RpcError
 } from '@slayzone/computer-transport/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { EventLoopStall } from '@slayzone/platform/event-loop-stall'
 import type { ComputerConfig } from './config'
 import type { ComputerDialer } from './handlers/types'
 import { createHubRequestHandler, startComputer, watchPrimaryHubExitCode } from './main'
+import { projectScopedDeps } from './project-scope.fixture'
+import { hubHostFromUrl } from '@slayzone/computer-transport/client'
 
 const fakeDialer: ComputerDialer = { notify: () => true }
 
@@ -89,6 +93,20 @@ describe('createHubRequestHandler dispatch table', () => {
     }
   })
 
+  it('a request naming a path scope it cannot confine fails closed, never runs unscoped', async () => {
+    // No chat store here (no computer identity): the scope's roots are unknowable,
+    // so the request is refused rather than judged by the machine bound alone.
+    const { handle } = makeDispatch()
+    const scoped = { ...ACTOR, pathScope: { kind: 'project', projectId: 'p1' } }
+    await expect(
+      handle(HubToComputerMethods.fsPathExists, { path: '/tmp' }, scoped)
+    ).rejects.toThrow()
+    // The same request without a scope still runs.
+    await expect(
+      handle(HubToComputerMethods.fsPathExists, { path: '/tmp' }, ACTOR)
+    ).resolves.toBeTruthy()
+  })
+
   it('routes implemented methods (git.isGitRepo does not throw unimplemented)', async () => {
     const { handle } = makeDispatch()
     // /tmp is inside allowedRoots but not a git repo → resolves to
@@ -153,6 +171,7 @@ describe('createHubRequestHandler dispatch table', () => {
     const root = realpathSync(tmpdir())
     let out = ''
     const { handle, dispose } = createHubRequestHandler({
+      ...projectScopedDeps({ p1: root }),
       shutdown: () => {},
       dialer: {
         notify: (method, params) => {
@@ -167,6 +186,7 @@ describe('createHubRequestHandler dispatch table', () => {
       HubToComputerMethods.ptySpawn,
       {
         sessionId: 'hub-address-dispatch',
+        projectId: 'p1',
         command: 'sh',
         args: ['-c', 'echo ADDR=[$SLAYZONE_HUB_ADDRESS]'],
         cwd: root,
@@ -282,6 +302,17 @@ describe('startComputer direct link (docs/direct-link.md)', () => {
   it('binds the loopback listener, then dials, advertising the bound address', async () => {
     const seen: Array<{ started: boolean; address: string | null }> = []
     let identity: { directAddress?: () => string | null } | undefined
+    // The terminal is a project's: its folder here is where it may start (§9 Phase 7c).
+    const slayRoot = mkdtempSync(join(tmpdir(), 'direct-seam-root-'))
+    writeFileSync(
+      join(slayRoot, 'computer.projects.json'),
+      JSON.stringify({
+        [hubHostFromUrl(testConfig.hubUrl)]: {
+          p1: { path: realpathSync(process.cwd()), updatedAt: 0 }
+        }
+      })
+    )
+    vi.stubEnv('SLAYZONE_ROOT', slayRoot)
     const handle = startComputer(testConfig, {
       credentialStore: memoryStore(),
       stateDir: tempState(),
@@ -357,6 +388,48 @@ describe('startComputer direct link: WebRTC addon off the boot path', () => {
       await handle.stop()
     }
   })
+
+  it('stops advertising WebRTC once the addon fails to load', async () => {
+    // A binary on disk that still cannot load (corrupt, wrong ABI): the next hello
+    // must not invite more offers that cannot be answered.
+    let identity: { directRtc?: () => boolean } | undefined
+    let onHubRequest:
+      | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
+      | undefined
+    let started = false
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      rtc: { available: () => true, load: () => null },
+      createDialer: (options) => {
+        identity = options.identity as typeof identity
+        onHubRequest = options.onHubRequest as typeof onHubRequest
+        return {
+          events: { on: () => undefined },
+          computerId: null,
+          start: () => {
+            started = true
+          },
+          stop: async () => undefined,
+          notify: () => true
+        } as never
+      }
+    })
+    try {
+      await vi.waitFor(() => expect(started).toBe(true))
+      expect(identity?.directRtc?.()).toBe(true)
+      await expect(
+        onHubRequest?.(
+          HubToComputerMethods.directRtcOffer,
+          { grantId: 'g', sdp: 'v=0', stunAddresses: [], clientAddress: null },
+          ACTOR
+        )
+      ).rejects.toThrow(/no WebRTC/)
+      expect(identity?.directRtc?.()).toBe(false)
+    } finally {
+      await handle.stop()
+    }
+  })
 })
 
 describe('startComputer direct link: a hub grant reaches that hub’s terminals', () => {
@@ -369,6 +442,17 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
       | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
       | undefined
     let identity: { directAddress?: () => string | null } | undefined
+    // The terminal is a project's: its folder here is where it may start (§9 Phase 7c).
+    const slayRoot = mkdtempSync(join(tmpdir(), 'direct-seam-root-'))
+    writeFileSync(
+      join(slayRoot, 'computer.projects.json'),
+      JSON.stringify({
+        [hubHostFromUrl(testConfig.hubUrl)]: {
+          p1: { path: realpathSync(process.cwd()), updatedAt: 0 }
+        }
+      })
+    )
+    vi.stubEnv('SLAYZONE_ROOT', slayRoot)
     const handle = startComputer(
       { ...testConfig, allowedRoots: [realpathSync(tmpdir()), process.cwd()] },
       {
@@ -379,7 +463,7 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
           onHubRequest = options.onHubRequest as typeof onHubRequest
           return {
             events: { on: () => undefined },
-            computerId: null,
+            computerId: 'direct-seam-computer',
             start: () => undefined,
             stop: async () => undefined,
             notify: () => true
@@ -403,7 +487,7 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
       )
       await onHubRequest?.(
         HubToComputerMethods.ptySpawn,
-        { sessionId: 'seam-1', command: 'cat', cwd: process.cwd(), relay: false },
+        { sessionId: 'seam-1', projectId: 'p1', command: 'cat', cwd: process.cwd(), relay: false },
         ACTOR
       )
       await onHubRequest?.(
@@ -433,6 +517,8 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
       }
     } finally {
       await handle.stop()
+      vi.unstubAllEnvs()
+      rmSync(slayRoot, { recursive: true, force: true })
     }
   })
 })
@@ -503,8 +589,23 @@ describe('startComputer runtime secondary hubs', () => {
       expect(b.options.identity.platform).toBe(of(PRIMARY)[0].options.identity.platform)
       // Marked as a desktop's own computer joined there, so that hub never prefers it
       // over a computer its user already had; the primary reports exactly its own.
-      expect(b.options.identity.capabilities).toEqual([...testConfig.capabilities, 'desktop'])
-      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual(testConfig.capabilities)
+      expect(b.options.identity.capabilities).toEqual([
+        ...testConfig.capabilities,
+        AI_CONFIG_HASH_CAPABILITY,
+        'desktop'
+      ])
+      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual([
+        ...testConfig.capabilities,
+        AI_CONFIG_HASH_CAPABILITY
+      ])
+      expect(b.options.identity.aiConfigHashFiles).toBe(true)
+      expect(of(PRIMARY)[0].options.identity.aiConfigHashFiles).toBe(true)
+      for (const identity of [b.options.identity, of(PRIMARY)[0].options.identity])
+        expect(identity).toMatchObject({
+          chatHistoryPages: true,
+          chatTimelineRowSlices: true,
+          promptSummariesAll: true
+        })
       // A spent token is recovered by asking the parent for a fresh one, per hub.
       expect(await b.options.refreshJoinToken!()).toBe(`fresh-for-${B}`)
       // The primary is wired exactly as before: no refresh hook, its own token.
@@ -701,5 +802,60 @@ describe('startComputer runtime secondary hubs', () => {
     } finally {
       await handle.stop()
     }
+  })
+})
+
+describe('startComputer event-loop stalls', () => {
+  it('runs the stall sampler, reports each stall to the hub, and stops it on stop', async () => {
+    let onStall: ((stall: EventLoopStall) => void) | undefined
+    let stopped = 0
+    const sent: Array<{ method: string; params: unknown }> = []
+    const lines: string[] = []
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      log: (message) => lines.push(message),
+      startStallDetector: (opts) => {
+        onStall = opts.onStall
+        return { stop: () => stopped++ }
+      },
+      createDialer: () =>
+        ({
+          events: { on: () => () => undefined },
+          computerId: null,
+          start: () => undefined,
+          stop: async () => undefined,
+          notify: (method: string, params?: unknown) => {
+            sent.push({ method, params })
+            return true
+          }
+        }) as never
+    })
+    try {
+      expect(onStall).toBeDefined()
+      onStall!({
+        startedAt: 1,
+        durationMs: 3_000,
+        mainThreadCpuMs: 2_900,
+        processCpuMs: 2_950,
+        gcMs: 0,
+        machineCpuBusyPct: null,
+        stacks: [],
+        children: []
+      })
+      expect(sent).toEqual([
+        {
+          method: 'event',
+          params: {
+            name: 'event-loop-stall',
+            payload: expect.objectContaining({ durationMs: 3_000 })
+          }
+        }
+      ])
+      expect(lines.some((l) => l.includes('event loop stall'))).toBe(true)
+    } finally {
+      await handle.stop()
+    }
+    expect(stopped).toBe(1)
   })
 })

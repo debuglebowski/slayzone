@@ -54,6 +54,8 @@ import {
   ProcRefusalReasons,
   type ProcSpawnParams,
   procSpawnParamsSchema,
+  procPrioritizeParamsSchema,
+  type ProcPrioritizeResult,
   procStatsParamsSchema,
   type ProcStatsResult,
   type ProcWriteResult,
@@ -74,7 +76,7 @@ import {
   type SpawnAdmission
 } from '../spawn-admission'
 import { terminateTree } from '../terminate-tree'
-import { resolveCommand } from './resolve-command'
+import { resolveCommand } from '@slayzone/platform'
 import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -84,6 +86,7 @@ const MAX_BUFFER_SIZE = 750 * 1024
 /** Re-exported for tests + main.ts wiring. Values come from the shared contract. */
 export const ProcMethods = {
   procSpawn: HubToComputerMethods.procSpawn,
+  procPrioritize: HubToComputerMethods.procPrioritize,
   procKill: HubToComputerMethods.procKill,
   procWrite: HubToComputerMethods.procWrite,
   procGetBufferSince: HubToComputerMethods.procGetBufferSince,
@@ -103,6 +106,9 @@ const REAP_ESCALATE_MS = 2_000
 const WRITE_ID_MEMORY = 256
 
 interface ProcSession {
+  cwd: string
+  taskId?: string
+  erased?: boolean
   revokeCli?: () => void
   child: ChildProcess
   /** stdout only — the replayable stream. */
@@ -121,6 +127,7 @@ interface ProcSession {
 
 /** An admitted spawn waiting for its start slot. */
 interface QueuedProcSpawn {
+  taskId?: string
   spawnId?: string
   ticket: AdmissionTicket
   promise: Promise<{ pid: number | null }>
@@ -129,7 +136,12 @@ interface QueuedProcSpawn {
 }
 
 export interface ProcHandlers {
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
+  hasTaskWork(taskId: string): boolean
+  stopTask(taskId: string): Promise<void>
   hasWork(): boolean
+  /** Pids of this hub's live processes (stall reports name only a hub's own). */
+  ownedPids(): number[]
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
@@ -140,6 +152,7 @@ export interface ProcHandlers {
 }
 
 export interface ProcHandlerOptions {
+  assertTaskActive?: (taskId: string) => void
   /** The computer-wide agent-start queue (see spawn-admission.ts); tests get a private one. */
   admission?: SpawnAdmission
   /**
@@ -150,6 +163,8 @@ export interface ProcHandlerOptions {
   groupLedgerPath?: string
   /** Tests only: the host identity entries are recorded under. */
   ledgerOwner?: LedgerOwner
+  /** Tests only: starts the child process (default: `child_process.spawn`). */
+  spawnProcess?: typeof spawn
 }
 
 function refuse(reason: string, message: string, data: Record<string, unknown> = {}): RpcError {
@@ -171,6 +186,7 @@ export function createProcHandlers(
   const procs = new Map<string, ProcSession>()
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
+  const spawnProcess = options.spawnProcess ?? spawn
   const queued = new Map<string, QueuedProcSpawn>()
   const ledger =
     options.groupLedgerPath && PROCESS_TREE_DETACHED
@@ -227,6 +243,7 @@ export function createProcHandlers(
       reject = rej
     })
     const item: QueuedProcSpawn = {
+      taskId: params.taskId ?? params.env?.SLAYZONE_TASK_ID,
       ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {}),
       ticket: undefined as unknown as AdmissionTicket,
       promise,
@@ -255,7 +272,20 @@ export function createProcHandlers(
     return promise
   }
 
+  /**
+   * Someone is waiting on this agent now: a spawn still queued for an agent-start
+   * slot goes next (the chat counterpart of `pty.prioritize`).
+   */
+  function procPrioritize(rawParams: unknown): ProcPrioritizeResult {
+    const { sessionId } = procPrioritizeParamsSchema.parse(rawParams)
+    const item = queued.get(sessionId)
+    return { ok: true, queued: item ? admission.prioritize(item.ticket) : false }
+  }
+
   function startProc(params: ProcSpawnParams, slot: AdmissionSlot | null): { pid: number | null } {
+    ctx.assertWorkAllowed?.()
+    const taskId = params.taskId ?? params.env?.SLAYZONE_TASK_ID
+    if (taskId) options.assertTaskActive?.(taskId)
     if (params.spawnId !== undefined) {
       const live = procs.get(params.sessionId)
       // The hub re-sent an attempt whose reply it lost: this process IS it.
@@ -311,7 +341,7 @@ export function createProcHandlers(
       : { file: params.command, args: params.args ?? [] }
     let child: ChildProcess
     try {
-      child = spawn(invocation.file, invocation.args, {
+      child = spawnProcess(invocation.file, invocation.args, {
         ...(cwd ? { cwd } : {}),
         env,
         // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
@@ -326,6 +356,8 @@ export function createProcHandlers(
     }
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: ProcSession = {
+      cwd,
+      taskId,
       revokeCli: capability?.revoke,
       child,
       buffer,
@@ -364,12 +396,14 @@ export function createProcHandlers(
       }
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
+      if (session.erased) return
       const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
         sessionId: params.sessionId,
         ...tag,
         ...payload
       })
       tombstones.add(params.sessionId, {
+        taskId: session.taskId,
         spawnId: session.spawnId,
         ...(typeof child.pid === 'number' ? { pid: child.pid } : {}),
         exitCode: payload.exitCode,
@@ -383,7 +417,7 @@ export function createProcHandlers(
     const stderrDecoder = new StringDecoder('utf8')
     const emitStdout = (data: string): void => {
       // A chunk that ended mid-character decodes to '' until the rest arrives.
-      if (!data || procs.get(params.sessionId) !== session) return
+      if (!data || session.erased || procs.get(params.sessionId) !== session) return
       // Buffer + stream the SAME text under the same seq: the hub's demux keeps
       // whichever copy of a seq arrives first (live or backfilled) and emits it
       // once, so any per-seq divergence would make output depend on timing.
@@ -397,7 +431,7 @@ export function createProcHandlers(
       })
     }
     const emitStderr = (data: string): void => {
-      if (!data || procs.get(params.sessionId) !== session) return
+      if (!data || session.erased || procs.get(params.sessionId) !== session) return
       // Unsequenced: stderr is diagnostic, never protocol, and is not replayable.
       ctx.dialer.notify(ProcNotifications.procData, {
         sessionId: params.sessionId,
@@ -616,6 +650,7 @@ export function createProcHandlers(
 
   const handlers: HubMethodTable = {
     [ProcMethods.procSpawn]: procSpawn,
+    [ProcMethods.procPrioritize]: procPrioritize,
     [ProcMethods.procKill]: procKill,
     [ProcMethods.procWrite]: procWrite,
     [ProcMethods.procGetBufferSince]: procGetBufferSince,
@@ -624,7 +659,31 @@ export function createProcHandlers(
   }
 
   return {
+    async stopTask(taskId: string) {
+      for (const [id, item] of queued)
+        if (item.taskId === taskId) {
+          admission.cancel(item.ticket)
+          queued.delete(id)
+          item.reject(new Error('Task was permanently erased'))
+        }
+      for (const [id, session] of procs)
+        if (session.taskId === taskId) {
+          session.erased = true
+          const result = await procKill({ sessionId: id, spawnId: session.spawnId })
+          if (!result.clean) throw new Error('Task process could not be stopped')
+          if (procs.get(id) === session) procs.delete(id)
+          session.buffer = new RingBuffer(MAX_BUFFER_SIZE)
+        }
+      tombstones.forgetTask(taskId)
+    },
+    hasTaskWork: (taskId: string) =>
+      [...procs.values(), ...queued.values()].some((s) => s.taskId === taskId),
+    hasFolderWork: (contains) => [...procs.values()].some((session) => contains(session.cwd)),
     hasWork: () => procs.size > 0 || queued.size > 0,
+    ownedPids: () =>
+      [...procs.values()]
+        .map((session) => session.child.pid)
+        .filter((pid): pid is number => typeof pid === 'number'),
     handlers,
     disposeAll,
     orphansReaped,

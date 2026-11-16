@@ -10,16 +10,18 @@ export function handoffPartner(mode: string): string | null {
   return terminalAgentIdForChat(mode) ?? chatAgentIdForTerminal(mode)
 }
 
-/** Every session of the task's main agent AND of its hand-off partner (`mergeFamilySessions`). */
+/** Every session of a tab's agent AND of its hand-off partner (`mergeFamilySessions`).
+ *  `tabId`: the terminal tab asking (default: the main tab). */
 export function useFamilySessions(
   taskId: string,
   mode: string,
-  enabled: boolean
+  enabled: boolean,
+  tabId?: string
 ): FamilySessionRow[] {
   const partner = handoffPartner(mode)
-  const own = useTaskSessions(taskId, mode, enabled)
+  const own = useTaskSessions(taskId, mode, enabled, tabId)
   // Always called (hook order); disabled without a partner.
-  const other = useTaskSessions(taskId, partner ?? '', enabled && partner !== null)
+  const other = useTaskSessions(taskId, partner ?? '', enabled && partner !== null, tabId)
   return useMemo(
     () => mergeFamilySessions({ mode, own, partner, other }),
     [own, other, mode, partner]

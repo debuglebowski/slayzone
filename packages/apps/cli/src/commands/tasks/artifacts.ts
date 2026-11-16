@@ -26,6 +26,9 @@ import {
   apiPutStream
 } from '../../api'
 import { cliAuthor, resolveId } from './_shared'
+import type { ArtifactExportFormat } from '@slayzone/task-artifacts/export-html'
+import { planTaskDownload, safeFileName } from '@slayzone/task-artifacts/download-plan'
+import { saveNew, saveReplacing, type WriteBody } from '../../save-file'
 
 /*
  * Hub/computer split (Wave 3.5): the subcommands below route through api.ts — the
@@ -41,7 +44,6 @@ import { cliAuthor, resolveId } from './_shared'
  *   upload      → POST   /api/tasks/:id/artifacts?title=                    (raw body)
  *   delete      → DELETE /api/artifacts/:id
  *   download    → GET    /api/artifacts/:id (metadata) + /api/artifacts/:id/content
- *                 POST   /api/artifacts/:id/export/{pdf,png,html}
  *   search      → GET    /api/artifacts/search?q=…
  *   write       → PUT    /api/artifacts/:id/content   (raw body)
  *   append      → POST   /api/artifacts/:id/content   (raw body)
@@ -77,10 +79,11 @@ import { cliAuthor, resolveId } from './_shared'
  *
  * `download --type zip` still ASSEMBLES the archive locally (streaming each
  * member's bytes in over the content route) — a hub-side zip endpoint would be a
- * new capability, not a wiring change. `--type pdf|png|html` post to the existing
- * export routes; the CAPABILITY check stays client-side so its wording and its
- * "available types for <mode>" hint survive (an export route only knows its own
- * single type).
+ * new capability, not a wiring change. `--type pdf|png|html` are RENDERED HERE, on
+ * the machine the CLI runs on: the content streams in over the content route, the
+ * shared export document is built from it, and pdf/png rasterise in a local headless
+ * browser (see ../../export/export-artifact.ts). The hub writing the file to its OWN
+ * disk was wrong for a remote hub and impossible for a standalone one.
  *
  *   path        → GET    /api/artifacts/:id  (reads the `filePath` field)
  *
@@ -281,6 +284,30 @@ async function streamToStdout(body: ReadableStream<Uint8Array>): Promise<void> {
  */
 async function openArtifactInApp(artifactId: string): Promise<void> {
   await apiFetch(`/api/open-artifact/${encodeURIComponent(artifactId)}`, { method: 'POST' })
+}
+
+/**
+ * A zip entry whose bytes stopped arriving partway (the hub dropped the connection,
+ * or it failed mid-body): names the entry, and the lower-level cause undici hides
+ * behind its bare `terminated`.
+ */
+function entryDownloadError(entryPath: string, err: Error): Error {
+  const cause = err.cause instanceof Error ? `: ${err.cause.message}` : ''
+  return new Error(
+    `Downloading "${entryPath}" from the hub failed partway (${err.message}${cause}). Nothing was saved.`,
+    { cause: err }
+  )
+}
+
+/**
+ * Where a download lands. `--output`: that path, replacing what is there (the person
+ * chose it). Otherwise `name` in the cwd, numbered `name (2).ext` when taken — the
+ * name comes from a title, so it must never overwrite (or write through a symlink to)
+ * a file that happens to share it. Either way the bytes land whole or not at all
+ * (see save-file.ts). Returns the final path.
+ */
+function saveDownload(output: string | undefined, name: string, write: WriteBody): Promise<string> {
+  return output ? saveReplacing(path.resolve(output), write) : saveNew(process.cwd(), name, write)
 }
 
 function getAvailableExportTypes(mode: RenderMode): string[] {
@@ -781,13 +808,77 @@ export function artifactsSubcommand(): Command {
       }
     })
 
+  // slay tasks artifacts move-to-task <destTaskId> [entryIds...]
+  cmd
+    .command('move-to-task <destTaskId> [entryIds...]')
+    .addHelpText(
+      'after',
+      `
+Entry IDs are artifact or folder IDs (prefixes ok); a folder moves with everything in it.
+Examples:
+  slay tasks artifacts move-to-task <dest> --all --from <src>
+  slay tasks artifacts move-to-task <dest> <artifactId> <folderId> --into <destFolderId>`
+    )
+    .description(
+      'Move artifacts and folders (with their contents) to another task, keeping ids, versions and artifact: links'
+    )
+    .option('--all', 'Move every top-level artifact and folder of the source task')
+    .option(
+      '--from <taskId>',
+      "Source task (default: the entries' task, or $SLAYZONE_TASK_ID with --all)"
+    )
+    .option('--into <folderId>', 'Destination folder in the target task (default: top level)')
+    .option('--json', 'Output as JSON')
+    .action(async (destTaskId: string, entryIds: string[], opts) => {
+      const sourceTaskId: string | undefined =
+        opts.from ?? (opts.all ? process.env.SLAYZONE_TASK_ID : undefined)
+      if (opts.all && !sourceTaskId) {
+        console.error('--all needs --from <taskId> (or $SLAYZONE_TASK_ID)')
+        process.exit(1)
+      }
+      if (!opts.all && entryIds.length === 0) {
+        console.error('Name artifact/folder IDs to move, or pass --all')
+        process.exit(1)
+      }
+      const { data } = await apiPost<{
+        ok: true
+        data: {
+          artifacts: ArtifactRow[]
+          folders: ArtifactFolderRow[]
+          destTaskId: string
+          destTaskTitle: string
+        }
+      }>('/api/artifacts/move', {
+        destTaskId,
+        ...(sourceTaskId ? { sourceTaskId } : {}),
+        entryIds,
+        destFolderId: opts.into ?? null,
+        all: opts.all === true
+      })
+      if (opts.json) {
+        console.log(JSON.stringify(data))
+      } else {
+        console.log(
+          `Moved ${data.artifacts.length} artifact(s), ${data.folders.length} folder(s) -> ${data.destTaskId.slice(0, 8)}  ${data.destTaskTitle}`
+        )
+      }
+    })
+
   // slay tasks artifacts download [artifactId]
   cmd
     .command('download [artifactId]')
     .description('Download an artifact in a given format')
     .option('--type <type>', 'Export type: raw, pdf, png, html, zip', 'raw')
-    .option('--output <path>', 'Output file path (default: ./<filename>)')
+    .option(
+      '--output <path>',
+      'Output file path, replaced if it exists (default: ./<filename>, numbered "<name> (2).<ext>" if taken)'
+    )
     .option('--task <id>', 'Task ID for zip (or $SLAYZONE_TASK_ID)')
+    .option('--browser <path>', 'pdf/png: Chrome/Chromium/Edge executable to render with')
+    .option(
+      '--install-browser',
+      'pdf/png: if no browser is found, download headless Chromium (~100 MB, once)'
+    )
     .option('--json', 'Output as JSON')
     .addHelpText(
       'after',
@@ -799,7 +890,9 @@ Download Types by Render Mode:
   html  — markdown, code, mermaid
   zip   — all artifacts in task (no artifactId needed)
 
-pdf/png/html require the SlayZone app to be running.
+pdf/png/html are rendered on this machine. html needs nothing else; pdf/png use a
+local headless browser: --browser <path>, else an installed Chrome, Chromium, Edge
+or Brave, else Chromium from an earlier --install-browser (kept in the user cache).
 `
     )
     .action(async (artifactId: string | undefined, opts) => {
@@ -829,39 +922,69 @@ pdf/png/html require the SlayZone app to be running.
           process.exit(1)
         }
 
-        const outputPath = opts.output ? path.resolve(opts.output) : path.resolve('artifacts.zip')
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true })
+        // Entry names from the shared planner (desktop and web use it too): titles
+        // and folder names are free text, so every entry is `/`-separated plain
+        // segments legal on every OS (no `..`, drive, backslash or reserved name — nothing
+        // that could escape wherever the zip is extracted), and duplicates are
+        // numbered `name (2).ext` instead of becoming two entries with one name.
+        const plan = planTaskDownload(folders, artifacts)
 
-        const byId = new Map(folders.map((f) => [f.id, f]))
-        function folderPath(id: string): string {
-          const f = byId.get(id)
-          if (!f) return ''
-          return f.parent_id ? path.join(folderPath(f.parent_id), f.name) : f.name
-        }
-
-        const output = fs.createWriteStream(outputPath)
-        const archive = new ZipArchive({ zlib: { level: 9 } })
-        archive.pipe(output)
-
-        for (const artifact of artifacts) {
-          // A row whose working copy is absent was SKIPPED before (`if
-          // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
-          // rather than failing the whole archive.
-          const { body } = await apiGetStream(
-            `/api/artifacts/${encodeURIComponent(artifact.id)}/content`,
-            [ARTIFACT_FILE_MISSING]
-          )
-          if (!body) continue
-          const rel = artifact.folder_id
-            ? path.join(folderPath(artifact.folder_id), artifact.title)
-            : artifact.title
-          archive.append(Readable.fromWeb(body as StreamWebReadable), { name: rel })
-        }
-
-        await archive.finalize()
-        await new Promise<void>((resolve, reject) => {
-          output.on('close', resolve)
-          output.on('error', reject)
+        const outputPath = await saveDownload(opts.output, 'artifacts.zip', async (output) => {
+          const archive = new ZipArchive({ zlib: { level: 9 } })
+          // Fails as soon as the archive or the output does (disk full, an unwritable
+          // target, a dropped body): every wait below is raced against it, so such a
+          // failure ends the download at once instead of leaving `finalize()` waiting
+          // on a destroyed archive forever.
+          const written = pipeline(archive, output)
+          written.catch(() => undefined)
+          const orFail = <T>(p: Promise<T>): Promise<T> => Promise.race([p, written.then(() => p)])
+          let body: Readable | undefined
+          try {
+            for (const entry of plan) {
+              // A row whose working copy is absent was SKIPPED before (`if
+              // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
+              // rather than failing the whole archive.
+              const res = await orFail(
+                apiGetStream(`/api/artifacts/${encodeURIComponent(entry.artifactId)}/content`, [
+                  ARTIFACT_FILE_MISSING
+                ])
+              )
+              if (!res.body) continue
+              const source = Readable.fromWeb(res.body as StreamWebReadable)
+              body = source
+              // One entry at a time: the next is fetched once this one is in the
+              // archive, so a large task never holds every response open at once, and
+              // nothing more is fetched after a failure. A body that fails partway
+              // (the hub drops the connection) fails the download here: archiver
+              // does not listen to its sources' errors, so unheard it would crash
+              // `slay` with an unhandled 'error' and never emit 'entry'.
+              const added = new Promise<void>((resolve, reject) => {
+                const onError = (err: Error): void => {
+                  archive.off('entry', onEntry)
+                  reject(entryDownloadError(entry.path, err))
+                }
+                const onEntry = (): void => {
+                  source.off('error', onError)
+                  resolve()
+                }
+                source.once('error', onError)
+                archive.once('entry', onEntry)
+              })
+              // Only awaited below; a failure after another one ended the download
+              // must not surface as an unhandled rejection.
+              added.catch(() => undefined)
+              archive.append(source, { name: entry.path })
+              await orFail(added)
+              body = undefined
+            }
+            await orFail(archive.finalize())
+            await written
+          } catch (err) {
+            archive.abort()
+            // An unread response keeps its connection (and `slay`) alive.
+            body?.destroy()
+            throw err
+          }
         })
 
         if (opts.json) {
@@ -882,17 +1005,15 @@ pdf/png/html require the SlayZone app to be running.
         process.exit(1)
       }
 
-      // The artifact row (title + render_mode) drives both the default output
-      // filename and the export-capability check. GET /api/artifacts/:id resolves
-      // the id prefix and returns the raw row — added for exactly this, since the
-      // capability check has to stay client-side to keep its wording + the
-      // "available types" hint (the export routes only know their own one type).
+      // The artifact row (title + render_mode) drives the default output filename,
+      // the export-capability check (with its "available types" hint) and which
+      // export document is built. GET /api/artifacts/:id resolves the id prefix and
+      // returns the raw row.
       const { data: artifact } = await apiGet<{ ok: true; data: ArtifactRow }>(
         `/api/artifacts/${encodeURIComponent(artifactId)}`
       )
 
       const mode = getEffectiveRenderMode(artifact.title, artifact.render_mode as RenderMode | null)
-      const baseName = artifact.title.replace(/\.[^.]+$/, '') || artifact.title
 
       // --- RAW ---
       if (opts.type === 'raw') {
@@ -901,11 +1022,11 @@ pdf/png/html require the SlayZone app to be running.
         const { body } = await apiGetStream(
           `/api/artifacts/${encodeURIComponent(artifact.id)}/content`
         )
-        const outputPath = opts.output ? path.resolve(opts.output) : path.resolve(artifact.title)
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-        await pipeline(
-          Readable.fromWeb(body as StreamWebReadable),
-          fs.createWriteStream(outputPath)
+        // No --output: the title's name in the cwd, never a path the title spells out.
+        const outputPath = await saveDownload(
+          opts.output,
+          safeFileName(artifact.title, artifact.id),
+          (out) => pipeline(Readable.fromWeb(body as StreamWebReadable), out)
         )
 
         if (opts.json) {
@@ -916,7 +1037,7 @@ pdf/png/html require the SlayZone app to be running.
         return
       }
 
-      // --- PDF / PNG / HTML (requires app) ---
+      // --- PDF / PNG / HTML: rendered locally ---
       const available = getAvailableExportTypes(mode)
       if (!available.includes(opts.type)) {
         console.error(
@@ -925,11 +1046,38 @@ pdf/png/html require the SlayZone app to be running.
         process.exit(1)
       }
 
+      const { body } = await apiGetStream(
+        `/api/artifacts/${encodeURIComponent(artifact.id)}/content`
+      )
+      // Every exportable mode is a text format; decode as the editor does (utf-8).
+      const content = Buffer.from(await new Response(body).arrayBuffer()).toString('utf8')
+
+      // Loaded on demand: the export path (marked, the inlined mermaid build, the
+      // browser driver) costs every other `slay` command nothing at startup.
+      const { exportArtifact, exportBaseName } = await import('../../export/export-artifact')
+      let bytes: Buffer
+      try {
+        bytes = await exportArtifact({
+          type: opts.type as ArtifactExportFormat,
+          content,
+          mode,
+          title: artifact.title,
+          browser: opts.browser,
+          installBrowser: opts.installBrowser === true
+        })
+      } catch (err) {
+        console.error((err as Error).message)
+        process.exit(1)
+      }
+
       const ext = opts.type
-      const outputPath = opts.output
-        ? path.resolve(opts.output)
-        : path.resolve(`${baseName}.${ext}`)
-      await apiPost(`/api/artifacts/${artifact.id}/export/${opts.type}`, { outputPath })
+      // No --output: the title's name with the export's extension, made safe as ONE
+      // name (extension included, so the result stays within the 255-byte limit).
+      const outputPath = await saveDownload(
+        opts.output,
+        safeFileName(`${exportBaseName(artifact.title)}.${ext}`, `${artifact.id}.${ext}`),
+        (out) => pipeline(Readable.from([bytes]), out)
+      )
 
       if (opts.json) {
         console.log(JSON.stringify({ path: outputPath, type: opts.type, artifactId: artifact.id }))

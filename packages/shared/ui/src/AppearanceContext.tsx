@@ -72,6 +72,9 @@ export interface AppearanceSettings {
   notesShowToolbar: boolean
   notesSpellcheck: boolean
   // Chat
+  /** Default chat text size, px (`chat_font_size`; unset follows the terminal's).
+   *  A chat tab may override it (`terminal_tabs.chat_font_size`). */
+  chatFontSize: number
   chatToolVisibility: 'all' | 'recent' | 'errors' | 'none'
   chatShowThinking: boolean
   chatWrapCode: boolean
@@ -130,6 +133,7 @@ export const appearanceDefaults: AppearanceSettings = {
   chatWrapCode: false,
   chatCompactSpacing: false,
   chatAutoScroll: true,
+  chatFontSize: 13,
   chatWidth: 'narrow',
   chatThreadsWidth: CHAT_THREADS_DEFAULT_WIDTH,
   chatShowTools: true,

@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/web-shell",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,15 +12,20 @@
   "dependencies": {
     "@slayzone/api": "workspace:*",
     "@slayzone/hub-auth": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/renderer-app": "workspace:*",
+    "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/theme-css": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
+    "fflate": "^0.8.2",
+    "mermaid": "^12.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@slayzone/react-compiler-config": "workspace:*",

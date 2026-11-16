@@ -13,7 +13,12 @@ export * from './telemetry'
 
 // `artifacts.*` tRPC router + the host seam it reads. Composed by `@slayzone/api`,
 // which wires the seam (`api/src/domain-router-deps.ts`).
-export { artifactsRouter, type ArtifactsRouter, type ArtifactsMounts } from './artifacts-router'
+export {
+  ARTIFACT_CHUNK_MAX,
+  artifactsRouter,
+  type ArtifactsRouter,
+  type ArtifactsMounts
+} from './artifacts-router'
 export {
   setArtifactsRouterDeps,
   getArtifactsRouterDeps,

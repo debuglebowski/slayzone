@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { getStorageDir, type SlayzoneDb } from '@slayzone/platform'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import {
   artifactsRouter,
   createArtifactStore,
@@ -15,6 +15,7 @@ import {
 } from '@slayzone/task-artifacts/server'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import type { ArtifactVersion, ArtifactSearchReport } from '@slayzone/task-artifacts/shared'
+import { planFolderDownload } from '@slayzone/task-artifacts/download-plan'
 import { createTestHarness, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
@@ -484,22 +485,10 @@ test('third-pass: pruning all versions preserves REST access to a surviving comp
   }
 })
 
-test('third-pass control: REST stream create and mixed-owner folder download preserve bytes and tree names', async () => {
+test('third-pass control: REST stream create and mixed-owner folder download (chunked reads) preserve bytes and tree names', async () => {
   const f = await fixture()
   try {
-    const dest = mkdtempSync(join(f.root, 'downloads-'))
-    setArtifactsRouterDeps({
-      onTasksChanged: () => {},
-      getDownloadHost: () => ({
-        getDownloadsDir: async () => dest,
-        showSaveDialog: async () => ({ canceled: false, filePath: join(dest, 'file.png') }),
-        showOpenDialog: async () => ({ canceled: false, filePaths: [dest] }),
-        showItemInFolder: () => {},
-        buildExportHtml: async (content) => content,
-        renderPdfToFile: async () => {},
-        renderPngToFile: async () => false
-      })
-    })
+    setArtifactsRouterDeps({ onTasksChanged: () => {} })
     const general = (await f.store.createFolder(f.h.slayDb, { taskId: 't', name: 'General' }))!
     const a = await f.upload('a')
     const b = await f.upload('b')
@@ -536,12 +525,34 @@ test('third-pass control: REST stream create and mixed-owner folder download pre
       folderId: general.id,
       content: 'hub'
     })
+    // A folder download as a client makes it: plan from the task's rows, then every
+    // file's bytes in bounded pieces over `readBytesChunk` — hub-held and
+    // computer-held alike (the computer reads its own range, never the whole file).
     const caller = artifactsRouter.createCaller({ db: f.h.slayDb, dataRoot: f.hubDir })
-    expect(await caller.downloadFolder({ folderId: general.id })).toBe(true)
-    expect(readFileSync(join(dest, 'General', 'hub.txt'), 'utf8')).toBe('hub')
-    expect(readFileSync(join(dest, 'General', 'PC A', 'a.txt'), 'utf8')).toBe('bytes a')
-    expect(readFileSync(join(dest, 'General', 'PC B', 'b.txt'), 'utf8')).toBe('bytes b')
-    expect(readFileSync(join(dest, 'General', 'PC A', 'Nested', 'file.png'))).toEqual(bytes)
+    const readChunked = async (id: string): Promise<Buffer | null> => {
+      const parts: Buffer[] = []
+      for (let offset = 0; ; ) {
+        const chunk = await caller.readBytesChunk({ id, offset, length: 2 })
+        if (!chunk) return null
+        parts.push(Buffer.from(chunk.data, 'base64'))
+        offset += 2
+        if (offset >= chunk.size) return Buffer.concat(parts)
+      }
+    }
+    const plan = planFolderDownload(
+      await f.store.listFoldersByTask(f.h.slayDb, 't'),
+      await f.store.listArtifactsByTask(f.h.slayDb, 't'),
+      general.id
+    )!
+    const got = new Map<string, Buffer>()
+    for (const e of plan.entries) {
+      got.set(e.path, (await readChunked(e.artifactId))!)
+    }
+    expect(got.get('General/hub.txt')?.toString('utf8')).toBe('hub')
+    expect(got.get('General/PC A/a.txt')?.toString('utf8')).toBe('bytes a')
+    expect(got.get('General/PC B/b.txt')?.toString('utf8')).toBe('bytes b')
+    expect(got.get('General/PC A/Nested/file.png')).toEqual(bytes)
+    expect(await caller.readBytesChunk({ id: 'no-such-artifact', offset: 0, length: 2 })).toBeNull()
   } finally {
     await f.close()
   }

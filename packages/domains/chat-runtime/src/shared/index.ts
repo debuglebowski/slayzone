@@ -29,7 +29,13 @@ export const CHAT_RECORD_KINDS = [
   'attachment',
   'settings',
   'timeline',
-  'pinned-message'
+  'pinned-message',
+  /**
+   * A pin keeping an out-of-line payload of this conversation's saved events alive
+   * (`id` = sha256 of the bytes in the blob store; `saved_at` = newest referencing
+   * event). Storage-internal: derived from the events, never transferred.
+   */
+  'event-blob'
 ] as const
 export type ChatRecordKind = (typeof CHAT_RECORD_KINDS)[number]
 export interface ChatRecord {
@@ -63,6 +69,7 @@ export interface ChatOwnership {
   migrationHash: string | null
 }
 export * from './protocol'
+export * from './task-data'
 export interface ChatTransferHeader {
   format: 'slayzone-chat'
   version: 1
@@ -71,9 +78,18 @@ export interface ChatTransferHeader {
   events: number
   records: number
   receipts: number
+  /**
+   * Set by a cross-hub move's export: this copy may replace an OLDER copy of the same
+   * conversation the target store still holds from an earlier stay of the task (a
+   * plain migration refuses to overwrite any). Part of the first line, so of the hash.
+   */
+  move?: true
 }
 export interface ChatTransferManifest {
   header: ChatTransferHeader
   hash: string
   bytes: number
 }
+export * from './session-ledger'
+export * from './agent-turns'
+export * from './task-paths'

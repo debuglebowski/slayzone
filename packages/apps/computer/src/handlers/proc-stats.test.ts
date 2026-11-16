@@ -91,7 +91,9 @@ describe.skipIf(process.platform === 'win32')('background process care on the co
     })) as { pid: number }
     await new Promise((r) => setTimeout(r, 600))
     expect(groupAlive(pid)).toBe(true)
-    execFileSync('kill', ['-TERM', `-${pid}`])
+    // The syscall, not the `kill` binary: procps-ng 4 (Ubuntu 24.04) signals the group
+    // yet exits 1 for `kill -TERM -<pgid>`.
+    process.kill(-pid, 'SIGTERM')
     procs.disposeAll()
   })
 })

@@ -372,6 +372,16 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
         ...(exceptQueuedId ? { exceptQueuedId } : {})
       })
 
+    /**
+     * The tab holding a queued message, or null when it is gone — or held by another
+     * tab than the one the caller named (robustness plan §9, v208: a queue item is
+     * reached through its tab, so the caller's tab is what was authorized).
+     */
+    const itemTab = async (id: string, expectedTab?: string): Promise<string | null> => {
+      const tabId = await data.getTabIdForItem(id)
+      return tabId !== null && expectedTab !== undefined && tabId !== expectedTab ? null : tabId
+    }
+
     return {
       list: async (tabId: string): Promise<QueuedChatMessage[]> => {
         const rows = await data.list(tabId)
@@ -387,9 +397,9 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
        * agent can't take it (no turn running, a prompt waiting, Codex's turn
        * just ended).
        */
-      steer: async (id: string): Promise<SteerResult> => {
+      steer: async (id: string, expectedTab?: string): Promise<SteerResult> => {
         const gone: SteerResult = { ok: false, reason: 'That message was already sent.' }
-        const tabId = await data.getTabIdForItem(id)
+        const tabId = await itemTab(id, expectedTab)
         if (tabId === null) return gone
         const marked = await onTabChain(
           tabId,
@@ -533,9 +543,10 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
        */
       update: async (
         id: string,
-        next: { send: string; original: string; content: UserContentBlock[] }
+        next: { send: string; original: string; content: UserContentBlock[] },
+        expectedTab?: string
       ): Promise<boolean> => {
-        const tabId = await data.getTabIdForItem(id)
+        const tabId = await itemTab(id, expectedTab)
         if (tabId === null || isSteering(tabId, id)) return false
         const content = await admit(tabId, next.content, id)
         const updated = await data.update(id, { ...next, content })
@@ -544,8 +555,8 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       },
 
       /** Move a queued message to `toIndex` in its tab's order. */
-      move: async (id: string, toIndex: number): Promise<boolean> => {
-        const tabId = await data.getTabIdForItem(id)
+      move: async (id: string, toIndex: number, expectedTab?: string): Promise<boolean> => {
+        const tabId = await itemTab(id, expectedTab)
         if (tabId === null || isSteering(tabId, id)) return false
         const moved = await data.move(id, toIndex)
         if (moved) {
@@ -560,8 +571,8 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
        * won't send it, nor anything behind it. Runs on the tab's drain chain, so
        * a hold never races a pop. False when it was already sent or removed.
        */
-      hold: async (id: string): Promise<boolean> => {
-        const tabId = await data.getTabIdForItem(id)
+      hold: async (id: string, expectedTab?: string): Promise<boolean> => {
+        const tabId = await itemTab(id, expectedTab)
         if (tabId === null) return false
         return onTabChain(tabId, async () => {
           if ((await data.getTabIdForItem(id)) === null) return false
@@ -583,17 +594,18 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
       },
 
       /** End an edit's hold; the queue drains if the agent is free. */
-      release: async (id: string): Promise<void> => {
+      release: async (id: string, expectedTab?: string): Promise<void> => {
         for (const [tabId, tabHolds] of holds) {
-          if (!tabHolds.has(id)) continue
+          if (!tabHolds.has(id) || (expectedTab !== undefined && tabId !== expectedTab)) continue
           dropHold(tabId, id)
           await drainChatQueue(db, tabId, data)
           return
         }
       },
 
-      remove: async (id: string): Promise<boolean> => {
+      remove: async (id: string, expectedTab?: string): Promise<boolean> => {
         const tabId = await data.getTabIdForItem(id)
+        if (tabId !== null && expectedTab !== undefined && tabId !== expectedTab) return false
         if (tabId !== null && isSteering(tabId, id)) {
           // Added to the turn: take it back from the agent first (on the chain,
           // so the queue cannot send it in between). One it kept stays listed.

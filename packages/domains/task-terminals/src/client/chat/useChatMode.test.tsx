@@ -3,7 +3,7 @@
 // hydration (live session > DB cache), drift sync from the subprocess's permission
 // mode, and the serialized one-IPC-at-a-time setMode loop with revert on failure.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -54,6 +54,7 @@ vi.mock('@slayzone/ui', async () => ({
 }))
 
 import { useChatMode } from './useChatMode'
+import { ChatRestorationBoundary } from './chat-restoration'
 
 interface Props {
   taskId: string
@@ -61,8 +62,11 @@ interface Props {
   tabId: string
   cwd: string
   livePermissionMode?: string | null
+  settingsGeneration: number
 }
-const base: Props = { taskId: 'task1', mode: 'claude-chat', tabId: 'tab1', cwd: '/repo' }
+/** What `setMode` is called with: the tab's ids, never the settings generation. */
+const ids = { taskId: 'task1', mode: 'claude-chat', tabId: 'tab1', cwd: '/repo' }
+const base: Props = { ...ids, settingsGeneration: 0 }
 
 /** Let resolved IPC promises (and their state updates) land. */
 const flush = () =>
@@ -90,6 +94,48 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('useChatMode hydration', () => {
+  it('keeps a restoration slot until a delayed eligibility read settles, including after unmount', async () => {
+    const work = Array.from({ length: 3 }, () => deferred<Capability>())
+    m.getAutoEligibility.mockImplementation(
+      () => work[m.getAutoEligibility.mock.calls.length - 1]!.promise
+    )
+    function Chat({ id }: { id: number }) {
+      useChatMode({ ...base, taskId: 'task' + id, tabId: 'tab' + id })
+      return <span>{id}</span>
+    }
+    const tree = (hideFirst: boolean) => (
+      <>
+        {work.map((_, id) =>
+          hideFirst && id === 0 ? null : (
+            <ChatRestorationBoundary
+              key={id}
+              client={m.client}
+              taskId={'task' + id}
+              tabId={'tab' + id}
+              active={false}
+            >
+              <Chat id={id} />
+            </ChatRestorationBoundary>
+          )
+        )}
+      </>
+    )
+    try {
+      const view = render(tree(false))
+      await flush()
+      view.rerender(tree(true))
+      await flush()
+      expect(m.getAutoEligibility).toHaveBeenCalledTimes(2)
+      await act(async () => work[0]!.resolve({ eligible: true, optedIn: true }))
+      await waitFor(() => expect(m.getAutoEligibility).toHaveBeenCalledTimes(3))
+    } finally {
+      cleanup()
+      await act(async () => {
+        for (const item of work) item.resolve({ eligible: true, optedIn: true })
+      })
+    }
+  })
+
   it('defaults to auto-accept with auto mode hidden before any IPC lands', () => {
     m.getInfo.mockReturnValue(pending())
     m.getAutoEligibility.mockReturnValue(pending())
@@ -195,6 +241,32 @@ describe('useChatMode hydration', () => {
   })
 })
 
+describe('useChatMode restored settings (S4)', () => {
+  it('re-reads the mode when the task’s saved settings land after the chat opened', async () => {
+    const { result, rerender } = await setup()
+    expect(result.current.chatMode).toBe('auto-accept')
+    // The hub's staged settings were imported on the computer: auto-accept → bypass.
+    m.getMode.mockResolvedValue('bypass')
+    rerender({ ...base, settingsGeneration: 1 })
+    await flush()
+    expect(result.current.chatMode).toBe('bypass')
+  })
+
+  it('a user change in flight wins over a re-read', async () => {
+    const first = deferred<unknown>()
+    m.setMode.mockReturnValueOnce(first.promise)
+    const { result, rerender } = await setup()
+    act(() => {
+      void result.current.handleModeChange('plan')
+    })
+    m.getMode.mockResolvedValue('bypass')
+    rerender({ ...base, settingsGeneration: 1 })
+    await flush()
+    expect(result.current.chatMode).toBe('plan')
+    await act(async () => first.resolve({ chatMode: 'plan' }))
+  })
+})
+
 describe('useChatMode drift sync', () => {
   beforeEach(() => {
     // Hydration never lands: drift is the only writer.
@@ -296,7 +368,7 @@ describe('useChatMode handleModeChange', () => {
     const { result } = await setup({ mode: 'codex-chat' })
     await act(() => result.current.handleModeChange('full-access', { stopAndResume: true }))
     expect(m.setMode).toHaveBeenCalledWith({
-      ...base,
+      ...ids,
       mode: 'codex-chat',
       chatMode: 'full-access',
       stopAndResume: true

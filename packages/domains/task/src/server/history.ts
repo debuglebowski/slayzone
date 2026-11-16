@@ -105,6 +105,44 @@ export function buildTaskUpdatedEvents(before: Task, after: Task): RecordActivit
   return events
 }
 
+/** A move to another project: one entry, filed under the project it moved to. */
+export function buildTaskProjectChangedEvents(
+  before: Pick<Task, 'id' | 'project_id'>,
+  target: { id: string; name: string },
+  sourceName: string
+): RecordActivityEventInput[] {
+  return [
+    buildTaskEvent(
+      { id: before.id, project_id: target.id },
+      'task.project_changed',
+      `Moved from ${sourceName} to ${target.name}`,
+      { from: before.project_id, to: target.id }
+    )
+  ]
+}
+
+/**
+ * A follow-up duplicate: an entry on the copy naming its source, and one on the
+ * source naming the copy and where it went.
+ */
+export function buildTaskDuplicatedEvents(
+  source: Pick<Task, 'id' | 'project_id' | 'title'>,
+  copy: Pick<Task, 'id' | 'project_id' | 'title'>,
+  copyProjectName: string
+): RecordActivityEventInput[] {
+  return [
+    buildTaskEvent(copy, 'task.duplicated', `Duplicated from “${source.title}”`, {
+      sourceTaskId: source.id
+    }),
+    buildTaskEvent(
+      source,
+      'task.duplicate_created',
+      `Duplicated to “${copy.title}” in ${copyProjectName}`,
+      { taskId: copy.id, projectId: copy.project_id }
+    )
+  ]
+}
+
 export function buildTaskArchivedEvents(tasks: Task[]): RecordActivityEventInput[] {
   return tasks.map((task) => buildTaskEvent(task, 'task.archived', 'Task archived'))
 }

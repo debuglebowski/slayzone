@@ -8,9 +8,7 @@
  * on its INSERT OR REPLACE; an edited queued message re-stamps `created_at`):
  *
  *   chat_events     chat-mode agent events: messages, tool calls, output   (TEXT, UTC)
- *   agent_prompts   prompts captured from the agent's prompt hook           (INTEGER, ms)
  *   chat_queue      chat messages queued but not sent yet                   (TEXT, UTC)
- *   agent_turns     `prompt_preview` only (first 200 chars of the prompt)   (INTEGER, ms)
  *   chat_tab_state  a chat tab's unsent draft (and its scroll position), by
  *                   `updated_at`                                            (INTEGER, ms)
  *
@@ -18,20 +16,12 @@
  * terminal table to sweep.
  *
  * NEVER TOUCHED. Tasks, projects, notes, files and accounts have no retention (owner
- * decision O-7) and nothing else in this database is session content either. In
- * particular the session LEDGER stays — `agent_sessions`, `task_conversations`,
- * `session_turns`, `session_resets`, `session_deletions`: ids, modes, paths and times,
- * no text. It is the task's resume binding (a copy of which also lives in the task row,
- * `tasks.provider_config`) and an append-only provenance record by design
- * (`task/server/ops/agent-sessions.ts`). The database cannot tell whether a bound
- * session is still running (`ended_at` is only ever set for warm-pool agents), so
- * deleting by age could cut a live agent off its resume target while removing no
- * content. `usage_records` (token counts, no text) is usage analytics' "all time" range
+ * decision O-7) and nothing else in this database is session content either. The
+ * session ledger, prompt history and turn snapshots live on the computers (robustness
+ * plan §9; each computer's chat retention ages them there); the hub's session
+ * INTENT (`session_resets`, `session_deletions`: ids, modes and times, no text) stays:
+ * a reset or deletion must keep reaching a computer that was offline. `usage_records` (token counts, no text) is usage analytics' "all time" range
  * and stays too.
- *
- * `agent_turns` rows stay with the preview blanked, not deleted: each pins a snapshot
- * ref in the user's repository (`refs/slayzone/turns/<id>`) that only the per-worktree
- * cap removes, together with its row (`agent-turns/server/turn-tracker.ts`).
  *
  * LIVE SESSIONS are not broken. A running chat transport keeps its buffer and next seq
  * in memory (the per-tab cap deletes its old rows the same way, in
@@ -72,6 +62,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { securityEvent } from '@slayzone/platform/security-log'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 
 /** Rows per statement. */
 export const SWEEP_BATCH = 500
@@ -83,28 +74,19 @@ export const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 
 interface Rule {
-  table: 'chat_events' | 'agent_prompts' | 'chat_queue' | 'agent_turns' | 'chat_tab_state'
+  table: 'chat_events' | 'chat_queue' | 'chat_tab_state'
   /** Over the table's own row; the one `?` is the cutoff. */
   expired: string
   /** `ms` = epoch milliseconds; `datetime` = SQLite `YYYY-MM-DD HH:MM:SS` UTC. */
   clock: 'ms' | 'datetime'
-  /** Blank a column instead of deleting the row. */
-  redact?: { column: string; set: string }
 }
 
 const RULES: readonly Rule[] = [
   // `datetime()` normalises whatever shape a writer used; an unparseable value is
   // NULL, never "older", so the row stays.
   { table: 'chat_events', expired: 'datetime(created_at) < ?', clock: 'datetime' },
-  { table: 'agent_prompts', expired: 'created_at < ?', clock: 'ms' },
   { table: 'chat_queue', expired: 'datetime(created_at) < ?', clock: 'datetime' },
-  { table: 'chat_tab_state', expired: 'updated_at < ?', clock: 'ms' },
-  {
-    table: 'agent_turns',
-    expired: "created_at < ? AND prompt_preview <> ''",
-    clock: 'ms',
-    redact: { column: 'prompt_preview', set: "prompt_preview = ''" }
-  }
+  { table: 'chat_tab_state', expired: 'updated_at < ?', clock: 'ms' }
 ]
 
 export interface SweepReport {
@@ -114,8 +96,6 @@ export interface SweepReport {
   durationMs: number
   /** Rows deleted, by table. */
   deleted: Record<string, number>
-  /** Rows whose content column was blanked, by table. */
-  redacted: Record<string, number>
   /** Tables whose pass failed; the others still ran. */
   failed: string[]
   checkpoint: 'truncated' | 'busy' | 'no-wal' | 'failed'
@@ -134,9 +114,7 @@ async function sweepTable(
   batch: number,
   pause: () => Promise<boolean>
 ): Promise<number> {
-  const change = rule.redact
-    ? `UPDATE ${rule.table} SET ${rule.redact.set}`
-    : `DELETE FROM ${rule.table}`
+  const change = `DELETE FROM ${rule.table}`
   // Rowids are positive unless a writer chose otherwise; none here does.
   let after = Number.MIN_SAFE_INTEGER
   let total = 0
@@ -190,7 +168,6 @@ export async function sweepSessionContent(
     cutoff: new Date(cutoffMs).toISOString(),
     durationMs: 0,
     deleted: {},
-    redacted: {},
     failed: [],
     checkpoint: 'failed'
   }
@@ -202,19 +179,18 @@ export async function sweepSessionContent(
   const hasOwnership = await db.get(
     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_ownership'"
   )
-  for (const [i, rule] of RULES.entries()) {
+  // The legacy chat tables are gone once every chat migrated (§9 Phase 8): their
+  // content lives on the computers, whose own retention sweeps it.
+  const rules = (await legacyChatTables(db)) ? RULES : []
+  for (const [i, rule] of rules.entries()) {
     // Between tables too: a table's last scan and the next one's first are two statements.
     if (i > 0 && !(await pause())) break
     const cutoff = rule.clock === 'ms' ? cutoffMs : sqliteDatetime(cutoffMs)
     try {
-      const taskScoped = rule.table === 'agent_prompts' || rule.table === 'agent_turns'
-      const gate = taskScoped
-        ? `NOT EXISTS(SELECT 1 FROM chat_ownership o WHERE o.task_id=${rule.table}.task_id AND o.state IN ('copying','verified'))`
-        : `NOT EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id WHERE b.tab_id=${rule.table}.tab_id AND o.state IN ('copying','verified'))`
+      const gate = `NOT EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id WHERE b.tab_id=${rule.table}.tab_id AND o.state IN ('copying','verified'))`
       const guarded = hasOwnership ? { ...rule, expired: `(${rule.expired}) AND ${gate}` } : rule
       const n = await sweepTable(db, guarded, cutoff, batch, pause)
-      if (rule.redact) report.redacted[rule.table] = n
-      else report.deleted[rule.table] = n
+      report.deleted[rule.table] = n
     } catch (err) {
       report.failed.push(rule.table)
       console.error(
@@ -257,11 +233,6 @@ function auditSweep(report: SweepReport): void {
       cutoff: report.cutoff,
       durationMs: report.durationMs,
       deleted: Object.entries(report.deleted).map(([table, rows]) => ({ table, rows })),
-      redacted: Object.entries(report.redacted).map(([table, rows]) => ({
-        table,
-        column: RULES.find((r) => r.table === table)?.redact?.column ?? null,
-        rows
-      })),
       failed: report.failed,
       checkpoint: report.checkpoint
     }
@@ -355,7 +326,6 @@ export function startSessionRetention(opts: {
         cutoff: new Date(Math.max(0, Date.now() - days * DAY_MS)).toISOString(),
         durationMs: 0,
         deleted: {},
-        redacted: {},
         failed: RULES.map((r) => r.table),
         checkpoint: 'failed'
       })

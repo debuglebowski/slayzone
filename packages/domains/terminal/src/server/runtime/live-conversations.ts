@@ -20,6 +20,10 @@ export interface ConversationHolder {
   isLive(taskId: string, conversationId: string): boolean
   /** Stop every process of this side running it, and wait for their exits. */
   release(taskId: string, conversationId: string): Promise<void>
+  /** The session id (`taskId:tabId`) of a live process running it, if any. */
+  liveSessionId?(taskId: string, conversationId: string): string | null
+  /** Every conversation a live process of this side runs for `taskId`. */
+  liveConversations?(taskId: string): string[]
 }
 
 export function createConversationRegistry() {
@@ -46,16 +50,52 @@ export function createConversationRegistry() {
     await holders.get(side)?.release(taskId, conversationId)
   }
 
-  return { registerConversationHolder, isConversationLive, releaseConversation }
+  function liveConversationSession(
+    side: ConversationSide,
+    taskId: string,
+    conversationId: string
+  ): string | null {
+    return holders.get(side)?.liveSessionId?.(taskId, conversationId) ?? null
+  }
+
+  /**
+   * The conversations a live process of `side` runs for `taskId`: `[]` with no
+   * holder (nothing of that side runs here), `null` when its holder cannot list
+   * them (the caller must assume any may be live).
+   */
+  function liveConversations(side: ConversationSide, taskId: string): string[] | null {
+    const holder = holders.get(side)
+    if (!holder) return []
+    return holder.liveConversations ? holder.liveConversations(taskId) : null
+  }
+
+  return {
+    registerConversationHolder,
+    isConversationLive,
+    releaseConversation,
+    liveConversationSession,
+    liveConversations
+  }
 }
 export type ConversationRegistry = ReturnType<typeof createConversationRegistry>
 export const defaultConversationRegistry = createConversationRegistry()
-export const { registerConversationHolder, isConversationLive, releaseConversation } =
-  defaultConversationRegistry
+export const {
+  registerConversationHolder,
+  isConversationLive,
+  releaseConversation,
+  liveConversationSession,
+  liveConversations
+} = defaultConversationRegistry
 
 /** What a refused start says: the other side runs this conversation. */
 export function conversationInUseMessage(runningIn: ConversationSide): string {
   return runningIn === 'terminal'
     ? 'This conversation is running in the terminal. Continue it here (the terminal stops first), or stop it there.'
     : 'This conversation is running in the chat. Continue it here (the chat stops first), or stop it there.'
+}
+
+/** What a refused start or pick says: another terminal tab of the task runs this
+ *  conversation. Names the tab so the user knows where to stop it. */
+export function conversationInOtherTabMessage(tabName: string): string {
+  return `This session is running in the "${tabName}" tab. Stop it there first, or start a new session here.`
 }

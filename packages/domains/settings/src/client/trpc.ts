@@ -8,7 +8,8 @@ import type { NotifyMounts } from '@slayzone/notify/server'
 import type { ProjectsMounts } from '@slayzone/projects/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
 import type { TagsMounts } from '@slayzone/tags/server'
-import type { ChatMounts, AppUsageMounts } from '@slayzone/terminal/server'
+import type { ChatMounts, AppUsageMounts, PtyMounts } from '@slayzone/terminal/server'
+import type { HubUserMounts } from '@slayzone/content-erasure/router'
 import type { AppBackupMounts } from '../server/backup-router'
 import type { AppExportImportMounts } from '../server/export-import-router'
 
@@ -16,10 +17,12 @@ import type { AppExportImportMounts } from '../server/export-import-router'
  * This domain's typed view of the shared tRPC client (one runtime, one socket per hub),
  * typed against only the routers the settings UI calls: `settings`, its own
  * `app.backup` and `app.exportImport`, plus `computers`, `diagnostics`, `workspace`,
- * `projects`, `tags`, `notify`, `app.meta` and `app.usage`.
+ * `projects`, `tags`, `notify`, `app.meta`, `app.usage` and `pty` (unattached sessions).
  */
 export const { useTRPC, useTRPCClient } = typedTrpc<
-  ChatMounts &
+  HubUserMounts &
+    ChatMounts &
+    PtyMounts &
     SettingsMounts &
     AppBackupMounts &
     AppExportImportMounts &

@@ -17,6 +17,7 @@ import {
   teardownAllWarm,
   getWarmStatus,
   reapOrphanWarms,
+  reconcileWarmPool,
   __resetForTests,
   createDbWarmPoolDataOps,
   type WarmPoolDataOps
@@ -42,6 +43,7 @@ const settle = (): Promise<void> => wait(240)
 interface WarmSpawnCall {
   computerId: string
   warmId: string
+  projectId: string
   command: string
   args: string[]
   cwd: string
@@ -84,6 +86,8 @@ const fakeBackend = {
 }
 
 let enabled = true
+/** False holds new warm spawns (the hub's boot restore); see `spawnsAllowed`. */
+let spawnsAllowed = true
 // cwd must exist on disk — spawnWarm guards on existsSync(projectRoot).
 const PROJECT_ROOT = tmpdir()
 // Stub db: the mode lookup returns the claude-code template; `run` captures any
@@ -118,6 +122,7 @@ function init(opts: { reserveTtlMs?: number } = {}): void {
   rowsAtSpawn = []
   failNextSpawn = false
   enabled = true
+  spawnsAllowed = true
   computerId = 'computer-1'
   projectRootFor = () => PROJECT_ROOT
   setPtyBackend(fakeBackend as unknown as PtyBackend)
@@ -127,6 +132,7 @@ function init(opts: { reserveTtlMs?: number } = {}): void {
     isEnabled: () => enabled,
     getProjectRoot: async (projectId, onComputer) => projectRootFor(projectId, onComputer),
     resolveComputerId: async () => computerId,
+    spawnsAllowed: () => spawnsAllowed,
     ...(opts.reserveTtlMs !== undefined ? { reserveTtlMs: opts.reserveTtlMs } : {})
   })
 }
@@ -184,6 +190,33 @@ test('no folder known on that computer: nothing is warmed', async () => {
   expect(spawnCount()).toBe(0)
 })
 
+// The hub holds new warm agents while its boot restore brings back the agents that
+// ran at shutdown: on 2026-11-11 the pool booted 7 before any restore was asked for.
+test('held: no warm agent boots until the hold is released, then it does', async () => {
+  init()
+  spawnsAllowed = false
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  expect(spawnCount()).toBe(0)
+  spawnsAllowed = true
+  reconcileWarmPool()
+  await settle()
+  expect(spawnCount()).toBe(1)
+  expect(getWarmStatus().p1).toBe('ready')
+})
+
+test('held: a warm agent already booted stays', async () => {
+  init()
+  setProjectTabCounts(1, { p1: 1 })
+  await settle()
+  spawnsAllowed = false
+  setProjectTabCounts(1, { p1: 1, p2: 1 })
+  await settle()
+  expect(getWarmStatus().p1).toBe('ready')
+  expect(getWarmStatus().p2).toBeUndefined()
+  expect(killCalls).toEqual([])
+})
+
 test('gate 0→1 spawns one warm shell', async () => {
   init()
   setProjectTabCounts(1, { p1: 1 })
@@ -206,10 +239,10 @@ test('warm spawn pre-boots the agent + records a pooled session (B3b)', async ()
   // (zsh tolerates it, which hid this on macOS). GitHub #173.
   expect(post.startsWith("exec 'claude' ")).toBeTruthy()
   expect(post.match(/\bexec\b/g)?.length).toBe(1)
-  // A pooled agent_sessions row was recorded (via the task store, on the pool's db).
+  // A pooled agent_sessions row was recorded on the warm agent's computer.
   const pooledInsert = sessionCalls('recordSessionSpawn')[0]
   expect(!!pooledInsert).toBeTruthy()
-  expect(pooledInsert!.db).toBe(db)
+  expect(pooledInsert!.computerId).toBe('computer-1')
   expect((pooledInsert!.args as { status: string }).status).toBe('pooled')
 })
 
@@ -563,7 +596,7 @@ test('injected ops seam handles mode lookup + session writes (db untouched)', as
     recordSessionSpawn: async (input) => {
       recorded = input
     },
-    markSessionDead: async (sessionId) => {
+    markSessionDead: async (_computerId, sessionId) => {
       deadIds.push(sessionId)
     }
   }

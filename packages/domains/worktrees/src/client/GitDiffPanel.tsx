@@ -1,4 +1,5 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react'
+import { useTaskFolders, worktreeOrProject } from './task-folders'
 import {
   Plus,
   Minus,
@@ -79,17 +80,15 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     diffSideBySide,
     diffWrap
   } = useAppearance()
-  const targetPath = useMemo(
-    () => task?.worktree_path ?? projectPath,
-    [task?.worktree_path, projectPath]
-  )
+  const folders = useTaskFolders(task)
+  const targetPath = worktreeOrProject(task, folders, projectPath)
 
   // Continuous-flow per-file collapse set (persisted per task).
   const { collapsedFiles, setCollapsedFiles } = useGitDiffCollapse(task)
 
   // Agent-turn selection + the sha range it scopes the snapshot to.
   const { selectedTurnId, setSelectedTurnId, turns, fromSha, toSha, refreshTurns } =
-    useGitDiffTurns(targetPath)
+    useGitDiffTurns(task?.id ?? null, targetPath)
 
   // Shared snapshot + the whole diff read pipeline.
   const {

@@ -38,6 +38,7 @@
 
 import { z } from 'zod'
 import { directAddressSchema } from './direct'
+import { FRAME_TOO_LARGE_CODE } from './frame-limit'
 import { RpcError } from './rpc'
 
 /**
@@ -53,6 +54,11 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 
 /**
  * Bump on any breaking change to the frames below.
+ *
+ * v9: artifacts are read in bounded pieces (`artifact.invoke` method
+ * `readBytesRange` → `{ data, size, version }`), so a download of any size never
+ * moves a whole file in one frame. A v8 computer lacks it and is refused rather than
+ * served by whole-file reads. Both peers upgrade together.
  *
  * v8: direct client ↔ computer link. `enroll` / `hello` carry the computer's
  * advertised direct-listener authority (`directAddress`), and the hub registers,
@@ -80,7 +86,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 8
+export const COMPUTER_PROTOCOL_VERSION = 9
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {
@@ -111,8 +117,26 @@ export const ComputerTransportErrorCodes = {
    * not a policy refusal: the user picks the project's folder on this computer
    * (or the hub delivers it), then the same spawn works.
    */
-  projectNotPlaced: -32007
+  projectNotPlaced: -32007,
+  /**
+   * A frame would exceed the receiver's limit (`COMPUTER_FRAME_MAX_BYTES`, ./frame-limit),
+   * so it was never sent: the caller's request (refused locally) or the peer's reply
+   * (answered with this error instead). Not transient. `data`: `{ method, bytes, limitBytes }`
+   * (`bytes: null` = too large to serialize at all).
+   */
+  frameTooLarge: FRAME_TOO_LARGE_CODE,
+  /**
+   * `pty.adopt` refused: the session is not running as the named attempt, runs no
+   * output detection, runs as another mode or task, or another start of it is in
+   * flight. Not transient for that attempt; the message says which.
+   */
+  sessionNotAdoptable: -32009
 } as const
+
+/** Is `err` a frame-limit refusal (an `RpcError` with `frameTooLarge`)? */
+export function isFrameTooLargeError(err: unknown): err is RpcError {
+  return err instanceof RpcError && err.code === ComputerTransportErrorCodes.frameTooLarge
+}
 
 /** The error a computer raises when asked to start a project's agent with no folder for it. */
 export function projectNotPlacedError(projectId: string): RpcError {
@@ -141,10 +165,34 @@ export function isProjectNotPlacedError(err: unknown): boolean {
  * REQUIRED from a v3 hub: a request without it comes from an older hub and is
  * refused with `protocolMismatch` (see {@link COMPUTER_PROTOCOL_VERSION}).
  */
+/**
+ * The path scope a request runs under (`@slayzone/platform/path-scope`, §9 Phase
+ * 7b): the task or project the hub authorized. The computer confines every path it
+ * judges while serving the request to that scope's roots in its own store.
+ */
+const scopeId = z.string().min(1).max(500)
+export const wirePathScopeSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('task'),
+    taskId: scopeId,
+    projectId: scopeId.nullable(),
+    hostReads: z.boolean().optional()
+  }),
+  z.object({
+    kind: z.literal('project'),
+    projectId: scopeId,
+    hostReads: z.boolean().optional(),
+    /** The hub's `worktree_base_path` template (platform/path-scope `WirePathScope`). */
+    worktreeBase: z.string().min(1).max(4096).optional()
+  })
+])
+
 export const requestActorSchema = z.object({
   userId: z.string().min(1).max(200).nullable(),
   /** `trpc <path>` / `METHOD /path` the request entered the hub through. */
-  route: z.string().max(200).nullable()
+  route: z.string().max(200).nullable(),
+  /** The path scope the hub authorized (absent: none — judged by `allowedRoots`). */
+  pathScope: wirePathScopeSchema.nullable().optional()
 })
 export type RequestActor = z.infer<typeof requestActorSchema>
 
@@ -188,6 +236,26 @@ const hostIdField = z.string().min(1).optional()
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /** Current handler supports `agentConfig.fs` hash batches. Absent = legacy reads. */
+  aiConfigHashFiles: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat history in bounded pages (chat-runtime
+   * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
+   * for the whole reads it knows. Additive; no protocol bump.
+   */
+  chatHistoryPages: z.boolean().optional(),
+  /**
+   * Whether this computer answers a task's prompt summaries in one request
+   * (`prompt.summaries` with `all: true`; FU5). Absent = an older computer: the hub
+   * asks it 500 session ids at a time. Additive; no protocol bump.
+   */
+  promptSummariesAll: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat-runtime `timelinePages` by row slices from a
+   * `startRow` (5th argument). Absent = an older computer: the hub asks it for whole
+   * pages (it refuses a 5th argument). Additive; no protocol bump.
+   */
+  chatTimelineRowSlices: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -204,7 +272,14 @@ export const enrollParamsSchema = z.object({
   /** v8: the direct listener's advertised authority; absent/null = none. */
   directAddress: directAddressSchema.optional(),
   /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
-  directRtc: z.boolean().optional()
+  directRtc: z.boolean().optional(),
+  /**
+   * Whether this computer enforces a direct grant's absolute `notAfter` (shared/direct.ts)
+   * — ending the grant and its connections at that wall-clock time however late the grant
+   * arrived. Absent = no: a hub that must bound a grant absolutely (IdP-role deadlines)
+   * offers such a computer no direct link (the relay is always correct).
+   */
+  directNotAfter: z.boolean().optional()
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -219,6 +294,26 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /** Current handler supports hash batches; enrollment tags never prove live support. */
+  aiConfigHashFiles: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat history in bounded pages (chat-runtime
+   * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
+   * for the whole reads it knows. Additive; no protocol bump.
+   */
+  chatHistoryPages: z.boolean().optional(),
+  /**
+   * Whether this computer answers a task's prompt summaries in one request
+   * (`prompt.summaries` with `all: true`; FU5). Absent = an older computer: the hub
+   * asks it 500 session ids at a time. Additive; no protocol bump.
+   */
+  promptSummariesAll: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat-runtime `timelinePages` by row slices from a
+   * `startRow` (5th argument). Absent = an older computer: the hub asks it for whole
+   * pages (it refuses a 5th argument). Additive; no protocol bump.
+   */
+  chatTimelineRowSlices: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),
@@ -234,7 +329,14 @@ export const helloParamsSchema = z.object({
   /** v8: the direct listener's advertised authority; absent/null = none. */
   directAddress: directAddressSchema.optional(),
   /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
-  directRtc: z.boolean().optional()
+  directRtc: z.boolean().optional(),
+  /**
+   * Whether this computer enforces a direct grant's absolute `notAfter` (shared/direct.ts)
+   * — ending the grant and its connections at that wall-clock time however late the grant
+   * arrived. Absent = no: a hub that must bound a grant absolutely (IdP-role deadlines)
+   * offers such a computer no direct link (the relay is always correct).
+   */
+  directNotAfter: z.boolean().optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
@@ -364,13 +466,71 @@ export const chatDirectWritePayloadSchema = z.object({
 })
 export type ChatDirectWritePayload = z.infer<typeof chatDirectWritePayloadSchema>
 
+/**
+ * `ComputerEventParams.name` for a stall of the computer's own main thread
+ * (`@slayzone/platform/event-loop-stall`), reported once it runs again. A frozen
+ * computer misses hub heartbeats and is dropped; on 2026-11-14 such stalls were
+ * only inferable from gaps in its request log. Diagnostic only: the hub records it
+ * (`computer.event_loop_stall`). A generic `event`, so an older hub ignores it.
+ */
+export const COMPUTER_EVENT_LOOP_STALL_EVENT_NAME = 'event-loop-stall'
+
+/** Cut, not rejected: an oversized sample must not drop the measurement. */
+const cutArray = <T extends z.ZodTypeAny>(item: T, max: number) =>
+  z.array(item).transform((items) => items.slice(0, max))
+const stallProcessSchema = z.object({
+  pid: z.number().int(),
+  elapsed: bounded(32),
+  /** Executable name only — never arguments (a shell's `-c` carries an agent's prompt). */
+  command: bounded(64)
+})
+const stallTopCpuProcessSchema = z.object({
+  pid: z.number().int(),
+  cpuPct: z.number(),
+  command: bounded(64)
+})
+
+/** Payload of {@link COMPUTER_EVENT_LOOP_STALL_EVENT_NAME}: the sampler's `EventLoopStall`,
+ *  bounded, with process commands reduced to executable names. */
+export const computerEventLoopStallPayloadSchema = z.object({
+  startedAt: z.number(),
+  durationMs: z.number().nonnegative(),
+  mainThreadCpuMs: z.number().nullable(),
+  processCpuMs: z.number(),
+  gcMs: z.number(),
+  machineCpuBusyPct: z.number().nullable(),
+  stacks: cutArray(z.object({ atMs: z.number(), frames: cutArray(bounded(512), 20) }), 5),
+  children: cutArray(
+    z.object({ atMs: z.number(), processes: cutArray(stallProcessSchema, 64) }),
+    5
+  ),
+  topCpu: cutArray(
+    z.object({ atMs: z.number(), processes: cutArray(stallTopCpuProcessSchema, 5) }),
+    5
+  ).optional(),
+  /** Earlier reports the computer could not deliver (hub away, outbox full). */
+  dropped: z.number().int().nonnegative().optional(),
+  // FU5: the detector's verdict and its evidence (platform `event-loop-stall`). Absent
+  // from an older computer's reports.
+  verdict: z.enum(['busy', 'starved', 'blocked']).optional(),
+  loadAvg1: z.number().nonnegative().nullable().optional(),
+  cpuCount: z.number().int().positive().optional(),
+  majorPageFaults: z.number().int().nonnegative().optional(),
+  voluntaryCtxSwitches: z.number().int().nonnegative().optional(),
+  involuntaryCtxSwitches: z.number().int().nonnegative().optional()
+})
+export type ComputerEventLoopStallPayload = z.infer<typeof computerEventLoopStallPayloadSchema>
+
 export const ptyInputPayloadSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   /** The submitted line (Enter bytes included), or null when nothing was submitted. */
   submitted: z.string().max(70_000).nullable(),
   esc: z.boolean(),
-  statusCommand: z.boolean()
+  statusCommand: z.boolean(),
+  /** The write carried ^C / ^D (the user may be ending the agent). Absent = no, or an
+   *  older computer. */
+  interrupt: z.boolean().optional()
 })
 export type PtyInputPayload = z.infer<typeof ptyInputPayloadSchema>
 
@@ -577,6 +737,11 @@ export const HubToComputerMethods = {
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
+  /**
+   * Take over a live session as a new attempt (a restarted hub adopting what its
+   * previous run left running) — no process starts or stops. See `ptyAdoptParamsSchema`.
+   */
+  ptyAdopt: 'pty.adopt',
   ptyWarmKill: 'pty.warmKill',
   ptyWarmList: 'pty.warmList',
   // git ops (routed WorktreeExecAdapters — see server/exec-proxies)
@@ -611,6 +776,8 @@ export const HubToComputerMethods = {
   // imports directly rather than reimplementing.
   fsReadDir: 'fs.readDir',
   fsReadFile: 'fs.readFile',
+  /** One raw slice of a file (base64) — the hub streams previews from these. */
+  fsReadBytes: 'fs.readBytes',
   fsWriteFile: 'fs.writeFile',
   fsCreateFile: 'fs.createFile',
   fsCreateDir: 'fs.createDir',
@@ -628,6 +795,8 @@ export const HubToComputerMethods = {
   fsWatchStop: 'fs.watchStop',
   // child-process ops (routed ProcessBackend + routed chat agents)
   procSpawn: 'proc.spawn',
+  /** Move a chat agent's spawn still waiting for an agent-start slot to the front. */
+  procPrioritize: 'proc.prioritize',
   procKill: 'proc.kill',
   procWrite: 'proc.write',
   procGetBufferSince: 'proc.getBufferSince',
@@ -647,6 +816,7 @@ export const HubToComputerMethods = {
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
+  projectRelocate: 'project.relocate',
   projectForgetPath: 'project.forgetPath',
   projectList: 'project.list',
   ping: 'ping',
@@ -763,6 +933,19 @@ export const ptySpawnParamsSchema = z
      * detected either way. Absent (an older hub): always streamed.
      */
     relay: z.boolean().optional(),
+    /**
+     * A FIRST spawn of this session id by this hub run: if the computer already runs
+     * a live session under the id (a previous hub run left it — hub processes restart,
+     * computers keep their ptys), take that process over as this attempt instead of
+     * replacing it, when it runs detection as `mode`. The reply then carries
+     * `adopted`; otherwise (`replacedLive` says why) it is replaced as before. An
+     * older computer ignores it and replaces.
+     */
+    adoptLive: z
+      .object({
+        mode: z.string().min(1).max(200).optional()
+      })
+      .optional(),
     carryOutput: z
       .object({
         /** The exited attempt whose buffer continues; absent = it is long gone. */
@@ -834,9 +1017,60 @@ export const ptySpawnResultSchema = z.object({
    *  retained session host) that predates it — the hub then detects itself. */
   detection: z.literal(true).optional(),
   /** With `carryOutput`: the highest seq already in the continued buffer. */
-  seq: z.number().int().optional()
+  seq: z.number().int().optional(),
+  /**
+   * With `adoptLive`: the computer took the session it was running over as this
+   * attempt — no process started. `seq` is its highest seq (output up to it is the
+   * session's scrollback, read by replay), `detected` its settled detection.
+   */
+  adopted: z
+    .object({
+      seq: z.number().int(),
+      detected: ptyDetectedSnapshotSchema.optional()
+    })
+    .optional(),
+  /**
+   * With `adoptLive`: a live session under the id was replaced instead of taken over
+   * (the attempt it was, and why — e.g. `mode-mismatch`, `no-detection`).
+   */
+  replacedLive: z
+    .object({
+      spawnId: z.string().min(1).optional(),
+      reason: z.string().min(1).max(64)
+    })
+    .optional()
 })
 export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
+
+/**
+ * Take over a session the computer runs as a new attempt: the restarted hub adopting
+ * what its previous run left running. Nothing starts or stops; from here on the
+ * process answers to `spawnId` (writes, kills, its output and signals carry it). Only
+ * the exact listed attempt (`fromSpawnId`), only one running detection (the hub
+ * mirrors signals, it parses nothing), only as `mode` when given. Refused otherwise.
+ */
+export const ptyAdoptParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  /** The new attempt key the process answers to from now on. */
+  spawnId: z.string().min(1),
+  /** The attempt `pty.list` named: a different (or no) process under the id is refused. */
+  fromSpawnId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  /** Refused unless the session's detection runs as this mode. */
+  mode: z.string().min(1).max(200).optional(),
+  /** See `pty.spawn` `relay`. */
+  relay: z.boolean().optional()
+})
+export type PtyAdoptParams = z.infer<typeof ptyAdoptParamsSchema>
+
+export const ptyAdoptResultSchema = z.object({
+  pid: z.number().int(),
+  /** Its highest seq: everything up to it is scrollback, read by replay. */
+  seq: z.number().int(),
+  detection: z.literal(true),
+  detected: ptyDetectedSnapshotSchema.optional()
+})
+export type PtyAdoptResult = z.infer<typeof ptyAdoptResultSchema>
 
 export const ptyKillParamsSchema = z.object({
   sessionId: z.string().min(1),
@@ -844,6 +1078,17 @@ export const ptyKillParamsSchema = z.object({
   signal: z.string().optional()
 })
 export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>
+
+export const ptyKillResultSchema = z.object({
+  ok: z.literal(true),
+  /**
+   * Whether the named attempt was running here and is now stopped. False: nothing
+   * matched (it exited, or another attempt took the process over). Absent from older
+   * computers — the hub then re-lists to find out.
+   */
+  killed: z.boolean().optional()
+})
+export type PtyKillResult = z.infer<typeof ptyKillResultSchema>
 
 /**
  * The user is now looking at this session: if its spawn is still waiting for an
@@ -861,6 +1106,19 @@ export const ptyPrioritizeResultSchema = z.object({
   queued: z.boolean()
 })
 export type PtyPrioritizeResult = z.infer<typeof ptyPrioritizeResultSchema>
+
+/**
+ * Someone is waiting on this chat agent now (its tab was revealed, or a message was
+ * sent): if its `proc.spawn` is still waiting for an agent-start slot, start it next.
+ * A no-op (`queued: false`) for a process that already started or never queued.
+ */
+export const procPrioritizeParamsSchema = z.object({
+  sessionId: z.string().min(1)
+})
+export type ProcPrioritizeParams = z.infer<typeof procPrioritizeParamsSchema>
+
+export const procPrioritizeResultSchema = ptyPrioritizeResultSchema
+export type ProcPrioritizeResult = z.infer<typeof procPrioritizeResultSchema>
 
 /**
  * Which of a claude session's background jobs (`Bash` run_in_background /
@@ -1085,7 +1343,17 @@ export const ptyListResultSchema = z.object({
       /** The computer runs output detection for it (absent from older computers). */
       detection: z.literal(true).optional(),
       /** With `detection`: what it has detected so far. */
-      detected: ptyDetectedSnapshotSchema.optional()
+      detected: ptyDetectedSnapshotSchema.optional(),
+      /**
+       * With `detection`: the terminal mode it detects as (what the hub spawned or
+       * adopted it as). A restarted hub adopts a session only into a tab of that mode.
+       * Absent from older computers.
+       */
+      mode: z.string().min(1).max(200).optional(),
+      /** With `detection`: when its process started (ms epoch). Absent from older computers. */
+      startedAt: z.number().int().nonnegative().optional(),
+      /** A later attempt took this process over (`pty.adopt` / `adoptLive`): no start of its own. */
+      adopted: z.literal(true).optional()
     })
   ),
   /** Recently reaped sessions. Absent from older computers, which keep none. */
@@ -1111,6 +1379,11 @@ export type PtyListResult = z.infer<typeof ptyListResultSchema>
 export const ptyWarmSpawnParamsSchema = z.object({
   /** Placeholder session key; becomes a real `sessionId` at adopt. */
   warmId: z.string().min(1),
+  /**
+   * The project the warm agent is pre-started for: its cwd must lie inside that
+   * project's own folder on the computer (§9 Phase 7c).
+   */
+  projectId: z.string().min(1),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   computerShell: z.boolean().optional(),
@@ -1262,6 +1535,12 @@ export const projectSetPathParamsSchema = z.object({
   path: z.string().min(1)
 })
 export type ProjectSetPathParams = z.infer<typeof projectSetPathParamsSchema>
+
+export const projectRelocateParamsSchema = projectSetPathParamsSchema.extend({
+  sourcePath: z.string(),
+  mode: z.enum(['move', 'update']).default('move')
+})
+export type ProjectRelocateParams = z.infer<typeof projectRelocateParamsSchema>
 
 export const projectSetPathResultSchema = z.object({
   /** The realpath-resolved path actually recorded. */
@@ -1495,6 +1774,7 @@ export type ExecRunResult = z.infer<typeof execRunResultSchema>
  */
 const agentConfigPath = z.string().min(1)
 export const agentConfigFsParamsSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('hashFiles'), paths: z.array(agentConfigPath).min(1).max(128) }),
   z.object({ op: z.literal('homedir') }),
   z.object({ op: z.literal('exists'), path: agentConfigPath }),
   z.object({ op: z.literal('readFile'), path: agentConfigPath }),
@@ -1510,27 +1790,35 @@ export type AgentConfigFsParams = z.infer<typeof agentConfigFsParamsSchema>
 export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
 
 /**
- * `usage.collect`: parse this computer's agent usage logs from `cursors` (per log
- * file: the offset and mtime the last parse ended at — the hub keeps them per
- * computer). Answers each changed file's new records and its new cursor.
- */
-/**
- * A collect is paged: the first reply carries `next` when more follows, and the hub
- * asks for it (`page`) — no single message nears the WebSocket's 100 MiB limit, which
- * a whole backlog (81 MiB measured) can pass. A file split across pages is
- * `complete: false` on all but its last chunk, with its OLD cursor as `endOffset`
- * (an older hub that ignores paging saves that, and re-parses the rest next time).
+ * `usage.collect`: this computer's agent usage logs, parsed from the read offsets it
+ * keeps itself (robustness plan §9, P0; hub v209 — the hub keeps none). Answers each
+ * changed file's new records (`@slayzone/usage-analytics/collect` collector.ts).
+ *
+ * Paged: the first reply carries `next` when more follows, and the hub asks for it
+ * (`page`) — no single message nears the WebSocket's 100 MiB limit, which a whole
+ * backlog (81 MiB measured) can pass. A file split across pages is
+ * `complete: false` on all but its last chunk.
+ *
+ * Every reply with records carries a `receipt`; the hub sends it back as `ack` once
+ * it stored that page (with the next `page` request, or alone after the last). Only
+ * then do that page's files' cursors move here: a lost reply is parsed again, and
+ * deterministic record ids keep the hub from counting it twice.
+ *
+ * `seed` (first request only): the hub's former cursors for this computer, handed
+ * over once (v209). A cursor this computer keeps wins.
  */
 const usageCollectPageSchema = z.object({
   token: z.string().min(1).max(64),
   index: z.number().int().nonnegative()
 })
+const usageCursorsSchema = z.record(
+  z.string(),
+  z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
+)
 export const usageCollectParamsSchema = z.object({
-  cursors: z.record(
-    z.string(),
-    z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
-  ),
-  page: usageCollectPageSchema.optional()
+  page: usageCollectPageSchema.optional(),
+  ack: usageCollectPageSchema.optional(),
+  seed: usageCursorsSchema.optional()
 })
 export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
 export const usageCollectResultSchema = z.object({
@@ -1539,13 +1827,14 @@ export const usageCollectResultSchema = z.object({
       sourceFile: z.string(),
       fileMtimeMs: z.number(),
       endOffset: z.number().int().nonnegative(),
-      /** false: more of this file's records follow on a later page; keep its cursor. */
+      /** false: more of this file's records follow on a later page. */
       complete: z.boolean().optional(),
       // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
       records: z.array(z.record(z.string(), z.unknown()))
     })
   ),
-  next: usageCollectPageSchema.optional()
+  next: usageCollectPageSchema.optional(),
+  receipt: usageCollectPageSchema.optional()
 })
 export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
 
@@ -1765,6 +2054,46 @@ export const fsReadFileResultSchema = z.object({
 })
 export type FsReadFileResult = z.infer<typeof fsReadFileResultSchema>
 
+/**
+ * Largest slice one `fs.readBytes` returns: 256 KiB raw, ~342 KiB base64 per frame.
+ * Mirrors file-editor's `WORKSPACE_READ_BYTES_MAX_CHUNK` (this package cannot import
+ * it); `exec-proxies.test.ts` pins the two equal.
+ */
+export const FS_READ_BYTES_MAX_CHUNK = 256 * 1024
+
+/**
+ * `fs.readBytes`: `length` bytes at `offset` of `filePath` (RELATIVE to `rootPath`),
+ * read through one fd — never the whole file. Same jail as `fs.readFile`. A computer
+ * older than this frame answers "method not found", which the gateway turns into
+ * `ComputerUpdatePendingError` (hub-gateway.ts).
+ */
+export const fsReadBytesParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  filePath: z.string().min(1),
+  offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  length: z.number().int().min(1).max(FS_READ_BYTES_MAX_CHUNK)
+})
+export type FsReadBytesParams = z.infer<typeof fsReadBytesParamsSchema>
+
+export const fsReadBytesResultSchema = z.object({
+  /** The slice, base64. Empty at/after the end of the file. */
+  data: z.string(),
+  /** Size of the WHOLE file — a caller detects a file that changed between slices. */
+  size: z.number().int().nonnegative(),
+  mtimeMs: z.number(),
+  /** The slice reaches the end of the file. */
+  eof: z.boolean()
+})
+export type FsReadBytesResult = z.infer<typeof fsReadBytesResultSchema>
+
+/**
+ * `data` of an `fs.*` error that is the filesystem's own answer (`ENOENT`, `EISDIR`,
+ * …) rather than a refusal, so the hub can tell "no such file" from a fault without
+ * parsing the message. Set by `fs.readBytes`.
+ */
+export const fsErrnoErrorDataSchema = z.object({ errno: z.string().min(1).max(32) })
+export type FsErrnoErrorData = z.infer<typeof fsErrnoErrorDataSchema>
+
 export const fsWriteFileParamsSchema = z.object({
   rootPath: z.string().min(1),
   filePath: z.string().min(1),
@@ -1924,6 +2253,7 @@ export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 export const procSpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
   /** Idempotency key — see `pty.spawn`. */
   spawnId: spawnIdField,
   /** Resolve cwd from this project when `cwd` is absent. See `pty.spawn`. */
@@ -1942,6 +2272,15 @@ export const procSpawnParamsSchema = z.object({
    */
   shell: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
+  /**
+   * `cwd` is a folder the USER chose for this background process (the process
+   * domain's stored working folder — a sibling repo such as `~/backend`, a legacy
+   * row's folder): a declared root of this spawn (B3), judged by the computer's
+   * machine bound only (allowed roots, no link out of them, never its own state),
+   * not confined to its task's / project's folders. Absent: the cwd is judged
+   * against those folders, as for every other spawn.
+   */
+  declaredCwd: z.boolean().optional(),
   env: z.record(z.string(), z.string()).optional(),
   /** Agent-start admission lane (chat agents), as for `pty.spawn`. Absent: start at once. */
   admission: ptySpawnAdmissionSchema.optional(),
@@ -1950,7 +2289,16 @@ export const procSpawnParamsSchema = z.object({
    * SIGKILL): a `pnpm dev` shell can exit leaving its real server running, holding
    * the port. Set by the process domain; never for an agent. Absent: left alone.
    */
-  reapGroupOnExit: z.boolean().optional()
+  reapGroupOnExit: z.boolean().optional(),
+  /**
+   * A GLOBAL background process (the process domain's row with no task and no
+   * project): the hub declares it, and the computer starts it as before §9 Phase 7c —
+   * its `cwd` judged by the machine bound, none = the first allowed root. Ignored
+   * when the spawn names a task or a project (those start inside that scope's own
+   * folders). Absent on a spawn naming neither: refused (an unscoped spawn is a bug,
+   * not a global process).
+   */
+  global: z.boolean().optional()
 })
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 

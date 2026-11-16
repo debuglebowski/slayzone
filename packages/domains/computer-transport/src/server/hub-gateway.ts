@@ -26,11 +26,13 @@
  */
 
 import type { WebSocket } from 'ws'
+import { createSuspendClock } from '@slayzone/platform/suspend-clock'
 import {
   addressBucket,
   createFixedWindowLimiter,
   createRateLimitAudit
 } from '@slayzone/platform/rate-limit'
+import { currentPathScope } from '@slayzone/platform/path-scope'
 import {
   currentSecurityContext,
   runWithSecurityContext,
@@ -39,6 +41,7 @@ import {
 } from '@slayzone/platform/security-log'
 import { TypedEventEmitter } from '../shared/events'
 import {
+  isFrameTooLargeError,
   type FsChangeParams,
   type EnrollParams,
   enrollParamsSchema,
@@ -54,16 +57,20 @@ import {
   ComputerNotificationMethods,
   computerNotificationSchemas,
   ComputerToHubMethods,
+  HubToComputerMethods,
   type RequestActor
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
-import { wsDataByteLength, wsDataToText } from '../shared/ws-data'
+import { isWsMessageTooLargeError, wsDataByteLength, wsDataToText } from '../shared/ws-data'
+import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
 import { isBareAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { auditedHubCall } from './hub-audit'
 
 export interface ComputerDescriptor {
   /** Explicitly false while an older host is connected only for maintenance. */
   chatRuntimeReady?: boolean
+  /** Live handler's hash-batch support, from this handshake; never persisted tags. */
+  aiConfigHashFiles?: boolean
   computerId: string
   name?: string
   platform?: string
@@ -94,8 +101,19 @@ export interface ComputerDescriptor {
   peerLoopback: boolean
   /** v8: whether it answers WebRTC offers (`direct.rtcOffer`), from this connection's frame. */
   directRtc: boolean
+  /** Whether it enforces a direct grant's absolute `notAfter`, from this connection's
+   *  frame. Absent = no. */
+  directNotAfter?: boolean
+  /** Whether it answers chat history in bounded pages, from this connection's frame. Absent = no. */
+  chatHistoryPages?: boolean
+  /** Whether it answers a task's prompt summaries in one request (FU5). Absent = no. */
+  promptSummariesAll?: boolean
+  /** Whether it slices a timeline page by rows (`startRow`), from this connection's frame. Absent = no. */
+  chatTimelineRowSlices?: boolean
   connectedAt: number
   lastSeenAt: number
+  /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
+  recovering?: boolean
 }
 
 export type ComputerGatewayEvents = {
@@ -107,6 +125,8 @@ export type ComputerGatewayEvents = {
   'computer-disconnected': { computerId: string; reason: string }
   /** Heartbeat watchdog fired — socket was terminated. */
   'computer-lost': { computerId: string; reason: 'heartbeat-timeout' }
+  /** Usability changed without a socket reconnect (not a PTY lifecycle event). */
+  'computer-liveness': { computerId: string; usable: boolean; recovering: boolean }
   'pty.data': PtyDataParams & { computerId: string }
   'pty.exit': PtyExitParams & { computerId: string }
   /** Child-process stdout/stderr chunk from a routed `proc.spawn` (arrival order,
@@ -168,6 +188,15 @@ export interface HubComputerGatewayOptions {
    */
   floodLimits?: ComputerFloodLimits | false
   log?: (message: string, meta?: Record<string, unknown>) => void
+  /** Content-free liveness and slow-request telemetry. Must never affect delivery. */
+  diagnostic?: (event: string, payload: Record<string, unknown>) => void
+  /**
+   * Largest frame either way, in UTF-8 bytes. Default {@link COMPUTER_FRAME_MAX_BYTES}.
+   * Holds outbound frames (`DuplexRpc`); the host must give its `/computers` ws server
+   * the same `maxPayload` — read it back from {@link HubComputerGateway.maxFrameBytes}.
+   * Tests lower it.
+   */
+  maxFrameBytes?: number
 }
 
 /**
@@ -293,6 +322,11 @@ export interface HubComputerGateway {
   disconnect(computerId: string, reason: string): boolean
   /** Terminate every connection and reject all in-flight requests. */
   close(): void
+  /**
+   * The frame limit this gateway holds computers to. The `/computers` ws server MUST
+   * be created with `maxPayload` = this, so receive and send sides agree.
+   */
+  readonly maxFrameBytes: number
 }
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000
@@ -312,26 +346,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
  * failing array element (GHSA-mrhx-c7xc-m3w5), measured at ~180 bytes of heap per byte
  * of `capabilities: [0, 0, …]`, so a 100 MiB enroll is many GiB: an out-of-memory hub
  * with no credential. 64 KiB bounds that to ~12 MiB per frame. Authenticated computers
- * are not capped (pty output, file reads and command output ride their frames). Keep it
- * after the zod bump: an unauthenticated peer has no reason to send more.
+ * get the protocol's frame limit (`COMPUTER_FRAME_MAX_BYTES`): pty output, file reads and
+ * command output ride their frames. Keep it after the zod bump: an unauthenticated peer
+ * has no reason to send more.
  */
 export const PRE_AUTH_FRAME_MAX_BYTES = 64 * 1024
-
-/**
- * Wall-clock lateness above which a watchdog fire is attributed to THIS PROCESS
- * having been frozen rather than to the computer going silent.
- *
- * Ordinary event-loop lag is tens of milliseconds, seconds at the very worst
- * under load; a host sleep is seconds to hours. Biased deliberately low: a false
- * freeze-detection costs one extra heartbeat window of delay, a false reap costs
- * every agent session on the computer.
- *
- * Lateness rather than a monotonic clock: libuv's monotonic source ticks through
- * system sleep on some platforms and not others, so `performance.now()` would
- * make this correct on one OS and silently useless on another. `setTimeout`
- * cannot fire early anywhere.
- */
-const SUSPEND_LATENESS_MS = 2_000
 
 interface ComputerConnection {
   ws: WebSocket
@@ -346,6 +365,13 @@ interface ComputerConnection {
   heartbeatTimer: ReturnType<typeof setTimeout> | null
   authTimer: ReturnType<typeof setTimeout> | null
   closed: boolean
+  lastAliveAwakeMs: number
+  observedResumeAt: number
+  liveness: 'usable' | 'recovering' | 'stale'
+  probe: Promise<unknown> | null
+  slowRequests: Map<string, number>
+  /** Why the socket is closing, when the gateway knows better than "it closed". */
+  closeReason: string | null
 }
 
 /**
@@ -397,6 +423,15 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
   const authTimeoutMs = options.authTimeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+  const maxFrameBytes = options.maxFrameBytes ?? COMPUTER_FRAME_MAX_BYTES
+  const clock = createSuspendClock()
+  const diagnostic = (event: string, payload: Record<string, unknown>): void => {
+    try {
+      options.diagnostic?.(event, payload)
+    } catch {
+      // Observability must never fail a request or a liveness transition.
+    }
+  }
   const log =
     options.log ??
     (() => {
@@ -527,35 +562,16 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
    * computer has been heard from.
    *
    * It also refuses to judge a window this process did not witness — see the
-   * freeze guard below.
+   * shared suspension-aware clock below.
    */
   function armHeartbeatWatchdog(
     conn: ComputerConnection,
     delayMs: number = heartbeatTimeoutMs
   ): void {
     if (heartbeatTimeoutMs <= 0 || conn.closed) return
-    const armedAt = Date.now()
     conn.heartbeatTimer = setTimeout(() => {
-      // ── Freeze guard ────────────────────────────────────────────────────────
-      // `setTimeout` cannot fire EARLY, so a fire whose wall-clock lateness far
-      // exceeds its own delay means this process was not running for most of the
-      // window: host sleep (closing a laptop lid), VM suspend, a stopped
-      // debugger. The silence about to be judged was never actually observed —
-      // and judging it disposes every terminal session on a computer that is
-      // still very much alive, each surfacing as a fabricated
-      // "Process exited with code 1". Re-arm and look again with a window this
-      // process was awake for.
-      const latenessMs = Date.now() - armedAt - delayMs
-      if (latenessMs > SUSPEND_LATENESS_MS) {
-        log('watchdog fired after a process freeze — re-arming instead of reaping', {
-          computerId: conn.descriptor?.computerId ?? null,
-          latenessMs
-        })
-        armHeartbeatWatchdog(conn)
-        return
-      }
-      const lastSeenAt = conn.descriptor?.lastSeenAt ?? 0
-      const idleMs = Date.now() - lastSeenAt
+      refreshLiveness(conn)
+      const idleMs = clock.awakeNow() - conn.lastAliveAwakeMs
       if (idleMs < heartbeatTimeoutMs) {
         armHeartbeatWatchdog(conn, heartbeatTimeoutMs - idleMs)
         return
@@ -590,13 +606,83 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
   ): conn is ComputerConnection & { descriptor: ComputerDescriptor } {
     if (conn.closed || conn.descriptor === null) return false
     if (heartbeatTimeoutMs <= 0) return true
-    return Date.now() - conn.descriptor.lastSeenAt < heartbeatTimeoutMs
+    refreshLiveness(conn)
+    return conn.liveness === 'usable'
   }
 
-  /** Any valid inbound frame from an authenticated computer counts as liveness. */
+  function setLiveness(
+    conn: ComputerConnection,
+    next: ComputerConnection['liveness'],
+    reason: string
+  ): void {
+    if (!conn.descriptor || conn.closed || conn.liveness === next) return
+    conn.liveness = next
+    conn.descriptor.recovering = next === 'recovering'
+    const change = {
+      computerId: conn.descriptor.computerId,
+      usable: next === 'usable',
+      recovering: next === 'recovering'
+    }
+    diagnostic('computer.liveness', {
+      ...change,
+      reason,
+      ageMs: Math.max(0, Date.now() - conn.descriptor.lastSeenAt),
+      pendingRequests: conn.rpc.pendingCount
+    })
+    events.emit('computer-liveness', change)
+  }
+
+  /** Re-check silence using time this hub could observe, then confirm after a freeze. */
+  function refreshLiveness(conn: ComputerConnection): void {
+    if (conn.closed || !conn.descriptor || heartbeatTimeoutMs <= 0) return
+    const now = clock.awakeNow()
+    const resumedAt = clock.lastResumeAt()
+    if (resumedAt > conn.observedResumeAt) {
+      conn.observedResumeAt = resumedAt
+      // Short stalls inside the heartbeat window do not make a fresh peer
+      // unavailable or trigger reconnect refetches. Expired wall-time silence
+      // needs confirmation and one fresh window the hub can actually observe.
+      if (Date.now() - conn.descriptor.lastSeenAt >= heartbeatTimeoutMs) {
+        conn.lastAliveAwakeMs = now
+        setLiveness(conn, 'recovering', 'hub-resumed')
+      }
+      if (conn.liveness === 'recovering' && !conn.probe) {
+        conn.probe = Promise.resolve()
+          .then(() => {
+            if (conn.closed) return
+            return conn.rpc.request(
+              HubToComputerMethods.ping,
+              {},
+              Math.min(10_000, heartbeatTimeoutMs)
+            )
+          })
+          .catch(() => {
+            // The watchdog still reaps a computer silent for the fresh window.
+          })
+          .finally(() => {
+            conn.probe = null
+          })
+      }
+    }
+    if (now - conn.lastAliveAwakeMs >= heartbeatTimeoutMs)
+      setLiveness(conn, 'stale', 'heartbeat-window-expired')
+  }
+
+  /** Requests, notifications AND correlated replies prove liveness. */
   function markAlive(conn: ComputerConnection): void {
-    if (!conn.descriptor) return
+    if (!conn.descriptor || conn.closed) return
+    const resumedAt = clock.lastResumeAt()
+    // Detect recovery even if traffic was processed before the watchdog/read.
+    if (
+      heartbeatTimeoutMs > 0 &&
+      resumedAt > conn.observedResumeAt &&
+      Date.now() - conn.descriptor.lastSeenAt >= heartbeatTimeoutMs
+    )
+      setLiveness(conn, 'recovering', 'hub-resumed')
+    conn.lastAliveAwakeMs = clock.awakeNow()
+    conn.observedResumeAt = resumedAt
     conn.descriptor.lastSeenAt = Date.now()
+    setLiveness(conn, 'usable', 'peer-answered')
   }
 
   function teardown(conn: ComputerConnection, reason: string): void {
@@ -627,6 +713,8 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       stale.ws.terminate()
     }
     conn.descriptor = descriptor
+    conn.lastAliveAwakeMs = clock.awakeNow()
+    conn.observedResumeAt = clock.lastResumeAt()
     byComputerId.set(descriptor.computerId, conn)
     releasePending(conn)
     if (conn.authTimer) {
@@ -710,12 +798,17 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       platform: parsed.data.platform,
       version: parsed.data.version,
       capabilities: parsed.data.capabilities,
+      aiConfigHashFiles: parsed.data.aiConfigHashFiles === true,
       protocolVersion: parsed.data.protocolVersion,
       authMode: 'enroll',
       ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
+      directNotAfter: parsed.data.directNotAfter === true,
+      chatHistoryPages: parsed.data.chatHistoryPages === true,
+      promptSummariesAll: parsed.data.promptSummariesAll === true,
+      chatTimelineRowSlices: parsed.data.chatTimelineRowSlices === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -871,6 +964,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       platform: identity.platform,
       version: parsed.data.version ?? identity.version,
       capabilities: identity.capabilities,
+      aiConfigHashFiles: parsed.data.aiConfigHashFiles === true,
       authMode: 'hello',
       // From the hello FRAME, not from persistence: the epoch is a property of
       // the live process, and a stored one would survive the restart it exists
@@ -879,6 +973,10 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
+      directNotAfter: parsed.data.directNotAfter === true,
+      chatHistoryPages: parsed.data.chatHistoryPages === true,
+      promptSummariesAll: parsed.data.promptSummariesAll === true,
+      chatTimelineRowSlices: parsed.data.chatTimelineRowSlices === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -1053,16 +1151,31 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       descriptor: null,
       heartbeatTimer: null,
       authTimer: null,
-      closed: false
+      closed: false,
+      lastAliveAwakeMs: 0,
+      observedResumeAt: 0,
+      liveness: 'usable',
+      probe: null,
+      slowRequests: new Map(),
+      closeReason: null
     }
     conn.rpc = new DuplexRpc({
       label: 'computer-hub',
       defaultRequestTimeoutMs: requestTimeoutMs,
+      maxFrameBytes,
+      // Refused before sending; the connection stays up (see ../shared/frame-limit).
+      onFrameTooLarge: (info) =>
+        diagnostic('computer.frame_too_large', {
+          computerId: conn.descriptor?.computerId ?? null,
+          direction: 'outbound',
+          ...info
+        }),
       write: (line) => {
         ws.send(line)
       },
       onPeerRequest: (method, params, id) => handleComputerRequest(conn, method, params, id),
       onNotification: (method, params) => handleComputerNotification(conn, method, params),
+      onPeerResponse: () => markAlive(conn),
       onParseError: (line, err) => protocolError(conn, `unparseable frame: ${String(err)}`, line)
     })
     connections.add(conn)
@@ -1095,8 +1208,26 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         if (line.trim().length > 0) conn.rpc.handleLine(line)
       }
     })
-    ws.on('close', () => teardown(conn, 'socket-closed'))
+    ws.on('close', () => teardown(conn, conn.closeReason ?? 'socket-closed'))
     ws.on('error', (err) => {
+      if (isWsMessageTooLargeError(err)) {
+        // The computer sent a frame over the limit (it should have refused it itself).
+        // ws must close the socket (1009) and exposes no size: say what we do know —
+        // the limit, and which requests it was answering — instead of a bare close.
+        conn.closeReason = 'frame-too-large'
+        const pendingMethods = conn.rpc.pendingMethods()
+        diagnostic('computer.frame_too_large', {
+          computerId: conn.descriptor?.computerId ?? null,
+          direction: 'inbound',
+          limitBytes: maxFrameBytes,
+          pendingMethods
+        })
+        protocolError(
+          conn,
+          `frame over the ${maxFrameBytes}-byte limit (in flight: ${pendingMethods.join(', ') || 'none'}); connection closed`
+        )
+        return
+      }
       log('computer computer socket error', {
         computerId: conn.descriptor?.computerId,
         error: String(err)
@@ -1116,6 +1247,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       cliRelayHandler = handler
     },
     events,
+    maxFrameBytes,
     admitUpgrade,
     handleConnection,
     request<T = unknown>(
@@ -1156,9 +1288,13 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       // Who asked, for the computer's local request log (T-27). Same context the
       // audit line above reads; none = the hub acting on its own behalf.
       const ctx = currentSecurityContext()
+      // The path scope the router authorized rides beside the actor: the computer
+      // confines every path of this request to it (platform/path-scope).
+      const pathScope = currentPathScope()
       const actor: RequestActor = {
         userId: ctx?.actor ? ctx.actor.slice(0, 200) : null,
-        route: ctx?.route ? ctx.route.slice(0, 200) : null
+        route: ctx?.route ? ctx.route.slice(0, 200) : null,
+        ...(pathScope ? { pathScope } : {})
       }
       const send = () => {
         if (getConnection(computerId) !== conn || conn.closed)
@@ -1166,6 +1302,8 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         return conn.rpc.request<T>(method, params, timeoutMs, actor)
       }
       const { authorizeRequest, beforeRequest } = options
+      const startedAt = Date.now()
+      const pendingAtStart = conn.rpc.pendingCount
       const sent = (
         authorizeRequest || beforeRequest
           ? Promise.resolve()
@@ -1173,11 +1311,36 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
               .then(() => beforeRequest?.(computerId, method, params))
               .then(send)
           : conn.rpc.request<T>(method, params, timeoutMs, actor)
-      ).catch((err: unknown) => {
-        if (isUnknownMethodAnswer(err, method))
-          throw new ComputerUpdatePendingError(method, err.code, conn.descriptor?.version)
-        throw err
-      })
+      )
+        .catch((err: unknown) => {
+          if (isFrameTooLargeError(err) && (err.data as { frame?: unknown })?.frame === 'reply') {
+            const data = err.data as { bytes?: unknown; limitBytes?: unknown }
+            diagnostic('computer.reply_too_large', {
+              computerId,
+              method,
+              bytes: data.bytes ?? null,
+              limitBytes: data.limitBytes ?? null
+            })
+          }
+          if (isUnknownMethodAnswer(err, method))
+            throw new ComputerUpdatePendingError(method, err.code, conn.descriptor?.version)
+          throw err
+        })
+        .finally(() => {
+          const durationMs = Date.now() - startedAt
+          if (durationMs < 1_000) return
+          // At most one slow event per computer/method per ten seconds under a flood.
+          const last = conn.slowRequests.get(method) ?? 0
+          if (Date.now() - last < 10_000) return
+          conn.slowRequests.set(method, Date.now())
+          diagnostic('computer.request_slow', {
+            computerId,
+            method,
+            durationMs,
+            pendingAtStart,
+            pendingRequests: conn.rpc.pendingCount
+          })
+        })
       if (!audited) {
         // An unaudited method (a read, a probe) still leaves a line when the computer
         // REFUSES it by its own policy (T-27) — a jail refusal is worth seeing.
@@ -1212,6 +1375,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       getConnection(computerId)?.rpc.notify(method, params)
     },
     listComputers(): ComputerDescriptor[] {
+      for (const conn of byComputerId.values()) refreshLiveness(conn)
       return [...byComputerId.values()]
         .filter(
           (conn): conn is ComputerConnection & { descriptor: ComputerDescriptor } =>
@@ -1236,6 +1400,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     },
     close(): void {
       closed = true
+      clock.dispose()
       for (const conn of [...connections]) {
         teardown(conn, 'gateway-closed')
         conn.ws.terminate()

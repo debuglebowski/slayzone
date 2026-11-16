@@ -23,14 +23,20 @@ export interface GitOpDef<I extends z.ZodObject = z.ZodObject> {
   readonly input: I
   readonly paths: readonly Fields<I>[]
   readonly repoRelative: readonly Fields<I>[]
+  /**
+   * Absolute paths the op makes a NEW root of (`git worktree add`'s target): under a
+   * path scope they may lie outside the scope, never inside someone else's root.
+   */
+  readonly newRoots: readonly Fields<I>[]
 }
 
 function op<I extends z.ZodObject>(
   input: I,
   paths: readonly Fields<I>[],
-  repoRelative: readonly Fields<I>[] = []
+  repoRelative: readonly Fields<I>[] = [],
+  newRoots: readonly Fields<I>[] = []
 ): GitOpDef<I> {
-  return { input, paths, repoRelative }
+  return { input, paths, repoRelative, newRoots }
 }
 
 const at = z.object({ path: s })
@@ -120,8 +126,10 @@ export const gitOpsContract = {
       paths: z.array(s),
       mode: z.enum(['all', 'custom']).optional()
     }),
-    ['repoPath', 'worktreePath'],
-    ['paths']
+    ['repoPath'],
+    ['paths'],
+    // The worktree being set up: a root in the making (the task records it after).
+    ['worktreePath']
   ),
 
   getResolvedCommitDag: op(
@@ -164,12 +172,16 @@ export const gitOpsContract = {
   // `createWorktree`'s steps (the procedure adds policy + phase events),
   addWorktree: op(
     z.object({ repoPath: s, targetPath: s, branch: s.optional(), sourceBranch: s.optional() }),
-    ['repoPath', 'targetPath']
+    ['repoPath'],
+    [],
+    ['targetPath']
   ),
-  initSubmodules: op(z.object({ worktreePath: s }), ['worktreePath']),
+  initSubmodules: op(z.object({ worktreePath: s }), [], [], ['worktreePath']),
   runWorktreeSetupScript: op(
     z.object({ worktreePath: s, repoPath: s, sourceBranch: s.nullable().optional() }),
-    ['worktreePath', 'repoPath']
+    ['repoPath'],
+    [],
+    ['worktreePath']
   ),
   // `detectWorktrees`' git (the procedure adds the hub's worktree colors),
   listWorktrees: op(repo, ['repoPath']),
@@ -204,7 +216,8 @@ function fieldValues(input: Record<string, unknown>, fields: readonly string[]):
 
 /** The absolute paths `input` names for `op`, in contract order (the repo first). */
 export function gitOpAbsolutePaths<K extends GitOpName>(op: K, input: GitOpInput<K>): string[] {
-  return fieldValues(input as Record<string, unknown>, gitOpsContract[op].paths)
+  const def = gitOpsContract[op] as GitOpDef
+  return fieldValues(input as Record<string, unknown>, [...def.paths, ...def.newRoots])
 }
 
 /** The repo-relative paths `input` names for `op`. */
@@ -220,7 +233,12 @@ export function gitOpRepoRelativePaths<K extends GitOpName>(op: K, input: GitOpI
 export function mapGitOpPaths<K extends GitOpName>(
   op: K,
   input: GitOpInput<K>,
-  map: { absolute: (p: string) => string; repoRelative: (p: string) => string }
+  map: {
+    absolute: (p: string) => string
+    repoRelative: (p: string) => string
+    /** A new root's path (default: as `absolute`). */
+    newRoot?: (p: string) => string
+  }
 ): GitOpInput<K> {
   const out: Record<string, unknown> = { ...(input as Record<string, unknown>) }
   const apply = (fields: readonly string[], fn: (p: string) => string) => {
@@ -232,6 +250,7 @@ export function mapGitOpPaths<K extends GitOpName>(
   }
   apply(gitOpsContract[op].paths, map.absolute)
   apply(gitOpsContract[op].repoRelative, map.repoRelative)
+  apply((gitOpsContract[op] as GitOpDef).newRoots, map.newRoot ?? map.absolute)
   return out as GitOpInput<K>
 }
 

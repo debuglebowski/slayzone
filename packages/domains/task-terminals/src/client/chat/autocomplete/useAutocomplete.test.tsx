@@ -257,3 +257,58 @@ describe('useAutocomplete — native slash commands', () => {
     expect(submit).not.toHaveBeenCalled()
   })
 })
+
+describe('useAutocomplete loading (restored tabs)', () => {
+  function counted(id: string) {
+    const fetch = vi.fn(() => Promise.resolve(['alpha']))
+    return { source: { ...slashSource, id, fetch } as AutocompleteSource, fetch }
+  }
+  type Props = { srcs: AutocompleteSource[]; enabled?: boolean; cwd?: string }
+  const mount = (initialProps: Props) =>
+    renderHook(
+      ({ srcs, enabled, cwd = '/repo' }: Props) =>
+        useAutocomplete({
+          sources: srcs,
+          draft: '',
+          cursorPos: 0,
+          setDraft: () => {},
+          acceptCtx,
+          fetchCtx: { cwd },
+          ...(enabled === undefined ? {} : { enabled })
+        }),
+      { initialProps }
+    )
+
+  it('a hidden composer fetches nothing until it is first shown, then keeps its items', async () => {
+    const a = counted('a')
+    const { rerender } = mount({ srcs: [a.source], enabled: false })
+    await act(async () => {})
+    expect(a.fetch).not.toHaveBeenCalled()
+    rerender({ srcs: [a.source], enabled: true })
+    await waitFor(() => expect(a.fetch).toHaveBeenCalledTimes(1))
+    rerender({ srcs: [a.source], enabled: false })
+    rerender({ srcs: [a.source], enabled: true })
+    await act(async () => {})
+    expect(a.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('rebuilding one source does not refetch the others', async () => {
+    const files = counted('files')
+    const cli = counted('cli')
+    const { rerender } = mount({ srcs: [files.source, cli.source] })
+    await waitFor(() => expect(files.fetch).toHaveBeenCalledTimes(1))
+    const cli2 = counted('cli')
+    rerender({ srcs: [files.source, cli2.source] })
+    await waitFor(() => expect(cli2.fetch).toHaveBeenCalledTimes(1))
+    expect(files.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('a new cwd refetches every source', async () => {
+    const files = counted('files')
+    const { rerender } = mount({ srcs: [files.source] })
+    await waitFor(() => expect(files.fetch).toHaveBeenCalledTimes(1))
+    rerender({ srcs: [files.source], cwd: '/other' })
+    await waitFor(() => expect(files.fetch).toHaveBeenCalledTimes(2))
+    expect(files.fetch).toHaveBeenLastCalledWith({ cwd: '/other' })
+  })
+})

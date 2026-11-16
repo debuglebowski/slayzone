@@ -23,12 +23,15 @@ export function ProcessesPanel({
   taskId,
   projectId,
   cwd,
+  cwdUnavailable = null,
   terminalSessionId,
   onOpenUrl
 }: {
   taskId: string | null
   projectId: string | null
   cwd?: string | null
+  /** Why the task's folder is not known yet, or null (ProcessDialog `cwdUnavailable`). */
+  cwdUnavailable?: string | null
   terminalSessionId?: string
   onOpenUrl?: (url: string) => void
 }) {
@@ -390,6 +393,7 @@ export function ProcessesPanel({
         taskId={taskId}
         projectId={projectId}
         cwd={cwd ?? null}
+        cwdUnavailable={cwdUnavailable}
         onSaved={refreshList}
         onSpawned={handleDialogSpawned}
       />

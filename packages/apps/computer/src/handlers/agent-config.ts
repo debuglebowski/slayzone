@@ -13,32 +13,60 @@
  * @module computer/handlers/agent-config
  */
 import { homedir as osHomedir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, resolve, isAbsolute } from 'node:path'
 import { localAiConfigFs } from '@slayzone/ai-config/config-fs'
 import { COMPUTER_PROVIDER_PATHS } from '@slayzone/ai-config/shared'
 import {
   HubToComputerMethods,
   agentConfigFsParamsSchema
 } from '@slayzone/computer-transport/shared'
-import { jailedFs, judgePath, type JailAccess } from '../path-jail'
+import { jailedFs, judgePath, outsideScopeJail, type JailAccess } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
+
+/** Paths `hashFiles` judges per turn of the event loop. */
+const HASH_JUDGE_CHUNK = 16
 
 export function createAgentConfigHandlers(
   ctx: HandlerContext,
   homedir: () => string = osHomedir
 ): HubMethodTable {
-  /** Allowed roots (live — `computer.setAllowedRoots` edits them) + provider dirs. */
-  const roots = (): string[] => [
-    ...ctx.config.allowedRoots,
-    ...Object.values(COMPUTER_PROVIDER_PATHS).map((p) => join(homedir(), p.baseDir))
-  ]
-  const allow = (candidate: string, access: JailAccess = 'read'): string =>
-    judgePath(candidate, roots(), { access, subtree: access === 'entry' })
+  /** This computer's provider dirs under home (`~/.claude`, …). */
+  const providerRoots = (): string[] =>
+    Object.values(COMPUTER_PROVIDER_PATHS).map((p) => join(homedir(), p.baseDir))
+  /**
+   * A provider-dir file is computer-level: judged by those dirs alone, outside the
+   * request's path scope (a project's ops read them beside its own files). Any other
+   * path is a project file: inside `allowedRoots` (live — `computer.setAllowedRoots`
+   * edits them) AND inside the scope the hub authorized (§9 Phase 7c).
+   */
+  const allow = (candidate: string, access: JailAccess = 'read'): string => {
+    const opts = { access, subtree: access === 'entry' }
+    const providers = providerRoots()
+    // Judged by the same roots as before scopes (allowedRoots + provider dirs): a
+    // provider dir that does not exist yet still answers "absent" when an allowed
+    // root holds it, never "outside".
+    if (providers.some((root) => isUnder(candidate, root)))
+      return outsideScopeJail(() =>
+        judgePath(candidate, [...ctx.config.allowedRoots, ...providers], opts)
+      )
+    return judgePath(candidate, ctx.config.allowedRoots, opts)
+  }
 
   async function agentConfigFs(raw: unknown): Promise<{ result: unknown }> {
     const p = agentConfigFsParamsSchema.parse(raw)
     const fs = localAiConfigFs
     switch (p.op) {
+      case 'hashFiles': {
+        // Authorize every entry before any hash can be reused or read — a chunk at a
+        // time, the event loop turning between chunks (FU5: never one long block).
+        const paths: string[] = []
+        for (let i = 0; i < p.paths.length; i += HASH_JUDGE_CHUNK) {
+          if (i > 0) await new Promise<void>((next) => setImmediate(next))
+          for (const path of p.paths.slice(i, i + HASH_JUDGE_CHUNK)) paths.push(allow(path))
+        }
+        const hashes = await fs.hashFiles!(paths)
+        return { result: hashes.map((row, i) => ({ path: p.paths[i], hash: row.hash })) }
+      }
       case 'homedir':
         return { result: homedir() }
       case 'exists':
@@ -69,4 +97,10 @@ export function createAgentConfigHandlers(
   }
 
   return { [HubToComputerMethods.agentConfigFs]: agentConfigFs }
+}
+
+/** `candidate` lexically inside `root` (or it): only picks WHICH roots judge it. */
+function isUnder(candidate: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(candidate))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }

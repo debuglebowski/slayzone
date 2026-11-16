@@ -1,7 +1,8 @@
 /**
  * Shared core of the `/api/chat/*` routes (and the chat side of `/api/agent/*`):
  * which chat tab a request addresses, the folder-bearing opts the lifecycle ops
- * take, where the turn stands (live status + the reduced saved history), and the
+ * take, where the turn stands (live status + the reduced saved history, read in
+ * bounded pages), and the
  * error → HTTP mapping. The routes stay thin; `slay chat` / `slay agent` call them.
  *
  * Addressing: `:id` is a task id or prefix; the tab is the task's main tab unless
@@ -12,11 +13,16 @@ import { TRPCError } from '@trpc/server'
 import {
   chatCapabilitiesForMode,
   isChatSupported,
-  type AgentEvent,
   type ChatTurnStatus,
   type PermissionRequestEvent
 } from '@slayzone/terminal-contracts'
-import { initialState, reducer, type ChatTimelineState } from '@slayzone/terminal/reducer'
+import type { ChatTimelineState } from '@slayzone/terminal/reducer'
+import {
+  emptyChatHistory,
+  withChatHistory,
+  type ChatHistoryReads,
+  type ChatHistoryView
+} from '@slayzone/terminal/chat-history'
 import {
   ChatPromptAnswerError,
   describeChatPrompt,
@@ -25,6 +31,7 @@ import {
 import type { ChatAccess, RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 export interface ChatTarget {
   taskId: string
@@ -141,31 +148,40 @@ export async function turnStatus(
   }
 }
 
-/** The saved history, reduced the way the chat panel reduces it. */
-export async function reducedHistory(
+/**
+ * `use` over the tab's saved history, reduced the way the chat panel reduces it —
+ * read in bounded pages (the projection's snapshot, then rows on demand), never
+ * the whole log in one computer answer. A tab its computer does not know reads as
+ * an empty history.
+ */
+export async function withChatTabHistory<T>(
   chat: ChatAccess,
-  target: ChatTarget
-): Promise<{
-  state: ChatTimelineState
-  lastSeq: number
-  events: Array<{ seq: number; event: AgentEvent }>
-}> {
-  let events: Array<{ seq: number; event: AgentEvent; at?: number }> = []
-  try {
-    events = (await chat.deps().ops.getBufferSince(target.tabId, -1)) as typeof events
-  } catch (err) {
-    if (!/Unknown chat tab/.test(err instanceof Error ? err.message : String(err))) throw err
+  target: ChatTarget,
+  use: (history: ChatHistoryView) => Promise<T>
+): Promise<T> {
+  const ops = chat.deps().ops
+  const reads: ChatHistoryReads = {
+    openTimeline: (tabId, version) => Promise.resolve(ops.openTimeline(tabId, version)),
+    timelinePages: (tabId, pages, asOfSeq, epoch, startRow) =>
+      Promise.resolve(
+        startRow === undefined
+          ? ops.timelinePages(tabId, pages, asOfSeq, epoch)
+          : ops.timelinePages(tabId, pages, asOfSeq, epoch, startRow)
+      ),
+    getEventPage: (tabId, afterSeq) => Promise.resolve(ops.getEventPage(tabId, afterSeq))
   }
-  const state = reducer(
-    initialState({ agentStartedTurns: chatCapabilitiesForMode(target.mode).agentStartedTurns }),
-    {
-      type: 'events',
-      events: events.map((e) => e.event),
-      at: events.map((e) => e.at),
-      seq: events.map((e) => e.seq)
-    }
-  )
-  return { state, lastSeq: events.at(-1)?.seq ?? -1, events }
+  const opts = { agentStartedTurns: chatCapabilitiesForMode(target.mode).agentStartedTurns }
+  let opened = false
+  try {
+    return await withChatHistory(reads, target.tabId, opts, (history) => {
+      opened = true
+      return use(history)
+    })
+  } catch (err) {
+    if (opened || !/Unknown chat tab/.test(err instanceof Error ? err.message : String(err)))
+      throw err
+    return use(await emptyChatHistory(opts))
+  }
 }
 
 /** The prompts the agent is blocked on right now, oldest first. */
@@ -218,6 +234,8 @@ export function describePrompts(
 /** Answer a failure with its status: route refusals, unknown tasks, bad answers, then 500. */
 export function sendChatError(res: Response, err: unknown): void {
   if (res.headersSent) return
+  // A whole-history read over the computer link limit: 413 with the reason, not a 500.
+  if (respondFrameTooLarge(res, err)) return
   if (err instanceof ChatRouteError) {
     res.status(err.status).json({ ok: false, error: err.message })
     return

@@ -32,6 +32,7 @@ import {
   APP_SIGN_IN_PATH,
   APP_SIGN_IN_TOKEN_PATH,
   ENTRA_PROVIDER_ID,
+  OIDC_PROVIDER_ID,
   PASSWORD_AUTH_ENDPOINTS,
   verifySession,
   WEB_SIGN_IN_PATH
@@ -183,10 +184,11 @@ export function passwordRouteRefusal(
  *   - `sign-in/social` — starts the flow: answers the Entra authorize URL and sets the
  *                        state cookie. better-auth only knows the one provider this
  *                        hub installs, and refuses its ID-token variant (entra.ts).
- *   - `callback/microsoft` — where Entra sends the browser back. The callback of the
- *                        configured provider only, by exact path; it signs in nobody
- *                        without the state cookie and a code Entra will redeem for
- *                        this hub's own certificate.
+ *   - `callback/microsoft`, `callback/oidc` — where the issuer sends the browser back
+ *                        (the Entra setup, a generic OpenID issuer). By exact path; a
+ *                        hub installs ONE provider and better-auth refuses the other id.
+ *                        It signs in nobody without the state cookie and a code the
+ *                        issuer will redeem for this hub's own credential.
  * Better-auth's other OAuth routes (`/link-social`, `/refresh-token`,
  * `/get-access-token`, `/account-info`, its `/error` page) are not listed: each needs a
  * session, or nothing the server flow uses.
@@ -213,6 +215,7 @@ export function passwordRouteRefusal(
 const SSO_BOOTSTRAP_PATHS = keySet([
   '/api/auth/sign-in/social',
   `/api/auth/callback/${ENTRA_PROVIDER_ID}`,
+  `/api/auth/callback/${OIDC_PROVIDER_ID}`,
   '/api/auth/device/code',
   '/api/auth/device/token',
   WEB_SIGN_IN_PATH,
@@ -294,6 +297,11 @@ const MCP_PATH = '/mcp'
  * Role changes through `PATCH /api/hub/users` are still the hub's to refuse: on a hub
  * with Entra sign-in every one (`SSO_MANAGED_ROLE`), and the break-glass account's own
  * anywhere (hub-auth `protected`).
+ *
+ * A route listed here is reachable in EVERY shape it takes — the match is method and
+ * path, never query or body. So nothing beyond stopping access may ride on one: content
+ * erasure has its own `/api/hub/content-erasure`, which is not listed (the account
+ * routes answer its old `?erasure=` / `{ action }` shapes 410).
  */
 export const BREAK_GLASS_ROUTES: ReadonlySet<string> = new Set([
   'GET /api/hub/users',

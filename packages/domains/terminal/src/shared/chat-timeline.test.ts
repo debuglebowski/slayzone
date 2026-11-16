@@ -1291,6 +1291,26 @@ test('user-message-popped: removes matching user-text + drops inFlight', () => {
   expect(rowsOf(s).some((i) => i.kind === 'user-text')).toBe(false)
 })
 
+test('user-message-popped: the taken-back message keeps its delivery (a waiter still learns it)', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', id: 'm1', text: 'hello' } })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message-popped', id: 'm1', text: 'hello' } })
+  expect(s.userIndex.get('m1')).toBeUndefined()
+  expect(s.takenBack.get('m1')).toEqual({ delivery: 'queued' })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'user-message-delivery', id: 'm1', state: 'cancelled' }
+  })
+  expect(s.takenBack.get('m1')).toEqual({ delivery: 'cancelled' })
+  // A message never taken back is not tracked.
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'user-message-delivery', id: 'other', state: 'failed', error: 'x' }
+  })
+  expect(s.takenBack.has('other')).toBe(false)
+})
+
 test('user-message-popped: refuses pop when assistant progress sits between', () => {
   // Defensive replay safety. Main side gates emission, but if late events land
   // out-of-order between renderer's request and the synthetic event, the pop

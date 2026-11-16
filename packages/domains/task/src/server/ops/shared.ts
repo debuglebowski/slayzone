@@ -1,20 +1,21 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ProviderConfig, Task, TasksChange, UpdateTaskInput } from '@slayzone/task-contracts'
+import type {
+  ProviderConfig,
+  Task,
+  TaskPathState,
+  TasksChange,
+  UpdateTaskInput
+} from '@slayzone/task-contracts'
 import {
   prioritySchema,
   validateReparent,
   reparentErrorMessage,
   type ReparentTaskRow
 } from '@slayzone/task-contracts'
-import { recordConversation } from './task-conversations.js'
-// The resume predicate is DEFINED in agent-sessions.ts and interpolated here, so
-// the renderer's hint and the spawn-time resolver cannot answer the same question
-// differently. See `resumableSessionSql`.
-import { OWNED_AT_SQL, resumableSessionSql } from './agent-sessions.js'
+import { resetConversation } from './task-conversations.js'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
-import { parseProject, projectFolders } from '@slayzone/projects/server'
 import {
   getColumnById,
   getDefaultStatus,
@@ -24,12 +25,18 @@ import {
   parseColumnsConfig,
   WORKFLOW_CATEGORIES
 } from '@slayzone/projects-contracts'
-import { chatOwnsSpawnFlags, DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
+import {
+  CHAT_SETTING_KEYS,
+  chatOwnsSpawnFlags,
+  COMPUTER_OWNED_CHAT_KEYS,
+  DEFAULT_AGENTS
+} from '@slayzone/terminal-contracts'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { WorktreeCopyBehavior } from '@slayzone/projects-contracts'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
+import { taskEvents } from '../events.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -55,6 +62,18 @@ import type {} from '../task-txns.js'
  * `DESC` keeps the tie-break consistent with `created_at DESC`: newest first.
  */
 export const TASK_ORDER_BY = `ORDER BY t."order" ASC, t.created_at DESC, t.rowid DESC`
+
+/**
+ * Task row `t` is not in transit between hubs: a list shows it. In transit = arriving
+ * from another hub and not yet committed here (an incoming move), or already taken
+ * by the target hub and about to be released here (an outgoing move at `release`).
+ * Either way the other hub's copy is the one to show, so a moving task never appears
+ * twice. Interpolated by every list query (board, rows, all, project, subtasks).
+ */
+export const NOT_IN_TRANSIT = `NOT EXISTS (
+  SELECT 1 FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
+   WHERE mt.task_id = t.id AND (m.direction = 'in' OR m.mode = 'move') AND m.status IN ('running', 'paused', 'failed')
+     AND (m.direction = 'in' OR m.step = 'release'))`
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -93,20 +112,20 @@ export interface WorktreeExecAdapters {
    * `() => null` — meaning a task whose agent runs on a computer had its worktree
    * created on the HUB, leaving the agent with a cwd that does not exist on its
    * own machine. Every call site already has the id in scope.
-   *
-   * `getWorktreeColor` / `ensureProjectWorktreeColors` are deliberately NOT
-   * given one: they are hub-local UI state, never routed (and the former is sync,
-   * so it could not be a network call).
    */
-  /** `createWorktree` from `worktrees/server`. */
+  /** `createWorktree` from `worktrees/server`. Answers the computer that made it
+   *  (null: this host's own disk) — recorded on the task, so the worktree is removed
+   *  there later even when the task's default computer has changed. */
   createWorktree: (
     taskId: string,
     repoPath: string,
     worktreePath: string,
     branch: string,
     sourceBranch?: string
-  ) => Promise<void>
-  /** `removeWorktree` from `worktrees/server` (no branch deletion). */
+  ) => Promise<{ computerId: string | null }>
+  /** `removeWorktree` from `worktrees/server` (no branch deletion). Runs on the
+   *  computer that holds the task's worktree (`tasks.worktree_computer_id`, else the
+   *  task's computer). */
   removeWorktree: (
     taskId: string,
     projectPath: string,
@@ -131,10 +150,6 @@ export interface WorktreeExecAdapters {
   getCurrentBranch: (taskId: string, repoPath: string) => Promise<string | null>
   /** `isGitRepo` from `worktrees/server`. */
   isGitRepo: (taskId: string, path: string) => Promise<boolean>
-  /** `getWorktreeColor` from `worktrees/server`. */
-  getWorktreeColor: (projectPath: string, worktreePath: string) => string | undefined
-  /** `ensureProjectWorktreeColors` from `worktrees/server`. */
-  ensureProjectWorktreeColors: (projectPath: string) => Promise<ReadonlyMap<string, string>>
   /** `fs.existsSync` for a path in the task's WORKSPACE (e.g. the recovered-worktree
    *  check). Routed: the workspace lives wherever the task's agents run. The local
    *  default stays sync (`boolean`); a computer-backed impl needs a network
@@ -189,6 +204,10 @@ export type WorktreeCleanup = 'none' | 'removed' | 'failed'
 
 export interface TaskRuntimeAdapters {
   killPtysByTaskId: (taskId: string) => void
+  /** Stop every agent of the task — its PTYs and its chats, also a chat a computer
+   *  owns (terminal's `stopTaskAgents`). A task moved to another project stops them
+   *  so none keeps running in the old folder. */
+  stopTaskAgents: (taskId: string) => Promise<void>
   removeTaskProcesses: (taskId: string) => void
   recordDiagnosticEvent: (event: DiagnosticEventPayload) => void
   /** Broadcast a respawn request to the renderer when a task transitions from a
@@ -216,6 +235,13 @@ export interface TaskRuntimeAdapters {
    * Unwired (no computers: tests, the fork sidecar): the legacy `projects.path`.
    */
   projectRootForTask: (db: SlayzoneDb, taskId: string, projectId: string) => Promise<string | null>
+  /**
+   * The project's folder on the computer that HOLDS this task's worktree — where it is
+   * removed. Differs from {@link projectRootForTask} when the worktree was made on
+   * another computer than the task's current one (`tasks.worktree_computer_id`).
+   * Unwired: the legacy `projects.path`.
+   */
+  worktreeRootForTask: (db: SlayzoneDb, taskId: string, projectId: string) => Promise<string | null>
   /**
    * The state of the computer that holds this task's worktree (R5-1). Unwired (no
    * computers: tests, the fork sidecar): always `ready` — the worktree is local.
@@ -263,12 +289,6 @@ const unconfiguredWorktreeExecAdapters: WorktreeExecAdapters = {
   isGitRepo: async () => {
     throw notConfigured('worktrees.isGitRepo')
   },
-  getWorktreeColor: () => {
-    throw notConfigured('worktrees.getWorktreeColor')
-  },
-  ensureProjectWorktreeColors: async () => {
-    throw notConfigured('worktrees.ensureProjectWorktreeColors')
-  },
   pathExists: async () => {
     throw notConfigured('worktrees.pathExists')
   },
@@ -292,6 +312,9 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   killPtysByTaskId: () => {
     // Unwired: no PTYs to kill.
   },
+  stopTaskAgents: async () => {
+    // Unwired: no agents to stop.
+  },
   removeTaskProcesses: () => {
     // Unwired: no processes to kill.
   },
@@ -312,6 +335,7 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   worktrees: unconfiguredWorktreeExecAdapters,
   worktreePolicy: unconfiguredWorktreePolicyAdapters,
   projectRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId),
+  worktreeRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId),
   worktreeComputerState: async () => 'ready'
 }
 
@@ -348,16 +372,15 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
   if (!row) return null
   const providerConfig: ProviderConfig =
     (safeJsonParse(row.provider_config) as ProviderConfig) ?? {}
+  // The hub keeps no task path (§9 Phase 7e, v211): a client reads the paths from
+  // the computer (`task.paths`); the task says only whether they are set.
   return {
     ...row,
+    has_worktree: Boolean(row.has_worktree),
+    has_base_dir: Boolean(row.has_base_dir),
     dangerously_skip_permissions: Boolean(row.dangerously_skip_permissions),
     provider_config: providerConfig,
     // Backfill deprecated per-provider fields from provider_config
-    claude_conversation_id: providerConfig['claude-code']?.conversationId ?? null,
-    codex_conversation_id: providerConfig['codex']?.conversationId ?? null,
-    cursor_conversation_id: providerConfig['cursor-agent']?.conversationId ?? null,
-    gemini_conversation_id: providerConfig['gemini']?.conversationId ?? null,
-    opencode_conversation_id: providerConfig['opencode']?.conversationId ?? null,
     claude_flags: providerConfig['claude-code']?.flags ?? '',
     codex_flags: providerConfig['codex']?.flags ?? '',
     cursor_flags: providerConfig['cursor-agent']?.flags ?? '',
@@ -386,132 +409,6 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
 
 export function parseTasks(rows: Record<string, unknown>[]): Task[] {
   return rows.map((row) => parseTask(row)!)
-}
-
-/** Attaches transient worktree_color field. Lazy-detects for cold projects (one IPC per
- *  unique project per process lifetime). Tasks without worktree_path are returned untouched. */
-export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promise<Task[]> {
-  const projectIds = new Set<string>()
-  for (const t of tasks) {
-    if (t.worktree_path && t.project_id) projectIds.add(t.project_id)
-  }
-  if (projectIds.size === 0) return tasks
-
-  // The project-wide folder, all projects at once (one placements query).
-  const ids = [...projectIds]
-  const rows = await db.all<Record<string, unknown>>(
-    `SELECT * FROM projects WHERE id IN (${ids.map(() => '?').join(',')})`,
-    ids
-  )
-  const folders = await projectFolders(
-    db,
-    rows.flatMap((r) => parseProject(r) ?? [])
-  )
-  const projectPaths = new Map([...folders].filter((e): e is [string, string] => e[1] !== null))
-
-  await Promise.all(
-    [...projectPaths.values()].map((p) => runtimeAdapters.worktrees.ensureProjectWorktreeColors(p))
-  )
-
-  return tasks.map((t) => {
-    if (!t.worktree_path) return t
-    const ppath = projectPaths.get(t.project_id)
-    if (!ppath) return t
-    const color = runtimeAdapters.worktrees.getWorktreeColor(ppath, t.worktree_path)
-    return color ? { ...t, worktree_color: color } : t
-  })
-}
-
-/**
- * Populate `currentConversationByMode` from the first-class agent-session
- * tables (`agent_sessions` + `session_resets` + `session_deletions`, migrations
- * v147/v157). The renderer reads this field instead of
- * `provider_config.{mode}.conversationId` so reset cutoff, provenance gating and
- * user deletions are honored on every read. Single query per call (cheap;
- * indexed). Modes with no honored session are simply absent from the record.
- *
- * This is the field the terminal's resume hint comes from, so it is also what
- * makes a session SWITCH durable: `switchConversation` appends a `user-selected`
- * row, which becomes the newest honored row here, which becomes
- * `existingConversationId` on the next spawn → `--resume <picked>`.
- */
-async function attachCurrentConversationByMode(db: SlayzoneDb, tasks: Task[]): Promise<Task[]> {
-  if (tasks.length === 0) return tasks
-  const placeholders = tasks.map(() => '?').join(',')
-  const ids = tasks.map((t) => t.id)
-  // ROW_NUMBER window: deterministically picks the latest honored row per
-  // (task_id, mode) strictly after any manual-reset cutoff. SQLite's `GROUP BY
-  // + HAVING max(created_at)` does NOT guarantee which row's column values are
-  // returned for the group — the window form is correct by spec.
-  const rows = await db.all<{
-    task_id: string
-    mode: string
-    conversation_id: string | null
-  }>(
-    `WITH reset AS (
-       SELECT task_id, mode, max(created_at) AS at
-       FROM session_resets
-       WHERE task_id IN (${placeholders})
-       GROUP BY task_id, mode
-     ),
-     ranked AS (
-       SELECT
-         s.task_id,
-         s.mode,
-         s.conversation_id,
-         ROW_NUMBER() OVER (
-           PARTITION BY s.task_id, s.mode
-           ORDER BY ${OWNED_AT_SQL} DESC
-         ) AS rn
-       FROM agent_sessions s
-       LEFT JOIN reset r ON r.task_id = s.task_id AND r.mode = s.mode
-       WHERE s.task_id IN (${placeholders})
-         AND ${resumableSessionSql('r.at')}
-     )
-     SELECT task_id, mode, conversation_id FROM ranked WHERE rn = 1`,
-    [...ids, ...ids]
-  )
-  const byTask = new Map<string, Record<string, string | null>>()
-  for (const r of rows) {
-    let entry = byTask.get(r.task_id)
-    if (!entry) {
-      entry = {}
-      byTask.set(r.task_id, entry)
-    }
-    entry[r.mode] = r.conversation_id
-  }
-  return tasks.map((t) => ({
-    ...t,
-    currentConversationByMode: byTask.get(t.id) ?? {}
-  }))
-}
-
-export async function parseAndColorTasks(
-  db: SlayzoneDb,
-  rows: Record<string, unknown>[]
-): Promise<Task[]> {
-  const colored = await attachWorktreeColors(db, parseTasks(rows))
-  return attachCurrentConversationByMode(db, colored)
-}
-
-export async function parseAndColorTask(
-  db: SlayzoneDb,
-  row: Record<string, unknown> | undefined
-): Promise<Task | null> {
-  const task = parseTask(row)
-  if (!task) return null
-  const [colored] = await attachWorktreeColors(db, [task])
-  const [withConv] = await attachCurrentConversationByMode(db, [colored])
-  return withConv
-}
-
-export async function colorOne<T extends Task | null | undefined>(
-  db: SlayzoneDb,
-  task: T
-): Promise<T> {
-  if (!task) return task
-  const [colored] = await attachWorktreeColors(db, [task])
-  return colored as T
 }
 
 export async function getProjectColumns(
@@ -574,7 +471,7 @@ export async function cleanupTaskFull(
   taskId: string,
   batchIds: string[] = [taskId],
   /** The purge of a task whose computer is gone for good: there is no one to ask. */
-  opts: { skipWorktree?: boolean } = {}
+  opts: { skipWorktree?: boolean; preserveArtifacts?: boolean } = {}
 ): Promise<WorktreeCleanup> {
   // Resolved first: an id that is not one plain path segment (`..` named the data dir)
   // is refused (`UnsafePathError`) before anything is killed or removed. getDataRoot()
@@ -584,34 +481,41 @@ export async function cleanupTaskFull(
   runtimeAdapters.removeTaskProcesses(taskId)
   // Clean up artifact files on disk.
   // HUB storage, not workspace: never routed to a computer (see hubPathExists).
-  if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
+  if (
+    !opts.preserveArtifacts &&
+    (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir))
+  ) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }
 
-  const task = await db.get<{ worktree_path: string | null; project_id: string }>(
-    'SELECT worktree_path, project_id FROM tasks WHERE id = ?',
+  const task = await db.get<{ has_worktree: number; project_id: string }>(
+    'SELECT has_worktree, project_id FROM tasks WHERE id = ?',
     [taskId]
   )
 
-  if (!task?.worktree_path || opts.skipWorktree) return 'none'
+  if (!task?.has_worktree || opts.skipWorktree) return 'none'
 
-  // Skip removal if any other live task (outside this batch) still references the same worktree.
-  // Subtasks inherit parent's worktree_path; first batch member to run cleanup actually removes,
-  // siblings short-circuit on `existsSync(worktreePath)` inside removeWorktree.
-  const ids = batchIds.length > 0 ? batchIds : [taskId]
-  const placeholders = ids.map(() => '?').join(',')
-  const sharedRow = await db.get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`,
-    [task.worktree_path, ...ids]
+  // The computer holding the task's folders knows its worktree and whether another
+  // live task (outside this batch) still names it — a subtask inherits its parent's
+  // worktree; the first batch member to clean up removes it (robustness plan §9, 7e).
+  const ids = new Set(batchIds.length > 0 ? batchIds : [taskId])
+  const live = (
+    await db.all<{ id: string }>(
+      'SELECT id FROM tasks WHERE project_id = ? AND archived_at IS NULL AND deleted_at IS NULL',
+      [task.project_id]
+    )
   )
-  if ((sharedRow?.n ?? 0) > 0) return 'none'
+    .map((r) => r.id)
+    .filter((id) => !ids.has(id))
 
-  // The worktree lives on the task's computer, next to the project's folder there.
-  const projectRoot = await runtimeAdapters.projectRootForTask(db, taskId, task.project_id)
-
-  if (!projectRoot) return 'none'
   try {
-    await runtimeAdapters.worktrees.removeWorktree(taskId, projectRoot, task.worktree_path)
+    if (!taskPathsDelegate) return 'none'
+    const release = await taskPathsDelegate.release(taskId, live)
+    if (!release.worktreePath || release.shared) return 'none'
+    // The worktree lives on the computer it was made on, next to the project's folder there.
+    const projectRoot = await runtimeAdapters.worktreeRootForTask(db, taskId, task.project_id)
+    if (!projectRoot) return 'none'
+    await runtimeAdapters.worktrees.removeWorktree(taskId, projectRoot, release.worktreePath)
     return 'removed'
   } catch (err) {
     console.error('Failed to remove worktree:', err)
@@ -779,8 +683,9 @@ async function createWorktreeForTask(
   const sourceBranch = projectRow.worktree_source_branch ?? undefined
 
   // Block A: Create worktree and link to task immediately
+  let made: { computerId: string | null }
   try {
-    await runtimeAdapters.worktrees.createWorktree(
+    made = await runtimeAdapters.worktrees.createWorktree(
       taskId,
       repoPath,
       worktreePath,
@@ -791,14 +696,17 @@ async function createWorktreeForTask(
     // Git may exit non-zero after creating the worktree (e.g. post-checkout hook failure).
     // If the dir exists, still link it — better than orphaning a worktree the user can see.
     if (await runtimeAdapters.worktrees.pathExists(taskId, worktreePath)) {
+      // Which computer holds it is not known here: the first write that reaches one
+      // records it (hub computer-task-paths.ts `recordHolder`).
       await db.run(
         `
         UPDATE tasks
-        SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
+        SET has_worktree = 1, worktree_parent_branch = ?, updated_at = datetime('now')
         WHERE id = ?
       `,
-        [worktreePath, parentBranch, taskId]
+        [parentBranch, taskId]
       )
+      await notifyTaskPaths(taskId, { op: 'set', worktreePath })
       runtimeAdapters.recordDiagnosticEvent({
         level: 'warn',
         source: 'task',
@@ -822,15 +730,18 @@ async function createWorktreeForTask(
     return
   }
 
-  // Worktree created — link to task before any post-creation steps
+  // Worktree created — link to task before any post-creation steps, with the computer
+  // that holds it: it is removed there, whichever computer is the task's later.
   await db.run(
     `
     UPDATE tasks
-    SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
+    SET has_worktree = 1, worktree_parent_branch = ?,
+        worktree_computer_id = COALESCE(?, worktree_computer_id), updated_at = datetime('now')
     WHERE id = ?
   `,
-    [worktreePath, parentBranch, taskId]
+    [parentBranch, made.computerId, taskId]
   )
+  await notifyTaskPaths(taskId, { op: 'set', worktreePath })
   runtimeAdapters.recordDiagnosticEvent({
     level: 'info',
     source: 'task',
@@ -893,6 +804,28 @@ export class InvalidTaskUpdateError extends Error {
   override name = 'InvalidTaskUpdateError'
 }
 
+/**
+ * The computer that holds (or would hold) a task's folders cannot take a path now:
+ * none holds them, or it is not connected (§9 Phase 7e — the hub keeps no path).
+ * A precondition the caller can fix by connecting it, not a server fault —
+ * transports map it to "precondition failed" / 409.
+ */
+export class TaskFoldersUnavailableError extends Error {
+  override name = 'TaskFoldersUnavailableError'
+}
+
+/**
+ * A move names a project this hub does not have (a stale picker, another hub's
+ * project). A caller error — transports map it to "bad request" — never the raw
+ * foreign-key failure it would otherwise be.
+ */
+export class ProjectNotFoundError extends Error {
+  override name = 'ProjectNotFoundError'
+  constructor(projectId: string) {
+    super(`Project not found: ${projectId}`)
+  }
+}
+
 interface UpdateTarget {
   existing: { project_id: string; status: string; is_temporary: number } | undefined
   targetProjectId: string | undefined
@@ -907,7 +840,8 @@ async function readUpdateTarget(db: SlayzoneDb, data: UpdateTaskInput): Promise<
   )
   const targetProjectId = data.projectId ?? existing?.project_id
   const targetColumns = targetProjectId ? await getProjectColumns(db, targetProjectId) : null
-  const projectChanged = data.projectId !== undefined && existing?.project_id !== data.projectId
+  const projectChanged =
+    existing !== undefined && data.projectId !== undefined && existing.project_id !== data.projectId
   return { existing, targetProjectId, targetColumns, projectChanged }
 }
 
@@ -941,10 +875,113 @@ export async function validateTaskUpdate(db: SlayzoneDb, data: UpdateTaskInput):
   assertValidTaskUpdate(data, await readUpdateTarget(db, data))
 }
 
+/**
+ * Where a chat's settings go once a computer owns the chat (robustness plan §9,
+ * decision 2): that computer holds the only copy. The hub's composition installs
+ * it; without one (tests, a hub with no computers) `provider_config` chat keys are
+ * plain starting values.
+ */
+export interface ChatSettingsDelegate {
+  /** The task's chat modes whose chat a computer owns (or is taking over). */
+  ownedModes(taskId: string): Promise<ReadonlySet<string>>
+  /** Change those settings on the chat's computer. */
+  apply(taskId: string, mode: string, settings: Record<string, unknown>): Promise<void>
+}
+let chatSettingsDelegate: ChatSettingsDelegate | null = null
+export function setChatSettingsDelegate(delegate: ChatSettingsDelegate | null): void {
+  chatSettingsDelegate = delegate
+}
+
+/**
+ * A task's worktree path and base dir live on its computer (robustness plan §9, P0,
+ * Phase 7a; 7e, v211: the hub keeps no copy, only `has_worktree` / `has_base_dir`):
+ * that computer runs every write. The hub's composition installs this; every writer
+ * here reports the values it wrote after its flag write. Without one (tests, a hub
+ * with no computers) the paths have nowhere to live: only the flags change.
+ */
+/** A write of a task's paths: the fields it sets (absent = unchanged; null clears). */
+export interface TaskPathPatch {
+  worktreePath?: string | null
+  baseDir?: string | null
+}
+export type TaskPathChange =
+  /** The fields this write sets (absent = unchanged; null clears). */
+  ({ op: 'set' } & TaskPathPatch) | { op: 'inherit'; parentTaskId: string } | { op: 'clear' }
+/** The worktree a cleanup may remove, on `computerId`; `shared`: a live task keeps it. */
+export interface TaskPathRelease {
+  worktreePath: string | null
+  shared: boolean
+  computerId: string
+}
+export interface TaskPathsDelegate {
+  /** The task's paths changed as `change`: run it on the computer holding its folders. */
+  changed(taskId: string, change: TaskPathChange): Promise<void>
+  /**
+   * The task's checkout is about to be removed: its worktree (as the computer holding
+   * it knows) and whether a task in `liveTaskIds` still names it. Throws when that
+   * computer cannot be asked.
+   */
+  release(taskId: string, liveTaskIds: readonly string[]): Promise<TaskPathRelease>
+  /**
+   * A path the user sets, as given: written on the computer holding the task's
+   * folders (a task with none yet: where its work runs, which then holds them) before
+   * the hub records that it is set. The delegate alone judges the paths (`''` is
+   * unset): it answers the fields as written, which the hub's flags follow. Throws
+   * when a path is one no computer takes, or that computer is away or refuses it.
+   */
+  apply(taskId: string, patch: TaskPathPatch): Promise<TaskPathPatch>
+  /** A purged task's checkout is dealt with: its computer may forget the path. */
+  forget(taskId: string, computerId: string): Promise<void>
+  /**
+   * The tasks' paths as the computer holding each answers (§9 Phase 7d): `offline`
+   * for a task whose computer is not connected. Never answers from a hub copy.
+   */
+  read(taskIds: readonly string[]): Promise<Record<string, TaskPathState>>
+}
+let taskPathsDelegate: TaskPathsDelegate | null = null
+export function setTaskPathsDelegate(delegate: TaskPathsDelegate | null): void {
+  taskPathsDelegate = delegate
+}
+/** The installed delegate (tests that stand in for a computer restore it). */
+export function getTaskPathsDelegate(): TaskPathsDelegate | null {
+  return taskPathsDelegate
+}
+/**
+ * The tasks' paths from their computers (§9 Phase 7d). Without a delegate (a hub with
+ * no computers) every task answers `offline`: there is nowhere the paths live.
+ */
+export async function readTaskPaths(
+  taskIds: readonly string[]
+): Promise<Record<string, TaskPathState>> {
+  if (!taskPathsDelegate)
+    return Object.fromEntries(taskIds.map((id) => [id, { state: 'offline', computerId: null }]))
+  return taskPathsDelegate.read(taskIds)
+}
+
+/**
+ * Tell the task's computer; never fails the hub write (the delegate stages what it
+ * cannot send). Then every client re-reads the task's paths (`task:paths-changed`):
+ * nothing else tells them a path changed (B2 — their reads are not keyed on the row's
+ * version).
+ */
+export async function notifyTaskPaths(taskId: string, change: TaskPathChange): Promise<void> {
+  try {
+    await taskPathsDelegate?.changed(taskId, change)
+  } catch (error) {
+    console.warn(`[task] paths of ${taskId} not handed to its computer:`, error)
+  }
+  taskEvents.emit('task:paths-changed', { taskId })
+}
+
 export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
   const target = await readUpdateTarget(db, data)
   assertValidTaskUpdate(data, target)
   const { existing, targetProjectId, targetColumns, projectChanged } = target
+  // A project change is a move — subtasks, tags, detaching — and has exactly one
+  // path: `applyProjectChange` / `moveTasksToProject` (ops/move-to-project.ts),
+  // which the update ops run before handing the rest of the update here.
+  if (projectChanged)
+    throw new Error('A project change goes through moveTasksToProject, not updateTask')
 
   // Auto-promote a temporary task when its title is renamed. Mirrors "Turn into task" behavior:
   // clears is_temporary and moves status into the `started` category. Caller can opt out by
@@ -954,27 +991,22 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   let normalizedStatusForWrite: string | undefined
   if (data.status !== undefined) {
-    // Unknown here only on a project move (assertValidTaskUpdate) — re-home it.
-    normalizedStatusForWrite = isKnownStatus(data.status, targetColumns)
-      ? data.status
-      : getDefaultStatus(targetColumns)
+    normalizedStatusForWrite = data.status
   } else if (shouldPromoteFromTemp) {
     normalizedStatusForWrite =
       getStatusByCategory('started', targetColumns) ?? getDefaultStatus(targetColumns)
-  } else if (projectChanged && existing?.status && !isKnownStatus(existing.status, targetColumns)) {
-    normalizedStatusForWrite = getDefaultStatus(targetColumns)
   }
 
   // Status-regression telemetry — catches an unexpected demotion of a task back
   // into the project's default/triage column (the "task keeps jumping to inbox"
   // class of bug). Fires only on the signature — a write that moves the task
-  // from a MORE-advanced workflow category down to `getDefaultStatus`, without a
-  // project change (which legitimately re-homes out-of-range statuses). The
+  // from a MORE-advanced workflow category down to `getDefaultStatus` (a project
+  // move, which legitimately re-homes statuses, never comes through here). The
   // stack trace (built only in this rare branch, so the common path pays
   // nothing) names the offending caller. level:'error' forces an immediate
   // diagnostics flush so a crash/restart can't lose it. Query via:
   //   SELECT * FROM diagnostics_events WHERE event='task.status_regression'
-  if (normalizedStatusForWrite !== undefined && !projectChanged && existing?.status) {
+  if (normalizedStatusForWrite !== undefined && existing?.status) {
     const defaultStatus = getDefaultStatus(targetColumns)
     const categoryRank = (statusId: string): number => {
       const category = getColumnById(statusId, targetColumns)?.category
@@ -1005,16 +1037,11 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   const fields: string[] = []
   const values: unknown[] = []
-  /**
-   * Conversation-id mutations the merge produced. Recorded into the
-   * append-only `task_conversations` ledger after the UPDATE commits so the
-   * renderer's `currentConversationByMode` view (computed from the ledger)
-   * tracks every legacy-field write. Origin tag:
-   *   - newId === null  → `manual-reset` (clear)
-   *   - newId !== null  → `slay-spawned-fresh` (the agent in slay's PTY
-   *     reports/asserts this is its session)
-   */
-  const convIdChanges: Array<{ mode: string; newId: string | null }> = []
+  /** The paths this update writes, for the computer holding the task's folders. */
+  let pathPatch: TaskPathPatch = {}
+  const chatSettingsPushes: Array<{ mode: string; settings: Record<string, unknown> }> = []
+  /** A worktree / base-dir change: every tab's session resets (below). */
+  let resetsWholeTask = false
 
   if (data.title !== undefined) {
     fields.push('title = ?')
@@ -1043,29 +1070,6 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   if (data.dueDate !== undefined) {
     fields.push('due_date = ?')
     values.push(data.dueDate)
-  }
-  if (data.projectId !== undefined) {
-    fields.push('project_id = ?')
-    values.push(data.projectId)
-    if (projectChanged) {
-      // Clear repo/worktree/base_dir fields — child repos and worktrees may differ across projects
-      if (data.repoName === undefined) {
-        fields.push('repo_name = ?')
-        values.push(null)
-      }
-      if (data.worktreePath === undefined) {
-        fields.push('worktree_path = ?')
-        values.push(null)
-      }
-      if (data.worktreeParentBranch === undefined) {
-        fields.push('worktree_parent_branch = ?')
-        values.push(null)
-      }
-      if (data.baseDir === undefined) {
-        fields.push('base_dir = ?')
-        values.push(null)
-      }
-    }
   }
   if (data.parentId !== undefined) {
     // `validateReparent` does synchronous `lookup(id)` calls (task, parent, and the
@@ -1119,57 +1123,46 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     const legacyMappings: Array<{
       mode: string
       col: string
-      convId?: string | null
       flags?: string
-      hasConvId: boolean
       hasFlags: boolean
     }> = [
       {
         mode: 'claude-code',
         col: 'claude',
-        convId: data.claudeConversationId,
         flags: data.claudeFlags,
-        hasConvId: data.claudeConversationId !== undefined,
         hasFlags: data.claudeFlags !== undefined
       },
       {
         mode: 'codex',
         col: 'codex',
-        convId: data.codexConversationId,
         flags: data.codexFlags,
-        hasConvId: data.codexConversationId !== undefined,
         hasFlags: data.codexFlags !== undefined
       },
       {
         mode: 'cursor-agent',
         col: 'cursor',
-        convId: data.cursorConversationId,
         flags: data.cursorFlags,
-        hasConvId: data.cursorConversationId !== undefined,
         hasFlags: data.cursorFlags !== undefined
       },
       {
         mode: 'gemini',
         col: 'gemini',
-        convId: data.geminiConversationId,
         flags: data.geminiFlags,
-        hasConvId: data.geminiConversationId !== undefined,
         hasFlags: data.geminiFlags !== undefined
       },
       {
         mode: 'opencode',
         col: 'opencode',
-        convId: data.opencodeConversationId,
         flags: data.opencodeFlags,
-        hasConvId: data.opencodeConversationId !== undefined,
         hasFlags: data.opencodeFlags !== undefined
       }
     ]
-    const hasLegacyUpdate = legacyMappings.some((m) => m.hasConvId || m.hasFlags)
+    const hasLegacyUpdate = legacyMappings.some((m) => m.hasFlags)
     const shouldResetConversationIds =
-      (data.worktreePath !== undefined || data.baseDir !== undefined || projectChanged) &&
+      (data.worktreePath !== undefined || data.baseDir !== undefined) &&
       data.providerConfig === undefined &&
       !hasLegacyUpdate
+    resetsWholeTask = shouldResetConversationIds
 
     if (
       data.providerConfig !== undefined ||
@@ -1187,26 +1180,45 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       // Deep merge: per-mode entry merge so partial updates don't clobber existing fields
       const merged: ProviderConfig = { ...current }
 
-      // Clear stale conversation IDs when worktree changes
-      if (shouldResetConversationIds) {
-        for (const mode of Object.keys(merged)) {
-          merged[mode] = { ...merged[mode], conversationId: null }
-        }
-      }
-
       if (data.providerConfig !== undefined) {
+        const owned =
+          chatSettingsDelegate &&
+          Object.values(data.providerConfig).some((entry) =>
+            COMPUTER_OWNED_CHAT_KEYS.some((key) => entry && Object.hasOwn(entry, key))
+          )
+            ? await chatSettingsDelegate.ownedModes(data.id)
+            : null
         for (const [mode, entry] of Object.entries(data.providerConfig)) {
-          merged[mode] = { ...current[mode], ...entry }
+          if (owned?.has(mode) && entry) {
+            // A computer owns this chat: its settings change there, and the hub
+            // keeps no copy. The session id is never set through a task update.
+            const rest: Record<string, unknown> = { ...entry }
+            const settings: Record<string, unknown> = {}
+            for (const key of COMPUTER_OWNED_CHAT_KEYS) {
+              if (Object.hasOwn(rest, key) && key !== 'chatConversationId')
+                settings[key] = rest[key]
+              delete rest[key]
+            }
+            if (Object.keys(settings).length) chatSettingsPushes.push({ mode, settings })
+            const kept: Record<string, unknown> = { ...current[mode], ...rest }
+            for (const key of COMPUTER_OWNED_CHAT_KEYS) delete kept[key]
+            merged[mode] = kept as ProviderConfig[string]
+            continue
+          }
+          // Session ids are never the hub's (robustness plan §9): an older client's
+          // `conversationId` / `conversationHistory` is dropped, not stored.
+          const {
+            conversationId: _id,
+            conversationHistory: _history,
+            ...hubKeys
+          } = (entry ?? {}) as Record<string, unknown>
+          merged[mode] = { ...current[mode], ...hubKeys }
         }
       }
 
       // Apply legacy field updates on top
       for (const m of legacyMappings) {
-        if (m.hasConvId || m.hasFlags) {
-          merged[m.mode] = { ...merged[m.mode] }
-          if (m.hasConvId) merged[m.mode].conversationId = m.convId
-          if (m.hasFlags) merged[m.mode].flags = m.flags
-        }
+        if (m.hasFlags) merged[m.mode] = { ...merged[m.mode], flags: m.flags }
       }
 
       // Seed default flags when switching agent (not for Claude chat,
@@ -1218,22 +1230,6 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
         }
       }
 
-      // Track every conversation-id change so we can append a row to the
-      // append-only `task_conversations` ledger AFTER the legacy UPDATE
-      // commits. This is the funnel that makes any updateTask write — Detect
-      // banner, Reset Terminal, slay-internal — flow through the ledger,
-      // matching what hook-driven + chat-mode paths already do. Without this
-      // funnel the renderer's `currentConversationByMode` (computed from the
-      // ledger) goes stale after Detect/Reset writes, surfacing as the
-      // session-id banner re-appearing post-Update.
-      const modesToCompare = new Set<string>([...Object.keys(current), ...Object.keys(merged)])
-      for (const m of modesToCompare) {
-        const oldId = current[m]?.conversationId ?? null
-        const newId = merged[m]?.conversationId ?? null
-        if (oldId === newId) continue
-        convIdChanges.push({ mode: m, newId })
-      }
-
       fields.push('provider_config = ?')
       values.push(JSON.stringify(merged))
 
@@ -1241,10 +1237,6 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       for (const m of legacyMappings) {
         const entry = merged[m.mode]
         if (!entry) continue
-        if (m.hasConvId || data.providerConfig !== undefined || shouldResetConversationIds) {
-          fields.push(`${m.col}_conversation_id = ?`)
-          values.push(entry.conversationId ?? null)
-        }
         if (m.hasFlags || data.providerConfig !== undefined) {
           fields.push(`${m.col}_flags = ?`)
           values.push(entry.flags ?? '')
@@ -1260,19 +1252,14 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     fields.push('panel_sizes = ?')
     values.push(data.panelSizes ? JSON.stringify(data.panelSizes) : null)
   }
-  // Note: these also get cleared to null on project change (see projectChanged block above)
-  if (data.worktreePath !== undefined) {
-    fields.push('worktree_path = ?')
-    values.push(data.worktreePath)
-  }
+  // A project move clears these too (`moveTasksToProject`).
+  // As given: the task-paths delegate judges them (`apply`), once.
+  if (data.worktreePath !== undefined) pathPatch.worktreePath = data.worktreePath
   if (data.worktreeParentBranch !== undefined) {
     fields.push('worktree_parent_branch = ?')
     values.push(data.worktreeParentBranch)
   }
-  if (data.baseDir !== undefined) {
-    fields.push('base_dir = ?')
-    values.push(data.baseDir)
-  }
+  if (data.baseDir !== undefined) pathPatch.baseDir = data.baseDir
   if (data.browserUrl !== undefined) {
     fields.push('browser_url = ?')
     values.push(data.browserUrl)
@@ -1414,6 +1401,30 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     return parseTask(row)
   }
 
+  // The hub keeps only whether each path is set (§9 Phase 7e); the values live on
+  // the computer holding the task's folders. A path the USER sets is written there
+  // first — that computer judges it (never inside another task's or project's
+  // folder) and must be connected; a refusal fails the update. Clears (a project
+  // change) are handed over after, staged while it is away.
+  const userPaths = data.worktreePath !== undefined || data.baseDir !== undefined
+  if (userPaths) {
+    if (!taskPathsDelegate)
+      throw new TaskFoldersUnavailableError(
+        "No computer holds this task's folders: its paths cannot be set"
+      )
+    // The flags follow what the computer holds now (the delegate's answer).
+    pathPatch = await taskPathsDelegate.apply(data.id, pathPatch)
+  }
+  if (pathPatch.worktreePath !== undefined || pathPatch.baseDir !== undefined) {
+    if (pathPatch.worktreePath !== undefined) {
+      fields.push('has_worktree = ?')
+      values.push(pathPatch.worktreePath ? 1 : 0)
+    }
+    if (pathPatch.baseDir !== undefined) {
+      fields.push('has_base_dir = ?')
+      values.push(pathPatch.baseDir ? 1 : 0)
+    }
+  }
   fields.push("updated_at = datetime('now')")
   values.push(data.id)
 
@@ -1448,56 +1459,46 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     events: updateEvents
   })
 
-  // Funnel: every conversation-id mutation from updateTask flows into the
-  // append-only ledger so the renderer's currentConversationByMode reflects
-  // every write. recordConversation itself dual-writes to the legacy field
-  // for HONORED origins — the legacy UPDATE just ran with the same target
-  // value, so the re-write is idempotent (matching value). For manual-reset,
-  // recordConversation also clears the legacy field — also idempotent vs
-  // the UPDATE we just ran. Best-effort: a ledger write failure must not
-  // fail the parent updateTask (e.g. callers that update unrelated fields).
-  //
-  // CAUTION — provenance boundary: this funnel records every conv-id change
-  // here as HONORED (`slay-spawned-fresh` for non-null, `manual-reset` for
-  // null). Today's callers are trusted by convention:
-  //   - renderer Detect → parses /status from slay's own PTY (the agent's
-  //     real sessionId)
-  //   - renderer Reset Terminal → writes null
-  //   - server-internal agent / worktree paths → don't carry foreign
-  //     conv-ids
-  // If you add an `updateTask` caller that takes a user-controlled or
-  // network-supplied conversation id and threads it through `providerConfig`,
-  // DO NOT route it through here. Add a dedicated IPC with provenance
-  // verification (e.g. matching against /status output of a live slay PTY),
-  // or introduce a new non-honored origin (e.g. `external-update`). Otherwise
-  // you reintroduce an UPDATE-based eager-persist clobber.
-  for (const change of convIdChanges) {
+  if (!userPaths && (pathPatch.worktreePath !== undefined || pathPatch.baseDir !== undefined))
+    await notifyTaskPaths(data.id, { op: 'set', ...pathPatch })
+  // A path the user set was written on its computer above (`apply`): clients re-read it.
+  else if (userPaths) taskEvents.emit('task:paths-changed', { taskId: data.id })
+
+  // A worktree / base-dir change: every tab's agent ran in the old folder,
+  // so the WHOLE task resets — every tab, every mode (a reset intent the hub
+  // delivers to the task's computers, robustness plan §9).
+  if (resetsWholeTask) {
     try {
-      await recordConversation(db, {
-        taskId: data.id,
-        mode: change.mode,
-        conversationId: change.newId,
-        origin: change.newId === null ? 'manual-reset' : 'slay-spawned-fresh'
-      })
+      await resetConversation(db, { taskId: data.id, scope: 'all-tabs' })
     } catch {
-      /* ledger write is best-effort; legacy write already committed */
+      /* best-effort: the task update is committed */
     }
   }
-
+  for (const push of chatSettingsPushes) {
+    const ordered = Object.fromEntries(
+      CHAT_SETTING_KEYS.filter((key) => Object.hasOwn(push.settings, key)).map((key) => [
+        key,
+        push.settings[key]
+      ])
+    )
+    try {
+      await chatSettingsDelegate?.apply(data.id, push.mode, ordered)
+    } catch (error) {
+      // The task update is committed; the chat's computer is unreachable or
+      // refused. The hub keeps no copy to retry from: report it.
+      console.warn(`[task] chat settings of ${data.id} (${push.mode}) not applied:`, error)
+    }
+  }
   const effectiveStatus = normalizedStatusForWrite
   const reachedTerminal =
     effectiveStatus !== undefined && isTerminalStatus(effectiveStatus, targetColumns)
-  // `previouslyTerminal` uses the PRE-write status. Compute before project-change
-  // logic may invalidate the old status's known-ness. Use same column config (pre-change)
-  // only when project didn't change; otherwise semantics are ambiguous and we skip respawn.
-  const previouslyTerminal =
-    !projectChanged && existing?.status ? isTerminalStatus(existing.status, targetColumns) : false
+  // `previouslyTerminal` uses the PRE-write status.
+  const previouslyTerminal = existing?.status
+    ? isTerminalStatus(existing.status, targetColumns)
+    : false
   const revived = effectiveStatus !== undefined && !reachedTerminal && previouslyTerminal
   if (reachedTerminal) {
     runtimeAdapters.onReachedTerminal(data.id)
-  } else if (projectChanged) {
-    // Project change rehomes the task — kill its PTYs but no other "terminal" semantics.
-    runtimeAdapters.killPtysByTaskId(data.id)
   }
   // Clear snooze when task reaches terminal status
   if (reachedTerminal && !fields.some((f) => f.startsWith('snoozed_until'))) {

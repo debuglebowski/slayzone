@@ -22,6 +22,17 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  setHubConnectAbortListener,
+  type HubConnectAbort,
+  type HandshakeAbortReason
+} from './connectHandshake'
+export {
+  getHubConnectTrace,
+  getHubConnectTraces,
+  type HubConnectAttempt,
+  type HubConnectOutcome
+} from './connectTrace'
+export {
   attachDirectPty,
   readDirectPtyBuffer,
   DIRECT_CALL_DEADLINE_MS,
@@ -49,6 +60,7 @@ export {
   type DirectLinkManagerOptions,
   type DirectRtcPeerFactory
 } from './direct-link'
+export { readTaskData, type TaskDataReadResult } from './direct-task-data'
 export {
   keepDirectLease,
   type DirectLeaseKeeper,
@@ -96,6 +108,7 @@ export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'
 export {
   useHubOwnershipStore,
+  getClientForHub,
   getHubIdForProject,
   getHubIdForTask,
   useHubIdForProject,

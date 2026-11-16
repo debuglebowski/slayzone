@@ -216,3 +216,15 @@ test("a desktop's joined computer is the default only where it is the user's onl
     usable = []
   }
 })
+
+test("work whose rows are gone (permanent deletion) picks among its owner's computers", async () => {
+  usable = [{ computerId: 'cA' }, { computerId: 'cB' }]
+  const withLogin = placementFor(true)
+  expect(await withLogin.forOwner(A), "the owner's own connected computer").toBe('cA')
+  expect(await withLogin.forOwner(B)).toBe('cB')
+  expect(await withLogin.forOwner(null), 'no owner: no computer').toBeNull()
+  usable = [{ computerId: 'cB' }]
+  expect(await withLogin.forOwner(A), "never someone else's").toBeNull()
+  usable = [{ computerId: 'cA' }]
+  expect(await placementFor(false).forOwner(null), 'no login: the connected default').toBe('cA')
+})

@@ -15,8 +15,8 @@
  *   create   → POST   /api/artifacts?taskId&title[&folderId&renderMode]  (streamed body)
  *   upload   → POST   /api/tasks/:id/artifacts?title=                    (streamed body)
  *   delete   → DELETE /api/artifacts/:id
- *   download → GET    /api/artifacts/:id/content  (raw + zip)
- *              POST   /api/artifacts/:id/export/{pdf,png,html}
+ *   download → GET    /api/artifacts/:id/content  (raw + zip, and the source of the
+ *                     pdf/png/html exports, which the CLI renders itself)
  *
  * The `CLI artifact commands work without a local database` suite below is the
  * regression guard: it runs with SLAYZONE_ROOT pointed at an EMPTY dir, which is
@@ -29,6 +29,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import express from 'express'
 import Database from 'better-sqlite3'
 import { afterAll, describe, expect, test } from 'vitest'
@@ -36,6 +37,7 @@ import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
 import { DB_PRAGMAS, getDbName, getStorageDir } from '../../../shared/platform/src/index.js'
 import { registerRestApi } from '../../../apps/api/src/http/rest-api/index.js'
+import { defaultBrowserEnv, findBrowser } from '../src/export/browser.js'
 
 /**
  * The storage dir a process anchored at `root` resolves — derived by running the
@@ -54,6 +56,9 @@ function storageDirFor(root: string): string {
     else process.env.SLAYZONE_ROOT = prev
   }
 }
+
+// A Chrome-family browser the CLI's own discovery finds here (pdf/png render tests).
+const LOCAL_BROWSER = findBrowser(defaultBrowserEnv())
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 // Without the bundle there is nothing to spawn: every suite below is skipped (the old
@@ -95,6 +100,29 @@ db.prepare(
 ).run(taskId, projectId, 'Artifact task', 'todo', 3, 0)
 
 const app = express()
+// Every artifact-content fetch, by artifact id (the zip tests check what was fetched).
+const contentFetches: string[] = []
+// Artifacts whose content response is cut off: headers and a first piece of the body
+// arrive, then the hub drops the connection (a hub crash or a network loss mid-body).
+const dropContentMidBody = new Set<string>()
+app.use((req, res, next) => {
+  const m = /^\/api\/artifacts\/([^/]+)\/content$/.exec(req.path)
+  if (req.method === 'GET' && m) {
+    const id = decodeURIComponent(m[1])
+    contentFetches.push(id)
+    if (dropContentMidBody.has(id)) {
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(1024 * 1024)
+      })
+      res.write(Buffer.alloc(64 * 1024, 1), () => {
+        setTimeout(() => res.socket?.destroy(), 100)
+      })
+      return
+    }
+  }
+  next()
+})
 app.use(express.json())
 registerRestApi(app, { db: slayDb, notifyRenderer: () => {} })
 const rest = await mountRestApp(app)
@@ -105,10 +133,22 @@ interface CliResult {
   /** Raw stdout bytes — `read`/`download` must be byte-exact for binary artifacts. */
   stdoutBytes: Buffer
   stderr: string
+  /** Still running after `timeoutMs`: killed. */
+  timedOut: boolean
 }
 function runCli(
   args: string[],
-  opts: { input?: string | Buffer; envOverrides?: Record<string, string | undefined> } = {}
+  opts: {
+    input?: string | Buffer
+    envOverrides?: Record<string, string | undefined>
+    cwd?: string
+    /** `ulimit -f` (KiB) for the CLI: a write past it fails with EFBIG. */
+    fileSizeLimitKb?: number
+    /** Kill the CLI after this long (a hang is reported as `timedOut`). */
+    timeoutMs?: number
+    /** The CLI's stdout is this open fd (a file, as `> file` / `>> file` would give). */
+    stdoutFd?: number
+  } = {}
 ): Promise<CliResult> {
   return new Promise((resolve) => {
     const env: Record<string, string> = {
@@ -121,13 +161,29 @@ function runCli(
       if (v === undefined) delete env[k]
       else env[k] = v
     }
-    const p = spawn('node', [SLAY_BIN, ...args], {
+    const [cmd, cmdArgs] =
+      opts.fileSizeLimitKb === undefined
+        ? ['node', [SLAY_BIN, ...args]]
+        : [
+            'sh',
+            ['-c', `ulimit -f ${opts.fileSizeLimitKb}; exec node "$@"`, 'sh', SLAY_BIN, ...args]
+          ]
+    const p = spawn(cmd, cmdArgs, {
       env,
-      stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe']
+      cwd: opts.cwd,
+      stdio: [opts.input !== undefined ? 'pipe' : 'ignore', opts.stdoutFd ?? 'pipe', 'pipe']
     })
+    let timedOut = false
+    const timer =
+      opts.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true
+            p.kill('SIGKILL')
+          }, opts.timeoutMs)
     const outChunks: Buffer[] = []
     let stderr = ''
-    p.stdout.on('data', (d: Buffer) => {
+    p.stdout?.on('data', (d: Buffer) => {
       outChunks.push(d)
     })
     p.stderr.on('data', (d) => {
@@ -138,13 +194,36 @@ function runCli(
       p.stdin!.end()
     }
     p.on('close', (code) => {
+      clearTimeout(timer)
       const stdoutBytes = Buffer.concat(outChunks)
-      resolve({ exitCode: code, stdout: stdoutBytes.toString('utf-8'), stdoutBytes, stderr })
+      resolve({
+        exitCode: code,
+        stdout: stdoutBytes.toString('utf-8'),
+        stdoutBytes,
+        stderr,
+        timedOut
+      })
     })
   })
 }
 
 const short = (id: string) => id.slice(0, 8)
+
+/** The entry names of a zip, from its central directory. */
+function zipEntryNames(zip: Buffer): string[] {
+  const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  let at = zip.readUInt32LE(eocd + 16)
+  const names: string[] = []
+  for (let i = 0; i < zip.readUInt16LE(eocd + 10); i++) {
+    expect(zip.readUInt32LE(at)).toBe(0x02014b50)
+    const nameLen = zip.readUInt16LE(at + 28)
+    const extraLen = zip.readUInt16LE(at + 30)
+    const commentLen = zip.readUInt16LE(at + 32)
+    names.push(zip.subarray(at + 46, at + 46 + nameLen).toString('utf8'))
+    at += 46 + nameLen + extraLen + commentLen
+  }
+  return names
+}
 
 // Shared across the suites below: `notes.md` (markdown) is the fixture the
 // download-capability + no-server assertions address by prefix.
@@ -441,6 +520,63 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(fs.readFileSync(out).toString('hex')).toBe(BINARY.toString('hex'))
   })
 
+  // Review 7, #6: `--output` naming stdout writes into it as it stands — never a temp
+  // file beside it (there is no such directory) renamed over it: a redirect target
+  // keeps what it had (`>>`), a pipe gets the bytes, and the path line follows them.
+  // …and a symlink of the person's own that leads there.
+  const stdoutLink = path.join(tmpDir, 'to-stdout')
+  if (process.platform !== 'win32') fs.symlinkSync('/dev/stdout', stdoutLink)
+  const stdoutPaths =
+    process.platform === 'win32'
+      ? []
+      : [
+          '/dev/stdout',
+          '/dev/fd/1',
+          ...(process.platform === 'linux' ? ['/proc/self/fd/1'] : []),
+          stdoutLink
+        ]
+  for (const target of stdoutPaths) {
+    for (const mode of ['w', 'a'] as const) {
+      test(`download --output ${target} with stdout ${mode === 'a' ? 'appended' : 'redirected'} to a file`, async () => {
+        const file = path.join(tmpDir, `stdout-${mode}-${target.replaceAll('/', '_')}.out`)
+        fs.writeFileSync(file, mode === 'a' ? 'previous\n' : '')
+        const fd = fs.openSync(file, mode)
+        let r: CliResult
+        try {
+          r = await runCli(
+            ['tasks', 'artifacts', 'download', short(pngId), '--type', 'raw', '--output', target],
+            { stdoutFd: fd }
+          )
+        } finally {
+          fs.closeSync(fd)
+        }
+        expect(r.exitCode, r.stderr).toBe(0)
+        const expected = Buffer.concat([
+          Buffer.from(mode === 'a' ? 'previous\n' : ''),
+          BINARY,
+          Buffer.from(`${target}\n`)
+        ])
+        expect(fs.readFileSync(file).toString('hex')).toBe(expected.toString('hex'))
+      })
+    }
+    test(`download --output ${target} with stdout a pipe`, async () => {
+      const r = await runCli([
+        'tasks',
+        'artifacts',
+        'download',
+        short(pngId),
+        '--type',
+        'raw',
+        '--output',
+        target
+      ])
+      expect(r.exitCode, r.stderr).toBe(0)
+      expect(r.stdoutBytes.toString('hex')).toBe(
+        Buffer.concat([BINARY, Buffer.from(`${target}\n`)]).toString('hex')
+      )
+    })
+  }
+
   test('create --copy-from streams a binary file byte-exact', async () => {
     const srcPath = path.join(tmpDir, 'copied.png')
     fs.writeFileSync(srcPath, BINARY)
@@ -509,13 +645,394 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(fs.readFileSync(out).subarray(0, 4).toString('hex')).toBe('504b0304')
   })
 
-  test('download --type pdf reports the host cannot export (no artifactExport dep)', async () => {
-    // This harness registers the routes WITHOUT an `artifactExport` slot, i.e. the
-    // standalone-hub shape → 501. The CLI must surface that, not crash.
-    const r = await runCli(['tasks', 'artifacts', 'download', short(artifactId), '--type', 'pdf'])
-    expect(r.exitCode).toBe(1)
-    expect(r.stderr.includes('not available in standalone server')).toBe(true)
+  // Review 5, #11: the zip's entry names come from the shared download planner, as on
+  // desktop and web — titles are free text an agent picks.
+  test('download --type zip: duplicate, climbing and backslash titles → unique, safe entries', async () => {
+    const zipTask = crypto.randomUUID()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(zipTask, projectId, 'Zip names task', 'todo', 3, 1)
+    const f = await runCli([
+      'tasks',
+      'artifacts',
+      'mkdir',
+      'docs',
+      '--task',
+      short(zipTask),
+      '--json'
+    ])
+    expect(f.exitCode, f.stderr).toBe(0)
+    const folder = (JSON.parse(f.stdout) as { id: string }).id
+    for (const [title, inFolder] of [
+      ['dup.md', false],
+      ['dup.md', false],
+      ['DUP.md', false],
+      ['a/../../x.md', false],
+      ['win\\name.md', false],
+      ['C:evil.md', false],
+      ['dup.md', true],
+      ['../../../up.md', true]
+    ] as const) {
+      const c = await runCli(
+        [
+          'tasks',
+          'artifacts',
+          'create',
+          title,
+          '--task',
+          short(zipTask),
+          ...(inFolder ? ['--folder', folder] : []),
+          '--json'
+        ],
+        { input: `# ${title}\n` }
+      )
+      expect(c.exitCode, c.stderr).toBe(0)
+    }
+    const out = path.join(tmpDir, 'names.zip')
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      '--type',
+      'zip',
+      '--task',
+      short(zipTask),
+      '--output',
+      out
+    ])
+    expect(r.exitCode, r.stderr).toBe(0)
+    const names = zipEntryNames(fs.readFileSync(out))
+    expect(names.sort()).toEqual(
+      [
+        'dup.md',
+        'dup (2).md',
+        'DUP (3).md',
+        'a_x.md',
+        'win_name.md',
+        'C_evil.md',
+        'docs/dup.md',
+        'docs/up.md'
+      ].sort()
+    )
+    for (const n of names) {
+      expect(n.split('/')).not.toContain('..')
+      expect(n).not.toMatch(/[\\:]/)
+      expect(n.startsWith('/')).toBe(false)
+    }
   })
+
+  // Review 7, #4: the output fails partway (disk full, here a file-size limit). The
+  // failure must end the command — non-zero, no output file, no temp file — and stop
+  // fetching the remaining entries, not hang nor exit 0 with nothing written.
+  test.skipIf(process.platform === 'win32')(
+    'download --type zip whose output fails mid-stream exits non-zero and leaves nothing',
+    async () => {
+      const bigTask = crypto.randomUUID()
+      db.prepare(
+        'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(bigTask, projectId, 'Zip output failure task', 'todo', 3, 2)
+      const ids: string[] = []
+      for (let i = 0; i < 6; i++) {
+        // Random bytes: incompressible, so the archive outgrows the limit by entry 2.
+        const src = path.join(tmpDir, `noise-${i}.bin`)
+        fs.writeFileSync(src, randomBytes(150 * 1024))
+        const u = await runCli([
+          'tasks',
+          'artifacts',
+          'upload',
+          src,
+          '--task',
+          short(bigTask),
+          '--json'
+        ])
+        expect(u.exitCode, u.stderr).toBe(0)
+        ids.push((JSON.parse(u.stdout) as { id: string }).id)
+      }
+      const dir = path.join(tmpDir, 'zip-output-fails')
+      fs.mkdirSync(dir)
+      const before = contentFetches.length
+      const r = await runCli(
+        [
+          'tasks',
+          'artifacts',
+          'download',
+          '--type',
+          'zip',
+          '--task',
+          short(bigTask),
+          '--output',
+          path.join(dir, 'out.zip')
+        ],
+        { fileSizeLimitKb: 200, timeoutMs: 120_000 }
+      )
+      expect(r.timedOut).toBe(false)
+      expect(r.exitCode).not.toBe(0)
+      expect(r.stderr).toMatch(/EFBIG|too large/i)
+      expect(r.stdout).toBe('')
+      expect(fs.readdirSync(dir)).toEqual([])
+      // Fetching stopped at the failure: the last entries were never requested.
+      const fetched = contentFetches.slice(before).filter((id) => ids.includes(id))
+      expect(fetched.length).toBeGreaterThan(0)
+      expect(fetched.length).toBeLessThan(ids.length)
+    },
+    180_000
+  )
+
+  // Review 8, L2: the hub drops the connection partway through an entry's body. The
+  // command must fail cleanly — non-zero, a message naming the entry, no output file,
+  // no temp file — not crash on an unhandled stream 'error' (archiver does not listen
+  // to its sources' errors).
+  test('download --type zip whose hub drops a body mid-stream exits non-zero and leaves nothing', async () => {
+    const dropTask = crypto.randomUUID()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(dropTask, projectId, 'Zip dropped body task', 'todo', 3, 3)
+    const ids: string[] = []
+    for (const title of ['first.md', 'cut.md', 'last.md']) {
+      const c = await runCli(
+        ['tasks', 'artifacts', 'create', title, '--task', short(dropTask), '--json'],
+        { input: `# ${title}\n` }
+      )
+      expect(c.exitCode, c.stderr).toBe(0)
+      ids.push((JSON.parse(c.stdout) as { id: string }).id)
+    }
+    dropContentMidBody.add(ids[1])
+    try {
+      const dir = path.join(tmpDir, 'zip-body-dropped')
+      fs.mkdirSync(dir)
+      const before = contentFetches.length
+      const r = await runCli(
+        [
+          'tasks',
+          'artifacts',
+          'download',
+          '--type',
+          'zip',
+          '--task',
+          short(dropTask),
+          '--output',
+          path.join(dir, 'out.zip')
+        ],
+        { timeoutMs: 120_000 }
+      )
+      expect(r.timedOut).toBe(false)
+      expect(r.exitCode, r.stderr).toBe(1)
+      expect(r.stderr).not.toMatch(/Unhandled 'error' event|^\s+at /m)
+      expect(r.stderr).toMatch(/cut\.md/)
+      expect(r.stdout).toBe('')
+      expect(fs.readdirSync(dir)).toEqual([])
+      // Nothing more is fetched after the failure.
+      expect(contentFetches.slice(before).filter((id) => ids.includes(id))).toEqual([
+        ids[0],
+        ids[1]
+      ])
+    } finally {
+      dropContentMidBody.delete(ids[1])
+    }
+  }, 180_000)
+
+  // pdf/png/html are rendered BY THE CLI from the content route — this harness's hub
+  // has no exporter at all (the standalone-hub shape), and the exports still work.
+  test('download --type html renders locally, no browser involved', async () => {
+    const out = path.join(tmpDir, 'notes-export.html')
+    // An unusable --browser proves html never looks for one.
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(artifactId),
+      '--type',
+      'html',
+      '--output',
+      out,
+      '--browser',
+      path.join(tmpDir, 'no-such-browser')
+    ])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.trim()).toBe(out)
+    const html = fs.readFileSync(out, 'utf8')
+    expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(html).toContain('<title>notes.md</title>')
+    expect(html).toContain('<h1>hello</h1>')
+  })
+
+  // Review 1, L2: with no --output the file lands in the current directory under a
+  // name made safe from the title — an agent-named artifact cannot point it elsewhere
+  // (the hub's owned-path guard on the old export route no longer stands in front).
+  test('download without --output: a title that climbs or is absolute stays in the cwd', async () => {
+    const cwd = path.join(tmpDir, 'l2', 'a', 'b')
+    fs.mkdirSync(cwd, { recursive: true })
+    // Review 5, #12: a 300-byte title and a Windows drive-relative one also get a
+    // name every filesystem accepts (≤255 bytes, extension kept; no `:`).
+    const long = `${'x'.repeat(297)}.md`
+    for (const [title, type, expected] of [
+      ['../../escape-l2.md', 'html', 'escape-l2.html'],
+      ['../../escape-raw.md', 'raw', 'escape-raw.md'],
+      ['/abs/dir/abs-l2.md', 'html', 'abs_dir_abs-l2.html'],
+      ['C:evil.md', 'raw', 'C_evil.md'],
+      ['C:evil-h.md', 'html', 'C_evil-h.html'],
+      [long, 'raw', `${'x'.repeat(252)}.md`],
+      [long, 'html', `${'x'.repeat(250)}.html`],
+      ['y'.repeat(300), 'html', `${'y'.repeat(250)}.html`]
+    ] as const) {
+      const c = await runCli(
+        ['tasks', 'artifacts', 'create', title, '--task', short(taskId), '--json'],
+        { input: '# x\n' }
+      )
+      expect(c.exitCode, c.stderr).toBe(0)
+      const id = (JSON.parse(c.stdout) as { id: string }).id
+      const r = await runCli(['tasks', 'artifacts', 'download', short(id), '--type', type], { cwd })
+      expect(r.exitCode, r.stderr).toBe(0)
+      expect(fs.realpathSync(r.stdout.trim())).toBe(fs.realpathSync(path.join(cwd, expected)))
+    }
+    expect(fs.existsSync(path.join(tmpDir, 'l2', 'escape-l2.html'))).toBe(false)
+    expect(fs.existsSync(path.join(tmpDir, 'l2', 'escape-raw.md'))).toBe(false)
+  })
+
+  // Review 6, #5: with no --output the name comes from the title, so it may already be
+  // taken in the cwd — by a file the person cares about, or a symlink to one. Neither
+  // is overwritten (nor written through): the download is numbered `name (2).ext`.
+  test('download without --output never overwrites an existing name in the cwd', async () => {
+    const cwd = path.join(tmpDir, 'no-clobber')
+    const outside = path.join(tmpDir, 'no-clobber-outside')
+    fs.mkdirSync(cwd, { recursive: true })
+    fs.mkdirSync(outside, { recursive: true })
+    const c = await runCli(
+      ['tasks', 'artifacts', 'create', 'keep.md', '--task', short(taskId), '--json'],
+      { input: '# fresh\n' }
+    )
+    expect(c.exitCode, c.stderr).toBe(0)
+    const id = (JSON.parse(c.stdout) as { id: string }).id
+
+    // keep.md: a precious regular file. keep.html: a symlink to a file elsewhere.
+    // artifacts.zip: the zip's default name, also taken.
+    fs.writeFileSync(path.join(cwd, 'keep.md'), 'precious md')
+    fs.writeFileSync(path.join(outside, 'target.html'), 'precious html')
+    fs.symlinkSync(path.join(outside, 'target.html'), path.join(cwd, 'keep.html'))
+    fs.writeFileSync(path.join(cwd, 'artifacts.zip'), 'precious zip')
+
+    const download = async (args: string[]) => {
+      const r = await runCli(['tasks', 'artifacts', 'download', ...args], { cwd })
+      expect(r.exitCode, r.stderr).toBe(0)
+      return fs.realpathSync(r.stdout.trim())
+    }
+    const at = (name: string) => fs.realpathSync(path.join(cwd, name))
+
+    expect(await download([short(id), '--type', 'raw'])).toBe(at('keep (2).md'))
+    expect(fs.readFileSync(path.join(cwd, 'keep (2).md'), 'utf8')).toBe('# fresh\n')
+    // Taken again (by our own previous download): the next number.
+    expect(await download([short(id), '--type', 'raw'])).toBe(at('keep (3).md'))
+    expect(await download([short(id), '--type', 'html'])).toBe(at('keep (2).html'))
+    expect(fs.readFileSync(path.join(cwd, 'keep (2).html'), 'utf8')).toContain('<h1>fresh</h1>')
+    expect(await download(['--type', 'zip', '--task', short(taskId)])).toBe(at('artifacts (2).zip'))
+    expect(
+      fs.readFileSync(path.join(cwd, 'artifacts (2).zip')).subarray(0, 4).toString('hex')
+    ).toBe('504b0304')
+
+    expect(fs.readFileSync(path.join(cwd, 'keep.md'), 'utf8')).toBe('precious md')
+    expect(fs.lstatSync(path.join(cwd, 'keep.html')).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(path.join(outside, 'target.html'), 'utf8')).toBe('precious html')
+    expect(fs.readFileSync(path.join(cwd, 'artifacts.zip'), 'utf8')).toBe('precious zip')
+    // Nothing else left behind (no temp files).
+    expect(fs.readdirSync(cwd).sort()).toEqual(
+      [
+        'artifacts (2).zip',
+        'artifacts.zip',
+        'keep (2).html',
+        'keep (2).md',
+        'keep (3).md',
+        'keep.html',
+        'keep.md'
+      ].sort()
+    )
+    expect(fs.readdirSync(outside)).toEqual(['target.html'])
+  })
+
+  // With --output the person chose the path: an existing file there is replaced, as
+  // before — but whole, never left half-written.
+  test('download --output replaces an existing file there, leaving no temp file', async () => {
+    const dir = path.join(tmpDir, 'explicit-output')
+    fs.mkdirSync(dir, { recursive: true })
+    const out = path.join(dir, 'chosen.md')
+    fs.writeFileSync(out, 'old content')
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(artifactId),
+      '--type',
+      'raw',
+      '--output',
+      out
+    ])
+    expect(r.exitCode, r.stderr).toBe(0)
+    expect(r.stdout.trim()).toBe(out)
+    expect(fs.readFileSync(out, 'utf8')).not.toBe('old content')
+    expect(fs.readdirSync(dir)).toEqual(['chosen.md'])
+  })
+
+  test('download --type html of a mermaid artifact embeds the bundled mermaid build', async () => {
+    const c = await runCli(
+      ['tasks', 'artifacts', 'create', 'flow.mmd', '--task', short(taskId), '--json'],
+      { input: 'graph TD\n  A --> B\n' }
+    )
+    expect(c.exitCode).toBe(0)
+    const id = (JSON.parse(c.stdout) as { id: string }).id
+    const out = path.join(tmpDir, 'flow-export.html')
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(id),
+      '--type',
+      'html',
+      '--output',
+      out
+    ])
+    expect(r.exitCode).toBe(0)
+    const html = fs.readFileSync(out, 'utf8')
+    // The inlined (compressed) payload decoded to the real browser build, not the
+    // code-block fallback a missing mermaid degrades to.
+    expect(html).toContain('<pre class="mermaid">')
+    expect(html).toContain('mermaid.initialize(')
+    expect(html.length).toBeGreaterThan(1_000_000)
+  })
+
+  test('download --type pdf with a --browser that does not exist is refused', async () => {
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(artifactId),
+      '--type',
+      'pdf',
+      '--browser',
+      path.join(tmpDir, 'no-such-browser')
+    ])
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr).toContain('Browser not found or not executable:')
+  })
+
+  test.skipIf(!LOCAL_BROWSER)(
+    'download --type pdf renders in the local browser',
+    { timeout: 60_000 },
+    async () => {
+      const out = path.join(tmpDir, 'notes-export.pdf')
+      const r = await runCli([
+        'tasks',
+        'artifacts',
+        'download',
+        short(artifactId),
+        '--type',
+        'pdf',
+        '--output',
+        out
+      ])
+      expect(r.exitCode).toBe(0)
+      expect(r.stdout.trim()).toBe(out)
+      expect(fs.readFileSync(out).subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    }
+  )
 
   test('download --type png on a markdown artifact is rejected client-side', async () => {
     // Capability check stays in the CLI (it knows the render mode from the row it

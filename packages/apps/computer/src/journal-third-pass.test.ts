@@ -24,6 +24,7 @@ import {
   atomicRuntimeJson
 } from './session-host'
 import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
+import { placeTestProject } from './project-scope.fixture'
 
 async function fixture(legacyChatMarker?: string, stagedJournals = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'chat-journal-third-'))
@@ -43,7 +44,13 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
   )
   const disconnectedJournal = join(runtimeDir(root), 'hooks-' + 'a'.repeat(16) + '.json')
   mkdirSync(runtimeDir(root), { recursive: true })
-  const hooks = [{ id: 'native-hook', params: { name: 'agent-hook', payload: { status: 'done' } } }]
+  const hooks = [
+    { id: 'native-hook', params: { name: 'agent-hook', payload: { status: 'done' } } },
+    {
+      id: 'owned-native-hook',
+      params: { name: 'agent-hook', payload: { taskId: 'task', text: 'private native hook' } }
+    }
+  ]
   const legacy = legacyChatMarker
     ? [
         ...hooks,
@@ -66,6 +73,11 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
     activeStaging = `${journal}.${process.pid}.abcdef56.tmp`
     writeFileSync(activeStaging, JSON.stringify(legacy))
   }
+  // The chat's task belongs to a project placed here: its agent starts inside it.
+  // The in-process computer reads its project map from SLAYZONE_ROOT.
+  placeTestProject(root, url, 'p1', root)
+  const previousRoot = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
   let host = await startSessionHost(root, config)
   let control = await hostControl(root)
   let allowDelivery = false
@@ -124,7 +136,7 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
     kind: 'bootstrap',
     value: {
       identity: { id: 'store', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
-      projectId: null,
+      projectId: 'p1',
       cwd: root,
       revision: 1,
       providerConfig: {},
@@ -162,6 +174,8 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
       peer.close()
       control.close()
       await host.stop()
+      if (previousRoot === undefined) delete process.env.SLAYZONE_ROOT
+      else process.env.SLAYZONE_ROOT = previousRoot
       rmSync(root, { recursive: true, force: true })
     }
   }
@@ -239,6 +253,24 @@ test('upgrade removes abandoned complete and partial hook journal temps while re
     expect(readFileSync(f.activeStaging!, 'utf8')).toContain(marker)
     expect(f.journalText()).toContain('native-hook')
     expect(f.journalText()).not.toContain(marker)
+  } finally {
+    await f.close()
+  }
+})
+
+test('verified task erasure removes its native hook journal copy, scoped to this hub', async () => {
+  const f = await fixture()
+  try {
+    expect(f.journalText()).toContain('private native hook')
+    await f.request({
+      kind: 'task.erase',
+      jobId: '11111111-1111-4111-8111-111111111111',
+      taskId: 'task',
+      revision: 2
+    })
+    expect(f.journalText()).not.toContain('private native hook')
+    expect(f.journalText()).toContain('native-hook')
+    expect(f.disconnectedJournalText()).toContain('private native hook')
   } finally {
     await f.close()
   }

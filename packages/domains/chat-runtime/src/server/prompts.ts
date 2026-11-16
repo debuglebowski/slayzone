@@ -5,9 +5,9 @@ import {
   isSyntheticChatPrompt,
   type ResolvedAgentHook
 } from '@slayzone/terminal-contracts'
-import type { ChatStorage } from './storage'
+import { EVENT_MARKER_KINDS, type ChatStorage } from './storage'
 import { chatStorageMode } from './storage-mode'
-interface LocalPrompt {
+export interface LocalPrompt {
   id: string
   taskId: string
   agentId: string
@@ -27,15 +27,108 @@ export function trimLocalPromptHistory(store: ChatStorage, taskId: string, agent
       .run(taskId, agentId)
   )
 }
-export function createLocalPrompts(store: ChatStorage) {
+/**
+ * Keep one prompt in the task's history: in the task's active conversation of the
+ * prompt's provider when there is one, else in the task's storage-only prompt inbox.
+ * With `once`, a prompt whose id the task already holds is kept as it is (a hand-off
+ * delivered twice, robustness plan §9).
+ */
+export function storePrompt(store: ChatStorage, prompt: LocalPrompt, once = false): void {
+  const { taskId } = prompt
+  if (once && store.findRecords('prompt', taskId, { id: prompt.id }).length) return
+  const mode = chatStorageMode(prompt.agentId)
+  const existing = store
+    .listForTask(taskId)
+    .find(
+      (r) =>
+        r.state === 'active' &&
+        r.identity.mode === mode &&
+        !store.getRecord(r.identity.id, 'settings', 'inbox')
+    )
+  const inbox = store.conversation(`hook-inbox:${taskId}`)
+  const identity = existing?.identity ??
+    inbox?.identity ?? {
+      id: `hook-inbox:${taskId}`,
+      taskId,
+      tabId: `hook-inbox:${taskId}`,
+      // One task inbox accepts hooks from several providers; provider identity
+      // belongs to each prompt, not this storage-only container.
+      mode: 'claude-chat',
+      epoch: 1
+    }
+  store.transaction(() => {
+    if (!existing) {
+      store.createConversation(identity)
+      store.putRecord(identity.id, identity.epoch, {
+        kind: 'settings',
+        id: 'inbox',
+        value: true,
+        at: 0
+      })
+    }
+    store.putRecord(identity.id, identity.epoch, {
+      kind: 'prompt',
+      id: prompt.id,
+      value: prompt,
+      at: prompt.createdAt
+    })
+    trimLocalPromptHistory(store, taskId, prompt.agentId)
+  })
+}
+
+const KINDS_SQL = EVENT_MARKER_KINDS.map((k) => `'${k}'`).join(',')
+/**
+ * The rows `summaries` folds, ordered `storage_id, seq`. Params: the task id three
+ * times. A conversation covered by `event_markers` (storage.ts) is read through its
+ * markers and each marker's event by primary key — only a prompt's `text` is parsed;
+ * one not yet covered (rows from before markers, until the backfill reaches it) by
+ * the full scan of its events, as before. Same columns, same values either way.
+ */
+export const PROMPT_SUMMARY_ROWS_SQL = `SELECT m.conversation_id AS storage_id,m.seq,e.saved_at,
+          m.kind,m.session_id,m.branch_id,m.message_id,
+          CASE WHEN m.kind='user-message' THEN json_extract(e.event,'$.text') END AS text
+          FROM conversations c
+          JOIN event_marker_coverage v ON v.conversation_id=c.id
+          JOIN event_markers m ON m.conversation_id=c.id
+          JOIN events e ON e.conversation_id=m.conversation_id AND e.seq=m.seq
+          WHERE c.task_id=? AND c.state='active'
+          UNION ALL
+          SELECT e.conversation_id,e.seq,e.saved_at,
+          json_extract(e.event,'$.kind'),json_extract(e.event,'$.sessionId'),
+          json_extract(e.event,'$.conversationId'),json_extract(e.event,'$.id'),
+          json_extract(e.event,'$.text')
+          FROM events e JOIN conversations c ON c.id=e.conversation_id
+          WHERE c.task_id=? AND c.state='active'
+            AND NOT EXISTS (SELECT 1 FROM event_marker_coverage v WHERE v.conversation_id=c.id)
+            AND json_extract(e.event,'$.kind') IN (${KINDS_SQL})
+          UNION ALL
+          SELECT r.conversation_id,json_extract(r.value,'$.seq'),r.saved_at,
+            'turn-init',json_extract(r.value,'$.sessionId'),NULL,NULL,NULL
+          FROM records r JOIN conversations c ON c.id=r.conversation_id
+          WHERE c.task_id=? AND c.state='active' AND r.kind='settings' AND r.id GLOB 'session-anchor:*'
+          ORDER BY storage_id,seq`
+
+export function createLocalPrompts(
+  store: ChatStorage,
+  opts: {
+    /** Active conversations a summary had to scan in full (no markers yet): index them first. */
+    uncovered?(conversationIds: string[]): void
+  } = {}
+) {
   function list(
     taskId: string,
     agentId?: string,
     excluded: Array<{ mode: string; conversationId: string }> = []
   ) {
+    // One ownership lookup per conversation, not per prompt (≤ 500 per agent).
+    const states = new Map<string, string | undefined>()
+    const stateOf = (id: string) => {
+      if (!states.has(id)) states.set(id, store.conversation(id)?.state)
+      return states.get(id)
+    }
     return store
       .findRecords('prompt', taskId)
-      .filter((r) => store.conversation(r.conversationId)?.state === 'active')
+      .filter((r) => stateOf(r.conversationId) === 'active')
       .map((r) => r.value as LocalPrompt)
       .filter(
         (p) =>
@@ -45,9 +138,14 @@ export function createLocalPrompts(store: ChatStorage) {
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   }
   return {
-    /** Full-history summaries are independent of the bounded composer recall list. */
-    summaries(taskId: string, conversationIds: string[]) {
-      const wanted = new Set(conversationIds)
+    /**
+     * Full-history summaries are independent of the bounded composer recall list.
+     * `conversationIds` null = every provider conversation of the task (one request
+     * per task instead of one per 500 ids, FU5).
+     */
+    summaries(taskId: string, conversationIds: readonly string[] | null) {
+      const wanted = conversationIds ? new Set(conversationIds) : null
+      const isWanted = (id: string) => wanted === null || wanted.has(id)
       type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
       const captured = new Map<string, Summary>(),
         events = new Map<string, Summary>()
@@ -65,26 +163,25 @@ export function createLocalPrompts(store: ChatStorage) {
         }
       }
       for (const p of list(taskId)) {
-        if (!p.cliSessionId || !wanted.has(p.cliSessionId) || seenPrompts.has(p.id)) continue
+        if (!p.cliSessionId || !isWanted(p.cliSessionId) || seenPrompts.has(p.id)) continue
         seenPrompts.add(p.id)
         add(captured, p.cliSessionId, p.text, p.createdAt)
       }
       store.compose((raw) => {
+        if (opts.uncovered) {
+          const uncovered = (
+            raw
+              .prepare(
+                `SELECT c.id FROM conversations c WHERE c.task_id=? AND c.state='active'
+                  AND NOT EXISTS (SELECT 1 FROM event_marker_coverage v WHERE v.conversation_id=c.id)`
+              )
+              .all(taskId) as Array<{ id: string }>
+          ).map((r) => r.id)
+          if (uncovered.length) opts.uncovered(uncovered)
+        }
         const rows = raw
-          .prepare(`SELECT e.conversation_id AS storage_id,e.seq,e.saved_at,
-          json_extract(e.event,'$.kind') AS kind,json_extract(e.event,'$.sessionId') AS session_id,
-          json_extract(e.event,'$.conversationId') AS branch_id,json_extract(e.event,'$.id') AS message_id,
-          json_extract(e.event,'$.text') AS text
-          FROM events e JOIN conversations c ON c.id=e.conversation_id
-          WHERE c.task_id=? AND c.state='active'
-            AND json_extract(e.event,'$.kind') IN ('turn-init','conversation-branch','user-message')
-          UNION ALL
-          SELECT r.conversation_id,json_extract(r.value,'$.seq'),r.saved_at,
-            'turn-init',json_extract(r.value,'$.sessionId'),NULL,NULL,NULL
-          FROM records r JOIN conversations c ON c.id=r.conversation_id
-          WHERE c.task_id=? AND c.state='active' AND r.kind='settings' AND r.id GLOB 'session-anchor:*'
-          ORDER BY storage_id,seq`)
-          .iterate(taskId, taskId) as Iterable<{
+          .prepare(PROMPT_SUMMARY_ROWS_SQL)
+          .iterate(taskId, taskId, taskId) as Iterable<{
           storage_id: string
           seq: number
           saved_at: number
@@ -98,7 +195,7 @@ export function createLocalPrompts(store: ChatStorage) {
           nativeId: string | null = null
         let pending: Array<{ id: string; text: string; at: number }> = []
         function message(id: string, text: string, at: number) {
-          if (!nativeId || !wanted.has(nativeId)) return
+          if (!nativeId || !isWanted(nativeId)) return
           const key = JSON.stringify([nativeId, id])
           if (seenEvents.has(key)) return
           seenEvents.add(key)
@@ -124,7 +221,7 @@ export function createLocalPrompts(store: ChatStorage) {
         }
       })
       const result: Summary[] = []
-      for (const id of wanted) {
+      for (const id of wanted ?? new Set([...captured.keys(), ...events.keys()])) {
         const a = captured.get(id),
           b = events.get(id)
         if (!a && !b) continue
@@ -152,51 +249,13 @@ export function createLocalPrompts(store: ChatStorage) {
       if (!taskId || !text || !isPromptCaptureMode(hook.agentId)) return
       if (store.conversation(`task-tombstone:${taskId}`)?.state === 'deleted')
         throw new Error('Task chat history was deleted')
-      const mode = chatStorageMode(hook.mode)
-      const existing = store
-        .listForTask(taskId)
-        .find(
-          (r) =>
-            r.state === 'active' &&
-            r.identity.mode === mode &&
-            !store.getRecord(r.identity.id, 'settings', 'inbox')
-        )
-      const inbox = store.conversation(`hook-inbox:${taskId}`)
-      const identity = existing?.identity ??
-        inbox?.identity ?? {
-          id: `hook-inbox:${taskId}`,
-          taskId,
-          tabId: `hook-inbox:${taskId}`,
-          // One task inbox accepts hooks from several providers; provider identity
-          // belongs to each prompt, not this storage-only container.
-          mode: 'claude-chat',
-          epoch: 1
-        }
-      store.transaction(() => {
-        if (!existing) {
-          store.createConversation(identity)
-          store.putRecord(identity.id, identity.epoch, {
-            kind: 'settings',
-            id: 'inbox',
-            value: true,
-            at: 0
-          })
-        }
-        const prompt: LocalPrompt = {
-          id: randomUUID(),
-          taskId,
-          agentId: hook.mode,
-          cliSessionId: hook.sessionId ?? null,
-          text,
-          createdAt: Date.now()
-        }
-        store.putRecord(identity.id, identity.epoch, {
-          kind: 'prompt',
-          id: prompt.id,
-          value: prompt,
-          at: prompt.createdAt
-        })
-        trimLocalPromptHistory(store, taskId, hook.mode)
+      storePrompt(store, {
+        id: randomUUID(),
+        taskId,
+        agentId: hook.mode,
+        cliSessionId: hook.sessionId ?? null,
+        text,
+        createdAt: Date.now()
       })
     }
   }

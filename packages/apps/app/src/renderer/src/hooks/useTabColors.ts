@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useWorktreeColors } from '@slayzone/worktrees/client/useWorktreeColors'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Tab } from '@slayzone/tabs-state'
@@ -22,15 +23,12 @@ export function useTabColors(
     return map
   }, [tabs, tasks, projects, colorTintsEnabled])
 
-  const taskWorktreeColors = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const tab of tabs) {
-      if (tab.type !== 'task') continue
-      const task = tasks.find((t) => t.id === tab.taskId)
-      if (task?.worktree_color) map.set(tab.taskId, task.worktree_color)
-    }
-    return map
+  // Worktree colours of the OPEN tabs' tasks, matched in the client (§9 Phase 7d).
+  const tabTasks = useMemo(() => {
+    const open = new Set(tabs.flatMap((tab) => (tab.type === 'task' ? [tab.taskId] : [])))
+    return tasks.filter((t) => open.has(t.id))
   }, [tabs, tasks])
+  const taskWorktreeColors = useWorktreeColors(tabTasks, projects)
 
   const tabCycleOrder = useMemo(() => {
     const homeIndex = tabs.findIndex((tab) => tab.type === 'home')

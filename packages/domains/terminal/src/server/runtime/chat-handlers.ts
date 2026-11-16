@@ -1,6 +1,11 @@
 import { defaultChatTransport, type ChatTransport } from './chat-transport-manager'
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
+import type {
+  ChatBlobChunk,
+  ChatCreateOpts,
+  ChatHistoryPageBudget
+} from '@slayzone/terminal-contracts'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getPtyHostBridge } from '../pty-host'
 import {
@@ -113,7 +118,7 @@ export interface ChatEventContext {
 
 export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the
-   * agent-turns domain (turn boundaries; chat prompts → `agent_prompts`). */
+   * agent-turns domain (turn boundaries; prompts live on the computer). */
   onChatEvent?: (tabId: string, event: AgentEvent, ctx: ChatEventContext | null) => void
   /** Data seam (hub/computer split). The composition root passes the local-DB
    * impl (`createDbChatDataOps(db, taskStore)`), which runs the same SQL the
@@ -124,14 +129,6 @@ export interface ChatHandlerOpts {
   conversations?: import('./live-conversations').ConversationRegistry
   sessionReader?: ClaudeSessionReader
   notifyQueueChanged?: (tabId: string) => void
-}
-
-interface ChatCreateOpts {
-  tabId: string
-  taskId: string
-  mode: string
-  cwd: string
-  providerFlagsOverride?: string | null
 }
 
 /** What started an agent: a user action (default) or a workspace restore. */
@@ -649,6 +646,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     recordCodexPlanDecision,
     respawn,
     getReplay,
+    getReplayPage,
     openTimeline,
     timelinePages,
     searchTimeline,
@@ -680,6 +678,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     switchTabConversation,
     getEventBufferSince,
     readEventsSince,
+    readEventPage,
     getSessionInfo,
     getSessionTerminalState,
     isTurnOpen,
@@ -687,6 +686,42 @@ export function createChatOps(opts: ChatHandlerOpts) {
     configureTransport,
     chatEvents
   } = transport
+  /**
+   * Per tab: the hydrate (or start / reset) opening its session right now, from the
+   * moment its request arrived — it builds its options (stored config reads) before
+   * the session exists. A send that arrived behind it waits for it instead of being
+   * refused with "No chat session": clients send right after they hydrate, and the
+   * first message of a chat was lost when the build was slow (a busy computer).
+   */
+  const opening = new Map<string, Promise<void>>()
+  function openSession<T>(tabId: string, work: () => Promise<T>): Promise<T> {
+    // Forgotten before the caller resumes: a send right after it runs at once.
+    const done = (): void => {
+      if (opening.get(tabId) === settled) opening.delete(tabId)
+    }
+    const run = work().then(
+      (value) => {
+        done()
+        return value
+      },
+      (error: unknown) => {
+        done()
+        throw error
+      }
+    )
+    const settled = run.then(
+      () => undefined,
+      () => undefined
+    )
+    opening.set(tabId, settled)
+    return run
+  }
+  /** Run `fn` once the tab's session opening (if any) settled; at once otherwise. */
+  function afterOpening<T>(tabId: string, fn: () => T | Promise<T>): T | Promise<T> {
+    const pending = opening.get(tabId)
+    return pending ? pending.then(fn) : fn()
+  }
+
   /**
    * A setting the live process refused (`set_model` etc.) normally falls back to
    * a kill+respawn — but with a turn open (running, parked on a prompt, or a
@@ -775,20 +810,22 @@ export function createChatOps(opts: ChatHandlerOpts) {
       if (opts.onStateChange) opts.onStateChange(sessionId, newState, oldState)
       else notifyGlobalStateListeners(sessionId, newState, oldState)
     },
-    // The tabs' saved history: the transport loads it (after any previous
-    // instance of the tab finished writing) and writes it insert-only, in order.
+    // The tabs' saved history: the transport reads it back a page at a time (after
+    // any previous instance of the tab finished writing) and writes it insert-only.
     eventStore: {
       nextSeq: data.getNextSeqForTab?.bind(data),
-      load: (tabId) => data.loadChatEvents(tabId),
       insertSync: data.persistChatEventSync?.bind(data),
+      prepare: data.prepareChatEvent?.bind(data),
       insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
-      readRange: (tabId, afterSeq, beforeSeq) =>
-        data.loadChatEventsRange(tabId, afterSeq, beforeSeq)
+      readPage: (tabId, afterSeq, beforeSeq, budget) =>
+        data.loadChatEventsPage(tabId, afterSeq, beforeSeq, budget),
+      tailStart: (tabId, count) => data.chatEventsTailStart(tabId, count)
     },
     lookupUserMessages: (taskId, ids) =>
       data.loadUserMessageContent?.(taskId, ids) ?? Promise.resolve(new Map()),
     // Each tab's timeline projection (paged history), derived from those events.
     timelineStore: (tabId) => ({
+      records: data.timelineRecords?.(tabId),
       loadCheckpoint: () => data.loadTimelineCheckpoint(tabId),
       loadPages: (pages) => data.loadTimelinePages(tabId, pages),
       loadSummaries: () => data.loadTimelineSummaries(tabId),
@@ -802,7 +839,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       void seq
       void (async () => {
         // Tree-view "Last interaction" sort marker — only fire on user-message
-        // (clear "I interacted" signal). Agent-side bumps come via agent_turns.
+        // (clear "I interacted" signal). Agent-side bumps come via recorded agent turns.
         if (event.kind === 'user-message' && !event.history) {
           const info = getSessionInfo(tabId)
           if (info) {
@@ -881,10 +918,11 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
   const ops = {
     supports: (mode: string): boolean => supportsChatMode(mode),
-    refuseStart: async (o: ChatCreateOpts): Promise<void> => {
-      await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
-      transport.recordConversationInUse(o.tabId)
-    },
+    refuseStart: (o: ChatCreateOpts): Promise<void> =>
+      openSession(o.tabId, async () => {
+        await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+        transport.recordConversationInUse(o.tabId)
+      }),
 
     /**
      * E2E-only (the router gates it on PLAYWRIGHT): shorten the watchdog so a spec
@@ -904,9 +942,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * started lazily on the first `chat:send` (or queue drain). Idempotent —
      * reattaches to an existing live session for the same tab.
      */
-    hydrate: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      return hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
-    },
+    hydrate: (o: ChatCreateOpts): Promise<ChatSessionInfo> =>
+      openSession(o.tabId, async () =>
+        hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      ),
 
     /**
      * One snapshot for (re)drawing a tab: its saved events after `afterSeq`, and
@@ -915,13 +954,35 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getReplay: (tabId: string, afterSeq: number) => getReplay(tabId, afterSeq),
 
     /**
+     * One bounded page of {@link getReplay} (`hasMore`: read on after its last event;
+     * the last page carries the live part). Every caller that can, reads this.
+     */
+    getReplayPage: (tabId: string, afterSeq: number, budget?: ChatHistoryPageBudget) =>
+      getReplayPage(tabId, afterSeq, budget),
+
+    /**
+     * One chunk of an image / file a saved event references (`chat-blobs`): saved
+     * history carries references, clients load the bytes as they show them.
+     */
+    readBlob: async (tabId: string, sha256: string, offset: number): Promise<ChatBlobChunk> => {
+      if (!data.readChatEventBlob)
+        throw new Error('Chat attachments of saved events are unavailable here')
+      return data.readChatEventBlob(tabId, sha256, offset)
+    },
+
+    /**
      * Open a tab paged (its projection's snapshot: state + newest rows + page
      * summaries), or `full` when the client must replay every event instead.
      */
     openTimeline: (tabId: string, version: string) => openTimeline(tabId, version),
     /** Rows of sealed pages as of the client's newest event (`expired`: open again). */
-    timelinePages: (tabId: string, pages: number[], asOfSeq: number, epoch: number) =>
-      timelinePages(tabId, pages, asOfSeq, epoch),
+    timelinePages: (
+      tabId: string,
+      pages: number[],
+      asOfSeq: number,
+      epoch: number,
+      startRow?: number
+    ) => timelinePages(tabId, pages, asOfSeq, epoch, startRow),
     /** Sealed pages that may hold `query`. */
     searchTimeline: (tabId: string, query: string) => searchTimeline(tabId, query),
 
@@ -941,16 +1002,18 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * keystroke. Hydrates if needed, then `ensureSpawned`. Idempotent for live
      * sessions.
      */
-    start: async (o: ChatCreateOpts & { reason?: ChatStartReason }): Promise<ChatSessionInfo> => {
-      // A restore starts in the computer's background lane: reopening a workspace
-      // must not start every agent at once.
-      const built = await buildHydrateOpts(data, o, { fresh: false })
-      await hydrateSession({
-        ...built,
-        admission: o.reason === 'restore' ? 'background' : 'foreground'
-      })
-      return ensureSpawned(o.tabId)
-    },
+    start: (o: ChatCreateOpts & { reason?: ChatStartReason }): Promise<ChatSessionInfo> =>
+      openSession(o.tabId, async () => {
+        // A restore starts in the computer's background lane: reopening a workspace
+        // must not start every agent at once.
+        const built = await buildHydrateOpts(data, o, { fresh: false })
+        await hydrateSession({
+          ...built,
+          admission: o.reason === 'restore' ? 'background' : 'foreground'
+        })
+        // A user start joining a queued restore moves it to the front.
+        return ensureSpawned(o.tabId, { prioritize: o.reason !== 'restore' })
+      }),
 
     /** Replace the running process while retaining this tab's conversation and events. */
     restart: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
@@ -969,17 +1032,18 @@ export function createChatOps(opts: ChatHandlerOpts) {
       tabId: string,
       message: OutgoingUserMessage,
       _operationId?: string
-    ): { id: string; state: string } | Promise<{ id: string; state: string }> => {
-      // Text is taken at once, as always; attached files are checked and sealed first.
-      if (message.content.every((b) => b.type === 'text'))
-        return dispatchUserMessage(tabId, message)
-      return admitAttachments({
-        tabId,
-        content: message.content,
-        lookup: data.attachments,
-        events: getEventBufferSince(tabId, -1).map((e) => e.event)
-      }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
-    },
+    ): { id: string; state: string } | Promise<{ id: string; state: string }> =>
+      afterOpening(tabId, () => {
+        // Text is taken at once, as always; attached files are checked and sealed first.
+        if (message.content.every((b) => b.type === 'text'))
+          return dispatchUserMessage(tabId, message)
+        return admitAttachments({
+          tabId,
+          content: message.content,
+          lookup: data.attachments,
+          events: getEventBufferSince(tabId, -1).map((e) => e.event)
+        }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
+      }),
 
     // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
     // tool_use_id with a tool_result content block so the SDK's turn machinery
@@ -1403,34 +1467,39 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * race where the old child's exit broadcast could leak between IPCs and stick
      * "Session ended" in the renderer.
      */
-    reset: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      if (await data.threads?.get(o.tabId))
-        throw new Error('Start another thread to begin a new side discussion.')
-      // Awaited for the same reason as `remove`.
-      await removeSession(o.tabId)
-      try {
-        await data.clearChatEventsForTab(o.tabId)
-      } catch (err) {
-        console.error('[chat-handlers] clearChatEventsForTab failed:', err)
-      }
-      try {
-        await data.clearChatQueue(o.tabId)
-      } catch (err) {
-        console.error('[chat-handlers] clearChatQueue failed:', err)
-      }
-      await data.recordConversation({
-        taskId: o.taskId,
-        mode: o.mode,
-        conversationId: null,
-        origin: 'manual-reset',
-        legacyJsonField: 'chatConversationId'
-      })
-      await data.clearChatConversationId(o.taskId, o.mode)
-      return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
-    },
+    reset: (o: ChatCreateOpts): Promise<ChatSessionInfo> =>
+      openSession(o.tabId, async () => {
+        if (await data.threads?.get(o.tabId))
+          throw new Error('Start another thread to begin a new side discussion.')
+        // Awaited for the same reason as `remove`.
+        await removeSession(o.tabId)
+        try {
+          await data.clearChatEventsForTab(o.tabId)
+        } catch (err) {
+          console.error('[chat-handlers] clearChatEventsForTab failed:', err)
+        }
+        try {
+          await data.clearChatQueue(o.tabId)
+        } catch (err) {
+          console.error('[chat-handlers] clearChatQueue failed:', err)
+        }
+        await data.recordConversation({
+          taskId: o.taskId,
+          mode: o.mode,
+          conversationId: null,
+          origin: 'manual-reset',
+          legacyJsonField: 'chatConversationId'
+        })
+        await data.clearChatConversationId(o.taskId, o.mode)
+        return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
+      }),
 
     // The whole saved history after `afterSeq` (not just the in-memory cache).
     getBufferSince: (tabId: string, afterSeq: number) => readEventsSince(tabId, afterSeq),
+
+    /** One bounded page of {@link getBufferSince} (`hasMore`: read on after its last event). */
+    getEventPage: (tabId: string, afterSeq: number, budget?: ChatHistoryPageBudget) =>
+      readEventPage(tabId, afterSeq, budget),
 
     /**
      * The tab's live session. With `mode`, null unless that session runs this

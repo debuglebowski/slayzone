@@ -2,7 +2,10 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
+import { build } from 'esbuild'
+import { TIMELINE_PROJECTION_VERSION } from '@slayzone/terminal/timeline-projection'
 import { createChatRuntimeHandlers } from './chat-runtime'
+import { createFixtureChatRuntime, projectScopedDeps } from '../project-scope.fixture'
 const dirs: string[] = [],
   handles: Array<ReturnType<typeof createChatRuntimeHandlers>> = []
 afterEach(async () => {
@@ -22,7 +25,7 @@ function setup(extra: Partial<Parameters<typeof createChatRuntimeHandlers>[0]> =
   const stateDir = mkdtempSync(join(tmpdir(), 'slz-chat-rpc-'))
   dirs.push(stateDir)
   const notifications: unknown[] = []
-  const h = createChatRuntimeHandlers({
+  const h = createFixtureChatRuntime({
     ...extra,
     ctx: {
       config: {
@@ -167,6 +170,8 @@ test('authenticated dispatch exposes chat requests and rejects a missing actor',
     stateDir,
     hubScope: 'hub-dispatch',
     getComputerId: () => 'computer',
+    // The task's project is placed here: its agent starts inside it (§9 Phase 7c).
+    getProjectPaths: projectScopedDeps({ p1: realpathSync(tmpdir()) }).getProjectPaths,
     shutdown: () => {},
     dialer: { notify: () => true },
     config: {
@@ -176,14 +181,15 @@ test('authenticated dispatch exposes chat requests and rejects a missing actor',
       capabilities: ['proc']
     }
   })
+  const placed = { ...bootstrap, projectId: 'p1' }
   try {
     await expect(
-      dispatch.handle('chat.request', { kind: 'bootstrap', value: bootstrap }, undefined)
+      dispatch.handle('chat.request', { kind: 'bootstrap', value: placed }, undefined)
     ).rejects.toThrow(/actor|older|protocol/i)
     expect(
       await dispatch.handle(
         'chat.request',
-        { kind: 'bootstrap', value: bootstrap },
+        { kind: 'bootstrap', value: placed },
         { userId: null, route: 'test chat' }
       )
     ).toMatchObject({ ok: true })
@@ -350,4 +356,190 @@ test('direct link: simple commands run under the granted epoch and tell the hub 
   await expect(h.direct.command('tab', 1, 'send' as never, ['tab', {}], 'op-3')).rejects.toThrow(
     /not a direct chat command/
   )
+})
+
+test('inventory: one conversation whose state cannot be read is flagged, the others are reported', async () => {
+  const { h, stateDir } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  await h.request({
+    kind: 'bootstrap',
+    value: { ...bootstrap, identity: { ...bootstrap.identity, id: 'other', tabId: 'tab2' } }
+  })
+  const { default: Database } = await import('better-sqlite3')
+  const { readdirSync } = await import('node:fs')
+  const runtime = join(stateDir, 'computer-runtime')
+  const ns = readdirSync(runtime).find((d) => /^[a-f0-9]{64}$/.test(d))!
+  const raw = new Database(join(runtime, ns, 'chat.sqlite'))
+  raw
+    .prepare(
+      "UPDATE records SET value='{broken' WHERE conversation_id='store' AND kind='settings' AND id='bootstrap'"
+    )
+    .run()
+  raw.close()
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const inventory = (await h.request({ kind: 'inventory' })) as Array<{
+    identity: { id: string }
+    unreadable?: boolean
+    bootstrapRevision?: number
+  }>
+  expect(inventory.find((e) => e.identity.id === 'store')).toMatchObject({ unreadable: true })
+  expect(inventory.find((e) => e.identity.id === 'other')).toMatchObject({ bootstrapRevision: 1 })
+})
+
+test('a storage-only owner (task content / artifact store) opens without any folder; no agent starts there', async () => {
+  const { h } = setup()
+  const identity = {
+    id: 'content',
+    taskId: 'task',
+    tabId: 'task-content:task',
+    mode: 'claude-chat',
+    epoch: 1
+  }
+  // The hub sends a storage-only owner no folder (it never runs an agent): the
+  // task may have no worktree, base dir or placed project on this computer.
+  await expect(
+    h.request({ kind: 'bootstrap', value: { ...bootstrap, identity, cwd: '' } })
+  ).resolves.toMatchObject({ ok: true })
+  await expect(
+    h.request({
+      kind: 'invoke',
+      value: {
+        route: { id: 'content', epoch: 1 },
+        target: 'ops',
+        method: 'takeOver',
+        operationId: 'take-1',
+        args: [{ tabId: 'task-content:task', taskId: 'task', mode: 'claude-chat', cwd: '' }]
+      }
+    })
+  ).rejects.toThrow(/no folder on this computer/)
+})
+
+test('archive.blob: a restored archive serves an image only to the conversation that references it, in bounded chunks', async () => {
+  const { h } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  await h.request({
+    kind: 'bootstrap',
+    value: {
+      ...bootstrap,
+      identity: { id: 'other', taskId: 'task2', tabId: 'tab2', mode: 'claude-chat', epoch: 1 }
+    }
+  })
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(700 * 1024, 7)])
+  const sha = (await import('node:crypto')).createHash('sha256').update(png).digest('hex')
+  try {
+    vi.stubEnv('PLAYWRIGHT', '1')
+    await h.request({
+      kind: 'test.seedEvents',
+      route: { id: 'store', epoch: 1 },
+      fromSeq: 0,
+      events: [
+        {
+          kind: 'tool-result',
+          toolUseId: 't',
+          isError: false,
+          rawContent: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') }
+            }
+          ],
+          structured: null
+        }
+      ]
+    })
+  } finally {
+    vi.unstubAllEnvs()
+  }
+  const backupId = '00000000-0000-4000-8000-000000000001',
+    archiveId = '00000000-0000-4000-8000-000000000002'
+  await h.request({ kind: 'backup.create', id: backupId })
+  await h.request({ kind: 'backup.restore', backupId, archiveId })
+  const read = (conversationId: string, offset: number) =>
+    h.request({ kind: 'archive.blob', archiveId, conversationId, sha256: sha, offset }) as Promise<{
+      mediaType: string
+      size: number
+      offset: number
+      data: string
+    }>
+  const parts: Buffer[] = []
+  for (let offset = 0; offset < png.length; ) {
+    const chunk = await read('store', offset)
+    expect(chunk).toMatchObject({ mediaType: 'image/png', size: png.length, offset })
+    const bytes = Buffer.from(chunk.data, 'base64')
+    expect(bytes.length).toBeLessThanOrEqual(512 * 1024)
+    parts.push(bytes)
+    offset += bytes.length
+  }
+  expect(Buffer.concat(parts)).toEqual(png)
+  await expect(read('other', 0)).rejects.toThrow(/not part of this archive conversation/i)
+  await expect(
+    h.request({
+      kind: 'archive.blob',
+      archiveId,
+      conversationId: 'store',
+      sha256: '../x',
+      offset: 0
+    })
+  ).rejects.toThrow()
+})
+
+test('computer handler uses the bundled projection worker and survives its startup failure', async () => {
+  const source = (
+    await build({
+      entryPoints: [
+        join(
+          import.meta.dirname,
+          '../../../../domains/terminal/src/server/runtime/chat-timeline-worker-entry.ts'
+        )
+      ],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      write: false
+    })
+  ).outputFiles[0].text
+  for (const [workerSource, expectedKind] of [
+    [source, 'paged'],
+    ["throw new Error('worker startup fault')", 'full']
+  ] as const) {
+    vi.stubGlobal('__SLAYZONE_TIMELINE_WORKER_SOURCE__', workerSource)
+    const { h } = setup()
+    try {
+      await h.request({ kind: 'bootstrap', value: bootstrap })
+      await h.request({
+        kind: 'invoke',
+        value: {
+          route: { id: 'store', epoch: 1 },
+          target: 'ops',
+          method: 'hydrate',
+          operationId: 'hydrate-worker',
+          args: [{ taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: bootstrap.cwd }]
+        }
+      })
+      expect(
+        await h.request({
+          kind: 'invoke',
+          value: {
+            route: { id: 'store', epoch: 1 },
+            target: 'ops',
+            method: 'openTimeline',
+            args: ['tab', TIMELINE_PROJECTION_VERSION]
+          }
+        })
+      ).toMatchObject({ kind: expectedKind })
+      await h.request({
+        kind: 'invoke',
+        value: {
+          route: { id: 'store', epoch: 1 },
+          target: 'ops',
+          method: 'saveTabDraft',
+          operationId: 'draft-worker',
+          args: ['tab', { text: 'draft stays available', attachments: [] }]
+        }
+      })
+    } finally {
+      await h.close()
+      vi.unstubAllGlobals()
+    }
+  }
 })

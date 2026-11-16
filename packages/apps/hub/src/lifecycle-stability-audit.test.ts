@@ -9,8 +9,8 @@ import { createComputerChatRuntime } from '../../../domains/chat-runtime/src/ser
 import { createChatMigrationAttachmentReader } from '@slayzone/chat-runtime/server'
 import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { taskSessionStore } from './test-session-store'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 
 const dirs: string[] = []
@@ -45,8 +45,8 @@ async function fixture() {
     bytes = Buffer.from('durable prepared attachment')
   h.db.exec("INSERT INTO projects(id,name,color) VALUES('p','P','#000')")
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-    .run('task', 'p', 'Task', dir)
+    .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+    .run('task', 'p', 'Task')
   h.db.exec(
     "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
   )
@@ -69,7 +69,8 @@ async function fixture() {
     )
     .run(JSON.stringify([ref]))
   const open = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'hub',
       computerId: () => 'pc',

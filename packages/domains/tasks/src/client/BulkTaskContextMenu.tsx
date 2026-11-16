@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, Fragment } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,6 +10,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
   ContextMenuRadioGroup,
+  ContextMenuLabel,
   ContextMenuRadioItem,
   buildStatusOptions,
   getColumnStatusStyle,
@@ -35,12 +36,14 @@ import {
   Signal,
   Tag as TagIcon,
   FolderInput,
+  FolderPlus,
   Archive,
   Trash2,
   ShieldAlert
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { getSnoozePresets } from '@slayzone/task/client'
+import { getSnoozePresets, MoveTaskDialog, useProjectsOnTaskHub } from '@slayzone/task/client'
+import { useCrossHubMoveTargets } from './useCrossHubMoveTargets'
 
 interface BulkTaskContextMenuProps {
   taskIds: string[]
@@ -86,6 +89,13 @@ export function BulkTaskContextMenu({
 }: BulkTaskContextMenuProps): React.JSX.Element {
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  /** The project picked in "Move to": the move dialog confirms it. */
+  const [moveMode, setMoveMode] = useState<'move' | 'copy'>('move')
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  // Tasks move only between projects of their own hub (the dialog refuses a mix).
+  const moveTargets = useProjectsOnTaskHub(projects, taskIds)
+  // Other hubs' projects: a move there copies the tasks over, in the background.
+  const { otherHubProjects, onMoveToOtherHub } = useCrossHubMoveTargets(projects, taskIds)
   // Offer only statuses EVERY selected task's project has — the backend rejects
   // the whole batch otherwise. None shared → the Status submenu is disabled.
   const statusColumns = useMemo(() => {
@@ -127,7 +137,8 @@ export function BulkTaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
-    onBulkUpdate(taskIds, { project_id: projectId })
+    setMoveMode('move')
+    setMoveTargetId(projectId)
   }
 
   const handleToggleBlocked = (): void => {
@@ -316,6 +327,15 @@ export function BulkTaskContextMenu({
 
           <ContextMenuSeparator />
 
+          <ContextMenuItem
+            onSelect={() => {
+              setMoveMode('copy')
+              setMoveTargetId(projects[0]?.id ?? '')
+            }}
+          >
+            <FolderPlus className="mr-2 size-3.5" />
+            Copy to project…
+          </ContextMenuItem>
           {/* Move to project */}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
@@ -330,7 +350,7 @@ export function BulkTaskContextMenu({
                 value={commonProject === MIXED ? '' : (commonProject as string)}
                 onValueChange={handleProjectChange}
               >
-                {projects.map((p) => (
+                {moveTargets.map((p) => (
                   <ContextMenuRadioItem key={p.id} value={p.id}>
                     <span
                       className="inline-block w-2 h-2 rounded-full mr-2"
@@ -338,6 +358,23 @@ export function BulkTaskContextMenu({
                     />
                     {p.name}
                   </ContextMenuRadioItem>
+                ))}
+                {otherHubProjects.map((h) => (
+                  <Fragment key={h.hubId}>
+                    <ContextMenuSeparator />
+                    <ContextMenuLabel className="text-xs text-muted-foreground">
+                      {h.hubLabel}
+                    </ContextMenuLabel>
+                    {h.projects.map((p) => (
+                      <ContextMenuRadioItem key={p.id} value={p.id}>
+                        <span
+                          className="inline-block w-2 h-2 rounded-full mr-2"
+                          style={{ backgroundColor: p.color }}
+                        />
+                        {p.name}
+                      </ContextMenuRadioItem>
+                    ))}
+                  </Fragment>
                 ))}
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
@@ -360,6 +397,20 @@ export function BulkTaskContextMenu({
         </ContextMenuContent>
       </ContextMenu>
 
+      {moveTargetId !== null && (
+        <MoveTaskDialog
+          initialMode={moveMode}
+          open
+          onOpenChange={(open) => {
+            if (!open) setMoveTargetId(null)
+          }}
+          taskIds={taskIds}
+          initialProjectId={moveTargetId}
+          otherHubProjects={otherHubProjects}
+          onMoveToOtherHub={onMoveToOtherHub}
+        />
+      )}
+
       <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -380,7 +431,8 @@ export function BulkTaskContextMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {taskIds.length} tasks</AlertDialogTitle>
             <AlertDialogDescription>
-              Move {taskIds.length} selected tasks to Trash? You can restore them for 30 days.
+              Permanently delete {taskIds.length} selected tasks and their SlayZone files and
+              history? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

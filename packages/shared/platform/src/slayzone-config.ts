@@ -37,8 +37,11 @@
  * are persisted.
  *
  * SUPERVISED mode (Electron host, `SLAYZONE_SUPERVISED=1`) must NOT touch any of
- * these files at all — the callers gate reads/writes on `!SUPERVISED`. Nothing in
- * this module reads `SLAYZONE_SUPERVISED`; it is a pure file reader/writer.
+ * these files — the callers gate reads/writes on `!SUPERVISED` — with ONE exception:
+ * the supervised computer's own `computer.config.json` `allowedRoots`, which its
+ * loopback hub sets (`computer.setAllowedRoots`) and it reads back at boot (computer
+ * config.ts `supervisedComputerConfigFile`). Nothing in this module reads
+ * `SLAYZONE_SUPERVISED`; it is a pure file reader/writer.
  *
  * Home dir honors `SLAYZONE_ROOT` (see getSlayzoneHomeDir) for E2E/test
  * sandboxing, so a test can redirect every file here to a temp dir.

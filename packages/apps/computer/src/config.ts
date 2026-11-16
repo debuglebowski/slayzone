@@ -17,9 +17,11 @@ import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
+  getComputerConfigFilePath,
   ignoredComputerConfigKeys,
   loadComputerConfigFile,
   readComputerConfigSnapshot,
+  readJsonObject,
   type ComputerConfig as ComputerConfigFile
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr, isBareAuthority, isLoopbackComputerUrl } from '@slayzone/platform/hub-addr'
@@ -138,8 +140,10 @@ export const ENV_VARS = {
   // loadComputerConfig ignores it, so setting it fails loudly with the
   // missing-SLAYZONE_HUB_JOIN_TOKEN error rather than half-working.
   // allowedRoots has NO env channel: a SUPERVISED computer self-derives its FS
-  // path-jail to `[homedir()]` (below), a STANDALONE computer gets it from
-  // <ROOT>/computer.config.json `allowedRoots` (+ the ROOT default in bin.ts). The
+  // path-jail to `[homedir()]` (below) unless its own computer.config.json keeps the
+  // roots its loopback hub set ({@link supervisedComputerConfigFile}), a STANDALONE
+  // computer gets it from <ROOT>/computer.config.json `allowedRoots` (+ the ROOT
+  // default in bin.ts). The
   // computer NAME likewise has no env channel — it derives from SUPERVISED (→
   // DEFAULT_LOCAL_COMPUTER_NAME) or computer.config.json `computerName`, else the hostname.
   // There is no certificate pin on any channel: a wss:// hub's front end is verified
@@ -174,6 +178,45 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
 }
 
 /**
+ * The ONE key a SUPERVISED computer (the desktop app's own) reads from its config
+ * file: `allowedRoots`. Everything else in it — hubUrl, hubUrls, joinToken, name,
+ * direct-link addresses — stays ignored: the Electron host supplies those in full,
+ * and a file must never point this computer at another hub or change whether its
+ * hub may edit its roots (`hubMayEditRoots` is still derived only).
+ *
+ * Why this key: its loopback hub edits the roots (Settings → Computers → Folders, and
+ * the hub's widening for project / work folders), and `computer.setAllowedRoots`
+ * persists them to exactly this file (handlers/computer-config.ts). Unread, every
+ * folder the user added vanished on the next launch while the UI had said saved.
+ * Reading it back applies the user's choice at boot — before any hub frame — and
+ * cannot widen the jail beyond it:
+ *  - it is the computer's OWN file, `<ROOT>/computer.config.json` with ROOT the
+ *    desktop's channel-scoped `~/.slayzone/<dev|stable>/computer` (never a
+ *    standalone computer's root, which is its launch dir);
+ *  - no hub frame can write it (a protected path of the path jail, main.ts); only
+ *    `computer.setAllowedRoots` does, which only the desktop's own loopback hub may
+ *    call;
+ *  - never the legacy shared `config.json` beside it.
+ *
+ * Absolute non-empty strings only; a missing, unreadable or malformed file, or no
+ * usable entry, keeps the `[homedir()]` default (never an error: the desktop's
+ * computer must start). A root that does not exist right now (an unmounted drive)
+ * is kept — the jail skips it until it is there.
+ */
+export function supervisedComputerConfigFile(
+  path: string = getComputerConfigFilePath()
+): Pick<ComputerConfigFile, 'allowedRoots'> {
+  const declared = readJsonObject(path)?.allowedRoots
+  if (!Array.isArray(declared)) return {}
+  const roots = [
+    ...new Set(
+      declared.filter((r): r is string => typeof r === 'string' && r.length > 0 && isAbsolute(r))
+    )
+  ]
+  return roots.length > 0 ? { allowedRoots: roots } : {}
+}
+
+/**
  * Assemble the effective config. Precedence (low→high):
  *   defaults ← <ROOT>/computer.config.json ← environment
  * (with the join-token embedded hubUrl as the lowest fallback). Throws with
@@ -188,15 +231,17 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
  *     SUPERVISED=1). Mirrors the hub's supervised no-op: the Electron host
  *     supplies the computer's env in full (SLAYZONE_HUB_ADDRESS / SLAYZONE_HUB_JOIN_TOKEN),
  *     and the name derives from SUPERVISED (→ DEFAULT_LOCAL_COMPUTER_NAME), so the
- *     shared file must not leak into it. Keeps the supervised computer boot
- *     byte-identical to pre-config behavior.
+ *     shared file must not leak into it — except its `allowedRoots`, the roots its
+ *     own hub set ({@link supervisedComputerConfigFile}).
  * Callers can also pass an explicit shared config to test the layering.
  */
 export function loadComputerConfig(
   env: Env = process.env,
-  shared: ComputerConfigFile = env === process.env && env.SLAYZONE_SUPERVISED !== '1'
-    ? loadComputerConfigFile()
-    : {}
+  shared: ComputerConfigFile = env !== process.env
+    ? {}
+    : env.SLAYZONE_SUPERVISED === '1'
+      ? supervisedComputerConfigFile()
+      : loadComputerConfigFile()
 ): ComputerConfig {
   const fromShared = fromSharedConfig(shared)
 
@@ -228,9 +273,10 @@ export function loadComputerConfig(
     // via ...fromShared below).
     name: env.SLAYZONE_SUPERVISED === '1' ? DEFAULT_LOCAL_COMPUTER_NAME : hostname(),
     // FS path-jail default. Supervised local computer → `[homedir()]` (it operates
-    // on the user's own projects under $HOME); standalone → `[]` here, then
-    // computer.config.json `allowedRoots` (...fromShared below) or the SLAYZONE_ROOT
-    // fallback in bin.ts. No env channel either way.
+    // on the user's own projects under $HOME), unless its own file keeps the roots
+    // its hub set; standalone → `[]` here, then computer.config.json `allowedRoots`
+    // (...fromShared below) or the SLAYZONE_ROOT fallback in bin.ts. No env channel
+    // either way.
     allowedRoots: env.SLAYZONE_SUPERVISED === '1' ? [homedir()] : ([] as string[]),
     capabilities: [...DEFAULT_CAPABILITIES],
     autoUpgrade: env.SLAYZONE_SUPERVISED !== '1',

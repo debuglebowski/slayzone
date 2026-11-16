@@ -274,7 +274,8 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       isMain: true,
       position: 0,
       createdAt: hubTime(Date.now()),
-      agentState: 'new'
+      agentState: 'new',
+      chatFontSize: null
     })
     emit('taskTerminals.onChanged', { taskId })
   }
@@ -459,7 +460,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       tasksChanged([taskId, ...blockerTaskIds])
     },
     'task.startMainAgent': ({ taskId }) => startMain(taskId),
-    'task.resetConversation': ({ id }) => touch(taskOrThrow(id), { currentConversationByMode: {} }),
+    'task.resetConversation': ({ id }) => taskOrThrow(id),
     'tags.setForTask': ({ taskId, tagIds }) => {
       taskTags.set(taskId, [...tagIds])
       tasksChanged([taskId])

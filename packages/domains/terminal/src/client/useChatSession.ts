@@ -9,12 +9,18 @@ import {
   type RefObject
 } from 'react'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
-import { chatViaDirect, noteDirectChatEvent, noteDirectChatLink } from './chat-direct'
+import {
+  chatViaDirect,
+  noteDirectChatEvent,
+  noteDirectChatLink,
+  readReplayPages
+} from './chat-direct'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type {
   AgentEvent,
+  ChatBlobChunk,
   PermissionDecision,
   RewindFilesPreview,
   RewindResult,
@@ -33,6 +39,7 @@ import {
   decodeTimelineState
 } from '../shared/chat-timeline-checkpoint'
 import { summarizeRows, type TimelinePageSummary } from '../shared/timeline-summary'
+import { SessionReadyGate } from '../shared/chat-session-ready'
 import {
   initialState,
   reducer,
@@ -66,6 +73,11 @@ interface OpenedPaged {
 
 export interface UseChatSessionResult {
   state: ChatTimelineState
+  /**
+   * One chunk of an image / file a saved event references (`chat-blobs`), read over
+   * the tab's direct link or the hub. Stable identity.
+   */
+  readBlob: (sha256: string, offset: number) => Promise<ChatBlobChunk>
   /** The rows; `undefined` = not loaded here (paged history). */
   timeline: TimelineRows
   inFlight: boolean
@@ -175,6 +187,8 @@ export interface UseChatSessionResult {
 }
 
 export interface UseChatSessionOpts {
+  /** Renderer restoration admission holds its slot until these reads really settle. */
+  trackRestore?: <T>(work: Promise<T>) => Promise<T>
   tabId: string
   taskId: string
   mode: string
@@ -198,6 +212,8 @@ interface HydrateChatCtx {
   }
   gen: number
   genRef: RefObject<number>
+  /** Holds sends until this load's hydrate answered (either way). */
+  sessionReady: SessionReadyGate
   hydratedRef: RefObject<boolean>
   /** True once any load of this hook finished — the next one is a reload. */
   loadedOnceRef: RefObject<boolean>
@@ -240,6 +256,7 @@ async function hydrateAndReplay({
   target,
   gen,
   genRef,
+  sessionReady,
   hydratedRef,
   loadedOnceRef,
   liveQueueRef,
@@ -256,7 +273,7 @@ async function hydrateAndReplay({
   onHydrateError
 }: HydrateChatCtx): Promise<void> {
   try {
-    await trpcClient.chat.hydrate.mutate(target)
+    await sessionReady.track(trpcClient.chat.hydrate.mutate(target))
     if (gen === genRef.current) onHydrateError(null)
   } catch (e) {
     // Surface hydrate failure but still attempt replay (e.g. session may
@@ -275,8 +292,19 @@ async function hydrateAndReplay({
         tabId: target.tabId,
         version: TIMELINE_PROJECTION_VERSION
       })
-    } catch {
-      // A hub without paged history (or none answering): the full replay.
+    } catch (error) {
+      const code = (error as { data?: { code?: string } } | null)?.data?.code
+      const message = error instanceof Error ? error.message : ''
+      // Only an older hub lacking the procedure needs a full replay. A timeout,
+      // denied read or unavailable computer must not amplify into loading all history.
+      if (
+        code !== 'NOT_IMPLEMENTED' &&
+        !(
+          code === 'NOT_FOUND' &&
+          /no procedure found|no ["']?query["']?-procedure|procedure.*not found/i.test(message)
+        )
+      )
+        throw error
     }
     if (gen !== genRef.current) return
     if (opened.kind === 'paged') {
@@ -291,12 +319,10 @@ async function hydrateAndReplay({
       onError(null)
       return
     }
-    // Saved history + what is streaming right now, in one snapshot.
-    const replay = await reads.getReplay({
-      tabId: target.tabId,
-      afterSeq: -1
-    })
-    if (gen !== genRef.current) return
+    // Saved history + what is streaming right now, read in bounded pages (the last
+    // carries what streams), applied below in one piece.
+    const replay = await readReplayPages(reads, target.tabId, -1, () => gen !== genRef.current)
+    if (!replay || gen !== genRef.current) return
     openFull()
     if (loadedOnceRef.current) dispatch({ type: 'reset' })
     // The whole history in ONE reducer batch (one render, linear time), with the
@@ -327,6 +353,46 @@ async function hydrateAndReplay({
       onHydrated()
     }
   }
+}
+
+type PagesAnswer =
+  | { expired: true }
+  | {
+      expired: false
+      pages: Array<{ page: number; from: number; rows: unknown[] }>
+      omitted?: number[]
+      /** The answer ended inside the first `omitted` page: ask again from this row. */
+      next?: number
+    }
+
+/**
+ * `timelinePages` for every page asked: an answer carries at most a byte budget of
+ * rows and names the pages it left out (`omitted`), which are asked for again at
+ * once. Asked from a row (`startRow`, always sent): a page larger than the budget
+ * comes in row slices, the next asked from `next`. An older peer ignores
+ * `startRow` and answers whole pages. `expired` as soon as one answer is.
+ */
+async function timelinePagesAll(
+  io: Pick<ChatIo, 'timelinePages'>,
+  input: { tabId: string; pages: number[]; asOfSeq: number; epoch: number; pageRows: number }
+): Promise<PagesAnswer> {
+  const { pageRows, ...ask } = input
+  const pages: Array<{ page: number; from: number; rows: unknown[] }> = []
+  for (let wanted = ask.pages, startRow = (ask.pages[0] ?? 0) * pageRows; wanted.length > 0; ) {
+    const res = (await io.timelinePages({ ...ask, pages: wanted, startRow })) as PagesAnswer
+    if (res.expired) return res
+    pages.push(...res.pages)
+    const asked = wanted
+    const again = (res.omitted ?? []).filter((page) => asked.includes(page))
+    // An answer with no row and nothing left out has nothing more to give.
+    if (res.pages.length === 0 || res.pages.every((p) => p.rows.length === 0)) break
+    wanted = again
+    startRow =
+      res.next !== undefined && again[0] === Math.floor(res.next / pageRows)
+        ? res.next
+        : (again[0] ?? 0) * pageRows
+  }
+  return { expired: false, pages }
 }
 
 /** Pages asked for in one `timelinePages` request, at most. */
@@ -364,6 +430,7 @@ function cancelFrame(id: number): void {
  * 5. On unmount: unsubscribe only. Session persists (main keeps buffer). Tab close triggers chat:remove via useTaskTerminals.
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
+  const trackRestore = opts.trackRestore
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
@@ -371,7 +438,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // reads, the event stream and simple commands go there; the hub otherwise.
   const { lease: directChat, lost: directChatLost } = useDirectLease(
     trpcClient,
-    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null
+    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null,
+    undefined,
+    trackRestore
   )
   const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
   // Fixed identities for the hydrate effect: they read the CURRENT path when called,
@@ -381,6 +450,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   )
   const getReplayRead = useStableCallback((input: Parameters<typeof chatIo.getReplay>[0]) =>
     chatIo.getReplay(input)
+  )
+  const readBlob = useStableCallback(
+    (sha256: string, offset: number) =>
+      chatIo.readBlob({ tabId: opts.tabId, sha256, offset }) as Promise<ChatBlobChunk>
   )
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
@@ -413,6 +486,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // in-flight work from the previous session. `hydratedRef` gates the queue
   // (queue events until the buffer replay completes), `liveQueueRef` holds them.
   const genRef = useRef(0)
+  // The current load's hydrate: the computer holds the tab's session only once it
+  // ran there, and a command that overtakes it is refused ("No chat session for
+  // tab"). Commands that need the session wait on it.
+  const [sessionReady] = useState(() => new SessionReadyGate())
   const hydratedRef = useRef(false)
   const loadedOnceRef = useRef(false)
   const liveQueueRef = useRef<
@@ -450,11 +527,20 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // still the newest saved event here and it is newer than the last live one.
   // Otherwise it is stale (the saved event it led to is already applied). A
   // saved event's rows show `at`, when it was saved.
+  const applyCliMetadata = useStableCallback((event: AgentEvent) => {
+    if (event.kind !== 'cli-models') return
+    const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
+    // Initialize can beat both the subscription and an older empty metadata query.
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData(queryKey, event.models)
+    })
+  })
   const applyLive = useCallback(
     (event: AgentEvent, seq: number, live?: number, at?: number): void => {
       if (live !== undefined) {
         if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
         lastLiveRef.current = live
+        applyCliMetadata(event)
         pendingLiveRef.current.push(event)
         if (frameRef.current === null) {
           frameRef.current = requestFrame(() => {
@@ -469,7 +555,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       flushLive()
       dispatch({ type: 'event', event, at, seq })
     },
-    [flushLive]
+    [flushLive, applyCliMetadata]
   )
   // Stable: refs + dispatch only. Saved events in seq order as one batch — the
   // same as applying each through `applyLive` (fragments waiting for a frame
@@ -562,7 +648,13 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      chatIo.timelinePages({ tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
+      timelinePagesAll(chatIo, {
+        tabId: opts.tabId,
+        pages: wanted,
+        asOfSeq,
+        epoch,
+        pageRows: paging?.pageRows ?? 0
+      }).then(
         (res) => {
           for (const page of wanted) loadingPagesRef.current.delete(page)
           if (gen !== genRef.current) return
@@ -668,15 +760,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     }) => {
       if (tabId !== opts.tabId) return
       const agentEvent = event as AgentEvent
-      if (agentEvent.kind === 'cli-models') {
-        const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
-        // The session can start before its model/list handshake finishes. Use
-        // the advertised list directly; an older empty DB query must not win.
-        void queryClient.cancelQueries({ queryKey }).then(() => {
-          queryClient.setQueryData(queryKey, agentEvent.models)
-        })
-      }
       if (!hydratedRef.current) {
+        applyCliMetadata(agentEvent)
         liveQueueRef.current.push({ event: event as AgentEvent, seq, live, at })
         return
       }
@@ -688,9 +773,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     (events: AgentEvent[], afterSeq: number, liveSeq: number): void => {
       if (afterSeq !== lastSeqRef.current) return
       lastLiveRef.current = Math.max(lastLiveRef.current, liveSeq)
+      for (const event of events) applyCliMetadata(event)
       if (events.length > 0) dispatch({ type: 'events', events })
     },
-    []
+    [applyCliMetadata]
   )
   // The lease whose computer stream has started (onStarted). Make-before-break: the
   // hub stream stays on until then, so an event saved while the direct subscription
@@ -828,7 +914,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       trpcClient
     }
 
-    void hydrateAndReplay({
+    const work = hydrateAndReplay({
       trpcClient,
       reads: { openTimeline: openTimelineRead, getReplay: getReplayRead },
       target: {
@@ -840,6 +926,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       },
       gen,
       genRef,
+      sessionReady,
       hydratedRef,
       loadedOnceRef,
       liveQueueRef,
@@ -855,6 +942,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       onHydrateError: setHydrateError,
       onHydrated: () => setLoadedInputs(inputs)
     })
+    void (trackRestore ? trackRestore(work) : work)
 
     return () => {
       // Bump the generation so the subscriptions + any in-flight async work for
@@ -862,6 +950,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       genRef.current = gen + 1
     }
   }, [
+    trackRestore,
     opts.tabId,
     opts.taskId,
     opts.mode,
@@ -878,7 +967,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     trpcClient,
     reopenToken,
     openTimelineRead,
-    getReplayRead
+    getReplayRead,
+    sessionReady
   ])
 
   const createOpts = (): {
@@ -911,6 +1001,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // `user-sent` is renderer-only; never persisted.
       dispatchLocal({ type: 'user-sent', id, text: userMessageText(content), content })
       try {
+        await sessionReady.ready()
         await trpcClient.chat.send.mutate({
           tabId: opts.tabId,
           message: { id, content },
@@ -925,7 +1016,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         throw err
       }
     },
-    [opts.tabId, trpcClient, dispatchLocal]
+    [opts.tabId, trpcClient, dispatchLocal, sessionReady]
   )
 
   // Read the failed message's text from the reducer; `state` is read via a
@@ -945,6 +1036,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       ...(item.text ? [{ type: 'text' as const, text: item.text }] : [])
     ]
     try {
+      await sessionReady.ready()
       // Same id: the server retries it (or takes it, if it never got it).
       await trpcClient.chat.send.mutate({
         tabId: opts.tabId,
@@ -1044,6 +1136,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
   return {
     state,
+    readBlob,
     timeline: state.timeline,
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),

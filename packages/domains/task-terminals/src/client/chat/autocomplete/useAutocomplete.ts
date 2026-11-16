@@ -26,6 +26,11 @@ export interface UseAutocompleteOptions {
   submit?: (text: string) => void
   /** Hide the menu (e.g. while ↑/↓ browses prompt history). */
   suppressed?: boolean
+  /**
+   * Whether the composer is on screen. Nothing is loaded (usage map, source items)
+   * until it first is; from then on it stays loaded. Default true.
+   */
+  enabled?: boolean
 }
 
 type UsageMap = Record<string, Record<string, number>>
@@ -92,7 +97,8 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
     context,
     enterPolicy = 'accept-selected',
     submit,
-    suppressed = false
+    suppressed = false,
+    enabled = true
   } = opts
   const trpcClient = useTRPCClient()
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -104,8 +110,15 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   /** Names the user explicitly accepted from the menu during the current draft. */
   const pickedRef = useRef<Map<string, { sourceId: string; name: string }>>(new Map())
 
-  // Load usage map once on mount (reads the latest trpcClient). Refreshed after
-  // each bump.
+  // Every restored tab mounts a composer, hidden or not. A hidden one loads
+  // nothing until it is first on screen: a restore of ~36 chats (2026-11-11) ran
+  // ~300 file-list and ~300 skill scans on the computer for menus nobody opened.
+  const [wasEnabled, setWasEnabled] = useState(enabled)
+  if (enabled && !wasEnabled) setWasEnabled(true)
+  const load = enabled || wasEnabled
+
+  // Load usage map once loading starts (reads the latest trpcClient). Refreshed
+  // after each bump.
   const loadUsage = useStableCallback((isCancelled: () => boolean) => {
     void trpcClient.chat.getAutocompleteUsage
       .query(context)
@@ -117,39 +130,37 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
       })
   })
   useEffect(() => {
+    if (!load) return
     let cancelled = false
     loadUsage(() => cancelled)
     return () => {
       cancelled = true
     }
-  }, [loadUsage])
+  }, [load, loadUsage])
 
-  // Fetch items per source once (cwd-scoped). Sources are stable refs.
-  const cwdRef = useRef(fetchCtx.cwd)
+  // Fetch each source's items once per (source, cwd). The composer rebuilds its
+  // source list whenever models or the CLI snapshot land; a source whose own inputs
+  // did not change keeps its items instead of re-running its fetch (a file list
+  // is a `git ls-files` on the computer).
+  const fetchedRef = useRef(new Map<string, { source: AutocompleteSource; cwd: string }>())
   useEffect(() => {
-    cwdRef.current = fetchCtx.cwd
-  })
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all(
-      sources.map(async (src) => {
-        try {
-          const items = await src.fetch({ cwd: cwdRef.current })
-          return [src.id, items] as const
-        } catch {
-          return [src.id, [] as unknown[]] as const
-        }
-      })
-    ).then((pairs) => {
-      if (cancelled) return
-      const next: Record<string, unknown[]> = {}
-      for (const [id, items] of pairs) next[id] = items
-      setItemsBySource(next)
-    })
-    return () => {
-      cancelled = true
+    if (!load) return
+    const cwd = fetchCtx.cwd
+    for (const src of sources) {
+      const done = fetchedRef.current.get(src.id)
+      if (done && done.source === src && done.cwd === cwd) continue
+      const mark = { source: src, cwd }
+      fetchedRef.current.set(src.id, mark)
+      void Promise.resolve()
+        .then(() => src.fetch({ cwd }))
+        .catch(() => [] as unknown[])
+        .then((items) => {
+          // A newer fetch of this source (rebuilt, or a new cwd) owns its slot now.
+          if (fetchedRef.current.get(src.id) !== mark) return
+          setItemsBySource((prev) => ({ ...prev, [src.id]: items }))
+        })
     }
-  }, [sources, fetchCtx.cwd])
+  }, [sources, fetchCtx.cwd, load])
 
   // Detect active sources. All sources whose `detect()` returns the same token range as the
   // first match merge into one cross-source-ranked list (via fzf on the union). This avoids

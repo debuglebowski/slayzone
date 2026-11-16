@@ -10,7 +10,18 @@ import {
   type TaskArtifact
 } from '@slayzone/task-contracts/types'
 
-export type ViewerKind = 'markdown' | 'code' | 'html' | 'svg' | 'mermaid' | 'image' | 'pdf'
+export type ViewerKind =
+  | 'markdown'
+  | 'code'
+  | 'html'
+  | 'svg'
+  | 'mermaid'
+  | 'image'
+  | 'pdf'
+  | 'video'
+  | 'audio'
+  | 'archive'
+  | 'font'
 
 const KIND_OF_MODE: Record<RenderMode, ViewerKind> = {
   markdown: 'markdown',
@@ -19,7 +30,13 @@ const KIND_OF_MODE: Record<RenderMode, ViewerKind> = {
   'svg-preview': 'svg',
   'mermaid-preview': 'mermaid',
   image: 'image',
-  pdf: 'pdf'
+  pdf: 'pdf',
+  video: 'video',
+  audio: 'audio',
+  // A patch reads as its source here, as it did before desktop gave it a diff view.
+  diff: 'code',
+  archive: 'archive',
+  font: 'font'
 }
 
 export function viewerKindOf(artifact: Pick<TaskArtifact, 'title' | 'render_mode'>): ViewerKind {
@@ -29,6 +46,17 @@ export function viewerKindOf(artifact: Pick<TaskArtifact, 'title' | 'render_mode
 /** Kinds shown from the downloaded file; the others from the artifact's text. */
 export const isFileKind = (kind: ViewerKind): kind is 'image' | 'pdf' =>
   kind === 'image' || kind === 'pdf'
+
+/** Kinds played by the native player (`media-player.ts`), from the downloaded file. */
+export const isMediaKind = (kind: ViewerKind): kind is 'video' | 'audio' =>
+  kind === 'video' || kind === 'audio'
+
+/**
+ * Kinds the phone has no viewer for yet: a note and Share. Nothing is fetched up
+ * front; only Share needs the file.
+ */
+export const isShareOnlyKind = (kind: ViewerKind): kind is 'archive' | 'font' =>
+  kind === 'archive' || kind === 'font'
 
 /**
  * Text that was not text: a binary file in a text kind (desktop's fallback for an unknown

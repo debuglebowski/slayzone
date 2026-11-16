@@ -50,6 +50,8 @@ Use the \`slay\` CLI to interact with the SlayZone task management system. The c
 
 All ID arguments support prefix matching (e.g., \`a1b2\` matches the full UUID starting with \`a1b2\`).
 
+**\`slay\` is the only way to change SlayZone data.** Never read or write \`$SLAYZONE_ROOT\`, \`~/.slayzone\` or SlayZone's SQLite databases directly: the running app and its computers hold copies that a direct edit silently breaks. If \`slay\` cannot do something, stop and ask the user.
+
 ## Domains
 
 | Skill | Commands | Purpose |
@@ -90,6 +92,8 @@ trigger: auto
 ---
 
 You are running inside **SlayZone** — a desktop task management app with integrated AI coding assistants (Claude Code, Codex, Gemini, Cursor, and more). Your terminal session, browser panel, and task metadata are all managed by the app. Use the \`slay\` CLI to interact with it (see the slay skill for full reference).
+
+Never read or write SlayZone's own data (\`$SLAYZONE_ROOT\`, \`~/.slayzone\`, its SQLite databases) directly; change it only through \`slay\`, and stop and ask if \`slay\` cannot do something.
 
 Prefer native file-editing tools for ordinary source changes. Use scripts when bulk transformations materially benefit from them. Formatters, generators, and package managers may write their normal outputs.
 
@@ -153,7 +157,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks view [id]\` — show task details including status, priority, description, tags, and subtasks.
 
-- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>]\` — update a task. \`--agent\` switches the task's agent (e.g. \`claude-code\`, \`codex\`, \`claude-chat\`): stops the running one and starts a fresh conversation.
+- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>] [--force]\` — update a task. \`--agent\` switches the task's agent (e.g. \`claude-code\`, \`codex\`, \`claude-chat\`): stops the running one and starts a fresh conversation. A done/canceled \`--status\` stops every agent of the task and is refused while one is mid-reply unless \`--force\` (same as \`tasks done\`).
   - \`--append-description\` adds text after a newline separator (mutually exclusive with \`--description\`)
   - \`--no-due\` clears the due date
   - \`--parent <id>\` reparents under another task in the same project; \`--no-parent\` makes it top-level
@@ -163,7 +167,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
   - Two-arg form: \`slay tasks progress <id> <value>\`
   - One-arg form: \`slay tasks progress <value>\` — id defaults to \`$SLAYZONE_TASK_ID\`
 
-- \`slay tasks done [id] [--close]\` — mark task complete using the project's configured "done" status.
+- \`slay tasks done [id] [--close] [--force]\` — mark task complete using the project's configured "done" status. Completing stops every agent of the task, so it is refused while any of them is mid-reply — including your own, when you complete your own task — unless \`--force\`. Completing your own task with \`--force\` ends your session immediately: make it your last action.
   - \`--close\` also closes the task tab in the app
 
 - \`slay tasks archive <id>\` — hide from kanban but keep in database.
@@ -332,7 +336,7 @@ description: "Manage task artifacts (files, folders) via the slay CLI"
 trigger: auto
 ---
 
-Artifacts are files attached to tasks, stored on disk at \`{data-dir}/artifacts/{taskId}/{artifactId}.ext\`. They can be text files, images, or any binary content. Use artifacts to attach specifications, screenshots, logs, or any reference material to a task.
+Artifacts are files attached to tasks, owned by the app (some are kept on the computer that ran the chat). Change them ONLY through \`slay\`: never write their files or SlayZone's databases directly. They can be text files, images, or any binary content. Use artifacts to attach specifications, screenshots, logs, or any reference material to a task.
 
 The \`--task\` flag defaults to \`$SLAYZONE_TASK_ID\` for \`create\`, \`upload\`, and \`mkdir\`. Note: \`list\` requires an explicit task ID argument.
 
@@ -389,6 +393,13 @@ Artifacts can be organized into folders. Folder operations support cycle detecti
 - \`slay tasks artifacts mv <artifactId> --folder <id|"root"> [--json]\` — move an artifact into a folder.
   - Use \`"root"\` for top level
 
+## Moving to another task
+
+- \`slay tasks artifacts move-to-task <destTaskId> [entryIds...] [--all] [--from <taskId>] [--into <folderId>] [--json]\` — move artifacts and folders (with everything in them) to another task.
+  - Keeps ids, version history and \`artifact:<id>\` links; files kept on a computer (chat uploads) move there too
+  - Entry ids are artifact or folder ids; \`--all\` moves every top-level entry of \`--from\` (default: your task)
+  - Safe to retry: a retry completes a partly applied move
+
 ## Versions
 
 Every artifact has immutable, content-addressed version history. Writes via \`write\`/\`append\`/\`create\` or the app UI create new versions automatically. Versions can be referenced by: integer (\`5\`), hash prefix (\`a1b2\`), name (\`milestone-1\`), relative (\`-1\`, \`-2\`), or \`HEAD~N\`.
@@ -421,7 +432,7 @@ Every artifact has immutable, content-addressed version history. Writes via \`wr
 
 Download artifacts in various formats. Default type is \`raw\` (original file).
 
-- \`slay tasks artifacts download <artifactId> [--type raw|pdf|png|html] [--output <path>] [--json]\` — download a single artifact.
+- \`slay tasks artifacts download <artifactId> [--type raw|pdf|png|html] [--output <path>] [--browser <path>] [--install-browser] [--json]\` — download a single artifact.
 - \`slay tasks artifacts download --type zip [--task <id>] [--output <path>] [--json]\` — download all task artifacts as a ZIP archive (no artifactId needed).
 
 **Available types by render mode:**
@@ -433,7 +444,7 @@ Download artifacts in various formats. Default type is \`raw\` (original file).
 | html | markdown, code, mermaid |
 | zip  | all (task-level) |
 
-\`pdf\`, \`png\`, and \`html\` exports require the SlayZone app to be running. \`--output\` defaults to the current directory with an auto-generated filename.
+\`pdf\`, \`png\` and \`html\` are rendered on the machine running \`slay\` (from the hub's copy of the artifact). \`html\` needs nothing else. \`pdf\` and \`png\` use a local headless browser: \`--browser <path>\`, else an installed Chrome, Chromium, Edge or Brave, else Chromium from an earlier \`--install-browser\`. With none found the command exits 1; rerun with \`--install-browser\` (downloads headless Chromium, ~100 MB, once, into the user cache) or use \`--type html\`. \`--output\` defaults to the current directory with an auto-generated filename.
 
 ## Piping examples
 

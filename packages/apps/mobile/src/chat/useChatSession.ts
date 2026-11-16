@@ -10,13 +10,14 @@
  *    again on every reconnect) starts a load, so no event can slip between the load's
  *    snapshot and the subscription:
  *      - first: `chat.hydrate` (loads the persisted history into a skeleton on the
- *        hub; spawns nothing), then `chat.getReplay` from -1;
+ *        hub; spawns nothing), then `chat.getReplay` from -1, a bounded page per read;
  *      - after a reconnect: `chat.getReplay` after the newest applied event (catch-up),
  *        or a full load when a reply was streaming (its fragments cannot be merged) or
  *        the hub's log went backwards.
  *    Events arriving meanwhile are queued and applied after, deduped by seq.
  * 2. `chat.onExit` (unfiltered on the hub; filtered here) ends the process state.
- * 3. The agent process starts lazily on the first send (`chat.send` spawns it).
+ * 3. The agent process starts lazily on the first send (`chat.send` spawns it). A send
+ *    waits for the tab's latest hydrate (`SessionReadyGate`, shared with desktop).
  * 4. Unmount: unsubscribe only. The session lives on in the hub.
  */
 import {
@@ -31,7 +32,12 @@ import {
   isTurnOpen,
   reducer
 } from '@slayzone/terminal/reducer'
-import { chatViaDirect } from '@slayzone/terminal/chat-direct'
+import {
+  chatViaDirect,
+  readReplayPages,
+  type WholeChatReplay
+} from '@slayzone/terminal/chat-direct'
+import { SessionReadyGate } from '@slayzone/terminal/chat-session-ready'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { messageContent } from './attachments'
@@ -151,6 +157,9 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     return engine
   })
   useEffect(() => () => sync.dispose(), [sync])
+  // The tab's latest hydrate: the computer holds the tab's session only once it ran
+  // there, and a send that overtakes it is refused ("No chat session for tab").
+  const [sessionReady] = useState(() => new SessionReadyGate())
 
   const { tabId, taskId, mode, cwd, providerFlagsOverride } = target
   // The tab's direct link to the computer holding its history (docs/direct-link.md):
@@ -172,13 +181,9 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         const ticket = sync.beginLoad(kind)
         if (kind === 'full') {
           try {
-            await trpcClient.chat.hydrate.mutate({
-              tabId,
-              taskId,
-              mode,
-              cwd,
-              providerFlagsOverride
-            })
+            await sessionReady.track(
+              trpcClient.chat.hydrate.mutate({ tabId, taskId, mode, cwd, providerFlagsOverride })
+            )
           } catch (err) {
             // Shown in the chat (desktop does the same); the replay may still work.
             if (sync.isCurrent(ticket)) {
@@ -186,9 +191,10 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
             }
           }
         }
-        let replay: Awaited<ReturnType<typeof trpcClient.chat.getReplay.query>>
+        let replay: WholeChatReplay
         try {
-          replay = await chatIo.getReplay({ tabId, afterSeq: ticket.afterSeq })
+          // A bounded page per read; the whole replay is applied at once below.
+          replay = (await readReplayPages(chatIo, tabId, ticket.afterSeq))!
         } catch (err) {
           if (sync.failLoad(ticket) === 'done') {
             setLoadError(message(err))
@@ -205,7 +211,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         return
       }
     },
-    [sync, trpcClient, chatIo, tabId, taskId, mode, cwd, providerFlagsOverride]
+    [sync, sessionReady, trpcClient, chatIo, tabId, taskId, mode, cwd, providerFlagsOverride]
   )
 
   // The subscription's handlers: fixed identities, run the latest code (they read refs).
@@ -251,6 +257,8 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
       const content = messageContent(text, files)
       dispatch({ type: 'user-sent', id, text, content })
       try {
+        // Shown at once; sent once the tab's hydrate answered (a reload's too).
+        await sessionReady.ready()
         await trpcClient.chat.send.mutate({
           tabId,
           message: { id, content },
@@ -261,7 +269,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         throw err
       }
     },
-    [trpcClient, tabId]
+    [trpcClient, tabId, sessionReady]
   )
 
   const retryMessage = useCallback(
@@ -270,6 +278,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
       if (!item || item.kind !== 'user-text') return
       dispatch({ type: 'user-retry', id })
       try {
+        await sessionReady.ready()
         // The whole message: its files too (attached on desktop).
         await trpcClient.chat.send.mutate({
           tabId,
@@ -280,7 +289,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         dispatch({ type: 'user-send-failed', id, error: message(err) })
       }
     },
-    [trpcClient, tabId]
+    [trpcClient, tabId, sessionReady]
   )
 
   // The ref is the synchronous double-tap guard; the state disables the buttons.

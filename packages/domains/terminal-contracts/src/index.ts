@@ -12,6 +12,7 @@ export {
   type AgentLifecycleEventType
 } from './agent-event-handler'
 export * from './chat-mode'
+export * from './chat-launch'
 export * from './chat-mode-catalog'
 export * from './chat-model'
 export * from './chat-model-catalog'
@@ -24,6 +25,7 @@ export * from './chat-provider'
 export * from './chat-conversation'
 export * from './chat-cli-commands'
 export * from './chat-attachments'
+export * from './chat-blobs'
 export * from './chat-tab-state'
 export * from './chat-synthetic-prompts'
 export * from './key-sequences'
@@ -67,8 +69,15 @@ export type {
   ArchivedArtifactVersion,
   ArchivedArtifactOriginal,
   ChatComputerOps,
-  ChatAvailability
+  ChatAvailability,
+  ChatUnavailableReason
 } from './computer-chat'
-export { chatAvailabilityMessage } from './computer-chat'
+export {
+  CHAT_UNAVAILABLE_TITLE,
+  chatAvailabilityMessage,
+  chatUnavailableDetail,
+  chatUnavailableMessage
+} from './computer-chat'
 export * from './chat-command-schemas'
 export * from './chat-saved-summary'
+export * from './chat-history-pages'

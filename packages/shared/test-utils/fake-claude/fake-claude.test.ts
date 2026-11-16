@@ -316,6 +316,35 @@ describe('fake-claude — delivery acks (2.1.312, --replay-user-messages)', () =
 })
 
 describe('fake-claude — steps', () => {
+  it('waitForFile holds a turn until the test releases it', async () => {
+    const gate = path.join(root, 'continue')
+    const epoch = fake.setScenario({
+      processes: [{ turns: [[step.waitForFile(gate), ...reply('released')]] }]
+    })
+    const p = start()
+    p.send(user('go'))
+    await epoch.waitForRun(0, (r) => r.entries.some((e) => e.kind === 'waiting-for-file'))
+    expect(p.lines.some((e) => e.type === 'result')).toBe(false)
+    fs.writeFileSync(gate, '')
+    await p.waitFor((e) => e.type === 'result')
+    expect(p.lines.some((e) => JSON.stringify(e).includes('released'))).toBe(true)
+  })
+
+  it('interrupt aborts a file gate and the next turn can run', async () => {
+    const epoch = fake.setScenario({
+      processes: [
+        { turns: [[step.waitForFile(path.join(root, 'never'))]], defaultTurn: echoTurn() }
+      ]
+    })
+    const p = start()
+    p.send(user('wait'))
+    await epoch.waitForRun(0, (r) => r.entries.some((e) => e.kind === 'waiting-for-file'))
+    p.send({ type: 'control_request', request_id: 'stop-gate', request: { subtype: 'interrupt' } })
+    await p.waitFor((e) => e.type === 'result')
+    p.send(user('next'))
+    await p.waitFor((e) => JSON.stringify(e).includes('echo: next'))
+  })
+
   it('stderr + exit steps', async () => {
     const epoch = fake.setScenario({
       processes: [

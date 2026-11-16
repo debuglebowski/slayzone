@@ -32,7 +32,8 @@ import { type ChromeColors, useTheme } from '../theme'
 import { useTRPCClient } from '../trpc'
 import { BottomSheet } from '../ui-kit/Chrome'
 import { PriorityIcon, StatusIcon, TagPills } from '../ui-kit/TaskGlyphs'
-import { todayISO } from '@slayzone/tasks/board'
+import { keepScratchTaskInput, todayISO } from '@slayzone/tasks/board'
+import type { ColumnConfig } from '@slayzone/workflow'
 
 export type TaskSegment = 'agent' | 'details' | 'artifacts'
 export const TASK_SEGMENTS: readonly TaskSegment[] = ['agent', 'details', 'artifacts']
@@ -188,6 +189,7 @@ function Page(props: TaskPageProps) {
       <TaskMenu
         visible={menu}
         writes={writes}
+        columns={row.project?.columns_config}
         onDeleted={props.onDeleted}
         onClose={() => setMenu(false)}
       />
@@ -331,11 +333,14 @@ function DetailsPanel({
 function TaskMenu({
   visible,
   writes,
+  columns,
   onDeleted,
   onClose
 }: {
   visible: boolean
   writes: TaskWrites
+  /** The task's project's columns ("Keep as task" moves it to the first started one). */
+  columns: ColumnConfig[] | null | undefined
   onDeleted: () => void
   onClose: () => void
 }) {
@@ -358,6 +363,15 @@ function TaskMenu({
   )
   return (
     <BottomSheet visible={visible} onClose={onClose} testID="task-menu-sheet">
+      {writes.task.is_temporary
+        ? item(
+            'Keep as task',
+            () =>
+              void writes.run(() =>
+                client.task.update.mutate(keepScratchTaskInput(writes.task.id, columns))
+              )
+          )
+        : null}
       {writes.task.needs_attention
         ? null
         : item(

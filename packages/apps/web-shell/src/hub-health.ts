@@ -10,8 +10,8 @@
 //
 // HOW (T-13): the switches /health reports, read by the shared hub sign-in client
 // (`hubBrowserSignInOf`, @slayzone/hub-auth/client). Password sign-in when
-// `enablePassword` is on; "Sign in with Microsoft" when Entra sign-in is
-// (`enableSso` with `requireLogin`, the hub's `ssoActive`).
+// `enablePassword` is on; "Sign in with <ssoLabel>" (Microsoft, or SSO for a generic
+// OpenID provider) when SSO sign-in is (`enableSso` with `requireLogin`, `ssoActive`).
 //
 // FAILS CLOSED: any fetch/parse error resolves `authRequired: true` with no
 // sign-in method — a transient health-check hiccup must never silently skip the

@@ -47,16 +47,11 @@ const persistence = {
       label: 'dev',
       command: 'pnpm dev',
       cwd: '/hub/path',
-      auto_restart: 0,
-      pid: null
+      auto_restart: 0
     }
   ],
   insert: async () => undefined,
   update: async () => undefined,
-  updatePid: async () => undefined,
-  recordPid: async () => undefined,
-  listPidHistory: async () => [],
-  removePidHistory: async () => undefined,
   remove: async () => undefined
 } as unknown as ProcessPersistence
 

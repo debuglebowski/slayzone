@@ -86,7 +86,7 @@ export const testPanelRouter = router({
     .query(async ({ ctx, input }) => {
       const categories = await listCategories(ctx.db, input.projectId)
       // The files are on the project's computer: the scan runs there.
-      return scanTestFilesWhereTheyAre(input, categories)
+      return scanTestFilesWhereTheyAre(ctx.db, input, categories)
     }),
 
   // Labels CRUD

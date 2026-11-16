@@ -1,0 +1,7 @@
+#!/bin/sh
+# Scripted stand-in for `codex app-server` (no network in the generate container).
+# The repo's fake-codex (packages/shared/test-utils/fake-codex) plays scenario.json:
+# every Codex chat message gets "echo: <message>".
+FAKE_CODEX_STATE_DIR=/opt/fake/codex-state; export FAKE_CODEX_STATE_DIR
+unset ELECTRON_RUN_AS_NODE
+exec /usr/local/bin/node /opt/fake/fake-codex/fake-codex.mjs "$@"

@@ -75,14 +75,6 @@ export interface TerminalStarterProps extends TerminalProps {
    * starts. Reattach to a live PTY also bypasses the gate.
    */
   isTemporary?: boolean
-  /**
-   * Hydration gate for an auto-start. `false` → the task's conversation id isn't
-   * loaded yet (boot window, before parseAndColorTasks); hold the spawn so we
-   * don't spawn with a null hint and clobber the real conversation.
-   * `true`/`undefined` → spawn normally. Bounded by a 5s fallback so a task that
-   * never hydrates still starts (main resolver is the backstop).
-   */
-  conversationHydrated?: boolean
 }
 
 // Lazy-spawn wrapper: hold off mounting <Terminal> (and thus PTY creation)
@@ -97,7 +89,6 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       mode = 'claude-code',
       agentState = 'stopped',
       isTemporary,
-      conversationHydrated,
       ...terminalProps
     } = props
     // Task view on screen. `isActive` is also passed through to <Terminal>.
@@ -253,26 +244,14 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       setStartPending(true)
     }, [startWhenShown, shown])
 
-    // Hydration gate for an auto-start: hold the spawn while the conversation id
-    // is still un-hydrated (boot window). Spawning now would pass a null hint and,
-    // if the main-side ledger resolver also misses, mint a fresh session that
-    // clobbers the real conversation (the restart bug). Re-runs when
-    // `conversationHydrated` flips true. Bounded by a 5s fallback so a
-    // never-hydrating task still starts — the main resolver remains the backstop.
+    // An auto-start starts now: which conversation it resumes is decided at spawn
+    // by the session ledger on the agent's computer (robustness plan §9).
     useEffect(() => {
       if (!startPending) return
-      const start = (): void => {
-        setStartPending(false)
-        setStarted(true)
-        setExistsChecked(true)
-      }
-      if (conversationHydrated !== false) {
-        start()
-        return
-      }
-      const fallback = setTimeout(start, 5000)
-      return () => clearTimeout(fallback)
-    }, [startPending, conversationHydrated])
+      setStartPending(false)
+      setStarted(true)
+      setExistsChecked(true)
+    }, [startPending])
 
     // Idle-close (hibernation) signals from main. `warn` arms a visual
     // countdown; `cancelled` aborts it; `hibernated` means main killed the PTY

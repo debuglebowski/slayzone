@@ -50,8 +50,26 @@ const trpcClient = {
 }
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+// A task's folders come from its computer (§9 Phase 7d): the fake reads the test
+// task's own `worktree_path` / `base_dir` (test-only fields; real tasks carry none).
+vi.mock('@slayzone/task/client/useTaskPath', () => ({
+  useTaskPath: (t: { worktree_path?: string | null; base_dir?: string | null } | null) => ({
+    state: 'ok',
+    worktreePath: t?.worktree_path ?? null,
+    baseDir: t?.base_dir ?? null
+  })
+}))
+type PathOver = Partial<Task> & { worktree_path?: string | null; base_dir?: string | null }
+/** A test task with paths: `has_worktree` / `has_base_dir` follow them. */
+const withPaths = <T extends object>(o: T): T =>
+  ({
+    ...o,
+    has_worktree: !!(o as PathOver).worktree_path,
+    has_base_dir: !!(o as PathOver).base_dir
+  }) as T
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => ({
+  useHubId: () => null,
   useTRPC: () => trpc,
   useTRPCClient: () => trpcClient,
   useSubscription: () => undefined
@@ -94,7 +112,7 @@ function answer(key: string, input: Record<string, unknown>): Promise<unknown> {
   }
 }
 
-const baseTask = {
+const baseTask = withPaths({
   id: 'task-0001',
   title: 'My task',
   project_id: 'p1',
@@ -102,8 +120,8 @@ const baseTask = {
   worktree_parent_branch: 'main',
   base_dir: null,
   pr_url: null
-} as unknown as Task
-const taskWith = (over: Partial<Task>) => ({ ...baseTask, ...over }) as unknown as Task
+}) as unknown as Task
+const taskWith = (over: PathOver) => withPaths({ ...baseTask, ...over }) as unknown as Task
 
 type Props = { task: Task; projectPath: string | null; visible: boolean }
 function setup(initial: Partial<Props> = {}) {

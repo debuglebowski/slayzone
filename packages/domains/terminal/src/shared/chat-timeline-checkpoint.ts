@@ -15,8 +15,13 @@ import type { ChatTimelineState } from './chat-timeline'
 import { PersistentIndex } from './persistent-index'
 import { beginReducerCall, endReducerCall } from './replay-batch'
 
-/** Bump on ANY change to the reducer or what it calls (the test says when). */
-export const CHAT_TIMELINE_VERSION = '16'
+/**
+ * Bump on ANY change to the reducer or what it calls (the test says when). Also
+ * bumped to refuse stored projections built from rows of another representation:
+ * 19 = rows carry out-of-line references (`chat-blobs`), so pages built before the
+ * v13 chat store (inline base64) are rebuilt from the events on next open.
+ */
+export const CHAT_TIMELINE_VERSION = '19'
 
 /**
  * Bump when what the hub persists or serves next to the state changes shape

@@ -22,7 +22,11 @@ type Row = Pick<TaskArtifact, 'id' | 'task_id' | 'title' | 'folder_id' | 'render
 }
 
 // The server: t1's artifacts. `updateGate`, when set, holds every update in flight.
-const server: { rows: Row[]; updateGate: Promise<void> | null } = { rows: [], updateGate: null }
+const server: {
+  rows: Row[]
+  folders: Array<{ id: string; task_id: string; parent_id: string | null; name: string }>
+  updateGate: Promise<void> | null
+} = { rows: [], folders: [], updateGate: null }
 
 // A stable tRPC view, like the real provider's: one proxy object per path.
 vi.mock('./trpc', () => {
@@ -30,7 +34,7 @@ vi.mock('./trpc', () => {
   const queryFn = (path: string, input: { taskId?: string } | undefined) => async () => {
     if (path === 'artifacts.getByTask')
       return server.rows.filter((r) => r.task_id === input?.taskId).map((r) => ({ ...r }))
-    if (path === 'artifacts.foldersGetByTask') return []
+    if (path === 'artifacts.foldersGetByTask') return server.folders.map((f) => ({ ...f }))
     if (path === 'app.clipboard.hasFiles') return false
     return null
   }
@@ -211,6 +215,7 @@ async function switchAwayAndBack(view: ReturnType<typeof render>, saved = 'a1') 
 beforeEach(() => {
   useShortcutStore.setState({ overrides: {}, isRecording: false })
   server.rows = [row('a1'), row('a2', 'raw'), row('a3')]
+  server.folders = []
   server.updateGate = null
   client = new QueryClient({ defaultOptions: { queries: { staleTime: 60_000, retry: false } } })
 })
@@ -478,5 +483,34 @@ describe('ArtifactsPanel saved view mode of the artifact selected at mount', () 
   it('with the artifacts loading after mount: applied as they arrive', async () => {
     await mountLoaded('a2')
     expect(viewer().dataset.viewMode).toBe('raw')
+  })
+})
+
+describe('ArtifactsPanel inline rename from a context menu', () => {
+  // Closing, the menu hands focus back to the row it opened on. Rename shows its
+  // input in that row and focuses it; the late hand-back blurred it, and blur commits
+  // the rename and closes the input — mid-typing for a user, and under load in e2e 93
+  // (the input vanished under Enter).
+  async function renameVia(trigger: HTMLElement) {
+    fireEvent.contextMenu(trigger)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    await settle(50)
+  }
+  const renameInput = () => screen.queryByTestId('artifacts-rename-input')
+
+  it('an artifact keeps its rename input focused as the menu closes', async () => {
+    await mountLoaded()
+    await renameVia(screen.getByTestId('artifact-row-a1').querySelector('button') as HTMLElement)
+    expect(renameInput()).not.toBeNull()
+    expect(document.activeElement).toBe(renameInput())
+  })
+
+  it('a folder keeps its rename input focused as the menu closes', async () => {
+    server.folders = [{ id: 'f1', task_id: 't1', parent_id: null, name: 'docs' }]
+    await mountLoaded()
+    await waitFor(() => expect(screen.getByTestId('folder-row-f1')).toBeTruthy())
+    await renameVia(screen.getByTestId('folder-row-f1').querySelector('button') as HTMLElement)
+    expect(renameInput()).not.toBeNull()
+    expect(document.activeElement).toBe(renameInput())
   })
 })

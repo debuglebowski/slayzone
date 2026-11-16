@@ -28,6 +28,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
+import {
+  agentHookPrompt,
+  isPromptCaptureMode,
+  type ResolvedAgentHook
+} from '@slayzone/terminal-contracts'
 import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
@@ -557,27 +562,6 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
     expect(ownB.text).toBe('B_OWN_FILE_BYTES')
   })
 
-  test('REST: an export cannot be written into A’s artifact dir, the hub’s state or nobody’s root', async () => {
-    for (const outputPath of [
-      join(hub.root, 'artifacts', A.task, 'planted.html'),
-      join(A.path, 'planted.html'),
-      join(hub.root, 'slayzone.data.sqlite'),
-      // N1: a file in nobody's project root (the hub OS user's dotfiles live there).
-      join(hub.root, '..', 'planted.html')
-    ]) {
-      const before = lines.length
-      const r = await rest(hub, b.token, {
-        method: 'POST',
-        path: '/api/artifacts/:id/export/html',
-        params: { id: B.artifact },
-        query: {},
-        body: { outputPath }
-      })
-      expect(r.status, `${outputPath}: ${r.status} ${r.text}`).toBe(404)
-      expect(denials(before), outputPath).toHaveLength(1)
-    }
-  })
-
   // ── MCP ──
   test('MCP: B and the admin get "Not found" + one audit line on every id A owns; A passes', async () => {
     const callB = await mcpClient(hub, b.token)
@@ -646,25 +630,37 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
       return true
     }
   }
+  // The session ledger is on the reporting agent's computer (robustness plan §9):
+  // record which conversations the route proved there.
+  const provenTurns = new Set<string>()
+  // Prompt history is on the computer too (§9, v207): count what the route captures.
+  const captured = new Map<string, number>()
   const deps = (): RestApiDeps =>
     ({
       db,
       notifyRenderer: () => {},
-      agentLifecycle: lifecycle
+      agentLifecycle: lifecycle,
+      captureAgentPrompt: async (hook: ResolvedAgentHook) => {
+        if (!hook.taskId || !agentHookPrompt(hook) || !isPromptCaptureMode(hook.agentId)) return
+        captured.set(hook.taskId, (captured.get(hook.taskId) ?? 0) + 1)
+      },
+      agentSessionLedger: {
+        computerFor: async () => 'pc',
+        recordHookConversation: async () => null,
+        confirmSessionConversation: async () => null,
+        markSessionFirstTurn: async (_computerId: string, conversationId: string) => {
+          provenTurns.add(conversationId)
+          return true
+        }
+      }
     }) as unknown as RestApiDeps
   const prompt = (o: Owned | null, mark: string, extra: Record<string, unknown> = {}) => ({
     agentId: 'claude-code',
     ctx: { v: 1, agentId: 'claude-code', ...(o ? { taskId: o.task } : {}), ...extra },
     raw: { hook_event_name: 'UserPromptSubmit', prompt: mark, session_id: `conv-${mark}` }
   })
-  const promptsFor = (taskId: string): number =>
-    (
-      raw.prepare('SELECT COUNT(*) AS n FROM agent_prompts WHERE task_id = ?').get(taskId) as {
-        n: number
-      }
-    ).n
-  const turnMarked = (mark: string): boolean =>
-    !!raw.prepare('SELECT 1 FROM session_turns WHERE conversation_id = ?').get(`conv-${mark}`)
+  const promptsFor = (taskId: string): number => captured.get(taskId) ?? 0
+  const turnMarked = (mark: string): boolean => provenTurns.has(`conv-${mark}`)
 
   test('hooks: B’s computer cannot change A’s task, and a session id attributes nothing; audited', async () => {
     const aPrompts = promptsFor(A.task)

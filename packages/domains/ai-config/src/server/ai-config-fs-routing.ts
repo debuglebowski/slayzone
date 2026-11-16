@@ -9,7 +9,7 @@
  */
 import type { SlayzoneDb } from '@slayzone/platform'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
-import type { AiConfigDirEntry, AiConfigFs, AiConfigStat } from './ai-config-fs'
+import type { AiConfigDirEntry, AiConfigFs, AiConfigStat, AiConfigFileHash } from './ai-config-fs'
 import { createAiConfigOps } from './handlers-store'
 
 export type AiConfigOps = ReturnType<typeof createAiConfigOps>
@@ -20,13 +20,16 @@ export type AiConfigFsCall =
   | { op: 'exists' | 'readFile' | 'mkdir' | 'unlink' | 'rmdir' | 'stat' | 'readdir'; path: string }
   | { op: 'writeFile'; path: string; content: string }
   | { op: 'rename'; path: string; to: string }
+  | { op: 'hashFiles'; paths: string[] }
 
 export interface AiConfigFsRouting {
-  /** The computer holding a project's files (by its checkout path, else its id). */
-  computerForProject(target: { projectPath?: string; projectId?: string }): Promise<string | null>
+  /** The computer holding a project's (or task's) files, by the scope the call names. */
+  computerForProject(target: { taskId?: string; projectId?: string }): Promise<string | null>
   /** An explicit computer (admitted), else the caller's own. */
   computerForCaller(computerId?: string | null): Promise<string | null>
   request(computerId: string, call: AiConfigFsCall): Promise<unknown>
+  /** Advertised by the computer running this handler, never inferred from hub version. */
+  supportsHashFiles?(computerId: string): boolean
 }
 
 let routing: AiConfigFsRouting | null = null
@@ -45,7 +48,23 @@ async function createRemoteAiConfigFs(
 ): Promise<AiConfigFs> {
   const home = String(await r.request(computerId, { op: 'homedir' }))
   const call = (c: AiConfigFsCall) => r.request(computerId, c)
+  async function hashFiles(paths: readonly string[]): Promise<AiConfigFileHash[]> {
+    const rows = await call({ op: 'hashFiles', paths: [...paths] })
+    if (
+      !Array.isArray(rows) ||
+      rows.length !== paths.length ||
+      rows.some(
+        (row, i) =>
+          !row ||
+          row.path !== paths[i] ||
+          (row.hash !== null && (typeof row.hash !== 'string' || !/^[a-f0-9]{64}$/.test(row.hash)))
+      )
+    )
+      throw new Error('Invalid computer file-hash batch')
+    return rows
+  }
   return {
+    ...(r.supportsHashFiles?.(computerId) ? { hashFiles } : {}),
     exists: async (path) => (await call({ op: 'exists', path })) === true,
     readFile: async (path) => String(await call({ op: 'readFile', path })),
     writeFile: async (path, content) => {
@@ -93,7 +112,7 @@ async function opsOn(db: SlayzoneDb, computerId: string | null, op: string): Pro
 /** The ops for a project's files: on the project's computer. */
 export async function aiConfigOpsForProject(
   db: SlayzoneDb,
-  target: { projectPath?: string; projectId?: string },
+  target: { taskId?: string; projectId?: string },
   op: string
 ): Promise<AiConfigOps> {
   const computerId = routing ? await routing.computerForProject(target) : null

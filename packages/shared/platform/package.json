@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/platform",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./ipc": "./src/ipc-dedup.ts",
     "./slz-file-url": "./src/slz-file-url.ts",
+    "./mime-types": "./src/mime-types.ts",
     "./pdf-viewer-links": "./src/pdf-viewer-links.ts",
     "./html-preview-links": "./src/html-preview-links.ts",
     "./forced-html-theme": "./src/forced-html-theme.ts",
@@ -36,6 +37,8 @@
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
     "./security-log": "./src/security-log.ts",
+    "./path-scope": "./src/path-scope.ts",
+    "./computer-frame-limit": "./src/computer-frame-limit.ts",
     "./agent-hooks": "./src/agent-hooks/index.ts",
     "./client-address": "./src/client-address.ts",
     "./hub-convex": "./src/hub-convex.ts",
@@ -47,7 +50,11 @@
     "./parent-watch": "./src/parent-watch.ts",
     "./node-pty-install": "./src/node-pty-install.ts",
     "./computer-launcher": "./src/computer-launcher.ts",
-    "./suspend-clock": "./src/suspend-clock.ts"
+    "./suspend-clock": "./src/suspend-clock.ts",
+    "./resolve-command": "./src/resolve-command.ts",
+    "./isolation": "./src/isolation.ts",
+    "./quarantine": "./src/quarantine.ts",
+    "./legacy-chat-tables": "./src/legacy-chat-tables.ts"
   },
   "scripts": {
     "test": "vitest run",

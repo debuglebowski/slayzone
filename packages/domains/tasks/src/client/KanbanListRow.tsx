@@ -60,7 +60,7 @@ export interface ListRowProps {
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string) => Promise<void>
   tags?: Tag[]
   taskTagIds?: string[]
   onTaskTagsChange?: (taskId: string, tagIds: string[]) => void

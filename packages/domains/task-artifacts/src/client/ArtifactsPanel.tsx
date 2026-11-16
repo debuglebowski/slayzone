@@ -158,6 +158,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       renameArtifact,
       moveArtifactToFolder,
       readContent,
+      readText,
       saveContent,
       uploadArtifact,
       uploadDir,
@@ -305,21 +306,28 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     )
     const [renameValue, setRenameValue] = useState('')
 
-    const willCreateRef = useRef(false)
+    // Set by a context-menu item that opens an inline input (New…, Rename): the menu,
+    // closing, must not hand focus back to the row it opened on. That hand-back lands
+    // after the input took focus and blurs it — and blur commits a rename and closes it.
+    const inputTakesFocusRef = useRef(false)
     const createInputRef = useCallback((node: HTMLInputElement | null) => {
       if (node) requestAnimationFrame(() => node.focus())
     }, [])
     const preventAutoFocus = useCallback((e: Event) => {
-      if (willCreateRef.current) {
+      if (inputTakesFocusRef.current) {
         e.preventDefault()
-        willCreateRef.current = false
+        inputTakesFocusRef.current = false
       }
     }, [])
     const renameInputRef = useRef<HTMLInputElement>(null)
 
-    // Focus create/rename inputs when they appear
+    // Focus create/rename inputs when they appear — on the next frame, as the create
+    // input does: started from a context menu, the menu is still open (and traps focus)
+    // in this commit, so a focus now is taken straight back.
     useEffect(() => {
-      if (renaming) renameInputRef.current?.focus()
+      if (!renaming) return
+      const frame = requestAnimationFrame(() => renameInputRef.current?.focus())
+      return () => cancelAnimationFrame(frame)
     }, [renaming])
 
     const selectedArtifact = artifacts.find((a) => a.id === selectedId) ?? null
@@ -439,11 +447,13 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     )
 
     const startRenameArtifact = useCallback((artifact: TaskArtifact) => {
+      inputTakesFocusRef.current = true
       setRenaming({ id: artifact.id, type: 'artifact' })
       setRenameValue(artifact.title)
     }, [])
 
     const startRenameFolder = useCallback((folder: ArtifactFolder) => {
+      inputTakesFocusRef.current = true
       setRenaming({ id: folder.id, type: 'folder' })
       setRenameValue(folder.name)
     }, [])
@@ -1121,7 +1131,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   createInputRef={createInputRef}
                   renameInputRef={renameInputRef}
                   preventAutoFocus={preventAutoFocus}
-                  willCreateRef={willCreateRef}
+                  inputTakesFocusRef={inputTakesFocusRef}
                   dropTargetFolder={dropTargetFolder}
                   handleFolderDragOver={handleFolderDragOver}
                   handleFolderDragLeave={handleFolderDragLeave}
@@ -1230,8 +1240,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 <ArtifactContentEditor
                   key={selectedArtifact.id}
                   artifact={selectedArtifact}
+                  siblingArtifacts={artifacts}
                   viewMode={viewMode}
-                  readContent={readContent}
+                  readText={readText}
                   saveContent={saveContent}
                   getFilePath={getFilePath}
                   effectiveReadability={effectiveReadability}
@@ -1244,6 +1255,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   searchRegex={findUseRegex}
                   onSearchMatchCountChange={setFindMatchCount}
                   onOpenUrl={onOpenUrl}
+                  onDownload={() => void downloadFile(selectedArtifact.id)}
                 />
               </>
             ) : (

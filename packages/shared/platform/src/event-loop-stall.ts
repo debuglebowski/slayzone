@@ -32,17 +32,38 @@
  *   - `mainThreadCpuMs` near zero → it was WAITING: a blocking call (see
  *     `children`), or almost never scheduled on a saturated machine.
  *
+ * And it says which of those it was ({@link classifyStall}, `verdict`; FU5 — 134 of
+ * the 186 computer stalls of 2026-11-14/15 were a saturated machine, not our code):
+ *
+ *   - `busy`    our own CPU alone crossed the threshold: a code cost, find it in `stacks`.
+ *               It says nothing about how much OF THE FREEZE that was — read
+ *               `mainThreadCpuMs / durationMs`: 48 s with 1.1 s of ours on a saturated
+ *               machine is `busy` (1.1 s would stall an idle machine too) and still
+ *               ~98 % starvation. Loops of short syscalls count as our (sys) CPU.
+ *   - `starved` little CPU of ours while the machine was saturated (`machineCpuBusyPct`,
+ *               `loadAvg1` vs `cpuCount`): the thread was runnable, not scheduled; the
+ *               stack is just where it happened to be.
+ *   - `blocked` little CPU of ours with CPUs to spare: a synchronous syscall, I/O or a
+ *               lock (`voluntaryCtxSwitches` high — Linux only, macOS reports 0),
+ *               paging (`majorPageFaults`), or the process suspended (≈ 0 CPU, no
+ *               stacks, few switches of any kind).
+ *
  * Cost while healthy: one 100ms timer on the main thread and one on the watcher.
  * The inspector is only touched during a stall.
  *
  * @module platform/event-loop-stall
  */
 
-import { cpus } from 'node:os'
+import { availableParallelism, cpus, loadavg } from 'node:os'
 import { PerformanceObserver, performance } from 'node:perf_hooks'
 import { Worker } from 'node:worker_threads'
 
 export interface EventLoopStall {
+  /** Highest-CPU processes sampled during the stall; executable names only, no arguments. */
+  topCpu?: Array<{
+    atMs: number
+    processes: Array<{ pid: number; cpuPct: number; command: string }>
+  }>
   /** Epoch ms of the last on-time heartbeat — when the freeze began, within one tick. */
   startedAt: number
   /** How long the main thread produced no heartbeat. */
@@ -62,6 +83,52 @@ export interface EventLoopStall {
     atMs: number
     processes: Array<{ pid: number; elapsed: string; command: string }>
   }>
+  /** What the freeze was (see the module doc). Always set by the detector. */
+  verdict?: StallVerdict
+  /** 1-minute load average at the thaw; `null` where the OS has none (Windows). */
+  loadAvg1?: number | null
+  /** CPUs this process may use. */
+  cpuCount?: number
+  /** Major page faults over the freeze (memory paged back in from disk), whole process. */
+  majorPageFaults?: number
+  /**
+   * Voluntary context switches over the freeze (waits: syscalls, I/O, locks), whole
+   * process. macOS does not count them (always 0 there); Linux does.
+   */
+  voluntaryCtxSwitches?: number
+  /** Involuntary context switches over the freeze (preempted by the scheduler), whole process. */
+  involuntaryCtxSwitches?: number
+}
+
+export type StallVerdict = 'busy' | 'starved' | 'blocked'
+
+/** Machine CPUs this busy (%) or a load this many times the CPU count = saturated. */
+const SATURATED_BUSY_PCT = 90
+const SATURATED_LOAD_PER_CPU = 1.5
+
+/**
+ * The verdict on a freeze (module doc): `busy` when OUR work alone reached the stall
+ * threshold, or filled at least half the freeze; otherwise `starved` on a saturated
+ * machine, `blocked` on one with CPUs to spare. A hint, not a cause: `busy` names a
+ * code cost worth finding, not the share of the freeze it explains (see
+ * `mainThreadCpuMs / durationMs`). Pure: a report's verdict can be recomputed from
+ * its own fields.
+ */
+export function classifyStall(
+  s: Pick<
+    EventLoopStall,
+    'durationMs' | 'mainThreadCpuMs' | 'processCpuMs' | 'machineCpuBusyPct'
+  > & { loadAvg1?: number | null; cpuCount?: number },
+  thresholdMs: number
+): StallVerdict {
+  const ownCpuMs = s.mainThreadCpuMs ?? s.processCpuMs
+  if (ownCpuMs >= thresholdMs || ownCpuMs >= 0.5 * s.durationMs) return 'busy'
+  const saturated =
+    (s.machineCpuBusyPct ?? 0) >= SATURATED_BUSY_PCT ||
+    (s.loadAvg1 != null &&
+      s.cpuCount !== undefined &&
+      s.loadAvg1 >= SATURATED_LOAD_PER_CPU * s.cpuCount)
+  return saturated ? 'starved' : 'blocked'
 }
 
 export interface EventLoopStallDetectorOptions {
@@ -104,7 +171,31 @@ type WatcherMessage =
       id: number
       /** `null` when `ps` failed or timed out. */
       processes: Array<{ pid: number; elapsed: string; command: string }> | null
+      topCpu?: Array<{ pid: number; cpuPct: number; command: string }>
     }
+
+/** Shared with the watcher worker; bounded and independent of module state. */
+export function parseStallProcesses(stdout: string, parentPid: number, ownPid: number) {
+  const processes: Array<{ pid: number; elapsed: string; command: string }> = []
+  const topCpu: Array<{ pid: number; cpuPct: number; command: string }> = []
+  for (const line of stdout.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+([\d.,]+)\s+(.*)$/)
+    if (!m) continue
+    const pid = Number(m[1])
+    if (pid === ownPid) continue
+    if (Number(m[2]) === parentPid)
+      processes.push({ pid, elapsed: m[3]!, command: m[5]!.slice(0, 300) })
+    const cpuPct = Number(m[4]!.replace(',', '.'))
+    if (cpuPct > 0)
+      topCpu.push({
+        pid,
+        cpuPct,
+        command: (m[5]!.split(/\s+/)[0]!.split('/').pop() ?? '?').slice(0, 64)
+      })
+  }
+  topCpu.sort((a, b) => b.cpuPct - a.cpuPct)
+  return { processes, topCpu: topCpu.slice(0, 5) }
+}
 
 /**
  * The watcher thread, as source: an `eval` worker needs no file of its own, so a
@@ -116,6 +207,7 @@ const WATCHER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads')
 const { execFile } = require('node:child_process')
 const { beat, thresholdMs, tickMs, sampleEveryMs, maxSamples, maxFrames, parentPid, psTimeoutMs } = workerData
+const parseStallProcesses = ${parseStallProcesses.toString()}
 
 let session = null
 try {
@@ -148,21 +240,14 @@ function snapshotChildren() {
   const id = ++snapshotId
   const takenAt = Date.now()
   parentPort.postMessage({ kind: 'children-pending', at: takenAt, id })
-  const ps = execFile('ps', ['-A', '-o', 'pid=,ppid=,etime=,command='], { timeout: psTimeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+  const ps = execFile('ps', ['-A', '-o', 'pid=,ppid=,etime=,pcpu=,command='], { timeout: psTimeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
     psPending = false
     if (err) {
       parentPort.postMessage({ kind: 'children', at: takenAt, id, processes: null })
       return
     }
-    const processes = []
-    for (const line of String(stdout).split('\\n')) {
-      const m = line.trim().match(/^(\\d+)\\s+(\\d+)\\s+(\\S+)\\s+(.*)$/)
-      if (!m || Number(m[2]) !== parentPid) continue
-      const pid = Number(m[1])
-      if (pid === ps.pid) continue // this snapshot's own ps
-      processes.push({ pid, elapsed: m[3], command: m[4].slice(0, 300) })
-    }
-    parentPort.postMessage({ kind: 'children', at: takenAt, id, processes })
+    parentPort.postMessage({ kind: 'children', at: takenAt, id,
+      ...parseStallProcesses(String(stdout), parentPid, ps.pid) })
   })
 }
 
@@ -201,6 +286,8 @@ interface Tick {
   threadCpuUs: number | null
   processCpuUs: number
   machine: { idle: number; total: number } | null
+  /** Whole-process counters of `process.resourceUsage()`. */
+  rusage: { majorPageFaults: number; voluntary: number; involuntary: number }
 }
 
 const threadCpuUsage = (
@@ -225,12 +312,27 @@ function readMachineCpu(): { idle: number; total: number } | null {
 function readTick(): Tick {
   const proc = process.cpuUsage()
   const thread = threadCpuUsage?.call(process)
+  const usage = process.resourceUsage()
   return {
     perf: performance.now(),
     wall: Date.now(),
     threadCpuUs: thread ? thread.user + thread.system : null,
     processCpuUs: proc.user + proc.system,
-    machine: readMachineCpu()
+    machine: readMachineCpu(),
+    rusage: {
+      majorPageFaults: usage.majorPageFault,
+      voluntary: usage.voluntaryContextSwitches,
+      involuntary: usage.involuntaryContextSwitches
+    }
+  }
+}
+
+/** CPUs this process may use (at least 1). */
+function cpuCount(): number {
+  try {
+    return Math.max(1, availableParallelism())
+  } catch {
+    return Math.max(1, cpus().length)
   }
 }
 
@@ -320,8 +422,17 @@ export function startEventLoopStallDetector(
         m.kind === 'children' && m.processes
           ? [{ atMs: m.at - from.wall, processes: m.processes }]
           : []
-      )
+      ),
+      topCpu: during.flatMap((m) =>
+        m.kind === 'children' && m.topCpu ? [{ atMs: m.at - from.wall, processes: m.topCpu }] : []
+      ),
+      loadAvg1: process.platform === 'win32' ? null : Math.round(loadavg()[0]! * 100) / 100,
+      cpuCount: cpuCount(),
+      majorPageFaults: Math.max(0, to.rusage.majorPageFaults - from.rusage.majorPageFaults),
+      voluntaryCtxSwitches: Math.max(0, to.rusage.voluntary - from.rusage.voluntary),
+      involuntaryCtxSwitches: Math.max(0, to.rusage.involuntary - from.rusage.involuntary)
     }
+    stall.verdict = classifyStall(stall, thresholdMs)
     try {
       options.onStall(stall)
     } catch {

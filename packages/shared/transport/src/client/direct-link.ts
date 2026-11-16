@@ -296,7 +296,11 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   /** Acquires in flight per target: a release must not take the grant they get. */
   const acquiring = new Map<string, number>()
   const targetKey = (t: DirectIssueTarget): string =>
-    t.kind === 'pty' ? `pty:${t.sessionId}` : `chat:${t.tabId}`
+    t.kind === 'pty'
+      ? `pty:${t.sessionId}`
+      : t.kind === 'chat'
+        ? `chat:${t.tabId}`
+        : `task:${t.taskId}`
   let hubUnsupported = false
   let disposed = false
   const connectedListeners = new Set<(computerId: string) => void>()
@@ -622,7 +626,9 @@ export interface DirectLinkHubClient {
     onStatusChange: {
       subscribe(
         input: undefined,
-        opts: { onData: (change: { computerId: string; connected: boolean }) => void }
+        opts: {
+          onData: (change: { computerId: string; connected: boolean; usable?: boolean }) => void
+        }
       ): { unsubscribe(): void }
     }
   }
@@ -696,7 +702,8 @@ export function directLinkManagerFor(
   try {
     sub = client.computers.onStatusChange.subscribe(undefined, {
       onData: (change) => {
-        if (change.connected) manager.computerConnected(change.computerId)
+        if (change.connected && change.usable !== false)
+          manager.computerConnected(change.computerId)
       }
     })
   } catch {

@@ -1,6 +1,36 @@
 export { CreateTaskDialog } from './CreateTaskDialog'
 export { EditTaskDialog } from './EditTaskDialog'
 export { DeleteTaskDialog } from './DeleteTaskDialog'
+export {
+  runTaskMove,
+  type RunTaskMoveOptions,
+  type TaskMoveJournal,
+  type TaskMoveStepContext,
+  type TaskMoveStepRunner,
+  type TaskMoveWorkStep
+} from './task-move-engine'
+export {
+  createTaskMoveSteps,
+  TASK_MOVE_CHUNK_BYTES,
+  type TaskMoveFileEntry,
+  type TaskMoveFileRef,
+  type TaskMoveRemoteBlockerLink,
+  type TaskMoveSourceApi,
+  type TaskMoveTargetApi
+} from './task-move-steps'
+export { DuplicateTaskDialog, type DuplicateTaskDialogProps } from './DuplicateTaskDialog'
+export {
+  MoveTaskDialog,
+  useProjectsOnTaskHub,
+  type MoveTaskDialogProps,
+  type OtherHubProjects
+} from './MoveTaskDialog'
+export {
+  settleDeleteTaskResult,
+  reportDeleteTaskError,
+  TaskNotDeletedError,
+  type DeleteTaskMutationResult
+} from './deleteTaskResult'
 export { TaskMetadataSidebar, BlockerStatusIcon } from './TaskMetadataSidebar'
 export { BlockerDialog } from './BlockerDialog'
 export { TaskStatusMenu } from './TaskStatusMenu'
@@ -24,3 +54,12 @@ export {
   useTaskScopedQueriesFreshOnTasksChanged,
   taskIdOfScopedQuery
 } from './taskScopedQueries'
+export {
+  useTaskPath,
+  useTaskWorktreePaths,
+  useTaskPathLocation,
+  peekTaskPath,
+  taskPathQueryKey,
+  type TaskPathView,
+  type TaskPathSubject
+} from './useTaskPath'

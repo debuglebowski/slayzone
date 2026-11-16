@@ -346,6 +346,9 @@ export function useChatDraftPersistence({
     })
     setResolved(next)
     setConflictAvailable(!!next.conflict || readConflicts(conflictKey).length > 0)
+    // In the same render as `resolved` (recoverLegacy needs it): set only by the effect
+    // below, the first loaded frame said "no older draft" even when there was one.
+    setLegacyAvailable(legacyKeys.some((candidate) => readJournal(candidate) !== null))
   }
 
   // Written in effects only (React Compiler): the last revision the server

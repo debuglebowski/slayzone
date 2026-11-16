@@ -7,7 +7,7 @@
  *   packages/shared/settings-core/src/server/scope.test.ts
  */
 import { describe, expect, it } from 'vitest'
-import { settingProjectId, settingScope } from './scope'
+import { isMachineLocalSetting, settingProjectId, settingScope } from './scope'
 
 describe('settingScope', () => {
   it('per user: one person’s UI state, including the G-09 key', () => {
@@ -57,6 +57,13 @@ describe('settingScope', () => {
 
   it('internal: integration credentials', () => {
     expect(settingScope('integration:credential:abc')).toBe('internal')
+  })
+
+  it('internal + this machine only: when this database dropped its legacy chat tables', () => {
+    // A user scope would move it out of `settings` (first-admin adoption) and the
+    // hub would no longer know its own schema history; an import must not carry it.
+    expect(settingScope('chat.legacy_tables_dropped_at')).toBe('internal')
+    expect(isMachineLocalSetting('chat.legacy_tables_dropped_at')).toBe(true)
   })
 
   it('matches prefixes, not substrings', () => {

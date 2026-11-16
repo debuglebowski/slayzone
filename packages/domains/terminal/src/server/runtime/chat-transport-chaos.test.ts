@@ -217,8 +217,6 @@ test('chaos × 200: no lost message, none answered twice, no overwritten or stal
     broadcastExit: () => undefined,
     broadcastStateChange: () => undefined,
     eventStore: {
-      load: async () =>
-        [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([seq, event]) => ({ seq, event })),
       insert: async (_tab, seq, event) => {
         if (rows.has(seq)) {
           clashes++
@@ -227,11 +225,9 @@ test('chaos × 200: no lost message, none answered twice, no overwritten or stal
         rows.set(seq, event)
         return 'inserted'
       },
-      readRange: async (_tab, after, before) =>
-        [...rows.entries()]
-          .filter(([seq]) => seq > after && seq < before)
-          .sort((a, b) => a[0] - b[0])
-          .map(([seq, event]) => ({ seq, event }))
+      ...mgr.memoryChatEventReads(() =>
+        [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([seq, event]) => ({ seq, event }))
+      )
     },
     outboxRetry: { windowMs: 40, baseMs: 2 },
     watchdogTimings: { startingBoundMs: 5_000, runningStallMs: 60_000, killGraceMs: 50 }

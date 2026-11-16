@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
@@ -16,7 +16,7 @@ import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'
 import { takeTaskPaneEvents } from '../taskPaneEvents'
-import { readCurrentConversationId } from '../../shared/main-terminal'
+import { invalidateSoon } from '../coalesced-invalidate'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
@@ -45,6 +45,17 @@ export interface UseTaskTerminalSessionResult {
   /** `mode`: the mode that ran it; the hand-off partner's means the conversation moves over. */
   handleSwitchSession: (conversationId: string, mode: string) => Promise<void>
   handleDeleteSession: (conversationId: string, mode: string) => Promise<void>
+  /** A SECONDARY agent tab's session reset (sessions are per tab; the caller
+   *  stops and remounts that tab's pane around it). */
+  handleTabSessionReset: (tabId: string, mode: string) => Promise<void>
+  /** A secondary tab picks a session (`fromMode` ran it); refused, naming the
+   *  tab, when another tab's live agent runs it. The caller remounts the pane. */
+  handleTabSessionSwitch: (
+    tabId: string,
+    mode: string,
+    conversationId: string,
+    fromMode: string
+  ) => Promise<void>
   handleReattachTerminal: () => void
   /** The main agent's chat ↔ terminal partner mode; null: no hand-off. */
   handoffMode: string | null
@@ -72,16 +83,38 @@ export function useTaskTerminalSession({
   // `mutateAsync` only: it is stable for the hook's lifetime, while the useMutation()
   // result object is new on every render (see the persist effect below).
   const { mutateAsync: updateTask } = useMutation(trpc.task.update.mutationOptions())
+  const { mutateAsync: recordDetected } = useMutation(
+    trpc.agentSessions.recordDetected.mutationOptions()
+  )
+  const queryClient = useQueryClient()
+  // The main tab's current conversation, as the task's computer decides it
+  // (robustness plan §9, P0): null when it has none. Only a SUCCESSFUL answer is
+  // known: while it loads, or while the computer is offline (the read fails), the
+  // current session is UNKNOWN — never "no session" (S8): no "detect the session"
+  // / "resume won't work" banner, and no detected id is recorded against it.
+  const currentQueryOptions = trpc.agentSessions.current.queryOptions(
+    { taskId: task?.id ?? '', agentId: task?.agent_id ?? '' },
+    { enabled: !!task }
+  )
+  const currentQuery = useQuery(currentQueryOptions)
+  const currentKnown = currentQuery.status === 'success'
+  const currentConversationId = currentQuery.data ?? null
+  const currentQueryKey = currentQueryOptions.queryKey
+  useSubscription(
+    trpc.agentSessions.onChanged.subscriptionOptions(undefined, {
+      enabled: !!task,
+      onData: (changedTaskId) => {
+        if (changedTaskId === task?.id) invalidateSoon(queryClient, currentQueryKey)
+      }
+    })
+  )
   // Detected session ID from /status command
   const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
 
   // Session ID discovery: providers that don't support --session-id at creation
   const sessionIdCommand = task ? SESSION_ID_COMMANDS[task.agent_id] : undefined
   const showSessionBanner =
-    !!sessionIdCommand &&
-    !!task &&
-    !readCurrentConversationId(task, task.agent_id) &&
-    !detectedSessionId
+    !!sessionIdCommand && !!task && currentKnown && !currentConversationId && !detectedSessionId
 
   // Providers where session ID detection is not possible
   const sessionIdUnavailable = !!task && SESSION_ID_UNAVAILABLE.includes(task.agent_id)
@@ -90,7 +123,8 @@ export function useTaskTerminalSession({
   )
   const showUnavailableBanner =
     sessionIdUnavailable &&
-    !readCurrentConversationId(task, task?.agent_id) &&
+    currentKnown &&
+    !currentConversationId &&
     sessionUnavailableDismissed !== task?.id
 
   const handleDetectSessionId = useCallback(async () => {
@@ -101,9 +135,11 @@ export function useTaskTerminalSession({
     await trpcClient.pty.write.mutate({ sessionId: sid, data: sessionIdCommand + '\r' })
   }, [task, sessionIdCommand, getMainSessionId, trpcClient])
 
-  const getConversationIdForMode = useCallback((t: Task): string | null => {
-    return readCurrentConversationId(t, t.agent_id)
-  }, [])
+  const getConversationIdForMode = useCallback(
+    (t: Task): string | null =>
+      t.id === task?.id && t.agent_id === task?.agent_id ? currentConversationId : null,
+    [task?.id, task?.agent_id, currentConversationId]
+  )
 
   // Subscribe to session detected events
   useEffect(() => {
@@ -119,13 +155,13 @@ export function useTaskTerminalSession({
   // Update DB with detected session ID
   const handleUpdateSessionId = useCallback(async () => {
     if (!task || !detectedSessionId) return
-    const updated = await updateTask({
-      id: task.id,
-      providerConfig: { [task.agent_id]: { conversationId: detectedSessionId } }
+    await recordDetected({
+      taskId: task.id,
+      agentId: task.agent_id,
+      conversationId: detectedSessionId
     })
-    onTaskUpdated(updated)
     setDetectedSessionId(null)
-  }, [task, detectedSessionId, onTaskUpdated, updateTask])
+  }, [task, detectedSessionId, recordDetected])
 
   const handleSyncSessionId = useStableCallback(() => {
     void handleUpdateSessionId()
@@ -157,6 +193,9 @@ export function useTaskTerminalSession({
   const persistedSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!task || !detectedSessionId || !sessionIdCommand) return
+    // Not before the current session is known: a detection of the id that is
+    // ALREADY current must not be recorded again (as a fresh spawn) — S8.
+    if (!currentKnown) return
     if (getConversationIdForMode(task) === detectedSessionId) {
       // Stays in the effect (lint set-state-in-effect, accepted): the clear must
       // pair with the dedupe-ref reset (a ref write in render → Compiler skip),
@@ -172,11 +211,11 @@ export function useTaskTerminalSession({
 
     void (async () => {
       try {
-        const updated = await updateTask({
-          id: task.id,
-          providerConfig: { [task.agent_id]: { conversationId: detectedSessionId } }
+        await recordDetected({
+          taskId: task.id,
+          agentId: task.agent_id,
+          conversationId: detectedSessionId
         })
-        onTaskUpdated(updated)
       } catch {
         // Allow a retry on a transient failure.
         if (persistedSessionIdRef.current === detectedSessionId)
@@ -191,9 +230,9 @@ export function useTaskTerminalSession({
     task,
     detectedSessionId,
     sessionIdCommand,
-    onTaskUpdated,
+    currentKnown,
     getConversationIdForMode,
-    updateTask
+    recordDetected
   ])
 
   // Shortcut and task menu restart the main agent through its transport.
@@ -231,12 +270,9 @@ export function useTaskTerminalSession({
     await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
   }, [task, resetTaskState, getMainSessionId, trpcClient])
 
-  // Reset terminal (kill PTY, clear session ID, remount fresh). Routes through
-  // `task.resetConversation` (a `manual-reset` ledger write) — NOT a plain
-  // provider_config null. The renderer's resume hint comes from the ledger-backed
-  // `currentConversationByMode`; only a `session_resets` cutoff clears the honored
-  // binding. Nulling provider_config alone left a phantom/stale id that survived
-  // "Start fresh" and looped `--resume` on reopen. See conversation-healer.ts.
+  // Reset terminal (kill PTY, remount fresh). Routes through
+  // `task.resetConversation`: a reset intent the task's computer applies to its
+  // session ledger before the respawn resolves (robustness plan §9).
   const handleResetTerminal = useCallback(async () => {
     if (!task) return
     const mainSessionId = getMainSessionId(task.id)
@@ -258,10 +294,10 @@ export function useTaskTerminalSession({
   // Switch to an EARLIER session (sessions sidebar). Same kill→remount shape as
   // handleRestartTerminal — the difference is the mutation in the middle, which
   // appends a `user-selected` row so the ledger's honored "current" conversation
-  // becomes the picked one BEFORE the remount reads it. That ordering is the
-  // whole mechanism: the remounted terminal takes its resume hint from the task's
-  // refreshed `currentConversationByMode`, so the respawn runs `--resume <picked>`
-  // and the switch survives a reopen even if the agent never confirms.
+  // becomes the picked one BEFORE the remount spawns. That ordering is the whole
+  // mechanism: the respawn resolves from the computer's ledger, so it runs
+  // `--resume <picked>` and the switch survives a reopen even if the agent never
+  // confirms.
   const handleSwitchSession = useCallback(
     async (conversationId: string, fromMode: string) => {
       if (!task) return
@@ -360,6 +396,30 @@ export function useTaskTerminalSession({
         conversationId
       })
       onTaskUpdated(updated)
+    },
+    [task, onTaskUpdated, trpcClient]
+  )
+
+  const handleTabSessionReset = useCallback(
+    async (tabId: string, mode: string) => {
+      if (!task) return
+      onTaskUpdated(await trpcClient.task.resetConversation.mutate({ id: task.id, mode, tabId }))
+    },
+    [task, onTaskUpdated, trpcClient]
+  )
+
+  const handleTabSessionSwitch = useCallback(
+    async (tabId: string, mode: string, conversationId: string, fromMode: string) => {
+      if (!task) return
+      onTaskUpdated(
+        await trpcClient.task.switchConversation.mutate({
+          id: task.id,
+          mode,
+          conversationId,
+          sourceMode: fromMode,
+          tabId
+        })
+      )
     },
     [task, onTaskUpdated, trpcClient]
   )
@@ -512,6 +572,8 @@ export function useTaskTerminalSession({
     handleResetTerminal,
     handleSwitchSession,
     handleDeleteSession,
+    handleTabSessionReset,
+    handleTabSessionSwitch,
     handleReattachTerminal,
     handoffMode,
     handleHandoff

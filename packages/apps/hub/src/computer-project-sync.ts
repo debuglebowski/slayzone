@@ -34,12 +34,15 @@ import { LOCAL_COMPUTER_WORK_ROOTS_KEY } from '@slayzone/settings-core/server'
 import { isAbsolute } from 'node:path'
 import { resolveWorktreeBasePathTemplate } from '@slayzone/worktrees/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { createAsyncFaultLedger, forEachIsolated } from '@slayzone/platform/isolation'
+import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
 import {
   deletePlacement,
   getPlacement,
   listPlacements,
   recordComputerProjectPaths,
   setPlacement,
+  TASK_COMPUTER_EXPR,
   type PlacementRow
 } from '@slayzone/computers/server'
 import { USABLE_PLACEMENT_STATUSES, type PlacementStatus } from '@slayzone/computers/shared'
@@ -55,6 +58,13 @@ const WORK_ROOTS_KEY = LOCAL_COMPUTER_WORK_ROOTS_KEY
 
 /** The computer calls this module makes. */
 export interface ComputerFolderOps {
+  relocateProject?(
+    computerId: string,
+    projectId: string,
+    sourcePath: string,
+    path: string,
+    mode?: 'move' | 'update'
+  ): Promise<{ path: string }>
   listRoots(computerId: string): Promise<{ roots: readonly string[] }>
   setAllowedRoots(computerId: string, roots: string[]): Promise<unknown>
   pathExists(computerId: string, path: string): Promise<boolean>
@@ -62,6 +72,11 @@ export interface ComputerFolderOps {
   forgetProjectPath(computerId: string, projectId: string): Promise<void>
   /** The computer's own report: every folder it has recorded for this hub. */
   listProjectPaths(computerId: string): Promise<ReadonlyArray<{ projectId: string; path: string }>>
+  /**
+   * The worktrees and base dirs of the given tasks, as that computer holds them (the
+   * hub keeps no task path, §9 7e). Throws when it cannot answer.
+   */
+  listTaskFolders(computerId: string, taskIds: readonly string[]): Promise<string[]>
 }
 
 export interface ComputerProjectSyncDeps {
@@ -87,10 +102,18 @@ export interface SetFolderResult {
 }
 
 export interface ComputerProjectSync {
+  relocateFolder(
+    computerId: string,
+    projectId: string,
+    sourcePath: string,
+    path: string,
+    mode?: 'move' | 'update'
+  ): Promise<SetFolderResult>
   onConnect(computerId: string): Promise<void>
   /**
-   * The worktree base setting or an automation's folder changed: register the local
-   * computer's work folders again (M6). Best-effort: an offline computer is widened on
+   * The worktree base setting, an automation's folder or a background process's
+   * folder changed — or a process is about to start on the local computer: register
+   * the local computer's work folders again (M6). Best-effort: an offline computer is widened on
    * its next connect.
    */
   localWorkFoldersChanged(): Promise<void>
@@ -159,8 +182,8 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
    * Folders the local computer works in besides project folders, as the desktop did
    * with no jail (M6): the worktree base each local project resolves to when the
    * setting names one (the default, a sibling, is covered by the project's parent),
-   * and each automation action's own absolute folder (a `{{…}}` one resolves to a
-   * project's folder, already covered).
+   * each automation action's own absolute folder (a `{{…}}` one resolves to a
+   * project's folder, already covered), and each background process's own folder.
    */
   async function localWorkFolders(computerId: string): Promise<string[]> {
     const folders: string[] = []
@@ -186,6 +209,22 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
         const cwd = (action as { params?: { cwd?: unknown } })?.params?.cwd
         if (typeof cwd === 'string' && !cwd.includes('{{') && isAbsolute(cwd)) folders.push(cwd)
       }
+    }
+    // Background processes ran on the desktop's own disk, unjailed, until v0.38.0 moved
+    // them onto the computer: one set up in `/tmp`, `/opt/x` or on an external drive
+    // must keep starting there. A project process sends no cwd (its computer resolves
+    // the project's folder, covered above); one whose task is another computer's (the
+    // one resolver, TASK_COMPUTER_EXPR) names a folder on THAT computer.
+    for (const p of await db.all<{ cwd: string }>(
+      `SELECT pr.cwd FROM processes pr
+         LEFT JOIN tasks t ON t.id = pr.task_id
+         LEFT JOIN projects p ON p.id = COALESCE(t.project_id, pr.project_id)
+        WHERE pr.cwd != ''
+          AND NOT (pr.task_id IS NULL AND pr.project_id IS NOT NULL)
+          AND COALESCE(${TASK_COMPUTER_EXPR}, ?) = ?`,
+      [computerId, computerId]
+    )) {
+      if (isAbsolute(p.cwd)) folders.push(p.cwd)
     }
     return folders
   }
@@ -235,20 +274,21 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
    * so the root is released only once the row is purged (round 4, R4-1).
    */
   async function foldersInUse(computerId: string): Promise<string[]> {
-    const rows = await db.all<{ worktree_path: string | null; base_dir: string | null }>(
-      `SELECT worktree_path, base_dir FROM tasks t
-        WHERE (t.computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
+    const tasks = await db.all<{ id: string }>(
+      `SELECT id FROM tasks t
+        WHERE (t.has_worktree = 1 OR t.has_base_dir = 1)
+          AND (t.computer_id = ? OR t.worktree_computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
             SELECT 1 FROM project_placements pp
              WHERE pp.project_id = t.project_id AND pp.computer_id = ?)))`,
-      [computerId, computerId]
+      [computerId, computerId, computerId]
     )
-    const folders: string[] = []
-    for (const r of rows) {
-      for (const f of [r.worktree_path, r.base_dir]) {
-        if (f && isAbsolute(f)) folders.push(f)
-      }
-    }
-    return folders
+    if (tasks.length === 0) return []
+    // The folders live on that computer only (§9 7e): it names them.
+    const folders = await ops.listTaskFolders(
+      computerId,
+      tasks.map((t) => t.id)
+    )
+    return folders.filter((f) => isAbsolute(f))
   }
 
   /**
@@ -271,14 +311,13 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     if (workFolders) {
       // Folders in use keep their root too (R3-1): a task worktree created under an
       // earlier worktree base still lives there after the setting changes.
-      const needed = missingRootsForFolders(
-        [...workFolders, ...(await foldersInUse(computerId))],
-        []
-      )
+      // Unknown (the computer could not name them): nothing is in doubt, nothing goes.
+      const inUse = await foldersInUse(computerId).catch(() => null)
+      const needed = missingRootsForFolders([...workFolders, ...(inUse ?? [])], [])
       // Only roots this sync added (a root the user already had covered the folder,
       // so it was never added or tracked) and the computer still has.
       const tracked = (await trackedWorkRoots(computerId)).filter((r) => roots.includes(r))
-      stale = tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r])))
+      stale = inUse ? tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r]))) : []
       keptTracked = tracked.filter((r) => !stale.includes(r))
       base = roots.filter((r) => !stale.includes(r))
     }
@@ -414,27 +453,59 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
             )
           )
           const unconfirmed = rows.filter((r) => served.has(r.project_id))
-          for (const row of unconfirmed) {
-            const answer = await ask(computerId, row.project_id, row.path)
-            if (answer) await setPlacement(db, { computerId, projectId: row.project_id, ...answer })
+          // One project at a time: a project whose folder cannot be recorded is
+          // recorded as a fault and retried next connect; the others still deliver.
+          const isolation = {
+            key: (r: { project_id: string }) => r.project_id,
+            ledger: createAsyncFaultLedger(db, { origin: 'hub', computerId }),
+            ignoreGate: true,
+            isFatal: isComputerUnreachable
           }
+          await forEachIsolated(
+            unconfirmed,
+            { ...isolation, pass: 'hub-project-sync' },
+            async (row) => {
+              const answer = await ask(computerId, row.project_id, row.path)
+              if (answer)
+                await setPlacement(db, { computerId, projectId: row.project_id, ...answer })
+            }
+          )
           // Folders cleared while the computer was unreachable: tell it now.
           const forgotten = (await listPlacements(db)).filter(
             (r) => r.computer_id === computerId && r.status === 'forgotten'
           )
-          for (const row of forgotten) {
-            const told = await ops.forgetProjectPath(computerId, row.project_id).then(
-              () => true,
-              () => false
-            )
-            if (told) await deletePlacement(db, computerId, row.project_id)
-          }
+          await forEachIsolated(
+            forgotten,
+            { ...isolation, pass: 'hub-project-forget' },
+            async (row) => {
+              const told = await ops.forgetProjectPath(computerId, row.project_id).then(
+                () => true,
+                () => false
+              )
+              if (told) await deletePlacement(db, computerId, row.project_id)
+            }
+          )
         })
         defaultsChanged =
           (await step(computerId, 'backfill', () => backfillDefaults(computerId))) ?? 0
 
         const after = snapshot(await listPlacements(db), computerId)
         if (before !== after || defaultsChanged > 0) deps.onChanged()
+      })
+    },
+
+    relocateFolder(computerId, projectId, sourcePath, path, mode) {
+      return withLock(computerId, async () => {
+        if (!ops.relocateProject)
+          throw new Error(
+            'This computer does not support project relocation. Update it and try again.'
+          )
+        await widenRoots(computerId, [path])
+        const answer = await ops.relocateProject(computerId, projectId, sourcePath, path, mode)
+        const recorded = { path: answer.path, status: 'ready' as const }
+        await setPlacement(db, { computerId, projectId, ...recorded })
+        deps.onChanged()
+        return recorded
       })
     },
 

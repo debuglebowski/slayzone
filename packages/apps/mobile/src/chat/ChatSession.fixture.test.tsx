@@ -148,7 +148,10 @@ describe('ChatSession against a recorded hub session', () => {
       const user = userEvent.setup()
       // Opened: attached through the tab's own subscription, hydrated in the task's folder.
       await waitFor(() =>
-        expect(hub.callsTo('chat.getReplay')).toEqual([{ tabId: fixture.tabId, afterSeq: -1 }])
+        // One bounded page: the recorded (older) hub answers the whole replay at once.
+        expect(hub.callsTo('chat.getReplay')).toEqual([
+          { tabId: fixture.tabId, afterSeq: -1, page: {} }
+        ])
       )
       expect(hub.subscribed['chat.onEvent']).toEqual([{ tabIds: [fixture.tabId] }])
       expect(hub.callsTo('chat.hydrate')).toEqual([

@@ -5,11 +5,13 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
 import type { ComputerConfig } from '../config'
 import { createAgentConfigHandlers } from './agent-config'
+import { runInScopeJail, type ScopeJail } from '../path-jail'
 
 let root: string
 let home: string
@@ -74,5 +76,70 @@ describe('agentConfig.fs', () => {
 
   it('refuses an unknown op', async () => {
     await expect(call({ op: 'chmod', path: join(root, 'a') })).rejects.toThrow()
+  })
+
+  it('hashes a bounded batch locally, preserving missing files and fresh edits', async () => {
+    const path = join(root, 'SKILL.md')
+    const missing = join(root, 'missing.md')
+    writeFileSync(path, 'first')
+    const digest = (s: string) => createHash('sha256').update(s).digest('hex')
+    expect(await call({ op: 'hashFiles', paths: [path, missing] })).toEqual({
+      result: [
+        { path, hash: digest('first') },
+        { path: missing, hash: null }
+      ]
+    })
+    writeFileSync(path, 'second')
+    expect(await call({ op: 'hashFiles', paths: [path] })).toEqual({
+      result: [{ path, hash: digest('second') }]
+    })
+    await expect(call({ op: 'hashFiles', paths: Array(129).fill(path) })).rejects.toThrow()
+    await expect(call({ op: 'hashFiles', paths: [path, '/etc/hosts'] })).rejects.toThrow(/outside/)
+  })
+})
+
+describe('agentConfig.fs under a path scope (§9 Phase 7c)', () => {
+  const jail = (roots: string[]): ScopeJail => ({
+    label: 'project p1',
+    roots,
+    excluded: [],
+    foreign: [],
+    hostReads: false
+  })
+
+  it("a project file is confined to the scope's folders", async () => {
+    const mine = join(root, 'mine')
+    const other = join(root, 'other')
+    mkdirSync(mine)
+    mkdirSync(other)
+    writeFileSync(join(other, 'CLAUDE.md'), 'theirs')
+    await runInScopeJail(jail([mine]), async () => {
+      await call({ op: 'writeFile', path: join(mine, 'CLAUDE.md'), content: 'ok' })
+      await expect(call({ op: 'readFile', path: join(other, 'CLAUDE.md') })).rejects.toThrow(
+        /outside the folders of project p1/
+      )
+      await expect(
+        call({ op: 'readFile', path: join(mine, '..', 'other', 'CLAUDE.md') })
+      ).rejects.toThrow(/outside the folders of project p1/)
+      await expect(call({ op: 'hashFiles', paths: [join(other, 'CLAUDE.md')] })).rejects.toThrow(
+        /outside the folders of project p1/
+      )
+    })
+    expect(readFileSync(join(mine, 'CLAUDE.md'), 'utf8')).toBe('ok')
+  })
+
+  it('its own provider dirs stay reachable (computer-level files), nothing else in home', async () => {
+    mkdirSync(join(home, '.claude'), { recursive: true })
+    writeFileSync(join(home, '.claude', 'CLAUDE.md'), 'global')
+    writeFileSync(join(home, '.bashrc'), 'secret')
+    await runInScopeJail(jail([root]), async () => {
+      expect(await call({ op: 'readFile', path: join(home, '.claude', 'CLAUDE.md') })).toEqual({
+        result: 'global'
+      })
+      await expect(call({ op: 'readFile', path: join(home, '.bashrc') })).rejects.toThrow()
+      await expect(
+        call({ op: 'readFile', path: join(home, '.claude', '..', '.bashrc') })
+      ).rejects.toThrow()
+    })
   })
 })

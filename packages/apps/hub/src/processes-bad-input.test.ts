@@ -210,33 +210,6 @@ async function createProject(hub: Hub, token: string | null): Promise<string> {
   return body.data.id
 }
 
-/** A task of `projectId` whose worktree is `dir`: a hub-local root of the caller's. */
-async function taskWithWorktree(
-  hub: Hub,
-  token: string | null,
-  projectId: string,
-  dir: string
-): Promise<void> {
-  const headers = {
-    'content-type': 'application/json',
-    ...(token ? { authorization: `Bearer ${token}` } : {})
-  }
-  const base = `http://127.0.0.1:${hub.port}/api/tasks`
-  const created = await fetch(base, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ projectId, title: 'w' })
-  })
-  const body = (await created.json()) as { data?: { id: string } }
-  assert(body.data?.id, `create task: ${created.status} ${JSON.stringify(body)}`)
-  const patched = await fetch(`${base}/${body.data.id}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ worktreePath: dir })
-  })
-  expect(patched.ok, `set worktree: ${patched.status} ${await patched.text()}`).toBe(true)
-}
-
 type Proc = {
   mutate: (input?: unknown) => Promise<unknown>
   query: (input?: unknown) => Promise<unknown>
@@ -521,13 +494,14 @@ function describeHub(
     // the stream, and the hub must stay up.
     test(`${name}: fileEditor.watch refusal reaches the stream, hub stays up`, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'slz-t102-watch-'))
-      // With login, a hub-local watch needs a root of the caller's (N1): the folder is
-      // their task's worktree (a hub without computers gives a project no folder).
-      if (opts.login) await taskWithWorktree(hub, token, projectId, dir)
+      // The watch names its project (§9 7b): the owner check is on that project, and
+      // the computer (none here) would confine the root — no hub-recorded folder.
       const changed: string[] = []
       let error: unknown = null
       const sub = client.fileEditor.watch.subscribe(
-        { rootPath: dir },
+        // Its path scope (§9 Phase 7b): the project; the computer — none here —
+        // would confine the root to it.
+        { projectId, rootPath: dir },
         {
           onData: (e) => changed.push((e as { relPath: string }).relPath),
           onError: (e) => {
@@ -540,7 +514,12 @@ function describeHub(
         await poll(async () => (error ? true : null), 5_000, 'the refusal on the stream')
         const code =
           error instanceof TRPCClientError ? (error.data as { code?: string })?.code : null
-        expect(code, `refused FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
+        // The project scope's refusal (§9 Phase 7b): "connect a computer", or — with
+        // login — the placement's "no computer of yours", which names the project.
+        const message = (error as Error)?.message ?? ''
+        expect(message, `refused on the stream (${code})`).toMatch(
+          /Connect a computer|No computer of yours/
+        )
         expect(changed).toEqual([])
         await stillUp(hub, client, 'fileEditor.watch')
       } finally {

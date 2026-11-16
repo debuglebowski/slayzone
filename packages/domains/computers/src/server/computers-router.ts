@@ -35,16 +35,21 @@ import {
   deleteComputer as storeDeleteComputer,
   setProjectDefaultComputer as storeSetProjectDefaultComputer,
   setTaskComputer as storeSetTaskComputer,
+  assertTaskMovable,
+  TaskFoldersElsewhereError,
   resolveTaskComputerId as storeResolveTaskComputerId,
   getComputer as storeGetComputer,
   setComputerDisabled as storeSetComputerDisabled,
-  renameComputer as storeRenameComputer
+  renameComputer as storeRenameComputer,
+  replaceComputer as storeReplaceComputer
 } from './store'
+import { listComputerTakeovers, replaceRefusal } from './takeovers'
 import {
   computerDisabledError,
   computerHasRunningWorkError,
   computerIsLocalError,
   computerNameReservedError,
+  isComputerStateError,
   type ComputerStateError
 } from './computer-state-errors'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared/types'
@@ -147,6 +152,24 @@ async function requireManager(
   if (!(await storeGetComputer(ctx.db, computerId))) throw noSuchComputer()
 }
 
+const itemFaultRefSchema = z.object({
+  computerId: z.string().nullable(),
+  origin: z.enum(['hub', 'computer']),
+  source: z.enum(['ledger', 'quarantine']),
+  pass: z.string().min(1).max(128),
+  key: z.string().min(1).max(512)
+})
+
+/** A computer's faults are its manager's; the hub's own (`null`) are the admin's. */
+async function requireFaultScope(
+  ctx: Pick<TrpcContext, 'db' | 'principal' | 'dataRoot'>,
+  path: string,
+  computerId: string | null
+): Promise<void> {
+  if (computerId !== null) return requireManager(ctx, path, computerId)
+  if (callerIsNotAdmin(ctx)) throw adminOnlyTrpcError(path)
+}
+
 export const computersRouter = router({
   /**
    * All non-revoked computers from the store, each annotated with live status from
@@ -202,6 +225,7 @@ export const computersRouter = router({
             createdAt: row.created_at,
             connected: conn !== undefined,
             usable: usableIds.has(row.id),
+            ...(conn?.recovering ? { recovering: true } : {}),
             connectedAt: conn?.connectedAt ?? null,
             revokedAt: row.revoked_at,
             // Enrolled and connected, but given no new work (`setDisabled`).
@@ -298,6 +322,12 @@ export const computersRouter = router({
     .input(z.object({ taskId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       await requireBindable(ctx, input.computerId)
+      // Its folder exists only on the computer holding it (robustness plan §9, 7e).
+      await assertTaskMovable(ctx.db, input.taskId, input.computerId).catch((error: unknown) => {
+        if (error instanceof TaskFoldersElsewhereError)
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message })
+        throw error
+      })
       await storeSetTaskComputer(ctx.db, input.taskId, input.computerId)
       notifyComputerBindingChanged()
       return { ok: true as const }
@@ -504,6 +534,122 @@ export const computersRouter = router({
     }),
 
   /**
+   * Re-enrolled computers to offer for replacement: a computer holds chats the hub
+   * assigns to another, registered computer that is offline — possibly the same
+   * machine, enrolled again under a new id after losing its credential. Only an offer:
+   * the hub cannot prove it (host ids may be shared), so the user confirms `replace`.
+   * The caller's managed computers only, as `list`.
+   */
+  takeovers: publicProcedure.query(async ({ ctx }) => {
+    const deps = getComputersDepsOrNull()
+    const live = new Set((deps?.getGateway()?.listComputers() ?? []).map((r) => r.computerId))
+    const access = managerAccessOf(ctx)
+    return listComputerTakeovers(
+      {
+        db: ctx.db,
+        isConnected: (id) => live.has(id),
+        localComputerId: deps?.localComputerId ?? null,
+        mayManage: (id) => access.mayManage(id)
+      },
+      deps?.takeoverCandidates?.() ?? []
+    )
+  }),
+
+  /**
+   * Replace a computer with its successor: the same machine, enrolled again under a
+   * new id. The former's tasks, project defaults, folders and worktrees move to the
+   * successor, its chats follow (the chat domain repoints them and the successor adopts
+   * the ones it holds at once), and the former row is deleted.
+   *
+   * The caller must manage both. Refused while the former is connected (it is still
+   * itself), for the desktop app's own computer, by itself, and for a revoked successor.
+   */
+  replace: publicProcedure
+    .input(z.object({ computerId: z.string(), successorId: z.string() }))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireManager(ctx, path, input.computerId)
+      await requireManager(ctx, path, input.successorId)
+      const former = await storeGetComputer(ctx.db, input.computerId)
+      if (!former) throw noSuchComputer()
+      const deps = getComputersDepsOrNull()
+      const live = new Set((deps?.getGateway()?.listComputers() ?? []).map((r) => r.computerId))
+      const refusal = replaceRefusal(
+        { isConnected: (id) => live.has(id), localComputerId: deps?.localComputerId ?? null },
+        former,
+        input.successorId
+      )
+      if (refusal) throw stateRefusal(refusal.code, refusal.error)
+      try {
+        await storeReplaceComputer(ctx.db, input)
+      } catch (err) {
+        if (isComputerStateError(err)) throw stateRefusal('BAD_REQUEST', err)
+        throw err
+      }
+      auditComputer('computer.replace', input.computerId, 'success', {
+        successorId: input.successorId
+      })
+      // Placement's default pick changes with the moved bindings.
+      notifyComputerBindingChanged()
+      return { ok: true as const }
+    }),
+
+  /**
+   * Needs attention (P3): items a pass on this computer (or, `computerId: null`, on
+   * the hub itself) could not process, each failing alone. The computer's manager
+   * sees its own; the hub's are the admin's.
+   */
+  listFaults: publicProcedure
+    .input(z.object({ computerId: z.string().nullable() }))
+    .query(async ({ ctx, input, path }) => {
+      await requireFaultScope(ctx, path, input.computerId)
+      const faults = getComputersDepsOrNull()?.itemFaults
+      return faults ? faults.list({ computerId: input.computerId, dataRoot: ctx.dataRoot }) : []
+    }),
+
+  /** Task ids with a fault the caller may see: the task badge. */
+  faultedTasks: publicProcedure.query(async ({ ctx }) => {
+    const faults = getComputersDepsOrNull()?.itemFaults
+    if (!faults) return [] as string[]
+    const access = managerAccessOf(ctx)
+    const out = new Set<string>()
+    const allowed = new Map<string | null, boolean>()
+    for (const row of await faults.byTask()) {
+      let ok = allowed.get(row.computerId)
+      if (ok === undefined) {
+        ok =
+          row.computerId === null ? !callerIsNotAdmin(ctx) : await access.mayManage(row.computerId)
+        allowed.set(row.computerId, ok)
+      }
+      if (ok) out.add(row.taskId)
+    }
+    return [...out]
+  }),
+
+  /** Retry: run the item again now (a quarantined file moves back where it was). */
+  retryFault: publicProcedure.input(itemFaultRefSchema).mutation(async ({ ctx, input, path }) => {
+    await requireFaultScope(ctx, path, input.computerId)
+    const faults = getComputersDepsOrNull()?.itemFaults
+    if (!faults) throw new Error('Faults are unavailable on this host')
+    await faults.retry(input, ctx.dataRoot)
+    auditComputer('computer.fault.retry', input.computerId ?? 'hub', 'success', {
+      pass: input.pass
+    })
+    return { ok: true as const }
+  }),
+
+  /** Discard: permanently delete the item. The client confirms first. */
+  discardFault: publicProcedure.input(itemFaultRefSchema).mutation(async ({ ctx, input, path }) => {
+    await requireFaultScope(ctx, path, input.computerId)
+    const faults = getComputersDepsOrNull()?.itemFaults
+    if (!faults) throw new Error('Faults are unavailable on this host')
+    await faults.discard(input, ctx.dataRoot)
+    auditComputer('computer.fault.discard', input.computerId ?? 'hub', 'success', {
+      pass: input.pass
+    })
+    return { ok: true as const }
+  }),
+
+  /**
    * Rename a computer (what Settings and every computer picker show). The manager's,
    * as for disable. Not the desktop app's own computer on its own hub, and never TO
    * the name that hub reserves for it: the hub picks its default computer by that
@@ -582,24 +728,26 @@ export const computersRouter = router({
    * `list` (its own; every one for an admin), decided per event in arrival order.
    */
   onStatusChange: publicProcedure.subscription(({ ctx }) =>
-    observable<{ computerId: string; connected: boolean }>((emit) => {
-      const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
-      if (!subscribe) return () => undefined
-      const access = managerAccessOf(ctx)
-      if (!access.enforcing) return subscribe((change) => emit.next(change))
-      let closed = false
-      let tail: Promise<void> = Promise.resolve()
-      const unsubscribe = subscribe((change) => {
-        tail = tail.then(async () => {
-          const allowed = await access.mayManage(change.computerId).catch(() => false)
-          if (allowed && !closed) emit.next(change)
+    observable<{ computerId: string; connected: boolean; usable?: boolean; recovering?: boolean }>(
+      (emit) => {
+        const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
+        if (!subscribe) return () => undefined
+        const access = managerAccessOf(ctx)
+        if (!access.enforcing) return subscribe((change) => emit.next(change))
+        let closed = false
+        let tail: Promise<void> = Promise.resolve()
+        const unsubscribe = subscribe((change) => {
+          tail = tail.then(async () => {
+            const allowed = await access.mayManage(change.computerId).catch(() => false)
+            if (allowed && !closed) emit.next(change)
+          })
         })
-      })
-      return () => {
-        closed = true
-        unsubscribe()
+        return () => {
+          closed = true
+          unsubscribe()
+        }
       }
-    })
+    )
   ),
 
   /** Revoke a computer (idempotent — first revocation time wins). */

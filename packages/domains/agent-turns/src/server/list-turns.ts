@@ -1,26 +1,43 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { listTurnsForWorktree } from './db'
-import { computerForTurnPath, runTurnGitOp } from './turn-git-routing'
+import { inPathScopeOf } from '@slayzone/platform/path-scope'
+import { computerForTurnTask, listTurnsOnComputer } from './turn-git-routing'
 import type { AgentTurnRange } from '../shared/types'
 
 /**
- * All agent-turns for a worktree, filtered + rethreaded for display (the filter's
- * rules: `filterAndRethread` in ./turn-git). Its git — the realpath and every
- * diff the filter reads — runs on the computer that holds the checkout; the hub
- * supplies only the rows. Shared by the tRPC `agentTurns.list` query and the
- * Electron IPC handler.
+ * All agent-turns of a task's checkout, filtered + rethreaded for display (the
+ * filter's rules: `filterAndRethread` in ./turn-git). The turns and their git live on
+ * the computer that holds the checkout (robustness plan §9, P0); the hub adds only
+ * the task titles it owns. The list names only the task (its PATH SCOPE): its
+ * computer resolves the checkout — its worktree, else its project's folder there
+ * (§9 Phase 7d: neither the client nor the hub names a path).
  */
-export async function listAgentTurnsForWorktree(
+export async function listAgentTurnsForTask(
   db: SlayzoneDb,
-  worktreePath: string
+  taskId: string
 ): Promise<AgentTurnRange[]> {
-  if (!worktreePath) return []
-  // No computer: refused ("connect a computer") — the hub reads no checkout itself.
-  const computerId = await computerForTurnPath(worktreePath)
-  const path = await runTurnGitOp(computerId, 'canonical', { repoPath: worktreePath })
-  const raw = await listTurnsForWorktree(db, path)
-  return runTurnGitOp(computerId, 'filterTurns', {
-    repoPath: path,
-    rows: raw as unknown as Array<Record<string, unknown>>
-  })
+  // No computer: refused ("connect a computer") — the hub holds no turn itself.
+  const computerId = await computerForTurnTask(taskId)
+  const task = await db.get<{ project_id: string | null }>(
+    'SELECT project_id FROM tasks WHERE id = ?',
+    [taskId]
+  )
+  const input = { taskId, projectId: task?.project_id ?? null }
+  if (computerId != null && !task) return []
+  const { rows } =
+    computerId == null
+      ? await listTurnsOnComputer(null, input) // refused: "connect a computer"
+      : await inPathScopeOf(db, { taskId }, 'agentTurns.list', () =>
+          listTurnsOnComputer(computerId, input)
+        )
+  const taskIds = [...new Set(rows.flatMap((r) => (r.task_id ? [r.task_id] : [])))]
+  const titles = new Map(
+    taskIds.length
+      ? (
+          (await db
+            .prepare(`SELECT id, title FROM tasks WHERE id IN (SELECT value FROM json_each(?))`)
+            .all(JSON.stringify(taskIds))) as Array<{ id: string; title: string }>
+        ).map((t) => [t.id, t.title])
+      : []
+  )
+  return rows.map((r) => ({ ...r, task_title: r.task_id ? (titles.get(r.task_id) ?? null) : null }))
 }

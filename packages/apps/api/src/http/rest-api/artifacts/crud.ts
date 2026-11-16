@@ -279,6 +279,174 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
     }
   })
 
+  // POST /api/artifacts/move — move entries to another task, keeping ids,
+  // versions and `artifact:<id>` links (CLI `move-to-task`). Ids are prefixes.
+  // `all` moves every top-level entry of `sourceTaskId`. Retrying a partly
+  // applied move completes it.
+  app.post('/api/artifacts/move', async (req, res) => {
+    const body = (req.body ?? {}) as {
+      destTaskId?: unknown
+      sourceTaskId?: unknown
+      artifactIds?: unknown
+      folderIds?: unknown
+      /** Artifact or folder ids: each resolves as an artifact first, else a folder. */
+      entryIds?: unknown
+      destFolderId?: unknown
+      all?: unknown
+    }
+    const strings = (v: unknown) =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string' && x) ? (v as string[]) : null
+    const artifactPrefixes = body.artifactIds === undefined ? [] : strings(body.artifactIds)
+    const folderPrefixes = body.folderIds === undefined ? [] : strings(body.folderIds)
+    const entryPrefixes = body.entryIds === undefined ? [] : strings(body.entryIds)
+    if (
+      typeof body.destTaskId !== 'string' ||
+      !body.destTaskId ||
+      !artifactPrefixes ||
+      !folderPrefixes ||
+      !entryPrefixes
+    ) {
+      res.status(400).json({ ok: false, error: 'destTaskId and id arrays required' })
+      return
+    }
+    if (
+      body.all === true
+        ? typeof body.sourceTaskId !== 'string'
+        : artifactPrefixes.length + folderPrefixes.length + entryPrefixes.length === 0
+    ) {
+      res.status(400).json({ ok: false, error: 'Name entries to move, or all with sourceTaskId' })
+      return
+    }
+    try {
+      const db = deps.db
+      const dest = await resolveByIdPrefix<{ id: string; title: string }>(
+        db,
+        'tasks',
+        body.destTaskId,
+        'Task',
+        'id, title'
+      )
+      if (isResolveFailure(dest)) {
+        res.status(dest.status).json({ ok: false, error: dest.error })
+        return
+      }
+      const artifactIds: string[] = [],
+        folderIds: string[] = []
+      for (const prefix of artifactPrefixes) {
+        const r = await resolveByIdPrefix<{ id: string }>(
+          db,
+          'task_artifacts',
+          prefix,
+          'Artifact',
+          'id',
+          { ambiguousLabel: 'artifact id' }
+        )
+        if (isResolveFailure(r)) {
+          res.status(r.status).json({ ok: false, error: r.error })
+          return
+        }
+        artifactIds.push(r.row.id)
+      }
+      for (const prefix of folderPrefixes) {
+        const f = await resolveFolderPrefix(db, prefix, res)
+        if (!f) return
+        folderIds.push(f.id)
+      }
+      for (const prefix of entryPrefixes) {
+        const a = await resolveByIdPrefix<{ id: string }>(
+          db,
+          'task_artifacts',
+          prefix,
+          'Artifact',
+          'id',
+          {
+            ambiguousLabel: 'artifact id'
+          }
+        )
+        if (!isResolveFailure(a)) {
+          artifactIds.push(a.row.id)
+          continue
+        }
+        if (a.status !== 404) {
+          res.status(a.status).json({ ok: false, error: a.error })
+          return
+        }
+        const f = await resolveByIdPrefix<{ id: string }>(
+          db,
+          'artifact_folders',
+          prefix,
+          'Artifact or folder',
+          'id'
+        )
+        if (isResolveFailure(f)) {
+          res.status(f.status).json({ ok: false, error: f.error })
+          return
+        }
+        folderIds.push(f.row.id)
+      }
+      let sourceTaskId: string | undefined
+      if (typeof body.sourceTaskId === 'string' && body.sourceTaskId) {
+        const src = await resolveByIdPrefix<{ id: string }>(
+          db,
+          'tasks',
+          body.sourceTaskId,
+          'Task',
+          'id'
+        )
+        if (isResolveFailure(src)) {
+          res.status(src.status).json({ ok: false, error: src.error })
+          return
+        }
+        sourceTaskId = src.row.id
+      } else {
+        const owners = await db.all<{ task_id: string }>(
+          `SELECT task_id FROM task_artifacts WHERE id IN (SELECT value FROM json_each(?))
+           UNION SELECT task_id FROM artifact_folders WHERE id IN (SELECT value FROM json_each(?))`,
+          [JSON.stringify(artifactIds), JSON.stringify(folderIds)]
+        )
+        if (owners.length !== 1) {
+          res.status(400).json({
+            ok: false,
+            error: 'Entries to move must come from one task; pass sourceTaskId'
+          })
+          return
+        }
+        sourceTaskId = owners[0].task_id
+      }
+      if (body.all === true) {
+        const s = store()
+        for (const f of await s.listFoldersByTask(db, sourceTaskId))
+          if (!f.parent_id) folderIds.push(f.id)
+        for (const a of await s.listArtifactsByTask(db, sourceTaskId))
+          if (!a.folder_id) artifactIds.push(a.id)
+      }
+      let destFolderId: string | null = null
+      if (
+        typeof body.destFolderId === 'string' &&
+        body.destFolderId &&
+        body.destFolderId !== 'root'
+      ) {
+        const folder = await resolveFolderPrefix(db, body.destFolderId, res)
+        if (!folder) return
+        destFolderId = folder.id
+      }
+      const result = await store().moveArtifacts(db, {
+        artifactIds,
+        folderIds,
+        sourceTaskId,
+        destTaskId: dest.row.id,
+        destFolderId
+      })
+      deps.notifyRenderer()
+      res.json({
+        ok: true,
+        data: { ...result, destTaskId: dest.row.id, destTaskTitle: dest.row.title }
+      })
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
   app.post('/api/artifact-folders', async (req, res) => {
     const body = (req.body ?? {}) as { taskId?: unknown; name?: unknown; parentId?: unknown }
     if (typeof body.taskId !== 'string' || !body.taskId) {

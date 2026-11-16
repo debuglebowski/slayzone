@@ -99,6 +99,23 @@ describe('hello carries the protocol version', () => {
     gateway.close()
   })
 
+  // v9 (artifact downloads in bounded pieces, `readBytesRange`): a v8 computer has no
+  // ranged read, so the hub refuses it rather than fall back to whole-file reads.
+  it('is v9 and refuses a v8 computer', async () => {
+    expect(COMPUTER_PROTOCOL_VERSION).toBe(9)
+    const { gateway, ws } = setup()
+    const { apiKey } = await enroll(ws)
+    const old = new FakeSocket()
+    gateway.handleConnection(old as unknown as WebSocket, { ip: '127.0.0.1' })
+    old.frame({ id: 2, method: 'hello', params: { apiKey, protocolVersion: 8 } })
+    await flush()
+    expect(old.response(2)?.error).toMatchObject({
+      code: ComputerTransportErrorCodes.protocolMismatch
+    })
+    expect(old.closeCode).toBe(1008)
+    gateway.close()
+  })
+
   it('refuses a pre-v3 computer reconnecting, and audits it', async () => {
     const { gateway, ws } = setup()
     const { apiKey } = await enroll(ws)

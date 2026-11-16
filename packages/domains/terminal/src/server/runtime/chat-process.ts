@@ -111,6 +111,8 @@ export class ChatProcess implements OutboxProcess {
   stopRequested = false
   /** The watchdog killed it as stuck and its exit restarts the agent. */
   watchdogRestart = false
+  /** The watchdog initiated this process's teardown, regardless of restart budget. */
+  watchdogKilled = false
   /** The CLI refused the fork (it exits at startup): the tab went back to the original. */
   forkFailed = false
   /** Open tool calls (id → bound), for the watchdog. */

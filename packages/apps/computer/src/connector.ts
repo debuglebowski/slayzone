@@ -84,6 +84,10 @@ export async function startConnector(
             if (!dialer.notify('event', event.params)) throw new Error('hub offline')
             return { ok: true }
           }
+          // The hub refused the event itself as invalid (hub-gateway.ts): a typed
+          // rejection, so the host quarantines it instead of retrying it forever.
+          if ((err as { code?: number }).code === -32602)
+            return { ok: false, rejected: (err as Error).message || 'invalid event delivery' }
           throw err
         }
       }
@@ -91,6 +95,10 @@ export async function startConnector(
       const params = raw as { method: string; params?: unknown; timeoutMs?: number }
       return dialer.request(params.method, params.params, params.timeoutMs)
     },
+    onFrameTooLarge: (info) =>
+      process.stdout.write(
+        `[connector] local frame over the frame limit refused ${JSON.stringify(info)}\n`
+      ),
     notify: (method, raw) => {
       if (method !== 'event') return
       const event = raw as { method: string; params?: unknown }
@@ -117,9 +125,9 @@ export async function startConnector(
   }
   dialer = new HubDialer({
     url: config.hubUrl,
-    // The wire belongs to this connector. The separately checked local contract
-    // proves that the host implements its dispatch methods; compatible connector
-    // releases can still replace one another without stopping native sessions.
+    // The wire belongs to this connector; runtime capabilities come from its host,
+    // whose release can be older. The local contract permits connector replacement
+    // without stopping native sessions, independently of optional chat features.
     identity: {
       ...identity,
       version: COMPUTER_VERSION,

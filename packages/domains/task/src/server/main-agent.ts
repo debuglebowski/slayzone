@@ -20,18 +20,22 @@
 import { randomUUID } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { clearAllConversationIds, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
+import { getProviderFlags } from '@slayzone/task-contracts/types'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { parseProject } from '@slayzone/projects/server'
-import { getRuntimeAdapters } from './ops/shared'
+import { getRuntimeAdapters, readTaskPaths } from './ops/shared'
+import { resetConversation } from './ops/task-conversations'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
-import { getChatDeps, getPtyDeps } from '@slayzone/terminal/hub'
+import { getChatDeps, getPtyDeps, type UnattachedLaunchResolver } from '@slayzone/terminal/hub'
 import {
   isChatSupported,
   spawnConversationIds,
+  type ChatCreateOpts,
   type TerminalState
 } from '@slayzone/terminal-contracts'
 import {
+  hasOwnFolder,
   mainTerminalCwd,
   mainTerminalCwdNeedsRepos,
   mainTerminalProps,
@@ -57,6 +61,17 @@ export interface StartMainAgentInput {
   /** Terminal size to start a terminal agent at; omitted = the runtime default. */
   cols?: number
   rows?: number
+  /**
+   * The computer's admission lane: `foreground` (default) = someone asked for it
+   * now; `restore` = the hub bringing back what ran at shutdown — it starts after
+   * every foreground start (`computer/spawn-admission.ts`).
+   */
+  admission?: 'foreground' | 'restore'
+  /**
+   * Start only an agent of this kind; a task whose main agent is the other kind is
+   * left alone (answered `started: false`). The boot restore starts chat agents only.
+   */
+  kind?: 'pty' | 'chat'
 }
 
 export interface StartMainAgentResult {
@@ -140,35 +155,137 @@ export async function resolveMainAgentLaunch(
     kind: isChatSupported(props.mode) ? 'chat' : 'pty',
     props,
     providerFlagsOverride: props.providerFlags ?? null,
-    async resolveCwd() {
-      // The project's folder on the computer this task's work runs on — where its
-      // worktrees are and where the task's other agents start.
-      const projectRoot = await getRuntimeAdapters().projectRootForTask(db, taskId, task.project_id)
-      const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
-        ? await detectChildRepos(taskId, projectRoot!)
-        : []
-      const cwd = mainTerminalCwd(task, project, projectRoot, detected)
-      if (!cwd) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message:
-            "This task has no folder to run in: set the project's folder or the task's base dir"
-        })
-      }
-      return cwd
+    resolveCwd: () => resolveTaskAgentCwd(db, task, project)
+  }
+}
+
+/** Resolve a scoped chat launch from stored task/tab state, never client launch options. */
+export async function resolveChatAgentLaunch(
+  db: SlayzoneDb,
+  { taskId, tabId }: { taskId: string; tabId: string },
+  getTask: (taskId: string) => Promise<Task | null>
+): Promise<ChatCreateOpts> {
+  const tab = await db.get<{ task_id: string; mode: string; is_main: number }>(
+    'SELECT task_id,mode,is_main FROM terminal_tabs WHERE id=?',
+    [tabId]
+  )
+  if (!tab || tab.task_id !== taskId)
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found' })
+  const task = await getTask(taskId)
+  if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found' })
+  const mode = tab.is_main ? task.agent_id : tab.mode
+  const agent = (await getPtyDeps().ops.agentsList()).find((a) => a.id === mode)
+  if (!isChatSupported(mode) || !agent?.enabled) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Select an enabled chat agent for this tab'
+    })
+  }
+  const project = parseProject(
+    await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
+  )
+  return {
+    tabId,
+    taskId,
+    mode,
+    cwd: await resolveTaskAgentCwd(db, task, project),
+    providerFlagsOverride: tab.is_main ? getProviderFlags(task.provider_config, mode) : null
+  }
+}
+
+/**
+ * A terminal tab's launch (the `pty.create` input), from stored task/tab state: what
+ * a restarted hub adopts a session its previous run left running into (terminal
+ * `unattached-sessions`). The same derivation the desktop mounts the tab with — the
+ * main tab follows the task's agent and flags (`mainTerminalProps`), any other tab
+ * its own mode (a plain shell included) with no agent flags — so a later resume of
+ * the adopted agent launches it exactly as the tab would.
+ *
+ * Not adoptable when the tab runs another agent now than the process does
+ * (`mode-mismatch`), or the task or tab is gone. A folder its computer cannot answer
+ * for right now does not stop the adoption: the process already runs where it runs;
+ * the folder only matters for a later resume, which resolves it again.
+ */
+export async function resolveTerminalTabLaunch(
+  db: SlayzoneDb,
+  { taskId, tabId, mode: running }: { taskId: string; tabId: string; mode?: string },
+  getTask: (taskId: string) => Promise<Task | null>
+): ReturnType<UnattachedLaunchResolver> {
+  const task = await getTask(taskId)
+  if (!task) return { ok: false, reason: 'launch-unresolved', detail: 'task not found' }
+  const project = parseProject(
+    await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
+  )
+  let mode: string
+  let providerFlags: string | null = null
+  if (tabId === taskId) {
+    const props = mainTerminalProps(task, project, await getPtyDeps().ops.agentsList())
+    mode = props.mode
+    providerFlags = props.providerFlags || null
+  } else {
+    const tab = await db.get<{ task_id: string; mode: string }>(
+      'SELECT task_id, mode FROM terminal_tabs WHERE id = ?',
+      [tabId]
+    )
+    if (!tab || tab.task_id !== taskId)
+      return { ok: false, reason: 'launch-unresolved', detail: 'tab not found' }
+    mode = tab.mode
+  }
+  if (running && running !== mode) {
+    return {
+      ok: false,
+      reason: 'mode-mismatch',
+      detail: `the process runs ${running}, the tab ${mode}`
+    }
+  }
+  const cwd = await resolveTaskAgentCwd(db, task, project).catch(() => '')
+  return {
+    ok: true,
+    launch: {
+      sessionId: `${taskId}:${tabId}`,
+      cwd,
+      mode,
+      providerFlags,
+      executionContext: project?.execution_context ?? null
     }
   }
 }
 
+async function resolveTaskAgentCwd(
+  db: SlayzoneDb,
+  task: Task,
+  project: ReturnType<typeof parseProject>
+): Promise<string> {
+  const projectRoot = await getRuntimeAdapters().projectRootForTask(db, task.id, task.project_id)
+  const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
+    ? await detectChildRepos(task.id, projectRoot!)
+    : []
+  // A worktree / custom folder is read from the task's computer (§9 Phase 7d).
+  const paths = hasOwnFolder(task) ? (await readTaskPaths([task.id]))[task.id] : null
+  if (paths?.state === 'offline')
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: "This task's folder is on a computer that is not connected"
+    })
+  const cwd = mainTerminalCwd(task, project, projectRoot, detected, paths)
+  if (!cwd)
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: "This task has no folder to run in: set the project's folder or the task's base dir"
+    })
+  return cwd
+}
+
 async function startOnce(
   db: SlayzoneDb,
-  { taskId, cols, rows }: StartMainAgentInput,
+  { taskId, cols, rows, admission = 'foreground', kind: onlyKind }: StartMainAgentInput,
   getTask: (taskId: string) => Promise<Task | null>
 ): Promise<StartMainAgentResult> {
   const launch = await resolveMainAgentLaunch(db, taskId, getTask)
   const { sessionId, kind, props } = launch
   const pty = getPtyDeps().ops
   const base = { sessionId, tabId: launch.tabId, mode: launch.mode, kind } as const
+  if (onlyKind && kind !== onlyKind) return { ...base, cwd: null, state: null, started: false }
 
   // Live already: answer it. Starting again would replace it — a pty create kills
   // the session at this id; a chat hydrate with any other cwd tears the tab down.
@@ -185,16 +302,16 @@ async function startOnce(
       cwd,
       // What the desktop's main chat tab passes (`pane.providerFlags ?? null`).
       providerFlagsOverride: launch.providerFlagsOverride,
-      // Asked for now: the computer's foreground admission lane.
-      reason: 'user'
+      // `user` = the computer's foreground admission lane; `restore` = after it.
+      reason: admission === 'restore' ? 'restore' : 'user'
     })
   } else {
     const ids = spawnConversationIds(
       {
         mode: props.mode,
         supportsSessionId: props.supportsSessionId,
-        conversationId: props.conversationId,
-        existingConversationId: props.existingConversationId
+        conversationId: undefined,
+        existingConversationId: undefined
       },
       randomUUID
     )
@@ -209,7 +326,7 @@ async function startOnce(
       cols,
       rows,
       // Asked for now: starts ahead of agents a workspace restore queued.
-      foreground: true
+      foreground: admission !== 'restore'
     })
     if (!result.success) {
       throw new TRPCError({
@@ -275,11 +392,19 @@ export async function switchMainAgentMode(
   if (launch.kind === 'chat') await getChatDeps().ops.kill(launch.tabId)
   else await getPtyDeps().ops.ptyKill(launch.sessionId)
 
-  const updated = await io.update({
-    id: taskId,
-    agentId: mode,
-    providerConfig: clearAllConversationIds(task.provider_config)
+  // A mode switch starts the MAIN tab fresh — in every mode, so switching back
+  // does not resume the abandoned session either. Only the main tab: the task's
+  // other agent tabs keep their own sessions. (This used to reset every tab of
+  // the task, which is how a secondary "deploy" tab lost its session.)
+  // Chat modes are left to the update below exactly as before: a chat tab's
+  // conversation is owned per tab by the chat runtime (`chat_ownership`).
+  await resetConversation(db, {
+    taskId,
+    scope: { tabId: taskId },
+    exceptChat: true
   })
+
+  const updated = await io.update({ id: taskId, agentId: mode })
   if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
   return updated
 }

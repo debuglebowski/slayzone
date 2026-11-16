@@ -20,23 +20,56 @@ import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { ChatMigrationSnapshot, ChatTransferHeader, ChatTransferManifest } from '../shared'
 import { chatTransferManifestSchema } from '../shared'
-import type { ChatStorage } from './storage'
+import { historyReadTurns } from '@slayzone/terminal/history-turns'
+import type { ChatExportReader, ChatStorage } from './storage'
 export const TRANSFER_CHUNK_BYTES = 256 * 1024
-export function encodeTransfer(snapshot: ChatMigrationSnapshot) {
-  const header: ChatTransferHeader = {
+/**
+ * Bytes of lines one step of a streamed export writes at most (one row always):
+ * the event loop runs between steps (`historyReadTurns`).
+ */
+export const EXPORT_STEP_BYTES = 4 * 1024 * 1024
+
+/** A transfer's first line. The ONE encoding, shared by `encodeTransfer` and `writeExportTransfer`. */
+function transferHeader(
+  meta: Pick<ChatMigrationSnapshot, 'migrationId' | 'identity'> & {
+    events: number
+    records: number
+    receipts: number
+  },
+  opts?: { move?: boolean }
+): ChatTransferHeader {
+  return {
     format: 'slayzone-chat',
     version: 1,
-    migrationId: snapshot.migrationId,
-    identity: snapshot.identity,
-    events: snapshot.events.length,
-    records: snapshot.records.length,
-    receipts: snapshot.receipts.length
+    migrationId: meta.migrationId,
+    identity: meta.identity,
+    events: meta.events,
+    records: meta.records,
+    receipts: meta.receipts,
+    ...(opts?.move ? { move: true as const } : {})
   }
+}
+/** One line of a transfer after its header (the ONE encoding, as `transferHeader`). */
+function transferLine(kind: 'event' | 'record' | 'receipt', value: unknown): string {
+  return JSON.stringify({ kind, value })
+}
+
+export function encodeTransfer(snapshot: ChatMigrationSnapshot, opts?: { move?: boolean }) {
+  const header = transferHeader(
+    {
+      migrationId: snapshot.migrationId,
+      identity: snapshot.identity,
+      events: snapshot.events.length,
+      records: snapshot.records.length,
+      receipts: snapshot.receipts.length
+    },
+    opts
+  )
   const lines = [
     JSON.stringify(header),
-    ...snapshot.events.map((value) => JSON.stringify({ kind: 'event', value })),
-    ...snapshot.records.map((value) => JSON.stringify({ kind: 'record', value })),
-    ...snapshot.receipts.map((value) => JSON.stringify({ kind: 'receipt', value }))
+    ...snapshot.events.map((value) => transferLine('event', value)),
+    ...snapshot.records.map((value) => transferLine('record', value)),
+    ...snapshot.receipts.map((value) => transferLine('receipt', value))
   ]
   const bytes = Buffer.from(lines.join('\n') + '\n')
   return {
@@ -48,6 +81,133 @@ export function encodeTransfer(snapshot: ChatMigrationSnapshot) {
     } satisfies ChatTransferManifest
   }
 }
+/**
+ * A conversation's transfer written to `path` from an export's read snapshot, a page
+ * at a time: each step reads (at most) one history page, resolves its images back
+ * inline and appends its lines, then the event loop runs (`historyReadTurns`) — never
+ * the whole chat in memory or in one synchronous block. Byte-identical to
+ * `encodeTransfer(exportConversation(...))` of the same chat (same encoder, same
+ * reads). Written to `${path}.tmp`, fsynced, renamed. The caller closes the reader.
+ */
+export async function writeExportTransfer(
+  reader: ChatExportReader,
+  path: string,
+  opts?: { move?: boolean }
+): Promise<ChatTransferManifest> {
+  const header = transferHeader(
+    {
+      migrationId: reader.migrationId,
+      identity: reader.identity,
+      events: reader.eventCount,
+      records: reader.recordCount,
+      receipts: reader.receiptCount
+    },
+    opts
+  )
+  const temp = `${path}.tmp`
+  const fd = openSync(temp, 'w', 0o600)
+  const hash = createHash('sha256')
+  let bytes = 0
+  const write = (buffer: Buffer): void => {
+    for (let at = 0; at < buffer.length; ) at += writeSync(fd, buffer, at)
+    hash.update(buffer)
+    bytes += buffer.length
+  }
+  const job = historyReadTurns.job()
+  async function section<T>(
+    kind: 'event' | 'record' | 'receipt',
+    expected: number,
+    page: () => { rows: T[]; more: boolean },
+    value: (row: T) => unknown
+  ) {
+    let rows: T[] = [],
+      at = 0,
+      more = true,
+      count = 0
+    let pending: Buffer | undefined
+    for (let done = false; !done; )
+      done = await job.step(() => {
+        // At most one stored page is loaded/parsed in a turn, even for tiny rows.
+        if (at === rows.length) {
+          if (!more) return true
+          const next = page()
+          rows = next.rows
+          more = next.more
+          at = 0
+          if (rows.length === 0) {
+            if (more) throw new Error(`Transfer integrity: empty ${kind} page`)
+            return true
+          }
+        }
+        let stepBytes = 0
+        while (at < rows.length) {
+          const buffer = pending ?? Buffer.from(transferLine(kind, value(rows[at])) + '\n')
+          // Size the actual wire bytes before writing. Keep a resolved/encoded row
+          // for the next turn rather than resolving an image or encoding it twice.
+          if (stepBytes > 0 && stepBytes + buffer.length > EXPORT_STEP_BYTES) {
+            pending = buffer
+            break
+          }
+          pending = undefined
+          write(buffer)
+          stepBytes += buffer.length
+          at++
+          count++
+          if (stepBytes >= EXPORT_STEP_BYTES) break
+        }
+        return !more && at === rows.length
+      })
+    if (count !== expected) throw new Error(`Transfer integrity: ${kind} count changed`)
+  }
+  try {
+    await job.step(() => write(Buffer.from(JSON.stringify(header) + '\n')))
+    let afterSeq = -1
+    await section(
+      'event',
+      reader.eventCount,
+      () => {
+        const page = reader.eventPage(afterSeq)
+        const last = page.events.at(-1)
+        if (last) afterSeq = last.seq
+        return { rows: page.events, more: page.more }
+      },
+      (event) => ({ ...event, event: reader.resolve(event.event) })
+    )
+    let afterRecord: Parameters<ChatExportReader['recordPage']>[0]
+    await section(
+      'record',
+      reader.recordCount,
+      () => {
+        const page = reader.recordPage(afterRecord)
+        const last = page.records.at(-1)
+        if (last) afterRecord = { kind: last.kind, id: last.id }
+        return { rows: page.records, more: page.more }
+      },
+      (record) => record
+    )
+    let afterReceipt: string | undefined
+    await section(
+      'receipt',
+      reader.receiptCount,
+      () => {
+        const page = reader.receiptPage(afterReceipt)
+        const last = page.receipts.at(-1)
+        if (last) afterReceipt = last.id
+        return { rows: page.receipts, more: page.more }
+      },
+      (receipt) => receipt
+    )
+    fsyncSync(fd)
+  } catch (error) {
+    closeSync(fd)
+    unlinkSync(temp)
+    throw error
+  }
+  closeSync(fd)
+  renameSync(temp, path)
+  return { header, bytes, hash: hash.digest('hex') }
+}
+
 export function* readTransferLines(path: string): Generator<string> {
   const fd = openSync(path, 'r'),
     buffer = Buffer.allocUnsafe(TRANSFER_CHUNK_BYTES),
@@ -242,6 +402,14 @@ export function createChatTransfers(store: ChatStorage) {
         return { offset: p.offset }
       } finally {
         closeSync(fd)
+      }
+    },
+    /** The manifest a transfer was begun with, or null when there is none for `id`. */
+    manifestOf(id: string): ChatTransferManifest | null {
+      try {
+        return load(id).manifest
+      } catch {
+        return null
       }
     },
     finish(id: string) {

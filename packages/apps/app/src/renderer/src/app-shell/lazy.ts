@@ -67,8 +67,14 @@ export const CreateProjectDialog = lazyWithPreload(() =>
 export const ProjectSettingsDialog = lazyWithPreload(() =>
   import('@slayzone/projects').then((m) => ({ default: m.ProjectSettingsDialog }))
 )
+export const RelocateProjectDialog = lazyWithPreload(() =>
+  import('@slayzone/projects/client').then((m) => ({ default: m.ScopedRelocateProjectDialog }))
+)
 export const DeleteProjectDialog = lazyWithPreload(() =>
   import('@slayzone/projects').then((m) => ({ default: m.DeleteProjectDialog }))
+)
+export const MoveProjectToHubDialog = lazyWithPreload(() =>
+  import('@slayzone/tasks/hooks').then((m) => ({ default: m.MoveProjectToHubDialog }))
 )
 export const GroupSettingsDialog = lazyWithPreload(() =>
   import('@slayzone/projects').then((m) => ({ default: m.GroupSettingsDialog }))

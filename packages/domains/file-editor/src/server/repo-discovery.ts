@@ -20,6 +20,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { existsSync } from 'node:fs'
 import { lstat, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -64,7 +65,7 @@ const SKIP_DIRS = new Set([
 
 function git(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    execFile(gitCommand(), args, { cwd, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       if (err) reject(err)
       else resolve(stdout)
     })

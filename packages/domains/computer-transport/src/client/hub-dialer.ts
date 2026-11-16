@@ -27,8 +27,9 @@ import {
   HubToComputerMethods,
   ComputerToHubMethods
 } from '../shared/frames'
+import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
 import { DuplexRpc, JSON_RPC_INTERNAL_ERROR, RpcError } from '../shared/rpc'
-import { wsDataToText } from '../shared/ws-data'
+import { isWsMessageTooLargeError, wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
 import type { ComputerCredentialStore } from './credential-store'
 
@@ -42,6 +43,14 @@ export type HubDialerState =
 export interface ComputerIdentity {
   /** false: authenticated maintenance bridge, with no chat/new-work admission. */
   chatRuntimeReady?: boolean
+  /** Supplied by the host that actually implements the filesystem handler. */
+  aiConfigHashFiles?: boolean
+  /** Implementing host answers bounded event/replay pages. Absent = legacy whole reads. */
+  chatHistoryPages?: boolean
+  /** Implementing host accepts `timelinePages`' optional fifth `startRow` argument. */
+  chatTimelineRowSlices?: boolean
+  /** Implementing host answers `prompt.summaries` with `all: true`. Absent = 500-id batches. */
+  promptSummariesAll?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -129,6 +138,11 @@ export interface HubDialerOptions {
   epoch?: string
   /** Injectable randomness for backoff jitter (tests). */
   random?: () => number
+  /**
+   * Largest frame either way, in UTF-8 bytes (the socket's `maxPayload` and the
+   * send-side cap). Default {@link COMPUTER_FRAME_MAX_BYTES}; tests lower it.
+   */
+  maxFrameBytes?: number
   log?: (message: string, meta?: Record<string, unknown>) => void
 }
 
@@ -266,7 +280,8 @@ export class HubDialer {
     this.setState('connecting')
     // No TLS options: a wss:// hub is verified with Node's defaults (CA chain +
     // hostname). There is deliberately no pin and no way to skip verification.
-    const ws = new WebSocket(this.opts.url)
+    const maxFrameBytes = this.opts.maxFrameBytes ?? COMPUTER_FRAME_MAX_BYTES
+    const ws = new WebSocket(this.opts.url, { maxPayload: maxFrameBytes })
     const conn: Connection = {
       ws,
       rpc: null as unknown as DuplexRpc,
@@ -277,6 +292,10 @@ export class HubDialer {
     conn.rpc = new DuplexRpc({
       label: 'computer-computer',
       defaultRequestTimeoutMs: this.opts.requestTimeoutMs,
+      maxFrameBytes,
+      // Refused before sending, so the hub never closes the socket over it.
+      onFrameTooLarge: (info) =>
+        this.log('computer dialer refused a frame over the frame limit', { ...info }),
       write: (line) => {
         ws.send(line)
       },
@@ -299,6 +318,14 @@ export class HubDialer {
     })
     ws.on('error', (err) => {
       if (this.current !== conn) return
+      if (isWsMessageTooLargeError(err)) {
+        // ws closes 1009 and exposes no size; the limit and in-flight requests are
+        // what we know (the hub should have refused the frame itself).
+        this.log('hub frame exceeded the frame limit; connection closed', {
+          limitBytes: maxFrameBytes,
+          pendingMethods: conn.rpc.pendingMethods()
+        })
+      }
       this.log('computer dialer socket error', { error: String(err) })
       this.events.emit('error', {
         error: err instanceof Error ? err : new Error(String(err)),
@@ -318,6 +345,7 @@ export class HubDialer {
       platform: this.opts.identity.platform,
       version: this.opts.identity.version,
       capabilities: this.opts.identity.capabilities,
+      aiConfigHashFiles: this.opts.identity.aiConfigHashFiles === true,
       protocolVersion: COMPUTER_PROTOCOL_VERSION,
       ...(this.opts.identity.chatRuntimeReady !== undefined
         ? { chatRuntimeReady: this.opts.identity.chatRuntimeReady }
@@ -326,7 +354,14 @@ export class HubDialer {
       epoch: this.epoch,
       ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
       directAddress: this.opts.identity.directAddress?.() ?? null,
-      directRtc: this.opts.identity.directRtc?.() ?? false
+      directRtc: this.opts.identity.directRtc?.() ?? false,
+      // The grant registry of this release enforces `notAfter` (apps/computer grants.ts).
+      directNotAfter: true,
+      // A compatible connector can be newer than its busy retained session host.
+      // Only that runtime's identity proves which chat requests it implements.
+      chatHistoryPages: this.opts.identity.chatHistoryPages === true,
+      chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
+      promptSummariesAll: this.opts.identity.promptSummariesAll === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -359,6 +394,7 @@ export class HubDialer {
           const raw = await conn.rpc.request(ComputerToHubMethods.hello, {
             apiKey: stored.apiKey,
             version: this.opts.identity.version,
+            aiConfigHashFiles: this.opts.identity.aiConfigHashFiles === true,
             epoch: this.epoch,
             protocolVersion: COMPUTER_PROTOCOL_VERSION,
             ...(this.opts.identity.chatRuntimeReady !== undefined
@@ -369,7 +405,11 @@ export class HubDialer {
             // adopted a peer's host id while it was offline.
             ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
             directAddress: this.opts.identity.directAddress?.() ?? null,
-            directRtc: this.opts.identity.directRtc?.() ?? false
+            directRtc: this.opts.identity.directRtc?.() ?? false,
+            directNotAfter: true,
+            chatHistoryPages: this.opts.identity.chatHistoryPages === true,
+            promptSummariesAll: this.opts.identity.promptSummariesAll === true,
+            chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

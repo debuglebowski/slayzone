@@ -9,11 +9,13 @@ import React, {
 } from 'react'
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useSubscription,
   useFederationOrNull,
   getHubIdForProject,
+  getHubIdForTask,
+  HubScope,
   useHubOwnershipStore
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
@@ -22,14 +24,7 @@ import { useAppBadge } from './hooks/useAppBadge'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
-import {
-  getDefaultStatus,
-  getStatusByCategory,
-  isCompletedStatus,
-  resolveRepoPath,
-  defaultProjectRoot,
-  placementOn
-} from '@slayzone/projects-contracts'
+import { isCompletedStatus, defaultProjectRoot, placementOn } from '@slayzone/projects-contracts'
 // Domains
 import {
   useTasksData,
@@ -43,14 +38,15 @@ import {
   applyFilters,
   getViewConfig,
   useSnoozeWakeUp,
-  BulkTaskContextMenu
+  BulkTaskContextMenu,
+  TaskMovesPanel
 } from '@slayzone/tasks/hooks'
+import { keepScratchTaskInput, scratchTaskInput } from '@slayzone/tasks/board'
 import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 // Same module TabPanes' task fallback comes from (eager either way).
 import { markTerminalFirst } from '@slayzone/task/client/TerminalFirstShell'
 import { buildTaskDetailSnapshot, taskDetailCache } from '@slayzone/task/client/taskDetailCache'
-import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext } from '@slayzone/projects'
 import {
   isRateLimited,
@@ -60,7 +56,8 @@ import {
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
 import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
-import { useTabStore } from '@slayzone/tabs-state'
+import { setTabWorktreePathResolver, useTabStore } from '@slayzone/tabs-state'
+import { peekTaskPath, useTaskPathChanges } from '@slayzone/task/client/useTaskPath'
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
 import {
@@ -114,6 +111,7 @@ import { useHomePanel } from '@slayzone/home/client'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
+import { usePrimeOpenTaskDetails } from '@/hooks/usePrimeOpenTaskDetails'
 // Extracted shell: lazy components, types/constants, hooks, panels (see ./app-shell)
 import {
   TabPanes,
@@ -304,6 +302,8 @@ function App(): React.JSX.Element {
   useIdlePreload()
   // Computer-backed views refetch once a computer connects (none stays on "connect a computer").
   useComputerConnectRefetch()
+  // A task's worktree / custom folder changed on the hub: its paths are read again.
+  useTaskPathChanges()
 
   // Home panel state (extracted — owns its own state fully)
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
@@ -312,51 +312,22 @@ function App(): React.JSX.Element {
   // stays a bare id). `local`-fallback when single-hub / not yet resolved.
   const fed = useFederationOrNull()
   const defaultHubId = fed?.defaultHubId ?? 'local'
+  // Restored tabs render their detail from the board data, not 5 hub round trips each.
+  usePrimeOpenTaskDetails({ tabs, tasks, projects, tags, taskTags, hubIdByTask, defaultHubId })
   const selectedProjectHubId = useMemo(
     () => hubIdByProject.get(selectedProjectId) ?? defaultHubId,
     [hubIdByProject, selectedProjectId, defaultHubId]
   )
-  // Path existence and repo detection used to be gated to the local hub, because
-  // they ran against whichever hub the client was talking to and so said nothing
-  // true about a project whose files live elsewhere. They now route to the computer
-  // that owns the workspace, so the gate is gone — the answer is correct for
-  // every hub. `selectedProjectHubId` remains for routing the queries themselves.
-
-  // Multi-repo detection for home tab
-  const homeSelectedProject = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId),
-    [projects, selectedProjectId]
+  // Project-scoped calls made HERE (the shell, under the default hub's client) go to
+  // the hub that OWNS the project / task: `clientForProject` / `clientForTask`. The
+  // Home view's own calls (repos, git, editor…) run inside its HubScope instead.
+  const clientForProject = useCallback(
+    (projectId: string) => getClientForHub(getHubIdForProject(projectId), trpcClient),
+    [trpcClient]
   )
-  // Same data source as task git panel — flat list of project-root + child repos + recursive submodules.
-  const { repos: homeViewableRepos } = useProjectRepos(
-    defaultProjectRoot(homeSelectedProject),
-    null,
-    homeSelectedProject?.id
-  )
-  const homeDetectedRepos = useMemo(
-    () => homeViewableRepos.map((r) => ({ name: r.name, path: r.path, kind: r.kind })),
-    [homeViewableRepos]
-  )
-  const homeResolvedRepo = useMemo(
-    () =>
-      resolveRepoPath(
-        defaultProjectRoot(homeSelectedProject),
-        homeDetectedRepos,
-        homeSelectedProject?.selected_repo ?? null
-      ),
-    [homeSelectedProject, homeDetectedRepos]
-  )
-  const homeSelectedProjectId = homeSelectedProject?.id
-  const handleHomeRepoChange = useCallback(
-    (repoName: string) => {
-      if (!homeSelectedProjectId) return
-      trpcClient.projects.update
-        .mutate({ id: homeSelectedProjectId, selectedRepo: repoName })
-        .then((updated) => {
-          updateProject(updated)
-        })
-    },
-    [homeSelectedProjectId, updateProject, trpcClient]
+  const clientForTask = useCallback(
+    (taskId: string) => getClientForHub(getHubIdForTask(taskId), trpcClient),
+    [trpcClient]
   )
 
   // Project path validation (extracted — validates on select + window focus)
@@ -414,6 +385,20 @@ function App(): React.JSX.Element {
     loadedHubIds,
     onTaskRecovered: updateTask
   })
+
+  // A new tab lands next to its checkout's siblings: the worktree path is the one the
+  // client read from the task's computer (§9 Phase 7d), never a hub copy.
+  const pathQueryClient = useQueryClient()
+  useEffect(() => {
+    setTabWorktreePathResolver((t) => {
+      const full = useTabStore.getState()._taskLookup.tasks.find((x) => x.id === t.id) as
+        | Task
+        | undefined
+      const paths = full ? peekTaskPath(pathQueryClient, full) : null
+      return paths?.state === 'ok' ? paths.worktreePath : undefined
+    })
+    return () => setTabWorktreePathResolver(() => undefined)
+  }, [pathQueryClient])
 
   // Tab colors (extracted — pure derivation)
   const { taskProjectColors, taskWorktreeColors, tabCycleOrder } = useTabColors(
@@ -772,7 +757,7 @@ function App(): React.JSX.Element {
   )
 
   const handleTaskTagsChange = async (taskId: string, tagIds: string[]) => {
-    await trpcClient.tags.setForTask.mutate({ taskId, tagIds })
+    await clientForTask(taskId).tags.setForTask.mutate({ taskId, tagIds })
     setTaskTags((prev) => {
       const next = new Map(prev)
       next.set(taskId, tagIds)
@@ -958,27 +943,18 @@ function App(): React.JSX.Element {
         return
       }
       const project = projects.find((p) => p.id === projectId)
-      const existing = tasks
-        .filter((t) => t.project_id === projectId)
-        .map((t) => t.title.match(/^Terminal (\d+)$/))
-        .filter(Boolean)
-        .map((m) => parseInt(m![1], 10))
-      const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
-      const status = getDefaultStatus(project?.columns_config)
       const createStart = performance.now()
       // The project can belong to any hub (the rail is a cross-hub union), and a
       // task INSERT is FK-bound to it — so create on the hub that owns it, then
       // record the new id's hub before openTask scopes its tab.
       const projectHubId = getHubIdForProject(projectId)
       const task = await getClientForHub(projectHubId, trpcClient)
-        .task.create.mutate({
-          projectId,
-          title: `Terminal ${next}`,
-          status,
-          isTemporary: true,
-          // Opened right below — lets the hub hand it the project's warm agent.
-          openAfterCreate: true
-        })
+        .task.create.mutate(
+          scratchTaskInput(
+            { id: projectId, columns_config: project?.columns_config ?? null },
+            tasks
+          )
+        )
         .catch((err: unknown) => {
           earlyInput?.cancel()
           throw err
@@ -1096,25 +1072,19 @@ function App(): React.JSX.Element {
       const project = useTabStore
         .getState()
         ._taskLookup.projects.find((item) => item.id === task.project_id)
-      const converted = await trpcClient.task.update.mutate({
-        id: task.id,
-        title: 'Untitled task',
-        status:
-          getStatusByCategory('started', project?.columns_config) ??
-          getDefaultStatus(project?.columns_config),
-        isTemporary: false
-      })
+      const converted = await clientForTask(task.id).task.update.mutate(
+        keepScratchTaskInput(task.id, project?.columns_config)
+      )
       updateTask(converted)
       return converted
     },
-    [updateTask, trpcClient]
+    [updateTask, clientForTask]
   )
 
+  // The dialog already ran `deleteTask` (onDeleteTask) and only calls this once the
+  // task is gone; deleting again here would erase twice and report a false failure.
   const handleTaskDeleted = (): void => {
-    if (deletingTask) {
-      deleteTask(deletingTask.id)
-      useDialogStore.getState().closeDeleteTask()
-    }
+    useDialogStore.getState().closeDeleteTask()
   }
   // Stable: handed to every board card, so a new identity re-renders all of them.
   const handleTaskClick = useStableCallback((task: Task): void => {
@@ -1242,7 +1212,7 @@ function App(): React.JSX.Element {
     const project = projects.find((p) => p.id === selectedProjectId)
     if (project && trimmed !== project.name) {
       try {
-        const updated = await trpcClient.projects.update.mutate({
+        const updated = await clientForProject(selectedProjectId).projects.update.mutate({
           id: selectedProjectId,
           name: trimmed,
           color: project.color
@@ -1333,10 +1303,6 @@ function App(): React.JSX.Element {
       resetPanelSize={resetPanelSize}
       testsPanelEnabled={testsPanelEnabled}
       testGroupBy={testGroupBy}
-      homeResolvedRepo={homeResolvedRepo}
-      homeDetectedRepos={homeDetectedRepos}
-      homeSelectedProject={homeSelectedProject}
-      handleHomeRepoChange={handleHomeRepoChange}
       isViewActive={isViewActive}
       isHomeTabActive={isHomeTabActive}
       tasks={tasks}
@@ -1581,7 +1547,10 @@ function App(): React.JSX.Element {
                     onTabClose={(i) => closeTab(toFullIndex(i))}
                     onTabReorder={(from, to) => reorderTabs(toFullIndex(from), toFullIndex(to))}
                     onTabRename={async (taskId, title) => {
-                      const t = await trpcClient.task.update.mutate({ id: taskId, title })
+                      const t = await clientForTask(taskId).task.update.mutate({
+                        id: taskId,
+                        title
+                      })
                       updateTask(t)
                     }}
                     leftContent={
@@ -1827,6 +1796,13 @@ function App(): React.JSX.Element {
             displayTaskCount={displayTasks.length}
             selectedProjectPathMissing={selectedProjectPathMissing}
           />
+          {/* Moves of tasks to another hub: progress, pause/resume, resumed at start. */}
+          <TaskMovesPanel
+            hubIds={[...registeredHubIds]}
+            hubName={(hubId) => fed?.hubs.find((h) => h.id === hubId)?.label ?? hubId}
+            projectName={(projectId) => projects.find((p) => p.id === projectId)?.name}
+            syncKey={tasks}
+          />
           <AppDialogs
             shouldMount={shouldMount}
             createTaskOpen={createTaskOpen}
@@ -1838,6 +1814,7 @@ function App(): React.JSX.Element {
             editingTask={editingTask}
             handleTaskUpdated={handleTaskUpdated}
             deletingTask={deletingTask}
+            handleDeleteTask={deleteTask}
             handleTaskDeleted={handleTaskDeleted}
             createProjectOpen={createProjectOpen}
             handleProjectCreated={handleProjectCreated}
@@ -1895,26 +1872,29 @@ function App(): React.JSX.Element {
               than inside the guard hook (a hook cannot render), and browsing the
               COMPUTER that owns the project — the native dialog it replaces browsed
               this desktop, so on a remote computer it returned a path that did not
-              exist there. */}
-          <WorkspaceDirPicker
-            open={fixPickerOpen}
-            onOpenChange={setFixPickerOpen}
-            onSelect={(path) =>
-              applyFixedPath(path).catch((err: unknown) =>
-                toast.error("Couldn't use that folder", {
-                  description: err instanceof Error ? err.message : String(err)
-                })
-              )
-            }
-            target={{ projectId: selectedProjectId }}
-            title="Select project directory"
-            defaultPath={
-              placementOn(
-                projects.find((p) => p.id === selectedProjectId),
-                projects.find((p) => p.id === selectedProjectId)?.resolved_computer_id
-              )?.path ?? null
-            }
-          />
+              exist there. In the project's OWN hub's scope: the shell's default
+              hub does not know another hub's project. */}
+          <HubScope hubId={selectedProjectHubId}>
+            <WorkspaceDirPicker
+              open={fixPickerOpen}
+              onOpenChange={setFixPickerOpen}
+              onSelect={(path) =>
+                applyFixedPath(path).catch((err: unknown) =>
+                  toast.error("Couldn't use that folder", {
+                    description: err instanceof Error ? err.message : String(err)
+                  })
+                )
+              }
+              target={{ projectId: selectedProjectId }}
+              title="Select project directory"
+              defaultPath={
+                placementOn(
+                  projects.find((p) => p.id === selectedProjectId),
+                  projects.find((p) => p.id === selectedProjectId)?.resolved_computer_id
+                )?.path ?? null
+              }
+            />
+          </HubScope>
         </div>
       </SidebarProvider>
     </AppearanceProvider>

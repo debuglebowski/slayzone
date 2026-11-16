@@ -145,27 +145,27 @@ function seed(root: string, oldDays: number, newDays: number): void {
     )
     event.run('tab1', 0, '{"type":"text","text":"old"}', text(now - oldDays * DAY))
     event.run('tab1', 1, '{"type":"text","text":"new"}', text(now - newDays * DAY))
-    const prompt = db.prepare(
-      `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES (?, 't1', 'claude-code', ?, ?)`
+    const queued = db.prepare(
+      `INSERT INTO chat_queue (id, tab_id, send, original, position, created_at) VALUES (?, 'tab1', ?, ?, ?, ?)`
     )
-    prompt.run('pr-old', 'old', now - oldDays * DAY)
-    prompt.run('pr-new', 'new', now - newDays * DAY)
+    queued.run('q-old', 'old', 'old', 0, text(now - oldDays * DAY))
+    queued.run('q-new', 'new', 'new', 1, text(now - newDays * DAY))
   } finally {
     db.close()
   }
 }
 
 /** Read the hub's database after it stopped. */
-function contents(root: string): { events: number[]; prompts: string[]; tasks: string[] } {
+function contents(root: string): { events: number[]; queued: string[]; tasks: string[] } {
   const db = new Database(join(root, DB_FILE), { readonly: true })
   try {
     return {
       events: (
         db.prepare('SELECT seq FROM chat_events ORDER BY seq').all() as { seq: number }[]
       ).map((r) => r.seq),
-      prompts: (
-        db.prepare('SELECT id FROM agent_prompts ORDER BY id').all() as { id: string }[]
-      ).map((r) => r.id),
+      queued: (db.prepare('SELECT id FROM chat_queue ORDER BY id').all() as { id: string }[]).map(
+        (r) => r.id
+      ),
       tasks: (db.prepare('SELECT id FROM tasks ORDER BY id').all() as { id: string }[]).map(
         (r) => r.id
       )
@@ -210,13 +210,13 @@ test('a hub with a 90-day period sweeps shortly after it listens', async () => {
     expect(event.detail.days, `period: ${line}`).toBe(90)
     const rows = Object.fromEntries(event.detail.deleted.map((d) => [d.table, d.rows]))
     expect(rows.chat_events, `counts: ${line}`).toBe(1)
-    expect(rows.agent_prompts, `counts: ${line}`).toBe(1)
+    expect(rows.chat_queue, `counts: ${line}`).toBe(1)
   } finally {
     await hub.stop()
   }
   const after = contents(root)
   expect(after.events, `chat events: ${after.events}`).toEqual([1])
-  expect(after.prompts, `prompts: ${after.prompts}`).toEqual(['pr-new'])
+  expect(after.queued, `queued: ${after.queued}`).toEqual(['q-new'])
   expect(after.tasks, `tasks: ${after.tasks}`).toEqual(['t1'])
 })
 
@@ -241,5 +241,5 @@ test('the desktop app’s hub (supervised, nothing set) never sweeps', async () 
   }
   const after = contents(root)
   expect(after.events, `chat events: ${after.events}`).toEqual([0, 1])
-  expect(after.prompts, `prompts: ${after.prompts}`).toEqual(['pr-new', 'pr-old'])
+  expect(after.queued, `queued: ${after.queued}`).toEqual(['q-new', 'q-old'])
 })

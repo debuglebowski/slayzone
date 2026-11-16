@@ -1,4 +1,6 @@
 /** MCP tool naming and result content, for the MCP tool card. */
+import { chatBlobJsonReplacer } from '@slayzone/terminal-contracts'
+import { chatImageSource, type ChatImageSource } from './image-source'
 
 /**
  * An MCP tool name → its parts, else null: `mcp__<server>__<tool>` (Claude
@@ -22,7 +24,8 @@ export type McpBlock =
   | { kind: 'text'; text: string }
   /** Text that parsed as JSON, pretty-printed. */
   | { kind: 'json'; text: string }
-  | { kind: 'image'; src: string }
+  /** Inline (`src`) or stored out-of-line (`ref`, loaded when shown). */
+  | ({ kind: 'image' } & ChatImageSource)
   | { kind: 'resource'; uri: string; text?: string }
   | { kind: 'other'; text: string }
 
@@ -42,15 +45,15 @@ function textBlock(text: string): McpBlock {
 }
 
 function contentBlock(b: unknown): McpBlock {
-  if (!isRecord(b)) return { kind: 'other', text: JSON.stringify(b, null, 2) }
+  // Stored payloads print as `[audio/wav · 40 KB]`; escapes as what the tool printed.
+  if (!isRecord(b)) return { kind: 'other', text: JSON.stringify(b, chatBlobJsonReplacer, 2) }
   if (b.type === 'text' && typeof b.text === 'string') return textBlock(b.text)
   if (b.type === 'image') {
     // Anthropic block (`source: {type:'base64', media_type, data}`) or MCP block (`data`, `mimeType`).
     const src = isRecord(b.source) ? b.source : b
     const mime = (src.media_type ?? src.mimeType) as unknown
-    if (typeof src.data === 'string' && typeof mime === 'string') {
-      return { kind: 'image', src: `data:${mime};base64,${src.data}` }
-    }
+    const image = typeof mime === 'string' ? chatImageSource(src.data, mime) : null
+    if (image) return { kind: 'image', ...image }
   }
   if (b.type === 'resource' && isRecord(b.resource) && typeof b.resource.uri === 'string') {
     const text = typeof b.resource.text === 'string' ? b.resource.text : undefined
@@ -60,7 +63,7 @@ function contentBlock(b: unknown): McpBlock {
     const text = typeof b.name === 'string' ? b.name : undefined
     return { kind: 'resource', uri: b.uri, ...(text !== undefined ? { text } : {}) }
   }
-  return { kind: 'other', text: JSON.stringify(b, null, 2) }
+  return { kind: 'other', text: JSON.stringify(b, chatBlobJsonReplacer, 2) }
 }
 
 /** An MCP tool's result (`tool_result` content: string or content blocks) as display blocks. */

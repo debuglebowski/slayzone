@@ -146,7 +146,8 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
     isMain: true,
     position: 0,
     createdAt: '',
-    agentState: 'new'
+    agentState: 'new',
+    chatFontSize: null
   }
   const selected = tabs.find((t) => t.id === tabId) ?? main
   const target: AgentTarget = { taskId, tabId: selected.id, mode: selected.mode }

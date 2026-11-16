@@ -12,7 +12,6 @@ import {
   TERMINAL_STATE_LABELS
 } from '@slayzone/terminal-contracts'
 import type { Task } from '@slayzone/task-contracts'
-import { clearAllConversationIds } from '@slayzone/task-contracts/types'
 import {
   applyFilters,
   columnToCreateTaskDraft,
@@ -177,13 +176,11 @@ describe('agents (phase 1)', () => {
         isMain: true,
         position: 0,
         createdAt: '',
-        agentState: 'running'
+        agentState: 'running',
+        chatFontSize: null
       })
     ).toBe('Codex')
     expect(stripOscReplies('a\x1b]11;rgb:0/0/0\x07b')).toBe('ab')
     expect(arrowKey('up', true)).toBe('\x1bOA')
-    expect(clearAllConversationIds({ codex: { conversationId: 'c' } })).toEqual({
-      codex: { conversationId: null }
-    })
   })
 })

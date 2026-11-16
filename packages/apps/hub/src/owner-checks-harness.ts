@@ -23,13 +23,16 @@ import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import { getAppDeps, getMenuEvents, getNotifyEvents, type AppRouter } from '@slayzone/api'
 import { getAutomationsEvents } from '@slayzone/automations/server'
-import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
+import { agentSessionsEvents, artifactWatcherEvents, taskEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import {
   agentStarts,
   getAgentLifecycleEvents,
   getChatDeps,
-  getPtyDeps
+  getPtyDeps,
+  getPtyBackend,
+  setPtyBackend,
+  type UntrackedPtySession
 } from '@slayzone/terminal/server'
 import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
@@ -54,6 +57,7 @@ export interface InProcessHub {
 
 const SECRET = 'owner-checks-test-signing-secret-0123456789-abcdef'
 const PUBLIC_ADDRESS = 'hub.example.com'
+let emitUnattached: (owner: Owned) => void
 
 /**
  * Boot the hub in this process. `login: false` is the desktop app's own hub exactly
@@ -99,6 +103,30 @@ export async function bootInProcessHub(opts: { login: boolean }): Promise<InProc
     adminToken = owner.token
     adminUserId = owner.userId
   }
+  // Drive snapshots through the real unattached registry/router/filter, like a
+  // computer's reconnect list. No detection means these fixtures stay surfaced;
+  // this owner-policy harness never adopts or starts a process.
+  const backend = getPtyBackend()
+  const unattached = new Map<string, UntrackedPtySession>()
+  const listeners = new Set<() => void>()
+  setPtyBackend({
+    ...backend,
+    untrackedSessions: () => [...unattached.values()],
+    onUntrackedChange: (cb) => {
+      listeners.add(cb)
+      return { dispose: () => listeners.delete(cb) }
+    }
+  })
+  emitUnattached = (o) => {
+    unattached.set(o.session, {
+      computerId: o.computer,
+      sessionId: o.session,
+      spawnId: `${o.mark}_attempt`,
+      detection: false,
+      mode: 'terminal'
+    })
+    for (const cb of [...listeners]) cb()
+  }
   return {
     root,
     port: handle.port,
@@ -107,6 +135,7 @@ export async function bootInProcessHub(opts: { login: boolean }): Promise<InProc
     adminUserId,
     async stop() {
       await handle.stop()
+      setPtyBackend(backend)
       rmSync(root, { recursive: true, force: true })
     }
   }
@@ -190,8 +219,6 @@ export interface Owned {
   readonly task: string
   readonly tab: string
   readonly session: string
-  readonly prompt: string
-  readonly turn: string
   readonly artifact: string
   readonly artifactFolder: string
   readonly process: string
@@ -199,7 +226,6 @@ export interface Owned {
   readonly template: string
   readonly testCategory: string
   readonly testLabel: string
-  readonly chatQueueItem: string
   readonly automationRun: string
   readonly aiConfigItem: string
   readonly projectGroup: string
@@ -212,6 +238,8 @@ export interface Owned {
   readonly pathTree: string
   /** A file in that worktree, opened on the hub's own disk (N1: `ownedPath`). */
   readonly ownedPath: string
+  /** A move of one of the owner's tasks (its own task, so the lock blocks no other case). */
+  readonly taskMove: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -222,9 +250,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     project: id('project'),
     task: id('task'),
     tab: id('tab'),
-    session: id('session'),
-    prompt: id('prompt'),
-    turn: id('turn'),
+    // A runtime session key names its task (`taskId:tabId`): how its owner resolves.
+    session: `${id('task')}:${id('tab')}`,
     artifact: id('artifact'),
     artifactFolder: id('folder'),
     process: id('process'),
@@ -232,7 +259,6 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     template: id('template'),
     testCategory: id('testCategory'),
     testLabel: id('testLabel'),
-    chatQueueItem: id('chatQueue'),
     automationRun: id('automationRun'),
     aiConfigItem: id('aiConfigItem'),
     projectGroup: id('group'),
@@ -240,7 +266,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     automation: id('automation'),
     computer: id('computer'),
     pathTree: join(root, 'work', `${mark}_worktree`),
-    ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md')
+    ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md'),
+    taskMove: id('taskMove')
   }
 }
 
@@ -264,11 +291,11 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.projectGroup
     )
     run(
-      `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)`,
+      // Its folder is the project's (the hub keeps no task path, §9 7e).
+      `INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)`,
       o.task,
       o.project,
-      `${o.mark}_TASK_TITLE`,
-      o.path
+      `${o.mark}_TASK_TITLE`
     )
     // The same folder as the project's path: a record OF the hub's disk. A task on no
     // computer is not one — on a standalone hub its worktree is some computer's (Q1).
@@ -298,27 +325,6 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `${o.mark}_task_hibernated`
     )
     run(
-      `INSERT INTO agent_sessions (id, mode, task_id, tab_id, origin, status, created_at)
-       VALUES (?, 'claude-code', ?, ?, 'pending-spawn', 'bound', 0)`,
-      o.session,
-      o.task,
-      o.tab
-    )
-    run(
-      `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES (?, ?, 'claude-code', ?, 0)`,
-      o.prompt,
-      o.task,
-      `${o.mark}_PROMPT_TEXT`
-    )
-    run(
-      `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, created_at)
-       VALUES (?, ?, ?, ?, 'sha', 0)`,
-      o.turn,
-      o.path,
-      o.task,
-      o.tab
-    )
-    run(
       `INSERT INTO artifact_folders (id, task_id, name) VALUES (?, ?, ?)`,
       o.artifactFolder,
       o.task,
@@ -343,6 +349,26 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `${o.mark}_TAG`
     )
     run(`INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)`, o.task, o.tag)
+    // A task on its way to another hub: locked, so it is its own task, not `o.task`.
+    run(
+      `INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)`,
+      `moving_${o.mark}`,
+      o.project,
+      `${o.mark}_TASK_MOVING_TITLE`
+    )
+    run(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, step, status, created_by, created_at, updated_at)
+       VALUES (?, 'out', 'other-hub', 'other-project', ?, 1, 'export', 'running', ?, 0, 0)`,
+      o.taskMove,
+      JSON.stringify([`moving_${o.mark}`]),
+      o.userId
+    )
+    run(
+      `INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)`,
+      o.taskMove,
+      `moving_${o.mark}`
+    )
     run(
       `INSERT INTO task_templates (id, project_id, name) VALUES (?, ?, ?)`,
       o.template,
@@ -360,26 +386,6 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.testLabel,
       o.project,
       o.mark
-    )
-    // A queued chat message is the computer's; the hub keeps only its route — on its
-    // own chat tab, so the conversation's ownership fences nothing the other fixtures
-    // write on the task's terminal tab.
-    run(
-      `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES (?, ?, 'claude-chat', 0)`,
-      `${o.chatQueueItem}-tab`,
-      o.task
-    )
-    run(
-      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, 'claude-chat', NULL, 1, 'legacy')`,
-      `conv-${o.chatQueueItem}`,
-      o.task,
-      `${o.chatQueueItem}-tab`
-    )
-    run(
-      `INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES (?, ?, ?)`,
-      o.chatQueueItem,
-      `${o.chatQueueItem}-tab`,
-      `conv-${o.chatQueueItem}`
     )
     run(
       `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES (?, ?, ?, '{}', '[]')`,
@@ -469,7 +475,8 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'agentPrompts.onChanged': (o) => agentPromptsEvents.emit('agent-prompts:changed', o.task),
   'agentSessions.onChanged': (o) =>
     agentSessionsEvents.emit('agent-sessions:changed', { taskId: o.task }),
-  'agentTurns.onChanged': (o) => agentTurnsEvents.emit('agent-turns:changed', o.path),
+  'agentTurns.onChanged': (o) =>
+    agentTurnsEvents.emit('agent-turns:changed', { worktreePath: o.path, taskId: o.task }),
   'app.taskWindows.onListChanged': (o) =>
     getAppDeps().taskWindows.events.emit('list-changed', [o.task]),
   'app.taskWindows.onPrimaryActiveChanged': (o) =>
@@ -539,6 +546,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'processes.onStats': (o) =>
     getProcessesDeps().events.emit('stats', { [o.process]: { cpu: 1, rss: 1 } } as never),
   'pty.onData': (o) => getPtyDeps().events.emit('data', o.session, `${o.mark}_TERMINAL_BYTES`, 1),
+  'pty.onUnattachedChange': (o) => emitUnattached(o),
   'pty.onStateChange': (o) =>
     getPtyDeps().events.emit('state-change', o.session, 'running', 'idle'),
   'pty.onBackgroundJobs': (o) => getPtyDeps().events.emit('background-jobs', o.session, 1),
@@ -560,10 +568,15 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onResizeNeeded': (o) => getPtyDeps().events.emit('resize-needed', o.session),
   'pty.onAgentStarts': (o) => agentStarts.mark(o.session, 'queued'),
   'taskTerminals.onChanged': (o) => tabsEvents.emit('tabs:changed', { taskId: o.task }),
+  'task.onPathsChanged': (o) => taskEvents.emit('task:paths-changed', { taskId: o.task }),
   'worktrees.onDiffChanged': (o) =>
-    getGitWatcher().emit('git:diff-changed', { worktreePath: o.path, refsChanged: true }),
+    getGitWatcher().emit('git:diff-changed', {
+      worktreePath: o.path,
+      refsChanged: true,
+      taskId: o.task
+    }),
   'worktrees.onDiffWatchFailed': (o) =>
-    getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path }),
+    getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path, taskId: o.task }),
   // An `admin` subscription (T-106): a void signal, attributed to who caused it.
   'automations.onChanged': (o) => asUser(o.userId, () => getAutomationsEvents().emit('changed'))
 }

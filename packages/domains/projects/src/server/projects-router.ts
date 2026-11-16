@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { z } from 'zod'
 import {
   listAllProjects,
@@ -6,11 +5,14 @@ import {
   updateProject,
   deleteProject,
   uploadProjectIcon,
-  reorderProjects
+  reorderProjects,
+  projectIconsDirOf
 } from './project-store'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 import { getProjectsRouterDeps } from './projects-router-deps'
+import { getProjectFolderHost } from './project-folders'
+import { projectMovingSql } from './project-move-sql'
 
 const createProjectInput = z.object({
   name: z.string().min(1),
@@ -27,9 +29,35 @@ const createProjectInput = z.object({
 const updateProjectInput = z.unknown() as unknown as z.ZodType<UpdateProjectInput>
 
 // Icon dir derived from the context's dataRoot so the store stays electron-free.
-const iconsDir = (dataRoot: string): string => join(dataRoot, 'project-icons')
+const iconsDir = projectIconsDirOf
 
 export const projectsRouter = router({
+  relocate: publicProcedure
+    .input(
+      z.object({
+        id: z.string().min(1),
+        computerId: z.string().min(1),
+        sourcePath: z.string(),
+        path: z.string().trim().min(1),
+        mode: z.enum(['move', 'update']).default('move')
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const exists = await ctx.db.get(
+        `SELECT id FROM projects p WHERE id=? AND NOT ${projectMovingSql('p.id')}`,
+        [input.id]
+      )
+      if (!exists)
+        throw new Error('Project is missing or being transferred. Reopen Relocate and try again.')
+      const host = getProjectFolderHost()
+      if (!host?.relocateFolder)
+        throw new Error('Project relocation requires a connected computer.')
+      const computerId = await host.computerForProject(input.id)
+      if (computerId !== input.computerId)
+        throw new Error('Project computer changed. Reopen Relocate and try again.')
+      await host.relocateFolder(computerId, input.id, input.sourcePath, input.path, input.mode)
+      return updateProject(ctx.db, { id: input.id }, iconsDir(ctx.dataRoot))
+    }),
   list: publicProcedure.query(({ ctx }) => listAllProjects(ctx.db)),
 
   /**

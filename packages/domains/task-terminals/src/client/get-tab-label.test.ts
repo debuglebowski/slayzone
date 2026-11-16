@@ -16,6 +16,7 @@ function makeTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
     position: 0,
     createdAt: '',
     agentState: 'new',
+    chatFontSize: null,
     ...overrides
   }
 }

@@ -1,447 +1,122 @@
 import { randomUUID } from 'node:crypto'
-import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
-import {
-  HONORED_ORIGINS,
-  HONORED_ORIGINS_SQL,
-  type ConversationOrigin
-} from '@slayzone/task-contracts'
-import { agentSessionsEvents } from '../events'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { chatAgentIdForTerminal, isChatSupported } from '@slayzone/terminal-contracts'
-import { isHonoredConversation, isTurnTrackedMode } from './agent-sessions'
+import { agentSessionsEvents } from '../events'
+import { SessionsOfflineError, taskSessionLedger } from './agent-sessions'
 
 /**
- * Append-only ledger of conversation IDs per task per provider (table
- * `task_conversations`, migration v145). Replaces the mutable
- * `provider_config.{mode}.conversationId` singleton that was vulnerable to
- * eager-persist clobber (see conversation-id-robustness plan, RC1).
- *
- * Reads return the latest HONORED row strictly after any `manual-reset` for
- * the same (task, mode) — encoded in SQL, not a post-filter, so the cutoff
- * is structural.
+ * Session intent and session moves, from the hub (robustness plan §9, P0). The
+ * ledger itself is on the computer running the task's agents; see agent-sessions.ts.
  */
-
-/** AgentId → its legacy `<col>_conversation_id` column prefix. */
-const MODE_LEGACY_COL: Record<string, string> = {
-  'claude-code': 'claude',
-  codex: 'codex',
-  'cursor-agent': 'cursor',
-  gemini: 'gemini',
-  opencode: 'opencode'
-}
-
-const TTL_PENDING_MS = 10 * 60 * 1000 // 10 minutes — pending rows with a pre-minted expected sessionId.
-const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // Legacy spawns without a launch token.
-const FIND_PENDING_RETRY_MS = 100
 
 /**
- * Append a row. Single write API; replaces every direct mutation of the
- * legacy `provider_config.{mode}.conversationId` / `*_conversation_id` fields.
+ * Reset agent sessions: the next spawn in scope starts fresh. THE reset write —
+ * the sessions UI, `slay tasks reset-conversation`, REST, a worktree / project
+ * change and a main-agent switch all come here, so a reset means one thing.
  *
- * Transition-slice dual-write: when `origin` is in HONORED_ORIGINS, the same
- * `batchTxn` mirrors `conversationId` into the legacy JSON field and (if the
- * mode has one) the legacy column. Foreign / pending / manual-reset writes do
- * NOT touch the legacy fields. The follow-up "drop legacy storage" slice
- * deletes the dual-write branch in this one function.
+ * A reset is the user's intent, kept by the hub (`session_resets`) and delivered to
+ * every computer of the task — an offline one when it connects — so it works with
+ * the computer offline. `scope`: one tab (`{ tabId }`; the main tab's id is the task
+ * id), or `'all-tabs'` (stored without a tab). A tab's reset never touches another.
+ *
+ * `mode` omitted = every mode (stored as `*`; `exceptChat` leaves the chat modes,
+ * whose conversation the chat runtime owns per tab — the main-agent switch). Every
+ * mode, not only those with a session: a mode with no session before the reset has
+ * nothing to cut, so the two are the same reset.
+ *
+ * Returns the modes reported reset: `[mode]`, else the modes the computer holds
+ * sessions of in scope (none → nothing was written, as before), else — computer
+ * offline — `['*']`.
  */
-export async function recordConversation(
+export async function resetConversation(
   db: SlayzoneDb,
   args: {
-    id?: string
-    createdAt?: number
-    mirrorProviderConfig?: boolean
     taskId: string
-    mode: string
-    conversationId: string | null
-    origin: ConversationOrigin
-    pendingMeta?: { usedResume: boolean; spawnedAt: number; spawnToken?: string }
-    /**
-     * Which JSON key inside `provider_config.{mode}` to mirror to during the
-     * transition slice. Defaults to `'conversationId'` (the field non-chat
-     * agents read). Chat-mode callers pass `'chatConversationId'` because
-     * `provider_config.{mode}.chatConversationId` is the chat-mode-specific
-     * field the chat handlers + UI read today.
-     */
-    legacyJsonField?: 'conversationId' | 'chatConversationId'
+    mode?: string
+    /** With no `mode`: leave the chat modes (the main-agent switch). */
+    exceptChat?: boolean
+    scope: { tabId: string } | 'all-tabs'
   }
-): Promise<void> {
-  const { taskId, mode, conversationId, origin, pendingMeta } = args
-  const legacyJsonField = args.legacyJsonField ?? 'conversationId'
-  const id = args.id ?? randomUUID()
-  const createdAt = args.createdAt ?? Date.now()
-  if (!Number.isSafeInteger(createdAt) || createdAt < 0)
-    throw new Error('Invalid conversation timestamp')
-  if (args.id) {
-    const existing = await db.get<{
-      task_id: string
-      mode: string
-      conversation_id: string | null
-      origin: string
-    }>('SELECT task_id,mode,conversation_id,origin FROM task_conversations WHERE id=?', [id])
-    if (
-      existing &&
-      (existing.task_id !== taskId ||
-        existing.mode !== mode ||
-        existing.conversation_id !== conversationId ||
-        existing.origin !== origin)
-    )
-      throw new Error('Conversation ledger identity conflict')
+): Promise<string[]> {
+  const { taskId } = args
+  const tabId = args.scope === 'all-tabs' ? null : args.scope.tabId
+  let reported: string[]
+  if (args.mode) reported = [args.mode]
+  else {
+    const held = await taskSessionLedger().sessionModesInScope(taskId, tabId)
+    reported = held
+      ? held.filter((m) => !(args.exceptChat && isChatSupported(m)))
+      : [args.exceptChat ? '* (except chat)' : '*']
+    if (held && !reported.length) return []
   }
-  const meta = origin === 'pending-spawn' && pendingMeta ? JSON.stringify(pendingMeta) : null
-
-  const ops: BatchOp[] = [
-    {
-      type: 'run',
-      sql: `INSERT INTO task_conversations
-              (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-      params: [id, taskId, mode, conversationId, origin, meta, createdAt]
-    }
-  ]
-
-  if (args.mirrorProviderConfig !== false && HONORED_ORIGINS.has(origin) && conversationId) {
-    // Dual-write the legacy JSON field so consumers that still read
-    // `provider_config.{mode}.{legacyJsonField}` keep seeing fresh data
-    // during the transition slice.
-    const jsonPath = `$."${mode}".${legacyJsonField}`
-    ops.push({
-      type: 'run',
-      sql: `UPDATE tasks
-              SET provider_config = json_set(coalesce(provider_config, '{}'), ?, ?)
-            WHERE id = ?`,
-      params: [jsonPath, conversationId, taskId]
-    })
-    // Legacy `*_conversation_id` columns only exist for the non-chat
-    // conversation id. Chat modes never had top-level columns.
-    if (legacyJsonField === 'conversationId') {
-      const legacyCol = MODE_LEGACY_COL[mode]
-      if (legacyCol) {
-        ops.push({
-          type: 'run',
-          sql: `UPDATE tasks SET ${legacyCol}_conversation_id = ? WHERE id = ?`,
-          params: [conversationId, taskId]
-        })
-      }
-    }
-  } else if (args.mirrorProviderConfig !== false && origin === 'manual-reset') {
-    // Phase 1 transitional patch (delete in Phase 4): clear the legacy fields
-    // so consumers that still read `provider_config.{mode}.conversationId` /
-    // `chatConversationId` and the `*_conversation_id` columns immediately see
-    // NULL. Without this, the SQL-cutoff in `getCurrentConversationId` works
-    // but every live consumer of the legacy field stays bound to the broken
-    // id. Clears BOTH JSON keys + the legacy column in one batchTxn — the
-    // reset doesn't know whether the broken binding lives under the chat or
-    // non-chat key, so we clear both. Foreign-observed writes deliberately
-    // do NOT clear the legacy field (those are audit-only).
-    ops.push({
-      type: 'run',
-      sql: `UPDATE tasks
-              SET provider_config = json_set(
-                    json_set(coalesce(provider_config, '{}'), ?, NULL),
-                    ?, NULL)
-            WHERE id = ?`,
-      params: [`$."${mode}".conversationId`, `$."${mode}".chatConversationId`, taskId]
-    })
-    const legacyCol = MODE_LEGACY_COL[mode]
-    if (legacyCol) {
-      ops.push({
-        type: 'run',
-        sql: `UPDATE tasks SET ${legacyCol}_conversation_id = NULL WHERE id = ?`,
-        params: [taskId]
-      })
-    }
-  }
-
-  // Transition triple-write (migration v147): mirror this ledger row into the
-  // first-class agent-session tables so the new resolver stays current during
-  // the bake before reads cut over (slice 2). A reset is a `session_resets`
-  // timeline event, not a session; every other origin becomes a shadow
-  // `agent_sessions` row (status='dead', cwd=NULL — live status/cwd are owned
-  // by the pool/PTY layer in later slices). Reuses the same `id` + `createdAt`
-  // so the shadow is 1:1 with the ledger. Deleted in the "drop legacy" slice.
-  if (origin === 'manual-reset') {
-    ops.push({
-      type: 'run',
-      sql: `INSERT INTO session_resets (id, task_id, mode, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-      params: [id, taskId, mode, createdAt]
-    })
-  } else {
-    // A pending-spawn mirror represents an IN-FLIGHT spawn → status 'bound' so
-    // the B-aware findPendingSpawn (status != 'dead') still locates it. Every
-    // other mirror is a confirmed/historical audit row → 'dead'. (Transitional:
-    // replaced when the spawn path writes B rows directly.)
-    const shadowStatus = origin === 'pending-spawn' ? 'bound' : 'dead'
-    // Proven at write (v158) — same rule as `confirmSessionConversation`: a
-    // resume, a heal the healer verified on disk, a session the user picked out
-    // of the sidebar, or a provider whose turns slay cannot observe. The ONE
-    // exception is a fresh start of a mode whose AGENT is turn-tracked
-    // (`isTurnTrackedMode` — claude-code, or a provider wrapping it): Claude reports its
-    // id via SessionStart at LAUNCH, before it has written any transcript, so
-    // that id stays unproven until `markSessionFirstTurn`. Stamping it here let
-    // an agent that never took a prompt be resumed after restart → "No
-    // conversation found" → false "session expired". Marking the rest here also
-    // keeps intent-bearing rows (`in-band-clear`, `user-selected`) from ever
-    // falling through to an older session, which the read-side skip must not do.
-    const provenAtWrite = !(origin === 'slay-spawned-fresh' && (await isTurnTrackedMode(db, mode)))
-    ops.push({
-      type: 'run',
-      sql: `INSERT INTO agent_sessions
-              (id, mode, cwd, task_id, conversation_id, origin, status, pending_meta, created_at, bound_at)
-            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-      params: [id, mode, taskId, conversationId, origin, shadowStatus, meta, createdAt, createdAt]
-    })
-    if (origin !== 'pending-spawn' && conversationId && provenAtWrite) {
-      ops.push({
-        type: 'run',
-        sql: `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
-        params: [conversationId, createdAt]
-      })
-    }
-  }
-
-  await db.batchTxn(ops)
-
-  // The session set for this task just changed (new spawn/confirm, or a reset).
-  // Notify the renderer's session-history list. Best-effort — never block the
-  // write path. A pending-spawn shadow is filtered out of the list, but firing
-  // here is harmless (the refetch simply returns the same set).
+  await db.run(
+    `INSERT INTO session_resets (id, task_id, mode, tab_id, except_chat, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      randomUUID(),
+      taskId,
+      args.mode ?? '*',
+      tabId,
+      !args.mode && args.exceptChat ? 1 : 0,
+      Date.now()
+    ]
+  )
+  await taskSessionLedger().publishIntents(taskId)
   agentSessionsEvents.emit('agent-sessions:changed', { taskId })
+  return reported
 }
 
 /**
  * Make one of the task's sessions the current one of `mode` (the Sessions list).
  *
- * `sourceMode` is the mode that ran it. The Claude family shows chat and
- * terminal sessions in one list, so a session of the chat ↔ terminal partner
- * may be picked too: the conversation moves over — a hand-off, recorded
- * `handoff` (the same CLI and session files on both sides). Any other mode's
- * session is refused (`not-partner`), and the id must be an honored, undeleted
- * session of this task under the mode that ran it (`not-honored`).
- *
- * `release` stops (and awaits the exit of) a chat process still running the
- * conversation before the ledger moves it: never two processes on one
- * conversation. The caller passes the transport's; tests pass a recorder.
+ * `sourceMode` is the mode that ran it. The Claude family shows chat and terminal
+ * sessions in one list, so a session of the chat ↔ terminal partner may be picked
+ * too: the conversation moves over (`handoff`). Any other mode's session is refused
+ * (`not-partner`); the id must be an honored, undeleted session of this task under
+ * the mode that ran it (`not-honored`). A session live in another tab is refused,
+ * naming that tab. Recorded on the computer holding the sessions; offline: an error.
  */
 export async function switchConversation(
-  db: SlayzoneDb,
-  args: { taskId: string; mode: string; conversationId: string; sourceMode?: string },
-  deps: { release: (taskId: string, conversationId: string) => Promise<void> }
-): Promise<'switched' | 'not-partner' | 'not-honored'> {
+  _db: SlayzoneDb,
+  args: {
+    taskId: string
+    mode: string
+    conversationId: string
+    sourceMode?: string
+    /** The tab picking it; omitted = the main tab. The conversation MOVES here. */
+    tabId?: string
+  },
+  deps: {
+    release: (taskId: string, conversationId: string) => Promise<void>
+    liveInOtherTab?: (
+      taskId: string,
+      conversationId: string,
+      tabId: string
+    ) => Promise<string | null>
+  }
+): Promise<'switched' | 'not-partner' | 'not-honored' | { inUseBy: string }> {
   const { taskId, mode, conversationId } = args
+  const tabId = args.tabId ?? taskId
   const source = args.sourceMode ?? mode
   const handoff = source !== mode
-  if (
-    handoff &&
-    chatAgentIdForTerminal(mode) !== source &&
-    chatAgentIdForTerminal(source) !== mode
-  ) {
+  if (handoff && chatAgentIdForTerminal(mode) !== source && chatAgentIdForTerminal(source) !== mode)
     return 'not-partner'
-  }
-  if (!(await isHonoredConversation(db, taskId, source, conversationId))) return 'not-honored'
+  const ledger = taskSessionLedger()
+  const computerId = await ledger.forTask(taskId)
+  if (!computerId) throw new SessionsOfflineError()
+  if (!(await ledger.store.isHonoredConversation(computerId, taskId, source, conversationId)))
+    return 'not-honored'
+  const holder = await deps.liveInOtherTab?.(taskId, conversationId, tabId)
+  if (holder) return { inUseBy: holder }
   if (handoff && isChatSupported(source)) await deps.release(taskId, conversationId)
-  await recordConversation(db, {
+  await ledger.store.recordConversation(computerId, {
     taskId,
     mode,
+    tabId,
     conversationId,
     origin: handoff ? 'handoff' : 'user-selected',
     ...(isChatSupported(mode) ? { legacyJsonField: 'chatConversationId' as const } : {})
   })
+  agentSessionsEvents.emit('agent-sessions:changed', { taskId })
   return 'switched'
-}
-
-/**
- * Latest honored conversation id for (taskId, mode), strictly after the most
- * recent `manual-reset` (if any). Encoded as a single SQL query so the cutoff
- * is structural — not a JS-side filter that could expose stale rows under
- * the reset boundary.
- */
-export async function getCurrentConversationId(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string
-): Promise<string | null> {
-  const row = await db.get<{ conversation_id: string | null }>(
-    `WITH reset AS (
-       SELECT max(created_at) AS at
-       FROM task_conversations
-       WHERE task_id = ? AND mode = ? AND origin = 'manual-reset'
-     )
-     SELECT conversation_id
-       FROM task_conversations
-       WHERE task_id = ? AND mode = ?
-         AND origin IN (${HONORED_ORIGINS_SQL})
-         AND created_at > coalesce((SELECT at FROM reset), 0)
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    [taskId, mode, taskId, mode]
-  )
-  return row?.conversation_id ?? null
-}
-
-/** Full audit trail (newest first) — includes foreign + pending + manual-reset rows. */
-export async function listConversationHistory(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string
-): Promise<
-  Array<{
-    conversationId: string | null
-    origin: ConversationOrigin
-    createdAt: number
-  }>
-> {
-  const rows = await db.all<{
-    conversation_id: string | null
-    origin: ConversationOrigin
-    created_at: number
-  }>(
-    `SELECT conversation_id, origin, created_at
-       FROM task_conversations
-       WHERE task_id = ? AND mode = ?
-       ORDER BY created_at DESC`,
-    [taskId, mode]
-  )
-  return rows.map((r) => ({
-    conversationId: r.conversation_id,
-    origin: r.origin,
-    createdAt: r.created_at
-  }))
-}
-
-/**
- * Spawn-time provenance anchor for hook-driven providers. MUST complete
- * before the agent process is started — otherwise the agent's SessionStart
- * hook can race ahead, find no pending row, and record `foreign-observed`
- * for a legitimate session.
- */
-export async function recordPendingSpawn(
-  db: SlayzoneDb,
-  args: {
-    taskId: string
-    mode: string
-    /**
-     * The sessionId slay expects to observe back from this spawn. `null` for
-     * "fresh PTY spawn where slay didn't pre-mint a UUID" — the agent will
-     * mint its own. The hook handler treats a NULL-expected pending row as
-     * "accept the first observed id as fresh" (temporal-proximity gate only).
-     */
-    expectedSessionId: string | null
-    usedResume: boolean
-    spawnToken?: string
-  }
-): Promise<void> {
-  await recordConversation(db, {
-    taskId: args.taskId,
-    mode: args.mode,
-    conversationId: args.expectedSessionId,
-    origin: 'pending-spawn',
-    pendingMeta: {
-      usedResume: args.usedResume,
-      spawnedAt: Date.now(),
-      ...(args.spawnToken ? { spawnToken: args.spawnToken } : {})
-    }
-  })
-}
-
-/**
- * Look up the still-pending spawn for (taskId, mode). A provider that mints its
- * own id may not emit SessionStart until its first prompt, long after spawn.
- * A token-bearing null-expected row remains valid until PTY exit. Older rows
- * without a launch token retain the 30-second gate.
- * Does a single 100 ms re-read if no row is found, to defend the residual
- * race between `recordPendingSpawn` and the agent's SessionStart hook.
- */
-export async function findPendingSpawn(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string
-): Promise<{
-  /** `null` when slay didn't pre-mint a sessionId — accept the first observed. */
-  expectedSessionId: string | null
-  usedResume: boolean
-  spawnedAt: number
-  spawnToken?: string
-} | null> {
-  const cutoffExpected = Date.now() - TTL_PENDING_MS
-  const cutoffNull = Date.now() - TTL_PENDING_NULL_EXPECTED_MS
-  const query = async (): Promise<{
-    conversation_id: string | null
-    pending_meta: string | null
-  } | null> =>
-    (await db.get(
-      `SELECT p.conversation_id, p.pending_meta
-         FROM task_conversations p
-         JOIN agent_sessions s ON s.id = p.id
-         WHERE p.task_id = ? AND p.mode = ? AND p.origin = 'pending-spawn'
-           AND s.status != 'dead'
-           AND (
-             (p.conversation_id IS NOT NULL AND p.created_at >= ?)
-             OR (p.conversation_id IS NULL AND
-               (p.created_at >= ? OR json_extract(p.pending_meta, '$.spawnToken') IS NOT NULL))
-           )
-         ORDER BY p.created_at DESC
-         LIMIT 1`,
-      [taskId, mode, cutoffExpected, cutoffNull]
-    )) ?? null
-
-  let row = await query()
-  if (!row) {
-    await new Promise((r) => setTimeout(r, FIND_PENDING_RETRY_MS))
-    row = await query()
-  }
-  if (!row || !row.pending_meta) return null
-  try {
-    const meta = JSON.parse(row.pending_meta) as {
-      usedResume: boolean
-      spawnedAt: number
-      spawnToken?: string
-    }
-    return {
-      expectedSessionId: row.conversation_id, // may be null for fresh-without-pre-mint
-      usedResume: meta.usedResume,
-      spawnedAt: meta.spawnedAt,
-      spawnToken: meta.spawnToken
-    }
-  } catch {
-    return null
-  }
-}
-
-/**
- * Sweep legacy pending rows. Token-bearing rows can stay active indefinitely,
- * so only PTY exit may remove them by scope. Old token-bearing rows left by a
- * crash cannot match a new launch token and are harmless until DB maintenance.
- */
-export async function prunePendingSpawns(
-  db: SlayzoneDb,
-  scope?: { taskId: string; mode: string }
-): Promise<number> {
-  if (scope) {
-    const res = await db.run(
-      `DELETE FROM task_conversations
-         WHERE task_id = ? AND mode = ? AND origin = 'pending-spawn'`,
-      [scope.taskId, scope.mode]
-    )
-    // Triple-write mirror (v147): keep the shadow agent_sessions pending rows
-    // in lockstep so the slice-2 reader never sees a stale pending row.
-    await db.run(
-      `DELETE FROM agent_sessions
-         WHERE task_id = ? AND mode = ? AND origin = 'pending-spawn'`,
-      [scope.taskId, scope.mode]
-    )
-    return res.changes
-  }
-  const cutoff = Date.now() - TTL_PENDING_MS
-  const res = await db.run(
-    `DELETE FROM task_conversations
-       WHERE origin = 'pending-spawn' AND created_at < ?
-         AND json_extract(pending_meta, '$.spawnToken') IS NULL`,
-    [cutoff]
-  )
-  await db.run(
-    `DELETE FROM agent_sessions
-       WHERE origin = 'pending-spawn' AND created_at < ?
-         AND json_extract(pending_meta, '$.spawnToken') IS NULL`,
-    [cutoff]
-  )
-  return res.changes
 }

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DuplexRpc, LineDecoder, RpcDisposedError, RpcError, RpcTimeoutError } from './rpc'
+import { COMPUTER_FRAME_MAX_BYTES, FRAME_TOO_LARGE_CODE } from './frame-limit'
+import { ComputerTransportErrorCodes } from './frames'
 
 interface Harness {
   rpc: DuplexRpc
@@ -255,5 +257,218 @@ describe('LineDecoder', () => {
     expect(decoder.feed(':3}')).toEqual([])
     expect(decoder.flush()).toBe('{"c":3}')
     expect(decoder.flush()).toBeNull()
+  })
+})
+
+describe('DuplexRpc frame limit (send side)', () => {
+  const LIMIT = 1024
+  type Info = Parameters<
+    NonNullable<ConstructorParameters<typeof DuplexRpc>[0]['onFrameTooLarge']>
+  >[0]
+  function capped(overrides: Partial<ConstructorParameters<typeof DuplexRpc>[0]> = {}) {
+    const tooLarge: Info[] = []
+    const h = makeRpc({
+      maxFrameBytes: LIMIT,
+      onFrameTooLarge: (info) => tooLarge.push(info),
+      ...overrides
+    })
+    return { ...h, tooLarge }
+  }
+  const frameBytes = (line: string): number => Buffer.byteLength(line, 'utf8')
+
+  it('defaults to the shared computer frame limit', () => {
+    expect(COMPUTER_FRAME_MAX_BYTES).toBe(100 * 1024 * 1024)
+    expect(FRAME_TOO_LARGE_CODE).toBe(-32008)
+    expect(ComputerTransportErrorCodes.frameTooLarge).toBe(FRAME_TOO_LARGE_CODE)
+    expect(new DuplexRpc({ write: () => undefined }).maxFrameBytes).toBe(COMPUTER_FRAME_MAX_BYTES)
+  })
+
+  it('an oversized reply becomes a frameTooLarge error for that id, naming method and sizes', () => {
+    const { rpc, written, peerRequests, tooLarge } = capped()
+    rpc.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'chat.request', params: {} }))
+    expect(peerRequests).toHaveLength(1)
+    rpc.respond(9, { blob: 'x'.repeat(5000) })
+    expect(written).toHaveLength(1)
+    const reply = JSON.parse(written[0]!)
+    expect(reply.id).toBe(9)
+    expect(reply.result).toBeUndefined()
+    expect(reply.error.code).toBe(FRAME_TOO_LARGE_CODE)
+    expect(reply.error.message).toContain("'chat.request'")
+    expect(reply.error.message).toContain(String(LIMIT))
+    expect(reply.error.data).toMatchObject({ method: 'chat.request', limitBytes: LIMIT })
+    expect(reply.error.data.bytes).toBeGreaterThan(5000)
+    expect(frameBytes(written[0]!)).toBeLessThanOrEqual(LIMIT)
+    expect(tooLarge).toEqual([
+      expect.objectContaining({
+        kind: 'response',
+        method: 'chat.request',
+        id: 9,
+        limitBytes: LIMIT
+      })
+    ])
+  })
+
+  it('measures UTF-8 bytes, not characters', () => {
+    const { rpc, written, tooLarge } = capped()
+    // ~400 chars but ~1200 bytes ('é' = 2 bytes, '€' = 3 bytes).
+    rpc.respond('a', { s: '€'.repeat(400) })
+    expect(JSON.parse(written[0]!).error.code).toBe(FRAME_TOO_LARGE_CODE)
+    expect(tooLarge).toHaveLength(1)
+  })
+
+  it('a frame of exactly the limit is sent', () => {
+    const { rpc, written, tooLarge } = capped()
+    const overhead = JSON.stringify({ jsonrpc: '2.0', id: 'a', result: { s: '' } }).length
+    rpc.respond('a', { s: 'y'.repeat(LIMIT - overhead) })
+    expect(frameBytes(written[0]!)).toBe(LIMIT)
+    expect(JSON.parse(written[0]!).result.s).toHaveLength(LIMIT - overhead)
+    expect(tooLarge).toHaveLength(0)
+  })
+
+  it('an oversized error reply keeps its code and message, dropping only its data', () => {
+    const { rpc, written, tooLarge } = capped()
+    rpc.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 'a', method: 'exec.run' }))
+    rpc.respondError('a', -32000, 'boom', { dump: 'z'.repeat(5000) })
+    const reply = JSON.parse(written[0]!)
+    expect(reply.error.code).toBe(-32000)
+    expect(reply.error.message).toMatch(/^boom/)
+    expect(reply.error.message).toContain('error data omitted')
+    expect(reply.error.data).toBeUndefined()
+    expect(frameBytes(written[0]!)).toBeLessThanOrEqual(LIMIT)
+    expect(tooLarge).toEqual([expect.objectContaining({ kind: 'response', method: 'exec.run' })])
+  })
+
+  it('an oversized error message is truncated, code kept', () => {
+    const { rpc, written } = capped()
+    rpc.respondError('a', -32006, `refused: ${'m'.repeat(5000)}`)
+    const reply = JSON.parse(written[0]!)
+    expect(reply.error.code).toBe(-32006)
+    expect(reply.error.message).toMatch(/^refused: m+/)
+    expect(reply.error.message).toContain('truncated')
+    expect(frameBytes(written[0]!)).toBeLessThanOrEqual(LIMIT)
+  })
+
+  it('an error reply that cannot be slimmed under the limit falls back to frameTooLarge', () => {
+    const { rpc, written } = capped()
+    // The id alone (echoed by every reply) leaves no room for the original error.
+    const id = 'i'.repeat(LIMIT)
+    rpc.respondError(id, -32000, 'boom', { dump: 'z'.repeat(5000) })
+    const reply = JSON.parse(written[0]!)
+    expect(reply.id).toBe(id)
+    expect(reply.error.code).toBe(FRAME_TOO_LARGE_CODE)
+  })
+
+  it('a reply too large to serialize at all becomes frameTooLarge, not a throw', () => {
+    const { rpc, written, tooLarge } = capped()
+    const huge = {
+      toJSON() {
+        throw new RangeError('Invalid string length')
+      }
+    }
+    expect(() => rpc.respond('a', huge)).not.toThrow()
+    const reply = JSON.parse(written[0]!)
+    expect(reply.error.code).toBe(FRAME_TOO_LARGE_CODE)
+    expect(reply.error.data).toMatchObject({ bytes: null, limitBytes: LIMIT })
+    expect(tooLarge[0]).toMatchObject({ kind: 'response', bytes: null })
+  })
+
+  it('a reply that cannot be serialized for another reason becomes an internal error', () => {
+    const { rpc, written } = capped()
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(() => rpc.respond('a', cyclic)).not.toThrow()
+    const reply = JSON.parse(written[0]!)
+    expect(reply.error.code).toBe(-32000)
+    expect(reply.error.message).toContain('could not be serialized')
+  })
+
+  it('an oversized request is rejected locally and never sent', async () => {
+    const { rpc, written, tooLarge } = capped()
+    const err = await rpc.request('fs.writeFile', { content: 'w'.repeat(5000) }).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(RpcError)
+    expect((err as RpcError).code).toBe(FRAME_TOO_LARGE_CODE)
+    expect((err as RpcError).message).toContain("'fs.writeFile'")
+    expect((err as RpcError).data).toMatchObject({ method: 'fs.writeFile', limitBytes: LIMIT })
+    expect(written).toHaveLength(0)
+    expect(rpc.pendingCount).toBe(0)
+    expect(tooLarge).toEqual([expect.objectContaining({ kind: 'request', method: 'fs.writeFile' })])
+    // The endpoint keeps working.
+    const ok = rpc.request('small')
+    expect(written).toHaveLength(1)
+    rpc.handleLine(JSON.stringify({ id: JSON.parse(written[0]!).id, result: 1 }))
+    await expect(ok).resolves.toBe(1)
+  })
+
+  it('a request whose params cannot be serialized rejects instead of throwing synchronously', async () => {
+    const { rpc } = capped()
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    let p: Promise<unknown> | undefined
+    expect(() => {
+      p = rpc.request('m', cyclic)
+    }).not.toThrow()
+    await expect(p).rejects.toThrow()
+    expect(rpc.pendingCount).toBe(0)
+  })
+
+  it('an oversized notification is dropped with a diagnostic, never thrown', () => {
+    const { rpc, written, tooLarge } = capped()
+    expect(() => rpc.notify('event', { payload: 'e'.repeat(5000) })).not.toThrow()
+    expect(written).toHaveLength(0)
+    expect(tooLarge).toEqual([expect.objectContaining({ kind: 'notification', method: 'event' })])
+    rpc.notify('pty.data', { seq: 1 })
+    expect(written).toHaveLength(1)
+  })
+
+  it('maxFrameBytes <= 0 disables the cap', () => {
+    const { rpc, written } = makeRpc({ maxFrameBytes: 0 })
+    rpc.respond('a', { s: 'q'.repeat(5000) })
+    expect(JSON.parse(written[0]!).result.s).toHaveLength(5000)
+  })
+
+  it('describeRequest names an envelope request by what it carries', async () => {
+    const describe = (method: string, params: unknown): string =>
+      method === 'dispatch' ? String((params as { method: string }).method) : method
+    const { rpc, written, tooLarge } = capped({ describeRequest: describe })
+    // Inbound: a reply too large for an enveloped request names the inner method.
+    rpc.handleLine(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'dispatch',
+        params: { method: 'chat.request' }
+      })
+    )
+    rpc.respond(1, { history: 'h'.repeat(5000) })
+    const reply = JSON.parse(written[0]!)
+    expect(reply.error.code).toBe(FRAME_TOO_LARGE_CODE)
+    expect(reply.error.message).toContain("'chat.request'")
+    expect(reply.error.message).not.toContain('dispatch')
+    expect(reply.error.data.method).toBe('chat.request')
+    // Outbound: the same for a request refused locally, and for pendingMethods.
+    const err = await rpc
+      .request('dispatch', { method: 'fs.writeFile', params: { content: 'w'.repeat(5000) } })
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+    expect((err as RpcError).message).toContain("request 'fs.writeFile'")
+    expect(tooLarge.map((t) => t.method)).toEqual(['chat.request', 'fs.writeFile'])
+    rpc.request('dispatch', { method: 'pty.list' }, 0).catch(() => undefined)
+    expect(rpc.pendingMethods()).toEqual(['pty.list'])
+    rpc.dispose()
+  })
+
+  it('pendingMethods lists in-flight outbound request methods', () => {
+    const { rpc, written } = makeRpc()
+    rpc.request('alpha', undefined, 0).catch(() => undefined)
+    rpc.request('beta', undefined, 0).catch(() => undefined)
+    expect(rpc.pendingMethods()).toEqual(['alpha', 'beta'])
+    rpc.handleLine(JSON.stringify({ id: JSON.parse(written[0]!).id, result: null }))
+    expect(rpc.pendingMethods()).toEqual(['beta'])
+    rpc.dispose()
   })
 })

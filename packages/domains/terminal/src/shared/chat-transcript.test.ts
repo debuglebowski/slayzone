@@ -91,3 +91,66 @@ test('text format: role prefix, continuation lines indented', () => {
   ])
   expect(text).toBe('> a\n  b\n\nc\n')
 })
+
+// Watchdog cancellations must not look like an unexplained user Stop.
+test('watchdog cause survives replay and the default non-verbose transcript', () => {
+  const events: AgentEvent[] = [
+    user('audit', 'Resume'),
+    said('working', 'Continuing audit.'),
+    { kind: 'process-exit', code: 0, signal: null, reason: 'watchdog' }
+  ]
+  const rows = chatTranscriptFromEvents(events)
+  expect(rows.filter((r) => r.role === 'status').map((r) => r.text)).toEqual([
+    'interrupted by watchdog'
+  ])
+})
+
+test('requested Stop and unspecified cancellation remain distinct', () => {
+  for (const [reason, expected] of [
+    [undefined, 'interrupted'],
+    ['stop-request', 'stopped by request']
+  ] as const) {
+    const rows = chatTranscriptFromEvents([user('u', 'work'), { kind: 'interrupted', reason }])
+    expect(rows.at(-1)?.text).toBe(expected)
+  }
+})
+
+test('legacy watchdog notice gives an unlabeled process exit its known cause', () => {
+  const rows = chatTranscriptFromEvents([
+    user('audit', 'Resume'),
+    {
+      kind: 'notice',
+      id: 'watchdog',
+      level: 'warning',
+      code: 'watchdog-killed',
+      text: 'Codex stopped responding, so it was restarted.'
+    },
+    { kind: 'process-exit', code: 0, signal: null }
+  ])
+  expect(rows.at(-1)?.text).toBe('interrupted by watchdog')
+})
+
+test('a stored image (out-of-line reference) prints as a compact label, never as JSON', () => {
+  const ref = {
+    $chatBlob: { v: 1, sha256: 'a'.repeat(64), mediaType: 'image/png', size: 120 * 1024 }
+  }
+  const rows = chatTranscriptFromEvents(
+    [
+      user('u1', 'look'),
+      tool('t1', 'mcp__shots__take', {
+        image: { type: 'image', data: ref, mimeType: 'image/png' }
+      }),
+      {
+        kind: 'tool-result',
+        toolUseId: 't1',
+        isError: false,
+        rawContent: { type: 'image', data: ref, mimeType: 'image/png' },
+        structured: null
+      } as AgentEvent
+    ],
+    { verbose: true }
+  )
+  const text = rows.find((r) => r.role === 'tool')!.text
+  expect(text).toContain('[image/png · 120 KB]')
+  expect(text).not.toContain('$chatBlob')
+})

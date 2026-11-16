@@ -79,8 +79,9 @@ test.describe('Chat queue persistence', () => {
     const firstId = list[0]!.id
 
     const removed = await mainWindow.evaluate(
-      async (id) => window.getTrpcVanillaClient().chat.queue.remove.mutate({ id }),
-      firstId
+      async ({ id, tabId }) =>
+        window.getTrpcVanillaClient().chat.queue.remove.mutate({ id, tabId }),
+      { id: firstId, tabId: mainTabId }
     )
     expect(removed).toBe(true)
 

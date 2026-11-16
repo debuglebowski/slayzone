@@ -311,6 +311,19 @@ describe('locateClaudeTranscript', () => {
     expect(await locateClaudeTranscript('../etc/passwd', repo)).toBeNull()
   })
 
+  test('recorded folder outside the hint (the task moved to another project): resume where asked', async () => {
+    // The session ran in the old project's folder, which still exists. The task now
+    // lives in another project: `claude --resume` from the new folder continues the
+    // conversation there — never back in the old project.
+    const id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    const oldProject = join(work, 'old-project')
+    const newProject = join(work, 'new-project')
+    mkdirSync(oldProject, { recursive: true })
+    mkdirSync(newProject, { recursive: true })
+    const file = writeTranscript(oldProject, id, [{ type: 'user', cwd: oldProject }])
+    expect(await locateClaudeTranscript(id, newProject)).toEqual({ path: file, resumeCwd: null })
+  })
+
   test('no hint folder (the computer decides): still found by id', async () => {
     const id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
     const file = writeTranscript(worktree, id, moved(repo, worktree))

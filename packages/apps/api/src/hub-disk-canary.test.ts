@@ -90,7 +90,7 @@ const { setAuthGate } = await import('@slayzone/trpc-server')
 const { setHostCapabilitiesDeps } = await import('@slayzone/host-capabilities/server')
 const { createTestHarness } = await import('../../../shared/test-utils/ipc-harness.js')
 const { appRouter } = await import('./router')
-const { setHubDiskComputer } = await import('./access')
+const { setHubDiskComputer, setHubDiskTaskRoots } = await import('./access')
 const { registerRestApi } = await import('./http/rest-api')
 const { restRouteKey } = await import('./http/rest-api/admin-routes')
 const { bindRestPrincipal } = await import('./http/rest-api/principal')
@@ -150,9 +150,10 @@ sql(
 )
 setHubDiskComputer('cLocal')
 sql(
-  `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('tA2', 'pA', 'a2', ?, 'cLocal')`,
-  join(aRoot, 'wt')
+  `INSERT INTO tasks (id, project_id, title, has_worktree, computer_id) VALUES ('tA2', 'pA', 'a2', 1, 'cLocal')`
 )
+// The hub keeps no task folder (§9 7e): the hub's own computer reports its tasks' ones.
+setHubDiskTaskRoots(async () => [{ taskId: 'tA2', root: join(aRoot, 'wt') }])
 // What B can plant: B's own remote computer reporting project folders at every canary
 // and at `/`, with B's tasks' worktrees there.
 sql(
@@ -181,11 +182,11 @@ planted.forEach((folder, i) => {
     `pBp${i}`,
     folder
   )
+  // B's tasks with a worktree there (on B's computer, which the hub never asks).
   sql(
-    `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES (?, ?, 'p', ?, 'cB')`,
+    `INSERT INTO tasks (id, project_id, title, has_worktree, computer_id) VALUES (?, ?, 'p', 1, 'cB')`,
     `tBp${i}`,
-    `pBp${i}`,
-    folder
+    `pBp${i}`
   )
 })
 // A's computer reporting A's own folder too (a tie B must not break by naming cB).

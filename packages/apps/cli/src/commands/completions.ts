@@ -29,6 +29,18 @@ function entries(root: Command): Entry[] {
   }))
 }
 
+/** Nested commands and their flags (e.g. tasks moves pause). */
+function nestedCommands(root: Command): Array<{ path: string[]; cmd: Command }> {
+  const result: Array<{ path: string[]; cmd: Command }> = []
+  const visit = (cmd: Command, path: string[]): void => {
+    if (path.length > 1) result.push({ path, cmd })
+    for (const child of visible(cmd)) visit(child, [...path, child.name()])
+  }
+  visit(root, [])
+  return result.sort((a, b) => b.path.length - a.path.length)
+}
+const flagNames = (cmd: Command): string[] => cmd.options.flatMap((o) => (o.long ? [o.long] : []))
+
 /** Inside single quotes: fish escapes `'` as `\'`, zsh/bash close-escape-reopen. */
 const fishQ = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 const shQ = (s: string) => `'${s.replace(/'/g, "'\\''")}'`
@@ -52,6 +64,19 @@ export function fishScript(root: Command): string {
         `complete -c slay -n '__fish_seen_subcommand_from ${e.name}' -a ${fishQ(words.join(' '))}`
       )
   }
+  for (const { path, cmd } of nestedCommands(root)) {
+    lines.push(`# ${path.join(' ')} ${flagNames(cmd).join(' ')}`)
+    const condition = path.map((word) => `__fish_seen_subcommand_from ${word}`).join('; and ')
+    for (const child of visible(cmd))
+      lines.push(
+        `complete -c slay -n ${fishQ(condition)} -a ${fishQ(child.name())} -d ${fishQ(child.description())}`
+      )
+    for (const option of cmd.options)
+      if (option.long)
+        lines.push(
+          `complete -c slay -n ${fishQ(condition)} -l ${fishQ(option.long.slice(2))} -d ${fishQ(option.description)}`
+        )
+  }
   return `${lines.join('\n')}\n`
 }
 
@@ -72,6 +97,18 @@ export function zshScript(root: Command): string {
     out.push(`  local -a ${ident(e.name)}`, `  ${ident(e.name)}=(`)
     for (const s of e.subs) out.push(`    ${zshDesc(s.name, s.description)}`)
     out.push('  )')
+  }
+  for (const { path, cmd } of nestedCommands(root)) {
+    const condition = path.map((word, i) => `"$words[${i + 2}]" = ${shQ(word)}`).join(' && ')
+    out.push(`  if [[ ${condition} ]]; then`)
+    const children = visible(cmd)
+    if (children.length)
+      out.push(
+        `    local -a nested=(${children.map((child) => zshDesc(child.name(), child.description())).join(' ')})`,
+        "    _describe 'commands' nested"
+      )
+    else if (flagNames(cmd).length) out.push(`    _arguments ${flagNames(cmd).map(shQ).join(' ')}`)
+    out.push('    return', '  fi')
   }
   out.push('  case $words[2] in')
   for (const e of all) {
@@ -116,6 +153,21 @@ export function bashScript(root: Command): string {
     '  elif [ $COMP_CWORD -eq 2 ]; then',
     '    case "$prev" in'
   ]
+  const nested: string[] = []
+  for (const { path, cmd } of nestedCommands(root)) {
+    const words = [...visible(cmd).map((child) => child.name()), ...flagNames(cmd)]
+    if (!words.length) continue
+    const condition = path
+      .map((word, i) => `[ "\${COMP_WORDS[${i + 1}]}" = ${shQ(word)} ]`)
+      .join(' && ')
+    nested.push(
+      `  if ${condition}; then`,
+      `    COMPREPLY=( $(compgen -W ${shQ(words.join(' '))} -- "$cur") )`,
+      '    return',
+      '  fi'
+    )
+  }
+  out.splice(6, 0, ...nested)
   for (const e of all) {
     const words =
       e.name === 'completions' ? [...SHELLS] : e.subs.length ? e.subs.map((s) => s.name) : e.flags

@@ -1,5 +1,6 @@
 import type { AgentEvent } from './agent-events'
 import type { ChatAttachment } from './chat-attachments'
+import type { ChatBlobChunk } from './chat-blobs'
 export interface ComputerChatBackup {
   id: string
   createdAt: number
@@ -93,6 +94,14 @@ export interface ChatComputerOps {
     conversationId: string,
     ref: ChatAttachment
   ): Promise<{ data: string }>
+  /** One chunk of an image / file an archived conversation's events reference (`chat-blobs`). */
+  archiveBlob(
+    computerId: string,
+    archiveId: string,
+    conversationId: string,
+    sha256: string,
+    offset: number
+  ): Promise<ChatBlobChunk>
   archiveFile(
     computerId: string,
     archiveId: string,
@@ -100,6 +109,29 @@ export interface ChatComputerOps {
     artifactId: string,
     contentHash: string
   ): Promise<{ name: string; data: string }>
+}
+
+/**
+ * Why a chat's history is unavailable: its computer was removed for good (deleted, or
+ * missing), or a computer that holds the chat did not return it.
+ */
+export type ChatUnavailableReason = 'computer-removed' | 'not-returned'
+export const CHAT_UNAVAILABLE_TITLE = 'Chat history unavailable'
+/** Why, without the title ({@link CHAT_UNAVAILABLE_TITLE}). `computerName`: who did not return it. */
+export function chatUnavailableDetail(
+  reason: ChatUnavailableReason,
+  computerName = 'Its computer'
+): string {
+  switch (reason) {
+    case 'computer-removed':
+      return 'Its computer was removed. Connect a computer that holds this chat (e.g. the same machine re-enrolled with its chat data) to restore it.'
+    case 'not-returned':
+      return `${computerName} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
+  }
+}
+/** As an error message: the title, then why. */
+export function chatUnavailableMessage(reason: ChatUnavailableReason): string {
+  return `${CHAT_UNAVAILABLE_TITLE}. ${chatUnavailableDetail(reason)}`
 }
 
 export interface ChatAvailability {
@@ -114,7 +146,21 @@ export interface ChatAvailability {
     | 'unavailable'
     | 'upgrading'
   computer: { id: string; name: string } | null
+  /** 'unavailable' only: why, when the hub knows. */
+  reasonCode?: ChatUnavailableReason
+  /**
+   * 'unavailable' only: why, as text without the title — for clients that predate
+   * `reasonCode` (a newer hub's text reads right there too).
+   */
+  reason?: string
   waitingForAgents?: boolean
+  /** Socket survived a hub freeze; liveness is being confirmed, not known offline. */
+  recovering?: boolean
+  /**
+   * `offline` only: a connected computer reported holding this chat — possibly the
+   * offline one enrolled again under a new id (`computers.replace` moves its work).
+   */
+  heldBy?: { id: string; name: string }
   /** Hub recovery watermark. A ready computer can have missed live notifications. */
   recoveryGeneration?: string
 }
@@ -129,14 +175,29 @@ export function chatAvailabilityMessage(
     case 'preparing':
       return null
     case 'offline':
+      if (status.recovering)
+        return {
+          title: `Reconnecting to ${name}`,
+          detail: 'Confirming the computer connection. Your agents may still be running.'
+        }
+      if (status.heldBy)
+        return {
+          title: `${name} is offline`,
+          detail:
+            status.heldBy.name === name
+              ? `Another computer named ${name} holds this chat, possibly this one enrolled again. If so, replace the offline ${name} with it in Settings → Connections.`
+              : `${status.heldBy.name} holds this chat. If ${status.heldBy.name} is ${name} enrolled again, replace ${name} with it in Settings → Connections.`
+        }
       return {
         title: `${name} is offline`,
         detail: 'Chat is stored there. Connect that computer to load history and send messages.'
       }
     case 'unavailable':
       return {
-        title: 'Chat history unavailable',
-        detail: `${name} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
+        title: CHAT_UNAVAILABLE_TITLE,
+        detail: status.reasonCode
+          ? chatUnavailableDetail(status.reasonCode, name)
+          : (status.reason ?? chatUnavailableDetail('not-returned', name))
       }
     case 'upgrading':
       return {

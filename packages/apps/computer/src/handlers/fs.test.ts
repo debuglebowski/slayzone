@@ -3,11 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  FS_READ_BYTES_MAX_CHUNK,
   HubToComputerMethods,
-  ComputerNotificationMethods
+  ComputerNotificationMethods,
+  RpcError
 } from '@slayzone/computer-transport/shared'
 import type { ComputerConfig } from '../config'
 import { createFsHandlers } from './fs'
+import { runInScopeJail } from '../path-jail'
 import type { ComputerDialer } from './types'
 
 // Method names come from the SHARED frame contract, never a local copy. This
@@ -409,5 +412,114 @@ describe('createFsHandlers — watch lifecycle', () => {
     mkdirSync(child, { recursive: true })
     const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
     expect(() => handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toThrow(/allowedRoots/)
+  })
+})
+
+describe('createFsHandlers — fs.readBytes', () => {
+  const BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x0d, 0x0a, 0x7f])
+  beforeEach(() => {
+    mkdirSync(join(dir, 'img'), { recursive: true })
+    writeFileSync(join(dir, 'img', 'a.png'), BYTES)
+  })
+
+  it('returns the requested slice base64-encoded, with the whole size and eof', async () => {
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const head = (await handlers[M.fsReadBytes]({
+      rootPath: dir,
+      filePath: 'img/a.png',
+      offset: 0,
+      length: 4
+    })) as { data: string; size: number; mtimeMs: number; eof: boolean }
+    expect(Buffer.from(head.data, 'base64')).toEqual(BYTES.subarray(0, 4))
+    expect(head.size).toBe(BYTES.length)
+    expect(head.mtimeMs).toBeGreaterThan(0)
+    expect(head.eof).toBe(false)
+
+    const tail = (await handlers[M.fsReadBytes]({
+      rootPath: dir,
+      filePath: 'img/a.png',
+      offset: 4,
+      length: 100
+    })) as { data: string; eof: boolean }
+    expect(Buffer.from(tail.data, 'base64')).toEqual(BYTES.subarray(4))
+    expect(tail.eof).toBe(true)
+  })
+
+  it('caps a slice at FS_READ_BYTES_MAX_CHUNK via the schema', async () => {
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    await expect(
+      Promise.resolve().then(() =>
+        handlers[M.fsReadBytes]({
+          rootPath: dir,
+          filePath: 'img/a.png',
+          offset: 0,
+          length: FS_READ_BYTES_MAX_CHUNK + 1
+        })
+      )
+    ).rejects.toThrow()
+  })
+
+  it('refuses a root outside the jail, and a relative escape from the root', async () => {
+    const child = join(dir, 'child')
+    mkdirSync(child, { recursive: true })
+    const narrow = createFsHandlers(ctxWithRoots([realpathSync(child)])).handlers
+    await expect(
+      Promise.resolve().then(() =>
+        narrow[M.fsReadBytes]({ rootPath: dir, filePath: 'img/a.png', offset: 0, length: 1 })
+      )
+    ).rejects.toThrow(/allowedRoots/)
+    const wide = createFsHandlers(ctxWithRoots([realpathSync(dir)])).handlers
+    await expect(
+      Promise.resolve().then(() =>
+        wide[M.fsReadBytes]({ rootPath: child, filePath: '../img/a.png', offset: 0, length: 1 })
+      )
+    ).rejects.toThrow(/traversal/i)
+  })
+
+  it('refuses a directory and a missing file with the errno on the wire', async () => {
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const dirErr = await Promise.resolve()
+      .then(() => handlers[M.fsReadBytes]({ rootPath: dir, filePath: 'img', offset: 0, length: 1 }))
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+    expect(dirErr).toBeInstanceOf(RpcError)
+    expect((dirErr as RpcError).data).toEqual({ errno: 'EISDIR' })
+    const missing = await Promise.resolve()
+      .then(() =>
+        handlers[M.fsReadBytes]({ rootPath: dir, filePath: 'nope.png', offset: 0, length: 1 })
+      )
+      .then(
+        () => null,
+        (e: unknown) => e
+      )
+    expect((missing as RpcError).data).toEqual({ errno: 'ENOENT' })
+  })
+
+  it('reports a missing file as ENOENT under a task/project scope too', async () => {
+    // A request the hub scoped (§9 Phase 7b) judges through the scope jail, which
+    // resolves the path first — its ENOENT must reach the hub as the same errno, or
+    // a missing remote file reads as a server error instead of "not found".
+    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
+    const jail = {
+      label: 'project p1',
+      roots: [realpathSync(dir)],
+      excluded: [],
+      foreign: [],
+      hostReads: false
+    }
+    const missing = await runInScopeJail(jail, () =>
+      Promise.resolve()
+        .then(() =>
+          handlers[M.fsReadBytes]({ rootPath: dir, filePath: 'nope.png', offset: 0, length: 1 })
+        )
+        .then(
+          () => null,
+          (e: unknown) => e
+        )
+    )
+    expect(missing).toBeInstanceOf(RpcError)
+    expect((missing as RpcError).data).toEqual({ errno: 'ENOENT' })
   })
 })

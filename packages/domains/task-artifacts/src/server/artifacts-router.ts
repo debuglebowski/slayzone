@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
@@ -6,15 +6,7 @@ import {
   assertHubLocalExecEnabled,
   hubProcessesEnabled
 } from '@slayzone/platform/hub-switch-refusal'
-import {
-  artifactWatcherEvents,
-  downloadArtifactFile,
-  downloadArtifactFolder,
-  downloadArtifactAsPdf,
-  downloadArtifactAsPng,
-  downloadArtifactAsHtml,
-  downloadAllArtifactsAsZip
-} from '@slayzone/task/server'
+import { artifactWatcherEvents } from '@slayzone/task/server'
 import type {
   CreateArtifactInput,
   UpdateArtifactInput,
@@ -26,14 +18,28 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
 import { type ArtifactStore } from './artifact-store'
 import { getArtifactStorage } from './artifact-storage'
-import { getArtifactsRouterDeps, signalTasksChanged } from './artifacts-router-deps'
+import { signalTasksChanged } from './artifacts-router-deps'
+import { listZipBytes, listZipFile } from './zip-listing'
+import type { ArchiveListing } from '../shared/types'
+
+/** The largest piece `readBytesChunk` serves (bytes before base64): the shared cap. */
+export const ARTIFACT_CHUNK_MAX = ARTIFACT_CHUNK_MAX_BYTES
+import { TRPCError } from '@trpc/server'
+import { ARTIFACT_CHUNK_MAX_BYTES } from '@slayzone/task-artifacts/download-plan'
+import {
+  clearMoveStaging,
+  missingMoveFiles,
+  moveFilesManifest,
+  MoveFilesRefusedError,
+  readMoveFile,
+  writeMoveFile
+} from './move-files'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
 // CRUD/version/folder/upload store is electron-free (@slayzone/task/server) and shared
-// with the IPC handlers (coexistence until slice 5). The 6 download procedures need
-// Electron dialogs + export renderers, which reach the host through the AppDeps
-// capability bridge (see `downloadHost` below).
+// with the IPC handlers (coexistence until slice 5). Downloads and exports are NOT
+// here: the client reads content/bytes and saves on its own device (useArtifacts).
 //
 // Every input is validated here (round-8 P1): an unchecked input reached the store
 // whole, and `create` forwarded a `sourcePath` nobody's policy checked — the hub read
@@ -47,7 +53,12 @@ const renderMode = z.enum([
   'svg-preview',
   'mermaid-preview',
   'image',
-  'pdf'
+  'pdf',
+  'video',
+  'audio',
+  'diff',
+  'archive',
+  'font'
 ]) satisfies z.ZodType<RenderMode>
 const createArtifactInput = z.object({
   taskId: z.string(),
@@ -111,6 +122,50 @@ const updateFolderInput = z.object({
 const versionRef = z.union([z.number(), z.string()])
 
 const store = getArtifactStorage
+
+/** Largest artifact `readBase64` sends (a font is a few MiB; CJK families reach ~20). */
+export const READ_BASE64_MAX_BYTES = 32 * 1024 * 1024
+
+/**
+ * The hub's own working file for an artifact, or null when it has none here: an
+ * artifact a computer holds (`storage`) arrives as bytes only.
+ */
+async function hubFileOf(s: ArtifactStore, db: SlayzoneDb, id: string): Promise<string | null> {
+  const artifact = await s.getArtifact(db, id)
+  if (!artifact || ('storage' in artifact && artifact.storage)) return null
+  const path = await s.getArtifactPath(db, id)
+  return path && existsSync(path) ? path : null
+}
+
+/** A zip artifact's entries; null for an unknown artifact. */
+async function listArchive(
+  s: ArtifactStore,
+  db: SlayzoneDb,
+  id: string
+): Promise<ArchiveListing | null> {
+  if (!(await s.getArtifact(db, id))) return null
+  const path = await hubFileOf(s, db, id)
+  return path ? listZipFile(path) : listZipBytes(await s.readArtifactBytes(db, id))
+}
+
+/** A small binary artifact's current bytes, base64; null for an unknown artifact. */
+async function readBase64(s: ArtifactStore, db: SlayzoneDb, id: string): Promise<string | null> {
+  if (!(await s.getArtifact(db, id))) return null
+  const tooLarge = (size: number) =>
+    new TRPCError({
+      code: 'PAYLOAD_TOO_LARGE',
+      message: `Artifact is ${size} bytes; at most ${READ_BASE64_MAX_BYTES} can be read inline.`
+    })
+  const path = await hubFileOf(s, db, id)
+  // Refuse a large file on the hub's disk before reading any of it.
+  if (path) {
+    const { size } = statSync(path)
+    if (size > READ_BASE64_MAX_BYTES) throw tooLarge(size)
+  }
+  const bytes = await s.readArtifactBytes(db, id)
+  if (bytes.byteLength > READ_BASE64_MAX_BYTES) throw tooLarge(bytes.byteLength)
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
+}
 
 // Every write tells the other clients when it changed what `getByTask` or
 // `foldersGetByTask` answers for a task — `notify.onTasksChanged` naming that task,
@@ -208,42 +263,74 @@ function assertPasteSourcesAreHubStorage(dataRoot: string, sources: unknown): vo
   }
 }
 
-// Host-only steps of a download (save sheet, directory picker, downloads dir, reveal,
-// offscreen PDF/PNG render) come from the host's capability bridge, injected through
-// `setArtifactsRouterDeps` (api wires it from AppDeps). Previously these procedures
-// reached the electron-side download module through a catch-guarded dynamic import,
-// which cannot work in the plain-node side-car the renderer now talks to: the module
-// bundles fine, so the "absent" branch never fired, and its electron binding resolved
-// to a string path. AppDeps is compile-enforced at all three wiring sites, so a missing
-// capability is a build error rather than a silent no-op.
-const downloadHost = () => getArtifactsRouterDeps().getDownloadHost()
-
-function downloadSource(
-  db: SlayzoneDb,
-  dataRoot: string
-): import('@slayzone/task/server').ArtifactDownloadSource {
-  const s = store(dataRoot)
-  return {
-    get: async (id) => {
-      const a = await s.getArtifact(db, id)
-      return a ? { ...a } : undefined
-    },
-    folder: async (id) => {
-      const row = await db.get<{ task_id: string }>(
-        'SELECT task_id FROM artifact_folders WHERE id=?',
-        [id]
-      )
-      if (!row) return undefined
-      const f = (await s.listFoldersByTask(db, row.task_id)).find((f) => f.id === id)
-      return f ? { ...f } : undefined
-    },
-    artifacts: async (taskId) => (await s.listArtifactsByTask(db, taskId)).map((a) => ({ ...a })),
-    folders: async (taskId) => (await s.listFoldersByTask(db, taskId)).map((f) => ({ ...f })),
-    read: (id) => s.readArtifactBytes(db, id)
+// ── a move between hubs: the artifacts' bytes (move-files.ts) ──
+const moveFileRef = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('blob'), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.object({ kind: z.literal('file'), taskId: z.string().min(1), path: z.string().min(1) }),
+  z.object({
+    kind: z.literal('project-icon'),
+    projectId: z.string().min(1),
+    name: z.string().min(1)
+  })
+])
+const moveFileEntry = z.object({
+  ref: moveFileRef,
+  size: z.number().int().min(0),
+  hash: z.string().regex(/^[0-9a-f]{64}$/)
+})
+/** A move's file step asked of the wrong hub, or out of order: the app's to fix. */
+async function moveFiles<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof MoveFilesRefusedError)
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message, cause: err })
+    throw err
   }
 }
 
 export const artifactsRouter = router({
+  // --- Moving tasks to another hub: copying their artifact files ---
+  /** Source: every file the move's tasks own here (blobs and working copies). */
+  moveManifest: publicProcedure
+    .input(z.object({ moveId: z.string().min(1) }))
+    .query(({ ctx, input }) =>
+      moveFiles(() => moveFilesManifest(ctx.db, ctx.dataRoot, input.moveId))
+    ),
+  /** Source: one chunk of such a file, base64. */
+  moveRead: publicProcedure
+    .input(
+      z.object({
+        moveId: z.string().min(1),
+        ref: moveFileRef,
+        offset: z.number().int().min(0),
+        length: z.number().int().min(1)
+      })
+    )
+    .query(({ ctx, input }) => moveFiles(() => readMoveFile(ctx.db, ctx.dataRoot, input))),
+  /** Target: the files still to copy, each with where its copy stands. */
+  moveMissing: publicProcedure
+    .input(z.object({ moveId: z.string().min(1), entries: z.array(moveFileEntry) }))
+    .mutation(({ ctx, input }) => moveFiles(() => missingMoveFiles(ctx.db, ctx.dataRoot, input))),
+  /** Target: write one chunk; the last one (`complete`) checks the file and places it. */
+  moveWrite: publicProcedure
+    .input(
+      z.object({
+        moveId: z.string().min(1),
+        ref: moveFileRef,
+        offset: z.number().int().min(0),
+        data: z.string(),
+        complete: z.object({ size: z.number().int().min(0), hash: z.string() }).optional()
+      })
+    )
+    .mutation(({ ctx, input }) => moveFiles(() => writeMoveFile(ctx.db, ctx.dataRoot, input))),
+  /** Target: drop the move's partial copies (after the step, or a canceled move). */
+  moveClearStaging: publicProcedure
+    .input(z.object({ moveId: z.string().min(1) }))
+    .mutation(({ ctx, input }) => {
+      clearMoveStaging(ctx.dataRoot, input.moveId)
+    }),
+
   // --- Artifact CRUD / read ---
   getByTask: publicProcedure
     .input(z.object({ taskId: z.string() }))
@@ -281,6 +368,42 @@ export const artifactsRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactContent(ctx.db, input.id)),
 
+  // One bounded piece of an artifact's bytes, for a download the CLIENT saves on its
+  // own device (file, folder, zip — see useArtifacts): no message or string ever holds
+  // a whole file, so size has no ceiling. Base64: superjson would carry a typed array
+  // as a JSON number array, ~3.6× the size. Null ONLY when there is no such artifact
+  // or file; any other read failure is an error the client surfaces.
+  readBytesChunk: publicProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        offset: z.number().int().min(0),
+        length: z.number().int().min(1).max(ARTIFACT_CHUNK_MAX)
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const r = await store(ctx.dataRoot).readArtifactBytesRange(
+        ctx.db,
+        input.id,
+        input.offset,
+        input.length
+      )
+      return r
+        ? {
+            data: Buffer.from(r.bytes.buffer, r.bytes.byteOffset, r.bytes.byteLength).toString(
+              'base64'
+            ),
+            size: r.size,
+            version: r.version
+          }
+        : null
+    }),
+
+  /** The in-app editor's read: the text, or why it is not shown as text (binary / too large). */
+  readText: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactText(ctx.db, input.id)),
+
   getFilePath: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).getArtifactPath(ctx.db, input.id)),
@@ -288,6 +411,20 @@ export const artifactsRouter = router({
   getMtime: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).getArtifactMtime(ctx.db, input.id)),
+
+  /** A zip artifact's entries (the archive viewer), read from its central directory. */
+  listArchive: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => listArchive(store(ctx.dataRoot), ctx.db, input.id)),
+
+  /**
+   * A small binary artifact's bytes, base64 (the font viewer: a font must be loaded
+   * from bytes, since `slz-file:` is not readable by CORS fetches). At most
+   * `READ_BASE64_MAX_BYTES`, else PAYLOAD_TOO_LARGE.
+   */
+  readBase64: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => readBase64(store(ctx.dataRoot), ctx.db, input.id)),
 
   // --- Binary uploads (bytes via superjson) ---
   // `upload`/`uploadDir` read a client-named path off the hub's disk (see
@@ -320,6 +457,25 @@ export const artifactsRouter = router({
         (rows) => rows.map((a) => a.task_id)
       )
     ),
+  // Moves entries to another task keeping their ids, versions and links
+  // (`artifact:<id>`). A retry completes a partly applied move.
+  move: publicProcedure
+    .input(
+      z
+        .object({
+          artifactIds: z.array(z.string()).max(1000),
+          folderIds: z.array(z.string()).max(1000),
+          sourceTaskId: z.string(),
+          destTaskId: z.string(),
+          destFolderId: z.string().nullable()
+        })
+        .refine((v) => v.artifactIds.length + v.folderIds.length > 0, 'Nothing to move')
+    )
+    .mutation(async ({ ctx, input }) => {
+      const result = await store(ctx.dataRoot).moveArtifacts(ctx.db, input)
+      signalTasksChanged([input.sourceTaskId, input.destTaskId])
+      return result
+    }),
   pasteFiles: publicProcedure.input(pasteFilesInput).mutation(({ ctx, input }) => {
     assertPasteSourcesAreHubStorage(ctx.dataRoot, input.sourcePaths)
     return creating(
@@ -454,79 +610,6 @@ export const artifactsRouter = router({
       await store(ctx.dataRoot).reorderFolders(ctx.db, input)
       signalTasksChanged(taskIds)
     }),
-
-  // --- Download (needs the Electron host via AppDeps) ---
-  downloadFile: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactFile(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadFolder: publicProcedure
-    .input(z.object({ folderId: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactFolder(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.folderId,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAsPdf: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactAsPdf(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAsPng: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactAsPng(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAsHtml: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadArtifactAsHtml(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.id,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
-
-  downloadAllAsZip: publicProcedure
-    .input(z.object({ taskId: z.string() }))
-    .mutation(({ ctx, input }) =>
-      downloadAllArtifactsAsZip(
-        downloadHost(),
-        ctx.db,
-        ctx.dataRoot,
-        input.taskId,
-        downloadSource(ctx.db, ctx.dataRoot)
-      )
-    ),
 
   // --- Subscription ---
   // Fires when any artifact file changes on disk (fs.watch). Replaces the

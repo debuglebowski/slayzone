@@ -1,13 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { taskCheckoutPath, useTaskFolders } from './task-folders'
 import { useTRPC } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
 
 const POLL_MS = 30_000
-
-/** The checkout a task's branch lives in: its worktree, else its base dir, else the project. */
-export function taskCheckoutPath(task: Task, projectPath: string | null): string | null {
-  return task.worktree_path ?? task.base_dir ?? projectPath
-}
 
 /**
  * The PR gh resolves for the task's checked-out branch. Only consulted while the
@@ -29,7 +25,9 @@ export function useBranchPr({
   enabled: boolean
 }) {
   const trpc = useTRPC()
-  const checkoutPath = task ? taskCheckoutPath(task, projectPath) : null
+  // The checkout a task's branch lives in: its worktree, else its base dir, else the project.
+  const folders = useTaskFolders(task)
+  const checkoutPath = task ? taskCheckoutPath(task, folders, projectPath) : null
   const active = enabled && !!task && !task.pr_url && !!checkoutPath
   const branchQuery = useQuery(
     trpc.worktrees.getCurrentBranch.queryOptions(

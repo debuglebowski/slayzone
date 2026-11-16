@@ -5,12 +5,19 @@ import { unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import type { Express } from 'express'
+import type { Express, Response } from 'express'
 import { getArtifactStorage } from '@slayzone/task-artifacts/server'
 import type { RenderMode } from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot, resolveArtifactFilePath } from './shared'
+import {
+  contentRange,
+  parseRange,
+  resolveRange,
+  unsatisfiedContentRange,
+  type RangeAsk
+} from '../byte-range'
 
 /**
  * Artifact content transfer. Mirrors `slay tasks artifacts read` / `create` /
@@ -19,7 +26,8 @@ import { getArtifactsDataRoot, resolveArtifactFilePath } from './shared'
  *
  * - GET  /api/artifacts/:id/content — stream the working-copy file from disk.
  *   Backs `read` (stdout) and `download --type raw` (file copy) as well as the
- *   per-file reads `download --type zip` assembles client-side.
+ *   per-file reads `download --type zip` assembles client-side, and the desktop's
+ *   previews (one `Range` honoured, so a video or PDF can seek).
  * - POST /api/artifacts?taskId=&title=[&folderId=&renderMode=] — create from a
  *   streamed request body (`create`).
  * - POST /api/tasks/:id/artifacts?title=<name> — upload from a streamed request
@@ -158,6 +166,50 @@ export async function createArtifactFromStream(
   }
 }
 
+/**
+ * Status and headers for an artifact body of `size` bytes, honouring one `Range`
+ * (`byte-range.ts`): the slz-file preview handler forwards it, and a `<video>` or the
+ * PDF viewer needs 206s to seek. Returns the `[start, end)` to send, or null after
+ * answering 416.
+ */
+function startBody(
+  res: Response,
+  ask: RangeAsk,
+  size: number,
+  title: string
+): { start: number; end: number } | null {
+  res.setHeader('accept-ranges', 'bytes')
+  const range = resolveRange(ask, size)
+  if (!range) {
+    res.setHeader('content-range', unsatisfiedContentRange(size))
+    res.status(416).json({
+      ok: false,
+      code: 'RANGE_NOT_SATISFIABLE',
+      error: `range not satisfiable for ${size} bytes`
+    })
+    return null
+  }
+  if (ask.kind !== 'none') {
+    res.status(206)
+    res.setHeader('content-range', contentRange(range, size))
+  }
+  res.setHeader('content-type', 'application/octet-stream')
+  res.setHeader('content-length', String(range.end - range.start))
+  // Two filename forms: the legacy quoted one, and the RFC5987 `filename*`,
+  // which is percent-encoded and therefore LOSSLESS. `download` defaults its
+  // output path to the artifact title, so a caller holding only an id prefix
+  // must be able to recover the exact title — quotes, non-ASCII and all.
+  // The quoted form is reduced to printable ASCII on purpose: HTTP header
+  // values are latin-1, so a raw multi-byte char there is emitted mangled
+  // anyway (and a CR/LF would be header injection).
+  const asciiName = title.replace(/[^\x20-\x7e]|["\\]/g, '_')
+  res.setHeader(
+    'content-disposition',
+    `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(title)}`
+  )
+  return range
+}
+
 export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps): void {
   app.get('/api/artifacts/:id/content', async (req, res) => {
     try {
@@ -177,16 +229,14 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
       }
       const storage = getArtifactStorage(getArtifactsDataRoot())
       const artifact = (await storage.getArtifact(deps.db, resolved.row.id)) ?? resolved.row
+      const ask = parseRange(queryString(req.headers.range))
       if ('storage' in artifact && artifact.storage) {
         const bytes = await storage.readArtifactBytes(deps.db, artifact.id)
-        res.setHeader('content-type', 'application/octet-stream')
-        res.setHeader('content-length', String(bytes.byteLength))
-        const asciiName = artifact.title.replace(/[^\x20-\x7e]|["\\]/g, '_')
-        res.setHeader(
-          'content-disposition',
-          `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(artifact.title)}`
-        )
-        res.end(Buffer.from(bytes))
+        const range = startBody(res, ask, bytes.byteLength, artifact.title)
+        if (range)
+          res.end(
+            Buffer.from(bytes.buffer, bytes.byteOffset + range.start, range.end - range.start)
+          )
         return
       }
       const filePath = resolveArtifactFilePath(artifact.task_id, artifact.id, artifact.title)
@@ -204,22 +254,14 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
         return
       }
 
-      const { size } = statSync(filePath)
-      res.setHeader('content-type', 'application/octet-stream')
-      res.setHeader('content-length', String(size))
-      // Two filename forms: the legacy quoted one, and the RFC5987 `filename*`,
-      // which is percent-encoded and therefore LOSSLESS. `download` defaults its
-      // output path to the artifact title, so a caller holding only an id prefix
-      // must be able to recover the exact title — quotes, non-ASCII and all.
-      // The quoted form is reduced to printable ASCII on purpose: HTTP header
-      // values are latin-1, so a raw multi-byte char there is emitted mangled
-      // anyway (and a CR/LF would be header injection).
-      const asciiName = artifact.title.replace(/[^\x20-\x7e]|["\\]/g, '_')
-      res.setHeader(
-        'content-disposition',
-        `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(artifact.title)}`
-      )
-      const stream = createReadStream(filePath)
+      const range = startBody(res, ask, statSync(filePath).size, artifact.title)
+      if (!range) return
+      // An empty body (empty file): `createReadStream` has no empty `end`.
+      if (range.end === range.start) {
+        res.end()
+        return
+      }
+      const stream = createReadStream(filePath, { start: range.start, end: range.end - 1 })
       stream.on('error', () => {
         if (!res.headersSent) res.status(500)
         res.destroy()

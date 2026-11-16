@@ -1,4 +1,8 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  LegacyChatStorageRetiredError,
+  legacyChatTables
+} from '@slayzone/platform/legacy-chat-tables'
 import type { WorkspaceChangesEvent, WorkspaceChangesRecord } from '@slayzone/terminal-contracts'
 import type { WorkspaceChangesStore } from './runtime/chat-workspace-tracker'
 
@@ -13,12 +17,22 @@ type Row = {
   files: string
 }
 
+/**
+ * The hub's legacy workspace-changes table. Once dropped (every chat migrated,
+ * robustness plan §9 Phase 8) reads find nothing and writes are refused.
+ */
 export function createWorkspaceChangesStore(db: SlayzoneDb) {
+  const tables = () => legacyChatTables(db)
+  const writable = async () => {
+    if (!(await tables())) throw new LegacyChatStorageRetiredError('workspace changes')
+  }
   const store = {
     async remove(tabId: string, id: string) {
+      if (!(await tables())) return
       await db.prepare('DELETE FROM chat_workspace_changes WHERE tab_id=? AND id=?').run(tabId, id)
     },
     async begin(record: Omit<WorkspaceChangesRecord, 'status'> & { status: 'pending' }) {
+      await writable()
       await db
         .prepare(`INSERT INTO chat_workspace_changes (id,tab_id,message_id,computer_id,root_path,status,created_at)
         VALUES (?,?,?,?,?,'pending',?) ON CONFLICT(id) DO NOTHING`)
@@ -32,6 +46,7 @@ export function createWorkspaceChangesStore(db: SlayzoneDb) {
         )
     },
     async save(record: WorkspaceChangesRecord) {
+      await writable()
       const ops: Parameters<SlayzoneDb['batchTxn']>[0] = [
         {
           type: 'run',
@@ -66,6 +81,7 @@ export function createWorkspaceChangesStore(db: SlayzoneDb) {
       await db.batchTxn(ops)
     },
     async get(tabId: string, id: string) {
+      if (!(await tables())) return null
       const row = await db
         .prepare('SELECT * FROM chat_workspace_changes WHERE id=? AND tab_id=?')
         .get<Row>(id, tabId)
@@ -82,6 +98,7 @@ export function createWorkspaceChangesStore(db: SlayzoneDb) {
       }
     },
     async getFileDiff(tabId: string, id: string, path: string): Promise<string | null> {
+      if (!(await tables())) return null
       const row = await db
         .prepare(`SELECT d.diff FROM chat_workspace_diffs d JOIN chat_workspace_changes c ON c.id=d.capture_id
         WHERE c.tab_id=? AND c.id=? AND d.path=?`)
@@ -89,6 +106,7 @@ export function createWorkspaceChangesStore(db: SlayzoneDb) {
       return row?.diff ?? null
     },
     async recover(tabId: string): Promise<WorkspaceChangesEvent[]> {
+      if (!(await tables())) return []
       const rows = await db
         .prepare("SELECT * FROM chat_workspace_changes WHERE tab_id=? AND status='pending'")
         .all<Row>(tabId)

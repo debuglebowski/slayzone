@@ -24,12 +24,12 @@ import {
   crashReporter,
   nativeImage
 } from 'electron'
-import { join, extname, normalize, sep, resolve } from 'path'
+import { join, sep, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { homedir, hostname } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
+import { readFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
 
@@ -102,6 +102,7 @@ import { checkHubSession } from '@slayzone/hub-auth/client'
 import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
+import { createSlzFileHandler } from './slz-file-handler'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -190,6 +191,8 @@ const isViteDev = !app.isPackaged && !isPlaywright && !!process.env['ELECTRON_RE
 /** Must match DEV_RELAUNCH_EXIT_CODE in packages/apps/app/dev.mjs. */
 const DEV_RELAUNCH_EXIT_CODE = 75
 function relaunchApp(exitCode?: number): void {
+  // app.exit skips will-quit: remove open downloads' partials here.
+  abortAllSaveTargetsNow()
   if (isViteDev) {
     app.exit(DEV_RELAUNCH_EXIT_CODE)
     return
@@ -261,9 +264,7 @@ import {
   getManualInstallHint,
   getSupervisedRoot,
   SIDECAR_FIXED_PORT,
-  SLZ_FILE_HOST,
-  fileUrlToSlzFileUrl,
-  injectForcedHtmlTheme
+  fileUrlToSlzFileUrl
 } from '@slayzone/platform'
 import { initStorageDir, getStorageDir, resolveLegacyStateDir } from './data-paths'
 import { StorageImportError } from './copy-utils'
@@ -448,9 +449,9 @@ import logoSolid from '../../resources/logo-solid.svg?asset'
 /** Unpackaged runs (`pnpm dev`, e2e) get a DEV-badged icon so they're distinguishable from the installed app. */
 const icon = app.isPackaged ? packagedIcon : devIcon
 
-// The standalone mermaid browser bundle the offscreen artifact exporter injects. An
-// asset import copies just this file into out/main, so the packaged app need not ship
-// the mermaid package (the renderer bundles its own mermaid).
+// The standalone mermaid browser bundle the offscreen artifact exporter injects
+// (`./artifact-export`). An asset import copies just this file into out/main, so the
+// packaged app need not ship the mermaid package (the renderer bundles its own mermaid).
 import mermaidScriptPath from 'mermaid/dist/mermaid.min.js?asset'
 import {
   initDatabases,
@@ -460,15 +461,9 @@ import {
 } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
-import {
-  filesPathExists,
-  filesSaveTempImage,
-  buildPdfHtml,
-  buildMermaidPdfHtml,
-  buildPngHtml,
-  renderToPdf,
-  renderToPng
-} from '@slayzone/task/electron'
+import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
+import { exportArtifactOnDesktop, type ExportTimings } from './artifact-export'
+import { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner } from './client-save'
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
@@ -2286,6 +2281,8 @@ app
       recordDiagnosticEvent,
       requestPtyRespawn: broadcastRespawnRequest,
       onReachedTerminal: onTaskReachedTerminal,
+      // The same teardown the agents stopper below runs (PTYs + chats of this host).
+      stopTaskAgents: async (taskId: string) => onTaskReachedTerminal(taskId),
       // Data-root seam so task ops/ stays server-pure. MUST be the resolved
       // storage dir (this app's channel-scoped hub root), NOT
       // app.getPath('userData') — post-migration artifacts live under
@@ -2492,24 +2489,6 @@ app
               },
               appGetVersion: () => app.getVersion(),
               appGetDownloadsDir: async () => app.getPath('downloads'),
-              // Offscreen renderers, reached from the hub over the capability bridge.
-              artifactBuildExportHtml: async (content, mode, title) =>
-                mode === 'mermaid-preview'
-                  ? buildMermaidPdfHtml(content, title, mermaidScriptPath)
-                  : buildPdfHtml(content, mode, title),
-              artifactRenderPdfToFile: async (content, mode, title, destPath) => {
-                const isMermaid = mode === 'mermaid-preview'
-                const html = isMermaid
-                  ? buildMermaidPdfHtml(content, title, mermaidScriptPath)
-                  : buildPdfHtml(content, mode, title)
-                writeFileSync(destPath, await renderToPdf(html, isMermaid))
-              },
-              artifactRenderPngToFile: async (content, mode, title, destPath) => {
-                const html = buildPngHtml(content, mode, title, mermaidScriptPath)
-                if (!html) return false
-                writeFileSync(destPath, await renderToPng(html))
-                return true
-              },
               appGetTrpcPort: () => awaitTrpcPort(),
               appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
               appSetLabFlag: async (key, on) => {
@@ -2936,88 +2915,30 @@ app
     _chromiumVersion = rawUa.match(/Chrome\/(\d+)/)?.[1] || '142'
     browserSession.setUserAgent(_chromeUa)
 
-    // Serve local files via slz-file:// (Chromium blocks file:// in webviews and cross-origin renderers)
-    const userHome = homedir()
-    const slzFileHandler = async (request: Request) => {
-      // URLs are constructed via @slayzone/platform's toSlzFileUrl, which
-      // fills the authority slot with SLZ_FILE_HOST so Chromium's standard-URL
-      // canonicalizer can't move the first path segment into the host
-      // (lowercasing + Unicode-mangling it).
-      const parsed = new URL(request.url)
-      if (parsed.hostname !== SLZ_FILE_HOST) {
-        return new Response('Forbidden', { status: 403 })
-      }
-      const filePath = normalize(decodeURIComponent(parsed.pathname))
-
-      // Block path traversal outside user home directory.
-      if (!filePath.startsWith(userHome + sep)) {
-        return new Response(
-          `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Forbidden</title>
-<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#1a1a1a;color:#888}
-div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:12px;margin:8px 0 0;word-break:break-all;max-width:400px}</style>
-</head><body><div><h1>Access denied</h1><p>Path outside home directory</p></div></body></html>`,
-          { status: 200, headers: { 'content-type': 'text/html' } }
-        )
-      }
-      const mimeTypes: Record<string, string> = {
-        '.html': 'text/html',
-        '.htm': 'text/html',
-        '.css': 'text/css',
-        '.js': 'text/javascript',
-        '.mjs': 'text/javascript',
-        '.json': 'application/json',
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.svg': 'image/svg+xml',
-        '.ico': 'image/x-icon',
-        '.webp': 'image/webp',
-        '.avif': 'image/avif',
-        '.bmp': 'image/bmp',
-        '.woff': 'font/woff',
-        '.woff2': 'font/woff2',
-        '.ttf': 'font/ttf',
-        '.pdf': 'application/pdf',
-        '.xml': 'application/xml',
-        '.txt': 'text/plain'
-      }
-      try {
-        const data = await fsp.readFile(filePath)
-        const contentType = mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream'
-
-        // Per-artifact forced theme (task-artifacts HTML preview): the iframe
-        // is sandboxed cross-origin with no webContents handle to insertCSS
-        // into, so the override is injected as text here instead, gated on an
-        // explicit `theme` param only html preview requests ever send — every
-        // other slz-file:// consumer (images, PDFs, browser tabs, plain files)
-        // gets the untouched buffer below, unchanged. Doing it at parse time
-        // also means the document is never painted in the wrong scheme first.
-        const theme = parsed.searchParams.get('theme')
-        if (contentType === 'text/html' && (theme === 'dark' || theme === 'light')) {
-          const doctored = injectForcedHtmlTheme(data.toString('utf-8'), theme)
-          return new Response(doctored, {
-            headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
-          })
+    // Serve files via slz-file:// (Chromium blocks file:// in webviews and
+    // cross-origin renderers). Local paths come off this disk; source URLs (a file
+    // on a hub or one of its computers) are fetched from that hub — see
+    // slz-file-handler.ts.
+    const slzFileHandler = createSlzFileHandler({
+      homeDir: homedir(),
+      resolveHub: async (hubId) => {
+        const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+        const hub = resolveHubRegistry(cfg).find((h) => h.id === hubId)
+        if (!hub) return null
+        const token = await createHubTokenStore(
+          getClientStateRoot(),
+          getLegacyClientStateRoot()
+        ).get(hubId)
+        if (hub.id === LOCAL_HUB_ID && !isRemoteMode) {
+          const handle = await sidecarHandlePromise
+          await handle.waitForReady()
+          const port = handle.getPort()
+          return port ? { origin: `http://127.0.0.1:${port}`, token } : null
         }
-
-        return new Response(data, {
-          headers: {
-            'content-type': contentType,
-            'cache-control': 'no-cache'
-          }
-        })
-      } catch {
-        const escaped = filePath.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
-        return new Response(
-          `<!DOCTYPE html><html><head><meta charset="utf-8"><title>File not found</title>
-<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#1a1a1a;color:#888}
-div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:12px;margin:8px 0 0;word-break:break-all;max-width:400px}</style>
-</head><body><div><h1>File not found</h1><p>${escaped}</p></div></body></html>`,
-          { status: 200, headers: { 'content-type': 'text/html' } }
-        )
+        const normalized = hub.url ? normalizeRemoteUrl(hub.url) : null
+        return normalized ? { origin: toHubOrigin(normalized), token } : null
       }
-    }
+    })
     const webPanelSession = session.fromPartition('persist:web-panels')
     webPanelSession.setUserAgent(_chromeUa)
 
@@ -3558,6 +3479,16 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       })
     }
     ipcMain.handle('app:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
+    // Work a quit would interrupt (a task moving to another hub): the main window's
+    // renderer names it; quitting then asks first (before-quit below).
+    ipcMain.handle('app:set-quit-guard', (event, raw: unknown) => {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+      const message =
+        raw && typeof raw === 'object' && typeof (raw as { message?: unknown }).message === 'string'
+          ? (raw as { message: string }).message
+          : null
+      quitGuardMessage = message
+    })
     // App icon badge. Only the main window's renderer drives it (it holds the
     // full task list); secondary task windows never send, but guard anyway.
     ipcMain.handle('app:set-badge', (event, raw: unknown) => {
@@ -3877,6 +3808,41 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         typeof hubId === 'string' ? hubId : '',
         typeof address === 'string' ? address : ''
       )
+    )
+    // Artifact export renders HERE, on the device the person is using — never on the
+    // hub, so it works the same against a local or a remote hub.
+    ipcMain.handle('app:export-artifact', (event, request: unknown) =>
+      exportArtifactOnDesktop(BrowserWindow.fromWebContents(event.sender), request, {
+        mermaidScriptPath,
+        // e2e shortens the export window's waits (a hung document fails in seconds).
+        timings: isPlaywright
+          ? (globalThis as { __e2eExportTimings?: ExportTimings }).__e2eExportTimings
+          : undefined
+      })
+    )
+    // Downloads land on THIS machine too: the renderer streams the pieces it reads
+    // from the hub, main writes them (client-save.ts). A target belongs to the window
+    // that opened it and is aborted if that window goes away mid-download.
+    const saveTargets = new SaveTargets()
+    // Quitting mid-download leaves no hidden partial in the person's folder.
+    app.on('will-quit', () => saveTargets.abortAllNow())
+    ipcMain.handle('app:save-target-open', (event, request: unknown) => {
+      watchSaveTargetOwner(event.sender, saveTargets)
+      return saveTargets.open(event.sender.id, BrowserWindow.fromWebContents(event.sender), request)
+    })
+    ipcMain.handle(
+      'app:save-target-write',
+      (event, id: unknown, path: unknown, data: unknown, size: unknown) =>
+        saveTargets.write(event.sender.id, id, path, data, size)
+    )
+    ipcMain.handle('app:save-target-mkdir', (event, id: unknown, path: unknown) =>
+      saveTargets.mkdir(event.sender.id, id, path)
+    )
+    ipcMain.handle('app:save-target-close', (event, id: unknown) =>
+      saveTargets.close(event.sender.id, id)
+    )
+    ipcMain.handle('app:save-target-abort', (event, id: unknown) =>
+      saveTargets.abort(event.sender.id, id)
     )
     if (isPlaywright) {
       ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())
@@ -4896,7 +4862,40 @@ app.on('window-all-closed', () => {
   }
 })
 
+/** Set by the renderer while a quit would interrupt work (`app:set-quit-guard`). */
+let quitGuardMessage: string | null = null
+
 app.on('before-quit', (event) => {
+  // Work a quit would interrupt: ask first. Quit anyway → the guard is lifted and the
+  // quit goes on (the work resumes at the next start); Cancel → nothing happens.
+  if (quitGuardMessage && !quitRequested) {
+    event.preventDefault()
+    const message = quitGuardMessage
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+    const ask = parent
+      ? dialog.showMessageBox(parent, {
+          type: 'warning',
+          buttons: ['Cancel', 'Quit anyway'],
+          defaultId: 0,
+          cancelId: 0,
+          message: 'Quit SlayZone?',
+          detail: message
+        })
+      : dialog.showMessageBox({
+          type: 'warning',
+          buttons: ['Cancel', 'Quit anyway'],
+          defaultId: 0,
+          cancelId: 0,
+          message: 'Quit SlayZone?',
+          detail: message
+        })
+    void ask.then(({ response }) => {
+      if (response !== 1) return
+      quitGuardMessage = null
+      app.quit()
+    })
+    return
+  }
   // From the first quit request on, a hub/computer that exits stays down: the
   // drain below can take seconds, and a respawn in that window outlives a quit
   // that stalls (see QUIT_WATCHDOG_MS).
@@ -4919,7 +4918,10 @@ app.on('before-quit', (event) => {
       } catch {
         /* diagnostics unavailable — the console error above still records it */
       }
-      // app.exit skips will-quit, so reap the children here. Reap the hub and the
+      // app.exit skips will-quit, so remove open downloads' partials, and reap the
+      // children here.
+      abortAllSaveTargetsNow()
+      // Reap the hub and the
       // computer (bounded), THEN flush (bounded) — as will-quit does — so a missed
       // reap's *.quit_reap_failed event is still in the queue the flush writes,
       // along with the watchdog event above.

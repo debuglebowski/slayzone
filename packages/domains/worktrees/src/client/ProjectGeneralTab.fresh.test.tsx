@@ -14,7 +14,7 @@ let unstaged = 0
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => {
   // tRPC-shaped: queryOptions(input, opts) → a real query (key + fn + caller's opts).
   const q = (name: string, fn: (input: Record<string, string>) => Promise<unknown>) => ({
@@ -48,7 +48,12 @@ vi.mock('@slayzone/transport/client', () => {
     settings: { get: q('settings.get', async () => null), set: { mutationOptions: () => ({}) } }
   }
   const trpcClient = {}
-  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient, useSubscription: () => undefined }
+  return {
+    useHubId: () => null,
+    useTRPC: () => trpc,
+    useTRPCClient: () => trpcClient,
+    useSubscription: () => undefined
+  }
 })
 vi.mock('./BranchesTab', () => ({
   useBranchGraph: () => ({ refresh: async () => {} }),

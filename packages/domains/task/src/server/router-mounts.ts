@@ -1,6 +1,7 @@
 import type { taskRouter } from './task-router'
 import type { AgentSessionsRouter } from './agent-sessions-router'
 import type { TemplateRouter } from './template-router'
+import type { taskMovesRouter } from './task-moves-router'
 
 export type TaskRouter = typeof taskRouter
 
@@ -14,4 +15,6 @@ export type TaskMounts = {
   task: TaskRouter
   agentSessions: AgentSessionsRouter
   template: TemplateRouter
+  /** Moving tasks to another hub: each hub's journal of its tasks' moves. */
+  taskMoves: typeof taskMovesRouter
 }

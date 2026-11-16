@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/agent-turns",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -25,7 +25,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@tanstack/react-query": "^5.104.5",
     "@trpc/server": "^11.19.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

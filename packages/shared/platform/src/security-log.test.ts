@@ -373,7 +373,13 @@ describe('security-log: acting-user context', () => {
       'automation.run_command',
       'hub.local_exec',
       'integration.connect',
-      'hub.retention.sweep'
+      'hub.retention.sweep',
+      // The shared IdP-role contract's audit events (idp-role-contract AuditEventName).
+      'idp_roles.granted',
+      'idp_roles.denied',
+      'idp_roles.revalidated',
+      'idp_roles.local_change_refused',
+      'idp_roles.activation'
     ]) {
       expect(SECURITY_EVENTS as readonly string[], `${name} reserved`).toContain(name)
     }

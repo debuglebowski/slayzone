@@ -122,3 +122,32 @@ test('releasing a conversation stops the chat process running it, and waits for 
   // Another task's or another conversation's chat is left alone.
   await mgr.releaseChatConversation('task', '99999999-2222-4333-8444-555555555555')
 })
+
+test('imported history is broadcast and persisted as the store saves it (prepared), like live events', async () => {
+  const persisted: AgentEvent[] = []
+  const prepare = (_tabId: string, e: AgentEvent): AgentEvent =>
+    e.kind === 'tool-result' ? { ...e, rawContent: 'stored form' } : e
+  const h = transportHarness({
+    deps: {
+      eventStore: {
+        ...mgr.memoryChatEventReads(() => []),
+        insert: async () => 'inserted',
+        prepare
+      },
+      persistEvent: (_tabId, _seq, event) => {
+        persisted.push(event)
+      }
+    }
+  })
+  await mgr.hydrateSession({ ...TAB_OPTS })
+  await mgr.switchTabConversation(TAB_OPTS.tabId, {
+    conversationId: X,
+    branch,
+    history,
+    notices: []
+  })
+  const broadcast = h.saved().find((e) => e.kind === 'tool-result') as { rawContent: unknown }
+  expect(broadcast.rawContent).toBe('stored form')
+  const saved = persisted.find((e) => e.kind === 'tool-result') as { rawContent: unknown }
+  expect(saved.rawContent).toBe('stored form')
+})

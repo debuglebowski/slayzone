@@ -1,7 +1,8 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { createChatOwnershipStore } from '@slayzone/chat-runtime/hub'
 import type { DiagnosticEvent } from '@slayzone/diagnostics/shared'
-import { listSharedSessionClaims, relinquishSession } from '@slayzone/task/server'
+import { relinquishSession } from '@slayzone/task/server'
+import type { ComputerSessionLedger } from '@slayzone/chat-runtime/hub'
 
 export interface SharedSessionRepair {
   conversationId: string
@@ -21,25 +22,32 @@ export interface SharedSessionRepair {
  * mode) claim gets a `session_deletions` tombstone, so
  *
  * - a chat owner that holds the session decides the winner — it is the side
- *   driving the transcript, and the readers cannot see chat bindings (task does
- *   not depend on chat-runtime). Without the tombstone the earlier claimant would
+ *   driving the transcript; the computer names it (`chatSessionOwner`). Without the tombstone the earlier claimant would
  *   keep resolving the session and the hub would refuse its agent;
  * - the winner deleting the session later can never hand it to a loser.
  *
  * Tombstones are reversible (drop the row); transcripts on disk are never
- * touched. Idempotent — a tombstoned claim is no longer listed — so it runs at
- * every boot and also catches any future writer that records a shared id.
+ * touched. Idempotent — a tombstoned claim is no longer listed once its tombstone
+ * is delivered — so it runs whenever a computer connects: the session ledger lives
+ * on each computer (robustness plan §9), and the claims it lists are that
+ * computer's. The tombstones are the hub's intent, delivered like any deletion.
  */
 export async function repairSharedSessionClaims(deps: {
   db: SlayzoneDb
   record: (event: DiagnosticEvent) => void
+  ledger: Pick<ComputerSessionLedger, 'listSharedSessionClaims' | 'chatSessionOwner'>
+  computerId: string
 }): Promise<SharedSessionRepair[]> {
   const ownership = createChatOwnershipStore(deps.db)
   const repairs: SharedSessionRepair[] = []
-  for (const { conversationId, claims } of await listSharedSessionClaims(deps.db)) {
+  for (const { conversationId, claims } of await deps.ledger.listSharedSessionClaims(
+    deps.computerId
+  )) {
     let bound: string | null = null
     for (const mode of new Set(claims.map((c) => c.mode))) {
-      const owner = await ownership.forProviderSession(conversationId, mode)
+      // The chat holding the session on this computer (its own record, v208).
+      const held = await deps.ledger.chatSessionOwner(deps.computerId, conversationId, mode)
+      const owner = held ? await ownership.get(held.conversationId) : null
       if (owner && owner.state !== 'deleted') {
         bound = owner.taskId
         break

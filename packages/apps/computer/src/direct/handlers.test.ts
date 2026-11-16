@@ -40,7 +40,13 @@ function setup() {
       // A login-shell probe that never settles: grant bookkeeping must not wait on it.
       pathReady: new Promise(() => {})
     })
-  return { store, hubA: hub('a.example'), hubB: hub('b.example'), logFile: requestLog.filePath }
+  return {
+    store,
+    hubA: hub('a.example'),
+    hubB: hub('b.example'),
+    logFile: requestLog.filePath,
+    requestLog
+  }
 }
 
 const grantParams = {
@@ -82,8 +88,9 @@ describe('direct.* hub methods on the computer', () => {
   })
 
   it('logs the grant id, never the token hash', async () => {
-    const { hubA, logFile } = setup()
+    const { hubA, logFile, requestLog } = setup()
     await hubA.handle(HubToComputerMethods.directGrant, grantParams, ACTOR)
+    await requestLog.flush()
     const log = readFileSync(logFile, 'utf8')
     expect(log).toContain('"grantId":"g1"')
     expect(log).not.toContain(HASH)

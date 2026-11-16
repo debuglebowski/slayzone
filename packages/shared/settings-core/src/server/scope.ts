@@ -29,6 +29,7 @@
  * So a migration that seeds a `user` key's default only seeds it for a hub without
  * login — put a per-user default in the client.
  */
+import { LEGACY_CHAT_TABLES_DROPPED_SETTING } from '@slayzone/platform/legacy-chat-tables'
 
 export type SettingScope = 'hub' | 'user' | 'internal'
 
@@ -103,7 +104,12 @@ export const LOCAL_COMPUTER_WORK_ROOTS_KEY = 'local_computer_work_roots'
  * the same on every machine, so another machine's value would act on this one.
  * Also `internal`: the settings API neither serves nor writes them.
  */
-const MACHINE_LOCAL_KEYS: ReadonlySet<string> = new Set([LOCAL_COMPUTER_WORK_ROOTS_KEY])
+const MACHINE_LOCAL_KEYS: ReadonlySet<string> = new Set([
+  LOCAL_COMPUTER_WORK_ROOTS_KEY,
+  // When THIS database dropped its legacy chat tables (robustness plan §9 Phase 8):
+  // a record of this install's schema, meaningless in any other.
+  LEGACY_CHAT_TABLES_DROPPED_SETTING
+])
 
 export function isMachineLocalSetting(key: string): boolean {
   return MACHINE_LOCAL_KEYS.has(key)

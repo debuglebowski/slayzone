@@ -22,6 +22,7 @@
  */
 import { spawn } from 'node:child_process'
 import {
+  DEFAULT_SSO_LABEL,
   fetchHubHealth,
   fetchSessionEmail,
   HUB_DEVICE_CLIENT_IDS,
@@ -36,6 +37,7 @@ import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import { fail } from './service'
 
 export type { HubSignInMethods }
+export { DEFAULT_SSO_LABEL }
 
 /** The client id this CLI identifies as (the hub's approval page names it). */
 export const CLI_DEVICE_CLIENT_ID = HUB_DEVICE_CLIENT_IDS.cli

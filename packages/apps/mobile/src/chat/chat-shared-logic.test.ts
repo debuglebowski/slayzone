@@ -62,14 +62,17 @@ describe('@slayzone/task/main-terminal + @slayzone/projects-contracts/placements
       placements: [{ computer_id: 'c1', path: '/p', status: 'ready' as const }],
       resolved_computer_id: 'c1'
     }
-    const plain = { worktree_path: null, base_dir: null, repo_name: null, computer_id: null }
+    const plain = { has_worktree: false, has_base_dir: false, repo_name: null, computer_id: null }
     const root = taskProjectRoot(plain, project)
     expect(root).toBe('/p')
-    expect(mainTerminalCwd({ ...plain, worktree_path: '/wt' }, project, root, [])).toBe('/wt')
-    expect(mainTerminalCwd(plain, project, root, [])).toBe('/p')
+    const wt = { state: 'ok', worktreePath: '/wt', baseDir: null } as const
+    expect(mainTerminalCwd({ ...plain, has_worktree: true }, project, root, [], wt)).toBe('/wt')
+    expect(mainTerminalCwd(plain, project, root, [], null)).toBe('/p')
     const bound = { ...plain, repo_name: 'api' }
     expect(mainTerminalCwdNeedsRepos(bound, project, root)).toBe(true)
-    expect(mainTerminalCwd(bound, project, root, [{ name: 'api', path: '/p/api' }])).toBe('/p/api')
+    expect(mainTerminalCwd(bound, project, root, [{ name: 'api', path: '/p/api' }], null)).toBe(
+      '/p/api'
+    )
   })
 })
 

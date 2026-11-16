@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import { nextAgentMode, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
 import { chatModesForMode } from '@slayzone/terminal-contracts'
 import type { CallbackRef } from './useFollowBottom'
@@ -95,9 +95,12 @@ export function useChatPanelKeyboard({
   scrollToBottom,
   unstick
 }: UseChatPanelKeyboardOpts): void {
+  // When the last Esc that could start a double-Esc was pressed (0: none). A
+  // ref, not effect-local: the listener below is reinstalled whenever a
+  // dependency changes (a re-render with a new callback identity, a streamed
+  // row), and that must not drop a gesture half-way through its two presses.
+  const armedAtRef = useRef(0)
   useEffect(() => {
-    // When the last Esc that could start a double-Esc was pressed (0: none).
-    let armedAt = 0
     const isFocusedHere = (): boolean => {
       const root = panelRef.current
       if (!root) return false
@@ -124,11 +127,11 @@ export function useChatPanelKeyboard({
     }
     const handler = (e: KeyboardEvent): void => {
       if (!isFocusedHere()) return
-      if (e.key !== 'Escape') armedAt = 0
+      if (e.key !== 'Escape') armedAtRef.current = 0
       // A key a field already handled (the prompt's feedback Enter / Esc) is
       // not the prompt's.
       if (!e.defaultPrevented && !autocomplete.show && promptKeysRef?.current?.(e)) {
-        armedAt = 0
+        armedAtRef.current = 0
         e.preventDefault()
         return
       }
@@ -193,17 +196,17 @@ export function useChatPanelKeyboard({
       if (e.key === 'Escape' && !mod && !e.altKey && !e.shiftKey) {
         if (e.repeat) return
         if (autocomplete.show) {
-          armedAt = 0
+          armedAtRef.current = 0
           return
         }
         if (onDismissSideQuestion && !e.defaultPrevented) {
-          armedAt = 0
+          armedAtRef.current = 0
           e.preventDefault()
           onDismissSideQuestion()
           return
         }
         if (inFlight) {
-          armedAt = 0
+          armedAtRef.current = 0
           e.preventDefault()
           void handleStop()
           return
@@ -212,16 +215,16 @@ export function useChatPanelKeyboard({
         const fromComposer = active === composerRef?.current || !isTypingTarget(active)
         const action = draftEmpty ? onDoubleEscape : onClearDraft
         if (!action || e.defaultPrevented || !fromComposer) {
-          armedAt = 0
+          armedAtRef.current = 0
           return
         }
         const now = Date.now()
-        if (armedAt > 0 && now - armedAt <= DOUBLE_ESC_MS) {
-          armedAt = 0
+        if (armedAtRef.current > 0 && now - armedAtRef.current <= DOUBLE_ESC_MS) {
+          armedAtRef.current = 0
           e.preventDefault()
           action()
         } else {
-          armedAt = now
+          armedAtRef.current = now
         }
       }
     }

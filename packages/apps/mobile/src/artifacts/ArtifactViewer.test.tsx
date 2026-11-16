@@ -1,20 +1,37 @@
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
-import { Image, Linking, Share } from 'react-native'
+import { ActionSheetIOS, Image, Linking, Share } from 'react-native'
 import { hubEntryOf } from '../hub-session'
-import { trpcTest } from '../testing'
+import { pending, trpcTest } from '../testing'
 import { ArtifactViewer, type ArtifactViewerProps } from './ArtifactViewer'
 import { artifactRow, fakeArtifactsHub, versionRow } from './fake-artifacts-hub'
+import { exportArtifact } from './export/export-artifact'
 import { downloadArtifactFile } from './files'
 import { hubTarget } from './hub-rest'
-import { loadMermaidScript } from './page-assets'
+import { loadHtml2canvasScript, loadMermaidScript } from './page-assets'
+import { mediaPlayer } from './media-player'
 
 jest.mock('./files', () => ({ ...jest.requireActual('./files'), downloadArtifactFile: jest.fn() }))
+// expo-video's native half is absent in Node: a stand-in player that records its
+// source, and a view that keeps its props. `mediaPlayer` is switched per test between
+// that module and null (a build without the native module).
+jest.mock('expo-video', () => {
+  const { View } = require('react-native')
+  return {
+    useVideoPlayer: (source: string) => ({ source }),
+    VideoView: (props: object) => <View {...props} />
+  }
+})
+jest.mock('./media-player', () => ({ mediaPlayer: jest.fn() }))
 jest.mock('./page-assets', () => ({
   MERMAID_BUNDLE_FILE: 'mermaid.min.js',
-  loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}')
+  loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}'),
+  loadHtml2canvasScript: jest.fn(async () => 'window.html2canvas=function(){}')
 }))
 
+jest.mock('./export/export-artifact', () => ({ exportArtifact: jest.fn() }))
+
 const download = jest.mocked(downloadArtifactFile)
+const runExport = jest.mocked(exportArtifact)
 const target = hubTarget({ entry: hubEntryOf('home.example'), token: 'h' })
 
 async function view(
@@ -48,6 +65,8 @@ const pageOf = (testID: string) =>
 
 beforeEach(() => {
   download.mockReset()
+  runExport.mockReset()
+  jest.mocked(mediaPlayer).mockReturnValue(jest.requireActual('./ArtifactMediaPlayer'))
   jest.mocked(loadMermaidScript).mockClear()
   // `getSize` is overloaded (promise / callbacks): the promise form, which the image uses.
   jest
@@ -161,9 +180,52 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     expect(pageOf('artifact-page-pdf').source).toEqual({ uri: 'file:///cache/a1/spec.pdf' })
   })
 
+  it.each([
+    ['clip.mp4', 'video'],
+    ['voice.m4a', 'audio']
+  ])('%s: the downloaded file in the native player', async (title) => {
+    download.mockResolvedValue(`file:///cache/a1/${title}`)
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', title)] })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-media')
+    const props = screen.getByTestId('artifact-media').props as {
+      player: { source: string }
+      nativeControls: boolean
+    }
+    expect(props.player.source).toBe(`file:///cache/a1/${title}`)
+    expect(props.nativeControls).toBe(true)
+    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+  })
+
+  it('video in a build without the native player: says so and offers Share, fetching nothing', async () => {
+    jest.mocked(mediaPlayer).mockReturnValue(null)
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'clip.mp4')] })
+    await view(hub, { artifactId: 'a1' })
+    expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
+      /can't be played in this build/
+    )
+    // The note's own Share, beside the header's.
+    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
+    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+    expect(download).not.toHaveBeenCalled()
+  })
+
+  it.each(['bundle.zip', 'face.woff2'])(
+    '%s: no viewer on the phone yet, so a note and Share; nothing fetched up front',
+    async (title) => {
+      const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', title)] })
+      await view(hub, { artifactId: 'a1' })
+      expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
+        /can't be shown in the app yet/
+      )
+      expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+      expect(download).not.toHaveBeenCalled()
+    }
+  )
+
   it("a file that isn't text, in a text kind: says so and offers Share", async () => {
     const hub = fakeArtifactsHub({
-      artifacts: [artifactRow('a1', 'archive.zip')],
+      artifacts: [artifactRow('a1', 'dump.bin')],
       content: { a1: 'PK\u0003\u0004\u0000\u0000' }
     })
     await view(hub, { artifactId: 'a1' })
@@ -271,5 +333,204 @@ describe('ArtifactViewer, live and interactive', () => {
     await waitFor(() =>
       expect(pageOf('artifact-page-html').source.html).toContain('color-scheme:dark !important')
     )
+  })
+})
+
+describe('ArtifactViewer, Export', () => {
+  /** Opens Export and picks `choice` (by label); the sheet's options. */
+  async function pickExport(choice: string | null): Promise<string[]> {
+    let options: string[] = []
+    jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((o, pick) => {
+      options = o.options
+      pick(choice === null ? (o.cancelButtonIndex ?? options.length - 1) : options.indexOf(choice))
+    })
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Export' }))
+    return options
+  }
+
+  it.each([
+    ['plan.md', '# Plan', 'markdown', ['PDF', 'HTML', 'Cancel']],
+    ['main.ts', 'const a = 1', 'code', ['PDF', 'HTML', 'Cancel']],
+    ['report.html', '<h1>R</h1>', 'html', ['PDF', 'Cancel']],
+    ['logo.svg', '<svg/>', 'svg', ['PDF', 'PNG', 'Cancel']],
+    ['flow.mmd', 'graph TD; A-->B', 'mermaid', ['PDF', 'PNG', 'HTML', 'Cancel']]
+  ])('%s offers the formats desktop does', async (title, content, kind, expected) => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', title)],
+      content: { a1: content }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId(`artifact-page-${kind}`)
+    expect(await pickExport(null)).toEqual(expected)
+    expect(runExport).not.toHaveBeenCalled()
+  })
+
+  it('images and PDFs have no export', async () => {
+    download.mockResolvedValue('file:///cache/a1/spec.pdf')
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'spec.pdf')] })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-pdf')
+    expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+  })
+
+  it('exports the text on screen in the picked format, with the hidden renderer', async () => {
+    runExport.mockResolvedValue('file:///cache/slayzone-exports/flow.png')
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'flow.mmd')],
+      content: { a1: 'graph TD; A-->B' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-mermaid')
+    await pickExport('PNG')
+    await waitFor(() =>
+      expect(runExport).toHaveBeenCalledWith(
+        { content: 'graph TD; A-->B', mode: 'mermaid-preview', title: 'flow.mmd', format: 'png' },
+        {
+          render: expect.any(Function),
+          mermaidScript: loadMermaidScript,
+          html2canvasScript: loadHtml2canvasScript,
+          signal: expect.objectContaining({ aborted: false }),
+          onNotice: expect.any(Function)
+        }
+      )
+    )
+    await screen.findByRole('button', { name: 'Export' })
+  })
+
+  it('exports the version on screen', async () => {
+    runExport.mockResolvedValue('file:///cache/slayzone-exports/plan.pdf')
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' },
+      versions: { a1: [versionRow('a1', 2), versionRow('a1', 1)] }
+    })
+    await view(hub, { artifactId: 'a1', version: 1 })
+    await waitFor(() => expect(pageOf('artifact-page-markdown').source.html).toContain('(v1)'))
+    await pickExport('PDF')
+    await waitFor(() =>
+      expect(runExport).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('(v1)'), format: 'pdf' }),
+        expect.anything()
+      )
+    )
+  })
+
+  // Review 6, #7: Export makes a file of what is on screen. While the version picked is
+  // still loading or doesn't exist (or the text failed to load), what is on screen is a
+  // spinner or an error, not the working copy still in the cache: nothing to export.
+  describe('only what is on screen', () => {
+    async function viewThenPick(
+      hub: ReturnType<typeof fakeArtifactsHub>,
+      version: number
+    ): Promise<void> {
+      const { wrapper } = trpcTest(hub.backend)
+      const props: ArtifactViewerProps = {
+        target,
+        taskId: 't1',
+        artifactId: 'a1',
+        version: null,
+        onSelectVersion: jest.fn(),
+        onOpenArtifact: jest.fn()
+      }
+      const { rerender } = await render(<ArtifactViewer {...props} />, { wrapper })
+      // The working copy is loaded (and cached) first.
+      await screen.findByTestId('artifact-page-markdown')
+      expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
+      await rerender(<ArtifactViewer {...props} version={version} />)
+    }
+
+    it('a version that does not exist: Export is off', async () => {
+      const hub = fakeArtifactsHub({
+        artifacts: [artifactRow('a1', 'plan.md')],
+        content: { a1: '# Working copy' },
+        versions: { a1: [versionRow('a1', 1)] }
+      })
+      await viewThenPick(hub, 7)
+      await screen.findByText('This artifact has no version 7.')
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+      // Share would hand over the working copy as "version 7": off too.
+      expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled()
+      await userEvent.setup().press(screen.getByRole('button', { name: 'Export' }))
+      expect(runExport).not.toHaveBeenCalled()
+    })
+
+    it('a version still loading: Export is off', async () => {
+      const hub = fakeArtifactsHub({
+        artifacts: [artifactRow('a1', 'plan.md')],
+        content: { a1: '# Working copy' }
+      })
+      hub.on('artifacts.versionsList', pending)
+      await viewThenPick(hub, 2)
+      await screen.findByTestId('artifact-loading')
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled()
+    })
+
+    it('text that failed to load (an older copy still cached): Export is off', async () => {
+      const hub = fakeArtifactsHub({
+        artifacts: [artifactRow('a1', 'plan.md')],
+        content: { a1: '# Before' }
+      })
+      await view(hub, { artifactId: 'a1' })
+      await screen.findByTestId('artifact-page-markdown')
+      hub.on('artifacts.readContent', () => {
+        throw new Error('The hub could not read the file.')
+      })
+      await act(async () => hub.emit('artifacts.onContentChanged', 'a1'))
+      await screen.findByText(/could not read the file/)
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+    })
+  })
+
+  // Review 9, L4: closing the viewer stops its export: the share sheet never opens over
+  // another screen.
+  it('closing the viewer cancels its export (the abort signal)', async () => {
+    let signal: AbortSignal | undefined
+    runExport.mockImplementation((_request, deps) => {
+      signal = deps.signal
+      return new Promise(() => undefined)
+    })
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-markdown')
+    await pickExport('PDF')
+    await waitFor(() => expect(signal).toBeDefined())
+    expect(signal?.aborted).toBe(false)
+    await act(async () => screen.unmount())
+    expect(signal?.aborted).toBe(true)
+  })
+
+  // Review 9, F4: drawn again with text labels — said under the toolbar, as it happens
+  // (before the share sheet opens), not as an error.
+  it("a notice of the export's is shown under the toolbar", async () => {
+    runExport.mockImplementation(async (_request, deps) => {
+      deps.onNotice?.('Some labels were drawn as plain text.')
+      return 'file:///cache/slayzone-exports/r.pdf'
+    })
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'report.html')],
+      content: { a1: '<h1>R</h1>' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-html')
+    await pickExport('PDF')
+    await screen.findByText('Some labels were drawn as plain text.')
+    expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
+  })
+
+  it('a failed export says why, under the toolbar', async () => {
+    runExport.mockRejectedValue(new Error("Couldn't draw the diagram: Parse error"))
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'flow.mmd')],
+      content: { a1: 'nope' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-mermaid')
+    await pickExport('PDF')
+    await screen.findByText("Couldn't draw the diagram: Parse error")
+    expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
   })
 })

@@ -27,7 +27,11 @@ import type { TaskSessionStore } from './task-session-store'
 // computer. `spawnLocalPty` still exists in pty-backend for the COMPUTER's own use.
 import {
   getPtyBackend,
+  awaitPtyOperation,
   NodePtyUnavailableError,
+  ptyReattachRefusal,
+  type PtyReattachRefusal,
+  type PtySpawnConfirmation,
   type BackgroundJobQuery,
   type PtyExit,
   type PtyHandle,
@@ -68,9 +72,13 @@ import {
 } from '@slayzone/platform'
 import {
   shouldShellFallback,
+  exitWasRequested,
   buildRecoveryMessage,
+  buildAutoResumeMessage,
   decideRecoveryAdoption,
-  shouldArmHubStartupDeadline
+  decideUnexpectedExit,
+  shouldArmHubStartupDeadline,
+  AUTO_RESUME_WINDOW_MS
 } from '../pty-exit-strategy'
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
@@ -92,6 +100,7 @@ import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../
 import { localChatRuntime } from './local-chat-runtime'
 import {
   conversationInUseMessage,
+  conversationInOtherTabMessage,
   isConversationLive,
   registerConversationHolder
 } from './live-conversations'
@@ -103,13 +112,46 @@ export { filterBufferData }
 export interface PtyCreateResult {
   success: boolean
   error?: string
-  /** `conversation-in-use`: a chat of the task runs this conversation (offer "Continue here"). */
-  code?: 'conversation-in-use'
+  /** `conversation-in-use`: a chat of the task runs this conversation (offer "Continue here").
+   *  `conversation-in-other-tab`: another terminal tab of the task runs it (named in
+   *  `error`); the user stops it there, or starts a new session in this tab. */
+  code?:
+    | 'conversation-in-use'
+    | 'conversation-in-other-tab'
+    | 'session-ledger-unreadable'
+    /** An attach (`CreatePtyOptions.attach`) the owner refused: see `attachRefusal`. */
+    | 'attach-refused'
+  /** With `attach-refused`: why the live session could not be taken over
+   *  (`task-elsewhere`: the task runs on another computer now). */
+  attachRefusal?: PtyReattachRefusal | 'task-elsewhere'
 }
 
-/** A start refused: another side runs this conversation. */
+/** A start refused: another side (or another terminal tab) runs this conversation. */
 class ConversationInUseError extends Error {
-  readonly code = 'conversation-in-use'
+  constructor(
+    message: string,
+    readonly code: 'conversation-in-use' | 'conversation-in-other-tab' = 'conversation-in-use'
+  ) {
+    super(message)
+  }
+}
+
+/**
+ * The task's session ledger (on the agent's computer, robustness plan §9) could
+ * not be read. NOT "no session": a fresh start would silently shadow the real one,
+ * so a resolver throws this and `createPty` refuses the start, naming why — the
+ * user retries once the computer answers.
+ */
+export class SessionLedgerUnreadableError extends Error {
+  readonly code = 'session-ledger-unreadable' as const
+  constructor(cause: unknown) {
+    const why = cause instanceof Error ? cause.message : String(cause)
+    super(
+      `This task's session history could not be read from its computer (${why}). Not starting a new session over it — try again once the computer answers.`,
+      { cause }
+    )
+    this.name = 'SessionLedgerUnreadableError'
+  }
 }
 
 /**
@@ -337,6 +379,24 @@ interface PtySession {
   // ~100ms for trailing output; `state` cannot mark that window ('dead' goes
   // through the debounced state machine), so `hasLivePty` reads this.
   exited?: boolean
+  // Set when the hub asked the process to die (`killPty`), before its exit arrives
+  // (a computer's exit frame is a round trip away). Not live from then on: a mode
+  // switch's remount asked `pty.exists`, got "yes", and reattached to the dying
+  // session instead of starting the new mode.
+  killRequested?: boolean
+  // When the user last typed ^C / ^D into it (`PtyInputFacts.interrupt`): an exit
+  // shortly after is theirs, not unexpected (`decideUnexpectedExit`).
+  lastInterruptInputAt?: number
+  // Set while this session's agent is being resumed in place (it died
+  // unexpectedly): input typed meanwhile, held for the resumed process instead of
+  // being written to the dead one (`writePty`, flushed on adoption).
+  heldInput?: string[]
+  /**
+   * Set when this session is a process the computer was ALREADY running (a previous
+   * hub run's), taken over rather than started (`adoptAttached`). A later ordinary
+   * start of the tab binds to it instead of replacing it (review H2).
+   */
+  adoptedAt?: number
   createdAt: number
   state: TerminalState
   // CLI state tracking
@@ -386,6 +446,24 @@ const sessions = new Map<string, PtySession>()
 // session) is stored as the sentinel '' so a present-but-taskless entry is
 // distinguishable from a missing one on lookup.
 const sessionTaskMap = new Map<string, string>()
+/**
+ * When each session id was last auto-resumed after an unexpected exit — the rate
+ * limit of `decideUnexpectedExit` (an agent that keeps dying gets the recovery
+ * shell, not a restart loop). Keyed by session id so it survives the in-place
+ * re-spawn; entries past the window are pruned on write.
+ */
+const lastAutoResumeAt = new Map<string, number>()
+
+function noteAutoResume(sessionId: string, now: number): void {
+  for (const [id, at] of lastAutoResumeAt)
+    if (now - at >= AUTO_RESUME_WINDOW_MS) lastAutoResumeAt.delete(id)
+  lastAutoResumeAt.set(sessionId, now)
+}
+
+/** Tests (unit + e2e reset): forget every session's auto-resume history. */
+export function resetAutoResumeForTests(): void {
+  lastAutoResumeAt.clear()
+}
 const sessionTabMap = new Map<string, string>()
 const sessionChangeListeners = new Set<() => void>()
 const dataListeners = new Map<string, Set<(data: string, seq: number) => void>>()
@@ -733,6 +811,8 @@ let idleCheckerInterval: NodeJS.Timeout | null = null
 export interface ConversationHealRequest {
   taskId: string
   mode: AgentId
+  /** The spawning tab: a heal repoints only to THIS tab's sessions (v201). */
+  tabId: string
   cwd: string
   storedId: string
   /** Where the agent runs: transcripts are looked up on THAT computer's disk. */
@@ -758,8 +838,13 @@ export function setConversationHealer(handler: ConversationHealer | null): void 
  *  bug). Registered from the app (apps/app) for the same task → terminal
  *  dependency reason as the healer. No-op when unset. */
 export type ConversationResolver = (req: {
+  /** The computer the agent runs on: its session ledger answers (robustness plan §9). */
+  computerId: string | null
   taskId: string
   mode: AgentId
+  /** Sessions are scoped per tab (v201): the spawning tab's session, never the
+   *  main tab's for a secondary tab. Main tab id = task id. */
+  tabId: string
 }) => Promise<string | null>
 
 let conversationResolver: ConversationResolver | null = null
@@ -1311,6 +1396,8 @@ export function buildBaseEnv(): Record<string, string> {
 export interface CreatePtyOptions {
   win: PtySessionWindow
   sessionId: string
+  /** False after a requested stop/reset: never bind to a surviving adopted process. */
+  takeOver?: boolean
   /**
    * The session's task + tab, passed explicitly so the runtime no longer has to
    * decode them from the `sessionId` string (plans/agent-sessions.md slice 3 —
@@ -1379,6 +1466,15 @@ export interface CreatePtyOptions {
     /** The warm agent's already-established conversation id (preWarmedAgent only). */
     conversationId?: string | null
   }
+  /**
+   * ATTACH, never start: take over the session `computerId` already runs under this
+   * id as attempt `spawnId` (left by a previous hub run — hub processes restart,
+   * computers keep their ptys; see `PtyBackend.reattach`). No launch is built and
+   * nothing is spawned: the process keeps running as it is, and this registers it —
+   * output, input, state, exit — like any session. Refused (`attach-refused`) when
+   * it cannot be taken over or a session is already tracked under the id.
+   */
+  attach?: { computerId: string; spawnId: string; signal?: AbortSignal }
 }
 
 // Test-only (PLAYWRIGHT) pty-create capture at the TRUE spawn chokepoint (every
@@ -1404,14 +1500,48 @@ export function takePtyKillCalls(): string[] {
   return ptyKillCapturedSessionIds
 }
 
-export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult> {
-  if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn) {
+/**
+ * Re-spawn of a session whose agent died unexpectedly mid-session: the same launch
+ * as any resume (`createPty`), continuing the SAME session in place — its
+ * scrollback and output numbering, with `preamble` between the old process's
+ * output and the new one's — instead of replacing it. Internal: never on the wire.
+ */
+interface PtyContinuation {
+  /** The session whose process died. Replaced only while it still holds the id. */
+  from: PtySession
+  /** The line shown between the dead process's output and the resumed agent's. */
+  preamble: string
+}
+
+export function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult> {
+  return createPtyImpl(opts)
+}
+
+async function createPtyImpl(
+  opts: CreatePtyOptions,
+  continuation?: PtyContinuation
+): Promise<PtyCreateResult> {
+  if (opts.attach?.signal?.aborted) return { success: false, error: 'Attachment cancelled.' }
+  if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn && !continuation && !opts.attach) {
+    // What the spawn would resume: the caller's id, else the session ledger's on the
+    // agent's computer (robustness plan §9) — the same resolver a real spawn asks.
+    const taskId = opts.taskId !== undefined ? (opts.taskId ?? '') : splitTaskId(opts.sessionId)
+    const resolved =
+      !opts.existingConversationId && conversationResolver && taskId
+        ? await conversationResolver({
+            computerId: opts.computerId ?? null,
+            taskId,
+            mode: (opts.mode || 'claude-code') as AgentId,
+            tabId: opts.tabId ?? splitTabRowId(opts.sessionId)
+          }).catch(() => null)
+        : null
     ptyCreateCapturedOpts.push({
       sessionId: opts.sessionId,
       cwd: opts.cwd,
       mode: opts.mode,
       conversationId: opts.conversationId ?? null,
       existingConversationId: opts.existingConversationId ?? null,
+      resumeConversationId: opts.existingConversationId ?? resolved ?? null,
       providerArgs: opts.providerArgs ?? null
     })
     return { success: true }
@@ -1455,7 +1585,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
   const taskId = taskIdFromSessionId(sessionId)
   // Hub/computer split (wave 2): which computer this session spawns on (null =
   // hub-local, today's only path). Threaded into every PtySpawnSpec below.
-  const computerId = opts.computerId ?? null
+  const computerId = opts.attach?.computerId ?? opts.computerId ?? null
+  /** Taking over a running process (see `CreatePtyOptions.attach`): nothing is launched. */
+  const attaching = opts.attach !== undefined
   const createStartedAt = Date.now()
   let spawnAttempt: {
     shell: string
@@ -1478,12 +1610,46 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       patternError: patternError ?? null,
       providerArgs: providerArgs ?? [],
       hasConversationId: Boolean(conversationId),
-      hasExistingConversationId: Boolean(existingConversationId)
+      hasExistingConversationId: Boolean(existingConversationId),
+      attach: attaching
     }
   })
 
-  // Kill existing if any
-  if (sessions.has(sessionId)) {
+  // A process the hub took over (a previous run's agent) is THE agent of this tab: an
+  // ordinary start of the tab binds to it — replacing it would kill it mid-work and
+  // resume a twin. Only a requested end (kill/restart) lets a start replace it.
+  const atEntry = sessions.get(sessionId)
+  const boundToAdopted = (session: PtySession | undefined): boolean =>
+    opts.takeOver !== false &&
+    !continuation &&
+    !attaching &&
+    !!session?.adoptedAt &&
+    !session.exited &&
+    !session.killRequested
+  if (boundToAdopted(atEntry)) {
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'pty.create_bound_to_adopted',
+      sessionId,
+      taskId,
+      payload: { when: 'entry' }
+    })
+    return { success: true }
+  }
+  // An attach never replaces: a session tracked under the id already is the live one.
+  if (attaching && sessions.has(sessionId)) {
+    return {
+      success: false,
+      error: `A session is already attached at ${sessionId}.`,
+      code: 'attach-refused',
+      attachRefusal: 'already-tracked'
+    }
+  }
+
+  // Kill existing if any — unless this IS that session continuing (its process is
+  // already gone, and it must not emit an exit: the terminal stays on it).
+  if (!continuation && sessions.has(sessionId)) {
     recordDiagnosticEvent({
       level: 'warn',
       source: 'pty',
@@ -1491,6 +1657,24 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       sessionId,
       taskId
     })
+    // Never silent: an adopted agent ending here is a choice someone made.
+    if (atEntry?.adoptedAt) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.adopted_replaced',
+        sessionId,
+        taskId,
+        message: 'A start replaced an agent the hub had taken over after a restart.',
+        payload: {
+          reason: atEntry.killRequested
+            ? 'restart-requested'
+            : atEntry.exited
+              ? 'exited'
+              : 'replace'
+        }
+      })
+    }
     // Emit BEFORE killPty (see `replacing` doc on PtyEventMap): this is the one
     // deterministic point where we know the id is being reused, ahead of the
     // outgoing process's own (unawaited, possibly delayed) exit. Guarded: a
@@ -1512,6 +1696,30 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     killPty(sessionId)
   }
 
+  let adoptedHandle: PtyHandle | undefined
+  let adoptionAccepted = false
+  let adoptionReleased = false
+  const releaseAdoption = (): void => {
+    if (!adoptedHandle || adoptionReleased) return
+    adoptionReleased = true
+    const current = sessions.get(sessionId)
+    if (current?.pty === (adoptedHandle as unknown as pty.IPty)) {
+      current.killRequested = true
+      stopSessionTimers(current)
+      current.finalizer?.(PTY_EXIT_KILLED_BY_HOST)
+      if (sessions.get(sessionId) === current) {
+        current.replyMirror.dispose()
+        sessions.delete(sessionId)
+        sessionTaskMap.delete(sessionId)
+        sessionTabMap.delete(sessionId)
+        stateMachine.unregister(sessionId)
+        notifySessionChange()
+      }
+    }
+    if (adoptedHandle.adoption) adoptedHandle.adoption.release()
+    else adoptedHandle.kill()
+  }
+
   try {
     const agentId = mode || 'claude-code'
     const adapter = getAdapter({
@@ -1520,7 +1728,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       patterns: { working: patternWorking, error: patternError }
     })
     // MAIN is authoritative: when the renderer gave no hint (e.g. the boot board
-    // load hadn't hydrated `currentConversationByMode` yet), resolve the id from
+    // load hadn't hydrated a hint yet — today there never is one), resolve the id from
     // the ledger BEFORE deciding fresh-vs-resume. A null/stale hint must never
     // cause a destructive fresh-mint over a conversation main already knows.
     // Best-effort — on any failure keep null and fall through to a fresh spawn.
@@ -1531,52 +1739,71 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // conversation for it, and its own id is adopted below regardless — asking
     // would only sleep through the null retries.
     let ledgerConversationId: string | null = null
-    if (!existingConversationId && conversationResolver && !opts.adoptPty?.preWarmedAgent) {
+    if (
+      !existingConversationId &&
+      conversationResolver &&
+      !opts.adoptPty?.preWarmedAgent &&
+      !attaching
+    ) {
       // Resolve the authoritative id from the ledger, RETRYING on null. During
       // early boot the async db worker can momentarily return null for a query
       // that has a real answer — the first-spawn race that re-clobbered the
       // active tab on restart. Minting a fresh session over a real conversation
       // is destructive, so a single null is not taken at face value here; a real
       // id (no rows) costs at most ~300ms of retry on the cold spawn path.
+      // A ledger that could not be READ (its computer restarting, a timeout) is
+      // retried the same way, then refuses the start: unknown is not "none".
+      let unreadable: SessionLedgerUnreadableError | null = null
       for (let attempt = 0; attempt < 3; attempt++) {
+        unreadable = null
         try {
           ledgerConversationId = await conversationResolver({
+            computerId,
             taskId,
-            mode: agentId
+            mode: agentId,
+            tabId: resolveTabRowId(sessionId)
           })
-        } catch {
+        } catch (err) {
           ledgerConversationId = null
+          if (err instanceof SessionLedgerUnreadableError) unreadable = err
         }
         if (ledgerConversationId) break
         if (attempt < 2) await new Promise((r) => setTimeout(r, 150))
       }
+      if (unreadable) throw unreadable
     }
     // Pure fresh-vs-resume decision — see resolveSpawnConversation. The invariant
     // (known id ⇒ resume, never mint over it) lives there + is unit-tested.
-    const decision = resolveSpawnConversation({
-      existingConversationId,
-      ledgerConversationId,
-      conversationId,
-      supportsFreshPreMint: supportsFreshPreMint(initialCommand)
-    })
+    // An attach launches nothing, so it decides nothing: the process runs whatever
+    // conversation it runs, and reports it (`attached.conversationId`).
+    const decision = attaching
+      ? { resolvedExistingId: null, shouldMintFresh: false }
+      : resolveSpawnConversation({
+          existingConversationId,
+          ledgerConversationId,
+          conversationId,
+          supportsFreshPreMint: supportsFreshPreMint(initialCommand)
+        })
     // Canary: surface every spawn decision so a fresh-mint-over-a-task (the
     // restart-clobber signature) is visible in diagnostics. `ledgerResolved` +
     // `resolverReady` pinpoint a resolver gap if a clobber ever recurs.
-    recordDiagnosticEvent({
-      level: decision.shouldMintFresh ? 'warn' : 'info',
-      source: 'pty',
-      event: 'conv_id.spawn_decision',
-      sessionId,
-      taskId,
-      payload: {
-        hasExisting: Boolean(existingConversationId),
-        hasConversationId: Boolean(conversationId),
-        resolverReady: Boolean(conversationResolver),
-        ledgerResolved: ledgerConversationId,
-        resuming: Boolean(decision.resolvedExistingId),
-        shouldMintFresh: decision.shouldMintFresh
-      }
-    })
+    if (!attaching)
+      recordDiagnosticEvent({
+        level: decision.shouldMintFresh ? 'warn' : 'info',
+        source: 'pty',
+        event: 'conv_id.spawn_decision',
+        sessionId,
+        taskId,
+        payload: {
+          tabId: resolveTabRowId(sessionId),
+          hasExisting: Boolean(existingConversationId),
+          hasConversationId: Boolean(conversationId),
+          resolverReady: Boolean(conversationResolver),
+          ledgerResolved: ledgerConversationId,
+          resuming: Boolean(decision.resolvedExistingId),
+          shouldMintFresh: decision.shouldMintFresh
+        }
+      })
     // Self-heal a stale/phantom stored conversation id before building --resume.
     // No-op for healthy ids; for a missing one it repoints to the task's real
     // conversation (recorded history, or a near-certain orphan). Best-effort — on
@@ -1590,6 +1817,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         const healed = await conversationHealer({
           taskId,
           mode: agentId,
+          tabId: resolveTabRowId(sessionId),
           cwd,
           storedId: resolvedExistingId,
           computerId,
@@ -1663,6 +1891,32 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     if (resolvedExistingId && isConversationLive('chat', taskId, resolvedExistingId)) {
       throw new ConversationInUseError(conversationInUseMessage('chat'))
     }
+    // …and never two terminal tabs on one conversation. A tab resolves only its own
+    // sessions, so this needs a race or a heal to happen — and then the spawn is
+    // REFUSED, naming the tab that runs it. Never a silent fresh start instead:
+    // a fresh mint over a session the tab owns is exactly how a tab's session got
+    // lost (robustness plan §2).
+    const knownConversationId = resolvedExistingId || neverWrittenId
+    const holderSessionId = knownConversationId
+      ? terminalSessionRunning(taskId, knownConversationId, sessionId)
+      : null
+    if (knownConversationId && holderSessionId) {
+      const holderTabId = resolveTabRowId(holderSessionId)
+      const label = ledger ? await ledger.tabLabel(taskId, holderTabId).catch(() => null) : null
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'conv_id.live_elsewhere',
+        sessionId,
+        taskId,
+        message: knownConversationId,
+        payload: { tabId: resolveTabRowId(sessionId), holderTabId, holderSessionId }
+      })
+      throw new ConversationInUseError(
+        conversationInOtherTabMessage(label ?? (holderTabId === taskId ? 'Main' : holderTabId)),
+        'conversation-in-other-tab'
+      )
+    }
     // Fresh-spawn pre-mint (decision.shouldMintFresh): when the provider's
     // `initialCommand` has the literal `{id}` placeholder (today: claude-code,
     // qwen-code) and nothing is known, slay mints a UUID at spawn time and
@@ -1688,7 +1942,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     let postSpawnCommand: string | undefined
     // A pre-warmed agent is already running its command — never build/exec it
     // again (that would type the command into the live agent's TUI as input).
-    if (template && !opts.adoptPty?.preWarmedAgent) {
+    if (template && !opts.adoptPty?.preWarmedAgent && !attaching) {
       const binary = interpolateTemplate({
         template,
         conversationId: effectiveConversationId || undefined,
@@ -1712,11 +1966,15 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       postSpawnCommand = buildExecCommand(binary.name, allArgs)
     }
     const spawnConfig: SpawnConfig = { ...shellConfig, postSpawnCommand }
+    // An agent is running in this session: launched by the command above, or — for
+    // an attach — already running. Its exit then follows the agent rules (resume,
+    // recovery shell); a plain shell's exit just ends the session.
+    const runsAgent = Boolean(spawnConfig.postSpawnCommand) || (attaching && agentId !== 'terminal')
 
     spawnAttempt = {
       shell: spawnConfig.shell,
       shellArgs: spawnConfig.args,
-      hasPostSpawnCommand: Boolean(spawnConfig.postSpawnCommand)
+      hasPostSpawnCommand: runsAgent
     }
     recordDiagnosticEvent({
       level: 'info',
@@ -1741,7 +1999,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // through (the warm pool is exactly the population the clobber bug hit).
     // Gated on the AGENT the mode runs, so a user-defined provider wrapping a
     // hook-driven agent is healed too (it relies on the same notify.sh).
-    if (!opts.adoptPty?.preWarmedAgent) {
+    if (!opts.adoptPty?.preWarmedAgent && !attaching) {
       maybeReinstallHooksForSpawn(modeAgentId(agentId, type))
     }
 
@@ -1750,11 +2008,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // HOOK posts to loopback (local sidecar, or the computer's own relay) — never a
     // hub URL. `computerId == null` (every local spawn) OR no provider wired =>
     // null, so the mcpEnv resolution stays byte-identical to today's loopback env.
-    const remoteMcpEnv = await resolveRemoteMcpEnv(remoteMcpEnvProvider, {
-      taskId,
-      computerId,
-      mode: agentId
-    })
+    const remoteMcpEnv = attaching
+      ? null
+      : await resolveRemoteMcpEnv(remoteMcpEnvProvider, {
+          taskId,
+          computerId,
+          mode: agentId
+        })
 
     // A pre-warmed agent already has its env baked in from spawn time (warm pool)
     // and is never re-exported/re-exec'd (see the preWarmedAgent guard above) — its
@@ -1763,11 +2023,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // Ledger-null fallback (pre-init) matches the old `buildMcpEnv(null, …)`
     // behavior: env is still built (task id, MCP port, hook URL) minus the
     // DB-resolved project id.
-    const mcpEnv = opts.adoptPty?.preWarmedAgent
-      ? {}
-      : ledger
-        ? await ledger.buildMcpEnv(taskId, agentId, remoteMcpEnv)
-        : await buildMcpEnv(null, taskId, agentId, undefined, remoteMcpEnv)
+    // An attach launches nothing: its process kept the env it started with.
+    const mcpEnv: Record<string, string> =
+      opts.adoptPty?.preWarmedAgent || attaching
+        ? {}
+        : ledger
+          ? await ledger.buildMcpEnv(taskId, agentId, remoteMcpEnv)
+          : await buildMcpEnv(null, taskId, agentId, undefined, remoteMcpEnv)
 
     // Bind the pending-spawn ledger row to this exact launch. Codex may wait
     // minutes for its first prompt before emitting SessionStart; a timestamp
@@ -1780,7 +2042,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           spawnToken = randomUUID()
           mcpEnv.SLAYZONE_AGENT_HOOK_CONTEXT = JSON.stringify({
             ...hookContext,
-            spawnToken
+            spawnToken,
+            // Routes this agent's hooks to its own tab's PTY (two same-mode tabs).
+            // Provenance never trusts it: the token names the spawn, and the
+            // spawn row names its tab.
+            tabId: resolveTabRowId(sessionId)
           })
         }
       } catch {
@@ -1828,8 +2094,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // refuses with `project_not_placed`.
     const onComputer = computerId != null
     const spawnCwd = resumeCwd ?? cwd
+    // A docker / ssh transport works in its own workdir; on a computer its local
+    // process starts in the task's own folder there (§9 Phase 7c: the computer
+    // confines a spawn's cwd to them — this hub's home folder is not one).
     let effectiveCwd = transport
-      ? transport.cwd
+      ? onComputer
+        ? ''
+        : transport.cwd
       : onComputer
         ? spawnCwd || ''
         : spawnCwd || homedir()
@@ -1893,6 +2164,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     let usedArgs = [...initialArgs]
     let usedFallback = false
     let usedShellFallback = false
+    /** The agent died unexpectedly and its in-place resume is starting. */
+    let resumeInFlight = false
     // Record slay's spawn intent BEFORE the PTY starts so the agent's
     // SessionStart hook can verify provenance (`task_conversations`,
     // origin='pending-spawn'). `effectiveConversationId` is the id slay is
@@ -1901,15 +2174,31 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // so the row is durable before the child process can race ahead. Drops
     // on PTY exit via `prunePendingSpawns` below. Legacy rows without tokens
     // retain the time limit; token-bearing rows can wait for the first prompt.
-    if (ledger && !opts.adoptPty?.preWarmedAgent) {
+    // The row id is pruned on THIS process's exit — only its own row, never a
+    // sibling tab's in-flight one.
+    const pendingRowIds: string[] = []
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'conv_id.spawn_effective',
+      sessionId,
+      taskId,
+      message: effectiveConversationId ?? null,
+      payload: { tabId: resolveTabRowId(sessionId), mode: agentId, resuming }
+    })
+    if (ledger && !opts.adoptPty?.preWarmedAgent && !attaching) {
       try {
-        await ledger.recordPendingSpawn({
-          taskId,
-          mode: agentId,
-          expectedSessionId: effectiveConversationId || null,
-          usedResume: resuming,
-          spawnToken
-        })
+        pendingRowIds.push(
+          await ledger.recordPendingSpawn({
+            computerId,
+            taskId,
+            mode: agentId,
+            tabId: resolveTabRowId(sessionId),
+            expectedSessionId: effectiveConversationId || null,
+            usedResume: resuming,
+            spawnToken
+          })
+        )
       } catch {
         // Best-effort — a failed pending row falls back to "no pending" in the
         // hook handler, which records as foreign-observed for that one session.
@@ -1959,6 +2248,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       carryOutput?: { preamble: string }
     ): PtySpawnSpec => ({
       sessionId,
+      ...(opts.takeOver === false ? { takeOver: false } : {}),
       taskId,
       computerId,
       projectId: opts.projectId ?? null,
@@ -2006,7 +2296,53 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       (await getPtyBackend().spawn(
         buildSpec(rawFile, rawArgs, deadlineMs, admission, carryOutput)
       )) as unknown as pty.IPty
-    if (opts.adoptPty) {
+    // Re-checked right before starting anything: the hub may have taken this tab's
+    // running agent over while this start was being prepared (review H2).
+    const appeared = sessions.get(sessionId)
+    if (appeared !== atEntry && boundToAdopted(appeared)) {
+      if (ledger && pendingRowIds.length) {
+        const ids = pendingRowIds.splice(0)
+        void ledger.prunePendingSpawns({ computerId, ids }).catch(() => {
+          // Best-effort — a leftover token row cannot claim another launch.
+        })
+      }
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'pty.create_bound_to_adopted',
+        sessionId,
+        taskId,
+        payload: { when: 'pre-spawn' }
+      })
+      return { success: true }
+    }
+    if (opts.attach) {
+      // Attach: the process already runs on the computer (a previous hub run's).
+      // Taking it over starts and stops nothing; what comes back is an ordinary
+      // routed handle whose confirmation says `attached`.
+      const backend = getPtyBackend()
+      if (!backend.reattach) {
+        throw Object.assign(
+          new Error(
+            '[pty-manager] attaching requires a routing PtyBackend (sessions live on computers)'
+          ),
+          { reattachRefusal: 'computer-too-old' }
+        )
+      }
+      const attach = opts.attach
+      ptyProcess = (await awaitPtyOperation(
+        () =>
+          backend.reattach!(attach.computerId, sessionId, attach.spawnId, {
+            processName: spawnConfig.shell,
+            ...(taskId ? { taskId } : {}),
+            mode: agentId,
+            relay: (spawnRelay = isWatched(sessionId)),
+            signal: attach.signal
+          }),
+        attach.signal
+      )) as unknown as pty.IPty
+      adoptedHandle = ptyProcess as unknown as PtyHandle
+    } else if (opts.adoptPty) {
       // Warm-process adoption: the agent is already running ON THE COMPUTER. Adopting
       // REKEYS it there (warmId → this sessionId) rather than spawning anything, so
       // pid, output buffer and seq counter carry over and what comes back is an
@@ -2038,7 +2374,15 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // starts at once, as does every recovery shell below.
       const admission: PtySpawnAdmission | undefined =
         agentId === 'terminal' ? undefined : opts.foreground ? 'foreground' : 'background'
-      ptyProcess = await spawnRemote(spawnFile, initialArgs, startupTimeoutMs, admission)
+      // A continuation keeps the session's scrollback on its computer: the dead
+      // process's buffer (seq continues), the preamble, then the resumed agent.
+      ptyProcess = await spawnRemote(
+        spawnFile,
+        initialArgs,
+        startupTimeoutMs,
+        admission,
+        continuation ? { preamble: continuation.preamble } : undefined
+      )
     } else {
       try {
         ptyProcess = spawn(spawnFile, initialArgs, startupTimeoutMs)
@@ -2080,38 +2424,77 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // asking the wrong kernel. Adoption always targets a computer (`adoptPty`
     // carries a required `computerId`), so it is remote even when `computerId` is
     // unset on the spawn itself.
-    const isHubLocalProcess = computerId == null && !opts.adoptPty
+    const isHubLocalProcess = computerId == null && !opts.adoptPty && !attaching
 
-    sessions.set(sessionId, {
-      win: originalWin,
-      pty: ptyProcess,
-      sessionId,
-      taskId,
-      mode: agentId,
-      adapter,
-      // Only checks for session errors if we're trying to resume
-      detector: new PtyOutputDetector({ adapter, mode: agentId, resuming }),
-      buffer: new RingBuffer(MAX_BUFFER_SIZE),
-      cols: spawnOptions.cols,
-      rows: spawnOptions.rows,
-      lastOutputTime: Date.now(),
-      lastUserInteractionAt: Date.now(),
-      conversationId: effectiveConversationId ?? null,
-      createdAt: Date.now(),
-      state: 'starting',
-      // CLI state tracking
-      activity: 'unknown',
-      error: null,
-      // /status monitoring
-      inputBuffer: '',
-      syncQueryPending: '',
-      replyMirror: new TerminalReplyMirror(spawnOptions.cols, spawnOptions.rows, (reply) => {
-        const live = sessions.get(sessionId)
-        if (live) writeQueryReply(live, reply)
-      }),
-      lastEmittedTitle: '',
-      relayed: spawnRelay
-    })
+    // A continuation adopts its new process only into the session it continues:
+    // closed, restarted or quitting while the spawn was in flight, the new process
+    // belongs to nothing and is stopped (the dead session's exit is reported by
+    // whoever ended it, or by the caller).
+    const carried = continuation?.from
+    if (carried) {
+      const verdict = decideRecoveryAdoption({
+        finalized: !!carried.exited || !!carried.killRequested,
+        sessionReplaced: sessions.get(sessionId) !== carried,
+        isShuttingDown,
+        killRequested: !!carried.killRequested
+      })
+      if (verdict.action === 'discard') {
+        try {
+          ptyProcess.kill()
+        } catch {
+          // Already gone.
+        }
+        return { success: false, error: 'superseded' }
+      }
+      stopSessionTimers(carried)
+      carried.replyMirror.dispose()
+      // A debounced transition the dead process queued must not land on its successor.
+      stateMachine.unregister(sessionId)
+    }
+
+    const registerSession = (): void => {
+      opts.attach?.signal?.throwIfAborted()
+      sessions.set(sessionId, {
+        win: carried?.win ?? originalWin,
+        pty: ptyProcess,
+        sessionId,
+        taskId,
+        mode: agentId,
+        adapter,
+        // Only checks for session errors if we're trying to resume
+        detector: new PtyOutputDetector({ adapter, mode: agentId, resuming }),
+        buffer: carried?.buffer ?? new RingBuffer(MAX_BUFFER_SIZE),
+        cols: spawnOptions.cols,
+        rows: spawnOptions.rows,
+        lastOutputTime: Date.now(),
+        lastUserInteractionAt: carried?.lastUserInteractionAt ?? Date.now(),
+        conversationId: effectiveConversationId ?? null,
+        createdAt: Date.now(),
+        state: 'starting',
+        // CLI state tracking
+        activity: 'unknown',
+        error: null,
+        // /status monitoring
+        inputBuffer: '',
+        syncQueryPending: '',
+        replyMirror: new TerminalReplyMirror(spawnOptions.cols, spawnOptions.rows, (reply) => {
+          const live = sessions.get(sessionId)
+          if (live) writeQueryReply(live, reply)
+        }),
+        lastEmittedTitle: '',
+        relayed: spawnRelay,
+        // Taken over, not started: marked at once (its confirmation settles a tick later).
+        ...(attaching ? { adoptedAt: Date.now() } : {})
+      })
+    }
+    if (adoptedHandle?.adoption) {
+      if (!adoptedHandle.adoption.commit(registerSession))
+        throw new Error('Attachment ownership was cancelled before manager registration.')
+    } else registerSession()
+    adoptionAccepted = true
+    // Disposal may re-enter immediately after the atomic ownership transfer.
+    opts.attach?.signal?.throwIfAborted()
+
     // Interest may have changed while the spawn was in flight.
     syncRelay(sessions.get(sessionId)!)
     // Adoption: the warm shell was spawned before any tab existed, so it has no
@@ -2131,6 +2514,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     if (opts.adoptPty?.preWarmedAgent && opts.adoptPty.sessionId && ledger) {
       try {
         await ledger.bindSessionToTask({
+          computerId: opts.adoptPty.computerId,
           sessionId: opts.adoptPty.sessionId,
           taskId,
           tabId: resolveTabRowId(sessionId)
@@ -2163,20 +2547,36 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // Never stuck: a session that prints nothing is killed by the startup
     // deadline (computer-owned, or the hub's fallback), and its exit → `dead`.
     stateMachine.register(sessionId, 'starting')
+    if (carried) {
+      const continued = sessions.get(sessionId)!
+      // The dead session already showed `starting` and the info line (at the exit,
+      // see onExit) — unless a state change raced in since.
+      if (carried.state !== 'starting') {
+        continued.pendingTransitionTrigger = { source: 'auto-resume' }
+        emitStateChange(continued, sessionId, 'starting', carried.state)
+      }
+      // What the user typed while the resume was starting reaches the resumed
+      // process (an owner queues it until its process has started).
+      const held = carried.heldInput ?? []
+      carried.heldInput = undefined
+      for (const data of held) writePty(sessionId, data)
+    }
     // An AGENT's start is tracked for the startup card: `queued` until its owner
     // confirms the launch (after any wait for an admission slot), then `booting`
     // until its first output. A plain shell starts at once — not tracked.
-    if (agentId !== 'terminal') {
+    if (agentId !== 'terminal' && !attaching) {
       agentStarts.mark(sessionId, spawnConfirmation ? 'queued' : 'booting')
     }
     let firstOutputTs: number | null = null
     /** When the owner confirmed the spawn (round-trip backends) — after any admission wait. */
     let spawnConfirmedTs: number | null = null
     void spawnConfirmation?.then(
-      () => {
+      (confirmed) => {
         spawnConfirmedTs = Date.now()
+        // Nothing booted when the owner took a running session over (`attached`).
         // Only this spawn's own entry: a replacement at the same id tracks itself.
-        if (sessions.get(sessionId)?.pty === ptyProcess) agentStarts.markBooting(sessionId)
+        if (!confirmed.attached && sessions.get(sessionId)?.pty === ptyProcess)
+          agentStarts.markBooting(sessionId)
       },
       () => {
         // Refusals are handled where the confirmation is consumed below.
@@ -2209,11 +2609,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       finalized = true
       const exiting = sessions.get(sessionId)
       if (exiting && exiting.pty === ptyProcess) exiting.exited = true
-      // Drop the pending-spawn provenance row for this (task, mode). A row that
-      // isn't pruned here cannot match a later launch's token, but explicit
-      // pruning keeps the ledger small and avoids stale lookup candidates.
-      if (ledger) {
-        void ledger.prunePendingSpawns({ taskId, mode: agentId }).catch(() => {
+      // Drop THIS launch's pending-spawn provenance row (by id: a sibling tab of
+      // the same mode keeps its own). A row that isn't pruned here cannot match
+      // a later launch's token, but pruning keeps the ledger small.
+      if (ledger && pendingRowIds.length) {
+        void ledger.prunePendingSpawns({ computerId, ids: pendingRowIds }).catch(() => {
           // Best-effort — a leaked token-bearing row cannot claim a later spawn.
         })
       }
@@ -2280,8 +2680,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // Delay session cleanup so any trailing onData events (buffered in the PTY fd)
       // can still be processed and forwarded to the renderer before we drop the session.
       setTimeout(() => {
+        // Replaced meanwhile (agent switch, restart): the id and every map keyed by
+        // it belong to the NEW session now. Clearing them here dropped it — exists
+        // false, its process running attached to nothing.
+        exitSession?.replyMirror.dispose()
+        if (sessions.get(sessionId) !== exitSession) return
         dataListeners.delete(sessionId)
-        sessions.get(sessionId)?.replyMirror.dispose()
         sessions.delete(sessionId)
         sessionTaskMap.delete(sessionId)
         sessionTabMap.delete(sessionId)
@@ -2436,6 +2840,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       }, 250)
     }
 
+    // Each attached pty's exit handler, so a continuation whose start its owner
+    // refused can be handled as that process's exit (recovery shell), not a bare end.
+    const exitHandlers = new WeakMap<object, (exit: PtyExit) => void>()
     const attachPtyHandlers = (target: pty.IPty): void => {
       // The session's first output: started. From the bytes, or — when nothing is
       // relayed to this side — from the owner's `firstOutput` signal.
@@ -2813,8 +3220,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         })
       )
 
-      target.onExit(
-        guardPtyCallback(sessionId, taskId, 'onExit', (exit) => {
+      const onTargetExit = guardPtyCallback(
+        sessionId,
+        taskId,
+        'onExit',
+        (exit: { exitCode: number; signal?: number }) => {
           const { exitCode } = exit
           const win = getWin() // Dynamic lookup for redirectSessionWindow()
           clearStartupTimeout()
@@ -2822,6 +3232,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
 
           const session = sessions.get(sessionId)
           if (!session || session.pty !== target) return
+          // A second exit report for the process being resumed (its kill raced the
+          // resume): nothing left to decide — report it once.
+          if (resumeInFlight) {
+            session.heldInput = undefined
+            finalizeSessionExit(exitCode)
+            return
+          }
           // A routed handle carries the lifecycle cause the exit code cannot.
           lastExitReason =
             (exit as PtyExit).reason ??
@@ -2830,8 +3247,17 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           // The owner's deadline fired: record it exactly as the hub's own would,
           // then let the ordinary exit path below decide on a recovery shell.
           if (lastExitReason === 'startup-timeout') recordStartupTimeout('computer')
+          // SlayZone asked for this exit (close, replace, task done, hand-off, quit,
+          // hibernation): it ends the session — no retry, no recovery shell, no resume,
+          // whatever the code says (a computer-routed kill reports a null code, as 1).
+          const requested = exitWasRequested({
+            killRequested: !!session.killRequested,
+            shuttingDown: isShuttingDown,
+            hibernating: hibernatingSessions.has(sessionId)
+          })
 
           const canAsyncFallback =
+            !requested &&
             computerId == null && // remote sessions never use the local shell fallback
             canRetryInteractiveOnly &&
             !usedFallback &&
@@ -2928,151 +3354,323 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           const exitCtx = {
             exitCode,
             agentId,
-            hasPostSpawnCommand: !!spawnConfig.postSpawnCommand,
+            hasPostSpawnCommand: runsAgent,
             resuming,
             usedShellFallback,
-            isStale: isStaleResume || isResumeConflict
+            isStale: isStaleResume || isResumeConflict,
+            requested
           }
 
-          // #5: Shell fallback — spawn interactive shell when AI provider exits
-          // non-zero. Suppressed only for a stale session (the "session expired"
-          // overlay handles that case).
-          //
-          // Runs for COMPUTER-ROUTED sessions too. It used to be gated on
-          // `computerId == null` back when a computer was the exotic case and a local
-          // spawn was the norm; since every pty routes through a computer that gate
-          // disabled the feature outright — an agent that crashed left a dead pane
-          // with no recovery shell, on the ONLY path that exists. What actually
-          // differs remotely is the SPAWN CALL, not the recovery semantics: a
-          // remote spawn is a network round-trip, so it cannot run inside this
-          // synchronous onExit callback. Hence the async continuation below —
-          // everything after the spawn (buffer/seq bookkeeping, handler
-          // re-attachment, title polling) is shared, so the two paths cannot drift.
-          if (shouldShellFallback(exitCtx)) {
-            const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
-            const previousArgs = [...usedArgs]
-            // The deadline is "until the SESSION's first output", not per pty: a
-            // session that already printed has proven it starts, so its recovery
-            // shell gets none — exactly as the hub's own timer behaved.
-            const recoveryDeadlineMs = firstOutputTs === null ? startupTimeoutMs : undefined
+          // The existing recovery: a recovery shell where one applies, else the exit.
+          const recoverOrFinalize = (): void => {
+            // #5: Shell fallback — spawn interactive shell when AI provider exits
+            // non-zero. Suppressed only for a stale session (the "session expired"
+            // overlay handles that case).
+            //
+            // Runs for COMPUTER-ROUTED sessions too. It used to be gated on
+            // `computerId == null` back when a computer was the exotic case and a local
+            // spawn was the norm; since every pty routes through a computer that gate
+            // disabled the feature outright — an agent that crashed left a dead pane
+            // with no recovery shell, on the ONLY path that exists. What actually
+            // differs remotely is the SPAWN CALL, not the recovery semantics: a
+            // remote spawn is a network round-trip, so it cannot run inside this
+            // synchronous onExit callback. Hence the async continuation below —
+            // everything after the spawn (buffer/seq bookkeeping, handler
+            // re-attachment, title polling) is shared, so the two paths cannot drift.
+            if (requested && shouldShellFallback({ ...exitCtx, requested: false }))
+              recordDiagnosticEvent({
+                level: 'info',
+                source: 'pty',
+                event: 'pty.exit_requested',
+                sessionId,
+                taskId: taskIdFromSessionId(sessionId),
+                message: `${agentId} exited with code ${String(exitCode)} after SlayZone ended it; no recovery shell`,
+                payload: { exitCode, mode: agentId, computerId }
+              })
+            if (shouldShellFallback(exitCtx)) {
+              const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
+              const previousArgs = [...usedArgs]
+              // The deadline is "until the SESSION's first output", not per pty: a
+              // session that already printed has proven it starts, so its recovery
+              // shell gets none — exactly as the hub's own timer behaved.
+              const recoveryDeadlineMs = firstOutputTs === null ? startupTimeoutMs : undefined
 
-            // Adopt a freshly-spawned recovery shell as this session's pty. Shared
-            // verbatim by both paths; the ONLY difference upstream is sync vs await.
-            const adoptRecoveryShell = (fallbackShellPty: pty.IPty): void => {
-              usedShellFallback = true
-              ptyProcess = fallbackShellPty
-              session.pty = fallbackShellPty
-              session.relayed = spawnRelay
-              syncRelay(session)
-              usedArgs = shellOnlyArgs
-              usedFallback = true
+              // Adopt a freshly-spawned recovery shell as this session's pty. Shared
+              // verbatim by both paths; the ONLY difference upstream is sync vs await.
+              const adoptRecoveryShell = (fallbackShellPty: pty.IPty): void => {
+                usedShellFallback = true
+                ptyProcess = fallbackShellPty
+                session.pty = fallbackShellPty
+                session.relayed = spawnRelay
+                syncRelay(session)
+                usedArgs = shellOnlyArgs
+                usedFallback = true
 
-              const infoLine = buildRecoveryMessage(agentId, exitCode)
-              // An owner-buffered session got this line in the owner's buffer
-              // (`carryOutput.preamble`); it shows on the next replay.
-              if (!outputOwner(session)) session.buffer.append(infoLine)
-              if (!outputOwner(session) && !win.isDestroyed()) {
-                try {
-                  win.webContents.send(
-                    'pty:data',
-                    sessionId,
-                    infoLine,
-                    session.buffer.getCurrentSeq()
-                  )
-                } catch {
-                  // Window destroyed, ignore
+                const infoLine = buildRecoveryMessage(agentId, exitCode)
+                // An owner-buffered session got this line in the owner's buffer
+                // (`carryOutput.preamble`); it shows on the next replay.
+                if (!outputOwner(session)) session.buffer.append(infoLine)
+                if (!outputOwner(session) && !win.isDestroyed()) {
+                  try {
+                    win.webContents.send(
+                      'pty:data',
+                      sessionId,
+                      infoLine,
+                      session.buffer.getCurrentSeq()
+                    )
+                  } catch {
+                    // Window destroyed, ignore
+                  }
                 }
+
+                recordDiagnosticEvent({
+                  level: 'warn',
+                  source: 'pty',
+                  event: 'pty.shell_fallback',
+                  sessionId,
+                  taskId: taskIdFromSessionId(sessionId),
+                  message: `${agentId} exited with code ${String(exitCode)}; falling back to interactive shell`,
+                  payload: {
+                    exitCode,
+                    mode: agentId,
+                    previousArgs,
+                    fallbackArgs: shellOnlyArgs,
+                    computerId
+                  }
+                })
+
+                armHubStartupDeadlineUnlessOwned(fallbackShellPty)
+                attachPtyHandlers(fallbackShellPty)
+                startTitlePolling(session, fallbackShellPty)
               }
 
+              const recordFallbackFailure = (fallbackErr: unknown): void => {
+                recordDiagnosticEvent({
+                  level: 'error',
+                  source: 'pty',
+                  event: 'pty.shell_fallback_failed',
+                  sessionId,
+                  taskId: taskIdFromSessionId(sessionId),
+                  message: (fallbackErr as Error).message,
+                  payload: {
+                    shell: spawnFile,
+                    attemptedArgs: shellOnlyArgs,
+                    computerId
+                  }
+                })
+              }
+
+              if (computerId != null) {
+                // Remote: the spawn is a round-trip, so finalize is deferred to the
+                // continuation rather than falling through synchronously below. On
+                // failure we finalize there — the session must never be left with a
+                // dead pty and no exit recorded.
+                // The owner keeps ONE scrollback across the process change: the
+                // agent's output, this line, then the recovery shell's.
+                void spawnRemote(spawnFile, shellOnlyArgs, recoveryDeadlineMs, undefined, {
+                  preamble: buildRecoveryMessage(agentId, exitCode)
+                }).then(
+                  (fallbackShellPty) => {
+                    // The session can be torn down (tab closed, task killed, app
+                    // quitting) while the spawn is in flight — the local path cannot
+                    // race this way because it spawns synchronously inside onExit.
+                    // The decision is `decideRecoveryAdoption` (pure + unit-tested:
+                    // the three conditions fail independently and only the happy
+                    // path is reachable from e2e).
+                    const verdict = decideRecoveryAdoption({
+                      finalized,
+                      sessionReplaced: sessions.get(sessionId) !== session,
+                      isShuttingDown,
+                      killRequested: !!session.killRequested
+                    })
+                    if (verdict.action === 'discard') {
+                      try {
+                        fallbackShellPty.kill()
+                      } catch {
+                        // Already gone — nothing to clean up.
+                      }
+                      if (verdict.finalize) finalizeSessionExit(exitCode)
+                      return
+                    }
+                    adoptRecoveryShell(fallbackShellPty)
+                  },
+                  (fallbackErr: unknown) => {
+                    recordFallbackFailure(fallbackErr)
+                    finalizeSessionExit(exitCode)
+                  }
+                )
+                return
+              }
+
+              try {
+                adoptRecoveryShell(spawn(spawnFile, shellOnlyArgs, recoveryDeadlineMs))
+                return
+              } catch (fallbackErr) {
+                recordFallbackFailure(fallbackErr)
+              }
+            }
+
+            finalizeSessionExit(exitCode)
+          }
+
+          // An agent that died MID-SESSION without SlayZone asking (the 2026-11-14
+          // stray sweep SIGHUP'd 31 of them) is resumed on its conversation, in
+          // place — not buried under a recovery shell. Everything else (a start
+          // failure, a requested kill, a stale resume, a transport outcome, the
+          // user's ^C) keeps the handling above. Pure + unit-tested.
+          const signal = (exit as PtyExit).signal
+          const unexpected = decideUnexpectedExit({
+            exitCode,
+            ...(signal ? { signal } : {}),
+            ...(lastExitReason ? { reason: lastExitReason } : {}),
+            hasPostSpawnCommand: exitCtx.hasPostSpawnCommand,
+            usedShellFallback,
+            isStale: exitCtx.isStale,
+            hasResumeCommand: !!resumeCommand,
+            resumeEligibleMode: isResumeEligibleMode(agentId),
+            conversationId: session.conversationId ?? null,
+            killRequested: !!session.killRequested,
+            shuttingDown: isShuttingDown,
+            hibernating: hibernatingSessions.has(sessionId),
+            firstOutputAt: firstOutputTs,
+            lastInterruptInputAt: session.lastInterruptInputAt ?? null,
+            lastAutoResumeAt: lastAutoResumeAt.get(sessionId) ?? null,
+            now: Date.now()
+          })
+          if (unexpected.action === 'rate-limited') {
+            recordDiagnosticEvent({
+              level: 'warn',
+              source: 'pty',
+              event: 'pty.auto_resume_rate_limited',
+              sessionId,
+              taskId: taskIdFromSessionId(sessionId),
+              message: `${agentId} exited unexpectedly again within ${String(AUTO_RESUME_WINDOW_MS / 60_000)} min of its last auto-resume; not resuming`,
+              payload: { exitCode, signal: signal ?? null, mode: agentId, computerId }
+            })
+          }
+          if (unexpected.action !== 'resume') {
+            recoverOrFinalize()
+            return
+          }
+
+          const resumeId = session.conversationId as string
+          const preamble = buildAutoResumeMessage(agentId, exitCode, signal)
+          resumeInFlight = true
+          noteAutoResume(sessionId, Date.now())
+          // The dead process's per-session state goes with it, as on any replace:
+          // its agent tree (a death without SessionEnd — SIGKILL, OOM — would leave
+          // a stale subagent id pinning the resumed agent on 'background').
+          // Guarded: a throwing listener must not stop the resume.
+          try {
+            ptyEvents.emit('replacing', sessionId)
+          } catch (err) {
+            recordDiagnosticEvent({
+              level: 'warn',
+              source: 'pty',
+              event: 'pty.replacing_listener_error',
+              sessionId,
+              taskId,
+              message: err instanceof Error ? err.message : String(err)
+            })
+          }
+          // From now until the resumed process exists (resolve, heal, locate and
+          // spawn round trips — seconds on a loaded computer) the tab shows what is
+          // happening, and what the user types is held for the new process.
+          session.heldInput = []
+          if (session.state !== 'starting') {
+            const was = session.state
+            stateMachine.unregister(sessionId)
+            stateMachine.register(sessionId, 'starting')
+            session.state = 'starting'
+            session.pendingTransitionTrigger = { source: 'auto-resume' }
+            emitStateChange(session, sessionId, 'starting', was)
+          }
+          // A hub-buffered session shows the line now; an owner-buffered one gets
+          // it in its owner's scrollback with the spawn (`carryOutput`).
+          if (!outputOwner(session)) {
+            const seq = session.buffer.append(preamble)
+            ptyEvents.emit('data', sessionId, preamble, seq)
+            if (!win.isDestroyed()) {
+              try {
+                win.webContents.send('pty:data', sessionId, preamble, seq)
+              } catch {
+                // Window destroyed, ignore
+              }
+            }
+          }
+          // This launch's provenance rows are spent: the resume records its own.
+          if (ledger && pendingRowIds.length) {
+            const ids = pendingRowIds.splice(0)
+            void ledger.prunePendingSpawns({ computerId, ids }).catch(() => {
+              // Best-effort, as in finalizeSessionExit.
+            })
+          }
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.auto_resumed',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            message: `${agentId} exited unexpectedly (${signal ? `signal ${String(signal)}` : `code ${String(exitCode)}`}); resuming its conversation`,
+            payload: {
+              exitCode,
+              signal: signal ?? null,
+              mode: agentId,
+              computerId,
+              conversationId: resumeId,
+              uptimeMs: firstOutputTs === null ? null : Date.now() - firstOutputTs
+            }
+          })
+          void createPtyImpl(
+            {
+              ...opts,
+              win: session.win,
+              cols: session.cols,
+              rows: session.rows,
+              existingConversationId: resumeId,
+              conversationId: undefined,
+              initialPrompt: undefined,
+              adoptPty: undefined,
+              // The resume LAUNCHES the agent again: never an attach.
+              attach: undefined,
+              computerId
+            },
+            { from: session, preamble }
+          )
+            .catch(
+              (err: unknown): PtyCreateResult => ({
+                success: false,
+                error: err instanceof Error ? err.message : String(err)
+              })
+            )
+            .then((res) => {
+              if (res.success) return
+              resumeInFlight = false
+              // Never typed into a recovery shell: it would run as commands.
+              const heldWrites = session.heldInput?.length ?? 0
+              session.heldInput = undefined
+              if (finalized) return
+              // Ended (closed, restarted, quitting) while the resume was starting:
+              // report the exit, never a recovery shell nobody asked for.
+              if (sessions.get(sessionId) !== session || isShuttingDown || session.killRequested) {
+                finalizeSessionExit(exitCode)
+                return
+              }
               recordDiagnosticEvent({
                 level: 'warn',
                 source: 'pty',
-                event: 'pty.shell_fallback',
+                event: 'pty.auto_resume_failed',
                 sessionId,
                 taskId: taskIdFromSessionId(sessionId),
-                message: `${agentId} exited with code ${String(exitCode)}; falling back to interactive shell`,
-                payload: {
-                  exitCode,
-                  mode: agentId,
-                  previousArgs,
-                  fallbackArgs: shellOnlyArgs,
-                  computerId
-                }
+                message: res.error ?? 'resume failed',
+                payload: { exitCode, mode: agentId, computerId, droppedInputWrites: heldWrites }
               })
-
-              armHubStartupDeadlineUnlessOwned(fallbackShellPty)
-              attachPtyHandlers(fallbackShellPty)
-              startTitlePolling(session, fallbackShellPty)
-            }
-
-            const recordFallbackFailure = (fallbackErr: unknown): void => {
-              recordDiagnosticEvent({
-                level: 'error',
-                source: 'pty',
-                event: 'pty.shell_fallback_failed',
-                sessionId,
-                taskId: taskIdFromSessionId(sessionId),
-                message: (fallbackErr as Error).message,
-                payload: {
-                  shell: spawnFile,
-                  attemptedArgs: shellOnlyArgs,
-                  computerId
-                }
-              })
-            }
-
-            if (computerId != null) {
-              // Remote: the spawn is a round-trip, so finalize is deferred to the
-              // continuation rather than falling through synchronously below. On
-              // failure we finalize there — the session must never be left with a
-              // dead pty and no exit recorded.
-              // The owner keeps ONE scrollback across the process change: the
-              // agent's output, this line, then the recovery shell's.
-              void spawnRemote(spawnFile, shellOnlyArgs, recoveryDeadlineMs, undefined, {
-                preamble: buildRecoveryMessage(agentId, exitCode)
-              }).then(
-                (fallbackShellPty) => {
-                  // The session can be torn down (tab closed, task killed, app
-                  // quitting) while the spawn is in flight — the local path cannot
-                  // race this way because it spawns synchronously inside onExit.
-                  // The decision is `decideRecoveryAdoption` (pure + unit-tested:
-                  // the three conditions fail independently and only the happy
-                  // path is reachable from e2e).
-                  const verdict = decideRecoveryAdoption({
-                    finalized,
-                    sessionReplaced: sessions.get(sessionId) !== session,
-                    isShuttingDown
-                  })
-                  if (verdict.action === 'discard') {
-                    try {
-                      fallbackShellPty.kill()
-                    } catch {
-                      // Already gone — nothing to clean up.
-                    }
-                    if (verdict.finalize) finalizeSessionExit(exitCode)
-                    return
-                  }
-                  adoptRecoveryShell(fallbackShellPty)
-                },
-                (fallbackErr: unknown) => {
-                  recordFallbackFailure(fallbackErr)
-                  finalizeSessionExit(exitCode)
-                }
-              )
-              return
-            }
-
-            try {
-              adoptRecoveryShell(spawn(spawnFile, shellOnlyArgs, recoveryDeadlineMs))
-              return
-            } catch (fallbackErr) {
-              recordFallbackFailure(fallbackErr)
-            }
-          }
-
-          finalizeSessionExit(exitCode)
-        })
+              recoverOrFinalize()
+            })
+        }
       )
+      exitHandlers.set(target, onTargetExit)
+      target.onExit(onTargetExit)
     }
 
     attachPtyHandlers(ptyProcess)
@@ -3098,11 +3696,78 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // Nothing here is the sole net against a session that starts but never says
     // anything: the startup deadline owns that, keyed on OUTPUT rather than pid —
     // run by the process's owner, or by `armHubStartupDeadlineUnlessOwned`.
+    // A spawn its owner did not start. An ordinary one ends here (the overlay says
+    // why); an auto-resume is handled as its process's exit, so a start that never
+    // happened gets the recovery shell the resume replaced — not a dead pane.
+    const endUnstarted = (): void => {
+      const deliver = continuation ? exitHandlers.get(ptyProcess) : undefined
+      if (deliver)
+        deliver({
+          exitCode: -1,
+          ...(lastExitReason ? { reason: lastExitReason } : {}),
+          ...(lastExitDetail ? { detail: lastExitDetail } : {})
+        })
+      else finalizeSessionExit(-1)
+    }
+    /**
+     * The owner took over a process it was ALREADY running (a previous hub run's) —
+     * `attached`. Nothing started: the session is past its startup, its scrollback
+     * lives with the owner, its conversation is the one it reports. Settle it as a
+     * running agent and drop what this call prepared for a launch that never came.
+     */
+    const adoptAttached = (
+      session: PtySession,
+      taken: NonNullable<PtySpawnConfirmation['attached']>
+    ): void => {
+      if (session.killRequested || opts.attach?.signal?.aborted) return
+      if (firstOutputTs === null) firstOutputTs = Date.now()
+      session.adoptedAt = Date.now()
+      clearStartupTimeout()
+      clearEarlyExitWatchdog()
+      agentStarts.clear(sessionId)
+      // No resume is starting: the stale-resume window does not apply.
+      session.detector.checkingForSessionError = false
+      session.suppressOutput = false
+      if (session.state === 'starting') {
+        session.pendingTransitionTrigger = { source: 'adopted-live' }
+        transitionState(sessionId, 'idle')
+      }
+      if (taken.conversationId && taken.conversationId !== session.conversationId) {
+        noteSessionConversationId(sessionId, taken.conversationId)
+      }
+      // This call's provenance row named a launch that never happened; the live
+      // process keeps its own (its hooks carry that spawn's token).
+      if (ledger && pendingRowIds.length) {
+        const ids = pendingRowIds.splice(0)
+        void ledger.prunePendingSpawns({ computerId, ids }).catch(() => {
+          // Best-effort — a leftover token row cannot claim another launch.
+        })
+      }
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'pty.orphan_adopted',
+        sessionId,
+        taskId,
+        message: 'Attached to the session the computer was still running (hub restarted).',
+        payload: {
+          computerId,
+          mode: agentId,
+          via: attaching ? 'reattach' : 'spawn',
+          seq: taken.seq,
+          conversationId: taken.conversationId
+        }
+      })
+    }
     if (spawnConfirmation) {
       void spawnConfirmation.then(
-        ({ pid }) => {
+        ({ pid, attached }) => {
           const session = sessions.get(sessionId)
           if (!session || session.pty !== ptyProcess || finalized) return
+          if (attached) {
+            adoptAttached(session, attached)
+            return
+          }
           if (typeof pid === 'number' && pid > 0) return
           // Confirmed spawned, yet no usable pid — the owner replied that it has
           // no process. Unlike an unanswered reply, this IS a verdict.
@@ -3115,7 +3780,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             payload: { reason: 'confirmed_without_pid' }
           })
           lastExitReason = 'spawn-failed'
-          finalizeSessionExit(-1)
+          endUnstarted()
         },
         (err: unknown) => {
           const session = sessions.get(sessionId)
@@ -3131,7 +3796,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           })
           lastExitReason = 'spawn-failed'
           lastExitDetail = err instanceof Error ? err.message : String(err)
-          finalizeSessionExit(-1)
+          endUnstarted()
         }
       )
     } else if (isHubLocalProcess) {
@@ -3194,8 +3859,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       else openSessionErrorWindow()
     }
 
+    opts.attach?.signal?.throwIfAborted()
     return { success: true }
   } catch (error) {
+    releaseAdoption()
     const err = error as Error
     // A refusal, not a spawn failure: its message is the whole story.
     if (err instanceof ConversationInUseError) {
@@ -3205,6 +3872,31 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         event: 'pty.conversation_in_use',
         sessionId,
         taskId: taskIdFromSessionId(sessionId)
+      })
+      return { success: false, error: err.message, code: err.code }
+    }
+    if (opts.attach?.signal?.aborted) return { success: false, error: 'Attachment cancelled.' }
+    const refusal = ptyReattachRefusal(err)
+    if (refusal) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.orphan_adopt_failed',
+        sessionId,
+        taskId: taskIdFromSessionId(sessionId),
+        message: err.message,
+        payload: { refusal, computerId: opts.attach?.computerId ?? opts.computerId ?? null }
+      })
+      return { success: false, error: err.message, code: 'attach-refused', attachRefusal: refusal }
+    }
+    if (err instanceof SessionLedgerUnreadableError) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.session_ledger_unreadable',
+        sessionId,
+        taskId: taskIdFromSessionId(sessionId),
+        message: err.message
       })
       return { success: false, error: err.message, code: err.code }
     }
@@ -3230,6 +3922,8 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       success: false,
       error: `${err.message} (shell=${spawnAttempt?.shell ?? '?'}, cwd=${cwd || '?'})`
     }
+  } finally {
+    if (!adoptionAccepted) releaseAdoption()
   }
 }
 
@@ -3247,9 +3941,20 @@ export function submitPty(sessionId: string, text: string): boolean {
   return writePty(sessionId, session.adapter.encodeSubmit(text))
 }
 
+/** Input held for a resuming agent is bounded: a runaway paste is cut, not kept. */
+const HELD_INPUT_MAX_CHARS = 64 * 1024
+
 export function writePty(sessionId: string, data: string, writeId?: string): boolean {
   const session = sessions.get(sessionId)
   if (!session) return false
+
+  // Its agent is being resumed in place: hold the input for the new process (the
+  // dead one would swallow it).
+  if (session.heldInput) {
+    const held = session.heldInput.reduce((n, d) => n + d.length, 0)
+    if (held + data.length <= HELD_INPUT_MAX_CHARS) session.heldInput.push(data)
+    return true
+  }
 
   // A session a computer runs (docs/direct-link.md): the computer analyses EVERY
   // write in one input buffer and reports the facts (`pty-input`), whichever path
@@ -3337,6 +4042,8 @@ export function applyPtyInputFacts(
   // CR/LF check missed every typed submit once claude-code enabled the kitty
   // keyboard protocol, so markSessionUserInput never ran → needs_attention never
   // fired.
+  if (facts.interrupt) session.lastInterruptInputAt = Date.now()
+
   const submittedLine = facts.submitted
   if (submittedLine === null) return false
   if (submittedLine.trim().length > 0) {
@@ -3442,6 +4149,7 @@ export function killPty(sessionId: string): boolean {
     sessionId,
     taskId: session.taskId
   })
+  session.killRequested = true
   // Clear any pending timeouts to prevent orphaned callbacks
   stopSessionTimers(session)
   // Note: we intentionally do NOT eagerly delete from sessions/dataListeners
@@ -3511,6 +4219,13 @@ registerConversationHolder('terminal', {
       .filter(([, s]) => s.taskId === taskId && s.conversationId === conversationId && !s.exited)
       .map(([id]) => id)
     await Promise.all(ids.map((id) => killPtyAndWait(id)))
+  },
+  liveSessionId: (taskId, conversationId) => terminalSessionRunning(taskId, conversationId, ''),
+  liveConversations: (taskId) => {
+    const ids = new Set<string>()
+    for (const s of sessions.values())
+      if (s.taskId === taskId && s.conversationId && !s.exited) ids.add(s.conversationId)
+    return [...ids]
   }
 })
 
@@ -3531,26 +4246,51 @@ export function hasPty(sessionId: string): boolean {
   return sessions.has(sessionId)
 }
 
-/** Registered AND its process has not exited. During the post-exit drain window
- *  a session is still in the map but dead: a write there is lost, and treating
- *  it as alive skips the respawn that should replace it. */
+/** Registered, its process not exited and not asked to die. During the post-exit
+ *  drain window a session is still in the map but dead, and a killed one is dying:
+ *  a write there is lost, and treating it as alive skips the respawn that should
+ *  replace it. */
 export function hasLivePty(sessionId: string): boolean {
   const session = sessions.get(sessionId)
-  return !!session && !session.exited
+  return !!session && !session.exited && !session.killRequested
 }
 
-/** Find a live session by taskId + mode. Used by the agent-hook REST handler to
- *  resolve `{ taskId, agentId }` → sessionId so hook events can drive state
- *  transitions. Prefers the main session (`sessionId === taskId`) when multiple
- *  panes share a mode. Returns null if no session matches. */
-export function findSessionByTaskIdAndMode(taskId: string, mode: AgentId): string | null {
+/** Find the live session a hook event is about. Used by the agent-hook REST
+ *  handler to drive state transitions. `tabId` (the hook context names the
+ *  agent's own tab) picks exactly that tab's session — two tabs of one mode
+ *  each get their own events. Without it: the task's MAIN tab session of that
+ *  mode, else any session of it. Returns null if no session matches. */
+export function findSessionByTaskIdAndMode(
+  taskId: string,
+  mode: AgentId,
+  tabId?: string
+): string | null {
+  let main: string | null = null
   let fallback: string | null = null
   for (const [sessionId, session] of sessions) {
     if (session.taskId !== taskId || session.mode !== mode) continue
-    if (sessionId === taskId) return sessionId
+    const tab = resolveTabRowId(sessionId)
+    if (tabId) {
+      if (tab === tabId) return sessionId
+      continue
+    }
+    if (tab === taskId) main ??= sessionId
     fallback ??= sessionId
   }
-  return fallback
+  return main ?? fallback
+}
+
+/** The OTHER live terminal session of `taskId` running `conversationId`, if any. */
+function terminalSessionRunning(
+  taskId: string,
+  conversationId: string,
+  exceptSessionId: string
+): string | null {
+  for (const [id, s] of sessions) {
+    if (id === exceptSessionId || s.taskId !== taskId) continue
+    if (s.conversationId === conversationId && !s.exited && !s.killRequested) return id
+  }
+  return null
 }
 
 /** External entry point for hook-driven state transitions. Tags the

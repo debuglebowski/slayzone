@@ -20,6 +20,12 @@ export interface TerminalDeadOverlayProps {
   onDoctor: () => void
   doctorLoading: boolean
   doctorResults: ValidationResult[] | null
+  /**
+   * The session is gone WITHOUT an exit (the hub restarted and has not attached it):
+   * a neutral "not attached" variant replaces the exit one. `onAttach` when the
+   * computer still runs this tab's session from before the restart.
+   */
+  notAttached?: { onRestart: () => void; onAttach?: () => void; attaching?: boolean }
 }
 
 // The dead-session overlay. Branches internally between the stale-session
@@ -39,8 +45,42 @@ export function TerminalDeadOverlay({
   onRetryClick,
   onDoctor,
   doctorLoading,
-  doctorResults
+  doctorResults,
+  notAttached
 }: TerminalDeadOverlayProps): React.JSX.Element {
+  if (notAttached) {
+    return (
+      <div
+        data-testid="terminal-not-attached"
+        className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-3 overflow-y-auto text-center"
+      >
+        <p className="text-sm font-medium text-foreground">Session not attached</p>
+        <p className="text-sm text-muted-foreground max-w-md">
+          {notAttached.onAttach
+            ? 'Its session is still running on its computer (from before the hub restarted). Attach to it, or restart this tab.'
+            : 'This terminal is not connected to a running session. Restart it to start a new one.'}
+        </p>
+        <div className="flex gap-2">
+          {notAttached.onAttach && (
+            <button
+              onClick={notAttached.onAttach}
+              disabled={notAttached.attaching}
+              className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {notAttached.attaching && <Loader2 className="size-3.5 animate-spin" />}
+              Attach
+            </button>
+          )}
+          <button
+            onClick={notAttached.onRestart}
+            className="px-3 py-1.5 text-sm rounded-md bg-surface-2 dark:bg-surface-2 hover:bg-accent dark:hover:bg-accent text-foreground dark:text-foreground transition-colors"
+          >
+            Restart
+          </button>
+        </div>
+      </div>
+    )
+  }
   if (isSessionInUse) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-3 overflow-y-auto text-center">

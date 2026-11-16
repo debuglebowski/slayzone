@@ -105,7 +105,7 @@ const turn = (id: string, sha: string, prev: string | null = null): AgentTurnRan
 describe('useGitDiffTurns', () => {
   it('falls back to "all" when the selected turn disappears', () => {
     turnsData = [turn('t1', 's1'), turn('t2', 's2', 's1')]
-    const { result, rerender } = renderHook(() => useGitDiffTurns('/repo'))
+    const { result, rerender } = renderHook(() => useGitDiffTurns('t1', '/repo'))
     expect(result.current.selectedTurnId).toBe('all')
 
     act(() => result.current.setSelectedTurnId('t2'))
@@ -126,7 +126,7 @@ describe('useGitDiffTurns', () => {
 
   it('selecting a turn that is not listed snaps back to "all"', () => {
     turnsData = [turn('t1', 's1')]
-    const { result } = renderHook(() => useGitDiffTurns('/repo'))
+    const { result } = renderHook(() => useGitDiffTurns('t1', '/repo'))
     act(() => result.current.setSelectedTurnId('missing'))
     expect(result.current.selectedTurnId).toBe('all')
   })

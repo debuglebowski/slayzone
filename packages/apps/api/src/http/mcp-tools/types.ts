@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { MenuEventMap } from '../../app-deps'
-import type { TaskOpsBus } from '../rest-api/types'
+import type { TaskAgentsAccess, TaskOpsBus } from '../rest-api/types'
 
 export interface McpToolsDeps {
   db: SlayzoneDb
@@ -13,4 +13,6 @@ export interface McpToolsDeps {
   menu?: TypedEmitter<MenuEventMap>
   /** Legacy webContents.send fan-out — Electron host only; dropped slice 8. */
   legacyBroadcast?: (channel: string, ...args: unknown[]) => void
+  /** Completion guard for `update_task`. Absent → this host runs no agents. */
+  taskAgents?: TaskAgentsAccess
 }

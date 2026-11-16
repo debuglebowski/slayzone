@@ -5,6 +5,7 @@ import {
   ArrowUpLeft,
   Camera,
   ClipboardCopy,
+  CopyPlus,
   ExternalLink,
   FilePlus,
   Flag,
@@ -97,6 +98,10 @@ interface UseTaskPaletteCommandsParams {
   hasDescription: boolean
   onTaskUpdated: (task: Task) => void
   onTagsChange: (tagIds: string[]) => void
+  /** A project was picked: the move dialog confirms it (a move can't be undone). */
+  onMoveToProject: (projectId: string, mode?: 'move' | 'copy') => void
+  /** Opens the duplicate dialog (a fresh follow-up of the task). */
+  onDuplicate: () => void
   /** The header's inline title editor is on screen (not zen / compact). */
   canRenameInline: boolean
   onRenameInline: () => void
@@ -168,6 +173,8 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
   // Stable wrappers: the scope's identity then follows the task's data only.
   const onTaskUpdated = useStableCallback(params.onTaskUpdated)
   const onTagsChange = useStableCallback(params.onTagsChange)
+  const onMoveToProject = useStableCallback(params.onMoveToProject)
+  const onDuplicate = useStableCallback(params.onDuplicate)
   const onRenameInline = useStableCallback(params.onRenameInline)
   const onRename = useStableCallback(params.onRename)
   const onArchive = useStableCallback(params.onArchive)
@@ -239,7 +246,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
     if (isTerminalStatus(status, columnsConfig)) {
       trackTask(taskId, 'task_completed', {
         provider: task.agent_id ?? 'terminal',
-        had_worktree: Boolean(task.worktree_path)
+        had_worktree: Boolean(task.has_worktree)
       })
     }
     onTaskUpdated(await updateTask({ id: taskId, status }))
@@ -343,13 +350,26 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
               checked: p.id === task.project_id,
               run: () => {
                 if (p.id === task.project_id) return
-                trackTask(task.id, 'task_moved_to_project')
-                return update({ projectId: p.id })
+                onMoveToProject(p.id)
               }
             }))
           }
         })
       }
+      commands.push({
+        id: 'copy-project',
+        label: 'Copy to project…',
+        keywords: 'copy project clone',
+        icon: CopyPlus,
+        run: () => onMoveToProject(task.project_id, 'copy')
+      })
+      commands.push({
+        id: 'duplicate',
+        label: 'Duplicate task…',
+        keywords: 'duplicate copy clone follow-up followup',
+        icon: CopyPlus,
+        run: onDuplicate
+      })
       commands.push({
         id: 'progress',
         label: 'Set progress…',

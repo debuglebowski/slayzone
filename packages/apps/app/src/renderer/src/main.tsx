@@ -12,6 +12,8 @@ import {
   HubScope,
   electronBootstrap,
   setHubConnectProbe,
+  setHubConnectAbortListener,
+  getHubConnectTraces,
   setDirectLinkProbe,
   setDirectRtcPeerFactory,
   useHubRegistryStore
@@ -84,6 +86,15 @@ function withWindowId(serverUrl: string, windowId: number | null | undefined): s
 // federated hub was delaying the default hub's handshake on reload by ~2.4s.
 // Main-side probes don't touch that counter. See transport connectPacing.ts.
 setHubConnectProbe(async (url) => (await electronBootstrap.probeServerHealth(url)).ok)
+// A hub socket stuck in its handshake and given up (transport connectHandshake.ts) is
+// recorded: "the hub was up but the app could not reach it" leaves this trail.
+setHubConnectAbortListener(({ url, reason, waitedMs }) =>
+  recordRendererEvent(
+    'hub.connect.abort',
+    `Gave up a hub connection stuck in its handshake (${reason}, ${waitedMs}ms)`,
+    { url, reason, waitedMs }
+  )
+)
 
 // Direct links to computers (docs/direct-link.md): main checks this document's CSP
 // and probes the computer over HTTP, so a socket that would fail is never opened —
@@ -255,6 +266,12 @@ if (isFloatingGlobalAgentPanel) {
           ) => ReturnType<typeof initTrpcClient>['client'] | null
         }
       ).__slayzone_hubClientForTest = (hubId) => getHubClient(hubId)?.client ?? null
+      // Every hub's recent connect attempts (transport connectTrace.ts), for failure dumps.
+      ;(
+        window as typeof window & {
+          __slayzone_hubConnectTraces?: typeof getHubConnectTraces
+        }
+      ).__slayzone_hubConnectTraces = getHubConnectTraces
     }
     // Multi-hub federation registry. The DEFAULT hub is pinned to `server.url` —
     // the exact url boot's initTrpcClient() used — so its HubScope reuses that

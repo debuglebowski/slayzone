@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { useChatRestorationPending } from './chat-restoration'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useStableCallback } from '@slayzone/ui'
 import { useTRPC } from '../trpc'
@@ -19,7 +20,8 @@ export function useChatModels({
 }): ChatModelsView {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const { data } = useQuery(trpc.chat.getModels.queryOptions({ taskId, mode }))
+  const { data, isFetching } = useQuery(trpc.chat.getModels.queryOptions({ taskId, mode }))
+  useChatRestorationPending(isFetching)
   const refresh = useStableCallback(() => {
     void queryClient.invalidateQueries({
       queryKey: trpc.chat.getModels.queryKey({ taskId, mode })

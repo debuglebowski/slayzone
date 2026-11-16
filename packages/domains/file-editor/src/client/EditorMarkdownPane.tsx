@@ -8,7 +8,8 @@ import {
   type Editor as MilkdownEditor,
   type LinkOpenTarget
 } from '@slayzone/editor'
-import { toSlzFileUrl, SLZ_FILE_PREFIX } from '@slayzone/platform/slz-file-url'
+import { parseSlzFileUrl, toSlzFileUrl, SLZ_FILE_PREFIX } from '@slayzone/platform/slz-file-url'
+import { relativeToRoot, useWorkspaceFileUrl } from './workspace-file-url'
 import { MARKDOWN_FILE_TEXT_EXTENSIONS, posixDirname, posixResolve } from './FileEditorView.utils'
 
 export interface MarkdownFilePaneHandle {
@@ -72,12 +73,16 @@ export function MarkdownFilePane({
   }, [handleRef])
   const fileDirAbs = posixResolve(projectPath, posixDirname(filePath))
 
+  const workspaceFileUrl = useWorkspaceFileUrl(projectPath)
+  // Images inside the workspace load from wherever it lives (a remote computer
+  // included); anything outside it can only be a path on this machine.
   const resolveSrc = useCallback(
     (src: string): string => {
-      if (src.startsWith('/')) return toSlzFileUrl(src)
-      return toSlzFileUrl(posixResolve(fileDirAbs, src))
+      const abs = src.startsWith('/') ? src : posixResolve(fileDirAbs, src)
+      const rel = relativeToRoot(projectPath, abs)
+      return rel ? workspaceFileUrl(rel) : toSlzFileUrl(abs)
     },
-    [fileDirAbs]
+    [fileDirAbs, projectPath, workspaceFileUrl]
   )
 
   const handleLinkClick = useCallback(
@@ -95,13 +100,17 @@ export function MarkdownFilePane({
         return
       }
       if (resolvedHref.startsWith(SLZ_FILE_PREFIX)) {
-        const absPath = resolvedHref
-          .slice(SLZ_FILE_PREFIX.length)
-          .replace(/\?.*$/, '')
-          .replace(/#.*$/, '')
-        const projectPrefix = projectPath.endsWith('/') ? projectPath : projectPath + '/'
-        if (absPath.startsWith(projectPrefix)) {
-          const relPath = absPath.slice(projectPrefix.length)
+        const parsed = parseSlzFileUrl(resolvedHref.replace(/#.*$/, ''))
+        if (!parsed) return
+        const absPath =
+          parsed.kind === 'local'
+            ? parsed.path
+            : parsed.source.kind === 'workspace'
+              ? `${parsed.source.rootPath.replace(/\/+$/, '')}/${parsed.relPath}`
+              : null
+        if (!absPath) return
+        const relPath = relativeToRoot(projectPath, absPath)
+        if (relPath) {
           const ext = relPath.split('.').pop()?.toLowerCase() ?? ''
           if (MARKDOWN_FILE_TEXT_EXTENSIONS.has(ext)) {
             onOpenFile(relPath)

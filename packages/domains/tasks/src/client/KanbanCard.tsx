@@ -1,3 +1,5 @@
+import { useTaskNeedsAttention } from './faulted-tasks'
+import { useIsTaskMoving } from './cross-hub-moves'
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import type { Task } from '@slayzone/task-contracts'
@@ -71,6 +73,9 @@ export function KanbanCard({
   onUpdateTask,
   onTaskTagsChange
 }: KanbanCardProps): React.JSX.Element {
+  const needsAttention = useTaskNeedsAttention(task.id)
+  // Being moved to another hub (cross-hub-moves.ts): locked until the move is done.
+  const moving = useIsTaskMoving(task.id)
   const resolvedTags =
     (cp?.tags ?? true) && tags && taskTagIds ? tags.filter((t) => taskTagIds.includes(t.id)) : []
   const [prioOpen, setPrioOpen] = useState(false)
@@ -239,6 +244,14 @@ export function KanbanCard({
                       <TooltipContent>Linked to Linear</TooltipContent>
                     </Tooltip>
                   )}
+                  {moving && (
+                    <span
+                      className="shrink-0 text-[9px] font-medium text-primary"
+                      data-testid="task-moving-mark"
+                    >
+                      Moving…
+                    </span>
+                  )}
                   {task.snoozed_until && new Date(task.snoozed_until) > new Date() && (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -391,6 +404,15 @@ export function KanbanCard({
                         title="Blocked"
                       >
                         Blocked
+                      </span>
+                    )}
+                    {needsAttention && (
+                      <span
+                        className="shrink-0 h-5 rounded-full ring-1 ring-warning px-2 text-[10px] font-medium leading-none flex items-center text-warning"
+                        title="Something of this task could not be processed — see Settings › Hubs › Needs attention"
+                        data-testid="task-needs-attention"
+                      >
+                        Needs attention
                       </span>
                     )}
                     {(cp?.dueDate ?? true) && task.due_date && (

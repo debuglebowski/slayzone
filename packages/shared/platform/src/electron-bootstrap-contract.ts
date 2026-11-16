@@ -19,6 +19,43 @@
 import type { HubEntry } from './hub-registry'
 import type { LocalComputerHubs, LocalComputerStatus } from './local-computer-status'
 
+/** One artifact export, rendered by the host the user is on (see `exportArtifact`). */
+export interface ArtifactExportRequest {
+  format: 'pdf' | 'png' | 'html'
+  /** The artifact's text, already read by the client. */
+  content: string
+  /** Its effective render mode (`getEffectiveRenderMode`). */
+  mode: string
+  title: string
+}
+
+/** Saving on this device. `canceled`: the person dismissed the dialog — not an error. */
+export type HostSaveResult =
+  | { ok: true }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
+export type ArtifactExportResult = HostSaveResult
+
+/**
+ * Where a download is saved on THIS device, written in pieces (see `saveTargetOpen`):
+ * a download streams through, so its size never has to fit in one message or in
+ * memory.
+ *  - `file`: one file, under a name the person confirms.
+ *  - `directory`: a tree of files, inside a directory the person picks (the web shell,
+ *    which cannot write into a folder, saves it as `<folderName>.zip`).
+ *  - `zip`: one archive of the files written.
+ */
+export type SaveTargetRequest =
+  | { kind: 'file'; fileName: string; title: string; reveal?: boolean }
+  | { kind: 'directory'; folderName: string; title: string }
+  | { kind: 'zip'; fileName: string; title: string; reveal?: boolean }
+
+export type SaveTargetOpenResult =
+  | { ok: true; targetId: string }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
   /** Pre-boot config the renderer can't get from the settings DB (multi-hub), plus
@@ -65,6 +102,9 @@ export interface ElectronBootstrapApp {
   /** App icon badge (dock / taskbar overlay / launcher count). text '' = clear.
    *  overlayPng: PNG data URL drawn by the renderer for the Windows overlay. */
   setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) => Promise<void>
+  /** Work quitting would interrupt (a task moving to another hub): quitting asks first,
+   *  naming `message`. null = nothing to guard. */
+  setQuitGuard: (guard: { message: string } | null) => Promise<void>
   relaunch: () => Promise<void>
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
@@ -97,6 +137,38 @@ export interface ElectronBootstrapApp {
   ) => Promise<
     { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
   >
+  /**
+   * Render an artifact to PDF/PNG/HTML and save it where the person picks — on THIS
+   * device, never the hub's, so it works the same against a local or a remote hub.
+   * Desktop renders in an offscreen window; the web shell prints through the browser.
+   * Optional: a host without it reports export as unsupported.
+   */
+  exportArtifact?: (request: ArtifactExportRequest) => Promise<ArtifactExportResult>
+  /**
+   * Save a download on THIS device in pieces: open (asks where), then write each
+   * file's bytes in order, then close. Optional, like `exportArtifact`.
+   */
+  saveTargetOpen?: (request: SaveTargetRequest) => Promise<SaveTargetOpenResult>
+  /**
+   * Append `data` to the file at `path` (`/`-separated, relative; `''` for a `file`
+   * target). Writing a new path finishes the previous file and starts this one.
+   * `size`: the file's TOTAL byte length, the same on every write of the file; read
+   * when the file starts. A zip lays the entry out by it before its first byte (4 GiB
+   * or more: zip64 from the local header on). Undefined = unknown: the host lays the
+   * entry out for any size.
+   */
+  saveTargetWrite?: (
+    targetId: string,
+    path: string,
+    data: Uint8Array,
+    size?: number
+  ) => Promise<void>
+  /** Create a (possibly empty) folder at `path`. */
+  saveTargetMkdir?: (targetId: string, path: string) => Promise<void>
+  /** Finish: everything written is saved (and revealed, when asked). */
+  saveTargetClose?: (targetId: string) => Promise<HostSaveResult>
+  /** Give up: nothing partial is left behind. */
+  saveTargetAbort?: (targetId: string) => Promise<void>
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */

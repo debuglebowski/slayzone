@@ -121,7 +121,16 @@ const permissions = z.object({
     })
   ])
 })
+/** A history page budget (`ChatHistoryPageBudget`); the computer clamps it to its maxima. */
+const pageBudget = z
+  .object({
+    maxBytes: z.number().int().positive().optional(),
+    maxEvents: z.number().int().positive().optional()
+  })
+  .strict()
 const tab = z.tuple([id]),
+  /** A queued message's id and the tab holding it. */
+  queueItem = z.tuple([id, id]),
   taskMode = z.tuple([id, z.string()]),
   createTuple = z.tuple([create])
 export const chatOperationSchemas = {
@@ -193,15 +202,29 @@ export const chatOperationSchemas = {
   kill: tab,
   remove: tab,
   getReplay: z.tuple([id, z.number().int()]),
+  /** One chunk of an out-of-line event payload the tab's conversation pins (`chat-blobs`). */
+  readBlob: z.tuple([id, z.string().regex(/^[a-f0-9]{64}$/), z.number().int().nonnegative()]),
   getBufferSince: z.tuple([id, z.number().int()]),
+  /**
+   * One bounded page of `getReplay` / `getBufferSince` (`ChatReplayPage` /
+   * `ChatEventPage`). Only a computer that advertised `chatHistoryPages` knows them.
+   */
+  getReplayPage: z.tuple([id, z.number().int(), pageBudget.optional()]),
+  getEventPage: z.tuple([id, z.number().int(), pageBudget.optional()]),
   getInfo: z.tuple([id, z.string().optional()]),
   getTurnStatus: tab,
   openTimeline: z.tuple([id, z.string()]),
+  /**
+   * Optional 5th: `startRow` (absolute row: answered by row slices within the byte
+   * budget, `next` names where to go on). Only a computer that advertised
+   * `chatTimelineRowSlices` takes it; an older one refuses a 5-tuple.
+   */
   timelinePages: z.tuple([
     id,
     z.array(z.number().int().nonnegative()).max(512),
     z.number().int(),
-    z.number().int()
+    z.number().int(),
+    z.number().int().nonnegative().optional()
   ]),
   searchTimeline: z.tuple([id, z.string().max(1000)]),
   commandTaskOutput: z.tuple([id, id]),
@@ -271,13 +294,16 @@ export const chatQueueOperationSchemas = {
   renewReservation: z.tuple([id, z.object({ key: id, token: id })]),
   cancelReservation: z.tuple([id, z.object({ key: id, token: id })]),
   push: z.tuple([id, text, text, queueOptions]),
-  update: z.tuple([id, z.object({ send: text, original: text, content: chatContentSchema })]),
-  move: z.tuple([id, z.number().int().nonnegative()]),
-  hold: tab,
-  release: tab,
-  /** Add a queued message to the running turn (by its id). An older computer refuses the method. */
-  steer: tab,
-  remove: tab,
+  // Item operations name the queued message AND its tab (robustness plan §9, v208):
+  // the hub routes and authorizes by the tab; the computer refuses an item another
+  // tab holds.
+  update: z.tuple([id, z.object({ send: text, original: text, content: chatContentSchema }), id]),
+  move: z.tuple([id, z.number().int().nonnegative(), id]),
+  hold: queueItem,
+  release: queueItem,
+  /** Add a queued message to the running turn (by its id). */
+  steer: queueItem,
+  remove: queueItem,
   clear: tab
 } as const
 export type ChatOperation = keyof typeof chatOperationSchemas
@@ -285,7 +311,10 @@ export type ChatQueueOperation = keyof typeof chatQueueOperationSchemas
 export const CHAT_READ_OPERATIONS = new Set<ChatOperation>([
   'supports',
   'getReplay',
+  'readBlob',
   'getBufferSince',
+  'getReplayPage',
+  'getEventPage',
   'getInfo',
   'getTurnStatus',
   'openTimeline',
@@ -334,6 +363,8 @@ export function parseChatInvocation(input: unknown) {
   return { ...request, args }
 }
 export type ChatInvocation = ReturnType<typeof parseChatInvocation>
+export { COMPUTER_OWNED_CHAT_KEYS } from '@slayzone/terminal-contracts'
+
 export const chatBootstrapSchema = z.object({
   identity: chatIdentitySchema,
   projectId: id.nullable(),
@@ -352,18 +383,6 @@ export const chatBootstrapSchema = z.object({
   defaultFlags: z.string().nullable(),
   settings: z.record(z.string(), z.string().nullable()).optional(),
   terminalProviderConfig: z.record(z.string(), z.unknown()).optional(),
-  providerConfigRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
-  terminalProviderConfigRevision: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(Number.MAX_SAFE_INTEGER)
-    .optional(),
-  honoredConversations: z.array(z.string()).optional(),
-  honoredSessions: z.array(z.object({ mode: z.string(), conversationId: z.string() })).optional(),
-  deletedConversations: z
-    .array(z.object({ mode: z.string(), conversationId: z.string() }))
-    .optional(),
   env: z.record(z.string(), z.string())
 })
 export const chatTransferManifestSchema = z.object({
@@ -374,7 +393,8 @@ export const chatTransferManifestSchema = z.object({
     identity: chatIdentitySchema,
     events: z.number().int().nonnegative(),
     records: z.number().int().nonnegative(),
-    receipts: z.number().int().nonnegative()
+    receipts: z.number().int().nonnegative(),
+    move: z.literal(true).optional()
   }),
   hash: z.string().regex(/^[a-f0-9]{64}$/),
   bytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)

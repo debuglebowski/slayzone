@@ -51,11 +51,12 @@ const h = await createTestHarness()
 await ensureIntegrationSchema(h.slayDb)
 setCredentialCipher(null)
 
-// A process row persisted with a pid, as an earlier run would have left it.
+// A persisted process row, as an earlier run would have left it (the hub keeps no
+// pid since v209: a run is its computer's).
 h.db
   .prepare(
-    `INSERT INTO processes (id, task_id, project_id, label, command, cwd, auto_restart, pid)
-     VALUES ('persisted-1', NULL, NULL, 'dev', 'sleep 30', '/tmp', 1, 999999)`
+    `INSERT INTO processes (id, task_id, project_id, label, command, cwd, auto_restart)
+     VALUES ('persisted-1', NULL, NULL, 'dev', 'sleep 30', '/tmp', 1)`
   )
   .run()
 

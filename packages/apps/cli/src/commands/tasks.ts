@@ -1,3 +1,4 @@
+import { registerTaskTransfers } from './transfers'
 import { Command } from 'commander'
 import { browserCommand } from './browser'
 import { listAction } from './tasks/list'
@@ -67,25 +68,32 @@ export function tasksCommand(): Command {
     .command('done [id]')
     .description('Mark a task as done (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
     .option('--close', 'Also close the task tab in the app')
+    .option(
+      '--force',
+      'Complete even while an agent of the task is mid-reply (completion stops every agent)'
+    )
     .action(doneAction)
 
   // slay tasks reset-conversation
   cmd
     .command('reset-conversation [id]')
     .description(
-      'Clear the stored conversation IDs for a task — the next agent spawn starts fresh. ' +
-        'Appends a `manual-reset` row to task_conversations (append-only; never deletes).'
+      "Reset a task's agent session — the next agent spawn in that tab starts fresh. " +
+        'Sessions are per terminal tab; default = the main tab. Append-only (never deletes).'
     )
     .option(
       '--mode <mode>',
-      'Limit to one agent (e.g. claude-code, codex). Default: every agent with a row for this task.'
+      'Limit to one agent (e.g. claude-code, codex). Default: every agent with a session in scope.'
     )
+    .option('--tab <tab>', 'One terminal tab of the task: id, unique id prefix, or label')
+    .option('--all-tabs', 'Every terminal tab of the task')
     .action(resetConversationAction)
 
   // slay tasks update
   cmd
     .command('update [id]')
     .description('Update a task (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
+    .option('--project <name|id>', 'Move to a project on this hub')
     .option('--title <title>', 'New title')
     .option(
       '--description <text>',
@@ -106,6 +114,10 @@ export function tasksCommand(): Command {
     .option(
       '--worktree-path <path>',
       'Link a git worktree to this task (auto-derives parent branch + repo from project layout)'
+    )
+    .option(
+      '--force',
+      'With a done/canceled --status: complete even while an agent of the task is mid-reply (completion stops every agent)'
     )
     .action(updateAction)
 
@@ -213,5 +225,6 @@ export function tasksCommand(): Command {
   cmd.addCommand(browserCommand())
   cmd.addCommand(artifactsSubcommand())
 
+  registerTaskTransfers(cmd)
   return cmd
 }

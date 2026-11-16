@@ -10,6 +10,7 @@
  *   at the caret (parity with the PTY terminal), without sending.
  * Against the scripted fake CLI.
  */
+import type { Locator } from '@playwright/test'
 import { resetApp } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
 import { echoTurn, ev, expect, step, test } from '../fixtures/chat'
@@ -19,22 +20,37 @@ test.describe('Chat keyboard', () => {
     await resetApp(mainWindow)
   })
 
-  test('Esc Esc opens rewind: idle + empty composer only', async ({ chat }) => {
+  // The double-Esc window is 800 ms (useChatPanelKeyboard DOUBLE_ESC_MS; its hook
+  // tests pin the boundary with a fake clock). Two separate Playwright key calls
+  // race that window on a loaded box, so each pair is dispatched in ONE renderer
+  // turn (`escs`). Each Esc's `defaultPrevented` says what it did: the hook
+  // prevents the Esc that acts (clear / rewind / stop), never the one that arms.
+
+  test('Esc Esc with text in the composer clears the draft (first Esc keeps it)', async ({
+    chat
+  }) => {
     const t = await chat.openTask({
-      title: 'Esc Esc',
-      scenario: {
-        processes: [
-          {
-            turns: [
-              echoTurn(),
-              echoTurn(),
-              // Stays running until Stop.
-              [step.emit(ev.init(), ev.text('working…')), step.hang()]
-            ],
-            defaultTurn: echoTurn()
-          }
-        ]
-      }
+      title: 'Esc Esc draft',
+      scenario: { processes: [{ defaultTurn: echoTurn() }] }
+    })
+    await t.send('one')
+    await expect(t.panel.getByText('echo: one')).toBeVisible()
+    await expect(t.stopButton).toBeHidden()
+    const items = t.page.getByTestId('rewind-picker-item')
+
+    await t.composer.fill('keep me')
+    const pair = await escs(t.composer, 2)
+    // The first Esc keeps the text (it only arms); the second clears it.
+    expect(pair.valueAfterFirst).toBe('keep me')
+    expect(pair.prevented).toEqual([false, true])
+    await expect(t.composer).toHaveValue('')
+    await expect(items).toHaveCount(0)
+  })
+
+  test('Esc Esc idle + empty composer opens rewind; Enter edits & resends', async ({ chat }) => {
+    const t = await chat.openTask({
+      title: 'Esc Esc rewind',
+      scenario: { processes: [{ turns: [echoTurn(), echoTurn()], defaultTurn: echoTurn() }] }
     })
     await t.send('one')
     await expect(t.panel.getByText('echo: one')).toBeVisible()
@@ -43,18 +59,9 @@ test.describe('Chat keyboard', () => {
     await expect(t.stopButton).toBeHidden()
     const items = t.page.getByTestId('rewind-picker-item')
 
-    // Text in the composer: the first Esc keeps it; the second clears it.
-    await t.composer.fill('keep me')
-    await t.composer.press('Escape')
-    await expect(t.composer).toHaveValue('keep me')
-    await t.composer.press('Escape')
-    await expect(t.composer).toHaveValue('')
-    await expect(items).toHaveCount(0)
-
     // Empty and idle: the message list, newest first; Enter edits & resends it.
     await t.composer.fill('')
-    await t.composer.press('Escape')
-    await t.composer.press('Escape')
+    expect((await escs(t.composer, 2)).prevented).toEqual([false, true])
     await expect(items).toHaveCount(2)
     await expect(items.first()).toContainText('two')
     await t.page.keyboard.press('Enter')
@@ -65,15 +72,33 @@ test.describe('Chat keyboard', () => {
     await expect(t.composer).toHaveValue('two')
     const run = await t.run(0, (r) => r.rewound().length === 1)
     expect(run.rewound()).toHaveLength(1)
+  })
 
-    // A turn running: Esc stops it; the second Esc does not rewind.
-    await t.composer.fill('')
+  test('a turn running: Esc stops it; the next Esc does not rewind', async ({ chat }) => {
+    const t = await chat.openTask({
+      title: 'Esc stops',
+      scenario: {
+        processes: [
+          {
+            // Stays running until Stop.
+            turns: [[step.emit(ev.init(), ev.text('working…')), step.hang()]],
+            defaultTurn: echoTurn()
+          }
+        ]
+      }
+    })
+    const items = t.page.getByTestId('rewind-picker-item')
     await t.send('long one')
     await expect(t.panel.getByText('working…')).toBeVisible()
     await expect(t.stopButton).toBeVisible()
-    await t.composer.press('Escape')
-    await t.composer.press('Escape')
+    // The Esc that stops the turn acts (prevented)…
+    expect((await escs(t.composer, 1)).prevented).toEqual([true])
     await expect(t.stopButton).toBeHidden()
+    // Idle for real: while the stop lands the button reads "Stopping" (still in
+    // flight, so an Esc would stop again); the Send button is back once it ended.
+    await expect(t.sendButton).toBeVisible()
+    // …and does not arm: the first Esc once idle only arms, it never rewinds.
+    expect((await escs(t.composer, 1)).prevented).toEqual([false])
     await expect(items).toHaveCount(0)
   })
 
@@ -130,3 +155,28 @@ test.describe('Chat keyboard', () => {
     expect(run.userMessages()).toHaveLength(0)
   })
 })
+
+/**
+ * `n` Esc keydowns on the composer, dispatched back to back in one renderer turn
+ * (one macrotask between them, so React commits the first one's update), from the
+ * focused composer like a real press. Returns each event's `defaultPrevented` and
+ * the composer's value after the first.
+ */
+async function escs(
+  composer: Locator,
+  n: number
+): Promise<{ prevented: boolean[]; valueAfterFirst: string }> {
+  return composer.evaluate(async (el: HTMLTextAreaElement, count) => {
+    el.focus()
+    const prevented: boolean[] = []
+    let valueAfterFirst = ''
+    for (let i = 0; i < count; i++) {
+      const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      el.dispatchEvent(e)
+      prevented.push(e.defaultPrevented)
+      await new Promise((r) => setTimeout(r, 0))
+      if (i === 0) valueAfterFirst = el.value
+    }
+    return { prevented, valueAfterFirst }
+  }, n)
+}

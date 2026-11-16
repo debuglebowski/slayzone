@@ -7,7 +7,7 @@
  * internet, holding a weaker credential than everything that exists today. A
  * scoped session must not be able to read provider API keys, execute arbitrary
  * shell commands, touch the filesystem sandbox, or mint a computer credential,
- * even while it CAN type into an already-running agent (the actual product).
+ * even while it CAN start and steer task-bound chat agents.
  *
  * THIS FILE IS A SECURITY DOCUMENT, not just data. A reviewer should be able to
  * read `SCOPE_POLICY` top to bottom and know exactly what the web can do. Keep
@@ -97,14 +97,19 @@ export type ProcedureScope = Scope | 'never'
  * since the filter is a bandwidth optimization, not an authorization boundary.
  *
  * ── chat: the same split, applied to its own create-shaped procedures ──────
- * `start` / `reset` / `abortAndPop` all take `chatCreateOpts` — an
+ * Every granted chat operation carrying launch options resolves them server-side:
+ * only a stored, enabled chat tab of the authorized task may run, in that task's
+ * stored folder with its stored flags. The resolved folder is owner-checked too;
+ * the computer placement gate and computer filesystem sandbox still apply.
+ * `reset` / `abortAndPop` take `chatCreateOpts` — an
  * attacker-chosen `mode` + `cwd` (+ optional provider-flag override) that
  * either creates a fresh session or re-creates one with different parameters.
- * That is the identical risk class to `pty.create`, so all three are `never`
+ * That is the identical risk class to `pty.create`, so both are `never`
  * despite chat otherwise being granted wholesale. `kill` / `remove` take only a
  * `tabId` (no mode/cwd choice) but are denied FOR SYMMETRY with `pty.kill`:
  * ending the host process is reserved for `full`; steering the agent already
- * running in it is what `agent` scope is for. Runtime-setting changes on an
+ * running in it and starting task-bound chat agents is what `agent` scope is for.
+ * Runtime-setting changes on an
  * existing session (`setMode`, `setModel`, `setEffort`, `setFastMode`,
  * `setCollaboration`) stay granted — no cwd/binary choice involved.
  *
@@ -131,16 +136,15 @@ export type ProcedureScope = Scope | 'never'
  *
  * ── granted wholesale (the collaborative CRUD surface) ─────────────────────
  * `task.*`, `projects.*`, `projectGroups.*`, `tags.*`, `artifacts.*`,
- * `taskTerminals.*` → `tasks`. `chat.*` (minus the five denials above) → `agent`.
+ * `taskTerminals.*` → `tasks`. `chat.*` (minus host-only procedures) → `agent`.
  * `agentPrompts.list/onChanged`, `agentSessions.list/onChanged`,
  * `agentTurns.list/onChanged`, `history.*`, `usageAnalytics.*`,
  * `agentLifecycle.onEvent`, `notify.onTasksChanged` → `read`.
  * `task.testRecordPendingSpawn` is carved out to `never` (a test hook, not part
  * of the CRUD surface it happens to live in), and so is `task.startMainAgent`: it
- * names only a task, but it STARTS a process with that task's stored mode,
- * provider flags and base dir — all of which `tasks` can write (`task.update`) —
- * so granting it would turn "edit a task" into "choose what runs", the line
- * `pty.create` / `chat.start` hold.
+ * can start terminal agents, including shells and custom commands. Those stay
+ * behind the `pty.create` boundary. `chat.start` admits only a server-resolved,
+ * enabled chat-provider launch with the authorized task's stored configuration.
  *
  * ── granted narrowly (settings) ─────────────────────────────────────────────
  * `settings.getEffectiveTheme` / `getThemeSource` / `onThemeChanged` /
@@ -195,6 +199,9 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'agentPrompts.onChanged': 'read',
   'agentSessions.list': 'read',
   'agentSessions.onChanged': 'read',
+  'agentSessions.current': 'read',
+  'agentSessions.recordDetected': 'tasks',
+  'agentSessions.testLedger': 'never',
   'agentTurns.list': 'read',
   'agentTurns.onChanged': 'read',
   'aiConfig.checkSlayConfigured': 'never',
@@ -357,12 +364,6 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'artifacts.cleanupTask': 'tasks',
   'artifacts.create': 'tasks',
   'artifacts.delete': 'tasks',
-  'artifacts.downloadAllAsZip': 'tasks',
-  'artifacts.downloadAsHtml': 'tasks',
-  'artifacts.downloadAsPdf': 'tasks',
-  'artifacts.downloadAsPng': 'tasks',
-  'artifacts.downloadFile': 'tasks',
-  'artifacts.downloadFolder': 'tasks',
   'artifacts.foldersCreate': 'tasks',
   'artifacts.foldersDelete': 'tasks',
   'artifacts.foldersGetByTask': 'tasks',
@@ -373,10 +374,20 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'artifacts.getByTask': 'tasks',
   'artifacts.getFilePath': 'tasks',
   'artifacts.getMtime': 'tasks',
+  'artifacts.listArchive': 'tasks',
+  'artifacts.moveClearStaging': 'tasks',
+  'artifacts.moveManifest': 'tasks',
+  'artifacts.moveMissing': 'tasks',
+  'artifacts.moveRead': 'tasks',
+  'artifacts.moveWrite': 'tasks',
   'artifacts.onContentChanged': 'tasks',
   'artifacts.copy': 'tasks',
+  'artifacts.move': 'tasks',
   'artifacts.pasteFiles': 'tasks',
+  'artifacts.readBytesChunk': 'tasks',
+  'artifacts.readBase64': 'tasks',
   'artifacts.readContent': 'tasks',
+  'artifacts.readText': 'tasks',
   'artifacts.reorder': 'tasks',
   'artifacts.update': 'tasks',
   'artifacts.upload': 'tasks',
@@ -422,6 +433,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.getModel': 'agent',
   'chat.getModels': 'agent',
   'chat.getReplay': 'agent',
+  'chat.readBlob': 'agent',
   'chat.hydrate': 'agent',
   'chat.inspectPermissions': 'agent',
   'chat.interrupt': 'agent',
@@ -459,10 +471,12 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.setFastMode': 'agent',
   'chat.setMode': 'agent',
   'chat.setModel': 'agent',
+  // A restored chat's settings arrived from the hub's hand-off: re-read them (review 2, S4).
+  'chat.settings.onChanged': 'agent',
   // `/btw`: a question to the running agent, like `send` — its answer never enters the chat.
   'chat.sideQuestion.ask': 'agent',
   'chat.sideQuestion.cancel': 'agent',
-  'chat.start': 'never',
+  'chat.start': 'agent',
   'chat.stopCommandTask': 'agent',
   'chat.stopSubAgent': 'agent',
   'chat.backups.list': 'never',
@@ -476,6 +490,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.archives.read': 'never',
   'chat.archives.records': 'never',
   'chat.archives.attachment': 'never',
+  'chat.archives.blob': 'never',
   'chat.archives.file': 'never',
   'chat.availability': 'agent',
   'chat.supports': 'agent',
@@ -487,6 +502,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.testSetWatchdogTimings': 'never',
   'chat.testSeedEvents': 'never',
   'chat.testReadEvents': 'never',
+  'chat.testProviderConfig': 'never',
   'chat.testProjection': 'never',
   'chat.testSeedPrompts': 'never',
   // Pins are the user's bookmarks: an agent may read them, never change them.
@@ -504,20 +520,29 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.workspaceChanges.getFileDiff': 'agent',
   'computers.claim': 'never',
   'computers.delete': 'never',
+  // Needs attention (P3): reading what a pass could not process is like listing the
+  // computers; Retry / Discard act on a computer's state, as rename/delete do.
+  'computers.discardFault': 'never',
   // Reaching a session/tab directly is the same access as attaching to it.
   'computers.directRtcConnect': 'agent',
+  'computers.faultedTasks': 'read',
   'computers.issueDirectLink': 'agent',
   'computers.list': 'read',
+  'computers.listFaults': 'read',
   'computers.mintJoinToken': 'never',
   'computers.onStatusChange': 'read',
   'computers.rename': 'never',
   'computers.renameMachine': 'never',
+  'computers.replace': 'never',
   'computers.resolveTaskComputer': 'read',
+  'computers.retryFault': 'never',
   'computers.revokeComputer': 'never',
   'computers.setDisabled': 'never',
   'computers.setProjectDefaultComputer': 'never',
   'computers.setTaskComputer': 'never',
   'computers.setVisibility': 'never',
+  // Offers to replace a re-enrolled computer: as listing the computers.
+  'computers.takeovers': 'read',
   'computers.unrevoke': 'never',
   'diagnostics.exportBundle': 'never',
   'diagnostics.getConfig': 'never',
@@ -548,6 +573,17 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'history.listForTask': 'read',
   'hub.describe': 'read',
   'hub.setLabel': 'never',
+  'hub.users.list': 'never',
+  'hub.users.access': 'read',
+  'hub.users.disable': 'never',
+  'hub.users.previewErasure': 'never',
+  'hub.users.eraseContent': 'never',
+  'hub.users.erasureReports': 'never',
+  'hub.users.retryErasure': 'never',
+  'hub.users.erasureReceipt': 'never',
+  'hub.erasure.reports': 'never',
+  'hub.erasure.retry': 'never',
+  'hub.erasure.receipt': 'never',
   'integrations.applyStatusSync': 'never',
   'integrations.clearProjectConnection': 'never',
   'integrations.clearProjectProvider': 'never',
@@ -641,6 +677,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'projects.list': 'tasks',
   'projects.reorder': 'tasks',
   'projects.update': 'tasks',
+  'projects.relocate': 'never',
   'projects.uploadIcon': 'tasks',
   'pty.ackEnsureAlive': 'agent',
   'pty.agentsCreate': 'never',
@@ -663,6 +700,10 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.kill': 'never',
   'pty.killTask': 'never',
   'pty.list': 'agent',
+  'pty.unattachedList': 'agent',
+  'pty.unattachedAttach': 'never',
+  'pty.unattachedKill': 'never',
+  'pty.onUnattachedChange': 'agent',
   'pty.onAgentStarts': 'agent',
   'pty.onBackgroundJobs': 'agent',
   'pty.onResize': 'agent',
@@ -722,6 +763,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.deleteConversation': 'tasks',
   'task.deleteMany': 'tasks',
   'task.get': 'tasks',
+  'task.paths': 'tasks',
   'task.getAll': 'tasks',
   'task.getAllBlockedTaskIds': 'tasks',
   'task.getBlockers': 'tasks',
@@ -733,6 +775,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.loadBoardData': 'tasks',
   'task.loadBoardRows': 'tasks',
   'task.onChanged': 'tasks',
+  'task.onPathsChanged': 'tasks',
   'task.removeBlocker': 'tasks',
   'task.reorder': 'tasks',
   'task.reorderPinned': 'tasks',
@@ -748,6 +791,52 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.unarchive': 'tasks',
   'task.update': 'tasks',
   'task.updateMany': 'tasks',
+  'task.moveToProject': 'tasks',
+  'task.duplicate': 'tasks',
+  'task.movePreview': 'tasks',
+  'taskMoves.abort': 'tasks',
+  'taskMoves.addRemoteBlockers': 'tasks',
+  'taskMoves.advance': 'tasks',
+  'taskMoves.commit': 'tasks',
+  'taskMoves.export': 'tasks',
+  'taskMoves.import': 'tasks',
+  'taskMoves.copy': 'tasks',
+  'taskMoves.copyProject': 'tasks',
+  'taskMoves.begin': 'tasks',
+  'taskMoves.beginProject': 'tasks',
+  'taskMoves.cancel': 'tasks',
+  'taskMoves.fail': 'tasks',
+  'taskMoves.finishLocal': 'tasks',
+  'taskMoves.resolveTarget': 'tasks',
+  'taskMoves.clearAction': 'tasks',
+  'taskMoves.get': 'tasks',
+  'taskMoves.list': 'tasks',
+  'taskMoves.pause': 'tasks',
+  'taskMoves.preview': 'tasks',
+  'taskMoves.projectPreview': 'tasks',
+  'taskMoves.projectRedirects': 'tasks',
+  'taskMoves.progress': 'tasks',
+  'taskMoves.redirects': 'tasks',
+  'taskMoves.release': 'tasks',
+  'taskMoves.sessionsExport': 'tasks',
+  'taskMoves.skipSessions': 'tasks',
+  'taskMoves.sessionsRead': 'tasks',
+  'taskMoves.sessionsReadAttachment': 'tasks',
+  'taskMoves.sessionsDiscard': 'tasks',
+  'taskMoves.sessionsBegin': 'tasks',
+  'taskMoves.sessionsChunk': 'tasks',
+  'taskMoves.sessionsFinish': 'tasks',
+  'taskMoves.sessionsPutAttachment': 'tasks',
+  'taskMoves.sessionsActivate': 'tasks',
+  'taskMoves.sessionsImportLedger': 'tasks',
+  'taskMoves.sessionsRegister': 'tasks',
+  'taskMoves.sessionsFiles': 'tasks',
+  'taskMoves.sessionsFileRead': 'tasks',
+  'taskMoves.sessionsFilesMissing': 'tasks',
+  'taskMoves.sessionsFileWrite': 'tasks',
+  'taskMoves.remoteBlockers': 'tasks',
+  'taskMoves.removeRemoteBlocker': 'tasks',
+  'taskMoves.resume': 'tasks',
   'taskTerminals.create': 'tasks',
   'taskTerminals.delete': 'tasks',
   'taskTerminals.ensureMain': 'tasks',

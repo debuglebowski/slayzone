@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { bindRestComputer, type RestPrincipal } from '@slayzone/api'
 import { createHttpTunnelServer } from '@slayzone/computer-transport/server'
+import { authorizeDelegatedHuman, findHubAccount, type HubAuth } from '@slayzone/hub-auth/server'
 
 interface ComputerOwner {
   owner_user_id: string | null
@@ -10,6 +11,21 @@ interface Account {
   userId: string
   role: RestPrincipal['role']
   disabled: boolean
+}
+
+/**
+ * The account a relayed request acts for: the computer's owner, through the IdP-role
+ * gate (hub-auth `authorizeDelegatedHuman`) — the computer's own credential is
+ * automation and stays valid, but a human whose role evidence is stale, missing or
+ * denied, or a process whose view of the mode is not the persisted one, lends it
+ * nothing. Null = refused.
+ */
+export async function relayOwnerAccount(auth: HubAuth, userId: string): Promise<Account | null> {
+  const account = await findHubAccount(auth, userId)
+  if (!account || account.disabled) return account
+  const verdict = await authorizeDelegatedHuman(auth, userId)
+  if (!verdict.ok) return null
+  return { ...account, role: verdict.role ?? account.role }
 }
 
 /** The relay's only identity authority is the computer gateway. The HTTP parser

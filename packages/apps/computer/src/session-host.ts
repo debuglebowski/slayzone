@@ -7,7 +7,10 @@ import {
   writeFileSync,
   renameSync,
   unlinkSync,
-  readdirSync
+  readdirSync,
+  openSync,
+  fsyncSync,
+  closeSync
 } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -19,10 +22,39 @@ import {
 } from '@slayzone/computer-runtime'
 import { HubDialer, type HubDialerOptions } from '@slayzone/computer-transport/client'
 import { COMPUTER_VERSION, startComputer } from './main'
-import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import {
+  COMPUTER_FRAME_MAX_BYTES,
+  COMPUTER_PROTOCOL_VERSION
+} from '@slayzone/computer-transport/shared'
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { effectiveHubUrls, hostConfigurationKey, type ComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
+import { createComputerLog } from './file-log'
+import { adoptHookJournal, readHookJournal } from './hook-journal'
+import {
+  forEachIsolatedSync,
+  isStorageFatal,
+  StructuralFaultError
+} from '@slayzone/platform/isolation'
+import {
+  eraseQuarantinedForTask,
+  quarantineWrite,
+  readJsonTolerant
+} from '@slayzone/platform/quarantine'
+
+/**
+ * The standalone session host's log: `[host] …` lines to its stdout (its launcher's
+ * `computer-runtime/host.log`, or the service journal) AND, timestamped and rotated,
+ * to `<root>/logs/computer.log` — the same file the desktop's computer writes (its
+ * state dir is `root` too). Before, its lines (event-loop stalls included) reached
+ * only the unrotated stdout sink.
+ */
+export function sessionHostLog(
+  root: string,
+  stdout?: (text: string) => void
+): (message: string, meta?: Record<string, unknown>) => void {
+  return createComputerLog({ stateDir: root, tag: 'host', ...(stdout ? { stdout } : {}) })
+}
 
 export function runtimeDir(root: string): string {
   return join(root, 'computer-runtime')
@@ -106,30 +138,35 @@ function isChatNotification(params: unknown): boolean {
  * hooks retain their existing acknowledged-delivery journal.
  */
 function scrubChatJournals(root: string): void {
-  for (const entry of readdirSync(runtimeDir(root), { withFileTypes: true })) {
-    if (!entry.isFile()) continue
-    const path = join(runtimeDir(root), entry.name)
-    const staging = /^hooks-[a-f0-9]{16}\.json\.(\d+)\.[a-f0-9]{8}\.tmp$/.exec(entry.name)
-    if (staging) {
-      const pid = Number(staging[1])
-      if (!Number.isSafeInteger(pid) || pid < 1) continue
-      let dead = false
-      try {
-        process.kill(pid, 0)
-      } catch (error) {
-        dead = (error as NodeJS.ErrnoException).code === 'ESRCH'
+  // One file at a time: a journal that cannot be scrubbed is logged and left for
+  // the next start; it never keeps the host (every hub, every agent) down.
+  forEachIsolatedSync(
+    readdirSync(runtimeDir(root), { withFileTypes: true }).filter((entry) => entry.isFile()),
+    { pass: 'computer.scrub-chat-journals', key: (entry) => entry.name, isFatal: isStorageFatal },
+    (entry) => {
+      const path = join(runtimeDir(root), entry.name)
+      const staging = /^hooks-[a-f0-9]{16}\.json\.(\d+)\.[a-f0-9]{8}\.tmp$/.exec(entry.name)
+      if (staging) {
+        const pid = Number(staging[1])
+        if (!Number.isSafeInteger(pid) || pid < 1) return
+        let dead = false
+        try {
+          process.kill(pid, 0)
+        } catch (error) {
+          dead = (error as NodeJS.ErrnoException).code === 'ESRCH'
+        }
+        // A temp was never published or acknowledged. The last renamed journal
+        // remains authoritative; do not parse a potentially partial private copy.
+        if (dead) unlinkSync(path)
+        return
       }
-      // A temp was never published or acknowledged. The last renamed journal
-      // remains authoritative; do not parse a potentially partial private copy.
-      if (dead) unlinkSync(path)
-      continue
+      if (!/^hooks-[a-f0-9]{16}\.json$/.test(entry.name)) return
+      // Unreadable bytes are salvaged + quarantined by the reader (decision 7).
+      const events = readHookJournal(runtimeDir(root), path)
+      const native = events.filter((event) => !isChatNotification(event.params))
+      if (native.length !== events.length) atomicRuntimeJson(path, native)
     }
-    if (!/^hooks-[a-f0-9]{16}\.json$/.test(entry.name)) continue
-    const events: Array<{ params: unknown }> = JSON.parse(readFileSync(path, 'utf8'))
-    if (!Array.isArray(events)) throw new Error('Invalid host event journal')
-    const native = events.filter((event) => !isChatNotification(event.params))
-    if (native.length !== events.length) atomicRuntimeJson(path, native)
-  }
+  )
 }
 export async function hostControl(
   root: string,
@@ -175,21 +212,39 @@ class SessionTransport extends HubDialer {
   private delivering = false
   private closed = false
   private readonly journal: string
+  private readonly runtime: string
+  private readonly erasedTasks = new Set<string>()
+  async forgetTaskEvents(taskId: string): Promise<void> {
+    this.erasedTasks.add(taskId)
+    this.eventsQueue = this.eventsQueue.filter((event) => !eventBelongsToTask(event.params, taskId))
+    atomicRuntimeJson(this.journal, this.eventsQueue)
+    // Quarantined journal bytes and rejected events that name the task go too.
+    eraseQuarantinedForTask(this.runtime, taskId)
+    const fd = openSync(this.journal, 'r')
+    try {
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    if (process.platform !== 'win32') {
+      const directory = openSync(resolve(this.journal, '..'), 'r')
+      try {
+        fsyncSync(directory)
+      } finally {
+        closeSync(directory)
+      }
+    }
+  }
   constructor(
     readonly options: HubDialerOptions,
     root: string,
     private logEvent: (message: string) => void
   ) {
     super(options)
-    this.journal = join(
-      runtimeDir(root),
-      'hooks-' + createHash('sha256').update(options.url).digest('hex').slice(0, 16) + '.json'
-    )
-    try {
-      this.eventsQueue = JSON.parse(readFileSync(this.journal, 'utf8'))
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
+    // Named by the canonical hub URL; a file an older host named by this spelling moves.
+    this.runtime = runtimeDir(root)
+    this.journal = adoptHookJournal(this.runtime, options.url)
+    this.eventsQueue = readHookJournal(this.runtime, this.journal)
   }
   async deliverEvents(): Promise<void> {
     if (
@@ -209,7 +264,23 @@ class SessionTransport extends HubDialer {
         !this.peer.socket.destroyed
       ) {
         const next = this.eventsQueue[0]
-        await this.peer.rpc.request('event-deliver', next)
+        const result = await this.peer.rpc.request<{ ok?: boolean; rejected?: string } | undefined>(
+          'event-deliver',
+          next
+        )
+        if (typeof result?.rejected === 'string') {
+          // The hub refuses this event as invalid: retrying can never succeed, and
+          // holding it would block every later hook. It is quarantined (shown in
+          // Needs attention; erasure and Discard reach it) and the queue moves on.
+          quarantineWrite(this.runtime, {
+            pass: 'hook-event-rejected',
+            originalPath: this.journal,
+            content: JSON.stringify(next),
+            taskId: eventTaskId(next.params),
+            reason: result.rejected
+          })
+          this.logEvent(`hook event rejected by the hub (${result.rejected}); quarantined`)
+        }
         if (this.eventsQueue[0]?.id === next.id) this.eventsQueue.shift()
         atomicRuntimeJson(this.journal, this.eventsQueue)
       }
@@ -231,6 +302,7 @@ class SessionTransport extends HubDialer {
   }
   override notify(method: string, params?: unknown): boolean {
     if (method === 'event' && !isChatNotification(params)) {
+      if ([...this.erasedTasks].some((taskId) => eventBelongsToTask(params, taskId))) return false
       const entry = { id: randomUUID(), params }
       if (Buffer.byteLength(JSON.stringify(entry)) > 1024 * 1024) {
         this.logEvent('hook exceeds buffer size; dropped')
@@ -264,6 +336,34 @@ class SessionTransport extends HubDialer {
   }
 }
 
+function eventTaskId(params: unknown): string | null {
+  if (!params || typeof params !== 'object') return null
+  const payload = 'payload' in params ? params.payload : null
+  return payload &&
+    typeof payload === 'object' &&
+    'taskId' in payload &&
+    typeof payload.taskId === 'string'
+    ? payload.taskId
+    : null
+}
+
+function eventBelongsToTask(params: unknown, taskId: string): boolean {
+  if (!params || typeof params !== 'object') return false
+  const payload = 'payload' in params ? params.payload : null
+  return (
+    !!payload && typeof payload === 'object' && 'taskId' in payload && payload.taskId === taskId
+  )
+}
+
+function parseGenerations(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new StructuralFaultError('Generations file is not an object')
+  for (const generation of Object.values(value))
+    if (!Number.isSafeInteger(generation) || (generation as number) < 0)
+      throw new StructuralFaultError('Generations file holds an invalid generation')
+  return value as Record<string, number>
+}
+
 export async function startSessionHost(
   root: string,
   config: ComputerConfig,
@@ -276,12 +376,15 @@ export async function startSessionHost(
   const controls = new Set<LocalPeer>()
   const peers = new Set<LocalPeer>()
   const generationFile = join(runtimeDir(root), 'generations.json')
-  let generations: Record<string, number> = {}
-  try {
-    generations = JSON.parse(readFileSync(generationFile, 'utf8'))
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-  }
+  // A corrupt file is set aside (quarantine) and the host starts fresh: connectors
+  // then reserve new generations, never a reason not to boot.
+  const read = readJsonTolerant(generationFile, parseGenerations, {
+    root: runtimeDir(root),
+    pass: 'computer-generations'
+  })
+  if (read.status === 'corrupt')
+    log('generations file unreadable; quarantined and restarted', { error: read.error.message })
+  const generations: Record<string, number> = read.status === 'ok' ? read.value : {}
   const credential = (hub: string, generation: number): string =>
     createHmac('sha256', secret)
       .update(JSON.stringify([hub, generation]))
@@ -324,7 +427,8 @@ export async function startSessionHost(
     let authenticated = false
     const timer = setTimeout(() => socket.destroy(), 5000)
     const peer = socketPeer(socket, {
-      maxFrameBytes: () => (authenticated ? 100 * 1024 * 1024 : 8192),
+      maxFrameBytes: () => (authenticated ? COMPUTER_FRAME_MAX_BYTES : 8192),
+      onFrameTooLarge: (info) => log('local frame over the frame limit refused', { ...info }),
       request: async (method, raw) => {
         const params = (raw ?? {}) as Record<string, unknown>
         if (method === 'auth' && !auth) {

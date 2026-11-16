@@ -27,6 +27,22 @@
  * WHAT THIS BOUNDS: hub frames. A shell or agent the hub starts runs as this OS user
  * and can touch anything that user can; the real boundary is the OS account.
  *
+ * ROOT SPELLINGS ARE REMEMBERED FOR 2 s (FU5 computer stalls). Judging a path used to
+ * `realpath` every allowed root and every root of the request's scope — a task's own
+ * folders plus every other task's worktree carved out of them (≈ 50 on a busy
+ * computer): 3 ms a call, and request bursts judge hundreds of paths. So the
+ * canonical spelling of a ROOT (allowed roots, scope roots, carve-outs, foreign roots)
+ * is reused for at most {@link ROOT_SPELLING_TTL_MS}, and forgotten at once whenever a
+ * hub frame may have changed the tree: any judgement for `write` / `entry` / a new
+ * root, and every {@link jailedFs} write. Never cached: the judged path itself (the
+ * walk, its links, its canonical spelling) and the protected-path identities. A root
+ * remembered as missing is re-checked with one `lstat` (it counts the moment it exists).
+ * Why this bound is acceptable: what can change a root's spelling WITHOUT a jailed
+ * write is a process running as this user — a shell or agent the hub started, or the
+ * user — which could touch the same files directly anyway (see above); its change
+ * reaches the jail within 2 s, the same order as the judge-then-act race every op
+ * already has.
+ *
  * @module computer/path-jail
  */
 import {
@@ -49,11 +65,13 @@ import {
   writeSync
 } from 'node:fs'
 import { lstat as lstatAsync, open as openAsync, readdir as readdirAsync } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { promisify } from 'node:util'
 import { write as writeCb } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
   canonicalComputerPath,
+  computerPathKeyWithin,
   computerPathWithin,
   pathFoldsCase
 } from '@slayzone/platform/computer-path'
@@ -88,6 +106,14 @@ export interface JailOptions {
    * ANCESTOR of a protected path is refused too.
    */
   subtree?: boolean
+  /**
+   * A file the user picked on this machine to copy IN (`fs.copyIn` source): on a
+   * hub without login it may lie outside the request's path scope (still inside
+   * the machine bound), as a desktop drag from Finder always could.
+   */
+  hostRead?: boolean
+  /** A folder the request makes a NEW root of (see {@link ScopeJail.foreign}). */
+  newRoot?: boolean
 }
 
 // --- protected paths --------------------------------------------------------
@@ -143,7 +169,7 @@ function protectedHit(judged: string, subtree: boolean): boolean {
   const chain = identityChain(judged)
   const self = identity(judged)
   for (const guarded of protectedPaths) {
-    if (isInside(judged, guarded) || (subtree && isInside(guarded, judged))) return true
+    if (isInsideRoot(judged, guarded) || (subtree && isInside(guarded, judged))) return true
     const id = identity(guarded)
     if (id && chain.has(id)) return true
     if (subtree && self && identityChain(guarded).has(self)) return true
@@ -160,6 +186,43 @@ function protectedHit(judged: string, subtree: boolean): boolean {
  */
 function isInside(path: string, dir: string): boolean {
   return computerPathWithin(path, dir, pathFoldsCase(dir))
+}
+
+/**
+ * Comparison keys of ROOTS (allowed roots, scope roots and carve-outs, protected
+ * paths): a pure function of (spelling, case folding), the same few strings on every
+ * judgement — remembered, bounded (review R1: only roots; a judged path is never kept).
+ */
+const ROOT_KEYS_MAX = 10_000
+const rootKeys = new Map<string, string>()
+function rootKey(root: string, folds: boolean): string {
+  const id = (folds ? '1' : '0') + root
+  let key = rootKeys.get(id)
+  if (key === undefined) {
+    if (rootKeys.size >= ROOT_KEYS_MAX) rootKeys.clear()
+    key = canonicalComputerPath(root, folds)
+    rootKeys.set(id, key)
+  }
+  return key
+}
+/**
+ * A judgement compares a couple of paths (the judged one, the scope's home root) with
+ * every root: their keys, in a few slots — nothing else is kept.
+ */
+const PATH_KEY_SLOTS = 4
+const pathKeys: Array<{ path: string; folds: boolean; key: string }> = []
+function pathKey(path: string, folds: boolean): string {
+  for (const slot of pathKeys) if (slot.path === path && slot.folds === folds) return slot.key
+  const key = canonicalComputerPath(path, folds)
+  pathKeys.unshift({ path, folds, key })
+  if (pathKeys.length > PATH_KEY_SLOTS) pathKeys.pop()
+  return key
+}
+
+/** {@link isInside} where `root` is a ROOT (see {@link rootKey}): its key is remembered. */
+function isInsideRoot(path: string, root: string): boolean {
+  const folds = pathFoldsCase(root)
+  return computerPathKeyWithin(pathKey(path, folds), rootKey(root, folds))
 }
 
 /**
@@ -208,15 +271,55 @@ interface LiveRoot {
   real: string
 }
 
+/** How long a root's canonical spelling is reused (see the module doc). */
+export const ROOT_SPELLING_TTL_MS = 2_000
+const ROOT_SPELLINGS_MAX = 10_000
+/** Bumped by every judged or performed write: remembered spellings are void at once. */
+let rootGeneration = 0
+const rootSpellings = new Map<
+  string,
+  { real: string; exists: boolean; at: number; generation: number }
+>()
+
+/** A hub frame may have changed the tree: forget every remembered root spelling. */
+function forgetRootSpellings(): void {
+  rootGeneration++
+}
+
+/**
+ * The canonical spelling of ROOT `lexical` (resolved): `exists` when the whole path
+ * resolves (its `realpath`), else the realpath of its deepest existing ancestor plus
+ * the rest ({@link canonical}). Remembered per the module doc; a remembered absence
+ * is re-checked with one `lstat`, so a root counts the moment it exists.
+ */
+function rootSpelling(lexical: string): { real: string; exists: boolean } {
+  const now = Date.now()
+  const hit = rootSpellings.get(lexical)
+  if (
+    hit &&
+    hit.generation === rootGeneration &&
+    now - hit.at < ROOT_SPELLING_TTL_MS &&
+    (hit.exists || lstatOrNull(lexical) === null)
+  )
+    return hit
+  let spelling: { real: string; exists: boolean }
+  try {
+    spelling = { real: realpathSync.native(lexical), exists: true }
+  } catch {
+    spelling = { real: canonical(lexical), exists: false }
+  }
+  if (rootSpellings.size >= ROOT_SPELLINGS_MAX) rootSpellings.clear()
+  rootSpellings.set(lexical, { ...spelling, at: now, generation: rootGeneration })
+  return spelling
+}
+
 function liveRoots(allowedRoots: readonly string[]): LiveRoot[] {
   const out: LiveRoot[] = []
   for (const root of allowedRoots) {
     const lexical = resolve(root)
-    try {
-      out.push({ lexical, real: realpathSync.native(lexical) })
-    } catch {
-      // A configured root that does not exist cannot contain anything.
-    }
+    // A configured root that does not exist cannot contain anything.
+    const spelling = rootSpelling(lexical)
+    if (spelling.exists) out.push({ lexical, real: spelling.real })
   }
   return out
 }
@@ -291,8 +394,8 @@ function walk(
         hops
       )
     }
-    if (!isInside(target, root.real)) {
-      const other = liveRoots(allowedRoots).find((r) => isInside(target, r.real))
+    if (!isInsideRoot(target, root.real)) {
+      const other = liveRoots(allowedRoots).find((r) => isInsideRoot(target, r.real))
       if (!other) throw outside(candidate, allowedRoots)
       root = other
     }
@@ -302,7 +405,7 @@ function walk(
   // for `entry`, of its folder only — the entry itself is never followed.
   const real =
     access === 'entry' && current !== root.real ? canonicalEntry(current) : canonical(current)
-  if (!isInside(real, root.real)) throw outside(candidate, allowedRoots)
+  if (!isInsideRoot(real, root.real)) throw outside(candidate, allowedRoots)
   return real
 }
 
@@ -316,7 +419,7 @@ function within(
   hops: { n: number }
 ): string {
   for (const base of [root.lexical, root.real]) {
-    if (isInside(normalized, base)) {
+    if (isInsideRoot(normalized, base)) {
       return walk(root, components(normalized, base), access, candidate, allowedRoots, hops)
     }
   }
@@ -333,6 +436,133 @@ export function judgePath(
   allowedRoots: readonly string[],
   opts: JailOptions = {}
 ): string {
+  // A write is about to happen: no root spelling remembered from before it is reused.
+  if ((opts.access ?? 'read') !== 'read' || opts.newRoot === true) forgetRootSpellings()
+  const judged = judgeMachine(candidate, allowedRoots, opts)
+  const scope = scopeStore.getStore()
+  if (!scope || (opts.hostRead === true && scope.hostReads)) return judged
+  if (opts.newRoot === true) return judgeNewRoot(judged, candidate, scope)
+  return judgeScope(judged, candidate, scope)
+}
+
+// --- the request's path scope (§9 Phase 7b) -----------------------------------
+
+/**
+ * The roots ONE hub request may touch: the task's or project's own folders on this
+ * computer (`roots`), minus the roots of other tasks nested inside them
+ * (`excluded`: a task working in its project's folder never reaches into another
+ * task's worktree there). Opened by the dispatcher from the request's path scope;
+ * every path judged while it runs must ALSO lie inside it — on top of the machine
+ * bound (`allowedRoots`), never instead of it.
+ */
+export interface ScopeJail {
+  /** What the request is about, for refusals ("task t1", "project p1"). */
+  label: string
+  roots: readonly string[]
+  excluded: readonly string[]
+  /** Every root here that is someone else's (other tasks', other projects'). */
+  foreign: readonly string[]
+  /** The hub has no login: a user-chosen file to copy IN may lie outside the scope. */
+  hostReads: boolean
+}
+
+const scopeStore = new AsyncLocalStorage<ScopeJail>()
+
+/** Serve one request under `jail`: every path it judges is confined to it. */
+export function runInScopeJail<T>(jail: ScopeJail, fn: () => T): T {
+  return scopeStore.run(jail, fn)
+}
+
+/**
+ * Run `fn` OUTSIDE the request's scope jail: only for the computer-level provider
+ * dirs under home (`~/.claude`, …), which a project's AI-config ops read beside its
+ * own files and which belong to no task or project. Callers still judge every path
+ * by the machine bound (their own roots).
+ */
+export function outsideScopeJail<T>(fn: () => T): T {
+  return scopeStore.exit(fn)
+}
+
+/** The scope jail of the request being served, if it named one. */
+export function currentScopeJail(): ScopeJail | undefined {
+  return scopeStore.getStore()
+}
+
+/** The canonical (real) spelling of a root, or null when it does not exist here. */
+function realRoot(root: string): string | null {
+  try {
+    return rootSpelling(resolve(root)).real
+  } catch {
+    return null
+  }
+}
+
+/**
+ * `judged` (already the canonical path the op will use, inside the machine bound)
+ * must lie inside one of the scope's roots and inside none of its excluded ones.
+ * Both sides compared canonically: a link from a scope root into another task's
+ * worktree was already resolved by the machine walk, so it is judged by where it
+ * lands.
+ */
+function judgeScope(judged: string, candidate: string, scope: ScopeJail): string {
+  const roots = scope.roots.map(realRoot).filter((r): r is string => r !== null)
+  const home = roots.find((r) => isInsideRoot(judged, r))
+  if (!home) {
+    throw new JailViolationError(
+      roots.length === 0
+        ? `${scope.label} has no folder on this computer; refusing '${candidate}'`
+        : `path '${candidate}' is outside the folders of ${scope.label}; refused`
+    )
+  }
+  for (const excluded of scope.excluded) {
+    const real = realRoot(excluded)
+    // Another task's root that IS (or holds) this scope's own root is not carved out.
+    if (!real || isInsideRoot(home, real)) continue
+    if (isInsideRoot(judged, real)) {
+      throw new JailViolationError(
+        `path '${candidate}' is inside another task's folder, not ${scope.label}'s; refused`
+      )
+    }
+  }
+  return judged
+}
+
+/**
+ * A folder the request is about to MAKE a root (`git worktree add`'s target): inside
+ * the scope as any path, or outside it but inside nobody else's root — the rule the
+ * hub applied to a new root before it stopped knowing roots.
+ *
+ * A foreign root that IS or HOLDS one of the scope's own roots is not someone else's
+ * here (S5, nested projects): project A `~/dev`, project B `~/dev/web` — B's worktree
+ * beside its folder (`~/dev/web-workspaces/…`) lies inside A and is B's to make, as
+ * {@link judgeScope} already lets a task work in a folder another task's root holds.
+ * Any other foreign root under it (another task's worktree, project C `~/dev/c`)
+ * still refuses.
+ */
+function judgeNewRoot(judged: string, candidate: string, scope: ScopeJail): string {
+  try {
+    return judgeScope(judged, candidate, scope)
+  } catch (err) {
+    if (!(err instanceof JailViolationError)) throw err
+  }
+  const own = scope.roots.map(realRoot).filter((r): r is string => r !== null)
+  for (const root of scope.foreign) {
+    const real = realRoot(root)
+    if (!real || own.some((r) => isInsideRoot(r, real))) continue
+    if (isInsideRoot(judged, real)) {
+      throw new JailViolationError(
+        `path '${candidate}' is inside a folder that is not ${scope.label}'s; refused`
+      )
+    }
+  }
+  return judged
+}
+
+function judgeMachine(
+  candidate: string,
+  allowedRoots: readonly string[],
+  opts: JailOptions
+): string {
   const access = opts.access ?? 'read'
   if (allowedRoots.length === 0) {
     throw new JailViolationError(
@@ -347,7 +577,7 @@ export function judgePath(
   const hops = { n: 0 }
   let judged: string | null = null
   for (const root of roots) {
-    if (isInside(normalized, root.lexical) || isInside(normalized, root.real)) {
+    if (isInsideRoot(normalized, root.lexical) || isInsideRoot(normalized, root.real)) {
       judged = within(root, normalized, access, candidate, allowedRoots, hops)
       break
     }
@@ -355,7 +585,7 @@ export function judgePath(
   if (judged === null) {
     // Spelled through a link above a root (`/tmp/r` for a root `/private/tmp/r`).
     const canon = canonical(normalized)
-    const root = roots.find((r) => isInside(canon, r.real))
+    const root = roots.find((r) => isInsideRoot(canon, r.real))
     if (!root) throw outside(candidate, allowedRoots)
     judged = walk(root, components(canon, root.real), access, candidate, allowedRoots, hops)
   }
@@ -400,6 +630,63 @@ export function spawnCwd(cwd: string | undefined, allowedRoots: readonly string[
   throw new JailViolationError('computer has no existing allowedRoots; refusing to start a process')
 }
 
+/**
+ * Where a process the hub starts FOR A TASK OR PROJECT starts (§9 Phase 7c): an
+ * explicit `cwd` must lie inside that scope's own folders here (and the machine
+ * bound); none runs in the scope's own folder — the task's worktree, else its base
+ * dir, else its project's folder (the order `scopeBounds` lists them). The hub no
+ * longer knows those folders, so this is the only check a cwd gets.
+ */
+export function scopedSpawnCwd(
+  jail: ScopeJail,
+  cwd: string | undefined,
+  allowedRoots: readonly string[],
+  /** The error for a scope with no folder here (a project not placed on this computer). */
+  noFolder?: () => Error
+): string {
+  return runInScopeJail(jail, () => {
+    if (cwd) return judgePath(cwd, allowedRoots)
+    for (const root of jail.roots) {
+      const real = realRoot(root)
+      if (real && lstatOrNull(real)?.isDirectory()) return judgePath(real, allowedRoots)
+    }
+    if (noFolder) throw noFolder()
+    throw new JailViolationError(
+      `${jail.label} has no folder on this computer; refusing to start a process`
+    )
+  })
+}
+
+/**
+ * `jail` with `root` DECLARED one of its own roots, ahead of the others (B3): a folder
+ * the user chose for this request — a background process's own working folder (a
+ * sibling repo `~/backend`) — which is the request's to work in although it lies
+ * outside the task's / project's folders, inside another project's folder, or is
+ * another task's folder. Judged like every path by the machine bound (allowed roots,
+ * no link out of them, never this computer's own state); listed first, so a folder
+ * nested in another task's root is not carved out of itself.
+ */
+export function withDeclaredRoot(jail: ScopeJail, root: string): ScopeJail {
+  return { ...jail, roots: [root, ...jail.roots.filter((r) => r !== root)] }
+}
+
+/**
+ * The scope a spawn's own params name: its task (with the project the hub recorded
+ * for it), else its project. Null when it names neither — such a spawn is refused.
+ */
+export function implicitSpawnScope(
+  params: unknown
+):
+  | { kind: 'task'; taskId: string; projectId: string | null }
+  | { kind: 'project'; projectId: string }
+  | null {
+  if (!params || typeof params !== 'object') return null
+  const p = params as { taskId?: unknown; projectId?: unknown }
+  const projectId = typeof p.projectId === 'string' && p.projectId ? p.projectId : null
+  if (typeof p.taskId === 'string' && p.taskId) return { kind: 'task', taskId: p.taskId, projectId }
+  return projectId ? { kind: 'project', projectId } : null
+}
+
 // --- writing ----------------------------------------------------------------
 
 const NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
@@ -411,7 +698,8 @@ function assertParentUnchanged(judged: string): void {
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
   try {
-    return lstatSync(p)
+    // A missing entry is an answer, not an error: no exception built per probe (FU5).
+    return lstatSync(p, { throwIfNoEntry: false }) ?? null
   } catch {
     return null
   }
@@ -582,10 +870,35 @@ async function copyEntryAsync(
 }
 
 /**
+ * Every op of `ops`, forgetting the remembered root spellings once it has acted
+ * (an async one once it settles) — whether it succeeded or not.
+ */
+function forgettingRootSpellings<T extends Record<string, (...args: never[]) => unknown>>(
+  ops: T
+): T {
+  const out: Record<string, (...args: never[]) => unknown> = {}
+  for (const [name, op] of Object.entries(ops))
+    out[name] = (...args: never[]) => {
+      let result: unknown
+      try {
+        result = op(...args)
+      } catch (error) {
+        forgetRootSpellings()
+        throw error
+      }
+      if (result instanceof Promise) return result.finally(forgetRootSpellings)
+      forgetRootSpellings()
+      return result
+    }
+  return out as T
+}
+
+/**
  * The only writes a hub frame can cause. Every path is one {@link judgePath}
  * returned (with the access the op needs); each op re-checks right before it acts.
+ * Each one forgets the remembered root spellings once it has acted (module doc).
  */
-export const jailedFs = {
+export const jailedFs = forgettingRootSpellings({
   /** Create or overwrite a file (its folders too). */
   writeFile(judged: string, content: string | Uint8Array): void {
     const fd = openForWrite(judged, false)
@@ -673,4 +986,4 @@ export const jailedFs = {
     }
     await copyEntryAsync(judgedSrc, judgedDest, { n: 0, buf: Buffer.allocUnsafe(256 * 1024) })
   }
-}
+})

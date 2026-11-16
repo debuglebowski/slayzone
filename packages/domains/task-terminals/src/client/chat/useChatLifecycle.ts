@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useChatRestorationPending, useChatRestorationTracker } from './chat-restoration'
 import { useTRPCClient } from '../trpc'
+import { hubAllows } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import type { ChatTimelineState } from '@slayzone/terminal/client'
 import {
@@ -153,6 +155,7 @@ export function useChatLifecycle({
   clearQueue
 }: UseChatLifecycleOpts) {
   const trpcClient = useTRPCClient()
+  const trackRestoration = useChatRestorationTracker()
   const [resetting, setResetting] = useState(false)
   const [restarting, setRestarting] = useState(false)
   // Suppress "Session ended" UI during a reset/restart — process-exit fires between kill and
@@ -174,9 +177,19 @@ export function useChatLifecycle({
     autoStartedRef.current = true
     // Not cancelled on re-render: the ref makes this one-shot, so a cancelled
     // query would never start the agent (`chatApi` identity can change per render).
-    void trpcClient.settings.get
-      .query({ key: AGENT_STARTUP_SETTING })
-      .then((raw) => {
+    void trackRestoration(
+      Promise.all([
+        trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
+        hubAllows(trpcClient, 'chat.start')
+      ])
+    )
+      .then(([raw, canStart]) => {
+        // Older hubs and narrower credentials may deny startup. Restoring a tab
+        // must not issue a forbidden spawn or leave the startup card loading.
+        if (!canStart) {
+          setStartDecision('none')
+          return
+        }
         if (!openState.isMain) {
           setStartDecision(openState.agentState === 'running' ? 'now' : 'none')
           return
@@ -194,35 +207,83 @@ export function useChatLifecycle({
         // Best-effort — the chat still spawns when the user types.
         setStartDecision('none')
       })
-  }, [hydrating, openState, trpcClient])
+  }, [hydrating, openState, trpcClient, trackRestoration])
   // Still coming up (the startup card counts it, see chat-loading.ts): until the
   // decision lands. A 'now' start is requested in the same commit (effect below),
   // after which the hub reports the agent itself. A failed load is shown in the
   // chat, not waited on.
   const loading = startDecision === null && !loadFailed
+  useChatRestorationPending(loading)
   useEffect(() => (loading ? trackChatLoading() : undefined), [loading])
   const startFiredRef = useRef(false)
+  /** The start went out as a restore (hidden tab) and has not been re-asked as the user's. */
+  const restoreStartRef = useRef(false)
   useEffect(() => {
     if (startDecision === null || startDecision === 'none') return
     if (startDecision === 'shown' && !shown) return
     if (startFiredRef.current) return
     startFiredRef.current = true
-    // 'now' = reopening the workspace (a restore: the computer starts these a few
-    // at a time); 'shown' = the user is looking at it.
-    chatApi
-      .start({
+    // 'now' off screen = reopening the workspace (a restore: the computer starts
+    // these a few at a time, after anything a user asked for). On screen, or
+    // 'shown', the user is looking at it: it goes first.
+    const restore = startDecision === 'now' && !shown
+    restoreStartRef.current = restore
+    trackRestoration(
+      chatApi.start({
         tabId,
         taskId,
         mode,
         cwd,
         providerFlagsOverride: providerFlagsOverride ?? null,
-        reason: startDecision === 'now' ? 'restore' : 'user'
+        reason: restore ? 'restore' : 'user'
       })
-      .catch((err: unknown) => {
-        // Also shown in the chat itself (the start failure card); never silent.
-        toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
+    ).catch((err: unknown) => {
+      // Also shown in the chat itself (the start failure card); never silent.
+      toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }, [
+    startDecision,
+    shown,
+    chatApi,
+    tabId,
+    taskId,
+    mode,
+    cwd,
+    providerFlagsOverride,
+    trackRestoration
+  ])
+
+  // Revealed while its restore still waits for an agent-start slot (the hub
+  // restores every chat that ran at shutdown, a few at a time): ask again as the
+  // user's start, which moves the queued start to the front. Once; idempotent for
+  // an agent that is up meanwhile, and its failure is the first start's to show.
+  const notStarted = state.notStarted
+  useEffect(() => {
+    if (!shown || !restoreStartRef.current || !notStarted) return
+    restoreStartRef.current = false
+    trackRestoration(
+      chatApi.start({
+        tabId,
+        taskId,
+        mode,
+        cwd,
+        providerFlagsOverride: providerFlagsOverride ?? null,
+        reason: 'user'
       })
-  }, [startDecision, shown, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
+    ).catch(() => {
+      /* reported by the first start */
+    })
+  }, [
+    shown,
+    notStarted,
+    chatApi,
+    tabId,
+    taskId,
+    mode,
+    cwd,
+    providerFlagsOverride,
+    trackRestoration
+  ])
 
   const handleRestart = useCallback(async () => {
     if (restarting) return

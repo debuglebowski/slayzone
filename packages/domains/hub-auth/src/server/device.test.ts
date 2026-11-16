@@ -13,6 +13,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
+import { parseConfig } from '@normain/idp-role-contract'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAuthExpressApp } from './app'
@@ -21,6 +22,7 @@ import { DEVICE_CODE_TTL_MS, MAX_PENDING_DEVICE_CODES } from './device'
 import { createDevicePage, WRONG_CODE_LIMIT, WRONG_CODE_WINDOW_MS } from './device-page'
 import { ENTRA_ADMIN_ROLE, ENTRA_PROVIDER_ID, loadEntraClientCredential } from './entra'
 import { CLIENT_ID, type Claims, FakeEntra, TENANT, writeHubCredential } from './fake-entra-harness'
+import { idpRolesOf } from './idp-roles'
 import { createHubUser } from './users'
 import { verifySession } from './verify'
 
@@ -502,5 +504,209 @@ describe('device sign-in', () => {
     const token = await poll(code.device_code)
     expect(token.status).toBe(403)
     expect(token.body.access_token).toBeUndefined()
+  })
+})
+
+describe('IdP-role mode: a device code never outlives the grant it was approved under', () => {
+  beforeEach(async () => {
+    await new Promise<void>((r) => server.close(() => r()))
+    server = createServer()
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    auth = await createHubAuth({
+      dbPath: join(tmpDir, `auth-${++dbCounter}.sqlite`),
+      baseURL: base,
+      secret: SECRET,
+      enablePassword: false,
+      sso: {
+        tenantId: TENANT,
+        clientId: CLIENT_ID,
+        credential: loadEntraClientCredential(credentialPaths),
+        requireMfa: true,
+        authority: entra.authority,
+        idpRoles: parseConfig(
+          {
+            IDP_ROLES_ENABLED: 'true',
+            IDP_ROLE_CLAIM: 'roles',
+            IDP_ROLE_MAPPING: JSON.stringify({
+              'SlayZone.Admin': ['admin'],
+              'SlayZone.User': ['user']
+            })
+          },
+          ['admin', 'user']
+        )
+      }
+    })
+    const authApp = createAuthExpressApp(auth)
+    const page = createDevicePage(auth, { signInOrigin: entra.authority })
+    server.on('request', (req, res) => {
+      if ((req.url ?? '').startsWith('/api/auth/')) authApp(req, res)
+      else if (!page(req, res)) res.writeHead(404).end()
+    })
+    advance(1100) // sign-in evidence counts from the second after the activation
+  })
+
+  it('approved under the current grant: the token works through the gate', async () => {
+    const code = await requestCode()
+    const browser = new Browser()
+    expect((await browser.open(code.user_code, MFA)).status).toBe(200)
+    expect((await browser.approve(code.user_code)).status).toBe(200)
+    advance(6_000)
+    const token = await poll(code.device_code)
+    expect(token.status).toBe(200)
+    const ctx = await verifySession(
+      auth,
+      new Headers({ authorization: `Bearer ${String(token.body.access_token)}` })
+    )
+    expect(ctx?.role).toBe('user')
+  })
+
+  it("the account's FIRST sign-in after activation is the one the page asks for, after the code: the token is issued", async () => {
+    // Production 0.38.1: code 13:58:59, the page's SSO (first grant) 13:59:04, approve
+    // 13:59:05, poll 13:59:10 — refused as stale while the code's ISSUE time was the binding.
+    const code = await requestCode('slayzone-desktop')
+    advance(5_000)
+    const browser = new Browser()
+    expect((await browser.open(code.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    expect((await browser.approve(code.user_code)).status).toBe(200)
+    advance(5_000)
+    const token = await poll(code.device_code, 'slayzone-desktop')
+    expect(token.status).toBe(200)
+    const ctx = await verifySession(
+      auth,
+      new Headers({ authorization: `Bearer ${String(token.body.access_token)}` })
+    )
+    expect(ctx?.role).toBe('user')
+    expect(audit.filter((l) => l.event === 'idp_roles.denied')).toEqual([])
+  })
+
+  it('a grant older than the code: the page sends the browser through SSO again; the token is issued', async () => {
+    const first = await requestCode('slayzone-desktop')
+    expect((await new Browser().open(first.user_code, MFA)).status).toBe(200)
+    advance(140_000)
+    const code = await requestCode('slayzone-desktop')
+    advance(5_000)
+    const browser = new Browser()
+    expect((await browser.open(code.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    expect((await browser.approve(code.user_code)).status).toBe(200)
+    advance(5_000)
+    expect((await poll(code.device_code, 'slayzone-desktop')).status).toBe(200)
+  })
+
+  it('approve → access revoked (no mapped role) → valid SSO again → redeeming the OLD code mints nothing', async () => {
+    const old = await requestCode()
+    const browser = new Browser()
+    expect((await browser.open(old.user_code, MFA)).status).toBe(200)
+    expect((await browser.approve(old.user_code)).status).toBe(200)
+    advance(1_000)
+    // The role is removed at the IdP; the person's next sign-in is refused (revoked).
+    const other = await requestCode()
+    await new Browser().open(other.user_code, { ...MFA, roles: ['Other'] })
+    advance(1_000)
+    // Given back: a valid sign-in re-grants access.
+    const third = await requestCode()
+    expect((await new Browser().open(third.user_code, MFA)).status).toBe(200)
+    advance(6_000)
+    const token = await poll(old.device_code)
+    expect(token.status).not.toBe(200)
+    expect(token.body.access_token).toBeUndefined()
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'stale_authorization' }
+    })
+  })
+
+  it('a losing concurrent approval with a NEWER sign-in never upgrades the binding of the one that won', async () => {
+    const old = await requestCode()
+    expect((await new Browser().open(old.user_code, MFA)).status).toBe(200)
+    // Approval A wins with the sign-in above.
+    const browser = new Browser()
+    expect((await browser.open(old.user_code, MFA)).status).toBe(200)
+    expect((await browser.approve(old.user_code)).status).toBe(200)
+    advance(1_000)
+    // Revoked, then re-granted by a newer valid sign-in.
+    const other = await requestCode()
+    await new Browser().open(other.user_code, { ...MFA, roles: ['Other'] })
+    advance(1_000)
+    const third = await requestCode()
+    expect((await new Browser().open(third.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    // Approval B raced A: it saw the code pending and records its (newer) sign-in before
+    // its own approve fails. Controlled here; over HTTP it is a narrow interleaving.
+    const ctx = await auth.$context
+    const row = (await ctx.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: old.device_code }]
+    })) as { id: string; expiresAt: Date | string }
+    const idp = idpRolesOf(auth)!
+    const before = idp.deviceApprovalOf(row.id)!
+    idp.recordDeviceApproval(row.id, Date.now(), new Date(row.expiresAt).getTime())
+    expect(idp.deviceApprovalOf(row.id)).toEqual(before) // the oldest stays
+    advance(5_000)
+    const token = await poll(old.device_code)
+    expect(token.status).not.toBe(200)
+    expect(token.body.access_token).toBeUndefined()
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'stale_authorization' }
+    })
+  })
+
+  it('a poll that finds the code pending binds nothing: approved before the plugin re-reads it, it fails closed', async () => {
+    const code = await requestCode('slayzone-desktop')
+    advance(5_000)
+    const winner = new Browser()
+    expect((await winner.open(code.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    const ctx = await auth.$context
+    const row = (await ctx.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: code.device_code }]
+    })) as { id: string; expiresAt: Date | string }
+    // A racing approval already recorded a provisional, NEWER authentication.
+    idpRolesOf(auth)!.recordDeviceApproval(
+      row.id,
+      Date.now() + 60_000,
+      new Date(row.expiresAt).getTime()
+    )
+    // The token hook's lookup of this code sees it pending; the winning approval lands
+    // right after, before the plugin reads the code itself.
+    const findOne = ctx.adapter.findOne.bind(ctx.adapter)
+    let armed = true
+    const spy = vi.spyOn(ctx.adapter, 'findOne').mockImplementation((async (
+      args: Parameters<typeof findOne>[0]
+    ) => {
+      const found = await findOne(args)
+      const where = (args as { where?: Array<{ field: string }> }).where
+      if (armed && args.model === 'deviceCode' && where?.[0]?.field === 'deviceCode') {
+        armed = false
+        spy.mockRestore()
+        expect((found as { status?: string } | null)?.status).toBe('pending')
+        expect((await winner.approve(code.user_code)).status).toBe(200)
+      }
+      return found
+    }) as typeof ctx.adapter.findOne)
+    const token = await poll(code.device_code, 'slayzone-desktop')
+    expect(armed).toBe(false)
+    expect(token.status).not.toBe(200)
+    expect(token.body.access_token).toBeUndefined()
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'unbound_issuance' }
+    })
+  })
+
+  it('racing approvals keep the oldest authentication whichever records first', async () => {
+    const code = await requestCode()
+    const ctx = await auth.$context
+    const row = (await ctx.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: code.device_code }]
+    })) as { id: string; expiresAt: Date | string }
+    const idp = idpRolesOf(auth)!
+    const expires = new Date(row.expiresAt).getTime()
+    idp.recordDeviceApproval(row.id, Date.now() + 2_000, expires)
+    idp.recordDeviceApproval(row.id, Date.now() + 1_000, expires)
+    idp.recordDeviceApproval(row.id, Date.now() + 3_000, expires)
+    expect(idp.deviceApprovalOf(row.id)).toEqual({ authAtMs: Date.now() + 1_000 })
   })
 })

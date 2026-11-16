@@ -5,7 +5,7 @@
  * of every hub), 🔔 with how many agents wait for you (all hubs), ⋯ (`BoardMenu`: Filter…,
  * Display…, Board/List, Archive all; a dot while a filter narrows the board); then the
  * board (`ProjectBoard`: its column strip, one column at a time, swipe sideways; a
- * floating ＋ creates a task in the shown column). A tapped card opens the task on its
+ * floating ＋: tap = a temporary task, long-press = a task in the shown column). A tapped card opens the task on its
  * own screen (`onOpenTask`).
  *
  * iPad (`wide`): desktop's layout — the projects rail on the left (avatars, amber
@@ -76,7 +76,7 @@ export interface BoardHomeProps {
   onSignOut: (hubId: string) => void
   /** Phone: a card (or a 🔔 row, `segment` agent) was tapped — its task's screen. */
   onOpenTask: (row: Pick<TaskRow, 'hubLabel' | 'task'>, segment?: TaskSegment) => void
-  /** The floating ＋: create a task in the shown project (and column, if one is shown). */
+  /** The ＋ long-pressed: create a task in the shown project (and column, if one is shown). */
   onNewTask: (target: NewTaskParams) => void
   /** A project's settings (folders, computer). */
   onOpenProject: (hubLabel: string, projectId: string) => void

@@ -1,7 +1,15 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ElectronAPI, HubEntry, LocalComputerHubs, LocalComputerStatus } from '@slayzone/types'
+import type {
+  ArtifactExportRequest,
+  ArtifactExportResult,
+  HostSaveResult,
+  SaveTargetOpenResult,
+  SaveTargetRequest
+} from '@slayzone/platform/electron-bootstrap-contract'
 
-// Intentional bootstrap + client-local host surface. Do not add domain APIs here.
+// Intentional bootstrap + client-local host surface (ARCHITECTURE.md). Do not add domain
+// APIs here.
 // Renderer/backend traffic uses tRPC over WebSocket after boot.
 
 let lastDropPaths: string[] = []
@@ -73,6 +81,7 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:hub-device-login-cancel', payload) as Promise<{ ok: true }>,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
     setAppBadge: (badge) => ipcRenderer.invoke('app:set-badge', badge) as Promise<void>,
+    setQuitGuard: (guard) => ipcRenderer.invoke('app:set-quit-guard', guard) as Promise<void>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>
       ipcRenderer.invoke('app:set-boot-settings', payload) as Promise<{ ok: true }>,
@@ -88,6 +97,19 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:direct-link-prepare', address, hubId) as Promise<
         { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
       >,
+    // Client-local host capability, not a domain API: the export renders on THIS device.
+    exportArtifact: (request: ArtifactExportRequest) =>
+      ipcRenderer.invoke('app:export-artifact', request) as Promise<ArtifactExportResult>,
+    saveTargetOpen: (request: SaveTargetRequest) =>
+      ipcRenderer.invoke('app:save-target-open', request) as Promise<SaveTargetOpenResult>,
+    saveTargetWrite: (targetId: string, path: string, data: Uint8Array, size?: number) =>
+      ipcRenderer.invoke('app:save-target-write', targetId, path, data, size) as Promise<void>,
+    saveTargetMkdir: (targetId: string, path: string) =>
+      ipcRenderer.invoke('app:save-target-mkdir', targetId, path) as Promise<void>,
+    saveTargetClose: (targetId: string) =>
+      ipcRenderer.invoke('app:save-target-close', targetId) as Promise<HostSaveResult>,
+    saveTargetAbort: (targetId: string) =>
+      ipcRenderer.invoke('app:save-target-abort', targetId) as Promise<void>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
     restartLocalComputer: () =>

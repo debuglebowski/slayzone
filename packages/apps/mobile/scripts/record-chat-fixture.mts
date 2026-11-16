@@ -32,6 +32,7 @@ import {
   taskStep,
   transcriptPath
 } from '@slayzone/test-utils/fake-claude'
+import { readReplayPages } from '@slayzone/terminal/chat-direct'
 import { ChatSync, type ChatWireEvent, type ChatWireExit } from '../src/chat/chat-sync.ts'
 import {
   check,
@@ -214,10 +215,15 @@ try {
     cwd: WORK,
     providerFlagsOverride: null
   }
+  const replays = {
+    getReplay: (input: Parameters<typeof client.chat.getReplay.query>[0]) =>
+      client.chat.getReplay.query(input)
+  }
   async function load(kind: 'full' | 'catch-up'): Promise<void> {
     const ticket = sync.beginLoad(kind)
     if (kind === 'full') await client.chat.hydrate.mutate(target)
-    const replay = await client.chat.getReplay.query({ tabId, afterSeq: ticket.afterSeq })
+    // As the app reads it: a bounded page per read, the whole replay applied at once.
+    const replay = (await readReplayPages(replays, tabId, ticket.afterSeq))!
     if (sync.completeLoad(ticket, replay) === 'reload') await load('full')
   }
   // The folder exactly as the phone resolves it (`chat-cwd.ts`): no session yet, so the
@@ -556,7 +562,7 @@ try {
   )
 
   // The final history, as a fresh phone loads it.
-  const finalReplay = await client.chat.getReplay.query({ tabId, afterSeq: -1 })
+  const finalReplay = (await readReplayPages(replays, tabId, -1))!
   let freshState = initialState()
   const fresh = new ChatSync(tabId, {
     dispatch: (a) => {

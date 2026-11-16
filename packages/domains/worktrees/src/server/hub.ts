@@ -15,18 +15,16 @@ export {
 export {
   setGitOpTransport,
   executeGitOp,
-  gitTargetForPath,
   deliverGitWatchEvent,
   gitWatchComputerGone,
-  type GitOpTransport
+  type GitOpTransport,
+  type GitScope
 } from './git-op-routing'
+// aiConfig's path routing only, until §9 Phase 7c gives it a scope.
 export { setGhExecutor, type GhExecutor } from './gh-cli'
 export { setAiCommandRunner, type AiCommandRunner } from './merge-ai'
 export { hubWorktreeExecAdapters, defaultWorktreePolicyAdapters } from './hub-task-adapters'
-export {
-  setWorktreeColorDetector,
-  __resetForTests as resetWorktreeColorsForTest
-} from './color-registry'
+export { __resetForTests as resetWorktreeColorsForTest } from './color-registry'
 export { detectChildRepos, invalidateProjectReposCache } from './list-project-repos'
 export { getGitWatcher, closeGitWatcher } from './git-watcher'
 export { worktreesEvents, type WorktreesEventMap } from './events'

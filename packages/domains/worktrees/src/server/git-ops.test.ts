@@ -33,9 +33,10 @@ describe('git op contract', () => {
   test('the path fields it names are string fields of its input', () => {
     for (const [op, def] of Object.entries(gitOpsContract)) {
       const shape = def.input.shape as Record<string, unknown>
-      for (const field of [...def.paths, ...def.repoRelative])
+      for (const field of [...def.paths, ...def.repoRelative, ...def.newRoots])
         expect(Object.keys(shape), `${op}.${field}`).toContain(field)
-      expect(def.paths.length, `${op} names its repo path`).toBeGreaterThan(0)
+      // Every op names an absolute path the computer judges (a repo, or a root it makes).
+      expect(def.paths.length + def.newRoots.length, `${op} names a path`).toBeGreaterThan(0)
     }
   })
 

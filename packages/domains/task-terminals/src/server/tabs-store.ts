@@ -2,6 +2,7 @@ import { tabsEvents } from './events'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { parseAgentState, type AgentState } from '@slayzone/terminal-contracts'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
+import { clampChatFontSize } from '../shared/chat-font-size'
 
 /**
  * Electron-free tab CRUD store. Single source of truth shared by the
@@ -20,6 +21,7 @@ export interface TabRow {
   position: number
   created_at: string
   agent_state: string
+  chat_font_size: number | null
 }
 
 export function rowToTab(row: TabRow): TerminalTab {
@@ -32,7 +34,8 @@ export function rowToTab(row: TabRow): TerminalTab {
     isMain: row.is_main === 1,
     position: row.position,
     createdAt: row.created_at,
-    agentState: parseAgentState(row.agent_state)
+    agentState: parseAgentState(row.agent_state),
+    chatFontSize: row.chat_font_size ?? null
   }
 }
 
@@ -100,7 +103,8 @@ export async function ensureMainTab(
     isMain: true,
     position: 0,
     createdAt: now,
-    agentState: initialAgentState
+    agentState: initialAgentState,
+    chatFontSize: null
   }
 }
 
@@ -138,7 +142,8 @@ export async function createTabRow(
     isMain: false,
     position,
     createdAt: now,
-    agentState: 'stopped'
+    agentState: 'stopped',
+    chatFontSize: null
   }
 }
 
@@ -155,16 +160,21 @@ export async function updateTabRow(
 
   const mode = input.mode ?? existing.mode
   const label = input.label !== undefined ? input.label : existing.label
+  const chatFontSize =
+    input.chatFontSize !== undefined
+      ? clampChatFontSize(input.chatFontSize)
+      : existing.chat_font_size
 
   await db
     .prepare(`
     UPDATE terminal_tabs
     SET label = ?,
         mode = ?,
-        position = COALESCE(?, position)
+        position = COALESCE(?, position),
+        chat_font_size = ?
     WHERE id = ?
   `)
-    .run(label, mode, input.position, input.id)
+    .run(label, mode, input.position, chatFontSize, input.id)
 
   const updated = (await db
     .prepare('SELECT * FROM terminal_tabs WHERE id = ?')
@@ -208,7 +218,8 @@ export async function splitTabRow(db: SlayzoneDb, tabId: string): Promise<Termin
     isMain: false,
     position,
     createdAt: now,
-    agentState: 'stopped'
+    agentState: 'stopped',
+    chatFontSize: null
   }
 }
 

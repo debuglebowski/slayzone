@@ -25,6 +25,7 @@ export {
 export {
   setProcedurePolicy,
   procedurePolicy,
+  registeredProcedurePolicy,
   type ProcedurePolicy,
   type OwnerCheckRequest,
   type OwnedResultFilter
@@ -37,3 +38,4 @@ export type {
   IsMountedSlice,
   AssertSlice
 } from './mounted-router'
+export type { WithAmbientTarget } from './ambient-target'

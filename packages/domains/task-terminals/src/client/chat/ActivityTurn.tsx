@@ -2,6 +2,7 @@ import { useContext, useEffect, useId, useState } from 'react'
 import { Brain, ChevronRight, MessageSquare, Wrench } from 'lucide-react'
 import { cn, useNow, type AppearanceSettings } from '@slayzone/ui'
 import { GhMarkdown } from '@slayzone/markdown/client'
+import { renderCodexFileCitations } from './codex-file-citations'
 import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
 import type { ActivityItem, ActivityTurn as ActivityTurnData, SubAgentItem } from './activity-view'
 import { HighlightedText } from './HighlightedText'
@@ -92,7 +93,7 @@ function ActivityNarrative({
             (thinking ? (
               <HighlightedText text={text || 'Thinking…'} />
             ) : (
-              <GhMarkdown>{text}</GhMarkdown>
+              <GhMarkdown>{renderCodexFileCitations(text)}</GhMarkdown>
             ))}
         </div>
       </div>
@@ -113,7 +114,7 @@ function ActivityNarrative({
         </div>
       ) : (
         <div className="min-w-0 [&_.prose]:text-xs [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
-          <GhMarkdown>{text}</GhMarkdown>
+          <GhMarkdown>{renderCodexFileCitations(text)}</GhMarkdown>
         </div>
       )}
     </div>

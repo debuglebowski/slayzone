@@ -28,13 +28,16 @@ h.db
   .run(projectId, 'P', '#000', '/tmp/p')
 
 let notifyCount = 0
+/** Session ids the stub reports mid-reply, per task. */
+const midReply = new Map<string, string[]>()
 const stub = captureMcpServer()
 registerUpdateTaskTool(stub.server as never, {
   db: h.slayDb,
   taskBus: ipcMain,
   notifyRenderer: () => {
     notifyCount++
-  }
+  },
+  taskAgents: { midReplySessionIds: async (taskId) => midReply.get(taskId) ?? [] }
 })
 
 function seedTask(extra: Record<string, unknown> = {}): string {
@@ -57,6 +60,49 @@ describe('mcp update_task', () => {
     expect('task_id' in tool.schema).toBe(true)
     expect('parent_id' in tool.schema).toBe(true)
     expect('due_date' in tool.schema).toBe(true)
+  })
+
+  test('a terminal status while an agent is mid-reply is refused, nothing written; force completes', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:${id}`])
+    try {
+      for (const status of ['done', 'canceled']) {
+        const res = (await stub.invoke('update_task', { task_id: id, status, title: 'x' })) as {
+          content: { text: string }[]
+          isError?: boolean
+        }
+        expect(res.isError).toBe(true)
+        expect(res.content[0].text).toContain('mid-reply')
+        expect(res.content[0].text).toContain('force: true')
+      }
+      expect(h.db.prepare('SELECT status, title FROM tasks WHERE id = ?').get(id)).toEqual({
+        status: 'todo',
+        title: 'T'
+      })
+      const forced = (await stub.invoke('update_task', {
+        task_id: id,
+        status: 'done',
+        force: true
+      })) as { content: { text: string }[]; isError?: boolean }
+      expect(forced.isError === true).toBe(false)
+      expect((JSON.parse(forced.content[0].text) as { status: string }).status).toBe('done')
+    } finally {
+      midReply.delete(id)
+    }
+  })
+
+  test('a non-terminal status is never blocked by a mid-reply agent', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:${id}`])
+    try {
+      const res = (await stub.invoke('update_task', { task_id: id, status: 'in_progress' })) as {
+        content: { text: string }[]
+        isError?: boolean
+      }
+      expect(res.isError === true).toBe(false)
+    } finally {
+      midReply.delete(id)
+    }
   })
 
   test('happy: updates title; emits dual signals; notifyRenderer fires', async () => {

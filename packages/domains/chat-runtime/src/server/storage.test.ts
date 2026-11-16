@@ -2,6 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
+import {
+  CHAT_HISTORY_PAGE_MAX_BYTES,
+  clampChatHistoryPageBudget
+} from '@slayzone/terminal-contracts'
 import { openChatStorage } from './storage'
 
 const roots: string[] = []
@@ -196,4 +200,71 @@ test('task state version moves on every hub-facing write, never on local content
   store.putRecord('conversation-b', 1, { kind: 'settings', id: 'provider', value: {}, at: 1 })
   expect(version()).toBe(previous)
   expect(store.stateVersion('task-b')).toBeGreaterThan(0)
+})
+
+test('v9 (hub v208): pending settings, session and queue updates for the hub are dropped; others stay', () => {
+  const { store, root } = open()
+  store.createConversation(identity)
+  const pending = (kind: string) => ({
+    kind: 'settings' as const,
+    id: `metadata:${kind}`,
+    value: { operationId: kind, kind, sequence: 1, value: {} },
+    at: 1
+  })
+  for (const kind of ['provider-config', 'conversation', 'queue-item', 'agent-state'])
+    store.putRecord(identity.id, 1, pending(kind))
+  // As a v8 store left it.
+  store.compose((db) => db.pragma('user_version = 8'))
+  store.close()
+  const next = open(root).store
+  expect(
+    next
+      .findRecords('settings', undefined, { idPrefix: 'metadata:' })
+      .map((r) => r.id)
+      .sort()
+  ).toEqual(['metadata:agent-state'])
+})
+
+describe('bounded history reads (a 202 MB chat in one read stalled the computer and broke its socket)', () => {
+  test('pages of a large history: every page within budget, together the whole history; tail start by index', () => {
+    const { store } = open()
+    store.createConversation(identity)
+    // ~30 MB: thousands of events, some of them screenshot-sized.
+    for (let i = 0; i < 3_000; i++) {
+      const size = i % 50 === 0 ? 1_300_000 : 4_000
+      store.append(identity.id, 1, { kind: 'stderr', text: `${i}:${'x'.repeat(size)}` }, i)
+    }
+    const budget = clampChatHistoryPageBudget()
+    const seen: number[] = []
+    let pages = 0
+    for (let after = -1; ; ) {
+      const page = store.readPage(identity.id, after, Number.MAX_SAFE_INTEGER, budget)
+      pages++
+      const bytes = page.bytes.reduce((a, b) => a + b, 0)
+      expect(bytes).toBeLessThanOrEqual(CHAT_HISTORY_PAGE_MAX_BYTES)
+      page.events.forEach((e, i) =>
+        expect(page.bytes[i]).toBe(Buffer.byteLength(JSON.stringify(e.event)))
+      )
+      seen.push(...page.events.map((e) => e.seq))
+      if (!page.more) break
+      after = page.events.at(-1)!.seq
+    }
+    expect(pages).toBeGreaterThan(5)
+    expect(seen).toEqual(Array.from({ length: 3_000 }, (_, i) => i))
+    expect(store.readPage(identity.id, 10, 13, budget).events.map((e) => e.seq)).toEqual([11, 12])
+    expect(store.tailStart(identity.id, 2_000)).toBe(1_000)
+    expect(store.tailStart(identity.id, 3_001)).toBeNull()
+  })
+  test('one event larger than the budget is read alone', () => {
+    const { store } = open()
+    store.createConversation(identity)
+    store.append(identity.id, 1, { kind: 'stderr', text: 'x'.repeat(10_000) }, 1)
+    store.append(identity.id, 1, { kind: 'stderr', text: 'small' }, 2)
+    const page = store.readPage(identity.id, -1, Number.MAX_SAFE_INTEGER, {
+      maxBytes: 100,
+      maxEvents: 10
+    })
+    expect(page.events.map((e) => e.seq)).toEqual([0])
+    expect(page.more).toBe(true)
+  })
 })

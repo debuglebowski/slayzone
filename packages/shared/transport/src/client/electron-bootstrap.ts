@@ -1,6 +1,11 @@
 import type {
+  ArtifactExportRequest,
+  ArtifactExportResult,
   ElectronBootstrapAPI,
-  ElectronBrowserHost
+  ElectronBrowserHost,
+  HostSaveResult,
+  SaveTargetOpenResult,
+  SaveTargetRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type {
@@ -41,6 +46,7 @@ function api(): ElectronBootstrapAPI {
  * the read methods) — never a value a caller could mistake for success.
  */
 const NOT_IMPLEMENTED = 'Not implemented by this host'
+const SAVE_NOT_SUPPORTED = 'Saving files is not supported in this app'
 
 export const electronBootstrap = {
   getServerUrl: () =>
@@ -75,6 +81,9 @@ export const electronBootstrap = {
   // No app icon outside Electron — a no-op elsewhere.
   setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) =>
     api().app.setAppBadge?.(badge) ?? Promise.resolve(),
+  // Only the desktop app quits as a whole; elsewhere nothing to guard.
+  setQuitGuard: (guard: { message: string } | null) =>
+    api().app.setQuitGuard?.(guard) ?? Promise.resolve(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string
@@ -89,6 +98,29 @@ export const electronBootstrap = {
   prepareDirectLink: (address: string, hubId: string) =>
     api().app.prepareDirectLink?.(address, hubId) ??
     Promise.resolve({ ok: false as const, reason: 'unsupported' as const }),
+  /** Render + save an artifact export on this device (desktop: Electron, web: browser). */
+  exportArtifact: (request: ArtifactExportRequest): Promise<ArtifactExportResult> =>
+    api().app.exportArtifact?.(request) ??
+    Promise.resolve({ ok: false as const, error: 'Export is not supported in this app' }),
+  /** Open a streaming save target on this device (desktop: dialogs + disk; web: download). */
+  saveTargetOpen: (request: SaveTargetRequest): Promise<SaveTargetOpenResult> =>
+    api().app.saveTargetOpen?.(request) ??
+    Promise.resolve({ ok: false as const, error: SAVE_NOT_SUPPORTED }),
+  saveTargetWrite: (
+    targetId: string,
+    path: string,
+    data: Uint8Array,
+    size?: number
+  ): Promise<void> =>
+    api().app.saveTargetWrite?.(targetId, path, data, size) ??
+    Promise.reject(new Error(SAVE_NOT_SUPPORTED)),
+  saveTargetMkdir: (targetId: string, path: string): Promise<void> =>
+    api().app.saveTargetMkdir?.(targetId, path) ?? Promise.reject(new Error(SAVE_NOT_SUPPORTED)),
+  saveTargetClose: (targetId: string): Promise<HostSaveResult> =>
+    api().app.saveTargetClose?.(targetId) ??
+    Promise.resolve({ ok: false as const, error: SAVE_NOT_SUPPORTED }),
+  saveTargetAbort: (targetId: string): Promise<void> =>
+    api().app.saveTargetAbort?.(targetId) ?? Promise.resolve(),
   relaunch: () => api().app.relaunch?.() ?? Promise.resolve(),
   restartSidecar: () =>
     api().app.restartSidecar?.() ?? Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),

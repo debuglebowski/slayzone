@@ -56,12 +56,14 @@ import {
   deletePath,
   gitStatus,
   listAllFiles,
+  readBytes,
   readDir,
   readFile,
   renamePath,
   searchFiles,
   writeFile
 } from './file-ops'
+import type { ReadBytesResult } from './workspace-bytes'
 import { subscribeFileWatcher, type FileWatchEvent } from './watcher'
 import { discoverRepos, type DiscoveredRepo } from './repo-discovery'
 import type {
@@ -154,6 +156,13 @@ export interface LocalWorkspaceFs {
 
   readDir(rootPath: string, dirPath: string): DirEntry[]
   readFile(rootPath: string, filePath: string, force?: boolean): ReadFileResult
+  /** `length` bytes at `offset` (1..`WORKSPACE_READ_BYTES_MAX_CHUNK`); see `readBytesAt`. */
+  readBytes(
+    rootPath: string,
+    filePath: string,
+    offset: number,
+    length: number
+  ): Promise<ReadBytesResult>
   writeFile(rootPath: string, filePath: string, content: string): void
   createFile(rootPath: string, filePath: string): void
   createDir(rootPath: string, dirPath: string): void
@@ -218,6 +227,19 @@ export interface WorkspaceFsAdapters {
     filePath: string,
     force?: boolean
   ): Promise<ReadFileResult>
+  /**
+   * One raw slice of a file (binary-exact) — previews stream a file by pulling these
+   * in order. `size`/`mtimeMs` describe the whole file, so a caller can tell a file
+   * that changed between slices. Missing → `code: 'ENOENT'`, not a file → `'EISDIR'`,
+   * out of the root → a `PathTraversalError` (in-process) or the computer's refusal.
+   */
+  readBytes(
+    computerId: string | null,
+    rootPath: string,
+    filePath: string,
+    offset: number,
+    length: number
+  ): Promise<ReadBytesResult>
   writeFile(
     computerId: string | null,
     rootPath: string,
@@ -397,6 +419,7 @@ function createUnguardedLocalWorkspaceFs(): LocalWorkspaceFs {
     },
     readDir,
     readFile,
+    readBytes,
     writeFile,
     createFile,
     createDir,

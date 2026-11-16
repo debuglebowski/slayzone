@@ -132,7 +132,10 @@ export function TerminalSearchBar({ searchAddon, onClose, focusToken }: Terminal
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <span className="text-xs text-muted-foreground dark:text-muted-foreground tabular-nums shrink-0 min-w-[3ch] text-right">
+      <span
+        data-testid="terminal-search-count"
+        className="text-xs text-muted-foreground dark:text-muted-foreground tabular-nums shrink-0 min-w-[3ch] text-right"
+      >
         {countDisplay}
       </span>
       <button

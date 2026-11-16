@@ -11,7 +11,7 @@
  * computer bundles.
  */
 import { lastSubmitEnterEnd } from '@slayzone/terminal-contracts'
-import { appendInput, isInterruptKey } from './stdin-input'
+import { appendInput, isInterruptKey, isQuitKey } from './stdin-input'
 
 export interface PtyInputFacts {
   /** The write is the user's Esc key (not a mouse report that contains ESC). */
@@ -24,6 +24,12 @@ export interface PtyInputFacts {
   submitted: string | null
   /** The submitted line asks the agent for its conversation id (`/status`, …). */
   statusCommand: boolean
+  /**
+   * The write carries ^C / ^D: the user may be ending the agent, so its exit is not
+   * unexpected (see `decideUnexpectedExit`). Present only when true — an older
+   * computer never reports it.
+   */
+  interrupt?: boolean
 }
 
 /** Default conversation-id command when the adapter names none. */
@@ -39,13 +45,14 @@ export function analyzePtyInput(
   sessionIdCommand: string = DEFAULT_SESSION_ID_COMMAND
 ): { buffer: string; facts: PtyInputFacts } {
   const esc = isInterruptKey(data)
+  const quit = isQuitKey(data) ? { interrupt: true } : {}
   // Submit-Enter includes the kitty CSI-u encoding: once claude-code enables the
   // kitty keyboard protocol, Enter arrives as `ESC [ 13 u` and no \r ever does.
   const end = lastSubmitEnterEnd(data)
   if (end < 0) {
     return {
       buffer: appendInput(buffer, data),
-      facts: { esc, submitted: null, statusCommand: false }
+      facts: { esc, submitted: null, statusCommand: false, ...quit }
     }
   }
   // One write can carry keys typed after the Enter (sent together while an earlier
@@ -53,6 +60,11 @@ export function analyzePtyInput(
   const submitted = appendInput(buffer, data.slice(0, end))
   return {
     buffer: appendInput('', data.slice(end)),
-    facts: { esc, submitted, statusCommand: submitted.includes(sessionIdCommand) }
+    facts: {
+      esc,
+      submitted,
+      statusCommand: submitted.includes(sessionIdCommand),
+      ...quit
+    }
   }
 }

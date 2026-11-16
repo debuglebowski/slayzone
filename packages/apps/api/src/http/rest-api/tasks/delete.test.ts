@@ -46,7 +46,7 @@ function seedTask(id: string = crypto.randomUUID()): string {
 }
 
 describe('DELETE /api/tasks/:id', () => {
-  test('happy: 200 + soft-deletes (deleted_at set) + taskEvents emits', async () => {
+  test('happy: 200 + permanently deletes + taskEvents emits', async () => {
     const id = seedTask()
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:deleted')
@@ -59,7 +59,7 @@ describe('DELETE /api/tasks/:id', () => {
     const row = h.db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
       deleted_at: string | null
     }
-    expect(row.deleted_at !== null).toBe(true)
+    expect(row).toBeUndefined()
     expect(spy.calls.length).toBe(1)
     expect((spy.calls[0].payload as { taskId: string }).taskId).toBe(id)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
@@ -90,7 +90,7 @@ describe('DELETE /api/tasks/:id', () => {
     const row = h.db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
       deleted_at: string | null
     }
-    expect(row.deleted_at !== null).toBe(true)
+    expect(row).toBeUndefined()
   })
 
   test('blocked: the resolved task rides along so the CLI can still name it', async () => {

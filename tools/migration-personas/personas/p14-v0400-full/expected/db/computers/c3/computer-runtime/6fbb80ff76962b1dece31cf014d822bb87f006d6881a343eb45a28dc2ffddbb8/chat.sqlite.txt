@@ -1,0 +1,266 @@
+user_version 12
+
+## schema
+index agent_sessions_conversation: CREATE INDEX agent_sessions_conversation ON agent_sessions(conversation_id)
+index agent_sessions_pool: CREATE INDEX agent_sessions_pool ON agent_sessions(cwd, mode) WHERE status = 'pooled'
+index agent_sessions_task_tab: CREATE INDEX agent_sessions_task_tab ON agent_sessions(task_id, mode, tab_id, created_at DESC)
+index agent_turns_task: CREATE INDEX agent_turns_task ON agent_turns(task_id)
+index agent_turns_worktree: CREATE INDEX agent_turns_worktree ON agent_turns(worktree_path, created_at)
+index archive_tasks_task: CREATE INDEX archive_tasks_task ON archive_tasks(task_id)
+index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
+index artifact_folder_tombstones_task: CREATE INDEX artifact_folder_tombstones_task ON artifact_folder_tombstones(task_id)
+index artifact_folders_task: CREATE INDEX artifact_folders_task ON artifact_folders(task_id)
+index artifact_versions_hash: CREATE INDEX artifact_versions_hash ON artifact_versions(content_hash)
+index artifact_versions_name: CREATE UNIQUE INDEX artifact_versions_name ON artifact_versions(artifact_id,name) WHERE name IS NOT NULL
+index artifact_versions_num: CREATE UNIQUE INDEX artifact_versions_num ON artifact_versions(artifact_id,version_num)
+index content_erasure_jobs_owner: CREATE INDEX content_erasure_jobs_owner ON content_erasure_jobs(owner_user_id,state)
+index content_erasure_tasks_job: CREATE INDEX content_erasure_tasks_job ON content_erasure_tasks(job_id)
+index conversations_tab: CREATE INDEX conversations_tab ON conversations(tab_id)
+index conversations_task: CREATE INDEX conversations_task ON conversations(task_id)
+index events_retention: CREATE INDEX events_retention ON events(conversation_id,saved_at,seq)
+index records_kind_id: CREATE INDEX records_kind_id ON records(kind,id,conversation_id)
+index records_retention: CREATE INDEX records_retention ON records(conversation_id,saved_at)
+index session_deletions_lookup: CREATE INDEX session_deletions_lookup ON session_deletions(task_id, mode, conversation_id)
+index session_resets_lookup: CREATE INDEX session_resets_lookup ON session_resets(task_id, mode, tab_id, created_at DESC)
+index task_artifacts_task: CREATE INDEX task_artifacts_task ON task_artifacts(task_id)
+index task_conversations_lookup: CREATE INDEX task_conversations_lookup ON task_conversations(task_id, mode, created_at)
+table agent_sessions: CREATE TABLE agent_sessions ( id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, tab_id TEXT, conversation_id TEXT, origin TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pooled','bound','dead')), pending_meta TEXT, created_at INTEGER NOT NULL, bound_at INTEGER, ended_at INTEGER )
+table agent_turns: CREATE TABLE agent_turns ( id TEXT PRIMARY KEY, worktree_path TEXT NOT NULL, task_id TEXT, terminal_tab_id TEXT NOT NULL, snapshot_sha TEXT NOT NULL, head_sha_at_snap TEXT, prompt_preview TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL )
+table archive_index: CREATE TABLE archive_index (archive_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL)
+table archive_tasks: CREATE TABLE archive_tasks ( archive_id TEXT NOT NULL REFERENCES archive_index(archive_id) ON DELETE CASCADE, task_id TEXT NOT NULL, PRIMARY KEY(archive_id, task_id) )
+table artifact_blob_gc_generation: CREATE TABLE artifact_blob_gc_generation(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL)
+table artifact_blob_gc_pending: CREATE TABLE artifact_blob_gc_pending(id INTEGER PRIMARY KEY CHECK(id=1))
+table artifact_blob_leases: CREATE TABLE artifact_blob_leases(id TEXT PRIMARY KEY,expires_at INTEGER NOT NULL)
+table artifact_blob_pins: CREATE TABLE artifact_blob_pins( scope TEXT NOT NULL,owner_id TEXT NOT NULL,token TEXT NOT NULL,reference_key TEXT NOT NULL, task_id TEXT NOT NULL,artifact_id TEXT NOT NULL,owner_epoch INTEGER NOT NULL, content_hash TEXT NOT NULL,size INTEGER NOT NULL, PRIMARY KEY(scope,owner_id,token,reference_key) )
+table artifact_blobs: CREATE TABLE artifact_blobs(hash TEXT PRIMARY KEY,size INTEGER NOT NULL)
+table artifact_folder_tombstones: CREATE TABLE artifact_folder_tombstones(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,task_id TEXT NOT NULL)
+table artifact_folders: CREATE TABLE artifact_folders ( id TEXT PRIMARY KEY,task_id TEXT NOT NULL,parent_id TEXT REFERENCES artifact_folders(id) ON DELETE CASCADE, name TEXT NOT NULL,"order" INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT(datetime('now')) )
+table artifact_owners: CREATE TABLE artifact_owners(id TEXT PRIMARY KEY,kind TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id))
+table artifact_storage_schema: CREATE TABLE artifact_storage_schema(version INTEGER NOT NULL)
+table artifact_versions: CREATE TABLE artifact_versions ( id TEXT PRIMARY KEY,artifact_id TEXT NOT NULL REFERENCES task_artifacts(id) ON DELETE CASCADE, version_num INTEGER NOT NULL,content_hash TEXT NOT NULL,size INTEGER NOT NULL,name TEXT,author_type TEXT,author_id TEXT, created_at TEXT NOT NULL DEFAULT(datetime('now')),parent_id TEXT REFERENCES artifact_versions(id) ON DELETE SET NULL )
+table blob_leases: CREATE TABLE blob_leases (id TEXT PRIMARY KEY,expires_at INTEGER NOT NULL)
+table content_erasure_artifacts: CREATE TABLE content_erasure_artifacts ( artifact_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id) )
+table content_erasure_computer_acks: CREATE TABLE content_erasure_computer_acks ( job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id), computer_id TEXT NOT NULL, task_id TEXT NOT NULL, revision INTEGER NOT NULL, method TEXT NOT NULL DEFAULT 'computer' CHECK(method IN ('computer','operator')), verified_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(job_id,computer_id,task_id) )
+table content_erasure_jobs: CREATE TABLE content_erasure_jobs ( id TEXT PRIMARY KEY, scope TEXT NOT NULL, owner_user_id TEXT, actor_user_id TEXT, manifest TEXT NOT NULL, db_erased INTEGER NOT NULL DEFAULT 0, local_erased INTEGER NOT NULL DEFAULT 0, gc_generation INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'incomplete' CHECK(state IN ('incomplete','complete')), failure_codes TEXT NOT NULL DEFAULT '[]', retained_shared_blobs INTEGER NOT NULL DEFAULT 0, retained_backup_blobs INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT )
+table content_erasure_offline_requests: CREATE TABLE content_erasure_offline_requests ( job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id), computer_id TEXT NOT NULL, request_json TEXT NOT NULL, PRIMARY KEY(job_id,computer_id) )
+table content_erasure_tabs: CREATE TABLE content_erasure_tabs ( tab_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id) )
+table content_erasure_tasks: CREATE TABLE content_erasure_tasks ( task_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id), owner_user_id TEXT )
+table conversations: CREATE TABLE conversations ( id TEXT PRIMARY KEY, task_id TEXT NOT NULL, tab_id TEXT NOT NULL, mode TEXT NOT NULL, epoch INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','frozen','prepared','deleted')), migration_id TEXT, migration_hash TEXT )
+table events: CREATE TABLE events ( conversation_id TEXT NOT NULL REFERENCES conversations(id), seq INTEGER NOT NULL, saved_at INTEGER NOT NULL, event TEXT NOT NULL, PRIMARY KEY(conversation_id, seq) )
+table item_faults: CREATE TABLE item_faults ( origin TEXT NOT NULL CHECK (origin IN ('hub','computer')), computer_id TEXT NOT NULL DEFAULT '', pass TEXT NOT NULL, item_key TEXT NOT NULL, task_id TEXT, kind TEXT NOT NULL CHECK (kind IN ('transient','structural')), fingerprint TEXT, message TEXT NOT NULL, attempts INTEGER NOT NULL, first_at INTEGER NOT NULL, last_at INTEGER NOT NULL, next_retry_at INTEGER, PRIMARY KEY (origin, computer_id, pass, item_key) )
+table legacy_conversation_history: CREATE TABLE legacy_conversation_history ( task_id TEXT NOT NULL, mode TEXT NOT NULL, ids TEXT NOT NULL, PRIMARY KEY(task_id, mode) )
+table migration_checkpoints: CREATE TABLE migration_checkpoints ( migration_id TEXT PRIMARY KEY, identity TEXT NOT NULL, value TEXT NOT NULL )
+table mode_agents: CREATE TABLE mode_agents (mode TEXT PRIMARY KEY, agent_type TEXT)
+table provider_config_seeds: CREATE TABLE provider_config_seeds ( task_id TEXT NOT NULL, mode TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(task_id,mode) )
+table provider_configs: CREATE TABLE provider_configs ( task_id TEXT NOT NULL, mode TEXT NOT NULL, revision INTEGER NOT NULL, value TEXT NOT NULL, PRIMARY KEY(task_id,mode) )
+table queue_message_identities: CREATE TABLE queue_message_identities ( task_id TEXT NOT NULL,id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, value TEXT NOT NULL,PRIMARY KEY(task_id,id) )
+table receipts: CREATE TABLE receipts ( conversation_id TEXT NOT NULL REFERENCES conversations(id), id TEXT NOT NULL, hash TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL, saved_at INTEGER NOT NULL DEFAULT 0, result_expired INTEGER NOT NULL DEFAULT 0, method TEXT, PRIMARY KEY(conversation_id, id) )
+table records: CREATE TABLE records ( conversation_id TEXT NOT NULL REFERENCES conversations(id), kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, saved_at INTEGER NOT NULL, PRIMARY KEY(conversation_id, kind, id) )
+table retention_policy: CREATE TABLE retention_policy(id INTEGER PRIMARY KEY CHECK(id=1),days INTEGER NOT NULL)
+table session_deletions: CREATE TABLE session_deletions ( id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, conversation_id TEXT NOT NULL, created_at INTEGER NOT NULL )
+table session_resets: CREATE TABLE session_resets ( id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, tab_id TEXT, except_chat INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL )
+table session_turns: CREATE TABLE session_turns ( conversation_id TEXT PRIMARY KEY, first_turn_at INTEGER NOT NULL )
+table storage_maintenance: CREATE TABLE storage_maintenance (id TEXT PRIMARY KEY)
+table store_identity: CREATE TABLE store_identity (id INTEGER PRIMARY KEY CHECK(id=1), store_id TEXT NOT NULL)
+table task_artifacts: CREATE TABLE task_artifacts ( id TEXT PRIMARY KEY,task_id TEXT NOT NULL,folder_id TEXT REFERENCES artifact_folders(id) ON DELETE SET NULL, title TEXT NOT NULL,render_mode TEXT,view_mode TEXT,language TEXT,readability_override TEXT,width_override TEXT, zoom_pct INTEGER,html_theme_override TEXT,"order" INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT(datetime('now')),updated_at TEXT NOT NULL DEFAULT(datetime('now')), current_version_id TEXT REFERENCES artifact_versions(id) ON DELETE SET NULL )
+table task_cleanup_pending: CREATE TABLE task_cleanup_pending (task_id TEXT PRIMARY KEY)
+table task_conversations: CREATE TABLE task_conversations ( id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, tab_id TEXT, conversation_id TEXT, origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL )
+table task_lifecycle: CREATE TABLE task_lifecycle (task_id TEXT PRIMARY KEY,state TEXT NOT NULL,revision INTEGER NOT NULL)
+table task_path_releases: CREATE TABLE task_path_releases ( task_id TEXT PRIMARY KEY, project_id TEXT, worktree_path TEXT NOT NULL, released_at INTEGER NOT NULL )
+table task_paths: CREATE TABLE task_paths ( task_id TEXT PRIMARY KEY, project_id TEXT, worktree_path TEXT, base_dir TEXT, updated_at INTEGER NOT NULL )
+table task_state_versions: CREATE TABLE task_state_versions ( task_id TEXT PRIMARY KEY, version INTEGER NOT NULL )
+table usage_cursors: CREATE TABLE usage_cursors ( file_path TEXT PRIMARY KEY, offset INTEGER NOT NULL, modified_ms REAL NOT NULL )
+trigger artifact_blob_gc_requested: CREATE TRIGGER artifact_blob_gc_requested BEFORE INSERT ON artifact_blob_gc_pending BEGIN UPDATE artifact_blob_gc_generation SET version=version+1 WHERE id=1; END
+trigger artifact_folders_state_version_delete: CREATE TRIGGER artifact_folders_state_version_delete AFTER DELETE ON artifact_folders BEGIN INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger artifact_folders_state_version_insert: CREATE TRIGGER artifact_folders_state_version_insert AFTER INSERT ON artifact_folders BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger artifact_folders_state_version_update: CREATE TRIGGER artifact_folders_state_version_update AFTER UPDATE ON artifact_folders BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger artifact_owners_state_version_delete: CREATE TRIGGER artifact_owners_state_version_delete AFTER DELETE ON artifact_owners BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=OLD.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=OLD.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger artifact_owners_state_version_insert: CREATE TRIGGER artifact_owners_state_version_insert AFTER INSERT ON artifact_owners BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger artifact_owners_state_version_update: CREATE TRIGGER artifact_owners_state_version_update AFTER UPDATE ON artifact_owners BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger chat_artifact_owner: CREATE TRIGGER chat_artifact_owner AFTER INSERT ON task_artifacts BEGIN INSERT INTO artifact_owners VALUES(NEW.id,'artifact',computer_chat_artifact_owner()); END
+trigger chat_artifact_owner_delete: CREATE TRIGGER chat_artifact_owner_delete AFTER DELETE ON task_artifacts BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END
+trigger chat_artifact_owner_move: CREATE TRIGGER chat_artifact_owner_move AFTER UPDATE OF task_id ON task_artifacts WHEN OLD.task_id<>NEW.task_id BEGIN SELECT RAISE(ABORT,'Artifact move requires an owning conversation') WHERE computer_chat_artifact_owner()=''; UPDATE artifact_owners SET conversation_id=computer_chat_artifact_owner() WHERE id=NEW.id; INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger chat_folder_owner: CREATE TRIGGER chat_folder_owner AFTER INSERT ON artifact_folders BEGIN INSERT INTO artifact_owners VALUES(NEW.id,'folder',computer_chat_artifact_owner()); END
+trigger chat_folder_owner_delete: CREATE TRIGGER chat_folder_owner_delete AFTER DELETE ON artifact_folders BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END
+trigger chat_folder_owner_move: CREATE TRIGGER chat_folder_owner_move AFTER UPDATE OF task_id ON artifact_folders WHEN OLD.task_id<>NEW.task_id BEGIN SELECT RAISE(ABORT,'Folder move requires an owning conversation') WHERE computer_chat_artifact_owner()=''; UPDATE artifact_owners SET conversation_id=computer_chat_artifact_owner() WHERE id=NEW.id; INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger conversations_state_version: CREATE TRIGGER conversations_state_version AFTER UPDATE ON conversations BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger erased_artifact_cannot_return: CREATE TRIGGER erased_artifact_cannot_return BEFORE INSERT ON task_artifacts WHEN EXISTS(SELECT 1 FROM content_erasure_artifacts WHERE artifact_id=NEW.id) BEGIN SELECT RAISE(ABORT,'Artifact was permanently erased'); END
+trigger erased_artifact_has_no_new_versions: CREATE TRIGGER erased_artifact_has_no_new_versions BEFORE INSERT ON artifact_versions WHEN EXISTS(SELECT 1 FROM content_erasure_artifacts WHERE artifact_id=NEW.artifact_id) BEGIN SELECT RAISE(ABORT,'Artifact was permanently erased'); END
+trigger provider_configs_state_version_delete: CREATE TRIGGER provider_configs_state_version_delete AFTER DELETE ON provider_configs BEGIN INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger provider_configs_state_version_insert: CREATE TRIGGER provider_configs_state_version_insert AFTER INSERT ON provider_configs BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger provider_configs_state_version_update: CREATE TRIGGER provider_configs_state_version_update AFTER UPDATE ON provider_configs BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger records_state_version_delete: CREATE TRIGGER records_state_version_delete AFTER DELETE ON records WHEN NOT (OLD.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message') OR (OLD.kind='settings' AND (OLD.id='metadata-counter' OR OLD.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=OLD.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=OLD.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger records_state_version_insert: CREATE TRIGGER records_state_version_insert AFTER INSERT ON records WHEN NOT (NEW.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message') OR (NEW.kind='settings' AND (NEW.id='metadata-counter' OR NEW.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger records_state_version_update: CREATE TRIGGER records_state_version_update AFTER UPDATE ON records WHEN NOT (NEW.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message') OR (NEW.kind='settings' AND (NEW.id='metadata-counter' OR NEW.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger task_artifacts_state_version_delete: CREATE TRIGGER task_artifacts_state_version_delete AFTER DELETE ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger task_artifacts_state_version_insert: CREATE TRIGGER task_artifacts_state_version_insert AFTER INSERT ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state_version_update AFTER UPDATE ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+
+## agent_sessions (2)
+{"id":"31a47d20-1a05-4aa7-9fec-0c9e09de21f8","mode":"claude-chat","cwd":null,"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","tab_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","conversation_id":"d107f25d-e0bb-4ad3-ad9e-79d9169c6346","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":1794600388294,"bound_at":1794600388294,"ended_at":null}
+{"id":"8c9b0564-bf67-4c70-88f7-c05c8518efcc","mode":"claude-chat","cwd":null,"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","tab_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","conversation_id":"d107f25d-e0bb-4ad3-ad9e-79d9169c6346","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":1794600390107,"bound_at":1794600390107,"ended_at":null}
+
+## agent_turns (0)
+
+## archive_index (0)
+
+## archive_tasks (0)
+
+## artifact_blob_gc_generation (1)
+{"id":1,"version":0}
+
+## artifact_blob_gc_pending (0)
+
+## artifact_blob_leases (0)
+
+## artifact_blob_pins (0)
+
+## artifact_blobs (0)
+
+## artifact_folder_tombstones (0)
+
+## artifact_folders (0)
+
+## artifact_owners (0)
+
+## artifact_storage_schema (1)
+{"version":1}
+
+## artifact_versions (0)
+
+## blob_leases (0)
+
+## content_erasure_artifacts (0)
+
+## content_erasure_computer_acks (0)
+
+## content_erasure_jobs (0)
+
+## content_erasure_offline_requests (0)
+
+## content_erasure_tabs (0)
+
+## content_erasure_tasks (0)
+
+## conversations (2)
+{"id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","tab_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
+{"id":"__slz_settings__","task_id":"__slz_settings__","tab_id":"__slz_settings__","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
+
+## events (20)
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":0,"saved_at":1794600387581,"event":"{\"kind\":\"session-spawn\",\"spawnId\":\"25f23514-fc6f-41e1-9930-cd9a2a8d6bf2\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":1,"saved_at":1794600387707,"event":"{\"kind\":\"user-message\",\"id\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"text\":\"Which learning rate should I start with?\",\"content\":[{\"type\":\"text\",\"text\":\"Which learning rate should I start with?\"}]}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":10,"saved_at":1794600390089,"event":"{\"kind\":\"user-message-delivery\",\"id\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"state\":\"delivered\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":11,"saved_at":1794600390099,"event":"{\"kind\":\"turn-init\",\"sessionId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"model\":\"opus\",\"cwd\":\"/home/persona/repos/ml\",\"tools\":[\"Task\",\"AskUserQuestion\",\"Bash\",\"Edit\",\"ExitPlanMode\",\"Glob\",\"Grep\",\"NotebookEdit\",\"Read\",\"TodoWrite\",\"WebFetch\",\"WebSearch\",\"Write\"],\"permissionMode\":\"acceptEdits\",\"slashCommands\":[],\"skills\":[],\"cliVersion\":\"2.1.312\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":12,"saved_at":1794600390118,"event":"{\"kind\":\"assistant-text\",\"messageId\":\"msg_3_2\",\"text\":\"reply: And for fine-tuning?\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0},\"uuid\":\"evt-3-2-1\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":13,"saved_at":1794600390124,"event":"{\"kind\":\"user-message-delivery\",\"id\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"state\":\"answered\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":14,"saved_at":1794600390128,"event":"{\"kind\":\"result\",\"subtype\":\"success\",\"isError\":false,\"durationMs\":1,\"durationApiMs\":1,\"numTurns\":1,\"totalCostUsd\":0,\"stopReason\":\"end_turn\",\"terminalReason\":null,\"text\":\"reply: And for fine-tuning?\",\"modelUsage\":{},\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0},\"permissionDenials\":[]}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":15,"saved_at":1794600390133,"event":"{\"kind\":\"workspace-changes\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"captureId\":\"753755fa-be49-4fc5-a797-200ed79b8861\",\"messageId\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"status\":\"pending\",\"fileCount\":0}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":16,"saved_at":1794600390728,"event":"{\"kind\":\"workspace-changes\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"captureId\":\"753755fa-be49-4fc5-a797-200ed79b8861\",\"messageId\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"status\":\"complete\",\"fileCount\":0}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":17,"saved_at":1794600397304,"event":"{\"kind\":\"process-exit\",\"code\":143,\"signal\":null}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":18,"saved_at":<run-ms>,"event":"{\"kind\":\"session-spawn\",\"spawnId\":\"<new-uuid>\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":19,"saved_at":<run-ms>,"event":"{\"kind\":\"process-exit\",\"code\":143,\"signal\":null}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":2,"saved_at":1794600388280,"event":"{\"kind\":\"user-message-delivery\",\"id\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"state\":\"delivered\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":3,"saved_at":1794600388287,"event":"{\"kind\":\"turn-init\",\"sessionId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"model\":\"opus\",\"cwd\":\"/home/persona/repos/ml\",\"tools\":[\"Task\",\"AskUserQuestion\",\"Bash\",\"Edit\",\"ExitPlanMode\",\"Glob\",\"Grep\",\"NotebookEdit\",\"Read\",\"TodoWrite\",\"WebFetch\",\"WebSearch\",\"Write\"],\"permissionMode\":\"acceptEdits\",\"slashCommands\":[],\"skills\":[],\"cliVersion\":\"2.1.312\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":4,"saved_at":1794600388294,"event":"{\"kind\":\"assistant-text\",\"messageId\":\"msg_3_1\",\"text\":\"reply: Which learning rate should I start with?\",\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0},\"uuid\":\"evt-3-1-1\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":5,"saved_at":1794600388302,"event":"{\"kind\":\"user-message-delivery\",\"id\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"state\":\"answered\"}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":6,"saved_at":1794600388306,"event":"{\"kind\":\"result\",\"subtype\":\"success\",\"isError\":false,\"durationMs\":1,\"durationApiMs\":1,\"numTurns\":1,\"totalCostUsd\":0,\"stopReason\":\"end_turn\",\"terminalReason\":null,\"text\":\"reply: Which learning rate should I start with?\",\"modelUsage\":{},\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0},\"permissionDenials\":[]}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":7,"saved_at":1794600388315,"event":"{\"kind\":\"workspace-changes\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"captureId\":\"ed06e8f5-bd80-496f-b04b-e85557d54eb6\",\"messageId\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"status\":\"pending\",\"fileCount\":0}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":8,"saved_at":1794600388816,"event":"{\"kind\":\"workspace-changes\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"captureId\":\"ed06e8f5-bd80-496f-b04b-e85557d54eb6\",\"messageId\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"status\":\"complete\",\"fileCount\":0}"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","seq":9,"saved_at":1794600389696,"event":"{\"kind\":\"user-message\",\"id\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"text\":\"And for fine-tuning?\",\"content\":[{\"type\":\"text\",\"text\":\"And for fine-tuning?\"}]}"}
+
+## item_faults (0)
+
+## legacy_conversation_history (0)
+
+## migration_checkpoints (0)
+
+## mode_agents (0)
+
+## provider_config_seeds (0)
+
+## provider_configs (2)
+{"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","mode":"claude-chat","revision":4,"value":"{\"chatMode\":\"auto-accept\",\"chatConversationId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\"}"}
+{"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","mode":"claude-code","revision":0,"value":"{\"flags\":\"--allow-dangerously-skip-permissions\"}"}
+
+## queue_message_identities (2)
+{"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","id":"02afae7c-31f5-4a42-abeb-50c6381d05e2","conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","value":"{\"inputHash\":\"62c116073c8c87a2388ad831660bbbfb8947596df7f75c7685a3bd98c0534f93\",\"messageHash\":\"c650ddae10fc1b0d20e4f9251f677475401f79e9e63ddba229bb858b8da71e3d\",\"position\":0,\"createdAt\":\"2026-11-13T20:06:29.690Z\",\"handedOff\":true}"}
+{"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","id":"0f1e0d77-00c5-4113-b095-12107fc48098","conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","value":"{\"inputHash\":\"aff94b57e0a079f07c23c89ac9ae7b4cc321db7664e1fc14ee83dac7d40b4a54\",\"messageHash\":\"3af1544c41d59484489eb02c9e2d044f643ea0c2c6776a71970654469c8f005b\",\"position\":0,\"createdAt\":\"2026-11-13T20:06:27.697Z\",\"handedOff\":true}"}
+
+## receipts (7)
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"252ffb46-760c-4139-b843-9651b59a8c59","hash":"22acc3414a135e385005ca47a8840df3dc6f4202d4ad22e4e7e98365c95b4391","state":"delivered","result":"{\"id\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"send\":\"Which learning rate should I start with?\",\"original\":\"Which learning rate should I start with?\",\"position\":0,\"createdAt\":\"2026-11-13T20:06:27.697Z\",\"content\":[{\"type\":\"text\",\"text\":\"Which learning rate should I start with?\"}]}","saved_at":1794600387691,"result_expired":0,"method":"push"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"49375b787e8c98167da566dbbda69a62afa67256752ba83befc87b89a532b69e","hash":"85220019ae45258d498378204791659a6a29a1c60b3cef89b8e5ebb74ecfc9cf","state":"delivered","result":"{\"id\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"inputHash\":\"a211da5b5d7585ee3d61d0cdbedb8ecc9fb8510d2268c1a8aebebc2903fd0a24\",\"key\":\"e74c3c1a01a2e87381e2c83a9d1238a7443b1d4132b8167cb5d455bc320c8e50\",\"token\":\"5a825277-d8ce-4040-950d-54d430929e6d\",\"position\":0,\"state\":\"pending\",\"expiresAt\":1794600507654}","saved_at":1794600387649,"result_expired":0,"method":"reserve"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"6574881d-44ca-4139-a97d-87f9510032dd","hash":"c419cbb9e208a207d363020840ef026654f595689a50e6050e6347f074d530c1","state":"delivered","result":"{\"sessionId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"mode\":\"claude-chat\",\"cwd\":\"/home/persona/repos/ml\",\"pid\":"<pid>",\"startedAt\":\"2026-11-13T20:06:27.539Z\",\"ended\":false,\"chatMode\":\"auto-accept\",\"chatModel\":\"opus\",\"chatEffort\":null,\"chatCollaboration\":null,\"chatFastMode\":false}","saved_at":1794600387431,"result_expired":0,"method":"start"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"66c5e33ee544e8ed1a5a704f074483cd0520005007698f8bf7c2ef4d3aee978f","hash":"2f8b29b12fc4d162f40df7c1fb86d6aa923d189922d166dcaeb68cd1a66d08a5","state":"delivered","result":"{\"id\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"inputHash\":\"814ba3955ed44376508c1bfd641d5ebcd3b5deb4373f981ff6e702f4f6034255\",\"key\":\"0317ad4d75a46e1c78007cf1eb1d1a514d9c517bf4ce6000fcce9f43297ede0b\",\"token\":\"33bdb9a8-2745-4c90-90a5-1a67bf8be03e\",\"position\":0,\"state\":\"pending\",\"expiresAt\":1794600509676}","saved_at":1794600389673,"result_expired":0,"method":"reserve"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"7caa8ef2-4188-4a54-aac0-208f4f24c9ae","hash":"2365ac72c122ae00baa98ebe8b1113f45cb1c60ea3d99757b9e3adf03cd7eafd","state":"delivered","result":"{\"id\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"send\":\"And for fine-tuning?\",\"original\":\"And for fine-tuning?\",\"position\":0,\"createdAt\":\"2026-11-13T20:06:29.690Z\",\"content\":[{\"type\":\"text\",\"text\":\"And for fine-tuning?\"}]}","saved_at":1794600389685,"result_expired":0,"method":"push"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"<new-uuid>","hash":"<new-token>","state":"delivered","result":"{\"sessionId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"mode\":\"claude-chat\",\"cwd\":\"/home/persona/repos/ml\",\"pid\":"<pid>",\"startedAt\":\"<run-time>\",\"ended\":false,\"chatMode\":\"auto-accept\",\"chatModel\":\"opus\",\"chatEffort\":null,\"chatCollaboration\":null,\"chatFastMode\":false}","saved_at":<run-ms>,"result_expired":0,"method":"start"}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","id":"<new-uuid>","hash":"<new-token>","state":"delivered","result":"{\"sessionId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"mode\":\"claude-chat\",\"cwd\":\"/home/persona/repos/ml\",\"pid\":null,\"startedAt\":\"<run-time>\",\"ended\":false,\"chatMode\":\"auto-accept\",\"chatModel\":\"opus\",\"chatEffort\":null,\"chatCollaboration\":null,\"chatFastMode\":false}","saved_at":<run-ms>,"result_expired":0,"method":"hydrate"}
+
+## records (25)
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"prompt","id":"02afae7c-31f5-4a42-abeb-50c6381d05e2","value":"{\"id\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"agentId\":\"claude-chat\",\"cliSessionId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"text\":\"And for fine-tuning?\",\"createdAt\":1794600389696}","saved_at":1794600389705}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"prompt","id":"0f1e0d77-00c5-4113-b095-12107fc48098","value":"{\"id\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"agentId\":\"claude-chat\",\"cliSessionId\":null,\"text\":\"Which learning rate should I start with?\",\"createdAt\":1794600387707}","saved_at":1794600387710}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"bootstrap","value":"{\"identity\":{\"id\":\"84321f2e-b0cc-4ee9-b9a4-7df28b25249b\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"mode\":\"claude-chat\",\"epoch\":1},\"projectId\":\"04724cbc-f3c5-46a4-a648-0445da02704f\",\"cwd\":\"/home/persona/repos/ml\",\"revision\":2,\"providerConfig\":{},\"defaultFlags\":\"--allow-dangerously-skip-permissions\",\"settings\":{\"chat_default_mode:claude-chat\":null,\"chat_default_model:claude-chat\":null,\"chat_default_effort:claude-chat\":null,\"chat_default_mode:codex-chat\":null,\"chat_default_model:codex-chat\":null,\"chat_default_effort:codex-chat\":null},\"terminalProviderConfig\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"env\":{\"SLAYZONE_TASK_ID\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"SLAYZONE_PROJECT_ID\":\"04724cbc-f3c5-46a4-a648-0445da02704f\",\"SLAYZONE_ROOT\":\"/home/persona/hubs/hub2\"}}","saved_at":<run-ms>}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"cli-snapshot","value":"{\"slashCommands\":[],\"terminalSlashCommands\":[],\"skills\":[],\"cliVersion\":\"2.1.312\"}","saved_at":1794600388290}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"diagnostic:aea970d2-ce2f-48b7-8026-5b5e2b645928","value":"{\"level\":\"info\",\"source\":\"main\",\"event\":\"chat.lifecycle_missing\",\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"sessionId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed:1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"message\":\"the CLI sent no command_lifecycle; delivery inferred from turn progress\",\"payload\":{\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"mode\":\"claude-chat\",\"gen\":1}}","saved_at":1794600388275}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"metadata-counter","value":"4","saved_at":<run-ms>}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"metadata-state:activity","value":"{\"at\":1794600389713}","saved_at":1794600389714}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"metadata-state:agent-state","value":"{\"state\":\"running\"}","saved_at":<run-ms>}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"provider","value":"{\"chatConversationId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\"}","saved_at":<run-ms>}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"provider:claude-code","value":"{\"flags\":\"--allow-dangerously-skip-permissions\"}","saved_at":<run-ms>}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"queue-message-identities-v5","value":"true","saved_at":1794600387604}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"queue-message:02afae7c-31f5-4a42-abeb-50c6381d05e2","value":"{\"inputHash\":\"62c116073c8c87a2388ad831660bbbfb8947596df7f75c7685a3bd98c0534f93\",\"messageHash\":\"c650ddae10fc1b0d20e4f9251f677475401f79e9e63ddba229bb858b8da71e3d\",\"position\":0,\"createdAt\":\"2026-11-13T20:06:29.690Z\",\"handedOff\":true}","saved_at":1794600389700}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"queue-message:0f1e0d77-00c5-4113-b095-12107fc48098","value":"{\"inputHash\":\"aff94b57e0a079f07c23c89ac9ae7b4cc321db7664e1fc14ee83dac7d40b4a54\",\"messageHash\":\"3af1544c41d59484489eb02c9e2d044f643ea0c2c6776a71970654469c8f005b\",\"position\":0,\"createdAt\":\"2026-11-13T20:06:27.697Z\",\"handedOff\":true}","saved_at":1794600387708}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"session-proof:claude-chat:d107f25d-e0bb-4ad3-ad9e-79d9169c6346","value":"true","saved_at":1794600390112}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"settings","id":"session:[\"claude-chat\",\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\"]","value":"{\"taskId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"mode\":\"claude-chat\",\"conversationId\":\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\",\"origin\":\"slay-spawned-fresh\",\"legacyJsonField\":\"chatConversationId\",\"createdAt\":1794600390107}","saved_at":1794600390112}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"timeline","id":"checkpoint","value":"{\"version\":\"17.1\",\"seq\":19,\"data\":\"{\\\"sealed\\\":0,\\\"state\\\":\\\"{\\\\\\\"v\\\\\\\":\\\\\\\"17\\\\\\\",\\\\\\\"rowCount\\\\\\\":9,\\\\\\\"tailFrom\\\\\\\":0,\\\\\\\"tail\\\\\\\":[{\\\\\\\"kind\\\\\\\":\\\\\\\"session-start\\\\\\\",\\\\\\\"sessionId\\\\\\\":\\\\\\\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\\\\\\\",\\\\\\\"model\\\\\\\":\\\\\\\"opus\\\\\\\",\\\\\\\"cwd\\\\\\\":\\\\\\\"/home/persona/repos/ml\\\\\\\",\\\\\\\"tools\\\\\\\":[\\\\\\\"Task\\\\\\\",\\\\\\\"AskUserQuestion\\\\\\\",\\\\\\\"Bash\\\\\\\",\\\\\\\"Edit\\\\\\\",\\\\\\\"ExitPlanMode\\\\\\\",\\\\\\\"Glob\\\\\\\",\\\\\\\"Grep\\\\\\\",\\\\\\\"NotebookEdit\\\\\\\",\\\\\\\"Read\\\\\\\",\\\\\\\"TodoWrite\\\\\\\",\\\\\\\"WebFetch\\\\\\\",\\\\\\\"WebSearch\\\\\\\",\\\\\\\"Write\\\\\\\"],\\\\\\\"timestamp\\\\\\\":1794600388287},{\\\\\\\"kind\\\\\\\":\\\\\\\"user-text\\\\\\\",\\\\\\\"text\\\\\\\":\\\\\\\"Which learning rate should I start with?\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600387707,\\\\\\\"id\\\\\\\":\\\\\\\"0f1e0d77-00c5-4113-b095-12107fc48098\\\\\\\",\\\\\\\"delivery\\\\\\\":\\\\\\\"answered\\\\\\\"},{\\\\\\\"kind\\\\\\\":\\\\\\\"text\\\\\\\",\\\\\\\"role\\\\\\\":\\\\\\\"assistant\\\\\\\",\\\\\\\"messageId\\\\\\\":\\\\\\\"msg_3_1\\\\\\\",\\\\\\\"text\\\\\\\":\\\\\\\"reply: Which learning rate should I start with?\\\\\\\",\\\\\\\"blockOrdinal\\\\\\\":0,\\\\\\\"timestamp\\\\\\\":1794600388294},{\\\\\\\"kind\\\\\\\":\\\\\\\"result\\\\\\\",\\\\\\\"model\\\\\\\":\\\\\\\"opus\\\\\\\",\\\\\\\"tokenUsage\\\\\\\":{\\\\\\\"inputTokens\\\\\\\":0,\\\\\\\"outputTokens\\\\\\\":0},\\\\\\\"subtype\\\\\\\":\\\\\\\"success\\\\\\\",\\\\\\\"isError\\\\\\\":false,\\\\\\\"durationMs\\\\\\\":1,\\\\\\\"totalCostUsd\\\\\\\":0,\\\\\\\"numTurns\\\\\\\":1,\\\\\\\"text\\\\\\\":\\\\\\\"reply: Which learning rate should I start with?\\\\\\\",\\\\\\\"copyText\\\\\\\":\\\\\\\"reply: Which learning rate should I start with?\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600388306},{\\\\\\\"kind\\\\\\\":\\\\\\\"workspace-changes\\\\\\\",\\\\\\\"tabId\\\\\\\":\\\\\\\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\\\\\\\",\\\\\\\"captureId\\\\\\\":\\\\\\\"ed06e8f5-bd80-496f-b04b-e85557d54eb6\\\\\\\",\\\\\\\"messageId\\\\\\\":\\\\\\\"0f1e0d77-00c5-4113-b095-12107fc48098\\\\\\\",\\\\\\\"status\\\\\\\":\\\\\\\"complete\\\\\\\",\\\\\\\"fileCount\\\\\\\":0,\\\\\\\"id\\\\\\\":\\\\\\\"workspace:ed06e8f5-bd80-496f-b04b-e85557d54eb6\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600388315},{\\\\\\\"kind\\\\\\\":\\\\\\\"user-text\\\\\\\",\\\\\\\"text\\\\\\\":\\\\\\\"And for fine-tuning?\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600389696,\\\\\\\"id\\\\\\\":\\\\\\\"02afae7c-31f5-4a42-abeb-50c6381d05e2\\\\\\\",\\\\\\\"delivery\\\\\\\":\\\\\\\"answered\\\\\\\"},{\\\\\\\"kind\\\\\\\":\\\\\\\"text\\\\\\\",\\\\\\\"role\\\\\\\":\\\\\\\"assistant\\\\\\\",\\\\\\\"messageId\\\\\\\":\\\\\\\"msg_3_2\\\\\\\",\\\\\\\"text\\\\\\\":\\\\\\\"reply: And for fine-tuning?\\\\\\\",\\\\\\\"blockOrdinal\\\\\\\":0,\\\\\\\"timestamp\\\\\\\":1794600390118},{\\\\\\\"kind\\\\\\\":\\\\\\\"result\\\\\\\",\\\\\\\"model\\\\\\\":\\\\\\\"opus\\\\\\\",\\\\\\\"tokenUsage\\\\\\\":{\\\\\\\"inputTokens\\\\\\\":0,\\\\\\\"outputTokens\\\\\\\":0},\\\\\\\"subtype\\\\\\\":\\\\\\\"success\\\\\\\",\\\\\\\"isError\\\\\\\":false,\\\\\\\"durationMs\\\\\\\":1,\\\\\\\"totalCostUsd\\\\\\\":0,\\\\\\\"numTurns\\\\\\\":1,\\\\\\\"text\\\\\\\":\\\\\\\"reply: And for fine-tuning?\\\\\\\",\\\\\\\"copyText\\\\\\\":\\\\\\\"reply: And for fine-tuning?\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600390128},{\\\\\\\"kind\\\\\\\":\\\\\\\"workspace-changes\\\\\\\",\\\\\\\"tabId\\\\\\\":\\\\\\\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\\\\\\\",\\\\\\\"captureId\\\\\\\":\\\\\\\"753755fa-be49-4fc5-a797-200ed79b8861\\\\\\\",\\\\\\\"messageId\\\\\\\":\\\\\\\"02afae7c-31f5-4a42-abeb-50c6381d05e2\\\\\\\",\\\\\\\"status\\\\\\\":\\\\\\\"complete\\\\\\\",\\\\\\\"fileCount\\\\\\\":0,\\\\\\\"id\\\\\\\":\\\\\\\"workspace:753755fa-be49-4fc5-a797-200ed79b8861\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600390133}],\\\\\\\"state\\\\\\\":{\\\\\\\"toolIndex\\\\\\\":{\\\\\\\"$index\\\\\\\":[]},\\\\\\\"workspaceIndex\\\\\\\":{\\\\\\\"$index\\\\\\\":[[\\\\\\\"ed06e8f5-bd80-496f-b04b-e85557d54eb6\\\\\\\",4],[\\\\\\\"753755fa-be49-4fc5-a797-200ed79b8861\\\\\\\",8]]},\\\\\\\"subAgentIndex\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"childIndex\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"sessionStarted\\\\\\\":true,\\\\\\\"sessionId\\\\\\\":\\\\\\\"d107f25d-e0bb-4ad3-ad9e-79d9169c6346\\\\\\\",\\\\\\\"model\\\\\\\":\\\\\\\"opus\\\\\\\",\\\\\\\"lastResult\\\\\\\":{\\\\\\\"kind\\\\\\\":\\\\\\\"result\\\\\\\",\\\\\\\"model\\\\\\\":\\\\\\\"opus\\\\\\\",\\\\\\\"tokenUsage\\\\\\\":{\\\\\\\"inputTokens\\\\\\\":0,\\\\\\\"outputTokens\\\\\\\":0},\\\\\\\"subtype\\\\\\\":\\\\\\\"success\\\\\\\",\\\\\\\"isError\\\\\\\":false,\\\\\\\"durationMs\\\\\\\":1,\\\\\\\"totalCostUsd\\\\\\\":0,\\\\\\\"numTurns\\\\\\\":1,\\\\\\\"text\\\\\\\":\\\\\\\"reply: And for fine-tuning?\\\\\\\",\\\\\\\"copyText\\\\\\\":\\\\\\\"reply: And for fine-tuning?\\\\\\\",\\\\\\\"timestamp\\\\\\\":1794600390128},\\\\\\\"sessionEnded\\\\\\\":true,\\\\\\\"exitCode\\\\\\\":143,\\\\\\\"exitSignal\\\\\\\":null,\\\\\\\"userMessagesSent\\\\\\\":2,\\\\\\\"resultCount\\\\\\\":2,\\\\\\\"currentStreamMessageId\\\\\\\":null,\\\\\\\"openBlocks\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"live\\\\\\\":[],\\\\\\\"commandTasks\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"permissionMode\\\\\\\":\\\\\\\"acceptEdits\\\\\\\",\\\\\\\"bgShells\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"bgShellOrder\\\\\\\":[],\\\\\\\"bgShellPollIndex\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"currentSpawnId\\\\\\\":\\\\\\\"<new-uuid>\\\\\\\",\\\\\\\"notStarted\\\\\\\":false,\\\\\\\"cliCommands\\\\\\\":{\\\\\\\"slashCommands\\\\\\\":[],\\\\\\\"terminalSlashCommands\\\\\\\":[],\\\\\\\"skills\\\\\\\":[],\\\\\\\"cliVersion\\\\\\\":\\\\\\\"2.1.312\\\\\\\"},\\\\\\\"cliCommandDetails\\\\\\\":null,\\\\\\\"compacting\\\\\\\":false,\\\\\\\"usage\\\\\\\":{\\\\\\\"contextTokens\\\\\\\":0,\\\\\\\"contextWindow\\\\\\\":null,\\\\\\\"sessionCostUsd\\\\\\\":null,\\\\\\\"lastTotalCostUsd\\\\\\\":0},\\\\\\\"prompts\\\\\\\":[],\\\\\\\"promptIndex\\\\\\\":{\\\\\\\"$index\\\\\\\":[]},\\\\\\\"pendingPrompts\\\\\\\":[],\\\\\\\"userIndex\\\\\\\":{\\\\\\\"$index\\\\\\\":[[\\\\\\\"0f1e0d77-00c5-4113-b095-12107fc48098\\\\\\\",[1]],[\\\\\\\"02afae7c-31f5-4a42-abeb-50c6381d05e2\\\\\\\",[5]]]},\\\\\\\"branchRows\\\\\\\":[],\\\\\\\"streamingRows\\\\\\\":[],\\\\\\\"turnStart\\\\\\\":8,\\\\\\\"inFlightSubAgents\\\\\\\":[],\\\\\\\"rowsEpoch\\\\\\\":1,\\\\\\\"appliedSeq\\\\\\\":19,\\\\\\\"idlessOptimistic\\\\\\\":0,\\\\\\\"blockOrdinals\\\\\\\":{\\\\\\\"$map\\\\\\\":[]},\\\\\\\"freshStartPending\\\\\\\":false,\\\\\\\"agentStartedTurns\\\\\\\":true,\\\\\\\"agentTurnOpen\\\\\\\":false,\\\\\\\"stopPending\\\\\\\":false,\\\\\\\"turnTriggers\\\\\\\":[],\\\\\\\"turnNotifications\\\\\\\":[],\\\\\\\"turnsClosed\\\\\\\":2,\\\\\\\"importingHistory\\\\\\\":false}}\\\"}\"}","saved_at":<run-ms>}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"workspace","id":"753755fa-be49-4fc5-a797-200ed79b8861","value":"{\"id\":\"753755fa-be49-4fc5-a797-200ed79b8861\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"messageId\":\"02afae7c-31f5-4a42-abeb-50c6381d05e2\",\"computerId\":null,\"rootPath\":\"/home/persona/repos/ml\",\"status\":\"complete\",\"files\":[]}","saved_at":1794600390724}
+{"conversation_id":"84321f2e-b0cc-4ee9-b9a4-7df28b25249b","kind":"workspace","id":"ed06e8f5-bd80-496f-b04b-e85557d54eb6","value":"{\"id\":\"ed06e8f5-bd80-496f-b04b-e85557d54eb6\",\"tabId\":\"1a53df62-e3d3-462b-8e99-719ae0ae56ed\",\"messageId\":\"0f1e0d77-00c5-4113-b095-12107fc48098\",\"computerId\":null,\"rootPath\":\"/home/persona/repos/ml\",\"status\":\"complete\",\"files\":[]}","saved_at":1794600388814}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"chat_default_effort:claude-chat","value":"null","saved_at":<run-ms>}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"chat_default_effort:codex-chat","value":"null","saved_at":<run-ms>}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"chat_default_mode:claude-chat","value":"null","saved_at":<run-ms>}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"chat_default_mode:codex-chat","value":"null","saved_at":<run-ms>}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"chat_default_model:claude-chat","value":"null","saved_at":<run-ms>}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"chat_default_model:codex-chat","value":"null","saved_at":<run-ms>}
+{"conversation_id":"__slz_settings__","kind":"settings","id":"diagnostics-config","value":"{\"enabled\":true,\"verbose\":false}","saved_at":<run-ms>}
+
+## retention_policy (1)
+{"id":1,"days":0}
+
+## session_deletions (0)
+
+## session_resets (0)
+
+## session_turns (1)
+{"conversation_id":"d107f25d-e0bb-4ad3-ad9e-79d9169c6346","first_turn_at":1794600388294}
+
+## storage_maintenance (1)
+{"id":"attachment-pins-v4"}
+
+## store_identity (1)
+{"id":1,"store_id":"977c2c5f-e06d-4819-9d9c-834d016060f2"}
+
+## task_artifacts (0)
+
+## task_cleanup_pending (0)
+
+## task_conversations (2)
+{"id":"31a47d20-1a05-4aa7-9fec-0c9e09de21f8","task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","mode":"claude-chat","tab_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","conversation_id":"d107f25d-e0bb-4ad3-ad9e-79d9169c6346","origin":"slay-spawned-fresh","pending_meta":null,"created_at":1794600388294}
+{"id":"8c9b0564-bf67-4c70-88f7-c05c8518efcc","task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","mode":"claude-chat","tab_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","conversation_id":"d107f25d-e0bb-4ad3-ad9e-79d9169c6346","origin":"slay-spawned-fresh","pending_meta":null,"created_at":1794600390107}
+
+## task_lifecycle (1)
+{"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","state":"active","revision":1}
+
+## task_path_releases (0)
+
+## task_paths (0)
+
+## task_state_versions (2)
+{"task_id":"1a53df62-e3d3-462b-8e99-719ae0ae56ed","version":39}
+{"task_id":"__slz_settings__","version":14}
+
+## usage_cursors (6)
+{"file_path":"/home/persona/.claude/projects/-home-persona-repos-infra/9c7986f7-42f0-4dff-b31e-8087f505ecaa.jsonl","offset":796,"modified_ms":1794600373000}
+{"file_path":"/home/persona/.claude/projects/-home-persona-repos-ml/28fbbc4b-bbee-4360-a053-9693f0f65748.jsonl","offset":792,"modified_ms":1794600392000}
+{"file_path":"/home/persona/.claude/projects/-home-persona-repos-ml/d107f25d-e0bb-4ad3-ad9e-79d9169c6346.jsonl","offset":1607,"modified_ms":1794600390000}
+{"file_path":"/home/persona/.claude/projects/-home-persona-repos-webapp/5aaf8b3f-2275-4282-b51e-7225048b49e7.jsonl","offset":806,"modified_ms":1794600371000}
+{"file_path":"/home/persona/.claude/projects/-home-persona-repos-webapp/<new-uuid>.jsonl","offset":249,"modified_ms":<run-ms>}
+{"file_path":"/home/persona/.claude/projects/-home-persona-repos-webapp/c4d2f48a-9402-4be2-a237-ecbb41ceb925.jsonl","offset":1649,"modified_ms":1794600369000}

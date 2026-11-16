@@ -20,14 +20,39 @@ export { createLegacyChatSource, type LegacyChatDiagnostics } from './legacy-sou
 export { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
 export { legacySessionAmbiguous } from './legacy-session-authority'
 export { createHubChatRelay } from './hub-relay'
-export { createHubProviderConfigStore } from './hub-provider-config'
 
 export { createChatLifecycle } from './hub-lifecycle'
 
-export { createChatRecovery, type ComputerChatInventory } from './hub-recovery'
+export {
+  ChatHeldByAnotherComputerError,
+  createChatRecovery,
+  type ComputerChatInventory
+} from './hub-recovery'
 
 export { computerArtifactRequestSchema } from './artifacts'
+export { mergeSessionLedgers } from './session-ledger-merge'
+export { sessionLedgerBundleSchema, type SessionLedgerBundle } from './session-ledger-bundle'
 
 export { createChatAvailability, chatHistoryGeneration } from './hub-availability'
 export { createChatFolderDeletions } from './hub-folders'
 export { createChatMigrationAttachmentReader } from './migration-attachments'
+export { isolateItem, isComputerUnreachable } from './hub-isolation'
+export {
+  checkHubChatConsistency,
+  checkComputerChatConsistency,
+  type ChatConsistencyViolation
+} from './hub-consistency'
+export { applyComputerRetirements, type RetirementReport } from './hub-retirements'
+export { chatComputer, ChatUnavailableError } from './hub-chat-computer'
+export {
+  createComputerSessionLedger,
+  lateSessionStore,
+  SessionLedgerOfflineError,
+  type ComputerSessionLedger,
+  type ComputerSessionLedgerDeps
+} from './hub-session-ledger'
+export {
+  settleLegacyChatTables,
+  LEGACY_CHAT_TABLES_PASS,
+  type LegacyChatTablesOutcome
+} from './legacy-tables'

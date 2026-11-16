@@ -14,14 +14,15 @@ import {
   initChatTurnSubscriber,
   initPtyTurnSubscriber
 } from './turn-tracker.js'
-import { listTurnsForWorktree } from './db.js'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 
 // The hub runs no git: turns' git runs on a (loopback) computer, as in production.
-installLoopbackTurnComputer()
+// The computer resolves a task's checkout (§9 7c): here, from the fixture database.
+const computer = installLoopbackTurnComputer(() => h.db)
+const listTurnsForWorktree = async (_db: unknown, repo: string) => computer.rows(repo)
 
 function git(repo: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' })
@@ -63,8 +64,10 @@ function freshTask(): { taskId: string; tabId: string; repo: string } {
   const taskId = crypto.randomUUID()
   const tabId = `tab-${taskId.slice(0, 8)}`
   h.db
-    .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-    .run(taskId, projectId, 'T', repo)
+    .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+    .run(taskId, projectId, 'T')
+  // The task's worktree is on its computer (§9 7e), not in the hub row.
+  computer.setWorktree(taskId, repo)
   h.db
     .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
     .run(tabId, taskId, 'claude-code', 0)
@@ -119,11 +122,15 @@ describe('multi-task in same worktree', () => {
     const tabA = `tab-${taskA.slice(0, 8)}`
     const tabB = `tab-${taskB.slice(0, 8)}`
     h.db
-      .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-      .run(taskA, projectId, 'A', repo)
+      .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+      .run(taskA, projectId, 'A')
+    // The task's worktree is on its computer (§9 7e), not in the hub row.
+    computer.setWorktree(taskA, repo)
     h.db
-      .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-      .run(taskB, projectId, 'B', repo)
+      .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+      .run(taskB, projectId, 'B')
+    // The task's worktree is on its computer (§9 7e), not in the hub row.
+    computer.setWorktree(taskB, repo)
     h.db
       .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
       .run(tabA, taskA, 'claude-code', 0)
@@ -143,20 +150,13 @@ describe('multi-task in same worktree', () => {
   })
 })
 
-describe('task deletion sets task_id to NULL but keeps the turn', () => {
-  test('ON DELETE SET NULL', async () => {
+describe('task deleted on its computer', () => {
+  test('records nothing more (its turns went with its erasure there)', async () => {
     const { taskId, tabId, repo } = freshTask()
-    fs.writeFileSync(path.join(repo, 'before-delete.txt'), 'data')
-    await recordTurnBoundary(h.slayDb, tabId, 'before delete')
-    expect((await listTurnsForWorktree(h.slayDb, repo))[0].task_id).toBe(taskId)
-
-    // Cascade deletes the tab too. Drop tab first to avoid FK noise.
-    h.db.prepare('DELETE FROM terminal_tabs WHERE id = ?').run(tabId)
-    h.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
-
-    const list = await listTurnsForWorktree(h.slayDb, repo)
-    expect(list).toHaveLength(1)
-    expect(list[0].task_id).toBeNull()
+    computer.deleteTask(taskId)
+    fs.writeFileSync(path.join(repo, 'after-delete.txt'), 'data')
+    await recordTurnBoundary(h.slayDb, tabId, 'after delete')
+    expect(computer.rowsForTask(taskId)).toHaveLength(0)
   })
 })
 
@@ -209,8 +209,7 @@ describe('worktree path fallback', () => {
       .run(tabId, taskId, 'claude-code', 0)
     await recordTurnBoundary(h.slayDb, tabId, 'x')
     // Nothing inserted for this specific task
-    const row = h.db.prepare('SELECT COUNT(*) as c FROM agent_turns WHERE task_id = ?').get(taskId)
-    expect(row).toEqual({ c: 0 })
+    expect(computer.rowsForTask(taskId)).toHaveLength(0)
   })
 })
 
@@ -285,8 +284,10 @@ describe('initPtyTurnSubscriber', () => {
     const taskId = crypto.randomUUID()
     const tabId = `tab-${taskId.slice(0, 8)}`
     h.db
-      .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-      .run(taskId, projectId, 'T', repo)
+      .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+      .run(taskId, projectId, 'T')
+    // The task's worktree is on its computer (§9 7e), not in the hub row.
+    computer.setWorktree(taskId, repo)
     h.db
       .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
       .run(tabId, taskId, 'terminal', 0)

@@ -301,6 +301,36 @@ describe('fake codex app-server — turns', () => {
     expect(Date.now() - sentAt).toBeGreaterThanOrEqual(380)
   })
 
+  it('gates hold the turn/start reply (turnStart.gate) and a step (cstep.gate) until the test opens them', async () => {
+    const epoch = fake.setScenario({
+      processes: [
+        {
+          turnStart: { gate: 'id' },
+          turns: [[cstep.emit(cx.agentStarted('a')), cstep.gate('mid'), ...codexReply('ok')]]
+        }
+      ]
+    })
+    const p = start()
+    const thread = await p.handshake()
+    const res = p.request('turn/start', turnStart(thread, 'x'))
+    // The fake logs `gate-wait` before it blocks: nothing of the turn can be out yet.
+    await epoch.waitForRun(0, (r) => r.has('gate-wait'))
+    expect(p.lines.some((l) => l.method === 'turn/started')).toBe(false)
+    epoch.openGate('id')
+    await res
+    await p.waitFor((l) => l.method === 'item/started')
+    await epoch.waitForRun(0, (r) => r.entries.filter((e) => e.kind === 'gate-wait').length === 2)
+    expect(p.lines.some(completed)).toBe(false)
+    epoch.openGate('mid')
+    await p.waitFor(completed)
+    expect(
+      epoch
+        .run(0)!
+        .entries.filter((e) => e.kind === 'gate-open')
+        .map((e) => e.name)
+    ).toEqual(['id', 'mid'])
+  })
+
   it('handshake replies can fail or hang', async () => {
     fake.setScenario({
       processes: [

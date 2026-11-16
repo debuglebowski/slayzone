@@ -25,6 +25,21 @@ test.describe('App launch', () => {
     expect(appName).toBe('slayzone')
   })
 
+  test('test windows keep running when other shard windows cover them', async ({ electronApp }) => {
+    const switches = await electronApp.evaluate(({ app }) =>
+      [
+        'disable-background-timer-throttling',
+        'disable-backgrounding-occluded-windows',
+        'disable-renderer-backgrounding'
+      ].map((name) => [name, app.commandLine.hasSwitch(name)])
+    )
+    expect(switches).toEqual([
+      ['disable-background-timer-throttling', true],
+      ['disable-backgrounding-occluded-windows', true],
+      ['disable-renderer-backgrounding', true]
+    ])
+  })
+
   test('does not create splash window in Playwright mode', async ({ electronApp }) => {
     const dataWindows = electronApp.windows().filter((w) => w.url().startsWith('data:'))
     expect(dataWindows).toHaveLength(0)

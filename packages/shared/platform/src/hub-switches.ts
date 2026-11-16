@@ -7,7 +7,7 @@
  *
  *   SLAYZONE_HUB_REQUIRE_LOGIN        0   every client must sign in
  *   SLAYZONE_HUB_ENABLE_PASSWORD      1   email + password sign-in
- *   SLAYZONE_HUB_ENABLE_SSO           0   Entra OIDC sign-in
+ *   SLAYZONE_HUB_ENABLE_SSO           0   OIDC sign-in (Entra, or any OpenID provider)
  *   SLAYZONE_HUB_ENABLE_PROCESSES     1   hub-local processes / automation commands
  *   SLAYZONE_HUB_ENABLE_INTEGRATIONS  1   Linear / GitHub connect + sync
  *   SLAYZONE_HUB_ENABLE_TELEMETRY     1   third-party telemetry about this hub's data: off,
@@ -79,6 +79,40 @@ export const HUB_SSO_ENV = {
   keyPath: 'SLAYZONE_HUB_SSO_KEY_PATH',
   /** `0|1`, default `1`: refuse a sign-in whose ID token's `amr` does not contain `mfa`. */
   requireMfa: 'SLAYZONE_HUB_SSO_REQUIRE_MFA'
+} as const
+
+/**
+ * Generic OIDC sign-in: any OpenID Connect provider (Okta, Keycloak, Google, Auth0,
+ * Entra, …), hub-auth `oidc.ts`. Set INSTEAD of the Entra tenant settings above, never
+ * with them (B7). The client authenticates with the certificate in
+ * {@link HUB_SSO_ENV.certPath} / `keyPath` (`private_key_jwt`) or with a client secret.
+ * An Entra issuer (`https://login.microsoftonline.com/<tenant>/v2.0`) keeps the Entra
+ * setup's provider id and account keys, so moving from the tenant settings to these
+ * loses no account.
+ */
+export const HUB_OIDC_ENV = {
+  /** The issuer, exactly as its tokens' `iss` (discovery: `<issuer>/.well-known/openid-configuration`). */
+  issuer: 'SLAYZONE_HUB_OIDC_ISSUER',
+  clientId: 'SLAYZONE_HUB_OIDC_CLIENT_ID',
+  /** `client_secret_basic`. Env only, never in hub.config.json. */
+  clientSecret: 'SLAYZONE_HUB_OIDC_CLIENT_SECRET',
+  /** Space-separated; default `openid profile email offline_access`. */
+  scopes: 'SLAYZONE_HUB_OIDC_SCOPES'
+} as const
+
+/**
+ * The IdP-role mode's settings — the shared contract's names (@normain/idp-role-contract
+ * `parseConfig`), UNPREFIXED on purpose: every service of the contract reads the same
+ * names with the same values (`true|false`, a JSON mapping). The ONE exception to the
+ * `SLAYZONE_` prefix and `0|1` rules, for these four only; every other hub switch keeps
+ * them. Hub-only: stripped from task agents (env-manifest `NON_PREFIXED_INFRA`) and
+ * cleared by a parent spawning a hub ({@link HUB_PROCESS_ENV}). Parsed by the hub (B20).
+ */
+export const IDP_ROLE_ENV = {
+  enabled: 'IDP_ROLES_ENABLED',
+  claim: 'IDP_ROLE_CLAIM',
+  mapping: 'IDP_ROLE_MAPPING',
+  recheckIntervalSeconds: 'IDP_RECHECK_INTERVAL_SECONDS'
 } as const
 
 /**
@@ -181,6 +215,8 @@ export function readHubStunAddresses(
 export const HUB_PROCESS_ENV: readonly string[] = [
   ...Object.values(HUB_SWITCH_ENV),
   ...Object.values(HUB_SSO_ENV),
+  ...Object.values(HUB_OIDC_ENV),
+  ...Object.values(IDP_ROLE_ENV),
   RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
   ...Object.values(HUB_ADDRESS_ENV),
   LEGACY_HUB_LISTEN_ENV,
@@ -246,6 +282,11 @@ export interface HubSsoSettings {
   keyPath?: string
   /** {@link HUB_SSO_ENV.requireMfa}; on unless set to exactly `0`. */
   requireMfa: boolean
+  /** {@link HUB_OIDC_ENV}: generic OIDC. */
+  issuer?: string
+  oidcClientId?: string
+  clientSecret?: string
+  scopes?: string[]
 }
 
 /**
@@ -268,6 +309,14 @@ export function resolveHubSso(env: NodeJS.ProcessEnv = process.env): HubSsoSetti
   if (clientId) out.clientId = clientId
   if (certPath) out.certPath = certPath
   if (keyPath) out.keyPath = keyPath
+  const issuer = pick(HUB_OIDC_ENV.issuer)
+  const oidcClientId = pick(HUB_OIDC_ENV.clientId)
+  const clientSecret = pick(HUB_OIDC_ENV.clientSecret)
+  const scopes = pick(HUB_OIDC_ENV.scopes)
+  if (issuer) out.issuer = issuer
+  if (oidcClientId) out.oidcClientId = oidcClientId
+  if (clientSecret) out.clientSecret = clientSecret
+  if (scopes) out.scopes = scopes.split(/\s+/).filter(Boolean)
   return out
 }
 

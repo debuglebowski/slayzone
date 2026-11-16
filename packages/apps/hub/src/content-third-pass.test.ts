@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { createChatThreadStore } from '../../../domains/terminal/src/server/chat-threads-store'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import type {
@@ -101,7 +101,7 @@ async function rpcFixture() {
   const dir = directory()
   const starts: string[] = []
   const open = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
       stateDir: dir,
       hubScope: 'audit',
       computerId: () => 'pc',
@@ -896,15 +896,9 @@ async function threadFixture() {
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','P','#000')").run()
   h.db
     .prepare(
-      'INSERT INTO tasks(id,project_id,title,worktree_path,provider_config) VALUES(?,?,?,?,?)'
+      'INSERT INTO tasks(id,project_id,title,has_worktree,provider_config) VALUES(?,?,?,1,?)'
     )
-    .run(
-      'task',
-      'p',
-      'Task',
-      dir,
-      JSON.stringify({ 'claude-chat': { chatConversationId: native } })
-    )
+    .run('task', 'p', 'Task', JSON.stringify({ 'claude-chat': { chatConversationId: native } }))
   h.db
     .prepare(
       "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('parent','task','claude-chat',0)"
@@ -935,7 +929,8 @@ async function threadFixture() {
     )
     .run(clock)
   const open = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: (taskId) => (taskId === 'task' ? dir : null),
       stateDir: dir,
       hubScope: 'audit',
       computerId: () => 'pc',
@@ -1018,9 +1013,7 @@ test('control: parent-tab deletion cascades child ownership fences while unrelat
   try {
     const parent = (await f.hub.ownership.forTab('parent'))!
     const child = (await f.hub.ownership.forTab('child'))!
-    f.db
-      .prepare("INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('other','p','Other',?)")
-      .run(f.dir)
+    f.db.prepare("INSERT INTO tasks(id,project_id,title) VALUES('other','p','Other')").run()
     f.db
       .prepare(
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('other-tab','other','claude-chat',0)"

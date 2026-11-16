@@ -1,0 +1,22 @@
+{
+  "spawns": {
+    "642824eb-22a4-431e-b3bb-4b860f36adf8": "session-id 5e28e390-71ec-4cdf-9cf1-b12353ece11c",
+    "b0dbf67f-ea49-47c1-899a-1dbdf2cbd292": "resume 5e28e390-71ec-4cdf-9cf1-b12353ece11c",
+    "31f863c8-fad6-4a41-ab77-adfbc37224c1": "session-id dbb041ac-5993-41b5-9787-3e095dedee1f",
+    "a5e82069-b3d0-4666-aeaa-acab446695dc": "resume dbb041ac-5993-41b5-9787-3e095dedee1f"
+  },
+  "expect": {
+    "642824eb-22a4-431e-b3bb-4b860f36adf8": {
+      "resume": "5e28e390-71ec-4cdf-9cf1-b12353ece11c"
+    },
+    "b0dbf67f-ea49-47c1-899a-1dbdf2cbd292": {
+      "fresh": true
+    },
+    "31f863c8-fad6-4a41-ab77-adfbc37224c1": {
+      "resume": "dbb041ac-5993-41b5-9787-3e095dedee1f"
+    },
+    "a5e82069-b3d0-4666-aeaa-acab446695dc": {
+      "fresh": true
+    }
+  }
+}

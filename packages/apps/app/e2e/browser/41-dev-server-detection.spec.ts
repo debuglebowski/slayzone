@@ -94,7 +94,10 @@ test.describe('Dev server URL detection', () => {
       taskId
     )
     const tabs = task?.browser_tabs?.tabs ?? []
-    expect(tabs.some((t: { url: string }) => t.url === 'http://localhost:3456')).toBe(true)
+    // As the page reports it once it navigated: Chromium's form of the URL
+    // (`http://localhost:3456/`), which the tab then keeps.
+    const href = (url: string) => new URL(url).href
+    expect(tabs.map((t: { url: string }) => href(t.url))).toContain(href('http://localhost:3456'))
   })
 
   test('dismiss hides toast', async ({ mainWindow }) => {

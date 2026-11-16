@@ -13,13 +13,25 @@ import type {
   ArtifactVersion,
   VersionRef,
   DiffResult,
-  PruneReport
+  PruneReport,
+  ArtifactTextRead
 } from '@slayzone/task-artifacts/shared'
 import { useTrack } from '@slayzone/telemetry/client'
 import { toast, useDepsChanged, useStableCallback } from '@slayzone/ui'
+import { exportArtifactOnThisDevice, type ArtifactExportFormat } from './artifact-export'
+import {
+  base64ToBytes,
+  downloadArtifactOnThisDevice,
+  downloadFolderOnThisDevice,
+  downloadTaskZipOnThisDevice,
+  type DownloadOutcome,
+  type ReadArtifactChunk
+} from './artifact-downloads'
+import { readTextWithFallback } from './read-text-fallback'
 
-// Downloads reach the Electron host over the capability bridge, so they can fail for
-// reasons the user must see (no host capability, render failure, unwritable path).
+// Downloads and exports save on this device's host (desktop dialogs, browser download),
+// so they can fail for reasons the user must see (no host capability, render failure,
+// unwritable path).
 // These mutations were previously fired bare: a rejection became an unhandled promise
 // and the click looked like a no-op — which is how all 6 procedures stayed broken
 // unnoticed after the slice-9 cutover. `false` still means "user cancelled".
@@ -30,6 +42,17 @@ async function runDownload(label: string, run: () => Promise<boolean>): Promise<
     toast.error(`${label} failed`, { description: e instanceof Error ? e.message : String(e) })
     return false
   }
+}
+
+/** A download that saved without some files says which — never a silent omission. */
+function reportOutcome(outcome: DownloadOutcome): boolean {
+  if (outcome.skipped.length > 0) {
+    const n = outcome.skipped.length
+    toast.warning(`${n} ${n === 1 ? 'file was' : 'files were'} not found and left out`, {
+      description: outcome.skipped.join(', ')
+    })
+  }
+  return outcome.saved
 }
 
 export interface UseArtifactsReturn {
@@ -51,6 +74,8 @@ export interface UseArtifactsReturn {
   renameArtifact: (id: string, newTitle: string) => Promise<void>
   moveArtifactToFolder: (artifactId: string, folderId: string | null) => Promise<void>
   readContent: (id: string) => Promise<string | null>
+  /** The in-app editor's read: the text, or why it is not shown as text. Always fresh from disk. */
+  readText: (id: string) => Promise<ArtifactTextRead | null>
   saveContent: (id: string, content: string) => Promise<void>
   uploadArtifact: (sourcePath: string, title?: string) => Promise<TaskArtifact | null>
   uploadDir: (dirPath: string, parentFolderId?: string | null) => Promise<void>
@@ -203,24 +228,6 @@ export function useArtifacts(
   const { mutateAsync: deleteMutate } = useMutation(trpc.artifacts.delete.mutationOptions())
   const { mutateAsync: uploadMutate } = useMutation(trpc.artifacts.upload.mutationOptions())
   const { mutateAsync: uploadDirMutate } = useMutation(trpc.artifacts.uploadDir.mutationOptions())
-  const { mutateAsync: downloadFileMutate } = useMutation(
-    trpc.artifacts.downloadFile.mutationOptions()
-  )
-  const { mutateAsync: downloadFolderMutate } = useMutation(
-    trpc.artifacts.downloadFolder.mutationOptions()
-  )
-  const { mutateAsync: downloadAsPdfMutate } = useMutation(
-    trpc.artifacts.downloadAsPdf.mutationOptions()
-  )
-  const { mutateAsync: downloadAsPngMutate } = useMutation(
-    trpc.artifacts.downloadAsPng.mutationOptions()
-  )
-  const { mutateAsync: downloadAsHtmlMutate } = useMutation(
-    trpc.artifacts.downloadAsHtml.mutationOptions()
-  )
-  const { mutateAsync: downloadAllAsZipMutate } = useMutation(
-    trpc.artifacts.downloadAllAsZip.mutationOptions()
-  )
   const { mutateAsync: versionsCreateMutate } = useMutation(
     trpc.artifacts.versionsCreate.mutationOptions()
   )
@@ -353,6 +360,19 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
+  // Same fresh-from-disk reasoning as readContent: never serve a cached read.
+  const readText = useCallback(
+    (id: string): Promise<ArtifactTextRead | null> =>
+      readTextWithFallback(
+        () =>
+          queryClient.fetchQuery(
+            trpc.artifacts.readText.queryOptions({ id }, { staleTime: 0, gcTime: 0 })
+          ),
+        () => readContent(id)
+      ),
+    [queryClient, trpc, readContent]
+  )
+
   const saveContent = useCallback(
     async (id: string, content: string): Promise<void> => {
       // UI saves always mutate the latest version in place. The explicit
@@ -383,40 +403,79 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
+  // Downloads save on THIS device (see artifact-downloads.ts): the hub serves the
+  // bytes in bounded pieces. A fresh read every time, never a cached one.
+  const readChunk = useCallback<ReadArtifactChunk>(
+    async (id, offset, length) => {
+      const piece = await queryClient.fetchQuery(
+        trpc.artifacts.readBytesChunk.queryOptions(
+          { id, offset, length },
+          { staleTime: 0, gcTime: 0 }
+        )
+      )
+      return piece === null
+        ? null
+        : { data: base64ToBytes(piece.data), size: piece.size, version: piece.version }
+    },
+    [queryClient, trpc]
+  )
+
   const downloadFile = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Download', () => downloadFileMutate({ id })),
-    [downloadFileMutate]
+      runDownload('Download', async () => {
+        const artifact = artifacts.find((a) => a.id === id)
+        return artifact
+          ? reportOutcome(await downloadArtifactOnThisDevice(artifact, readChunk))
+          : false
+      }),
+    [artifacts, readChunk]
   )
 
   const downloadFolder = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Folder download', () => downloadFolderMutate({ folderId: id })),
-    [downloadFolderMutate]
+      runDownload('Folder download', async () =>
+        reportOutcome(await downloadFolderOnThisDevice(folders, artifacts, id, readChunk))
+      ),
+    [folders, artifacts, readChunk]
+  )
+
+  // PDF/PNG/HTML render on THIS device (see exportArtifactOnThisDevice): the hub
+  // only serves the content.
+  const exportOnThisDevice = useCallback(
+    async (id: string, format: ArtifactExportFormat): Promise<boolean> => {
+      const artifact = artifacts.find((a) => a.id === id)
+      if (!artifact) return false
+      const content = await readContent(id)
+      if (content === null) throw new Error('Artifact file not found')
+      return exportArtifactOnThisDevice(artifact, content, format)
+    },
+    [artifacts, readContent]
   )
 
   const downloadAsPdf = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('PDF export', () => downloadAsPdfMutate({ id })),
-    [downloadAsPdfMutate]
+      runDownload('PDF export', () => exportOnThisDevice(id, 'pdf')),
+    [exportOnThisDevice]
   )
 
   const downloadAsPng = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('PNG export', () => downloadAsPngMutate({ id })),
-    [downloadAsPngMutate]
+      runDownload('PNG export', () => exportOnThisDevice(id, 'png')),
+    [exportOnThisDevice]
   )
 
   const downloadAsHtml = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('HTML export', () => downloadAsHtmlMutate({ id })),
-    [downloadAsHtmlMutate]
+      runDownload('HTML export', () => exportOnThisDevice(id, 'html')),
+    [exportOnThisDevice]
   )
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return runDownload('ZIP export', () => downloadAllAsZipMutate({ taskId }))
-  }, [taskId, downloadAllAsZipMutate])
+    return runDownload('ZIP export', async () =>
+      reportOutcome(await downloadTaskZipOnThisDevice(folders, artifacts, readChunk))
+    )
+  }, [taskId, folders, artifacts, readChunk])
 
   const uploadDir = useCallback(
     async (dirPath: string, parentFolderId?: string | null): Promise<void> => {
@@ -566,6 +625,7 @@ export function useArtifacts(
     renameArtifact,
     moveArtifactToFolder,
     readContent,
+    readText,
     saveContent,
     uploadArtifact,
     uploadDir,

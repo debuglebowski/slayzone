@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { createArtifactStore } from '@slayzone/task-artifacts/server'
 import type { ArtifactFolder, TaskArtifact } from '@slayzone/task-contracts'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerArtifactStorage } from './computer-artifacts'
 
@@ -17,7 +17,7 @@ test('folder deletion survives an offline mirror, stale metadata and an older hu
   const pcs = new Map(
     ['a', 'b'].map((computerId) => [
       computerId,
-      createChatRuntimeHandlers({
+      createFixtureChatRuntime({
         stateDir: join(dir, computerId),
         hubScope: 'hub',
         computerId: () => computerId,

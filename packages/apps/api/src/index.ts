@@ -63,6 +63,7 @@ export {
   getHubDescribeDepsOrNull,
   type HubDescribeDeps
 } from './app-deps'
+export { setHubAdminDeps, getHubAdminDeps, type HubAdminDeps } from './hub-admin-deps'
 export {
   setPowerResumeEvents,
   getPowerResumeEvents,
@@ -110,8 +111,7 @@ export type {
   TaskOpsBus,
   PtyAccess,
   ProcessesAccess,
-  BrowserAccess,
-  ArtifactExportAccess
+  BrowserAccess
 } from './http/rest-api/types'
 // Owner checks (T-17): the ONE access function, the tRPC classification and its gate.
 export {
@@ -127,7 +127,9 @@ export {
   type Ownership,
   type ResourceKind,
   requestComputerOf,
-  setHubDiskComputer
+  setHubDiskComputer,
+  setHubDiskTaskRoots,
+  type TaskRoot
 } from './access'
 export {
   TRPC_OWNER_POLICY,

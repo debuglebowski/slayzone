@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/recorder'
 import { recordActivityEvents } from '@slayzone/history/recorder'
+import { projectTagsByName, remapTaskTagsToProject } from '@slayzone/tags/db'
 
 /**
  * Named-transaction adapters for the task domain. These are the conditional
@@ -108,11 +109,512 @@ function update(
   })()
 }
 
-/** Record an arbitrary, already-built activity-event list inside its own txn. */
-function recordEvents(db: Database, p: { events: RecordActivityEventInput[] }): void {
-  if (p.events.length === 0) return
+/**
+ * Move tasks to another project in one transaction (`moveTasksToProject`): each
+ * moved row gets the target project, its re-homed status, and loses what belonged
+ * to the old project's folder (repo, worktree, base dir); a moved row whose parent
+ * stays behind is detached (`detach`), as are subtasks left behind (`detachIds`).
+ * Tags follow by name (`remapTaskTagsToProject`). Answers the tags it created.
+ */
+function moveProject(
+  db: Database,
+  p: {
+    targetProjectId: string
+    moves: { id: string; status: string; detach: boolean }[]
+    detachIds: string[]
+    events: RecordActivityEventInput[]
+  }
+): { createdTagIds: string[] } {
+  return db.transaction(() => {
+    const move = db.prepare(
+      `UPDATE tasks SET project_id = ?, status = ?, repo_name = NULL, worktree_parent_branch = NULL,
+         has_worktree = 0, has_base_dir = 0,
+         parent_id = CASE WHEN ? = 1 THEN NULL ELSE parent_id END,
+         updated_at = datetime('now')
+       WHERE id = ?`
+    )
+    for (const m of p.moves) move.run(p.targetProjectId, m.status, m.detach ? 1 : 0, m.id)
+    const detach = db.prepare(
+      "UPDATE tasks SET parent_id = NULL, updated_at = datetime('now') WHERE id = ?"
+    )
+    for (const id of p.detachIds) detach.run(id)
+    const createdTagIds = remapTaskTagsToProject(
+      db,
+      p.moves.map((m) => m.id),
+      p.targetProjectId
+    )
+    if (p.events.length > 0) recordActivityEvents(db, p.events)
+    return { createdTagIds }
+  })()
+}
+
+/**
+ * Begin a move to another hub (`beginTaskMove`): unless one of the tasks is already
+ * locked by an unfinished move, write the journal row and lock the tasks — in one
+ * transaction, so two moves never lock the same task. A begin retried with its id
+ * answers the existing move. Answers `conflict` with the tasks already moving.
+ */
+function beginMove(
+  db: Database,
+  p: {
+    id: string
+    peerHubId: string
+    targetProjectId: string
+    rootTaskIds: string[]
+    taskIds: string[]
+    includeSubtasks: boolean
+    mode?: 'move' | 'copy'
+    requestRunner?: boolean
+    includeSessions: boolean
+    /** 'project': the whole project `projectId` moves (its tasks are `taskIds`). */
+    scope: 'task' | 'project'
+    projectId: string | null
+    createdBy: string | null
+    now: number
+  }
+): { outcome: 'created' | 'exists' } | { outcome: 'conflict'; taskIds: string[] } {
+  return db.transaction(() => {
+    if (db.prepare('SELECT 1 FROM task_moves WHERE id = ?').get(p.id))
+      return { outcome: 'exists' as const }
+    if (p.taskIds.length > 0) {
+      const placeholders = p.taskIds.map(() => '?').join(', ')
+      const busy = db
+        .prepare(
+          `SELECT DISTINCT mt.task_id FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
+            WHERE (m.direction = 'in' OR m.mode = 'move') AND m.status IN ('running', 'paused', 'failed') AND mt.task_id IN (${placeholders})`
+        )
+        .all(...p.taskIds) as Array<{ task_id: string }>
+      if (busy.length > 0)
+        return { outcome: 'conflict' as const, taskIds: busy.map((r) => r.task_id) }
+    }
+    // A project already moving (either way), or one a move of tasks is heading into.
+    const project = p.scope === 'project' ? p.projectId : p.targetProjectId
+    const projectBusy = db
+      .prepare(
+        `SELECT 1 FROM task_moves WHERE (direction = 'in' OR mode = 'move') AND status IN ('running', 'paused', 'failed')
+          AND ((scope = 'project' AND project_id = ?)
+               OR (? = 'project' AND direction = 'in' AND target_project_id = ?))`
+      )
+      .get(project, p.scope, project)
+    if (projectBusy) return { outcome: 'conflict' as const, taskIds: [] }
+    db.prepare(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, include_sessions, step, status, created_by, created_at, updated_at,
+         scope, project_id, mode, runner_requested)
+       VALUES (?, 'out', ?, ?, ?, ?, ?, 'lock', 'running', ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      p.id,
+      p.peerHubId,
+      p.targetProjectId,
+      JSON.stringify(p.rootTaskIds),
+      p.includeSubtasks ? 1 : 0,
+      p.includeSessions ? 1 : 0,
+      p.createdBy,
+      p.now,
+      p.now,
+      p.scope,
+      p.projectId,
+      p.mode ?? 'move',
+      p.requestRunner ? 1 : 0
+    )
+    const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
+    for (const taskId of p.taskIds) lock.run(p.id, taskId)
+    return { outcome: 'created' as const }
+  })()
+}
+
+/**
+ * Release a move's tasks (`releaseTaskMove`): a redirect per task (where it went),
+ * the move done — its lock lifted. Retried after it is done: nothing changes.
+ */
+function releaseMove(db: Database, p: { id: string; now: number }): void {
   db.transaction(() => {
-    recordActivityEvents(db, p.events)
+    const move = db
+      .prepare('SELECT peer_hub_id, scope, project_id FROM task_moves WHERE id = ?')
+      .get(p.id) as
+      | { peer_hub_id: string; scope: 'task' | 'project'; project_id: string | null }
+      | undefined
+    if (!move) return
+    db.prepare(
+      `INSERT OR REPLACE INTO task_move_redirects (task_id, hub_id, move_id, created_at)
+       SELECT task_id, ?, move_id, ? FROM task_move_tasks WHERE move_id = ?`
+    ).run(move.peer_hub_id, p.now, p.id)
+    // The tasks are the target's now: their rows go (every child row with them, by
+    // cascade) — removed, NOT erased, so a task can move back. A subtask left behind
+    // (the move did not bring subtasks) is detached first: the cascade would take it.
+    const moved = 'SELECT task_id FROM task_move_tasks WHERE move_id = ?'
+    db.prepare(
+      `UPDATE tasks SET parent_id = NULL, updated_at = datetime('now')
+        WHERE parent_id IN (${moved}) AND id NOT IN (${moved})`
+    ).run(p.id, p.id)
+    removeMovedTasks(db, moved, p.id)
+    // Their sessions went along (the computers forgot them): no chat of theirs is owned here.
+    if (movedSessions(db, p.id)) dropMovedChatOwnership(db, moved, p.id)
+    if (move.scope === 'project' && move.project_id) {
+      db.prepare(
+        `INSERT OR REPLACE INTO project_move_redirects (project_id, hub_id, move_id, created_at)
+         VALUES (?, ?, ?, ?)`
+      ).run(move.project_id, move.peer_hub_id, p.id, p.now)
+      removeMovedProject(db, move.project_id)
+    }
+    db.prepare("UPDATE task_moves SET status = 'done', updated_at = ? WHERE id = ?").run(
+      p.now,
+      p.id
+    )
+  })()
+}
+
+/** The tables a move between hubs writes, in insert order (parents first). */
+const IMPORT_ORDER = [
+  'tasks',
+  'terminal_tabs',
+  'artifact_folders',
+  'task_artifacts',
+  'artifact_versions',
+  'task_tags',
+  'task_dependencies',
+  'activity_events',
+  'usage_records'
+] as const
+
+/**
+ * Take tasks moved here from another hub (`importTaskMove`): every row of the bundle
+ * with its id, in one transaction (foreign keys checked at its end), the tags mapped
+ * onto this project's by name, a redirect left by an earlier move away cleared, and
+ * the move's journal row ('in', waiting to commit). Until the move commits, the
+ * tasks are locked and hidden. Answers `exists` for a move already taken (a retry).
+ * A column this hub does not have is dropped; one it has that the source lacks takes
+ * its default.
+ */
+function importMove(
+  db: Database,
+  p: {
+    moveId: string
+    mode?: 'move' | 'copy'
+    sourceHubId: string
+    targetProjectId: string
+    includeSessions: boolean
+    rootTaskIds: string[]
+    taskIds: string[]
+    rows: Record<(typeof IMPORT_ORDER)[number], Array<Record<string, unknown>>>
+    tags: Array<{ id: string; name: string; color: string; text_color: string }>
+    events: RecordActivityEventInput[]
+    /** A project move: the project, made before its tasks (ids kept). */
+    project: {
+      id: string
+      row: Record<string, unknown>
+      rows: Record<(typeof PROJECT_IMPORT_ORDER)[number], Array<Record<string, unknown>>>
+      settings: Array<{ key: string; value: string }>
+      userSettings: Array<{ key: string; value: string }>
+      /** The importer: their per-user settings; null = a hub without login (hub-wide). */
+      ownerUserId: string | null
+    } | null
+    now: number
+  }
+): { outcome: 'imported' | 'exists' } {
+  return db.transaction(() => {
+    if (db.prepare('SELECT 1 FROM task_moves WHERE id = ?').get(p.moveId))
+      return { outcome: 'exists' as const }
+    db.pragma('defer_foreign_keys = ON')
+    if (p.project) importMovedProject(db, p.project)
+    const tagIds = projectTagsByName(db, p.targetProjectId, p.tags)
+    for (const table of IMPORT_ORDER) {
+      insertMovedRows(
+        db,
+        table,
+        (p.rows[table] ?? []).flatMap((raw) => {
+          if (table !== 'task_tags') return [raw]
+          const tagId = tagIds.get(raw.tag_id as string)
+          return tagId === undefined ? [] : [{ ...raw, tag_id: tagId }]
+        })
+      )
+    }
+    if (p.taskIds.length > 0) {
+      const ids = p.taskIds.map(() => '?').join(', ')
+      db.prepare(`DELETE FROM task_move_redirects WHERE task_id IN (${ids})`).run(...p.taskIds)
+      // Tasks coming back: their chats, still on this hub's computers, are this hub's
+      // again — with the ownership they had when they left.
+      db.prepare(
+        `UPDATE chat_ownership SET
+           (state, epoch, cleanup_pending) = (SELECT state, epoch, cleanup_pending
+             FROM task_move_parked_chats WHERE conversation_id = chat_ownership.id)
+         WHERE state = 'deleted' AND id IN (
+           SELECT conversation_id FROM task_move_parked_chats WHERE task_id IN (${ids}))`
+      ).run(...p.taskIds)
+      db.prepare(`DELETE FROM task_move_parked_chats WHERE task_id IN (${ids})`).run(...p.taskIds)
+    }
+    db.prepare(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, include_sessions, step, status, created_at, updated_at,
+         scope, project_id, mode)
+       VALUES (?, 'in', ?, ?, ?, 1, ?, 'commit', 'running', ?, ?, ?, ?, ?)`
+    ).run(
+      p.moveId,
+      p.sourceHubId,
+      p.targetProjectId,
+      JSON.stringify(p.rootTaskIds),
+      p.includeSessions ? 1 : 0,
+      p.now,
+      p.now,
+      p.project ? 'project' : 'task',
+      p.project?.id ?? null,
+      p.mode ?? 'move'
+    )
+    const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
+    for (const taskId of p.taskIds) lock.run(p.moveId, taskId)
+    if (p.events.length > 0) recordActivityEvents(db, p.events)
+    return { outcome: 'imported' as const }
+  })()
+}
+
+/** A moved project's own tables, in insert order (parents first); `projects` goes first. */
+const PROJECT_IMPORT_ORDER = [
+  'tags',
+  'automations',
+  'task_templates',
+  'test_categories',
+  'test_labels',
+  'test_file_labels',
+  'test_file_notes',
+  'ai_config_items',
+  'ai_config_project_selections',
+  'activity_events'
+] as const
+
+/**
+ * Insert `rows` into `table` as they came, ids kept. A column this hub does not have
+ * is dropped; one it has that the source lacks takes its default.
+ */
+function insertMovedRows(
+  db: Database,
+  table: string,
+  rows: ReadonlyArray<Record<string, unknown>>
+): void {
+  if (rows.length === 0) return
+  const known = new Set(
+    (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+  )
+  for (const row of rows) {
+    const cols = Object.keys(row).filter((c) => known.has(c))
+    if (cols.length === 0) continue
+    db.prepare(
+      `INSERT INTO "${table}" (${cols.map((c) => `"${c}"`).join(', ')})
+       VALUES (${cols.map(() => '?').join(', ')})`
+    ).run(...cols.map((c) => row[c]))
+  }
+}
+
+/**
+ * A project moved here (`importMove`): its row (last among the ungrouped projects)
+ * and its own tables, ids kept; the settings naming it; a redirect left by an earlier
+ * move away cleared. Hidden from every list until the move commits (project-move-sql).
+ */
+function importMovedProject(
+  db: Database,
+  project: NonNullable<Parameters<typeof importMove>[1]['project']>
+): void {
+  const { sort_order } = db
+    .prepare(
+      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM projects WHERE group_id IS NULL'
+    )
+    .get() as { sort_order: number }
+  insertMovedRows(db, 'projects', [{ ...project.row, sort_order }])
+  for (const table of PROJECT_IMPORT_ORDER) insertMovedRows(db, table, project.rows[table] ?? [])
+  const hubWide = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+  for (const s of project.settings) hubWide.run(s.key, s.value)
+  if (project.ownerUserId) {
+    const own = db.prepare(
+      'INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)'
+    )
+    for (const s of project.userSettings) own.run(project.ownerUserId, s.key, s.value)
+  } else {
+    // No users here: a per-user value becomes the hub's, unless the hub has one.
+    const fallback = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
+    for (const s of project.userSettings) fallback.run(s.key, s.value)
+  }
+  db.prepare('DELETE FROM project_move_redirects WHERE project_id = ?').run(project.id)
+}
+
+/** A canceled incoming move: the tasks it brought go again (every row, by cascade). */
+function abortImport(db: Database, p: { id: string; now: number }): void {
+  db.transaction(() => {
+    const move = db
+      .prepare("SELECT status FROM task_moves WHERE id = ? AND direction = 'in'")
+      .get(p.id) as { status: string } | undefined
+    if (!move || move.status === 'done' || move.status === 'canceled') return
+    const moved = 'SELECT task_id FROM task_move_tasks WHERE move_id = ?'
+    removeMovedTasks(db, moved, p.id)
+    // What the move copied here is forgotten by the computers: nothing to own.
+    if (movedSessions(db, p.id)) dropMovedChatOwnership(db, moved, p.id)
+    const project = db
+      .prepare("SELECT project_id FROM task_moves WHERE id = ? AND scope = 'project'")
+      .get(p.id) as { project_id: string | null } | undefined
+    if (project?.project_id) removeMovedProject(db, project.project_id)
+    db.prepare("UPDATE task_moves SET status = 'canceled', updated_at = ? WHERE id = ?").run(
+      p.now,
+      p.id
+    )
+  })()
+}
+
+/**
+ * The chats of a moved task, now held by `computerId` (the move's `copy-sessions`
+ * step copied them there at `epoch`): this hub owns them — a row per chat, bound to its
+ * tab when the task has that tab. Overwrites what an earlier stay of the task left
+ * (restored from `task_move_parked_chats`, at an older epoch, maybe another computer).
+ * Idempotent. A chat the hub never owns (`hook-inbox:*`) is skipped.
+ */
+function registerMovedChats(
+  db: Database,
+  p: {
+    taskId: string
+    computerId: string
+    chats: Array<{ id: string; tabId: string; mode: string; epoch: number }>
+  }
+): void {
+  db.transaction(() => {
+    if (!db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(p.taskId))
+      throw new Error(`Task ${p.taskId} is not on this hub`)
+    db.prepare(
+      "INSERT OR IGNORE INTO chat_task_lifecycle (task_id, state) VALUES (?, 'active')"
+    ).run(p.taskId)
+    const owner = db.prepare(
+      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state, cleanup_pending)
+       VALUES (?, ?, ?, ?, ?, ?, 'active', 0)
+       ON CONFLICT(id) DO UPDATE SET
+         task_id = excluded.task_id, tab_id = excluded.tab_id, mode = excluded.mode,
+         computer_id = excluded.computer_id, epoch = excluded.epoch, state = 'active',
+         migration_id = NULL, destination_computer_id = NULL, source_computer_id = NULL,
+         manifest_hash = NULL, cleanup_pending = 0`
+    )
+    const bind = db.prepare(
+      `INSERT INTO chat_tab_bindings (tab_id, conversation_id) VALUES (?, ?)
+       ON CONFLICT(tab_id) DO UPDATE SET conversation_id = excluded.conversation_id,
+         revision = revision + 1`
+    )
+    const hasTab = db.prepare('SELECT 1 FROM terminal_tabs WHERE id = ? AND task_id = ?')
+    for (const chat of p.chats) {
+      if (chat.id.startsWith('hook-inbox:')) continue
+      owner.run(chat.id, p.taskId, chat.tabId, chat.mode, p.computerId, chat.epoch)
+      if (hasTab.get(chat.tabId, p.taskId)) bind.run(chat.tabId, chat.id)
+    }
+  })()
+}
+
+/** Whether move `id` carries the tasks' agent sessions. */
+function movedSessions(db: Database, id: string): boolean {
+  const row = db.prepare('SELECT include_sessions FROM task_moves WHERE id = ?').get(id) as
+    | { include_sessions: number }
+    | undefined
+  return row?.include_sessions === 1
+}
+
+/**
+ * The tasks' chats are kept on another hub (or nowhere: a canceled import): this hub
+ * keeps no ownership of them — not the rows, nor what binds them to tabs, nor what
+ * `removeMovedTasks` parked for a return. The computers forgot the chats themselves.
+ */
+function dropMovedChatOwnership(db: Database, movedSql: string, param: string): void {
+  const conversations = `SELECT id FROM chat_ownership WHERE task_id IN (${movedSql})`
+  const ids = (db.prepare(conversations).all(param) as Array<{ id: string }>).map((r) => r.id)
+  if (ids.length > 0) {
+    const json = JSON.stringify(ids)
+    // Every table that points at a conversation (bindings, routes, locations, …).
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as Array<{ name: string }>
+    for (const { name } of tables) {
+      if (name === 'chat_ownership') continue
+      const refs = db.prepare(`PRAGMA foreign_key_list("${name}")`).all() as Array<{
+        table: string
+        from: string
+      }>
+      for (const ref of refs)
+        if (ref.table === 'chat_ownership')
+          db.prepare(
+            `DELETE FROM "${name}" WHERE "${ref.from}" IN (SELECT value FROM json_each(?))`
+          ).run(json)
+    }
+    db.prepare('DELETE FROM chat_ownership WHERE id IN (SELECT value FROM json_each(?))').run(json)
+  }
+  db.prepare(`DELETE FROM task_move_parked_chats WHERE task_id IN (${movedSql})`).run(param)
+}
+
+/**
+ * Remove tasks leaving this hub by a move (`movedSql`: a SELECT of their ids, one `?`
+ * bound to `param`). Every row goes (child rows by cascade), but this is no deletion:
+ * - Their chats stay on this hub's computers. Each chat's ownership is parked first
+ *   (`task_move_parked_chats`): a task moving back takes it up again (`importMove`).
+ * - What the delete triggers (`chat_task_purge`, `chat_tab_purge`) queued is undone
+ *   in the same transaction, so the computers are never told to erase the tasks'
+ *   chats and terminal history, nor to tombstone the task ids (which would refuse
+ *   the tasks for good, a move back included). The ownership rows stay marked
+ *   deleted while the tasks are away: this hub does not own those chats then.
+ */
+function removeMovedTasks(db: Database, movedSql: string, param: string): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO task_move_parked_chats
+       (conversation_id, task_id, state, epoch, cleanup_pending)
+     SELECT id, task_id, state, epoch, cleanup_pending FROM chat_ownership
+      WHERE task_id IN (${movedSql}) AND state <> 'deleted'`
+  ).run(param)
+  db.prepare(`DELETE FROM tasks WHERE id IN (${movedSql})`).run(param)
+  const conversations = `SELECT id FROM chat_ownership WHERE task_id IN (${movedSql})`
+  db.prepare(`DELETE FROM chat_deletion_targets WHERE conversation_id IN (${conversations})`).run(
+    param
+  )
+  for (const table of ['chat_task_lifecycle', 'chat_lifecycle_acks', 'chat_task_computers'])
+    db.prepare(`DELETE FROM ${table} WHERE task_id IN (${movedSql})`).run(param)
+}
+
+/**
+ * Remove a project leaving this hub by a move (or a canceled import of one), after its
+ * tasks went: its row and every table hanging off it (by cascade; the tables with no
+ * foreign key explicitly), and the settings naming it. Removed, not erased: it can come
+ * back. A task still in the project means something wrote past the move's lock — the
+ * project stays and the step fails rather than take that task with it.
+ */
+function removeMovedProject(db: Database, projectId: string): void {
+  if (db.prepare('SELECT 1 FROM tasks WHERE project_id = ? LIMIT 1').get(projectId))
+    throw new Error(
+      'A task was added to the project while it was moving. Move or delete it, then resume.'
+    )
+  for (const table of ['test_file_notes', 'test_file_labels', 'project_placements'])
+    db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(projectId)
+  db.prepare("DELETE FROM settings WHERE key LIKE '%' || ? || '%'").run(projectId)
+  db.prepare("DELETE FROM user_settings WHERE key LIKE '%' || ? || '%'").run(projectId)
+  db.prepare('DELETE FROM projects WHERE id = ?').run(projectId)
+}
+
+/**
+ * Finish a duplicate created by `createTaskOp`: its description keeps the source's
+ * format, it takes the source's tags (re-pointed by name at the copy's project,
+ * created there when missing) and both tasks record the duplicate — atomically.
+ * Answers the created tag ids.
+ */
+function finishDuplicate(
+  db: Database,
+  p: {
+    sourceTaskId: string
+    copyTaskId: string
+    targetProjectId: string
+    descriptionFormat: string
+    events: RecordActivityEventInput[]
+  }
+): { createdTagIds: string[] } {
+  return db.transaction(() => {
+    db.prepare('UPDATE tasks SET description_format = ? WHERE id = ?').run(
+      p.descriptionFormat,
+      p.copyTaskId
+    )
+    db.prepare(
+      'INSERT OR IGNORE INTO task_tags (task_id, tag_id) SELECT ?, tag_id FROM task_tags WHERE task_id = ?'
+    ).run(p.copyTaskId, p.sourceTaskId)
+    const createdTagIds = remapTaskTagsToProject(db, [p.copyTaskId], p.targetProjectId)
+    if (p.events.length > 0) recordActivityEvents(db, p.events)
+    return { createdTagIds }
   })()
 }
 
@@ -122,7 +624,13 @@ export const taskTxns = {
   'task:soft-delete-many': softDeleteMany,
   'task:archive': archive,
   'task:update': update,
-  'task:record-events': recordEvents
+  'task:move-project': moveProject,
+  'task:finish-duplicate': finishDuplicate,
+  'task:begin-move': beginMove,
+  'task:release-move': releaseMove,
+  'task:import-move': importMove,
+  'task:register-moved-chats': registerMovedChats,
+  'task:abort-import': abortImport
 }
 
 // Types `db.namedTxn(...)` for these names. Every file that calls one imports this

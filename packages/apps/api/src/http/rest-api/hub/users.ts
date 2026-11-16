@@ -1,4 +1,9 @@
 import type { IncomingHttpHeaders } from 'node:http'
+import {
+  ROLES_MANAGED_BY_IDP,
+  ROLES_MANAGED_HTTP_STATUS,
+  ROLES_MANAGED_MESSAGE
+} from '@normain/idp-role-contract'
 import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
@@ -7,6 +12,7 @@ import { ADMIN_ONLY } from '../../../admin-policy'
 import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { RestApiDeps } from '../types'
 import { respondSwitchRefusal } from '../switch-refusal'
+import { CONTENT_ERASURE_PATH } from './content-erasure'
 
 /**
  * REST: `/api/hub/users` — operator account management, backing
@@ -48,6 +54,11 @@ import { respondSwitchRefusal } from '../switch-refusal'
  * ON A HUB WITH ENTRA SIGN-IN the role is the Entra app role (hub-auth entra.ts): a
  * role change, or `add` asking for an admin, answers 409 with the stable code
  * {@link SSO_MANAGED_ROLE_CODE}. Disable / enable are unchanged.
+ *
+ * WITH THE IdP-ROLE MODE ON (`IDP_ROLES_ENABLED=true`, hub-auth idp-roles.ts) a role
+ * change, or `add` naming any role, answers the shared contract's refusal: 409
+ * `ROLES_MANAGED_BY_IDP`, "Roles are managed by your identity provider." — the same
+ * code and text in every service of the contract.
  *
  * WITH PASSWORD SIGN-IN OFF (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10) `add` answers 403
  * `HUB_PASSWORD_DISABLED`: every account it makes is a password account
@@ -132,6 +143,13 @@ const SSO_MANAGED_ROLE = {
   error:
     'roles on this hub come from Entra ID: assign or remove the SlayZone.Admin app role ' +
     'on the enterprise application — it applies at the account’s next sign-in'
+} as const
+
+/** The shared contract's refusal of an in-hub role change (IdP-role mode). */
+const ROLES_MANAGED = {
+  ok: false,
+  code: ROLES_MANAGED_BY_IDP,
+  error: ROLES_MANAGED_MESSAGE
 } as const
 
 const ROLES: readonly PrincipalRole[] = ['admin', 'user']
@@ -220,6 +238,18 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
       setRole: (email, role) => runAsSecurityActor(actor, () => users.setRole(email, role))
     }
   }
+  /**
+   * Content erasure first shipped on this path (`GET ?erasure=…`, `PATCH { action }`),
+   * which a break-glass session may call (O-6 forbids it erasure) and which put
+   * destructive actions behind GET. It moved to {@link CONTENT_ERASURE_PATH}; the old
+   * shapes answer 410 naming it, so an older `slay` gets a reason, not a silent list.
+   */
+  const erasureMoved = (res: import('express').Response): void => {
+    res.status(410).json({
+      ok: false,
+      error: `content erasure moved to ${CONTENT_ERASURE_PATH} — update slay and repeat the command`
+    })
+  }
 
   // Create an account. Returns the generated password ONCE — it is not recoverable.
   app.post('/api/hub/users', async (req, res) => {
@@ -251,6 +281,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ...(role === undefined ? {} : { role })
       })
       if (!result.ok) {
+        if (result.reason === 'idp-managed') {
+          res.status(ROLES_MANAGED_HTTP_STATUS).json(ROLES_MANAGED)
+          return
+        }
         res
           .status(409)
           .json(
@@ -275,6 +309,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.get('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
+    if (req.query.erasure !== undefined) {
+      erasureMoved(res)
+      return
+    }
     try {
       res.json({ ok: true, data: await users.list() })
     } catch (err) {
@@ -291,6 +329,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.patch('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
+    if (req.body?.action !== undefined) {
+      erasureMoved(res)
+      return
+    }
     const body = (req.body ?? {}) as { email?: unknown; disabled?: unknown; role?: unknown }
     if (!isPlausibleEmail(body.email)) {
       res.status(400).json({ ok: false, error: 'email required' })
@@ -318,6 +360,13 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
             ? await users.disable(email)
             : await users.enable(email)
       switch (outcome) {
+        case 'erasure-in-progress':
+          res.status(409).json({
+            ok: false,
+            code: 'ERASURE_IN_PROGRESS',
+            error: 'This user cannot be enabled while their content is being erased.'
+          })
+          return
         case 'ok':
           res.json({ ok: true, data: { email, ...change } })
           return
@@ -353,6 +402,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
           return
         case 'sso-managed':
           res.status(409).json(SSO_MANAGED_ROLE)
+          return
+        case 'idp-managed':
+          res.status(ROLES_MANAGED_HTTP_STATUS).json(ROLES_MANAGED)
           return
       }
     } catch (err) {

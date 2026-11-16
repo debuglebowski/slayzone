@@ -36,7 +36,7 @@ export type ProbeWindow = Window & {
   __slayzone_terminalLinks?: Record<string, { _terminal?: { element?: HTMLElement } }>
 }
 
-/** Installed before the app boots (init script): long tasks + per-frame mount census. */
+/** Installed before the app boots: long tasks + DOM-driven readiness census. */
 export function installBootProbe({
   total,
   detailSelector
@@ -80,9 +80,7 @@ export function installBootProbe({
     for (const k in links) if (links[k]?._terminal?.element) n++
     return n
   }
-  // Fine-grained until the active tab is ready, then coarse (the census itself
-  // costs main-thread time — keep it equal and small in every run) for 10s.
-  const census = (): void => {
+  const sample = (): void => {
     const now = Math.round(performance.now())
     if (probe.activeReadyAt < 0 && document.querySelector(`.z-10 ${detailSelector}`)) {
       probe.activeReadyAt = now
@@ -98,10 +96,28 @@ export function installBootProbe({
       }
       if (probe.allTerminalsAt < 0 && terminalsAttached() >= total) probe.allTerminalsAt = now
     }
-    if (now < 10_000) setTimeout(census, probe.activeReadyAt < 0 ? 16 : 100)
   }
-  // A timer, not rAF: frames are not produced while the test window is occluded.
-  setTimeout(census, 16)
+  // Occluded Electron windows throttle timers too: a 16ms poll recorded 2108ms
+  // for a detail that committed at 880ms. Observe the DOM until the active detail
+  // and terminal mount, so readiness and its mount census share the actual commit.
+  // No layout reads; disconnect before the hidden panes hydrate in bulk.
+  const observer = new MutationObserver(() => {
+    sample()
+    if (probe.activeReadyAt >= 0 && probe.activeTerminalAt >= 0) observer.disconnect()
+  })
+  observer.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class']
+  })
+  // Coarse sampling covers non-DOM terminal attachment and eventual hydration.
+  const census = (): void => {
+    sample()
+    if (performance.now() < 10_000) setTimeout(census, 100)
+    else observer.disconnect()
+  }
+  setTimeout(census, 100)
 }
 
 /** Wipe the app and seed one project with {@link BOOT_TABS} terminal tasks. */

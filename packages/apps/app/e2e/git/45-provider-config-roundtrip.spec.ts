@@ -1,5 +1,6 @@
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { currentSession, seedSession } from '../fixtures/terminal'
 
 test.describe('Provider config roundtrip', () => {
   let projectId: string
@@ -32,72 +33,43 @@ test.describe('Provider config roundtrip', () => {
     expect(typeof task?.codex_flags).toBe('string')
   })
 
-  test('update conversationId for codex mode', async ({ mainWindow }) => {
+  test('record a session for codex mode', async ({ mainWindow }) => {
     const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, codexConversationId: cid }),
-      { id: taskId, cid: conversationId }
-    )
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
-    expect(task?.codex_conversation_id).toBe(conversationId)
+    // Session ids live on the task's computer (robustness plan §9).
+    await seedSession(mainWindow, taskId, 'codex', conversationId)
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBe(conversationId)
   })
 
-  test('update conversationId for cursor mode', async ({ mainWindow }) => {
+  test('record a session for cursor mode', async ({ mainWindow }) => {
     const conversationId = '11111111-2222-4333-8444-555555555555'
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, cursorConversationId: cid }),
-      { id: taskId, cid: conversationId }
-    )
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
-    expect(task?.cursor_conversation_id).toBe(conversationId)
+    // Session ids live on the task's computer (robustness plan §9).
+    await seedSession(mainWindow, taskId, 'cursor-agent', conversationId)
+    expect(await currentSession(mainWindow, taskId, 'cursor-agent')).toBe(conversationId)
   })
 
-  test('update conversationId for gemini mode', async ({ mainWindow }) => {
+  test('record a session for gemini mode', async ({ mainWindow }) => {
     const conversationId = 'gemini-session-abc123'
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, geminiConversationId: cid }),
-      { id: taskId, cid: conversationId }
-    )
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
-    expect(task?.gemini_conversation_id).toBe(conversationId)
+    // Session ids live on the task's computer (robustness plan §9).
+    await seedSession(mainWindow, taskId, 'gemini', conversationId)
+    expect(await currentSession(mainWindow, taskId, 'gemini')).toBe(conversationId)
   })
 
-  test('update conversationId for opencode mode', async ({ mainWindow }) => {
+  test('record a session for opencode mode', async ({ mainWindow }) => {
     const conversationId = 'opencode-session-xyz789'
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, opencodeConversationId: cid }),
-      { id: taskId, cid: conversationId }
-    )
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
-    expect(task?.opencode_conversation_id).toBe(conversationId)
+    // Session ids live on the task's computer (robustness plan §9).
+    await seedSession(mainWindow, taskId, 'opencode', conversationId)
+    expect(await currentSession(mainWindow, taskId, 'opencode')).toBe(conversationId)
   })
 
-  test('multiple conversation IDs coexist independently', async ({ mainWindow }) => {
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
+  test('sessions of several modes coexist independently', async ({ mainWindow }) => {
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBe(
+      'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
     )
-    // All previously set IDs should still be present
-    expect(task?.codex_conversation_id).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
-    expect(task?.cursor_conversation_id).toBe('11111111-2222-4333-8444-555555555555')
-    expect(task?.gemini_conversation_id).toBe('gemini-session-abc123')
-    expect(task?.opencode_conversation_id).toBe('opencode-session-xyz789')
+    expect(await currentSession(mainWindow, taskId, 'cursor-agent')).toBe(
+      '11111111-2222-4333-8444-555555555555'
+    )
+    expect(await currentSession(mainWindow, taskId, 'gemini')).toBe('gemini-session-abc123')
+    expect(await currentSession(mainWindow, taskId, 'opencode')).toBe('opencode-session-xyz789')
   })
 
   test('update flags for gemini mode', async ({ mainWindow }) => {
@@ -125,19 +97,69 @@ test.describe('Provider config roundtrip', () => {
     expect(task?.codex_flags).toBeTruthy()
   })
 
-  test('clear a single conversation ID via null', async ({ mainWindow }) => {
+  test('reset one mode: the others keep their sessions', async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, codexConversationId: null }),
+      (id) => window.getTrpcVanillaClient().task.resetConversation.mutate({ id, mode: 'codex' }),
+      taskId
+    )
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
+    expect(await currentSession(mainWindow, taskId, 'cursor-agent')).toBe(
+      '11111111-2222-4333-8444-555555555555'
+    )
+    expect(await currentSession(mainWindow, taskId, 'gemini')).toBe('gemini-session-abc123')
+  })
+
+  test('modes without a legacy column (qwen, copilot) keep sessions too', async ({
+    mainWindow
+  }) => {
+    await seedSession(mainWindow, taskId, 'qwen-code', 'qwen-session-xyz')
+    await seedSession(mainWindow, taskId, 'copilot', 'copilot-session-abc')
+    expect(await currentSession(mainWindow, taskId, 'qwen-code')).toBe('qwen-session-xyz')
+    expect(await currentSession(mainWindow, taskId, 'copilot')).toBe('copilot-session-abc')
+  })
+
+  test('a session id in a providerConfig update is not a hub value; flags merge as before', async ({
+    mainWindow
+  }) => {
+    // Was spec 96's deep-merge cases: the hub entry merges per key, and a session id
+    // never lands there (it is the computer ledger's, robustness plan §9).
+    await mainWindow.evaluate(
+      (id) =>
+        window.getTrpcVanillaClient().task.update.mutate({
+          id,
+          providerConfig: { codex: { flags: '--keep-this-flag', conversationId: 'via-config' } }
+        }),
+      taskId
+    )
+    await mainWindow.evaluate(
+      (id) =>
+        window.getTrpcVanillaClient().task.update.mutate({
+          id,
+          providerConfig: { gemini: { flags: '--new-flag' } }
+        }),
       taskId
     )
     const task = await mainWindow.evaluate(
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    expect(task?.codex_conversation_id).toBeNull()
-    // Others should be unaffected
-    expect(task?.cursor_conversation_id).toBe('11111111-2222-4333-8444-555555555555')
-    expect(task?.gemini_conversation_id).toBe('gemini-session-abc123')
+    const config = task?.provider_config as Record<string, Record<string, unknown>> | undefined
+    expect(config?.codex?.flags).toBe('--keep-this-flag')
+    expect(config?.codex).not.toHaveProperty('conversationId')
+    expect(config?.gemini?.flags).toBe('--new-flag')
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
+    expect(await currentSession(mainWindow, taskId, 'gemini')).toBe('gemini-session-abc123')
+  })
+
+  test('a subtask does not inherit its parent sessions', async ({ mainWindow }) => {
+    const child = await seed(mainWindow).createTask({
+      projectId,
+      parentId: taskId,
+      title: 'Provider config child',
+      status: 'todo'
+    })
+    expect(await currentSession(mainWindow, child.id, 'gemini')).toBeNull()
+    expect(await currentSession(mainWindow, child.id, 'cursor-agent')).toBeNull()
   })
 
   test('create task with explicit flags override', async ({ mainWindow }) => {

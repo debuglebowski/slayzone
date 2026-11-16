@@ -1,8 +1,9 @@
+import { projectNotInTransitSql } from '@slayzone/projects/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { attachPlacements, parseProject } from '@slayzone/projects/server'
-import { parseAndColorTasks, TASK_ORDER_BY } from './shared.js'
+import { NOT_IN_TRANSIT, parseTasks, TASK_ORDER_BY } from './shared.js'
 
 export interface BoardData {
   tasks: Task[]
@@ -17,12 +18,13 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
     `SELECT t.*, el.external_url AS linear_url
       FROM tasks t
       LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
-      WHERE t.deleted_at IS NULL
+      WHERE t.deleted_at IS NULL AND ${NOT_IN_TRANSIT}
       ${TASK_ORDER_BY}`
   )
 
+  // A project moving between hubs shows on one of them only.
   const projectRows = await db.all<Record<string, unknown>>(
-    'SELECT * FROM projects ORDER BY sort_order'
+    `SELECT * FROM projects p WHERE ${projectNotInTransitSql('p')} ORDER BY sort_order`
   )
 
   const tagRows = await db.all('SELECT * FROM tags ORDER BY sort_order, name')
@@ -39,15 +41,16 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
   const blockedRows = await db.all<{ id: string }>(
     `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
       UNION
-      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`
+      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL
+      UNION
+      SELECT task_id AS id FROM task_remote_blockers WHERE role = 'blocked_by'`
   )
 
-  // parseAndColorTasks (not bare parseTasks) so every task carries
-  // `currentConversationByMode` from the ledger. Without it the boot board store
-  // ships null conversation ids → auto-respawned terminals mint fresh sessions
-  // that shadow real conversations (the restart-clobber bug). Same query cost as
-  // getAllTasksOp, which already hydrates on every getTasks().
-  const tasks = await parseAndColorTasks(db, taskRows)
+  // As getAllTasksOp. No paths (§9 Phase 7d: a client reads them from the computer)
+  // and no conversation ids:
+  // the session ledger is on the agents' computers (robustness plan §9), which
+  // resolve every resume at spawn.
+  const tasks = parseTasks(taskRows)
 
   return {
     tasks,
@@ -90,7 +93,7 @@ export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): P
     `SELECT t.*, el.external_url AS linear_url
       FROM tasks t
       LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
-      WHERE t.deleted_at IS NULL AND t.id IN (${ph})
+      WHERE t.deleted_at IS NULL AND ${NOT_IN_TRANSIT} AND t.id IN (${ph})
       ${TASK_ORDER_BY}`,
     unique
   )
@@ -103,22 +106,24 @@ export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): P
   const blockedRows = await db.all<{ id: string }>(
     `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies WHERE blocks_task_id IN (${ph})
       UNION
-      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL AND id IN (${ph})`,
-    [...unique, ...unique]
+      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL AND id IN (${ph})
+      UNION
+      SELECT task_id AS id FROM task_remote_blockers WHERE role = 'blocked_by' AND task_id IN (${ph})`,
+    [...unique, ...unique, ...unique]
   )
   // LEAD over the board's own ORDER BY, so the successor is exactly the row a
   // full load lists next — including the rowid tie-break SQL alone can see.
   const nextRows = await db.all<{ id: string; next_id: string | null }>(
     `SELECT id, next_id FROM (
        SELECT t.id, LEAD(t.id) OVER (${TASK_ORDER_BY}) AS next_id
-       FROM tasks t WHERE t.deleted_at IS NULL
+       FROM tasks t WHERE t.deleted_at IS NULL AND ${NOT_IN_TRANSIT}
      ) WHERE id IN (${ph})`,
     unique
   )
   const nextTaskIds: Record<string, string | null> = {}
   for (const row of nextRows) nextTaskIds[row.id] = row.next_id
   return {
-    tasks: await parseAndColorTasks(db, taskRows),
+    tasks: parseTasks(taskRows),
     taskTags,
     blockedTaskIds: blockedRows.map((r) => r.id),
     nextTaskIds

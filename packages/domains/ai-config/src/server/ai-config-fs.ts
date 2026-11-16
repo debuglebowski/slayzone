@@ -7,6 +7,8 @@
  * Lean on purpose — node fs + os only, no DB or Electron — so a computer can run it.
  */
 import { promises as fsp } from 'node:fs'
+import { createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 
 export interface AiConfigStat {
@@ -22,7 +24,44 @@ export interface AiConfigDirEntry {
   isDirectory: boolean
 }
 
+export const AI_CONFIG_HASH_CAPABILITY = 'agentConfig.hashFiles'
+export interface AiConfigFileHash {
+  path: string
+  hash: string | null
+}
+
+// Only in-flight work is shared: an edit after a completed scan is always read.
+// The computer checks every caller's path scope before reaching this pure disk work.
+const pendingHashes = new Map<string, Promise<string | null>>()
+async function hashFile(path: string): Promise<string | null> {
+  const pending = pendingHashes.get(path)
+  if (pending) return pending
+  const work = (async () => {
+    if (
+      !(await fsp.access(path).then(
+        () => true,
+        () => false
+      ))
+    )
+      return null
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(path)) hash.update(chunk)
+    return hash.digest('hex')
+  })().finally(() => pendingHashes.delete(path))
+  pendingHashes.set(path, work)
+  return work
+}
+
+export async function hashAiConfigFiles(paths: readonly string[]): Promise<AiConfigFileHash[]> {
+  const out: AiConfigFileHash[] = []
+  // Stream one file at a time: a batch cannot buffer hundreds of large files.
+  for (const path of paths) out.push({ path, hash: await hashFile(path) })
+  return out
+}
+
 export interface AiConfigFs {
+  /** Optional on older computers. Digests only; no file contents cross the link. */
+  hashFiles?(paths: readonly string[]): Promise<AiConfigFileHash[]>
   /** Whether `path` exists (following symlinks); false on any error, like `existsSync`. */
   exists(path: string): Promise<boolean>
   /** UTF-8 contents; throws when missing or unreadable. */
@@ -45,6 +84,7 @@ export interface AiConfigFs {
 
 /** This machine's disk. */
 export const localAiConfigFs: AiConfigFs = {
+  hashFiles: hashAiConfigFiles,
   exists: (p) =>
     fsp.access(p).then(
       () => true,

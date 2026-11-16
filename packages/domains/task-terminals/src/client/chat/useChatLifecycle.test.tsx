@@ -29,6 +29,7 @@ const m = vi.hoisted(() => {
   const settingsGet = vi.fn<SettingsGet>()
   const recordClientEvent = vi.fn<RecordClientEvent>()
   return {
+    hubAllows: vi.fn<(client: unknown, path: string) => Promise<boolean>>(),
     settingsGet,
     recordClientEvent,
     toast: vi.fn(),
@@ -43,6 +44,7 @@ const m = vi.hoisted(() => {
 
 vi.mock('../trpc', () => ({ useTRPCClient: () => m.client }))
 vi.mock('@slayzone/ui', () => ({ toast: m.toast }))
+vi.mock('@slayzone/transport/client', () => ({ hubAllows: m.hubAllows }))
 
 import { useChatLifecycle, type UseChatLifecycleOpts } from './useChatLifecycle'
 import { chatsLoadingCount } from './chat-loading'
@@ -147,6 +149,7 @@ async function unhandledRejectionsDuring(fn: () => Promise<void>): Promise<unkno
 }
 
 beforeEach(() => {
+  m.hubAllows.mockReset().mockResolvedValue(true)
   m.settingsGet.mockReset().mockResolvedValue('auto')
   m.recordClientEvent.mockReset().mockResolvedValue(undefined)
   m.toast.mockReset()
@@ -201,7 +204,7 @@ describe('useChatLifecycle displaySessionEnded', () => {
 
 describe('useChatLifecycle startup (non-main tab)', () => {
   it('restores an agent that was running', async () => {
-    const { chatApi } = setup({ agentState: 'running' })
+    const { chatApi } = setup({ agentState: 'running', shown: false })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
     // A restore: the computer starts these a few at a time (background lane).
@@ -230,7 +233,11 @@ describe('useChatLifecycle startup (non-main tab)', () => {
   })
 
   it('passes the provider flags override through', async () => {
-    const { chatApi } = setup({ agentState: 'running', providerFlagsOverride: '--verbose' })
+    const { chatApi } = setup({
+      agentState: 'running',
+      providerFlagsOverride: '--verbose',
+      shown: false
+    })
     await flush()
     expect(chatApi.start).toHaveBeenCalledWith({
       ...TARGET,
@@ -241,6 +248,32 @@ describe('useChatLifecycle startup (non-main tab)', () => {
 })
 
 describe('useChatLifecycle startup decision', () => {
+  it.each([false, true])(
+    'skips auto-start when scope denies chat.start (main: %s)',
+    async (isMain) => {
+      m.hubAllows.mockResolvedValue(false)
+      m.settingsGet.mockResolvedValue('instant')
+      const { chatApi } = setup({ isMain, agentState: 'running' })
+      await flush()
+      expect(m.hubAllows).toHaveBeenCalledWith(m.client, 'chat.start')
+      expect(chatApi.start).not.toHaveBeenCalled()
+      expect(chatsLoadingCount()).toBe(0)
+      expect(m.toast).not.toHaveBeenCalled()
+    }
+  )
+
+  it('waits for scope discovery before auto-starting', async () => {
+    const allowed = deferred<boolean>()
+    m.hubAllows.mockReturnValue(allowed.promise)
+    const { chatApi } = setup({ agentState: 'running' })
+    await flush()
+    expect(chatApi.start).not.toHaveBeenCalled()
+    expect(chatsLoadingCount()).toBe(1)
+    await act(async () => allowed.resolve(true))
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+  })
+
   it('reads the startup setting by its key', async () => {
     setup()
     await flush()
@@ -301,7 +334,7 @@ describe('useChatLifecycle startup decision', () => {
     const start = leakable<Parameters<ChatActions['start']>[0]>('spawn failed')
     const chatApi: ChatActions = { ...makeChatApi(), start: start.fn }
     const leaked = await unhandledRejectionsDuring(async () => {
-      setup({ agentState: 'running', chatApi })
+      setup({ agentState: 'running', chatApi, shown: false })
       await flush()
     })
     expect(start.calls).toEqual([{ ...TARGET, reason: 'restore' }])
@@ -618,5 +651,36 @@ describe('useChatLifecycle inFlight diagnostics', () => {
     })
     expect(record.calls).toHaveLength(2)
     expect(leaked).toEqual([])
+  })
+})
+
+// The hub restores every chat that ran at shutdown, a few at a time. The tab the
+// user is looking at must not wait its FIFO turn behind the hidden ones.
+describe('useChatLifecycle restore of the tab on screen', () => {
+  it('a restored tab on screen asks as a user start (foreground lane)', async () => {
+    const { chatApi } = setup({ agentState: 'running', shown: true })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'user' })
+  })
+
+  it('revealed while its restore still waits: asks once more as a user start', async () => {
+    const waiting = timelineState({ notStarted: true })
+    const { chatApi, update } = setup({ agentState: 'running', shown: false, state: waiting })
+    await flush()
+    expect(chatApi.start).toHaveBeenLastCalledWith({ ...TARGET, reason: 'restore' })
+    update({ shown: true, state: waiting })
+    expect(chatApi.start).toHaveBeenCalledTimes(2)
+    expect(chatApi.start).toHaveBeenLastCalledWith({ ...TARGET, reason: 'user' })
+    update({ shown: false, state: waiting })
+    update({ shown: true, state: waiting })
+    expect(chatApi.start).toHaveBeenCalledTimes(2)
+  })
+
+  it('revealed after its agent is up: no second start', async () => {
+    const { chatApi, update } = setup({ agentState: 'running', shown: false })
+    await flush()
+    update({ shown: true })
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
   })
 })

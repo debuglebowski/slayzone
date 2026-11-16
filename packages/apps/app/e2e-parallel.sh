@@ -5,6 +5,7 @@
 # Usage:
 #   ./e2e-parallel.sh                 full suite (all groups except perf)
 #   ./e2e-parallel.sh <args...>       forwarded verbatim to `playwright test`
+#   E2E_PROCESSES=3 ./e2e-parallel.sh fewer processes on a shared or loaded host
 #
 # The perf group is NOT part of the full suite: it asserts wall-clock budgets, so
 # it must run alone on a quiet box. Run it on its own: `pnpm test:e2e:perf`.
@@ -61,7 +62,11 @@ fi
 # Process count. Seven = what the per-directory layout ran (six groups + core
 # split in two), so the box carries no more contention than before; only the
 # partition changed. See the header for why not more.
-PROCESSES=7
+PROCESSES=${E2E_PROCESSES:-7}
+if ! [[ "$PROCESSES" =~ ^[1-9][0-9]*$ ]] || [[ "$PROCESSES" -gt 32 ]]; then
+  echo "E2E_PROCESSES must be an integer between 1 and 32" >&2
+  exit 2
+fi
 PERF_GROUP=perf
 
 # Discover group dirs. `perf` is deliberately excluded — see the header.

@@ -26,6 +26,14 @@ PTY (node-pty)
 
 ## Key Concepts
 
+### Restoring chats
+
+Each hub client admits at most three complete chat restorations, at most two in the
+background. Revealing a queued tab promotes it. A slot covers history, settings,
+metadata queries, direct-link setup and the initial agent-start decision; cancelling
+a panel retains capacity until its requests settle. Restored panels stay mounted.
+Agent execution, durable queues and attention state continue independently of UI admission.
+
 ### Chat answers and threads
 
 - `chat/AssistantAnswer.tsx` owns the answer bubble, full-row hover highlight, top-right Copy/Thread/More toolbar, and shared Activities/Files/Threads/details footer. The toolbar keeps the same placement for short and long replies.

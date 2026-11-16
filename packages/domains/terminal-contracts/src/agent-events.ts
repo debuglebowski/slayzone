@@ -599,6 +599,8 @@ export interface ProcessExitEvent {
   kind: 'process-exit'
   code: number | null
   signal: string | null
+  /** Host initiated cancellation; never infer a user Stop from an OS exit code. */
+  reason?: 'watchdog'
 }
 
 /**
@@ -641,11 +643,11 @@ export interface ConversationBranchEvent {
 export interface InterruptedEvent {
   kind: 'interrupted'
   /**
-   * Why the turn ended without a reply. Absent = the user stopped it.
+   * Why the turn ended without a reply. Absent = unspecified interruption.
    * `already-in-conversation`: Claude Code already had the message (it got it
    * before a restart, and drops a message whose uuid it has seen), so no turn ran.
    */
-  reason?: 'already-in-conversation'
+  reason?: 'already-in-conversation' | 'watchdog' | 'stop-request'
 }
 
 /**

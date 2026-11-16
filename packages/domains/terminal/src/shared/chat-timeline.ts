@@ -306,8 +306,8 @@ export type TimelineItem =
       kind: 'interrupted'
       timestamp: number
       parentToolUseId?: string
-      /** Why the turn ended without a reply; absent = the user stopped it. */
-      reason?: 'already-in-conversation'
+      /** Why the turn ended without a reply; absent = unspecified interruption. */
+      reason?: 'already-in-conversation' | 'watchdog' | 'stop-request'
       /**
        * A later marker closes the same user turn (a Stop the CLI never saw, then
        * the message ran and was stopped again): this one is not shown.
@@ -614,6 +614,12 @@ export interface ChatTimelineState {
    * scan of the timeline from the end finds, without the scan (`findUserItem`).
    */
   userIndex: PersistentIndex<readonly number[]>
+  /**
+   * Messages Stop took back (`user-message-popped`: their row is gone) → their last
+   * delivery: the outbox cancels them after the pop, and a waiter (`slay chat wait
+   * --until answered`) must still learn it. Only taken-back messages; small.
+   */
+  takenBack: PersistentIndex<{ delivery: UserDeliveryState; error?: string }>
   /** Rows of `conversation-branch` items, ascending (what the branch lookbacks read). */
   branchRows: readonly number[]
   /** Rows still streaming (text / thinking with a `stream`, a tool whose input streams). */
@@ -740,6 +746,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
     ...initialPromptState(),
     userIndex: PersistentIndex.empty(),
+    takenBack: PersistentIndex.empty(),
     branchRows: [],
     streamingRows: [],
     turnStart: 0,
@@ -1254,7 +1261,14 @@ function setDelivery(
   error?: string
 ): ChatTimelineState {
   const at = findUserItem(state, id)
-  if (at < 0) return state
+  if (at < 0) {
+    // Taken back by Stop: no row, but its delivery is still asked for.
+    if (!state.takenBack.has(id)) return state
+    return {
+      ...state,
+      takenBack: state.takenBack.with(id, { delivery, ...(error ? { error } : {}) })
+    }
+  }
   const it = rowAt(state.timeline, at) as UserTextItem
   if (it.delivery === delivery && it.deliveryError === error) return state
   const wasFailed = it.delivery === 'failed'
@@ -1379,7 +1393,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // A stopped turn stopped again (it ran on before the CLI read the first
       // Stop) moves its one marker after the work it did meanwhile.
       const stoppedAgain =
-        !isTurnOpen(state) && event.reason === undefined && workedSinceStop(state)
+        !isTurnOpen(state) &&
+        (event.reason === undefined || event.reason === 'stop-request') &&
+        workedSinceStop(state)
       if (!isTurnOpen(state) && !stoppedAgain) return state
       const item: TimelineItem = {
         kind: 'interrupted',
@@ -1498,6 +1514,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
                     )
                   : state.userIndex.without(it.id)
                 : state.userIndex,
+            takenBack: it.id
+              ? state.takenBack.with(it.id, {
+                  delivery: it.delivery ?? 'queued',
+                  ...(it.deliveryError ? { error: it.deliveryError } : {})
+                })
+              : state.takenBack,
             idlessOptimistic:
               it.optimistic && !it.id ? state.idlessOptimistic - 1 : state.idlessOptimistic,
             userMessagesSent: Math.max(0, state.userMessagesSent - 1)
@@ -2321,11 +2343,17 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         timeline: appended(state.timeline, { kind: 'stderr', text: event.text, timestamp: ts })
       }
     case 'process-exit': {
+      // Older buffers recorded the watchdog notice, but no exit provenance.
+      const tail =
+        state.timeline.length > 0 ? rowAt(state.timeline, state.timeline.length - 1) : undefined
+      const reason =
+        event.reason ??
+        (tail?.kind === 'notice' && tail.code === 'watchdog-killed' ? 'watchdog' : undefined)
       // Process exited. If we were mid-turn, heal counters + clear stream state
       // so inFlight drops and the typing indicator clears. Without this, a crash
       // mid-stream leaves "Writing…" stuck forever even after the buffer replay.
       const healed = failInFlightSubAgents(
-        endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts)),
+        endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts, reason)),
         'stopped',
         'process'
       )
@@ -3105,9 +3133,17 @@ function blockingHookIndex(timeline: TimelineRows, toolAt: number, raw: unknown)
   return -1
 }
 
-function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
+function healOrphanedTurn(
+  state: ChatTimelineState,
+  ts: number,
+  reason?: 'watchdog'
+): ChatTimelineState {
   if (!isInFlight(state)) return state
-  const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
+  const item: TimelineItem = {
+    kind: 'interrupted',
+    timestamp: ts,
+    ...(reason ? { reason } : {})
+  }
   const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
   return {
     ...failed,

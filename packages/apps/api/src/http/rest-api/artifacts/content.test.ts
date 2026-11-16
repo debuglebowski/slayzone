@@ -37,6 +37,8 @@ const blobsDir = path.join(storageDir, 'blobs')
 
 const { registerArtifactsContentRoutes } = await import('./content.js')
 const { registerArtifactsCrudRoutes } = await import('./crud.js')
+const { getArtifactsDataRoot } = await import('./shared.js')
+const { getArtifactStorage, setArtifactStorage } = await import('@slayzone/task-artifacts/server')
 
 const h = await createTestHarness()
 
@@ -262,6 +264,110 @@ describe('GET /api/artifacts/:id/content', () => {
     expect(res.status).toBe(404)
     // Wording the CLI's `download --type raw` prints verbatim.
     expect(JSON.parse(res.bytes.toString('utf-8')).error).toBe('Artifact file not found on disk.')
+  })
+})
+
+/**
+ * Byte ranges: a `<video>` (and the PDF viewer) previews an artifact through the
+ * desktop's slz-file handler, which forwards `Range` here. Without 206s Chromium
+ * treats the file as an unseekable stream: no scrubbing, and an mp4 whose index
+ * sits at the end has to arrive whole before it can start.
+ */
+describe('GET /api/artifacts/:id/content — byte ranges', () => {
+  const get = async (urlPath: string, range?: string) => {
+    const res = await fetch(`${rest.url}${urlPath}`, { headers: range ? { range } : {} })
+    return {
+      status: res.status,
+      headers: res.headers,
+      bytes: Buffer.from(await res.arrayBuffer())
+    }
+  }
+  const url = () => `/api/artifacts/${binaryArtifact.id}/content`
+  const size = BINARY.length
+
+  test('advertises byte ranges on a whole-file read', async () => {
+    const res = await get(url())
+    expect(res.status).toBe(200)
+    expect(res.headers.get('accept-ranges')).toBe('bytes')
+    expect(res.bytes.toString('hex')).toBe(BINARY.toString('hex'))
+  })
+
+  test('one closed range is a 206 with exactly those bytes', async () => {
+    const res = await get(url(), 'bytes=2-5')
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-range')).toBe(`bytes 2-5/${size}`)
+    expect(res.headers.get('content-length')).toBe('4')
+    expect(res.bytes.toString('hex')).toBe(BINARY.subarray(2, 6).toString('hex'))
+  })
+
+  test('open-ended and suffix ranges', async () => {
+    const from = await get(url(), 'bytes=10-')
+    expect(from.status).toBe(206)
+    expect(from.headers.get('content-range')).toBe(`bytes 10-${size - 1}/${size}`)
+    expect(from.bytes.toString('hex')).toBe(BINARY.subarray(10).toString('hex'))
+
+    const tail = await get(url(), 'bytes=-3')
+    expect(tail.status).toBe(206)
+    expect(tail.headers.get('content-range')).toBe(`bytes ${size - 3}-${size - 1}/${size}`)
+    expect(tail.bytes.toString('hex')).toBe(BINARY.subarray(size - 3).toString('hex'))
+  })
+
+  test('an end past the file is clamped to its last byte', async () => {
+    const res = await get(url(), 'bytes=12-999')
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-range')).toBe(`bytes 12-${size - 1}/${size}`)
+    expect(res.bytes.toString('hex')).toBe(BINARY.subarray(12).toString('hex'))
+  })
+
+  test('a start past the end is 416 naming the size', async () => {
+    const res = await get(url(), `bytes=${size}-`)
+    expect(res.status).toBe(416)
+    expect(res.headers.get('content-range')).toBe(`bytes */${size}`)
+  })
+
+  test('several ranges or a malformed header serve the whole file', async () => {
+    for (const range of ['bytes=0-1,4-5', 'bytes=5-2', 'items=0-1']) {
+      const res = await get(url(), range)
+      expect(res.status).toBe(200)
+      expect(res.bytes.toString('hex')).toBe(BINARY.toString('hex'))
+    }
+  })
+
+  test('an artifact held by a computer is ranged the same way', async () => {
+    const id = crypto.randomUUID()
+    h.db
+      .prepare('INSERT INTO task_artifacts (id, task_id, title, "order") VALUES (?, ?, ?, ?)')
+      .run(id, taskId, 'remote.mp4', 120)
+    const root = getArtifactsDataRoot()
+    const local = getArtifactStorage(root)
+    setArtifactStorage(root, {
+      ...local,
+      getArtifact: async (db, artifactId) => {
+        const row = await local.getArtifact(db, artifactId)
+        return row && artifactId === id
+          ? { ...row, storage: { computerId: 'c1', available: true } }
+          : row
+      },
+      readArtifactBytes: async (db, artifactId) =>
+        artifactId === id ? new Uint8Array(BINARY) : local.readArtifactBytes(db, artifactId)
+    })
+    try {
+      const whole = await get(`/api/artifacts/${id}/content`)
+      expect(whole.status).toBe(200)
+      expect(whole.headers.get('accept-ranges')).toBe('bytes')
+      expect(whole.bytes.toString('hex')).toBe(BINARY.toString('hex'))
+
+      const part = await get(`/api/artifacts/${id}/content`, 'bytes=1-3')
+      expect(part.status).toBe(206)
+      expect(part.headers.get('content-range')).toBe(`bytes 1-3/${size}`)
+      expect(part.bytes.toString('hex')).toBe(BINARY.subarray(1, 4).toString('hex'))
+
+      const past = await get(`/api/artifacts/${id}/content`, 'bytes=999-')
+      expect(past.status).toBe(416)
+      expect(past.headers.get('content-range')).toBe(`bytes */${size}`)
+    } finally {
+      setArtifactStorage(root, local)
+    }
   })
 })
 

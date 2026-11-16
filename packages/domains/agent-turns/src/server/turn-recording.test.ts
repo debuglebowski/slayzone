@@ -19,9 +19,10 @@ import { installLoopbackTurnComputer } from '../../../../shared/test-utils/loopb
 import { chatSavedSummary } from '@slayzone/terminal-contracts'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { wireTurnRecording, type TurnRecordingSources } from './turn-recording.js'
-import { listTurnsForWorktree } from './db.js'
 
-installLoopbackTurnComputer()
+// The computer resolves a task's checkout (§9 7c): here, from the fixture database.
+const computer = installLoopbackTurnComputer(() => h.db)
+const listTurnsForWorktree = async (_db: unknown, repo: string) => computer.rows(repo)
 
 function git(repo: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' })
@@ -46,8 +47,10 @@ function freshTab(mode: string): { taskId: string; tabId: string; repo: string }
   const taskId = crypto.randomUUID()
   const tabId = `tab-${taskId.slice(0, 8)}`
   h.db
-    .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-    .run(taskId, projectId, 'T', repo)
+    .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+    .run(taskId, projectId, 'T')
+  // The task's worktree is on its computer (§9 7e), not in the hub row.
+  computer.setWorktree(taskId, repo)
   h.db
     .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
     .run(tabId, taskId, mode, 0)
@@ -130,9 +133,9 @@ describe('wireTurnRecording', () => {
     stop()
   })
 
-  test('chat owned by a computer: the turn records, its prompt stays on the computer', async () => {
-    // Migration v187: the hub holds no prompt text for a task whose chat a computer
-    // owns (a trigger refuses it). The boundary must still record — with no preview.
+  test('chat owned by a computer: the turn records with its preview, on the computer', async () => {
+    // Turns live on the computer (robustness plan §9, v207): the prompt preview is
+    // kept there with the turn, never on the hub.
     const s = fakeSources()
     const stop = wireTurnRecording(h.slayDb, s.sources)
     const { taskId, tabId, repo } = freshTab('claude-chat')
@@ -145,7 +148,7 @@ describe('wireTurnRecording', () => {
     fs.writeFileSync(path.join(repo, 'owned.txt'), 'x')
     s.chat(tabId, { kind: 'result' } as AgentEvent, 2)
     expect(await turnsSettle(repo, 1)).toBe(1)
-    expect((await listTurnsForWorktree(h.slayDb, repo))[0].prompt_preview).toBe('')
+    expect((await listTurnsForWorktree(h.slayDb, repo))[0].prompt_preview).toBe('secret prompt')
     stop()
   })
 

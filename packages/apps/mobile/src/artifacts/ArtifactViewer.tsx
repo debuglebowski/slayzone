@@ -4,8 +4,10 @@
  * page in `DocumentWebView`), image (`ZoomableImage`), PDF — with desktop's controls
  * that fit a phone: Preview / Source for SVG and mermaid, the HTML colour scheme
  * (System → Dark → Light, saved on the artifact as on desktop), History (its versions;
- * picking one shows that version), and Share (the iOS share sheet: save to Files, open
- * in another app, AirDrop…).
+ * picking one shows that version), Share (the iOS share sheet: save to Files, open
+ * in another app, AirDrop…), and Export: the text on screen as PDF / PNG / HTML, the
+ * formats desktop offers for its render mode, made on the phone (`export/`) and handed
+ * to the share sheet.
  *
  * Must render inside the artifact's hub scope; everything it reads or writes goes to
  * that hub.
@@ -13,15 +15,29 @@
 import { nextHtmlTheme } from '@slayzone/platform/forced-html-theme'
 import type { ArtifactVersion } from '@slayzone/task-artifacts/shared'
 import { dbTimestampToIso, formatRelativeDate } from '@slayzone/task-artifacts/shared'
-import type { TaskArtifact } from '@slayzone/task-contracts/types'
+import { getEffectiveRenderMode, type TaskArtifact } from '@slayzone/task-contracts/types'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ActionSheetIOS,
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View
+} from 'react-native'
 import { type ChromeColors, useTheme, useThemeVariant } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
+import { mediaPlayer } from './media-player'
 import { DocumentWebView, type DocumentPage } from './DocumentWebView'
+import { exportArtifact } from './export/export-artifact'
+import { exportFormatsOf } from './export/export-formats'
+import { useExportRenderer } from './export/use-export-renderer'
 import { downloadArtifactFile } from './files'
 import type { HubTarget } from './hub-rest'
+import { loadHtml2canvasScript, loadMermaidScript } from './page-assets'
 import { codePage } from './pages/code-page'
 import { htmlReportPage } from './pages/html-report-page'
 import { markdownNeedsMermaid, markdownPage } from './pages/markdown-page'
@@ -39,6 +55,8 @@ import {
 import {
   extensionBadge,
   isFileKind,
+  isMediaKind,
+  isShareOnlyKind,
   looksBinary,
   type ViewerKind,
   viewerKindOf
@@ -83,6 +101,8 @@ type Body =
   | { kind: 'page'; page: DocumentPage }
   | { kind: 'image'; uri: string }
   | { kind: 'binary' }
+  | { kind: 'media'; uri: string }
+  | { kind: 'unsupported'; message: string }
   | { kind: 'loading' }
   | { kind: 'error'; message: string; retry: () => void }
 
@@ -104,6 +124,11 @@ function LoadedArtifact({
 
   const kind = viewerKindOf(artifact)
   const fileKind = isFileKind(kind)
+  const mediaKind = isMediaKind(kind)
+  const player = mediaKind ? mediaPlayer() : null
+  // Played from the downloaded file when this build has the native player.
+  const downloads = fileKind || player !== null
+  const shareOnly = isShareOnlyKind(kind) || (mediaKind && player === null)
   const [showHistory, setShowHistory] = useState(false)
   const [view, setView] = useState<'preview' | 'source'>(
     artifact.view_mode === 'raw' ? 'source' : 'preview'
@@ -112,14 +137,27 @@ function LoadedArtifact({
     busy: false,
     error: null
   })
+  const [exportState, setExportState] = useState<{
+    busy: boolean
+    error: string | null
+    /** Something to know about the file just exported (not an error). */
+    notice: string | null
+  }>({ busy: false, error: null, notice: null })
+  const exportRenderer = useExportRenderer()
+  // The running export's abort: closing the viewer stops it, so its share sheet never
+  // opens over another screen.
+  const exportAbort = useRef<AbortController | null>(null)
+  useEffect(() => () => exportAbort.current?.abort(), [])
+  const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
+  const exportFormats = fileKind ? [] : exportFormatsOf(renderMode)
 
   const versions = useArtifactVersions(artifact.id, showHistory || version !== null)
   const selected: ArtifactVersion | null =
     version === null ? null : (versions.data?.find((v) => v.version_num === version) ?? null)
   const versionReady = version === null || selected !== null
 
-  const text = useArtifactText(artifact.id, selected, !fileKind && versionReady)
-  const file = useArtifactFile(target, artifact, selected, contentTick, fileKind && versionReady)
+  const text = useArtifactText(artifact.id, selected, !downloads && !shareOnly && versionReady)
+  const file = useArtifactFile(target, artifact, selected, contentTick, downloads && versionReady)
   const isText = text.data !== undefined && !looksBinary(text.data)
   const needsMermaid = useMemo(
     () =>
@@ -154,14 +192,23 @@ function LoadedArtifact({
             retry: versions.retry
           }
         : { kind: 'loading' }
-  } else if (fileKind) {
+  } else if (shareOnly) {
+    body = {
+      kind: 'unsupported',
+      message: mediaKind
+        ? `This ${kind} can't be played in this build of the app. Share it to open it in another app.`
+        : `${kind === 'font' ? 'Fonts' : 'Archives'} can't be shown in the app yet. Share it to open it in another app.`
+    }
+  } else if (downloads) {
     body = file.error
       ? { kind: 'error', message: file.error, retry: file.retry }
       : file.data === undefined
         ? { kind: 'loading' }
-        : kind === 'image'
-          ? { kind: 'image', uri: file.data }
-          : { kind: 'page', page: { kind: 'file', fileUri: file.data } }
+        : mediaKind
+          ? { kind: 'media', uri: file.data }
+          : kind === 'image'
+            ? { kind: 'image', uri: file.data }
+            : { kind: 'page', page: { kind: 'file', fileUri: file.data } }
   } else if (text.error) {
     body = { kind: 'error', message: text.error, retry: text.retry }
   } else if (text.data !== undefined && !isText) {
@@ -172,6 +219,7 @@ function LoadedArtifact({
   }
 
   const share = () => {
+    if (!versionReady) return
     setShareState({ busy: true, error: null })
     const ready =
       fileKind && file.data !== undefined
@@ -189,6 +237,55 @@ function LoadedArtifact({
       .catch((err: unknown) =>
         setShareState({ busy: false, error: err instanceof Error ? err.message : String(err) })
       )
+  }
+
+  // What is on screen: the working copy's text or the version's. Nothing while the
+  // version picked is loading or missing, or the text failed to load: the screen shows
+  // a spinner or an error then, and the cache may still hold another copy's text.
+  const exportContent = versionReady && !text.error && isText ? text.data : undefined
+  const chooseExport = () => {
+    if (exportContent === undefined) return
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: 'Export',
+        options: [...exportFormats.map((f) => f.label), 'Cancel'],
+        cancelButtonIndex: exportFormats.length
+      },
+      (index) => {
+        const choice = exportFormats[index]
+        if (!choice) return
+        const abort = new AbortController()
+        exportAbort.current = abort
+        setExportState({ busy: true, error: null, notice: null })
+        exportArtifact(
+          {
+            content: exportContent,
+            mode: renderMode,
+            title: artifact.title,
+            format: choice.format
+          },
+          {
+            render: exportRenderer.render,
+            mermaidScript: loadMermaidScript,
+            html2canvasScript: loadHtml2canvasScript,
+            signal: abort.signal,
+            // Shown under the toolbar as soon as it is known: before the share sheet opens.
+            onNotice: (notice) => setExportState((state) => ({ ...state, notice }))
+          }
+        )
+          .then(() => setExportState((state) => ({ ...state, busy: false, error: null })))
+          .catch((err: unknown) =>
+            setExportState({
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+              notice: null
+            })
+          )
+          .then(() => {
+            if (exportAbort.current === abort) exportAbort.current = null
+          })
+      }
+    )
   }
 
   const htmlTheme = artifact.html_theme_override ?? 'system'
@@ -235,9 +332,18 @@ function LoadedArtifact({
       />
       <HeaderButton
         label={shareState.busy ? 'Sharing…' : 'Share'}
-        disabled={shareState.busy}
+        // The version picked is loading or missing: there is nothing of it to share
+        // (the download would fall back to the working copy).
+        disabled={shareState.busy || !versionReady}
         onPress={share}
       />
+      {exportFormats.length > 0 ? (
+        <HeaderButton
+          label={exportState.busy ? 'Exporting…' : 'Export'}
+          disabled={exportState.busy || exportContent === undefined}
+          onPress={chooseExport}
+        />
+      ) : null}
     </>
   )
 
@@ -265,6 +371,8 @@ function LoadedArtifact({
         </View>
       ) : null}
       {shareState.error ? <Text style={styles.error}>{shareState.error}</Text> : null}
+      {exportState.error ? <Text style={styles.error}>{exportState.error}</Text> : null}
+      {exportState.notice ? <Text style={styles.notice}>{exportState.notice}</Text> : null}
       <View style={styles.body}>
         <ArtifactBody body={body} onOpenArtifact={onOpenArtifact} onShare={share} kind={kind} />
         {showHistory ? (
@@ -279,6 +387,7 @@ function LoadedArtifact({
           />
         ) : null}
       </View>
+      {exportRenderer.view}
     </View>
   )
 }
@@ -351,6 +460,19 @@ function ArtifactBody({
           <HeaderButton label="Share" onPress={onShare} />
         </Center>
       )
+    case 'unsupported':
+      return (
+        <Center>
+          <Text style={styles.note} testID="artifact-unsupported">
+            {body.message}
+          </Text>
+          <HeaderButton label="Share" onPress={onShare} />
+        </Center>
+      )
+    case 'media': {
+      const Player = mediaPlayer()?.ArtifactMediaPlayer
+      return Player ? <Player uri={body.uri} testID="artifact-media" /> : null
+    }
     case 'image':
       return <ZoomableImage uri={body.uri} testID="artifact-image" />
     case 'page':
@@ -446,6 +568,7 @@ const makeStyles = (t: ChromeColors) =>
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
     note: { color: t.mutedForeground, textAlign: 'center', padding: 24 },
     error: { color: t.destructive, paddingHorizontal: 16, paddingVertical: 6, fontSize: 13 },
+    notice: { color: t.mutedForeground, paddingHorizontal: 16, paddingVertical: 6, fontSize: 13 },
     banner: {
       flexDirection: 'row',
       alignItems: 'center',

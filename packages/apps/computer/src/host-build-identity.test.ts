@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { expect, it, vi } from 'vitest'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
+import { placeTestProject } from './project-scope.fixture'
 
 it('defers a rebuilt same-version host until work stops, including with auto-upgrade disabled', async () => {
   vi.stubGlobal('__SLAYZONE_COMPUTER_VERSION__', '1.0.0')
@@ -34,6 +35,7 @@ it('defers a rebuilt same-version host until work stops, including with auto-upg
   }
   const previousRoot = process.env.SLAYZONE_ROOT
   process.env.SLAYZONE_ROOT = root
+  placeTestProject(root, config.hubUrl, 'p1', root)
   const host = await startSessionHost(root, config)
   const control = await hostControl(root)
   const grant = await control.rpc.request<import('./session-host').ConnectorGrant>('reserve', {
@@ -45,6 +47,7 @@ it('defers a rebuilt same-version host until work stops, including with auto-upg
     actor: { userId: null, route: null },
     params: {
       sessionId: 'active',
+      projectId: 'p1',
       command: process.execPath,
       args: ['-e', 'setInterval(()=>{},1000)'],
       cwd: root

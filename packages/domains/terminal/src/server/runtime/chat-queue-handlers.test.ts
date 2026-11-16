@@ -373,3 +373,28 @@ describe('queue: add to the running turn (steer)', () => {
     expect((await ops.list(tab)).map((m) => m.id)).toEqual([b.id])
   })
 })
+
+describe('queue: item ops are scoped to the tab that names them (robustness plan §9, v208)', () => {
+  test('an item op naming another tab finds nothing and changes nothing', async () => {
+    const data = memoryQueue()
+    const ops = createChatQueueOps(db, data, lookup)
+    transport.ready = false
+    const q = await ops.push('tab-1', 'mine', 'mine')
+    const text = [{ type: 'text' as const, text: 'x' }]
+    expect(await ops.update(q.id, { send: 'x', original: 'x', content: text }, 'tab-2')).toBe(false)
+    expect(await ops.move(q.id, 0, 'tab-2')).toBe(false)
+    expect(await ops.hold(q.id, 'tab-2')).toBe(false)
+    expect(await ops.steer(q.id, 'tab-2')).toMatchObject({ ok: false })
+    expect(await ops.remove(q.id, 'tab-2')).toBe(false)
+    expect((await ops.list('tab-1')).map((m) => m.send)).toEqual(['mine'])
+    // The right tab still reaches it.
+    expect(await ops.hold(q.id, 'tab-1')).toBe(true)
+    await ops.release(q.id, 'tab-2')
+    transport.ready = true
+    await drainChatQueue(db, 'tab-1', data)
+    expect(transport.dispatched).toEqual([])
+    transport.ready = false
+    await ops.release(q.id, 'tab-1')
+    expect(await ops.remove(q.id, 'tab-1')).toBe(true)
+  })
+})

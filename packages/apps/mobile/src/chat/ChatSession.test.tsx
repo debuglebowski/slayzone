@@ -750,7 +750,7 @@ describe('ChatSession: files attached on desktop', () => {
     expect(screen.queryByLabelText('Send now: also run lint')).toBeNull()
     await runningTurn(hub)
     await fireEvent.press(await screen.findByLabelText('Send now: also run lint'))
-    await waitFor(() => expect(hub.callsTo('chat.queue.steer')).toEqual([{ id: 'q1' }]))
+    await waitFor(() => expect(hub.callsTo('chat.queue.steer')).toEqual([{ id: 'q1', tabId: TAB }]))
   })
 
   it('a refused add says why', async () => {
@@ -775,7 +775,9 @@ describe('ChatSession: files attached on desktop', () => {
     expect(screen.queryByLabelText('Send now: also run lint')).toBeNull()
     expect(screen.queryByLabelText('Remove queued message: also run lint')).toBeNull()
     await fireEvent.press(screen.getByLabelText('Take back from the agent: also run lint'))
-    await waitFor(() => expect(hub.callsTo('chat.queue.remove')).toEqual([{ id: 'q1' }]))
+    await waitFor(() =>
+      expect(hub.callsTo('chat.queue.remove')).toEqual([{ id: 'q1', tabId: TAB }])
+    )
   })
 
   it('a queued message shows in Up next at once, before the hub confirms it', async () => {

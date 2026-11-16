@@ -22,30 +22,47 @@ import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { taskRouter } from './task-router'
 import { setTaskDeps } from './task-router-deps'
 import { taskOps } from './task-ops-bundle'
-import { configureTaskRuntimeAdapters, getRuntimeAdapters } from './ops/shared'
-import { setMainAgentDeps } from './main-agent'
+import {
+  configureTaskRuntimeAdapters,
+  getRuntimeAdapters,
+  setTaskPathsDelegate
+} from './ops/shared'
+import { resolveChatAgentLaunch, resolveTerminalTabLaunch, setMainAgentDeps } from './main-agent'
+import { openTasksFromViewState, restoreRunningChatAgents } from './agent-restore'
+import { setTaskSessionLedger, type SessionLedgerClient } from './ops'
 
 const h = await createTestHarness()
-// The task's current conversation per mode, as the agent-session ledger would answer
-// it (`currentConversationByMode`; the ledger itself is pinned by its own suites).
-const conversations = new Map<string, Record<string, string>>()
-setTaskDeps({
-  ops: {
-    ...taskOps,
-    getTaskOp: async (db, id) => {
-      const t = await taskOps.getTaskOp(db, id)
-      const current = conversations.get(id)
-      return t && current ? { ...t, currentConversationByMode: current } : t
-    }
-  }
-})
-// A worktree task's row carries its worktree colour (worktrees/server's, in the hub).
-configureTaskRuntimeAdapters({
-  worktrees: {
-    ...getRuntimeAdapters().worktrees,
-    ensureProjectWorktreeColors: async () => new Map(),
-    getWorktreeColor: () => undefined
-  }
+setTaskDeps({ ops: taskOps })
+// The session ledger is on the agents' computer (robustness plan §9); here none is
+// connected: reset intents are recorded and wait for it (pinned by the hub's suites).
+const published: string[] = []
+setTaskSessionLedger({
+  publishIntents: async (taskId: string) => {
+    published.push(taskId)
+  },
+  forTask: async () => null,
+  sessionModesInScope: async () => null
+} as unknown as SessionLedgerClient)
+// A task's worktree / custom folder is read from its computer (§9 Phase 7d/7e): this
+// fake computer holds what each seeded task names; `away` = not connected.
+let pathsAway = false
+const computerPaths = new Map<string, { worktreePath: string | null; baseDir: string | null }>()
+setTaskPathsDelegate({
+  changed: async () => {},
+  apply: async (_taskId, patch) => patch,
+  release: async () => ({ worktreePath: null, shared: false, computerId: 'pc' }),
+  forget: async () => {},
+  read: async (taskIds) =>
+    Object.fromEntries(
+      taskIds.map((id) => {
+        if (pathsAway) return [id, { state: 'offline', computerId: 'pc' }]
+        const row = computerPaths.get(id)
+        return [
+          id,
+          { state: 'ok', worktreePath: row?.worktreePath ?? null, baseDir: row?.baseDir ?? null }
+        ]
+      })
+    )
 })
 const caller = taskRouter.createCaller({
   db: h.slayDb,
@@ -153,7 +170,7 @@ function seedTask(
   h.db
     .prepare(
       `INSERT INTO tasks (id, project_id, title, status, priority, "order", agent_id,
-         provider_config, worktree_path, base_dir, repo_name)
+         provider_config, has_worktree, has_base_dir, repo_name)
        VALUES (?, ?, 'T', 'inbox', 3, 0, ?, ?, ?, ?, ?)`
     )
     .run(
@@ -161,12 +178,65 @@ function seedTask(
       projectId,
       mode,
       JSON.stringify(extra.flags ? { [mode]: { flags: extra.flags } } : {}),
-      extra.worktree ?? null,
-      extra.baseDir ?? null,
+      extra.worktree ? 1 : 0,
+      extra.baseDir ? 1 : 0,
       extra.repo ?? null
     )
+  computerPaths.set(id, { worktreePath: extra.worktree ?? null, baseDir: extra.baseDir ?? null })
   return id
 }
+
+describe('stored chat launch', () => {
+  test('resolves main and extra tabs from stored settings', async () => {
+    const taskId = seedTask(seedProject('/p'), {
+      mode: 'claude-chat',
+      flags: '--verbose',
+      baseDir: '/base'
+    })
+    await caller.startMainAgent({ taskId })
+    const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+    expect(await resolveChatAgentLaunch(h.slayDb, { taskId, tabId: taskId }, getTask)).toEqual({
+      taskId,
+      tabId: taskId,
+      mode: 'claude-chat',
+      cwd: '/base',
+      providerFlagsOverride: '--verbose'
+    })
+    h.db
+      .prepare('INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES(?,?,?,1)')
+      .run('extra', taskId, 'claude-chat')
+    expect(await resolveChatAgentLaunch(h.slayDb, { taskId, tabId: 'extra' }, getTask)).toEqual({
+      taskId,
+      tabId: 'extra',
+      mode: 'claude-chat',
+      cwd: '/base',
+      providerFlagsOverride: null
+    })
+    const other = seedTask(seedProject('/other'), { mode: 'claude-chat' })
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId: other, tabId: 'extra' }, getTask)
+    ).rejects.toThrow('Not found')
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId, tabId: 'missing' }, getTask)
+    ).rejects.toThrow('Not found')
+  })
+
+  test('refuses terminal modes and tasks without a folder', async () => {
+    const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+    const taskId = seedTask(seedProject('/p'))
+    await caller.startMainAgent({ taskId })
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId, tabId: taskId }, getTask)
+    ).rejects.toThrow('chat agent')
+    const noFolder = seedTask(seedProject(null), { mode: 'claude-chat' })
+    h.db
+      .prepare('INSERT INTO terminal_tabs(id,task_id,mode,is_main,position) VALUES(?,?,?,1,0)')
+      .run(noFolder, noFolder, 'claude-chat')
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId: noFolder, tabId: noFolder }, getTask)
+    ).rejects.toThrow('no folder')
+  })
+})
 
 describe('terminal (pty) agents', () => {
   test("starts the agent with the task's own props and ensures its main tab", async () => {
@@ -221,14 +291,12 @@ describe('terminal (pty) agents', () => {
     expect(new Set(results.map((r) => r.sessionId)).size).toBe(1)
   })
 
-  test("resumes the task's current conversation instead of minting one", async () => {
+  test('passes no conversation hint: the resume is decided at spawn on the computer', async () => {
     const taskId = seedTask(seedProject('/p'))
-    conversations.set(taskId, { 'claude-code': 'conv-1' })
     await caller.startMainAgent({ taskId })
-    expect(ptyCreates[0]).toMatchObject({
-      conversationId: 'conv-1',
-      existingConversationId: 'conv-1'
-    })
+    // The pre-minted id is a candidate only: pty-manager resolves the ledger first and
+    // never mints over a known conversation (spawn-conversation.test).
+    expect(ptyCreates[0].existingConversationId).toBeUndefined()
   })
 
   test('a provider that mints its own ids gets none', async () => {
@@ -253,6 +321,16 @@ describe('the working directory, resolved on the hub', () => {
     const taskId = seedTask(seedProject('/wrap', 'api'), { worktree: '/wt', baseDir: '/b' })
     expect((await caller.startMainAgent({ taskId })).cwd).toBe('/wt')
     expect(detectCalls).toEqual([])
+  })
+
+  test('§9 7d: its computer away — refused visibly, never started in the project folder', async () => {
+    const taskId = seedTask(seedProject('/wrap', 'api'), { worktree: '/wt' })
+    pathsAway = true
+    try {
+      await expect(caller.startMainAgent({ taskId })).rejects.toThrow(/not connected/)
+    } finally {
+      pathsAway = false
+    }
   })
 
   test('then the base dir', async () => {
@@ -345,24 +423,40 @@ describe('task.switchMode', () => {
       ).provider_config
     )
 
-  test('stops the terminal agent, stores the mode, clears every conversation id', async () => {
+  test('stops the terminal agent, stores the mode, resets the main tab', async () => {
     const taskId = seedTask(seedProject('/p'), { flags: '--x' })
-    h.db
-      .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-      .run(JSON.stringify({ 'claude-code': { flags: '--x', conversationId: 'conv-1' } }), taskId)
     livePtys.set(`${taskId}:${taskId}`, 'running')
 
     const updated = await caller.switchMode({ taskId, mode: 'codex' })
 
     expect(updated.agent_id).toBe('codex')
     expect(killed).toEqual([`pty:${taskId}:${taskId}`])
-    // Flags survive (deep merge); the conversation is gone.
-    expect((await providerConfig(taskId))['claude-code']).toMatchObject({
-      flags: '--x',
-      conversationId: null
-    })
+    // Flags survive (deep merge).
+    expect((await providerConfig(taskId))['claude-code']).toMatchObject({ flags: '--x' })
+    // The main tab's sessions reset — every mode but the chat ones — as an intent
+    // for the task's computer (offline here: it waits), published at once.
+    expect(
+      h.db
+        .prepare('SELECT mode, tab_id, except_chat FROM session_resets WHERE task_id = ?')
+        .all(taskId)
+    ).toEqual([{ mode: '*', tab_id: taskId, except_chat: 1 }])
+    expect(published).toContain(taskId)
     // It does not start the new agent.
     expect(ptyCreates).toEqual([])
+  })
+
+  test('INCIDENT: resets only the MAIN tab — a secondary agent tab keeps its session', async () => {
+    // The ledger rule (a main-tab reset never cuts another tab) is pinned on the
+    // computer (session-ledger.test); here: the intent names the main tab only.
+    const taskId = seedTask(seedProject('/p'))
+    livePtys.set(`${taskId}:${taskId}`, 'running')
+    await caller.switchMode({ taskId, mode: 'codex' })
+    await caller.switchMode({ taskId, mode: 'claude-code' })
+    const resets = h.db
+      .prepare('SELECT tab_id FROM session_resets WHERE task_id = ?')
+      .all(taskId) as Array<{ tab_id: string | null }>
+    expect(resets.length).toBe(2)
+    expect(resets.every((r) => r.tab_id === taskId)).toBe(true)
   })
 
   test('from a chat mode: stops the chat process, not a pty', async () => {
@@ -395,5 +489,217 @@ describe('task.switchMode', () => {
     await expect(caller.switchMode({ taskId: 'nope', mode: 'codex' })).rejects.toMatchObject({
       code: 'NOT_FOUND'
     })
+  })
+})
+
+// --- boot restore (agent-restore.ts) ---------------------------------------------
+describe('boot restore of running chat agents', () => {
+  const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+  const everywhere = async () => true
+  const setSetting = (key: string, value: string | null) => {
+    h.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    if (value !== null)
+      h.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, value)
+  }
+  /** A task whose main tab (id = task id) ran `mode` at shutdown. */
+  function runningTask(mode: string, state = 'running'): string {
+    const taskId = seedTask(seedProject('/p'), { mode, baseDir: '/base' })
+    h.db
+      .prepare(
+        'INSERT INTO terminal_tabs(id,task_id,mode,is_main,position,agent_state) VALUES(?,?,?,1,0,?)'
+      )
+      .run(taskId, taskId, mode, state)
+    return taskId
+  }
+  function extraTab(taskId: string, state = 'running'): string {
+    const tabId = crypto.randomUUID()
+    h.db
+      .prepare(
+        'INSERT INTO terminal_tabs(id,task_id,mode,is_main,position,agent_state) VALUES(?,?,?,0,1,?)'
+      )
+      .run(tabId, taskId, 'claude-chat', state)
+    return tabId
+  }
+  const viewState = (taskIds: string[], active: number) =>
+    JSON.stringify({
+      tabs: [
+        { type: 'home' },
+        ...taskIds.map((taskId) => ({ type: 'task', taskId, hubId: 'local' }))
+      ],
+      activeTabIndex: active
+    })
+
+  beforeEach(() => {
+    // Only this block's tabs count as running.
+    h.db.prepare("UPDATE terminal_tabs SET agent_state = 'stopped'").run()
+    setSetting('viewState', null)
+    setSetting('terminal_agent_startup', 'auto')
+  })
+
+  test('starts every chat agent that ran, the active tab first in the foreground lane', async () => {
+    const a = runningTask('claude-chat')
+    const b = runningTask('codex-chat')
+    const extra = extraTab(b)
+    runningTask('claude-code') // a terminal agent: its tab starts it, not the hub
+    runningTask('claude-chat', 'stopped')
+    setSetting('viewState', viewState([a, b], 2))
+
+    const result = await restoreRunningChatAgents(h.slayDb, {
+      getTask,
+      belongsHere: everywhere,
+      concurrency: 1
+    })
+
+    expect(result).toMatchObject({ tabs: 3, started: 3, alreadyLive: 0, failed: 0 })
+    expect(chatStarts.map((s) => [s.tabId, s.reason])).toEqual([
+      [b, 'user'],
+      [extra, 'user'],
+      [a, 'restore']
+    ])
+    expect(chatStarts[0]).toMatchObject({ taskId: b, mode: 'codex-chat', cwd: '/base' })
+    expect(ptyCreates).toEqual([])
+  })
+
+  test('a live agent is answered, never started again', async () => {
+    const a = runningTask('claude-chat')
+    liveChats.set(`${a}:${a}`, 'idle')
+    const result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result).toMatchObject({ started: 0, alreadyLive: 1 })
+    expect(chatStarts).toEqual([])
+  })
+
+  test('the manual startup mode restores nothing', async () => {
+    runningTask('claude-chat')
+    setSetting('terminal_agent_startup', 'manual')
+    const result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result.tabs).toBe(0)
+    expect(chatStarts).toEqual([])
+  })
+
+  test('a task on another computer is left to it', async () => {
+    const a = runningTask('claude-chat')
+    const result = await restoreRunningChatAgents(h.slayDb, {
+      getTask,
+      belongsHere: async (taskId) => taskId !== a
+    })
+    expect(result).toMatchObject({ tabs: 1, elsewhere: 1, started: 0 })
+    expect(chatStarts).toEqual([])
+  })
+
+  test('another tab restores only when its task is open or its main agent restores', async () => {
+    const quiet = runningTask('claude-chat', 'stopped')
+    const hidden = extraTab(quiet)
+    let result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result.tabs).toBe(0)
+    setSetting('viewState', viewState([quiet], 1))
+    result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result.started).toBe(1)
+    expect(chatStarts.map((s) => s.tabId)).toEqual([hidden])
+  })
+
+  test('one tab that cannot start does not stop the others', async () => {
+    const broken = seedTask(seedProject(null), { mode: 'claude-chat' })
+    h.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,is_main,position,agent_state) VALUES(?,?,?,1,0,'running')"
+      )
+      .run(broken, broken, 'claude-chat')
+    const ok = runningTask('claude-chat')
+    const result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result).toMatchObject({ tabs: 2, started: 1, failed: 1 })
+    expect(chatStarts.map((s) => s.taskId)).toEqual([ok])
+  })
+
+  test("the saved view: only this hub's task tabs, and which is active", () => {
+    expect(
+      openTasksFromViewState(
+        JSON.stringify({
+          tabs: [
+            { type: 'home' },
+            { type: 'task', taskId: 'a', hubId: 'local' },
+            { type: 'task', taskId: 'r', hubId: 'remote' },
+            { type: 'task', taskId: 'b' }
+          ],
+          activeTabIndex: 3
+        })
+      )
+    ).toEqual({ order: ['a', 'b'], active: 'b' })
+    expect(openTasksFromViewState('not json')).toEqual({ order: [], active: null })
+    expect(openTasksFromViewState(null)).toEqual({ order: [], active: null })
+  })
+})
+
+// A restarted hub adopts the terminal sessions its previous run left running on a
+// computer: each into its tab, launched (for a later resume) exactly as that tab
+// would be — from the hub's records, never from what the process says about itself.
+describe('the launch a left-running terminal session is adopted with', () => {
+  const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+
+  test("the main tab: the task's agent, flags and folder", async () => {
+    const taskId = seedTask(seedProject('/p'), { flags: '--verbose', baseDir: '/base' })
+    expect(
+      await resolveTerminalTabLaunch(
+        h.slayDb,
+        { taskId, tabId: taskId, mode: 'claude-code' },
+        getTask
+      )
+    ).toEqual({
+      ok: true,
+      launch: {
+        sessionId: `${taskId}:${taskId}`,
+        cwd: '/base',
+        mode: 'claude-code',
+        providerFlags: '--verbose',
+        executionContext: null
+      }
+    })
+  })
+
+  test('a plain shell tab (a long-running `pnpm dev`): its own mode, no agent flags', async () => {
+    const taskId = seedTask(seedProject('/p'), { flags: '--verbose', baseDir: '/base' })
+    h.db
+      .prepare('INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES(?,?,?,1)')
+      .run('dev-server', taskId, 'terminal')
+    expect(
+      await resolveTerminalTabLaunch(
+        h.slayDb,
+        { taskId, tabId: 'dev-server', mode: 'terminal' },
+        getTask
+      )
+    ).toEqual({
+      ok: true,
+      launch: {
+        sessionId: `${taskId}:dev-server`,
+        cwd: '/base',
+        mode: 'terminal',
+        providerFlags: null,
+        executionContext: null
+      }
+    })
+  })
+
+  test('not adoptable: another agent in the tab now, or no such task or tab', async () => {
+    const taskId = seedTask(seedProject('/p'), { baseDir: '/base' })
+    expect(
+      await resolveTerminalTabLaunch(h.slayDb, { taskId, tabId: taskId, mode: 'codex' }, getTask)
+    ).toMatchObject({ ok: false, reason: 'mode-mismatch' })
+    expect(
+      await resolveTerminalTabLaunch(h.slayDb, { taskId, tabId: 'gone' }, getTask)
+    ).toMatchObject({ ok: false, reason: 'launch-unresolved' })
+    expect(
+      await resolveTerminalTabLaunch(h.slayDb, { taskId: crypto.randomUUID(), tabId: 'x' }, getTask)
+    ).toMatchObject({ ok: false, reason: 'launch-unresolved' })
+  })
+
+  test('a folder that cannot be read right now does not stop the adoption', async () => {
+    const taskId = seedTask(seedProject('/p'), { baseDir: '/base' })
+    pathsAway = true
+    try {
+      expect(
+        await resolveTerminalTabLaunch(h.slayDb, { taskId, tabId: taskId }, getTask)
+      ).toMatchObject({ ok: true, launch: { cwd: '', mode: 'claude-code' } })
+    } finally {
+      pathsAway = false
+    }
   })
 })

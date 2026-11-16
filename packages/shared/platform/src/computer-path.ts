@@ -90,11 +90,21 @@ export function canonicalComputerPath(p: string, caseInsensitive: boolean): stri
  * boundary is the root's own separator (`\` for a Windows root, `/` otherwise).
  */
 export function computerPathWithin(child: string, root: string, caseInsensitive = false): boolean {
-  const c = canonicalComputerPath(child, caseInsensitive)
-  const r = canonicalComputerPath(root, caseInsensitive)
-  if (c === r) return true
-  const sep = isWindowsComputerPath(r) ? '\\' : '/'
-  return c.startsWith(r.endsWith(sep) ? r : r + sep)
+  return computerPathKeyWithin(
+    canonicalComputerPath(child, caseInsensitive),
+    canonicalComputerPath(root, caseInsensitive)
+  )
+}
+
+/**
+ * {@link computerPathWithin} for keys already made by {@link canonicalComputerPath}
+ * (with the same case folding): for a caller that compares one path with many roots
+ * and keeps the roots' keys (the computer's path jail).
+ */
+export function computerPathKeyWithin(childKey: string, rootKey: string): boolean {
+  if (childKey === rootKey) return true
+  const sep = isWindowsComputerPath(rootKey) ? '\\' : '/'
+  return childKey.startsWith(rootKey.endsWith(sep) ? rootKey : rootKey + sep)
 }
 
 /**

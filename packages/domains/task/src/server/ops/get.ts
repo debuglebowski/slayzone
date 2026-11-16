@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
-import { parseAndColorTask } from './shared.js'
+import { parseTask } from './shared.js'
 
 export async function getTaskOp(db: SlayzoneDb, id: string): Promise<Task | null> {
   const row = await db.get<Record<string, unknown>>(
@@ -10,5 +10,5 @@ export async function getTaskOp(db: SlayzoneDb, id: string): Promise<Task | null
     WHERE t.id = ?`,
     [id]
   )
-  return parseAndColorTask(db, row)
+  return parseTask(row)
 }

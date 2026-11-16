@@ -12,11 +12,15 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+let wall = 0
+
 function setup(maxPerHub?: number) {
   clock = 1_000
+  wall = Date.parse('2026-11-09T12:00:00Z')
   const dropped: Array<{ grants: GrantRecord[]; reason: string }> = []
   const store = createDirectGrantStore({
     now: () => clock,
+    wallNow: () => wall,
     onDropped: (grants, reason) => dropped.push({ grants, reason }),
     ...(maxPerHub ? { maxGrantsPerHub: maxPerHub } : {})
   })
@@ -67,6 +71,28 @@ describe('direct grant store', () => {
     expect(dropped).toEqual([
       { grants: [expect.objectContaining({ grantId: 'g1' })], reason: 'expired' }
     ])
+  })
+
+  it('absolute notAfter: a grant delivered late still ends at the absolute time, not TTL after receipt', () => {
+    const { store, dropped } = setup()
+    const notAfter = wall + 10_000 // the account's evidence deadline, set by the hub
+    wall += 7_000 // delivered 7 s late (queues, a slow link)
+    clock += 7_000
+    grant(store, 1, { ttlMs: 300_000, notAfter })
+    clock += 2_999
+    expect(store.authenticate(token(1))).not.toBeNull()
+    clock += 1 // exactly the absolute end: 10 s after the hub sent it
+    expect(store.authenticate(token(1))).toBeNull()
+    expect(dropped.map((d) => d.reason)).toEqual(['expired'])
+  })
+
+  it('absolute notAfter: a grant arriving at or after its end is refused, and an existing grant is untouched', () => {
+    const { store } = setup()
+    grant(store, 1)
+    expect(() => grant(store, 1, { notAfter: wall })).toThrow(/after its absolute end/)
+    expect(() => grant(store, 2, { notAfter: wall - 1 })).toThrow(/after its absolute end/)
+    expect(store.authenticate(token(1))).not.toBeNull()
+    expect(store.size()).toBe(1)
   })
 
   it('sweeps expired grants without being asked, so open streams close on time', () => {

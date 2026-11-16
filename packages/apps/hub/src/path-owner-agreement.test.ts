@@ -1,34 +1,37 @@
 /**
- * G2: the owner policy (`@slayzone/api` access.ts: whose is this path?) and git
- * routing (`@slayzone/worktrees` gitTargetForPath: whose checkout is this?) read a
- * path with ONE normalizer. When they disagreed, a path routing sent to user A's task
- * was "nobody's" to the policy — hub-wide, so user B was let through. For every path
- * form the reviewer used, both must answer the same: A's, or nobody's.
+ * G2: the owner policy (`@slayzone/api` access.ts: whose is this path?) reads a path
+ * with ONE normalizer. Routing by path is gone (§9 Phase 7c: every path request names
+ * its task / project scope and the computer confines the path), so only the policy's
+ * answer remains to pin: for every path form the reviewer used, A's or nobody's.
+ *
+ * The hub keeps no task folder (§9 7e): a worktree path is nobody's here (the
+ * computer confines it to its task); the spellings are pinned on A's placement roots.
  */
 import { describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { canAccess, invalidateAccessCache, resource } from '@slayzone/api'
-import { gitTargetForPath } from '@slayzone/worktrees/hub'
 
 const h = await createTestHarness()
 const sql = (s: string, ...p: unknown[]): void => void h.db.prepare(s).run(...p)
 const A = 'user-a'
 const B = 'user-b'
 const wt = '/home/a-agree/wt/feat'
+const root = '/home/a-agree/proj'
 
 sql(`INSERT INTO projects (id, name, color, owner_user_id) VALUES ('pA', 'A', '#000', ?)`, A)
-sql(`INSERT INTO tasks (id, project_id, title, worktree_path) VALUES ('tA', 'pA', 'T', ?)`, wt)
-// Two of A's Windows computers, one placement each (a UNC share; a drive path
-// stored with `/`).
-for (const [computer, root] of [
-  ['cA1', '\\\\srv\\share\\a-wt'],
-  ['cA2', 'C:/code/a']
+sql(`INSERT INTO tasks (id, project_id, title, has_worktree) VALUES ('tA', 'pA', 'T', 1)`)
+// A's computers, one placement each: POSIX, a UNC share, a drive path stored with `/`.
+for (const [computer, root, platform] of [
+  ['cA0', '/home/a-agree/proj', 'linux'],
+  ['cA1', '\\\\srv\\share\\a-wt', 'win32'],
+  ['cA2', 'C:/code/a', 'win32']
 ]) {
   sql(
     `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
-     VALUES (?, ?, 'win32', '1', '[]', 1, ?)`,
+     VALUES (?, ?, ?, '1', '[]', 1, ?)`,
     computer,
     computer,
+    platform,
     A
   )
   sql(
@@ -39,11 +42,6 @@ for (const [computer, root] of [
   )
 }
 
-/** Routing: does this path go to A's task or project? */
-const routesToA = async (p: string): Promise<boolean> => {
-  const t = await gitTargetForPath(h.slayDb, p)
-  return t?.taskId === 'tA' || t?.projectId === 'pA'
-}
 /** Policy: is this path A's (B refused)? */
 const policySaysA = async (p: string): Promise<boolean> => {
   invalidateAccessCache()
@@ -51,22 +49,23 @@ const policySaysA = async (p: string): Promise<boolean> => {
   return !(await canAccess(h.slayDb, req, resource('path', p)))
 }
 
-describe('routing and the owner policy agree on whose a path is', () => {
+describe('the owner policy decides whose a path is, in every spelling', () => {
   for (const [p, owned] of [
-    [wt, true],
-    [`${wt}/x`, true],
-    [`${wt}/sub/../x`, true],
-    [`/${wt}/x`, true], // K1: a leading `//` is the same path on POSIX, never UNC
-    [`//${wt}`, true],
-    [`${wt}\\x`, false], // POSIX: a name beside the worktree, not inside it
-    [`${wt}/../x`, false],
+    [root, true],
+    [`${root}/x`, true],
+    [`${root}/sub/../x`, true],
+    [`/${root}/x`, true], // K1: a leading `//` is the same path on POSIX, never UNC
+    [`//${root}`, true],
+    [`${root}\\x`, false], // POSIX: a name beside the root, not inside it
+    [`${root}/../x`, false],
+    [wt, false], // a task's worktree: no hub record (§9 7e), the computer confines it
+    [`${wt}/x`, false],
     ['\\\\srv\\share\\a-wt\\feat', true],
     ['\\\\srv\\share\\a-wt\\feat\\..\\..\\x', false], // UNC: `..` within the share
     ['C:\\code\\a\\src', true], // stored as C:/code/a
     ['C:\\code\\a-other', false]
   ] as const) {
     test(`${p} → ${owned ? "A's" : "nobody's"}`, async () => {
-      expect(await routesToA(p), 'routing').toBe(owned)
       expect(await policySaysA(p), 'policy').toBe(owned)
     })
   }

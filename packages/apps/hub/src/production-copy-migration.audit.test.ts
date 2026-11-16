@@ -17,7 +17,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { expect, test } from 'vitest'
 import { openChatStorage } from '@slayzone/chat-runtime/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { bootstrapSchema } from './bootstrap-schema'
@@ -575,6 +575,12 @@ for (const label of ['stable-legacy', 'dev-legacy', 'dev-current']) {
             isDeepStrictEqual(db.prepare('SELECT * FROM chat_queue WHERE id=?').get(r.id), r)
           )
         }
+        const staged = (kind: string, key: string): unknown => {
+          const row = db
+            .prepare('SELECT payload FROM computer_data_handoff WHERE kind=? AND item_key=?')
+            .get(kind, key) as { payload: string } | undefined
+          return row ? JSON.parse(row.payload) : null
+        }
         for (const r of rows<PromptRow>(baseline, 'SELECT * FROM agent_prompts')) {
           const expected = {
             id: r.id,
@@ -587,7 +593,14 @@ for (const label of ['stable-legacy', 'dev-legacy', 'dev-current']) {
           check(
             'prompts',
             taskRecord(r.task_id, 'prompt', r.id).some((v) => isDeepStrictEqual(v, expected)),
-            isDeepStrictEqual(db.prepare('SELECT * FROM agent_prompts WHERE id=?').get(r.id), r)
+            // v207 hands the hub's prompts to the task's computer: staged until delivered.
+            isDeepStrictEqual(staged('agent-prompt', r.id), {
+              id: r.id,
+              agentId: r.agent_id,
+              cliSessionId: r.cli_session_id,
+              text: r.text,
+              createdAt: r.created_at
+            })
           )
         }
         for (const r of rows<CheckpointRow>(baseline, 'SELECT * FROM chat_timeline_checkpoints')) {
@@ -686,7 +699,9 @@ for (const label of ['stable-legacy', 'dev-legacy', 'dev-current']) {
             taskRecord(r.task_id, 'settings', `legacy-turn-preview:${r.id}`).some((v) =>
               isDeepStrictEqual(v, expected)
             ),
-            isDeepStrictEqual(db.prepare('SELECT * FROM agent_turns WHERE id=?').get(r.id), r)
+            // v207 hands the hub's turns to the checkout's computer: staged until delivered.
+            (staged('agent-turn', r.id) as { promptPreview?: string } | null)?.promptPreview ===
+              r.prompt_preview
           )
         }
         if (diagnosticsBaseline && diagnosticsDb) {

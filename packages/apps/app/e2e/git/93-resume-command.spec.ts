@@ -1,6 +1,11 @@
 import { test, expect, seed, resetApp, proveConversationTurn } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal, startAgentTerminal, closeAllTaskTabs } from '../fixtures/terminal'
+import {
+  openTaskTerminal,
+  startAgentTerminal,
+  closeAllTaskTabs,
+  seedSession
+} from '../fixtures/terminal'
 
 /**
  * Verifies that the correct pty:create opts are sent when resuming vs starting fresh.
@@ -28,6 +33,8 @@ test.describe('Resume command opts', () => {
       sessionId: string
       conversationId?: string | null
       existingConversationId?: string | null
+      /** What the spawn resumes (the ledger's, on the computer). */
+      resumeConversationId?: string | null
       mode?: string
       providerArgs?: string[] | null
     } | null>
@@ -81,7 +88,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('claude-code')
-    expect(opts?.existingConversationId).toBeFalsy()
+    expect(opts?.resumeConversationId).toBeFalsy()
     // Fresh start should generate a UUID for conversationId
     expect(opts?.conversationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -105,29 +112,19 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('codex')
-    expect(opts?.existingConversationId).toBeFalsy()
+    expect(opts?.resumeConversationId).toBeFalsy()
     // Codex initialCommand lacks {id} — no UUID should be generated
     expect(opts?.conversationId).toBeFalsy()
   })
 
   // --- Resume: stored conversationId flows through ---
 
-  test('claude-code resume: existingConversationId equals stored ID', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('claude-code resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
     const storedId = 'claude-resume-11111111'
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume claude', status: 'in_progress' })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'claude-code': { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
-    await proveConversationTurn(electronApp, storedId)
+    await seedSession(mainWindow, t.id, 'claude-code', storedId)
+    await proveConversationTurn(mainWindow, t.id, storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -137,7 +134,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('claude-code')
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 
   test('codex resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
@@ -149,14 +146,7 @@ test.describe('Resume command opts', () => {
       status: 'in_progress',
       agentId: 'codex'
     })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { codex: { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
+    await seedSession(mainWindow, t.id, 'codex', storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -166,7 +156,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('codex')
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 
   test('cursor-agent resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
@@ -178,14 +168,7 @@ test.describe('Resume command opts', () => {
       status: 'in_progress',
       agentId: 'cursor-agent'
     })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'cursor-agent': { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
+    await seedSession(mainWindow, t.id, 'cursor-agent', storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -195,7 +178,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('cursor-agent')
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 
   test('opencode resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
@@ -207,14 +190,7 @@ test.describe('Resume command opts', () => {
       status: 'in_progress',
       agentId: 'opencode'
     })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { opencode: { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
+    await seedSession(mainWindow, t.id, 'opencode', storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -224,7 +200,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('opencode')
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 
   test('qwen-code resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
@@ -236,14 +212,7 @@ test.describe('Resume command opts', () => {
       status: 'in_progress',
       agentId: 'qwen-code'
     })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'qwen-code': { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
+    await seedSession(mainWindow, t.id, 'qwen-code', storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -253,7 +222,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('qwen-code')
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 
   test('copilot resume: existingConversationId equals stored ID', async ({ mainWindow }) => {
@@ -265,14 +234,7 @@ test.describe('Resume command opts', () => {
       status: 'in_progress',
       agentId: 'copilot'
     })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { copilot: { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
+    await seedSession(mainWindow, t.id, 'copilot', storedId)
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -282,7 +244,7 @@ test.describe('Resume command opts', () => {
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
     expect(opts?.mode).toBe('copilot')
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 
   // --- providerConfig (not legacy fields) feeds resume ---
@@ -296,14 +258,7 @@ test.describe('Resume command opts', () => {
       agentId: 'codex'
     })
     // Use providerConfig field (not legacy codexConversationId)
-    await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { codex: { conversationId: 'via-provider-config' } }
-        }),
-      { id: t.id }
-    )
+    await seedSession(mainWindow, t.id, 'codex', 'via-provider-config')
     await s.refreshData()
 
     await resetCapture(mainWindow)
@@ -312,7 +267,7 @@ test.describe('Resume command opts', () => {
 
     await expect.poll(() => getLastOpts(mainWindow), { timeout: 10_000 }).not.toBeNull()
     const opts = await getLastOpts(mainWindow)
-    expect(opts?.existingConversationId).toBe('via-provider-config')
+    expect(opts?.resumeConversationId).toBe('via-provider-config')
   })
 
   // --- Flags flow through as providerFlags ---

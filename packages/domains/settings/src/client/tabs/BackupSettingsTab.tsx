@@ -351,6 +351,8 @@ export function BackupSettingsTab() {
             <AlertDialogDescription>
               This will replace your current database with <strong>{restoreTarget?.name}</strong> (
               {restoreTarget && formatTimestamp(restoreTarget.timestamp)}) and restart the app.
+              Backups can contain content erased later. Reapply those erasures before reopening
+              access.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center gap-3 py-2">

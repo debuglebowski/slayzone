@@ -111,10 +111,11 @@ describe('exhaustiveness', () => {
     // Every admin route is among them (T-106): the 12 T-15 counted, plus break-glass v2's
     // `PATCH /api/hub/computers`, minus `POST /api/computers/join-token` (now `user`:
     // everyone enrolls their own computer; naming someone else stays the admin's,
-    // `join-token-policy.ts`).
+    // `join-token-policy.ts`), plus content erasure's `GET`/`POST /api/hub/content-erasure`,
+    // plus `GET /api/hub/computers/takeovers` + `POST /api/hub/computers/replace`.
     expect(
       Object.keys(REST_OWNER_POLICY).filter((k) => REST_ADMIN_POLICY[k] === 'admin')
-    ).toHaveLength(12)
+    ).toHaveLength(16)
   })
 })
 
@@ -131,7 +132,8 @@ function checkMark(rule: HttpOwnerRule): void {
     expect(rule.ids ?? []).toEqual([])
     expect(rule.output).toBeUndefined()
   }
-  for (const r of rule.ids ?? []) expect(['exact', 'prefix', 'projectRef']).toContain(r.match)
+  for (const r of rule.ids ?? [])
+    expect(['exact', 'prefix', 'projectRef', 'taskSession']).toContain(r.match)
 }
 
 describe('each mark carries what the gate needs', () => {

@@ -44,8 +44,10 @@ import type { OwnerMark } from './owner-policy'
  *               neither ambiguous nor theirs.
  *   projectRef  a project's id OR a case-insensitive name substring, else a unique
  *               id prefix (`resolveProjectRef`); same rule.
+ *   taskSession exact session ownership for `<taskId>:<tabId>` keys; other keys
+ *               have no task owner and require a separate computer check.
  */
-export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef'
+export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef' | 'taskSession'
 
 /**
  * Where an id sits. REST: `params.<name>`, `query.<name>` or `body.<path>` (dotted;
@@ -89,6 +91,7 @@ const ref =
     match,
     ...(except ? { except } : {})
   })
+const taskMove = ref('taskMove', 'exact')
 const task = ref('task', 'exact')
 const taskPrefix = ref('task', 'prefix')
 const projectExact = ref('project', 'exact')
@@ -100,11 +103,11 @@ const tagPrefix = ref('tag', 'prefix')
 const template = ref('template', 'exact')
 const templatePrefix = ref('template', 'prefix')
 const session = ref('session', 'exact')
+/** Task/tab keys require their task's owner; pooled keys have only a computer owner. */
+const taskSession = ref('session', 'taskSession')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
-/** A path the hub opens on its OWN disk for the caller: one of their roots (N1). */
-const owned = ref('ownedPath', 'exact')
 const computer = ref('computer', 'exact')
 const automation = ref('automation', 'exact')
 const automationPrefix = ref('automation', 'prefix')
@@ -155,6 +158,23 @@ const bareRows =
   async (body, scope) =>
     Array.isArray(body) ? keepRows(body, toResource, scope) : body
 
+/** Unattached terminal sessions: on the caller's computer, and — when the session
+ *  belongs to a task (`<taskId>:<tabId>`) — of a task the caller may access. */
+const unattachedRows: HttpOutputFilter = async (body, scope) => {
+  if (!Array.isArray(body)) return body
+  const out: unknown[] = []
+  for (const row of body) {
+    if (!isRecord(row)) continue
+    const resources = [res('computer', row.computerId)]
+    if (typeof row.sessionId === 'string' && /^[^:]+:[^:]+$/.test(row.sessionId))
+      resources.push(res('session', row.sessionId))
+    const all = resources.filter((r): r is OwnedResource => r !== null)
+    if (all.length > 0 && resources.every((r) => r !== null) && (await scope.allowsAll(all)))
+      out.push(row)
+  }
+  return out
+}
+
 /** `{ ok, data: [...] }`. */
 const dataRows =
   (field: string, kind: ResourceKind): HttpOutputFilter =>
@@ -203,6 +223,8 @@ const DIRECT_ADDRESSES =
   "the listener addresses of the caller's own live direct-link grants (direct-link.ts issuedAddresses): cut in the handler to the caller"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
+const ERASURE =
+  "erasing a disabled account's content: decided by content-erasure admin.ts (admin + full session, disabled target, typed email); answers counts, ids and receipts, never content"
 
 // ── REST ──────────────────────────────────────────────────────────────────────
 
@@ -230,6 +252,15 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
     taskPrefix('query.taskId'),
     folderPrefix('query.folderId', ['root'])
   ),
+  'POST /api/artifacts/move': checked(
+    taskPrefix('body.destTaskId'),
+    taskPrefix('body.sourceTaskId'),
+    artifactPrefix('body.artifactIds[]'),
+    folderPrefix('body.folderIds[]'),
+    folderPrefix('body.destFolderId', ['root'])
+    // body.entryIds[] (artifact OR folder prefixes) are checked in the handler:
+    // each resolves through resolveByIdPrefix, which sees only the caller's rows.
+  ),
   'DELETE /api/artifacts/:id': checked(artifactPrefix('params.id')),
   'GET /api/artifacts/:id': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id': checked(
@@ -239,12 +270,6 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'GET /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'PUT /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
-  // `outputPath` is a hub-host path the render is WRITTEN to: only inside one of the
-  // caller's roots (access.ts `ownedPath`, N1) — never the hub's own state, someone
-  // else's worktree, or a file in nobody's project (`~/.bashrc`).
-  'POST /api/artifacts/:id/export/html': checked(artifact('params.id'), owned('body.outputPath')),
-  'POST /api/artifacts/:id/export/pdf': checked(artifact('params.id'), owned('body.outputPath')),
-  'POST /api/artifacts/:id/export/png': checked(artifact('params.id'), owned('body.outputPath')),
   'GET /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
@@ -276,8 +301,33 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/browser/type': checked(task('body.taskId')),
   'GET /api/browser/url': checked(task('query.taskId')),
 
+  // ── workspace files (fileEditor.readFile's marks: the scope task / project and the
+  // computer it may name) ──
+  'GET /api/files/raw': checked(
+    task('query.taskId'),
+    projectExact('query.projectId'),
+    computer('query.computerId')
+  ),
+
   // ── app ──
   'POST /api/close-task/:id': checked(task('params.id')),
+  'POST /api/tasks/:id/move': {
+    ...checked(taskPrefix('params.id')),
+    checkedInHandler:
+      'resolveProjectRef checks local target ownership; the app checks cross-hub targets'
+  },
+  'POST /api/tasks/:id/copy': {
+    ...checked(taskPrefix('params.id')),
+    checkedInHandler:
+      'resolveProjectRef checks local target ownership; the app checks cross-hub targets'
+  },
+  'POST /api/projects/:id/move': checked(projectRef('params.id')),
+  'POST /api/projects/:id/copy': checked(projectRef('params.id')),
+  'GET /api/task-moves': listed(dataRows('id', 'taskMove')),
+  'GET /api/task-moves/:id': checked(taskMove('params.id')),
+  'POST /api/task-moves/:id/pause': checked(taskMove('params.id')),
+  'POST /api/task-moves/:id/resume': checked(taskMove('params.id')),
+  'POST /api/task-moves/:id/cancel': checked(taskMove('params.id')),
   'POST /api/open-task/:id': checked(taskPrefix('params.id')),
   'POST /api/notify': none(SIGNAL),
   'GET /api/computers': none(COMPUTER),
@@ -321,6 +371,17 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/:id/write': checked(session('params.id')),
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
+  // A previous hub run's sessions still running on a computer: its owner's.
+  // And the task's, when the session belongs to one (same rule as tRPC/list).
+  'GET /api/pty/unattached': listed(unattachedRows),
+  'POST /api/pty/unattached/:computerId/:sessionId/attach': checked(
+    computer('params.computerId'),
+    taskSession('params.sessionId')
+  ),
+  'DELETE /api/pty/unattached/:computerId/:sessionId': checked(
+    computer('params.computerId'),
+    taskSession('params.sessionId')
+  ),
 
   // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──
   'GET /api/chat/:id/status': checked(taskPrefix('params.id'), tab('query.tab')),
@@ -446,7 +507,20 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   // `mayManageComputer` (an admin: any existing computer), else 404.
   'PATCH /api/hub/computers': none(
     'computer lifecycle (revoked or not): management metadata, decided in the handler by computer-access.ts mayManageComputer (T-19); no content'
-  )
+  ),
+  // Replacing a re-enrolled computer: both computers' lifecycle, decided in the handler
+  // by mayManageComputer (T-19), else 404. Offers name computers and counts; no content.
+  'GET /api/hub/computers/takeovers': none(
+    'computer lifecycle offers: management metadata (names, counts), filtered in the handler by computer-access.ts mayManageComputer (T-19); no content'
+  ),
+  'POST /api/hub/computers/replace': none(
+    'computer lifecycle (one computer replaced by another): decided in the handler by computer-access.ts mayManageComputer for both (T-19); no content'
+  ),
+  // Content erasure (added): another account's content is ERASED, never read. The
+  // service decides (content-erasure admin.ts: admin + full session, a disabled target,
+  // the typed email); it answers counts, ids and receipts only.
+  'GET /api/hub/content-erasure': none(ERASURE),
+  'POST /api/hub/content-erasure': none(ERASURE)
 }
 
 // ── MCP ───────────────────────────────────────────────────────────────────────

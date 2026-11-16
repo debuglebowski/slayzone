@@ -2,12 +2,11 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { createDirectListener, type DirectListener } from './direct/listener'
 import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
 import type { DirectPtyService } from './handlers/pty'
-import type { DirectChatService } from './handlers/chat-runtime'
+import type { DirectChatService, DirectTaskDataService } from './handlers/chat-runtime'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
 import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
-import { createHash } from 'node:crypto'
-import { createPtyHistory } from './pty-history'
+import { createPtyHistory, ptyHistoryDir } from './pty-history'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
@@ -43,13 +42,24 @@ import {
   RpcError,
   computerShutdownParamsSchema,
   directRtcOfferParamsSchema,
+  projectNotPlacedError,
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import { DEFAULT_DIRECT_LISTEN_ADDRESS, effectiveHubUrls, type ComputerConfig } from './config'
-import { JailViolationError, setProtectedPaths } from './path-jail'
+import {
+  implicitSpawnScope,
+  JailViolationError,
+  runInScopeJail,
+  type ScopeJail,
+  scopedSpawnCwd,
+  setProtectedPaths,
+  withDeclaredRoot
+} from './path-jail'
+import type { WirePathScope } from '@slayzone/platform/path-scope'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { createAgentHookServer } from './handlers/agent-hook'
@@ -69,14 +79,30 @@ import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
 import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
+import { COMPUTER_LOG_DIR_NAME } from './file-log'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
+import { isWithinDirectory } from './project-relocation'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
+import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
+import {
+  startEventLoopStallDetector,
+  type EventLoopStallDetector,
+  type EventLoopStallDetectorOptions
+} from '@slayzone/platform/event-loop-stall'
+import { createStallReporter } from './stall-report'
 
 /** Running package release, advertised on enrollment and reconnect. */
 declare const __SLAYZONE_COMPUTER_VERSION__: string | undefined
 export const COMPUTER_VERSION =
   typeof __SLAYZONE_COMPUTER_VERSION__ === 'string' ? __SLAYZONE_COMPUTER_VERSION__ : '0.0.0'
+
+// All hub connections share this computer's disk. A relocation must also fence
+// starts and detect processes belonging to another connected hub.
+const relocationHosts = new Set<{
+  assertAvailable(): void
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
+}>()
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
@@ -113,6 +139,11 @@ export interface ComputerRuntimeDeps {
    * listener attached here misses none of its events.
    */
   onConnection?: (connection: HubConnectionInfo) => void
+  /**
+   * Start the main-thread stall sampler (tests inject a fake). Default: the hub's own
+   * `startEventLoopStallDetector`. Each stall is logged and reported to every hub.
+   */
+  startStallDetector?: (options: EventLoopStallDetectorOptions) => EventLoopStallDetector
 }
 
 /** A hub the computer serves IN ADDITION to its primary, added while it runs. */
@@ -235,6 +266,12 @@ export interface HubRequestHandlerDeps {
    */
   getProjectPaths?: () => ProjectPathStore | null
   /**
+   * Settles once {@link getProjectPaths} has its map (loaded or failed). A request
+   * confined to a task's / project's folders waits for it: those folders come from
+   * that map, and a scope judged before it arrived would refuse a placed project.
+   */
+  projectPathsReady?: Promise<unknown>
+  /**
    * The computer-wide agent-start admission queue, shared by every hub this
    * computer serves (see spawn-admission.ts). Absent: a private one (tests).
    */
@@ -281,10 +318,14 @@ export interface HubRequestDispatch {
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
+  /** Pids of the processes this hub's work runs (ptys, processes, chat agents). */
+  ownedPids(): number[]
   /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
   directPty: DirectPtyService
   /** This hub's chat, as direct-link clients reach it. */
   directChat: DirectChatService
+  /** This hub's computer-only task data, as direct-link clients read it. */
+  directTaskData: DirectTaskDataService
 }
 
 /**
@@ -317,14 +358,9 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     // Task terminals' output outlives this process — per hub: one hub's sessions
     // never restore into another's.
     history: createPtyHistory({
-      dir: join(
+      dir: ptyHistoryDir(
         deps.stateDir ?? dirname(getComputerConfigFilePath()),
-        'computer-runtime',
-        'pty-history',
-        createHash('sha256')
-          .update(deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? '')
-          .digest('hex')
-          .slice(0, 24)
+        deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? ''
       )
     }),
     ...(deps.admission ? { admission: deps.admission } : {}),
@@ -332,6 +368,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   })
   // Chat agents (proc.spawn with an admission lane) share the pty agents' start queue.
   const proc = createProcHandlers(ctx, deps.getProjectPaths, {
+    assertTaskActive: (taskId) => chat.assertTaskActive(taskId),
     ...(deps.admission ? { admission: deps.admission } : {}),
     // The computer's protected runtime dir: no hub frame can read or rewrite it.
     groupLedgerPath: join(
@@ -349,8 +386,43 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     getProjectPaths: deps.getProjectPaths ?? (() => null),
     admission: deps.admission,
     hasTaskWork: pty.hasTaskWork,
-    stopTask: pty.stopTask
+    stopTask: async (taskId, state) => {
+      await pty.stopTask(taskId, state)
+      if (state === 'deleted') {
+        await proc.stopTask(taskId)
+        await deps.dialer.forgetTaskEvents?.(taskId)
+      }
+    }
   })
+  const { recoverRelocation, assertRelocationAvailable, ...projectHandlers } =
+    createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null), {
+      assertIdle: (projectId) => {
+        chat.assertProjectIdle(projectId)
+        const roots = chat.scopeBounds({ kind: 'project', projectId }).roots
+        const contains = (cwd: string) => roots.some((root) => isWithinDirectory(cwd, root))
+        if (
+          [...relocationHosts].some((host) => host.hasFolderWork(contains)) ||
+          chat
+            .projectTaskIds(projectId)
+            .some((id) => pty.hasTaskWork(id) || proc.hasTaskWork(id) || chat.hasTaskWork(id))
+        )
+          throw new Error(
+            'Stop this project’s running terminals, agents and processes before relocating it.'
+          )
+      },
+      remap: chat.relocateProjectPaths
+    })
+  const relocationHost = {
+    assertAvailable: () => {
+      if (deps.getProjectPaths?.()) assertRelocationAvailable()
+    },
+    hasFolderWork: (contains: (cwd: string) => boolean) =>
+      pty.hasFolderWork(contains) || proc.hasFolderWork(contains) || chat.hasFolderWork(contains)
+  }
+  relocationHosts.add(relocationHost)
+  ctx.assertWorkAllowed = () => {
+    for (const host of relocationHosts) host.assertAvailable()
+  }
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
     const parsed = computerShutdownParamsSchema.safeParse(params ?? {})
@@ -371,7 +443,13 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createGitOpHandlers(ctx, { onHubDisconnected: (cb) => onHubDisconnected.push(cb) }),
     ...createExecRunHandlers(ctx, deps.getProjectPaths),
     ...createAgentConfigHandlers(ctx),
-    ...createUsageCollectHandlers(ctx),
+    // Usage is attributed to tasks here, from this hub's session ledger, and parsed
+    // from the read offsets this computer keeps for this hub (§9, hub v209).
+    ...createUsageCollectHandlers(ctx, {
+      cursors: () => chat.usageCursors(),
+      taskOf: (ids) => chat.sessionTasks(ids),
+      taskOfCwd: (cwds) => chat.worktreeTasks(cwds)
+    }),
     ...createTestScanHandlers(ctx),
     ...createWorkspaceChangesHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...fs.handlers,
@@ -379,7 +457,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createGhHandlers(ctx),
     ...createSlayHandlers(ctx),
     ...createClaudeSessionHandlers(ctx, deps.getProjectPaths ?? (() => null)),
-    ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
+    ...projectHandlers
   }
 
   const directGrantHandlers = deps.directGrants
@@ -416,6 +494,36 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...Object.keys(directRtcHandlers)
   ])
 
+  /** Spawns whose cwd is confined to the task's / project's own folders (§9 Phase 7c). */
+  const SCOPED_SPAWNS: ReadonlySet<string> = new Set([
+    HubToComputerMethods.ptySpawn,
+    HubToComputerMethods.ptyWarmSpawn,
+    HubToComputerMethods.procSpawn
+  ])
+
+  // Existing processes and direct-link grants don't touch the relocated folder.
+  // Keep their controls available, including when recovery needs user intervention.
+  const relocationControls = new Set([
+    ...[...ptyMethods].filter((method) => !SCOPED_SPAWNS.has(method)),
+    HubToComputerMethods.procList,
+    HubToComputerMethods.procStats,
+    HubToComputerMethods.procWrite,
+    HubToComputerMethods.procKill,
+    HubToComputerMethods.procPrioritize,
+    HubToComputerMethods.ping,
+    HubToComputerMethods.computerShutdown
+  ])
+
+  /** A `proc.spawn` the hub declared a global background process (see its `global` field). */
+  const isGlobalProcSpawn = (method: string, p: unknown): boolean =>
+    method === HubToComputerMethods.procSpawn &&
+    typeof p === 'object' &&
+    p !== null &&
+    (p as { global?: unknown }).global === true
+
+  /** The jail one request's path scope opens: its folders from this hub's store. */
+  const scopeJailOf = (scope: WirePathScope): ScopeJail => chat.scopeJail(scope)
+
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
     const parsedActor = requestActorSchema.safeParse(rawActor)
@@ -441,7 +549,51 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       record('refused', err.code, err.message)
       throw err
     }
-    const entry = table[method]
+    const entry0 = Object.hasOwn(table, method) ? table[method] : undefined
+    // The path scope the hub authorized (§9 Phase 7b): every path judged while this
+    // request is served must lie inside that task's / project's own folders here.
+    const scope = actor.pathScope
+    const scoped =
+      entry0 && scope ? (p: unknown) => runInScopeJail(scopeJailOf(scope), () => entry0(p)) : entry0
+    // A process the hub starts for a task or project (§9 Phase 7c) starts inside
+    // that scope's own folders: its cwd is judged against them, or chosen from them.
+    // The hub no longer knows them, so a spawn naming neither is refused — except a
+    // background process the hub declares GLOBAL (no task, no project): it starts as
+    // before 7c, judged by the machine bound in the proc handler. A background
+    // process whose cwd its user set (`declaredCwd`, B3) starts there: that folder
+    // is a root of the spawn, judged by the machine bound.
+    const entry =
+      scoped && SCOPED_SPAWNS.has(method)
+        ? (p: unknown) => {
+            const spawnScope = scope ?? implicitSpawnScope(p)
+            if (!spawnScope && isGlobalProcSpawn(method, p)) return scoped(p)
+            if (!spawnScope) {
+              throw new JailViolationError(
+                `${method} names no task or project; refusing to start a process`
+              )
+            }
+            const raw = (p as { cwd?: unknown }).cwd
+            const cwd = typeof raw === 'string' && raw ? raw : undefined
+            // A background process's own folder, set by its user (B3): a root of this
+            // spawn, judged by the machine bound only — the handler runs in that jail.
+            const declared =
+              method === HubToComputerMethods.procSpawn &&
+              cwd !== undefined &&
+              (p as { declaredCwd?: unknown }).declaredCwd === true
+            const jail = declared
+              ? withDeclaredRoot(scopeJailOf(spawnScope), cwd)
+              : scopeJailOf(spawnScope)
+            const judged = scopedSpawnCwd(
+              jail,
+              cwd,
+              deps.config.allowedRoots,
+              // No folder for its project here: the user places it, then it starts.
+              spawnScope.projectId ? () => projectNotPlacedError(spawnScope.projectId!) : undefined
+            )
+            const next = { ...(p as object), cwd: judged }
+            return declared ? runInScopeJail(jail, () => entry0!(next)) : scoped(next)
+          }
+        : scoped
     if (!entry) {
       const err = new RpcError(
         ComputerTransportErrorCodes.unimplemented,
@@ -460,6 +612,20 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       )
         await cliReady
       if (deps.pathReady && !ptyMethods.has(method)) await deps.pathReady
+      // Chat requests judge their paths (agent start folder, `cwd` of a command,
+      // folder lists) inside the task's folders too, from the same map.
+      if (
+        deps.projectPathsReady &&
+        (scope ||
+          SCOPED_SPAWNS.has(method) ||
+          method === HubToComputerMethods.chatRequest ||
+          method.startsWith('project.'))
+      )
+        await deps.projectPathsReady
+      if (deps.getProjectPaths?.() && !relocationControls.has(method)) {
+        await recoverRelocation()
+        ctx.assertWorkAllowed?.()
+      }
       const result = await entry(params)
       record('ok')
       return result
@@ -482,6 +648,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const dispose = async (): Promise<void> => {
+    relocationHosts.delete(relocationHost)
     pty.disposeAll()
     proc.disposeAll()
     fs.disposeAll()
@@ -513,11 +680,13 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     handle: trackedHandle,
     directPty: pty.direct,
     directChat: chat.direct,
+    directTaskData: chat.directTaskData,
     dispose,
     setAgentHookUrl,
     hubDisconnected,
     captureAgentHook: chat.captureHook,
-    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork()
+    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork(),
+    ownedPids: () => [...pty.ownedPids(), ...proc.ownedPids(), ...chat.ownedPids()]
   }
 }
 
@@ -531,6 +700,13 @@ export function startComputer(
       // Logging is opt-in — with no sink, computer lifecycle diagnostics are discarded.
     })
 
+  // This process's own freezes (a frozen computer misses heartbeats and is dropped
+  // by its hubs): logged and reported to every hub — see stall-report.ts.
+  const stallReporter = createStallReporter({ log })
+  const stallDetector = (deps.startStallDetector ?? startEventLoopStallDetector)({
+    onStall: (stall) => stallReporter.report(stall)
+  })
+
   // `startComputer` is synchronous, and resolving the host id is file I/O. Rather
   // than make the whole entrypoint async, the identity object is MUTABLE and the
   // dialer reads `hostId` when it builds an enroll/hello frame — not when the
@@ -543,7 +719,11 @@ export function startComputer(
     name: config.name,
     platform: `${process.platform}-${process.arch}`,
     version: COMPUTER_VERSION,
-    capabilities: config.capabilities
+    aiConfigHashFiles: true,
+    chatHistoryPages: true,
+    chatTimelineRowSlices: true,
+    promptSummariesAll: true,
+    capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own
   // identity object — the same machine otherwise, host id included. One made before
@@ -585,7 +765,8 @@ export function startComputer(
     join(stateDir, 'config.json'),
     credentialsFilePath(stateDir),
     join(stateDir, 'computer-runtime'),
-    join(stateDir, REQUEST_LOG_DIR_NAME)
+    join(stateDir, REQUEST_LOG_DIR_NAME),
+    join(stateDir, COMPUTER_LOG_DIR_NAME)
   ])
   const requestLog = createRequestLog({
     stateDir,
@@ -596,8 +777,9 @@ export function startComputer(
   // Folder limits stay local (T-27): a standalone computer applies the roots its
   // own computer.config.json declares whenever that file changes — what
   // `slay computer roots --add` writes. Polled, not fs.watch: an atomic rename
-  // replaces the inode a watcher holds. Not for the desktop's supervised computer,
-  // which never reads the file (its loopback hub edits its roots instead).
+  // replaces the inode a watcher holds. Not for the desktop's supervised computer:
+  // its loopback hub edits its roots live, and the file — which those edits persist
+  // to — is read back only at boot (config.ts `supervisedComputerConfigFile`).
   const watchLocalRoots = !config.hubMayEditRoots
   if (watchLocalRoots) {
     watchFile(configFile, { interval: 2000, persistent: false }, (current, previous) => {
@@ -622,8 +804,11 @@ export function startComputer(
   }
 
   // ONE admission queue for every hub connection: agent starts contend for this
-  // machine, whichever hub asked for them.
-  const admission = createSpawnAdmission()
+  // machine, whichever hub asked for them. Each start's wait goes to the log (the
+  // computer's log file): the record a slow restore is diagnosed from.
+  const admission = createSpawnAdmission({
+    onEvent: (event) => log(`agent start ${event.type}`, { ...event })
+  })
   // ONE direct-link grant table: one listener serves every hub, and each hub's
   // grants stay keyed by the link that registered them.
   const directGrants = createDirectGrantStore()
@@ -640,7 +825,8 @@ export function startComputer(
     grants: directGrants,
     services: {
       pty: (hubKey) => dispatchByHub.get(hubKey)?.directPty ?? null,
-      chat: (hubKey) => dispatchByHub.get(hubKey)?.directChat ?? null
+      chat: (hubKey) => dispatchByHub.get(hubKey)?.directChat ?? null,
+      taskData: (hubKey) => dispatchByHub.get(hubKey)?.directTaskData ?? null
     },
     listenAddress: config.directListenAddress ?? DEFAULT_DIRECT_LISTEN_ADDRESS,
     ...(config.directPublicAddress ? { publicAddress: config.directPublicAddress } : {}),
@@ -671,16 +857,21 @@ export function startComputer(
     })
   identity.directAddress = () => directListener?.advertisedAddress ?? null
   // WebRTC rides on the listener (its channels are served like its sockets). The
-  // addon is only resolved here: loading it is left to the first offer, so dialing
-  // the hubs never waits on it.
+  // addon is only located here (its binary for this platform on disk, not loaded):
+  // loading it is left to the first offer, so dialing the hubs never waits on it.
   const rtcRuntime = deps.rtc ?? {
     available: rtcRuntimeAvailable,
     load: () => loadRtcPolyfill(log)
   }
-  identity.directRtc = () => directListener !== null && rtcRuntime.available()
+  // The last load failed: a binary that is on disk yet cannot load. Each later offer
+  // still retries, but hellos stop advertising WebRTC until one loads, so a hub that
+  // reconnects stops sending offers this computer cannot answer.
+  let rtcLoadFailed = false
+  identity.directRtc = () => directListener !== null && !rtcLoadFailed && rtcRuntime.available()
   const getRtcAnswerer = (): RtcAnswerer | null => {
     if (rtcAnswerer || !directListener || !rtcRuntime.available()) return rtcAnswerer
     const rtc = rtcRuntime.load()
+    rtcLoadFailed = rtc === null
     if (rtc) {
       rtcAnswerer = createRtcAnswerer({ rtc, grants: directGrants, listener: directListener, log })
     }
@@ -750,7 +941,7 @@ export function startComputer(
     // Where this computer keeps THIS hub's projects. Loaded async (one file read)
     // and late-bound, like the agent-hook URL — the dispatch table is synchronous.
     let projectPaths: ProjectPathStore | null = null
-    void createProjectPathStore(hubHostFromUrl(hubUrl))
+    const projectPathsReady = createProjectPathStore(hubHostFromUrl(hubUrl))
       .then((store) => {
         projectPaths = store
         log('project path map loaded', {
@@ -786,6 +977,7 @@ export function startComputer(
       config,
       log,
       getProjectPaths: () => projectPaths,
+      projectPathsReady,
       admission,
       requestLog,
       directGrants,
@@ -805,6 +997,11 @@ export function startComputer(
     dialer.events.on('connected', ({ computerId, mode }) =>
       log('connected to hub', { hubUrl, computerId, mode })
     )
+    // This hub sees its own processes; the primary also machine-wide CPU.
+    const detachStallReports = stallReporter.attach(dialer, {
+      primary: isPrimary,
+      ownedPids: () => dispatch.ownedPids()
+    })
     dialer.events.on('disconnected', ({ reason }) => {
       void cliRelayReady.then(
         (relay) => relay.disconnect(),
@@ -880,6 +1077,7 @@ export function startComputer(
         )
         const agentHookServer = await agentHookReady
         if (agentHookServer) await agentHookServer.close()
+        detachStallReports()
         await dialer.stop()
         secondaryIdentities.delete(hubIdentity)
       }
@@ -902,7 +1100,21 @@ export function startComputer(
   const connections = new Map<string, HubConnection>()
   const hubUrls = effectiveHubUrls(config)
   const primaryUrl = hubUrls[0]
-  for (const [i, url] of hubUrls.entries()) connections.set(url, connectHub(url, i === 0))
+  // The primary hub is required. Each additional configured hub connects on its
+  // own: one that cannot (a refused url, unreadable local state) is logged and
+  // never stops the computer from serving the others.
+  connections.set(primaryUrl, connectHub(primaryUrl, true))
+  forEachIsolatedSync(
+    hubUrls.filter((url) => url !== primaryUrl),
+    {
+      pass: 'computer.connect-hubs',
+      key: (url) => url,
+      isFatal: isStorageFatal,
+      log: (message, error) =>
+        log('could not connect an additional hub', { message, error: String(error) })
+    },
+    (url) => void connections.set(url, connectHub(url, false))
+  )
   const primaryDialer = connections.get(primaryUrl)!.dialer
 
   // Hub-set changes run one at a time, each after the previous has fully applied:
@@ -1037,6 +1249,9 @@ export function startComputer(
       await directListener?.close()
       rtcAnswerer?.close()
       directGrants.close()
+      stallDetector.stop()
+      // Every request line recorded before stop is on disk when stop resolves.
+      await requestLog.close()
     }
   }
   return handle

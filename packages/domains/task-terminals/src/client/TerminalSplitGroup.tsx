@@ -17,8 +17,6 @@ interface PaneProps {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
-  /** True once the conversation id is hydrated; gates the main tab's auto-spawn. */
-  conversationHydrated?: boolean
   supportsSessionId?: boolean
   providerFlags?: string
   executionContext?: import('@slayzone/terminal-contracts').ExecutionContext | null
@@ -34,6 +32,8 @@ interface PaneProps {
   }) => void
   onFirstInput?: () => void
   onRetry?: () => void
+  /** Remount this pane (the "Session not attached" overlay's Restart / Attach). */
+  onRemount?: () => void
   // Context menu callbacks
   onSplit?: () => void
   onNewGroup?: () => void
@@ -44,6 +44,8 @@ interface PaneProps {
   onHandoff?: (() => void) | null
   /** Open the task's sessions sidebar (absent: nothing to pick from). */
   onShowSessions?: (() => void) | null
+  /** Bumped to remount the pane (a secondary tab's session reset / switch). */
+  remountKey?: number
 }
 
 export interface TerminalSplitGroupHandle {
@@ -166,6 +168,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
             agentState={pane.tab.agentState}
             isMain={pane.tab.isMain}
             isTemporary={pane.isTemporary}
+            {...(pane.tab.chatFontSize != null ? { fontSize: pane.tab.chatFontSize } : {})}
             {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
             {...(pane.onShowSessions ? { onShowSessions: pane.onShowSessions } : {})}
             {...(pane.onReady ? { onReady: pane.onReady } : {})}
@@ -185,7 +188,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       const terminal = (
         <TerminalCmp
           ref={terminalRef}
-          key={pane.sessionId}
+          key={`${pane.sessionId}#${pane.remountKey ?? 0}`}
           sessionId={pane.sessionId}
           cwd={pane.cwd}
           mode={pane.tab.mode}
@@ -201,13 +204,13 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onReady={pane.onReady}
           onFirstInput={pane.onFirstInput}
           onRetry={pane.onRetry}
+          onRemount={pane.onRemount}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
           {...(shouldGate
             ? {
                 agentState: pane.tab.agentState,
-                isTemporary: pane.isTemporary,
-                conversationHydrated: pane.conversationHydrated
+                isTemporary: pane.isTemporary
               }
             : {})}
         />

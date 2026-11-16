@@ -68,6 +68,31 @@ describe('useChatSession', () => {
     expect(result.current.state.timeline.map((i) => i?.kind)).toEqual(['user-text'])
   })
 
+  it('reads the history in bounded pages, carrying on after the last event of each', async () => {
+    const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
+    const history = Array.from({ length: 9 }, (_, seq) => ({
+      seq,
+      event: { kind: 'user-message', id: `u${seq}`, text: `m${seq}` }
+    }))
+    const asked: Array<{ afterSeq: number; page?: unknown }> = []
+    hub.on('chat.getReplay', (input) => {
+      asked.push(input)
+      const rest = history.filter((e) => e.seq > input.afterSeq)
+      const events = rest.slice(0, 4)
+      return rest.length > 4
+        ? { events, hasMore: true }
+        : { events, hasMore: false, live: { afterSeq: 8, liveSeq: 0, events: [] } }
+    })
+    const { wrapper } = trpcTest(hub.backend)
+    const { result } = await renderHook(() => useChatSession(target), { wrapper })
+    await waitFor(() => expect(result.current.hydrating).toBe(false))
+    expect(asked.map((a) => a.afterSeq)).toEqual([-1, 3, 7])
+    for (const a of asked) expect(a.page).toBeDefined()
+    expect(
+      result.current.state.timeline.flatMap((i) => (i?.kind === 'user-text' ? [i.text] : []))
+    ).toEqual(history.map((e) => e.event.text))
+  })
+
   it("reads a turn Claude Code starts by itself (a background task's answer) as working", async () => {
     const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
     hub.on('chat.getReplay', () => ({
@@ -141,5 +166,123 @@ describe('useChatSession', () => {
     })
     expect(calls).toEqual(['replay -1'])
     expect(hub.callsTo('chat.respondPermission')).toHaveLength(1)
+  })
+
+  describe("a send waits for its tab's hydrate (the computer refuses one that overtakes it)", () => {
+    /** A hub whose hydrate answers when the test says, refusing a send before it ran. */
+    function gatedHub(): {
+      hub: ReturnType<typeof fakeHub>
+      release: (outcome?: 'ok' | 'fail') => void
+    } {
+      const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
+      let ready = false
+      let settle: ((outcome: 'ok' | 'fail') => void) | null = null
+      hub.on(
+        'chat.hydrate',
+        () =>
+          new Promise((resolve, reject) => {
+            settle = (outcome) => {
+              ready = outcome === 'ok'
+              if (outcome === 'ok') resolve(null)
+              else reject(new Error('hydrate failed'))
+            }
+          })
+      )
+      hub.on('chat.send', (input) => {
+        if (!ready) throw new Error(`No chat session for tab ${input.tabId}`)
+        return { id: input.message.id, state: 'queued' }
+      })
+      return {
+        hub,
+        release: (outcome = 'ok') => {
+          const s = settle
+          settle = null
+          s?.(outcome)
+        }
+      }
+    }
+
+    const delivery = (result: { current: ReturnType<typeof useChatSession> }) =>
+      result.current.state.timeline
+        .filter((i) => i?.kind === 'user-text')
+        .map((i) => (i?.kind === 'user-text' ? (i.delivery ?? 'sent') : null))
+
+    it('during the first load', async () => {
+      const { hub, release } = gatedHub()
+      const { wrapper } = trpcTest(hub.backend)
+      const { result } = await renderHook(() => useChatSession(target), { wrapper })
+      await waitFor(() => expect(hub.callsTo('chat.hydrate')).toHaveLength(1))
+
+      let sent!: Promise<void>
+      await act(async () => {
+        sent = result.current.sendMessage('hello')
+      })
+      // Shown at once; held back until the hydrate answered.
+      expect(result.current.state.timeline.map((i) => i?.kind)).toEqual(['user-text'])
+      await new Promise((r) => setTimeout(r, 20))
+      expect(hub.callsTo('chat.send')).toHaveLength(0)
+
+      await act(async () => release())
+      await act(async () => sent)
+      expect(hub.callsTo('chat.send')).toHaveLength(1)
+      expect(delivery(result)).not.toContain('failed')
+    })
+
+    it('during a reload', async () => {
+      const { hub, release } = gatedHub()
+      const { wrapper } = trpcTest(hub.backend)
+      const { result } = await renderHook(() => useChatSession(target), { wrapper })
+      await waitFor(() => expect(hub.callsTo('chat.hydrate')).toHaveLength(1))
+      await act(async () => release())
+      await waitFor(() => expect(result.current.hydrating).toBe(false))
+
+      // The reload's hydrate runs again on the hub: the session is not there until it did.
+      let reloaded = false
+      let releaseReload: () => void = () => undefined
+      hub.on(
+        'chat.hydrate',
+        () =>
+          new Promise((resolve) => {
+            releaseReload = () => {
+              reloaded = true
+              resolve(null)
+            }
+          })
+      )
+      hub.on('chat.send', (input) => {
+        if (!reloaded) throw new Error(`No chat session for tab ${input.tabId}`)
+        return { id: input.message.id, state: 'queued' }
+      })
+      await act(async () => result.current.reload())
+      await waitFor(() => expect(hub.callsTo('chat.hydrate')).toHaveLength(2))
+
+      let sent!: Promise<void>
+      await act(async () => {
+        sent = result.current.sendMessage('again')
+      })
+      await new Promise((r) => setTimeout(r, 20))
+      expect(hub.callsTo('chat.send')).toHaveLength(0)
+
+      await act(async () => releaseReload())
+      await act(async () => sent)
+      expect(hub.callsTo('chat.send')).toHaveLength(1)
+      expect(delivery(result)).not.toContain('failed')
+    })
+
+    it('a failed hydrate does not hold the send back', async () => {
+      const { hub, release } = gatedHub()
+      hub.on('chat.send', (input) => ({ id: input.message.id, state: 'queued' }))
+      const { wrapper } = trpcTest(hub.backend)
+      const { result } = await renderHook(() => useChatSession(target), { wrapper })
+      await waitFor(() => expect(hub.callsTo('chat.hydrate')).toHaveLength(1))
+
+      let sent!: Promise<void>
+      await act(async () => {
+        sent = result.current.sendMessage('hello')
+      })
+      await act(async () => release('fail'))
+      await act(async () => sent)
+      expect(hub.callsTo('chat.send')).toHaveLength(1)
+    })
   })
 })

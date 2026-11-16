@@ -1,5 +1,6 @@
 /**
- * A git op names a checkout path; the hub routes it to whose checkout that is. On a
+ * A git op names its path scope (the task or project whose checkout it touches, §9
+ * Phase 7b); the hub routes it to that scope's computer. On a
  * hub with login, user B must never run a git op on user A's computer, by ANY path
  * form — and the hub's own background reads (no caller) must keep working.
  *
@@ -21,8 +22,8 @@ import { runWithSecurityContext } from '@slayzone/platform/security-log'
 const h = await createTestHarness()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('pa', 'A', '#000')
 h.db
-  .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-  .run('tA', 'pa', 'A task', '/home/a/wt/feat')
+  .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+  .run('tA', 'pa', 'A task')
 
 let actor: string | null = 'userB'
 const reached: string[] = []
@@ -66,9 +67,10 @@ beforeAll(() => {
 })
 afterAll(() => setGitOpTransport(null))
 
-const op = (repoPath: string) => {
+/** A git op on `repoPath`, naming `target` as its path scope (§9 Phase 7b). */
+const op = (repoPath: string, target?: { taskId?: string; projectId?: string }) => {
   const run = () =>
-    executeGitOp('getStatusSummary', { repoPath } as never, false, h.slayDb).then(
+    executeGitOp('getStatusSummary', { repoPath, target } as never, false, h.slayDb).then(
       () => 'ran',
       () => 'refused'
     )
@@ -90,7 +92,10 @@ describe("user B and A's computer", () => {
     test(`${path}: never runs on A's computer`, async () => {
       actor = 'userB'
       reached.length = 0
+      // No scope: a bare path names nobody (refused before routing); A's task named
+      // as the scope: the owner check on A's computer refuses B.
       await op(path)
+      await op(path, { taskId: 'tA' })
       expect(reached, 'reached computers').not.toContain('computer-A')
     })
   }
@@ -100,14 +105,14 @@ describe("the hub's own background reads (no caller)", () => {
   test("a read of A's worktree reaches A's computer", async () => {
     actor = null
     reached.length = 0
-    expect(await op('/home/a/wt/feat')).toBe('ran')
+    expect(await op('/home/a/wt/feat', { taskId: 'tA' })).toBe('ran')
     expect(reached).toEqual(['computer-A'])
   })
 
   test("A's own op on A's worktree runs there", async () => {
     actor = 'userA'
     reached.length = 0
-    expect(await op('/home/a/wt/feat/sub/..')).toBe('ran')
+    expect(await op('/home/a/wt/feat/sub/..', { taskId: 'tA' })).toBe('ran')
     expect(reached).toEqual(['computer-A'])
   })
 })

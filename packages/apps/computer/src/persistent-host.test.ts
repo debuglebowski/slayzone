@@ -24,6 +24,16 @@ it('keeps processes and session epoch when connector attaches are replaced', asy
     ).rejects.toThrow()
     expect((await control.rpc.request<{ epoch: string }>('health')).epoch).toBe(host.epoch)
     await expect(control.rpc.request('dispatch', {})).rejects.toThrow()
+    const connector = await connectorHost(root, second, hubUrl, {})
+    try {
+      expect(await connector.rpc.request('identity')).toMatchObject({
+        chatHistoryPages: true,
+        chatTimelineRowSlices: true,
+        promptSummariesAll: true
+      })
+    } finally {
+      connector.close()
+    }
   } finally {
     control.close()
     await host.stop()

@@ -2,13 +2,13 @@ import path from 'node:path'
 import {
   existsSync,
   readFileSync,
-  unlinkSync,
   rmSync,
   statSync,
   mkdtempSync,
   writeFileSync,
   mkdirSync
 } from 'node:fs'
+import { open, stat } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateArtifactInput,
@@ -25,7 +25,11 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // can stream a version's bytes off disk instead of hauling them through the
 // worker boundary as a utf-8 string.
 import { BlobStore } from './blob-store'
+import { readArtifactTextFile } from './text-content'
+import { ARTIFACT_TEXT_MAX_BYTES, type ArtifactTextRead } from '../shared/text-read'
 import { VersionError } from './errors'
+import { isErasureDoneOrCompacting } from '@slayzone/content-erasure'
+import { eraseContent } from '@slayzone/content-erasure/server'
 import { cleanupTaskWorkingCopies, workingCopyJournalDir } from './working-copy'
 import {
   artifactFilePathIn,
@@ -34,6 +38,42 @@ import {
 } from '@slayzone/task/server/artifact-paths'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './artifact-store-txns'
+
+/**
+ * Blobs whose whole-file hash check passed, by path → the file's stamp then
+ * (inode:size:mtime). A download's first piece checks the blob; asking for that first
+ * piece again must not re-hash a multi-GB blob every time. A changed file (damaged,
+ * replaced) has a new stamp and is checked again. Bounded: oldest forgotten first.
+ */
+const verifiedBlobs = new Map<string, string>()
+const VERIFIED_BLOBS_MAX = 1024
+
+async function blobStamp(file: string): Promise<string | null> {
+  const st = await stat(file, { bigint: true }).catch(() => null)
+  return st ? `${st.ino}:${st.size}:${st.mtimeNs}` : null
+}
+
+/** The blob's content matches its hash: checked once per unchanged file. */
+async function blobIntact(blobs: BlobStore, hash: string): Promise<boolean> {
+  const file = blobs.blobPath(hash)
+  const before = await blobStamp(file)
+  if (before && verifiedBlobs.get(file) === before) return true
+  if (!(await blobs.verifyAsync(hash))) {
+    verifiedBlobs.delete(file)
+    return false
+  }
+  // The stamp after the check: what was hashed (the check may restore a deleted blob).
+  const after = await blobStamp(file)
+  if (after) {
+    verifiedBlobs.delete(file)
+    verifiedBlobs.set(file, after)
+    if (verifiedBlobs.size > VERIFIED_BLOBS_MAX) {
+      const oldest = verifiedBlobs.keys().next().value
+      if (oldest !== undefined) verifiedBlobs.delete(oldest)
+    }
+  }
+  return true
+}
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
@@ -202,9 +242,10 @@ export function createArtifactStore(dataDir: string) {
     async deleteArtifact(db: SlayzoneDb, id: string): Promise<boolean> {
       const existing = await getRow(db, id)
       if (!existing) return false
-      const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-      if (existsSync(filePath)) unlinkSync(filePath)
-      await db.prepare('DELETE FROM task_artifacts WHERE id = ?').run(id)
+      const report = await eraseContent(db, dataDir, { kind: 'artifacts', ids: [id] })
+      // A scheduled database compaction is not a failure: it completes the job later.
+      if (!isErasureDoneOrCompacting(report))
+        throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
       return true
     },
 
@@ -245,6 +286,39 @@ export function createArtifactStore(dataDir: string) {
         }
       }
       return ''
+    },
+
+    /**
+     * The artifact for the in-app text editor: its text, or why it is not shown as
+     * text (binary, or over the size cap — then it is not read at all). Same source
+     * order as `readArtifactContent`: the working file, the legacy file, then the
+     * current version's blob. An artifact with no content yet is empty text.
+     */
+    async readArtifactText(
+      db: SlayzoneDb,
+      id: string,
+      maxBytes: number = ARTIFACT_TEXT_MAX_BYTES
+    ): Promise<ArtifactTextRead | null> {
+      const existing = await getRow(db, id)
+      if (!existing) return null
+      const taskId = existing.task_id as string
+      const title = existing.title as string
+      const filePath = getArtifactFilePath(taskId, id, title)
+      if (existsSync(filePath)) return readArtifactTextFile(filePath, maxBytes)
+      const legacyPath = getLegacyArtifactFilePath(taskId, id, title)
+      if (existsSync(legacyPath)) return readArtifactTextFile(legacyPath, maxBytes)
+      if (existing.current_version_id != null) {
+        try {
+          const { blobPath } = await this.resolveArtifactVersion(db, {
+            artifactId: id,
+            versionRef: 'current'
+          })
+          if (blobPath && existsSync(blobPath)) return readArtifactTextFile(blobPath, maxBytes)
+        } catch {
+          // Unreadable version: empty text, as readArtifactContent.
+        }
+      }
+      return { kind: 'text', content: '', size: 0 }
     },
 
     async getArtifactPath(db: SlayzoneDb, id: string): Promise<string | null> {
@@ -294,6 +368,28 @@ export function createArtifactStore(dataDir: string) {
         if (copy) result.push(copy)
       }
       return result
+    },
+
+    /**
+     * Moves entries (artifacts, and folders with their subtrees) from
+     * `sourceTaskId` to `destTaskId`, keeping ids, versions and working copies.
+     * Retrying a partly applied move completes it. Returns the entries moved now.
+     */
+    async moveArtifacts(
+      db: SlayzoneDb,
+      data: {
+        artifactIds: string[]
+        folderIds: string[]
+        sourceTaskId: string
+        destTaskId: string
+        destFolderId: string | null
+      }
+    ): Promise<{ artifacts: TaskArtifact[]; folders: ArtifactFolder[] }> {
+      const result = await db.namedTxn('task-artifacts:move', { dataDir, ...data })
+      return {
+        artifacts: result.artifacts.map(parseArtifact).filter(Boolean) as TaskArtifact[],
+        folders: result.folders.map(parseFolder).filter(Boolean) as ArtifactFolder[]
+      }
     },
 
     async pasteArtifactFiles(
@@ -419,6 +515,84 @@ export function createArtifactStore(dataDir: string) {
       }
       const { version } = await this.resolveArtifactVersion(db, { artifactId: id, versionRef })
       return new BlobStore(dataDir).read(version.content_hash)
+    },
+
+    /**
+     * Up to `length` bytes of the artifact's current content from `offset`, and its
+     * total size: a download reads in bounded pieces, so no message or string ever
+     * holds a whole (possibly multi-GB) file. Null only when there is no such
+     * artifact or it has neither a working file nor a version; any other failure
+     * (unreadable file, damaged blob) throws, so a client never mistakes it for a
+     * missing file. A blob's hash is checked on the first piece, not on every one.
+     *
+     * `version` names the exact content the piece came from — `blob:<hash>`, or the
+     * working file's inode, size and nanosecond mtime — so a client reading several
+     * pieces can refuse to stitch pieces of different versions. A file that changes
+     * while this one piece is read throws instead of returning a mixed piece.
+     */
+    async readArtifactBytesRange(
+      db: SlayzoneDb,
+      id: string,
+      offset: number,
+      length: number
+    ): Promise<{ bytes: Uint8Array; size: number; version: string } | null> {
+      const row = await getRow(db, id)
+      if (!row) return null
+      const taskId = row.task_id as string,
+        title = row.title as string
+      let file = [
+        getArtifactFilePath(taskId, id, title),
+        getLegacyArtifactFilePath(taskId, id, title)
+      ].find((p) => existsSync(p))
+      let blobVersion: string | null = null
+      if (!file) {
+        if (row.current_version_id == null) return null
+        const version = (await db.namedTxn('task-artifacts:versions:resolve', {
+          artifactId: id,
+          versionRef: 'current'
+        })) as ArtifactVersion
+        const blobs = new BlobStore(dataDir)
+        if (offset === 0 && !(await blobIntact(blobs, version.content_hash)))
+          throw new VersionError(
+            'BLOB_HASH_MISMATCH',
+            'Artifact version hash integrity check failed'
+          )
+        file = blobs.blobPath(version.content_hash)
+        blobVersion = `blob:${version.content_hash}`
+      }
+      const handle = await open(file, 'r')
+      const stamp = async (): Promise<{ size: number; version: string }> => {
+        const st = await handle.stat({ bigint: true })
+        return {
+          size: Number(st.size),
+          // A blob is named by its hash, but its FILE can still be replaced (hub-disk
+          // tampering, restore): the stamp makes that a different version, so a
+          // download spanning the change is refused instead of spliced.
+          version:
+            blobVersion !== null
+              ? `${blobVersion}:${st.ino}:${st.size}:${st.mtimeNs}`
+              : `file:${st.ino}:${st.size}:${st.mtimeNs}`
+        }
+      }
+      return stamp()
+        .then(async (before) => {
+          const want = Math.max(0, Math.min(length, before.size - offset))
+          const bytes = Buffer.alloc(want)
+          let read = 0
+          while (read < want) {
+            const { bytesRead } = await handle.read(bytes, read, want - read, offset + read)
+            if (bytesRead === 0) break
+            read += bytesRead
+          }
+          if ((await stamp()).version !== before.version)
+            throw new Error('The artifact changed while it was being read')
+          return {
+            bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, read),
+            size: before.size,
+            version: before.version
+          }
+        })
+        .finally(() => handle.close())
     },
 
     /** The current (HEAD) version row, or null when the artifact has none. */

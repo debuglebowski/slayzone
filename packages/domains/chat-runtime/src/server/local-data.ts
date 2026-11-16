@@ -1,3 +1,7 @@
+import {
+  timelineStoreFromRecords,
+  type TimelineRecordStore
+} from '@slayzone/terminal/timeline-records'
 import { randomUUID } from 'node:crypto'
 import type {
   ChatDataOps,
@@ -25,6 +29,7 @@ import type {
 } from '@slayzone/terminal-contracts'
 import {
   assertChatTabStateScope,
+  clampChatHistoryPageBudget,
   userMessageAttachments,
   isSyntheticChatPrompt,
   chatCapabilitiesForMode,
@@ -34,7 +39,9 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
+import { dropTimelineInSteps } from './timeline-drop'
 import { chatStorageMode, isStorageOnlyChatOwner, terminalStorageAgentId } from './storage-mode'
+import { createSessionLedgerService, type SessionLedgerService } from './session-ledger-service'
 
 export const sessionRecordKey = (mode: string, conversationId: string | null): string =>
   `session:${JSON.stringify([mode, conversationId])}`
@@ -44,16 +51,17 @@ export interface ChatBootstrap {
   projectId: string | null
   cwd: string
   revision: number
+  /**
+   * The hub's entry for the chat mode: hub-owned spawn `flags`, plus starting
+   * values for a chat whose (task, mode) has no computer configuration yet. The
+   * computer owns chat settings and the chat session id (robustness plan §9).
+   */
   providerConfig: ProviderConfigEntry
-  providerConfigRevision?: number
   defaultFlags: string | null
   settings?: Record<string, string | null>
   env: Record<string, string>
+  /** The hub's terminal-mode entry: its hub-owned spawn `flags`. */
   terminalProviderConfig?: ProviderConfigEntry
-  terminalProviderConfigRevision?: number
-  honoredConversations?: string[]
-  honoredSessions?: Array<{ mode: string; conversationId: string }>
-  deletedConversations?: Array<{ mode: string; conversationId: string }>
 }
 export interface ChatMetadataUpdate {
   operationId: string
@@ -63,11 +71,8 @@ export interface ChatMetadataUpdate {
   tabId: string
   epoch: number
   kind:
-    | 'provider-config'
-    | 'conversation'
     | 'activity'
     | 'thread-created'
-    | 'queue-item'
     | 'agent-state'
     | 'artifact-changed'
     | 'artifact-deleted'
@@ -79,6 +84,12 @@ export interface ChatMetadataUpdate {
    * `task_state_versions`). Absent from older computers.
    */
   stateVersion?: number
+  /**
+   * The chat database it was counted in (`ChatStorage.storeId`). Stamped when
+   * sent, never stored: a conversation moved to another computer keeps its
+   * pending records, but they are sent with the database that now holds them.
+   */
+  storeId?: string
 }
 
 export interface ChatMetadataSnapshot {
@@ -87,12 +98,24 @@ export interface ChatMetadataSnapshot {
   updates: ChatMetadataUpdate[]
   /** Task state version read before the snapshot's content: never newer than it. */
   stateVersion?: number
+  /** The chat database `counter` counts in. */
+  storeId: string
+  /**
+   * Operation ids of the conversation's unacknowledged updates, read with
+   * `counter`: the snapshot already contains their effect, so the hub acks
+   * them on delivery instead of applying them again.
+   */
+  pending: string[]
 }
 
 /** Content stays local. Only explicitly constructed metadata is forwarded to the hub. */
 export function createLocalChatData(
   store: ChatStorage,
-  notify: (update: ChatMetadataUpdate) => void = () => undefined
+  notify: (update: ChatMetadataUpdate) => void = () => undefined,
+  /** The computer's agent-session ledger (same store): the authority for sessions. */
+  ledger: SessionLedgerService = createSessionLedgerService(store),
+  /** A tab's task recorded a session: best-effort signal (the hub's sessions list refreshes). */
+  onSessionsChanged: (tabId: string) => void = () => undefined
 ) {
   function owner(tabId: string) {
     const o = store.forTab(tabId)
@@ -110,6 +133,37 @@ export function createLocalChatData(
   function remove(tabId: string, kind: ChatRecordKind, key: string) {
     const i = owner(tabId)
     store.removeRecord(i.id, i.epoch, kind, key)
+  }
+  function timelineRecords(tabId: string): TimelineRecordStore {
+    // Capture once: a late worker reply must never write into a replacement owner.
+    const identity = owner(tabId)
+    function readable() {
+      const current = store.conversation(identity.id)
+      if (!current || current.state === 'deleted' || current.identity.epoch !== identity.epoch)
+        throw new Error('Timeline ownership changed')
+    }
+    return {
+      load: async (key) => {
+        readable()
+        return store.timelineRecord(identity.id, key)
+      },
+      pageIds: async () => {
+        readable()
+        return store.timelinePageIds(identity.id)
+      },
+      loadSummaries: async () => {
+        readable()
+        return store.timelineSummaries(identity.id, identity.epoch)
+      },
+      searchPages: async (needle) => {
+        readable()
+        return store.searchTimelinePages(identity.id, identity.epoch, needle)
+      },
+      save: async (write) => store.writeTimeline(identity.id, identity.epoch, write),
+      discard: async () => {
+        await dropTimelineInSteps(store, identity.id, identity.epoch)
+      }
+    }
   }
   function taskTab(taskId: string, mode?: string) {
     const choices = store
@@ -150,7 +204,8 @@ export function createLocalChatData(
       set(tabId, 'settings', `metadata:${operationId}`, update)
       queueMicrotask(() => {
         try {
-          if (get(tabId, 'settings', `metadata:${operationId}`)) notify(update)
+          if (get(tabId, 'settings', `metadata:${operationId}`))
+            notify({ ...update, storeId: store.storeId() })
         } catch {
           /* Runtime may have shut down before this notification. */
         }
@@ -187,7 +242,20 @@ export function createLocalChatData(
               Number(b.conversationId === owner(tabId).id) -
                 Number(a.conversationId === owner(tabId).id)
           )
-        const value = (candidates[0]?.value as ProviderConfigEntry | undefined) ?? {}
+        // Settings the hub handed off before this configuration existed (hub v205,
+        // chat-settings): the start, under anything this computer itself cached.
+        const seed = db
+          .prepare('SELECT value FROM provider_config_seeds WHERE task_id=? AND mode=?')
+          .get(taskId, mode) as { value: string } | undefined
+        const value: ProviderConfigEntry = {
+          ...(seed ? (JSON.parse(seed.value) as ProviderConfigEntry) : {}),
+          ...((candidates[0]?.value as ProviderConfigEntry | undefined) ?? {})
+        }
+        if (seed)
+          db.prepare('DELETE FROM provider_config_seeds WHERE task_id=? AND mode=?').run(
+            taskId,
+            mode
+          )
         db.prepare('INSERT INTO provider_configs VALUES(?,?,0,?)').run(
           taskId,
           mode,
@@ -200,25 +268,24 @@ export function createLocalChatData(
   function provider(taskId: string, mode: string): ProviderConfigEntry {
     return providerState(taskId, mode).value
   }
-  function bootstrapProvider(
-    value: ChatBootstrap,
-    mode: string,
-    config: ProviderConfigEntry,
-    revision?: number
-  ) {
+  /**
+   * Apply the hub's view of one (task, mode) entry. Only the key the hub owns is
+   * taken: spawn `flags`. Chat settings and every session id are this computer's
+   * (the session ledger is here too): the hub's values only seed a missing entry
+   * (`providerState`). A deleted chat session is dropped.
+   */
+  function bootstrapProvider(value: ChatBootstrap, mode: string, config: ProviderConfigEntry) {
     const current = providerState(value.identity.taskId, mode)
-    if (revision === undefined || revision <= current.revision) return
-    const localSession = current.value.chatConversationId
-    const next = {
-      ...config,
-      ...(localSession && !deleted(value.identity.taskId, mode, localSession)
-        ? { chatConversationId: localSession }
-        : {})
-    }
+    const next: ProviderConfigEntry = { ...current.value }
+    if (config.flags !== undefined) next.flags = config.flags
+    else delete next.flags
+    if (deleted(value.identity.taskId, mode, next.chatConversationId))
+      next.chatConversationId = null
+    if (JSON.stringify(next) === JSON.stringify(current.value)) return
     store.compose((db) =>
       db
         .prepare('UPDATE provider_configs SET value=?,revision=? WHERE task_id=? AND mode=?')
-        .run(JSON.stringify(next), revision, value.identity.taskId, mode)
+        .run(JSON.stringify(next), current.revision + 1, value.identity.taskId, mode)
     )
   }
   function patchSync(taskId: string, mode: string, key: keyof ProviderConfigEntry, value: unknown) {
@@ -233,7 +300,7 @@ export function createLocalChatData(
           .run(JSON.stringify(next), revision, taskId, mode)
       )
       set(tabId, 'settings', owner(tabId).mode === mode ? 'provider' : `provider:${mode}`, next)
-      metadata(tabId, 'provider-config', { mode, key, value, revision })
+      // Chat settings and every session id stay here (robustness plan §9, P0).
     })
   }
   async function patch(
@@ -245,19 +312,28 @@ export function createLocalChatData(
     patchSync(taskId, mode, key, value)
   }
 
+  /** A session the user deleted: the hub's tombstone as delivered, or an older local copy. */
   function deleted(taskId: string, mode: string, id: string | null | undefined) {
-    return (
-      !!id &&
-      store
-        .findRecords('settings', taskId, { id: 'deleted-sessions' })
-        .some(
-          (r) =>
-            r.id === 'deleted-sessions' &&
-            (r.value as Array<{ mode: string; conversationId: string }>).some(
-              (v) => v.mode === mode && v.conversationId === id
-            )
-        )
+    if (!id) return false
+    if (
+      store.compose((db) =>
+        db
+          .prepare(
+            'SELECT 1 FROM session_deletions WHERE task_id=? AND mode=? AND conversation_id=? LIMIT 1'
+          )
+          .get(taskId, mode, id)
+      )
     )
+      return true
+    return store
+      .findRecords('settings', taskId, { id: 'deleted-sessions' })
+      .some(
+        (r) =>
+          r.id === 'deleted-sessions' &&
+          (r.value as Array<{ mode: string; conversationId: string }>).some(
+            (v) => v.mode === mode && v.conversationId === id
+          )
+      )
   }
   function bootstrap(value: ChatBootstrap) {
     return store.transaction(() => {
@@ -307,18 +383,6 @@ export function createLocalChatData(
       }
       if (isStorageOnlyChatOwner(value.identity))
         set(value.identity.tabId, 'settings', 'inbox', true)
-      store.transaction(() => {
-        const previous =
-          get<Array<{ mode: string; conversationId: string }>>(
-            value.identity.tabId,
-            'settings',
-            'deleted-sessions'
-          ) ?? []
-        const all = new Map(previous.map((v) => [`${v.mode}:${v.conversationId}`, v]))
-        for (const v of value.deletedConversations ?? [])
-          all.set(`${v.mode}:${v.conversationId}`, v)
-        if (all.size) set(value.identity.tabId, 'settings', 'deleted-sessions', [...all.values()])
-      })
       const previous = store.getRecord<ChatBootstrap>(value.identity.id, 'settings', 'bootstrap')
       if (!previous || value.revision > previous.revision) {
         if (value.settings) {
@@ -353,35 +417,26 @@ export function createLocalChatData(
       }
       if (value.terminalProviderConfig) {
         const mode = terminalStorageAgentId(value.identity.mode)
+        // The hub's entry carries only its spawn flags: a session id is this
+        // computer's ledger's (robustness plan §9), never taken from the hub.
+        const {
+          conversationId: _id,
+          conversationHistory: _history,
+          ...hubEntry
+        } = value.terminalProviderConfig as ProviderConfigEntry & { conversationHistory?: unknown }
         if (!previous || value.revision > previous.revision)
-          set(value.identity.tabId, 'settings', `provider:${mode}`, value.terminalProviderConfig)
+          set(value.identity.tabId, 'settings', `provider:${mode}`, hubEntry)
       }
       if (!get(value.identity.tabId, 'settings', 'inbox'))
         store.transaction(() => {
-          bootstrapProvider(
-            value,
-            value.identity.mode,
-            value.providerConfig,
-            value.providerConfigRevision
-          )
+          bootstrapProvider(value, value.identity.mode, value.providerConfig)
           if (value.terminalProviderConfig)
             bootstrapProvider(
               value,
               terminalStorageAgentId(value.identity.mode),
-              value.terminalProviderConfig,
-              value.terminalProviderConfigRevision
+              value.terminalProviderConfig
             )
         })
-      for (const id of value.honoredConversations ?? [])
-        if (!get(value.identity.tabId, 'settings', `session:${id}`))
-          set(value.identity.tabId, 'settings', `session:${id}`, { conversationId: id })
-      for (const session of value.honoredSessions ?? [])
-        set(
-          value.identity.tabId,
-          'settings',
-          `session-proof:${session.mode}:${session.conversationId}`,
-          true
-        )
     })
   }
   const queued = (tabId: string): QueuedChatMessage[] =>
@@ -550,10 +605,7 @@ export function createLocalChatData(
               continue // Preserve an unprovable conflicting row for explicit recovery.
             }
             recordQueueHandoff(tabId, event.id, content, row.saved_at)
-            if (item) {
-              remove(tabId, 'queue', item.id)
-              metadata(tabId, 'queue-item', { id: item.id, removed: true })
-            }
+            if (item) remove(tabId, 'queue', item.id)
           }
           if (rows.length < 256) break
         }
@@ -789,7 +841,6 @@ export function createLocalChatData(
         queueIdentity(item, queueInputHash(send, original, opts))
       )
       if (reservation) remove(tabId, 'settings', admissionPrefix + reservation.key)
-      metadata(tabId, 'queue-item', { id, removed: false })
       return item
     },
     pop: (tabId, held = []) => {
@@ -846,17 +897,13 @@ export function createLocalChatData(
       if (!item) return false
       repairQueueIdentities(item.tabId)
       remove(item.tabId, 'queue', id)
-      metadata(item.tabId, 'queue-item', { id, removed: true })
       return true
     },
     clear: (tabId) => {
       repairQueueIdentities(tabId)
       for (const r of pendingAdmissions(tabId)) remove(tabId, 'settings', admissionPrefix + r.key)
       const list = queued(tabId)
-      for (const item of list) {
-        remove(tabId, 'queue', item.id)
-        metadata(tabId, 'queue-item', { id: item.id, removed: true })
-      }
+      for (const item of list) remove(tabId, 'queue', item.id)
       return list.length
     },
     getTabIdForItem: (id) => queueItem(id)?.tabId ?? null
@@ -981,9 +1028,22 @@ export function createLocalChatData(
       return (tab?.value as ChatBootstrap | undefined)?.defaultFlags ?? null
     },
     recordConversation: async (input) => {
-      store.transaction(() => {
+      const createdAt = input.createdAt ?? Date.now()
+      // The session ledger first: it is the authority (one per computer, shared by
+      // the chat and the terminal agents of every task here).
+      await ledger.recordConversation({
+        ...(input.id ? { id: input.id } : {}),
+        createdAt,
+        taskId: input.taskId,
+        mode: input.mode,
+        ...(input.tabId ? { tabId: input.tabId } : {}),
+        conversationId: input.conversationId,
+        origin: input.origin,
+        ...(input.pendingMeta ? { pendingMeta: input.pendingMeta } : {})
+      })
+      const tabId = store.transaction(() => {
         const tabId = taskTab(input.taskId, input.mode)
-        const value = { ...input, createdAt: input.createdAt ?? Date.now() }
+        const value = { ...input, createdAt }
         set(tabId, 'settings', sessionRecordKey(input.mode, input.conversationId), value)
         if (input.conversationId)
           set(tabId, 'settings', `session-proof:${input.mode}:${input.conversationId}`, true)
@@ -993,11 +1053,14 @@ export function createLocalChatData(
           input.legacyJsonField ?? 'conversationId',
           input.conversationId
         )
-        metadata(tabId, 'conversation', value)
+        return tabId
       })
+      // The hub keeps no copy (robustness plan §9): its sessions list only refreshes.
+      onSessionsChanged(tabId)
     },
     isHonoredConversation: async (t, m, id) => {
       if (deleted(t, m, id)) return false
+      if (await ledger.isHonoredConversation(t, m, id)) return true
       const tabId = taskTab(t, m),
         session =
           get<{ mode?: string }>(tabId, 'settings', sessionRecordKey(m, id)) ??
@@ -1009,16 +1072,23 @@ export function createLocalChatData(
       )
     },
     getCurrentConversationId: async (t, m) => {
+      // A terminal mode's session is the ledger's (the main tab's); a chat's is its
+      // own provider configuration.
       const id =
-        (chatStorageMode(m) !== m
-          ? provider(t, m).conversationId
-          : provider(t, m).chatConversationId) ?? null
+        chatStorageMode(m) !== m
+          ? await ledger.getCurrentConversationId(t, m)
+          : (provider(t, m).chatConversationId ?? null)
       return deleted(t, m, id) ? null : id
     },
     bumpLastInteraction: async (taskId, now) => {
       metadata(taskTab(taskId), 'activity', { at: now })
       return true
     },
+    // Binary payloads leave the event before it is cached, broadcast or saved: the
+    // bytes land in the blob store here, `appendAt` pins them with the row.
+    prepareChatEvent: (_tabId, event) => store.extractEventBlobs(event),
+    readChatEventBlob: (tabId, sha256, offset) =>
+      store.readEventBlob(owner(tabId).id, sha256, offset),
     persistChatEventSync: (tabId, seq, event, at) =>
       store.transaction(() => {
         const i = owner(tabId)
@@ -1031,10 +1101,8 @@ export function createLocalChatData(
           !event.history &&
           event.id &&
           store.getRecord(i.id, 'queue', event.id)
-        ) {
+        )
           remove(tabId, 'queue', event.id)
-          metadata(tabId, 'queue-item', { id: event.id, removed: true })
-        }
         if (
           outcome === 'inserted' &&
           event.kind === 'user-message' &&
@@ -1088,8 +1156,9 @@ export function createLocalChatData(
       }),
     persistChatEvent: async (tabId, seq, event, at) =>
       data.persistChatEventSync!(tabId, seq, event, at ?? Date.now()),
-    loadChatEvents: async (tabId) => store.read(owner(tabId).id, -1),
-    loadChatEventsRange: async (tabId, after, before) => store.read(owner(tabId).id, after, before),
+    loadChatEventsPage: async (tabId, after, before, budget) =>
+      store.readPage(owner(tabId).id, after, before, budget),
+    chatEventsTailStart: async (tabId, count) => store.tailStart(owner(tabId).id, count),
     getNextSeqForTab: async (tabId) => store.nextSeq(owner(tabId).id),
     clearChatEventsForTab: async (tabId) => {
       const i = owner(tabId)
@@ -1097,10 +1166,22 @@ export function createLocalChatData(
     },
     loadUserMessageContent: async (taskId, ids) => {
       const found = new Map<string, UserContentBlock[]>()
+      // Never a whole conversation at once: a page-sized window of rows at a time
+      // (sizes from record headers), SQLite keeps only rows naming a wanted id, and
+      // the event loop runs between windows.
+      const needles = ids.map((id) => JSON.stringify(id))
+      const budget = clampChatHistoryPageBudget()
       for (const o of store.listForTask(taskId))
-        for (const e of store.read(o.identity.id, -1))
-          if (e.event.kind === 'user-message' && e.event.id && ids.includes(e.event.id))
-            found.set(e.event.id, e.event.content ?? [])
+        for (let after = -1; ; ) {
+          const window = store.pageBounds(o.identity.id, after, Number.MAX_SAFE_INTEGER, budget)
+          if (window.through === null) break
+          for (const e of store.readMatching(o.identity.id, after, window.through + 1, needles))
+            if (e.event.kind === 'user-message' && e.event.id && ids.includes(e.event.id))
+              found.set(e.event.id, e.event.content ?? [])
+          if (!window.more) break
+          after = window.through
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
       for (const r of store.findRecords('settings', taskId, { idPrefix: 'attachment-message:' }))
         if (r.id.startsWith('attachment-message:') && ids.includes(r.id.slice(19)))
           found.set(
@@ -1109,50 +1190,17 @@ export function createLocalChatData(
           )
       return found
     },
-    loadTimelineCheckpoint: async (tabId) => get(tabId, 'timeline', 'checkpoint'),
+    timelineRecords,
+    loadTimelineCheckpoint: async (tabId) =>
+      timelineStoreFromRecords(timelineRecords(tabId)).loadCheckpoint(),
     loadTimelinePages: async (tabId, pages) =>
-      pages.flatMap((page) => {
-        const r = get<{ rows: string }>(tabId, 'timeline', `page:${page}`)
-        return r ? [{ page, rows: r.rows }] : []
-      }),
-    loadTimelineSummaries: async (tabId) =>
-      store
-        .records(owner(tabId).id, 'timeline')
-        .filter((r) => r.kind === 'timeline' && r.id.startsWith('page:'))
-        .map((r) => ({
-          page: Number(r.id.slice(5)),
-          summary: (r.value as { summary: string }).summary
-        }))
-        .sort((a, b) => a.page - b.page),
+      timelineStoreFromRecords(timelineRecords(tabId)).loadPages(pages),
+    // Both paths use paced metadata, with the same captured ownership fence.
+    loadTimelineSummaries: async (tabId) => timelineRecords(tabId).loadSummaries!(),
     saveTimeline: async (tabId, write: TimelineWrite) =>
-      store.transaction(() => {
-        if (write.dropPagesFrom !== null)
-          for (const r of store.records(owner(tabId).id, 'timeline'))
-            if (
-              r.kind === 'timeline' &&
-              r.id.startsWith('page:') &&
-              Number(r.id.slice(5)) >= write.dropPagesFrom
-            )
-              remove(tabId, 'timeline', r.id)
-        for (const p of write.pages) set(tabId, 'timeline', `page:${p.page}`, p)
-        if (write.checkpoint) set(tabId, 'timeline', 'checkpoint', write.checkpoint)
-        else remove(tabId, 'timeline', 'checkpoint')
-      }),
-    searchTimelinePages: async (tabId, needle) =>
-      store
-        .records(owner(tabId).id, 'timeline')
-        .filter(
-          (r) =>
-            r.kind === 'timeline' &&
-            r.id.startsWith('page:') &&
-            (r.value as { searchText: string }).searchText.includes(needle)
-        )
-        .map((r) => Number(r.id.slice(5)))
-        .sort((a, b) => a - b),
-    clearTimeline: async (tabId) => {
-      for (const r of store.records(owner(tabId).id, 'timeline'))
-        if (r.kind === 'timeline') remove(tabId, 'timeline', r.id)
-    },
+      timelineStoreFromRecords(timelineRecords(tabId)).save(write),
+    searchTimelinePages: async (tabId, needle) => timelineRecords(tabId).searchPages!(needle),
+    clearTimeline: async (tabId) => timelineRecords(tabId).discard(),
     clearChatQueue: (tabId) => queue.clear(tabId),
     buildMcpEnv: async (taskId) =>
       get<ChatBootstrap>(taskTab(taskId), 'settings', 'bootstrap')?.env ?? {},
@@ -1261,10 +1309,23 @@ export function createLocalChatData(
             }>
           ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
         ),
-        counter = store.getRecord<number>(id, 'settings', 'metadata-counter') ?? 0
+        counter = store.getRecord<number>(id, 'settings', 'metadata-counter') ?? 0,
+        // Read with `counter` (one transaction): exactly the updates whose
+        // effect this snapshot already contains.
+        // Record ids only (`metadata:<operationId>`): no unrelated content parsed.
+        pending = store.compose((db) =>
+          (
+            db
+              .prepare(
+                "SELECT substr(id,10) AS operationId FROM records WHERE conversation_id=? AND kind='settings' AND id GLOB 'metadata:*' ORDER BY saved_at,id"
+              )
+              .all(id) as Array<{ operationId: string }>
+          ).map((r) => r.operationId)
+        ),
+        storeId = store.storeId()
       const updates: ChatMetadataUpdate[] = []
       if (i.tabId.startsWith('artifact-store:'))
-        return { identity: i, counter, updates, stateVersion }
+        return { identity: i, counter, updates, stateVersion, storeId, pending }
       const add = (kind: ChatMetadataUpdate['kind'], key: string, value: unknown) =>
         updates.push({
           operationId: `snapshot:${id}:${key}`,
@@ -1293,76 +1354,34 @@ export function createLocalChatData(
           })
       }
       for (const r of records) {
-        if (r.kind === 'settings' && r.id.startsWith('session:')) {
-          const v = r.value as {
-            conversationId?: string | null
-            mode?: string
-            origin?: string
-            createdAt?: number
-            ownershipClaim?: boolean
-          }
-          if (
-            (v.conversationId && !deleted(i.taskId, v.mode ?? i.mode, v.conversationId)) ||
-            (v.conversationId === null && v.origin === 'manual-reset')
-          )
-            add('conversation', r.id, {
-              mode: v.mode ?? i.mode,
-              conversationId: v.conversationId,
-              origin: v.origin ?? 'legacy-migration',
-              createdAt: v.createdAt ?? r.at,
-              ...(v.ownershipClaim !== undefined ? { ownershipClaim: v.ownershipClaim } : {}),
-              legacyJsonField: (v.mode ?? i.mode).endsWith('-chat')
-                ? 'chatConversationId'
-                : 'conversationId'
-            })
-        }
-        if (
-          !isStorageOnlyChatOwner(i) &&
-          r.kind === 'settings' &&
-          (r.id === 'provider' || r.id.startsWith('provider:'))
-        ) {
-          const mode = r.id === 'provider' ? i.mode : r.id.slice(9),
-            current = providerState(i.taskId, mode),
-            cfg = current.value
-          for (const key of [
-            'chatMode',
-            'chatModel',
-            'chatEffort',
-            'chatCollaboration',
-            'chatFastMode',
-            'chatConversationId',
-            'conversationId'
-          ] as const) {
-            if (cfg[key] !== undefined)
-              add('provider-config', `${r.id}:${key}`, {
-                mode,
-                key,
-                revision: current.revision,
-                value: deleted(i.taskId, mode, typeof cfg[key] === 'string' ? cfg[key] : null)
-                  ? null
-                  : cfg[key]
-              })
-          }
-        }
-        if (r.kind === 'queue') add('queue-item', `queue:${r.id}`, { id: r.id, removed: false })
         if (r.kind === 'settings' && r.id === 'metadata-state:activity')
           add('activity', 'activity', r.value)
         if (r.kind === 'settings' && r.id === 'metadata-state:agent-state')
           add('agent-state', 'agent-state', r.value)
       }
-      return { identity: i, counter, updates, stateVersion }
+      return { identity: i, counter, updates, stateVersion, storeId, pending }
     })
+  }
+  /** Unacknowledged updates, oldest kept order, stamped with this database. */
+  function pendingMetadata(limit: number): ChatMetadataUpdate[] {
+    const storeId = store.storeId()
+    return store
+      .findRecords('settings', undefined, { idPrefix: 'metadata:', limit })
+      .map((r) => ({ ...(r.value as ChatMetadataUpdate), storeId }))
   }
   return {
     data,
     queue,
     bootstrap,
+    /** The computer's (only) chat settings and session ids of one (task, mode). */
+    providerConfig: provider,
     owner,
     get,
     set,
     remove,
     metadata,
     metadataSnapshot,
+    pendingMetadata,
     cancelPendingQueueAdmissions,
     repairQueueIdentities
   }

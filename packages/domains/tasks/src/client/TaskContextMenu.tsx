@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,6 +10,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
   ContextMenuRadioGroup,
+  ContextMenuLabel,
   ContextMenuRadioItem,
   buildStatusOptions,
   getColumnStatusStyle,
@@ -40,7 +41,9 @@ import {
   Signal,
   Tag as TagIcon,
   FolderInput,
+  FolderPlus,
   Copy,
+  CopyPlus,
   Archive,
   Trash2,
   ShieldAlert,
@@ -53,8 +56,17 @@ import {
   Bell
 } from 'lucide-react'
 import { useTrack } from '@slayzone/telemetry/client'
+import { useCrossHubMoveTargets } from './useCrossHubMoveTargets'
 import { format } from 'date-fns'
-import { getSnoozePresets, CustomSnoozeDialog, BlockerDialog } from '@slayzone/task/client'
+import {
+  getSnoozePresets,
+  CustomSnoozeDialog,
+  BlockerDialog,
+  DuplicateTaskDialog,
+  MoveTaskDialog,
+  reportDeleteTaskError,
+  useProjectsOnTaskHub
+} from '@slayzone/task/client'
 
 interface TaskContextMenuProps {
   task: Task
@@ -65,7 +77,8 @@ interface TaskContextMenuProps {
   isBlocked?: boolean
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask: (taskId: string) => void
-  onDeleteTask: (taskId: string) => void
+  /** Reports its own outcome; rejects when the task was not deleted. */
+  onDeleteTask: (taskId: string) => Promise<void>
   onTaskTagsChange?: (taskId: string, tagIds: string[]) => void
   onTagCreated?: (tag: Tag) => void
   /** Provided when the task has an active agent session (PTY or chat). Renders a "Shut down agent" item. */
@@ -112,7 +125,15 @@ export function TaskContextMenu({
   const [blockerDialogOpen, setBlockerDialogOpen] = useState(false)
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
+  /** The project picked in "Move to": the move dialog confirms it. */
+  const [moveMode, setMoveMode] = useState<'move' | 'copy'>('move')
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const statusOptions = buildStatusOptions(columns)
+  // A task moves only between projects of its own hub.
+  const moveTargets = useProjectsOnTaskHub(projects, [task.id])
+  // Other hubs' projects: a move there copies the task over, in the background.
+  const { otherHubProjects, onMoveToOtherHub } = useCrossHubMoveTargets(projects, [task.id])
 
   const handleStatusChange = (status: string): void => {
     trackTask(task.id, 'task_status_changed', { from: task.status, to: status })
@@ -132,8 +153,10 @@ export function TaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
-    trackTask(task.id, 'task_moved_to_project')
-    onUpdateTask(task.id, { project_id: projectId })
+    if (projectId !== task.project_id) {
+      setMoveMode('move')
+      setMoveTargetId(projectId)
+    }
   }
 
   const handleSnooze = (date: Date): void => {
@@ -165,10 +188,12 @@ export function TaskContextMenu({
     setArchiveDialogOpen(false)
   }
 
-  const handleDeleteConfirm = (): void => {
+  const handleDeleteConfirm = async (): Promise<void> => {
     trackTask(task.id, 'task_deleted', { was_temporary: Boolean(task.is_temporary) })
-    onDeleteTask(task.id)
     setDeleteDialogOpen(false)
+    // Delete is permanent: a refusal or failure must reach the user, never vanish
+    // as an unhandled rejection.
+    await onDeleteTask(task.id).catch(reportDeleteTaskError)
   }
 
   // Blocked handlers
@@ -386,6 +411,15 @@ export function TaskContextMenu({
 
           <ContextMenuSeparator />
 
+          <ContextMenuItem
+            onSelect={() => {
+              setMoveMode('copy')
+              setMoveTargetId(task.project_id)
+            }}
+          >
+            <FolderPlus className="mr-2 size-3.5" />
+            Copy to project…
+          </ContextMenuItem>
           {/* Move to project */}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
@@ -394,7 +428,7 @@ export function TaskContextMenu({
             </ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuRadioGroup value={task.project_id} onValueChange={handleProjectChange}>
-                {projects.map((p) => (
+                {moveTargets.map((p) => (
                   <ContextMenuRadioItem key={p.id} value={p.id}>
                     <span
                       className="inline-block w-2 h-2 rounded-full mr-2"
@@ -403,9 +437,32 @@ export function TaskContextMenu({
                     {p.name}
                   </ContextMenuRadioItem>
                 ))}
+                {otherHubProjects.map((h) => (
+                  <Fragment key={h.hubId}>
+                    <ContextMenuSeparator />
+                    <ContextMenuLabel className="text-xs text-muted-foreground">
+                      {h.hubLabel}
+                    </ContextMenuLabel>
+                    {h.projects.map((p) => (
+                      <ContextMenuRadioItem key={p.id} value={p.id}>
+                        <span
+                          className="inline-block w-2 h-2 rounded-full mr-2"
+                          style={{ backgroundColor: p.color }}
+                        />
+                        {p.name}
+                      </ContextMenuRadioItem>
+                    ))}
+                  </Fragment>
+                ))}
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
           </ContextMenuSub>
+
+          {/* Duplicate as a fresh follow-up */}
+          <ContextMenuItem onSelect={() => setDuplicateDialogOpen(true)}>
+            <CopyPlus className="mr-2 size-3.5" />
+            Duplicate…
+          </ContextMenuItem>
 
           {/* Copy submenu */}
           <ContextMenuSub>
@@ -464,7 +521,8 @@ export function TaskContextMenu({
             <AlertDialogHeader>
               <AlertDialogTitle>Delete Task</AlertDialogTitle>
               <AlertDialogDescription>
-                Move "{task.title}" to Trash? You can restore it for 30 days.
+                Permanently delete "{task.title}" and its SlayZone files and history? This cannot be
+                undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -503,6 +561,29 @@ export function TaskContextMenu({
           />
         </MountWhenOpened>
       )}
+
+      {/* Move to project: confirms the pick, says what the move does */}
+      <MountWhenOpened open={moveTargetId !== null}>
+        <MoveTaskDialog
+          initialMode={moveMode}
+          open={moveTargetId !== null}
+          onOpenChange={(open) => {
+            if (!open) setMoveTargetId(null)
+          }}
+          taskIds={[task.id]}
+          initialProjectId={moveTargetId ?? undefined}
+          otherHubProjects={otherHubProjects}
+          onMoveToOtherHub={onMoveToOtherHub}
+        />
+      </MountWhenOpened>
+
+      <MountWhenOpened open={duplicateDialogOpen}>
+        <DuplicateTaskDialog
+          open={duplicateDialogOpen}
+          onOpenChange={setDuplicateDialogOpen}
+          task={task}
+        />
+      </MountWhenOpened>
 
       {/* Blocking task dialog */}
       <MountWhenOpened open={blockerDialogOpen}>

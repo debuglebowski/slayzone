@@ -163,31 +163,49 @@ test.describe('Terminal crash overlay', () => {
   test("a refused spawn shows the computer's own words under the reason", async ({
     mainWindow
   }) => {
-    await ensureLiveTerminal(mainWindow)
+    await crashTerminal(mainWindow)
+    const retry = mainWindow.getByRole('button', { name: 'Retry' }).last()
+    await expect(retry).toBeVisible({ timeout: 10_000 })
     const refusal =
       "posix_spawnp failed. /nm/node-pty/spawn-helper is not executable. Fix: chmod +x '/nm/node-pty/spawn-helper'"
-    await mainWindow.evaluate(
-      ({ sid, detail }) =>
-        window.getTrpcVanillaClient().pty.testEmitExit.mutate({
-          sessionId: sid,
-          exitCode: -1,
-          errorCode: null,
-          exitReason: 'spawn-failed',
-          exitDetail: detail
-        }),
-      { sid: sessionId, detail: refusal }
+    // testEmitExit drives a stubbed spawn. A live shell would contradict the exit:
+    // the state store reconciles against it and correctly returns to running.
+    await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: true })
     )
-    await expect(mainWindow.getByText("The computer couldn't start the agent.").last()).toBeVisible(
-      {
-        timeout: 10_000
-      }
-    )
-    await expect(mainWindow.getByTestId('terminal-dead-detail').last()).toHaveText(refusal)
-    // The real shell behind the emitted exit is still running: end it.
-    await mainWindow.evaluate(
-      (sid) => window.getTrpcVanillaClient().pty.kill.mutate({ sessionId: sid }),
-      sessionId
-    )
+    try {
+      await retry.click()
+      await expect
+        .poll(() =>
+          mainWindow.evaluate(
+            async (sid) =>
+              (await window.getTrpcVanillaClient().pty.testTakePtyCreateOpts.query()).some(
+                (opts) => opts.sessionId === sid
+              ),
+            sessionId
+          )
+        )
+        .toBe(true)
+      await mainWindow.evaluate(
+        ({ sid, detail }) =>
+          window.getTrpcVanillaClient().pty.testEmitExit.mutate({
+            sessionId: sid,
+            exitCode: -1,
+            errorCode: null,
+            exitReason: 'spawn-failed',
+            exitDetail: detail
+          }),
+        { sid: sessionId, detail: refusal }
+      )
+      await expect(
+        mainWindow.getByText("The computer couldn't start the agent.").last()
+      ).toBeVisible({ timeout: 10_000 })
+      await expect(mainWindow.getByTestId('terminal-dead-detail').last()).toHaveText(refusal)
+    } finally {
+      await mainWindow.evaluate(() =>
+        window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: false })
+      )
+    }
   })
 
   test('Retry clears overlay then it reappears after re-crash', async ({ mainWindow }) => {

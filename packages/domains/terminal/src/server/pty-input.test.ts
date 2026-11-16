@@ -37,6 +37,14 @@ describe('analyzePtyInput', () => {
     expect(analyzePtyInput('', '\x1b[<35;10;5M').facts.esc).toBe(false)
   })
 
+  it('flags ^C / ^D (raw and kitty CSI-u with ctrl), never plain keys or reports', () => {
+    for (const key of ['\x03', '\x04', 'abc\x03', '\x1b[99;5u', '\x1b[100;5u', '\x1b[99;5:1u'])
+      expect(analyzePtyInput('', key).facts.interrupt).toBe(true)
+    // c / d without ctrl, Esc, mouse and focus reports: not an interrupt.
+    for (const key of ['c', 'd', '\x1b[99u', '\x1b[99;3u', '\x1b', '\x1b[<35;10;5M', '\x1b[I'])
+      expect(analyzePtyInput('', key).facts.interrupt).toBeFalsy()
+  })
+
   it('drops terminal reports from the buffer', () => {
     expect(analyzePtyInput('ab', '\x1b[<35;10;5M\x1b[I').buffer).toBe('ab')
   })

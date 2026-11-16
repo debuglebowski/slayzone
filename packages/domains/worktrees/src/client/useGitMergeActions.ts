@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { useTaskFolders, worktreeOrProject } from './task-folders'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
@@ -17,6 +18,7 @@ export function useGitMergeActions({
   onTaskUpdated?: (task: Task) => void
 }) {
   const trpc = useTRPC()
+  const folders = useTaskFolders(task)
   const queryClient = useQueryClient()
   // `mutateAsync` (stable) for the ones the callbacks below depend on — never the
   // useMutation() result object, which is new on every render.
@@ -28,8 +30,9 @@ export function useGitMergeActions({
   // Merge-mode: commit and continue merge
   const handleCommitAndContinueMerge = useCallback(async () => {
     if (!task || !onUpdateTask || !onTaskUpdated) return
-    const targetPath = task.worktree_path ?? projectPath
-    if (!targetPath) return
+    const worktreePath = folders.worktreePath
+    const targetPath = worktreeOrProject(task, folders, projectPath)
+    if (!targetPath || !worktreePath) return
 
     await stageAll({ path: targetPath })
     await commitFiles({
@@ -38,13 +41,13 @@ export function useGitMergeActions({
     })
 
     const sourceBranch = await queryClient.fetchQuery(
-      trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path! })
+      trpc.worktrees.getCurrentBranch.queryOptions({ path: worktreePath })
     )
     if (!sourceBranch) throw new Error('Cannot merge: detached HEAD in worktree')
 
     const result = await mergeWithAi({
       projectPath: projectPath!,
-      worktreePath: task.worktree_path!,
+      worktreePath,
       parentBranch: task.worktree_parent_branch!,
       sourceBranch
     })
@@ -76,6 +79,7 @@ export function useGitMergeActions({
     }
   }, [
     task,
+    folders,
     projectPath,
     completedStatus,
     onUpdateTask,

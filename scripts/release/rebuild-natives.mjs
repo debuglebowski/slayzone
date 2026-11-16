@@ -18,6 +18,7 @@
 // Usage: rebuild-natives.mjs --app-dir <dir> --workspace-root <dir> --electron-version <v>
 //          --platform <win32|darwin|linux> --arch <x64|arm64>
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { rebuild } from '@electron/rebuild'
@@ -74,6 +75,18 @@ for (const [name, files] of Object.entries(PREBUILT[platform] ?? {})) {
   }
   console.log(`${name}: using prebuilds/${platform}-${arch}`)
   ignoreModules.push(name)
+}
+
+// node-pty's install script copies conpty.dll + OpenConsole.exe for the BUILD host's arch
+// into build/Release/conpty, so the arm64 app (cross-built on x64) shipped x64 copies there
+// (scripts/release/check-native-arch.mjs refuses them). Re-run that script for the TARGET
+// arch: the folder then matches the prebuild it sits next to. It no-ops off Windows.
+if (platform === 'win32') {
+  execFileSync(
+    process.execPath,
+    [path.join(workspaceRoot, 'node_modules', 'node-pty', 'scripts', 'post-install.js')],
+    { stdio: 'inherit', env: { ...process.env, npm_config_arch: arch } }
+  )
 }
 
 // Mirrors app-builder-lib's util/yarn.js rebuild() options.

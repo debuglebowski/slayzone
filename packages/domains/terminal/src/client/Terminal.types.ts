@@ -27,6 +27,9 @@ export interface TerminalProps {
   }) => void
   onFirstInput?: () => void
   onRetry?: () => void
+  /** Remount this pane: a fresh attach (or start). The "Session not attached"
+   *  overlay's Restart / after-Attach action; falls back to `onRetry`. */
+  onRemount?: () => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
 }

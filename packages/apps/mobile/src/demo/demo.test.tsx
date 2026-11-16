@@ -39,7 +39,8 @@ jest.mock('../terminal/TerminalDom', () => {
 // mermaid's build ships inside the app bundle (prebuild), not in Node.
 jest.mock('../artifacts/page-assets', () => ({
   MERMAID_BUNDLE_FILE: 'mermaid.min.js',
-  loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}')
+  loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}'),
+  loadHtml2canvasScript: jest.fn(async () => 'window.html2canvas=function(){}')
 }))
 
 /** The HTML of the markdown artifact page on screen (the web view stand-in keeps its props). */

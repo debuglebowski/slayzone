@@ -4,6 +4,7 @@ import type { TreeGroupBy, TreeOrderBy, TreeOrderDir } from '@slayzone/tabs-stat
 
 export const TEMP_GROUP_KEY = '__temporary__'
 export const PINNED_GROUP_KEY = '__pinned__'
+export const BLOCKED_GROUP_KEY = '__blocked__'
 export const NONE_GROUP_KEY = '__none__'
 
 export interface TreeGroup {
@@ -11,6 +12,7 @@ export interface TreeGroup {
   key: string
   isTemp: boolean
   isPinned: boolean
+  isBlocked?: boolean
   /** Ungrouped bucket — `groupBy === 'none'`. Suppresses header + add-button. */
   isNone?: boolean
   tasks: Task[]
@@ -49,7 +51,7 @@ export function orderTreeRows(
         break
       case 'last_interaction': {
         // Newest interaction first. Null → bottom. Bumped by chat user-messages
-        // and agent_turns inserts; see migrations v139.
+        // and recorded agent turns; see migrations v139.
         const av = a.last_interaction_at
         const bv = b.last_interaction_at
         if (av == null && bv == null) cmp = 0
@@ -74,13 +76,16 @@ export interface GroupOpts {
   groupTemporary: boolean
   groupPinned: boolean
   pinnedIds: Set<string>
+  groupBlocked?: boolean
+  blockedIds?: ReadonlySet<string>
 }
 
 /**
  * Bucket roots into groups according to `groupBy`. Pinned tasks split into
  * their own group when `groupPinned` is on (winning over temp). Temp tasks
  * split into their own group when `groupTemporary` is on. Otherwise mixed
- * into their natural status/priority bucket.
+ * into their natural status/priority bucket. Remaining blocked tasks split
+ * when `groupBlocked` is on, including tasks blocked by open dependencies.
  *
  * When `showEmpty` is on:
  * - groupBy='status': render every column from `columns` even if empty, but
@@ -97,15 +102,27 @@ export function groupTreeRows(
   const groups: TreeGroup[] = []
   const pinnedTasks: Task[] = []
   const tempTasks: Task[] = []
+  const blockedTasks: Task[] = []
   const persistent: Task[] = []
   for (const t of roots) {
     if (opts.groupPinned && opts.pinnedIds.has(t.id)) pinnedTasks.push(t)
     else if (opts.groupTemporary && t.is_temporary) tempTasks.push(t)
+    else if (opts.groupBlocked && (t.is_blocked || opts.blockedIds?.has(t.id))) blockedTasks.push(t)
     else persistent.push(t)
   }
 
   if (pinnedTasks.length > 0) {
     groups.push({ key: PINNED_GROUP_KEY, isTemp: false, isPinned: true, tasks: pinnedTasks })
+  }
+
+  if (blockedTasks.length > 0) {
+    groups.push({
+      key: BLOCKED_GROUP_KEY,
+      isTemp: false,
+      isPinned: false,
+      isBlocked: true,
+      tasks: blockedTasks
+    })
   }
 
   // Temporary group renders last — append right before each return path.
@@ -138,33 +155,17 @@ export function groupTreeRows(
       arr.push(t)
       byKey.set(t.status, arr)
     }
-    if (opts.showEmpty) {
-      const effective = columns ?? DEFAULT_COLUMNS
-      const ordered = [...effective].sort((a, b) => a.position - b.position)
-      for (const col of ordered) {
-        if (opts.statusFilter.size > 0 && !opts.statusFilter.has(col.id)) continue
-        groups.push({ key: col.id, isTemp: false, isPinned: false, tasks: byKey.get(col.id) ?? [] })
-        byKey.delete(col.id)
-      }
-      // Any leftover statuses not in columns config (legacy).
-      for (const [k, arr] of byKey)
-        groups.push({ key: k, isTemp: false, isPinned: false, tasks: arr })
-    } else {
-      // Preserve column position order for known statuses.
-      const seen = new Set<string>()
-      if (columns) {
-        const ordered = [...columns].sort((a, b) => a.position - b.position)
-        for (const col of ordered) {
-          const arr = byKey.get(col.id)
-          if (!arr || arr.length === 0) continue
-          groups.push({ key: col.id, isTemp: false, isPinned: false, tasks: arr })
-          seen.add(col.id)
-        }
-      }
-      for (const [k, arr] of byKey) {
-        if (seen.has(k)) continue
-        groups.push({ key: k, isTemp: false, isPinned: false, tasks: arr })
-      }
+    const ordered = [...(columns ?? DEFAULT_COLUMNS)].sort((a, b) => a.position - b.position)
+    for (const col of ordered) {
+      if (opts.showEmpty && opts.statusFilter.size > 0 && !opts.statusFilter.has(col.id)) continue
+      const tasks = byKey.get(col.id) ?? []
+      if (!opts.showEmpty && tasks.length === 0) continue
+      groups.push({ key: col.id, isTemp: false, isPinned: false, tasks })
+      byKey.delete(col.id)
+    }
+    // Keep legacy statuses visible after the configured workflow.
+    for (const [key, tasks] of byKey) {
+      groups.push({ key, isTemp: false, isPinned: false, tasks })
     }
     return appendTemp()
   }

@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs
 import path from 'path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { assertPathSafeId, containedPath, isPathSafeId } from '@slayzone/platform/safe-path'
+import { projectNotInTransitSql } from './project-move-sql'
 import type {
   ColumnConfig,
   CreateProjectInput,
@@ -10,6 +11,8 @@ import type {
   UpdateProjectInput
 } from '@slayzone/projects-contracts'
 import { deleteProjectPlacements } from '@slayzone/computers/server'
+import { isErasureDoneOrCompacting } from '@slayzone/content-erasure'
+import { eraseContent } from '@slayzone/content-erasure/server'
 import {
   defaultProjectRoot,
   parseColumnsConfig,
@@ -30,7 +33,11 @@ const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.s
  * Electron-main IPC path computes the dir itself, the tRPC router derives it
  * from `ctx.dataRoot`.
  */
-function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
+/** Where a hub keeps its projects' icon files (`<projectId>.<ext>`). */
+export const projectIconsDirOf = (dataRoot: string): string => path.join(dataRoot, 'project-icons')
+
+/** Remove project `projectId`'s icon files from `iconsDir` (best effort). */
+export function unlinkProjectIconFiles(iconsDir: string, projectId: string): void {
   // Not an id (`''` matched every dotfile): no project's icon, nothing to remove.
   if (!isPathSafeId(projectId) || !existsSync(iconsDir)) return
   for (const entry of readdirSync(iconsDir)) {
@@ -128,7 +135,10 @@ export async function projectFolder(db: SlayzoneDb, projectId: string): Promise<
 }
 
 export async function listAllProjects(db: SlayzoneDb): Promise<Project[]> {
-  const rows = await db.all<Record<string, unknown>>('SELECT * FROM projects ORDER BY sort_order')
+  // A project moving between hubs shows on one of them only (project-move-sql.ts).
+  const rows = await db.all<Record<string, unknown>>(
+    `SELECT * FROM projects p WHERE ${projectNotInTransitSql('p')} ORDER BY sort_order`
+  )
   return attachPlacements(
     db,
     rows.map((row) => parseProject(row)!)
@@ -327,7 +337,12 @@ export async function deleteProject(
   id: string,
   iconsDir: string
 ): Promise<boolean> {
-  const result = await db.run('DELETE FROM projects WHERE id = ?', [id])
+  const existing = await db.get('SELECT 1 FROM projects WHERE id=?', [id])
+  if (!existing) return false
+  const report = await eraseContent(db, path.dirname(iconsDir), { kind: 'projects', ids: [id] })
+  // A scheduled database compaction is not a failure: it completes the job later.
+  if (!isErasureDoneOrCompacting(report))
+    throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
   // No foreign key on `project_placements`: its rows go explicitly.
   await deleteProjectPlacements(db, id)
   // A per-user key (see `settingScope`): global on a hub without login, one row
@@ -335,7 +350,7 @@ export async function deleteProject(
   await db.run('DELETE FROM settings WHERE key = ?', [`commit_graph:project:${id}`])
   await db.run('DELETE FROM user_settings WHERE key = ?', [`commit_graph:project:${id}`])
   unlinkProjectIconFiles(iconsDir, id)
-  return result.changes > 0
+  return true
 }
 
 export async function uploadProjectIcon(
@@ -399,7 +414,10 @@ export async function relocateProjectIcons(db: SlayzoneDb, iconsDir: string): Pr
 
 export async function reorderProjects(db: SlayzoneDb, projectIds: string[]): Promise<void> {
   if (!Array.isArray(projectIds) || projectIds.length === 0) return
-  const { count } = (await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM projects')) as {
+  // The client orders the projects it lists: one in transit between hubs is not one.
+  const { count } = (await db.get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM projects p WHERE ${projectNotInTransitSql('p')}`
+  )) as {
     count: number
   }
   if (projectIds.length !== count)

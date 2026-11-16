@@ -16,7 +16,8 @@ import {
   killPty,
   setDatabase,
   setConversationResolver,
-  setReinstallHooks
+  setReinstallHooks,
+  SessionLedgerUnreadableError
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
@@ -257,14 +258,14 @@ function makeAsyncDb(): SlayzoneDb {
   const raw = new Database(':memory:')
   raw.exec(`
     CREATE TABLE tasks (id TEXT PRIMARY KEY, provider_config TEXT, claude_conversation_id TEXT, project_id TEXT);
-    CREATE TABLE task_conversations (
+    CREATE TABLE task_conversations (tab_id TEXT,
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, conversation_id TEXT,
       origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL);
     -- Production schema shape (ledger writes go through the fake task store here).
-    CREATE TABLE agent_sessions (
+    CREATE TABLE agent_sessions (tab_id TEXT,
       id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, conversation_id TEXT,
       origin TEXT NOT NULL, status TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL, bound_at INTEGER);
-    CREATE TABLE session_resets (
+    CREATE TABLE session_resets (tab_id TEXT,
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, created_at INTEGER NOT NULL);
   `)
   raw
@@ -461,4 +462,101 @@ test('a throwing reinstallHooks never blocks the spawn', async () => {
   killPty(sid)
   setConversationResolver(null)
   setReinstallHooks(null)
+})
+
+// ── Per-tab sessions (v201): the resolver is asked for the SPAWNING tab ─────────
+test('the resolver is asked for the spawning tab (secondary tab ≠ main tab)', async () => {
+  const asked: Array<{ taskId: string; mode: string; tabId: string }> = []
+  setConversationResolver(async (req) => {
+    asked.push(req)
+    return req.tabId === 'deploy' ? 'DEPLOY-CONV' : 'MAIN-CONV'
+  })
+  const fake = makeFakePty()
+  installAdoptBackend(fake)
+  const sid = 'tabTask:deploy'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '',
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
+  })
+  expect(asked[0]).toEqual({
+    computerId: null,
+    taskId: 'tabTask',
+    mode: 'claude-code',
+    tabId: 'deploy'
+  })
+  const cmd = fake.written.join('')
+  expect(cmd).toContain('--resume')
+  expect(cmd).toContain('DEPLOY-CONV')
+  killPty(sid)
+  setConversationResolver(null)
+})
+
+test('a tab whose session is LIVE in another tab is refused, naming that tab — never a fresh mint', async () => {
+  setConversationResolver(async () => 'SHARED-CONV')
+  const first = makeFakePty()
+  installAdoptBackend(first)
+  const holder = 'liveTask:tabA'
+  const opts = {
+    win: fakeWin,
+    cwd: '/tmp',
+    mode: 'claude-code' as const,
+    type: 'claude-code',
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '',
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
+  }
+  expect((await createPty({ ...opts, sessionId: holder })).success).toBe(true)
+
+  const second = makeFakePty()
+  installAdoptBackend(second)
+  const res = await createPty({ ...opts, sessionId: 'liveTask:tabB' })
+  expect(res).toMatchObject({ success: false, code: 'conversation-in-other-tab' })
+  expect(res.error).toContain('"tabA"')
+  // Nothing was started in the refused tab: no fresh session, no resume.
+  expect(second.written.join('')).toBe('')
+  killPty(holder)
+  setConversationResolver(null)
+})
+
+// S2: the session ledger is on the agent's computer. A read that fails there (the
+// computer restarting, a timeout) is NOT "no session": minting a fresh session would
+// silently shadow the real one. The start is refused, naming why, and nothing runs.
+test('a session-ledger read that fails refuses the start visibly — never a fresh mint', async () => {
+  let asked = 0
+  setConversationResolver(async () => {
+    asked++
+    throw new SessionLedgerUnreadableError(new Error('computer restarting'))
+  })
+  const fake = makeFakePty()
+  installAdoptBackend(fake)
+  const sid = 'ledger-down:ledger-down'
+  const result = await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    adoptPty: { warmId: 'warm-ledger', computerId: 'computer-1' }
+  })
+  expect(result.success).toBe(false)
+  expect(result.code).toBe('session-ledger-unreadable')
+  expect(result.error).toMatch(/session history/)
+  // Retried (a transient failure may clear), then refused: nothing was started.
+  expect(asked).toBe(3)
+  expect(fake.written.join('')).not.toContain('--session-id')
+  killPty(sid)
+  setConversationResolver(null)
 })

@@ -36,6 +36,8 @@ function memoryStore() {
   let checkpoint: { version: string; seq: number; data: string } | null = null
   const writes: TimelineWrite[] = []
   let fail = false
+  /** Fail the write with this index (0-based count of writes), once. */
+  let failAt = -1
   let discarded = 0
   const store: TimelineProjectionStore = {
     loadCheckpoint: async () => checkpoint,
@@ -50,6 +52,10 @@ function memoryStore() {
         .map(([page, p]) => ({ page, summary: p.summary })),
     save: async (write) => {
       if (fail) throw new Error('disk full')
+      if (writes.length === failAt) {
+        failAt = -1
+        throw new Error('disk full')
+      }
       writes.push(write)
       if (write.dropPagesFrom !== null) {
         for (const page of [...pages.keys()]) if (page >= write.dropPagesFrom) pages.delete(page)
@@ -84,6 +90,9 @@ function memoryStore() {
     },
     failWrites: (on: boolean) => {
       fail = on
+    },
+    failWriteAt: (index: number) => {
+      failAt = index
     }
   }
 }
@@ -106,19 +115,19 @@ async function clientView(p: TimelineProjection): Promise<ChatTimelineState> {
   const open = await p.openSnapshot()
   let state = decodeTimelineState(open.state)
   const sealed = open.summaries.length
-  const got = await p.pagesAsOf(
-    Array.from({ length: sealed }, (_, i) => i),
-    open.seq,
-    open.epoch
-  )
-  if (got.expired) throw new Error('expired')
-  for (const page of got.pages) {
-    state = reducer(state, {
-      type: 'rows-loaded',
-      from: page.from,
-      rows: page.rows,
-      epoch: open.epoch
-    })
+  // An answer carries a page budget of rows; what did not fit is asked again.
+  for (let wanted = Array.from({ length: sealed }, (_, i) => i); wanted.length > 0; ) {
+    const got = await p.pagesAsOf(wanted, open.seq, open.epoch)
+    if (got.expired) throw new Error('expired')
+    for (const page of got.pages) {
+      state = reducer(state, {
+        type: 'rows-loaded',
+        from: page.from,
+        rows: page.rows,
+        epoch: open.epoch
+      })
+    }
+    wanted = got.omitted ?? []
   }
   return state
 }
@@ -393,4 +402,373 @@ test('search: pages that may hold the text, a changed page always among them', a
   const pages = await p.searchPages('NEEDLE-xyz')
   expect(pages).toContain(0)
   expect(await p.searchPages('no such text anywhere 123')).toEqual([])
+})
+
+describe('pages answered within a byte budget (rows carry screenshots: 32 pages could pass 100 MiB)', () => {
+  const events = buildLongSession({
+    events: 6_000,
+    seed: 5,
+    provider: 'claude',
+    askEveryTool: true
+  })
+
+  test('an answer stops at the budget (the first page always fits) and names what it left out; asking again completes the view', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    const budget = 64 * 1024
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      pageBudgetBytes: budget
+    })
+    const open = await p.openSnapshot()
+    let state = decodeTimelineState(open.state)
+    let wanted = Array.from({ length: open.summaries.length }, (_, i) => i)
+    expect(wanted.length).toBeGreaterThan(4)
+    let answers = 0
+    while (wanted.length > 0) {
+      const got = await p.pagesAsOf(wanted, open.seq, open.epoch)
+      if (got.expired) throw new Error('expired')
+      answers++
+      const size = got.pages.reduce((n, page) => n + JSON.stringify(page.rows).length, 0)
+      if (got.pages.length > 1) expect(size).toBeLessThanOrEqual(budget)
+      expect(got.pages.length).toBeGreaterThan(0)
+      expect([...got.pages.map((x) => x.page), ...(got.omitted ?? [])]).toEqual(wanted)
+      for (const page of got.pages)
+        state = reducer(state, {
+          type: 'rows-loaded',
+          from: page.from,
+          rows: page.rows,
+          epoch: open.epoch
+        })
+      wanted = got.omitted ?? []
+    }
+    expect(answers).toBeGreaterThan(1)
+    expect(meaning(state)).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('opened from a paged history source: the same projection as from the array', async () => {
+    const history = buffered(events)
+    const fromArray = await TimelineProjection.open({
+      store: memoryStore().store,
+      history,
+      agentStartedTurns: true
+    })
+    const pagesRead: number[] = []
+    const fromPages = await TimelineProjection.open({
+      store: memoryStore().store,
+      history: {
+        lastSeq: history.at(-1)!.seq,
+        async *pages(after) {
+          const rest = history.filter((b) => b.seq > after)
+          for (let i = 0; i < rest.length; i += 500) {
+            pagesRead.push(i)
+            yield rest.slice(i, i + 500)
+          }
+        }
+      },
+      agentStartedTurns: true
+    })
+    expect(pagesRead.length).toBeGreaterThan(1)
+    expect(meaning(await clientView(fromPages))).toEqual(meaning(await clientView(fromArray)))
+  })
+})
+
+describe('written in slices, one heavy step per loop turn (a boot restore opens dozens of chats)', () => {
+  // 2026-11-14: restoring ~60 chats froze the computer 1–11 s at a time in
+  // `flushNow → saveTimeline`: every dirty page plus the checkpoint went out in one
+  // synchronous write, and every chat did its fold and write in the same loop turn.
+  const events = buildLongSession({
+    events: 6_000,
+    seed: 9,
+    provider: 'claude',
+    askEveryTool: true
+  })
+  const slice = 64 * 1024
+  const rowsBytes = (w: TimelineWrite) => w.pages.reduce((n, p) => n + p.rows.length, 0)
+
+  test('a rebuild writes pages a slice at a time; the checkpoint only with the last', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      flushSliceBytes: slice
+    })
+    expect(mem.pages.size).toBeGreaterThan(4)
+    expect(mem.writes.length).toBeGreaterThan(mem.pages.size / 2)
+    // A slice holds one page, or pages within the slice budget.
+    for (const w of mem.writes)
+      if (w.pages.length > 1) expect(rowsBytes(w)).toBeLessThanOrEqual(slice)
+    // Only the first write of a run drops pages; only the last stores the checkpoint.
+    expect(mem.writes.filter((w) => w.dropPagesFrom !== null)).toHaveLength(1)
+    expect(mem.writes[0].dropPagesFrom).toBe(0)
+    expect(mem.writes.filter((w) => w.checkpoint !== null)).toHaveLength(1)
+    expect(mem.writes.at(-1)!.checkpoint).not.toBeNull()
+    expect(meaning(await clientView(p))).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('a failure between two slices leaves no checkpoint: the next open rebuilds it whole', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    mem.failWriteAt(1)
+    const broken = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      flushSliceBytes: slice,
+      onError: () => undefined
+    })
+    await broken.close()
+    // The first slice dropped the stored checkpoint; nothing stored one after the failure.
+    expect(mem.checkpoint).toBeNull()
+    const reopened = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      flushSliceBytes: slice
+    })
+    expect(mem.checkpoint?.seq).toBe(history.at(-1)!.seq)
+    expect(meaning(await clientView(reopened))).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('many chats rebuilding at once: at most two heavy steps between two loop turns', async () => {
+    let tick = 0
+    let spinning = true
+    const spin = () => {
+      tick++
+      if (spinning) setImmediate(spin)
+    }
+    setImmediate(spin)
+    const perTick = new Map<number, number>()
+    const stores = Array.from({ length: 6 }, () => {
+      const mem = memoryStore()
+      const save = mem.store.save
+      mem.store.save = async (w) => {
+        perTick.set(tick, (perTick.get(tick) ?? 0) + 1)
+        return save(w)
+      }
+      return mem
+    })
+    const history = buffered(events)
+    const opened = await Promise.all(
+      stores.map((mem) =>
+        TimelineProjection.open({
+          store: mem.store,
+          history,
+          agentStartedTurns: true,
+          flushSliceBytes: slice
+        })
+      )
+    )
+    spinning = false
+    expect(opened.every((p) => p.usable)).toBe(true)
+    expect(Math.max(...perTick.values())).toBeLessThanOrEqual(2)
+    expect(perTick.size).toBeGreaterThan(stores.length)
+  })
+})
+
+describe('a page larger than the answer budget, asked from a row on (`startRow`)', () => {
+  // A 256-row page of long tool output measured 4–6.6 MB on the dev store (rows up
+  // to 2.2 MB), nothing bounds it: the page was the smallest unit an answer had.
+  const events = buildLongSession({
+    events: 6_000,
+    seed: 5,
+    provider: 'claude',
+    askEveryTool: true
+  })
+  const rowBytes = (rows: unknown[]) =>
+    rows.reduce<number>((n, r) => n + JSON.stringify(r).length, 0)
+
+  test('row slices within the budget (one row always), resumed from `next`, complete the view', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    const budget = 8 * 1024
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      pageBudgetBytes: budget
+    })
+    const open = await p.openSnapshot()
+    let state = decodeTimelineState(open.state)
+    let wanted = Array.from({ length: open.summaries.length }, (_, i) => i)
+    expect(wanted.length).toBeGreaterThan(2)
+    let startRow = 0
+    let partial = 0
+    for (let guard = 0; wanted.length > 0; guard++) {
+      expect(guard).toBeLessThan(10_000)
+      const got = await p.pagesAsOf(wanted, open.seq, open.epoch, startRow)
+      if (got.expired) throw new Error('expired')
+      expect(got.pages.length).toBeGreaterThan(0)
+      const rows = got.pages.flatMap((x) => x.rows)
+      if (rows.length > 1) expect(rowBytes(rows)).toBeLessThanOrEqual(budget)
+      for (const page of got.pages)
+        state = reducer(state, {
+          type: 'rows-loaded',
+          from: page.from,
+          rows: page.rows,
+          epoch: open.epoch
+        })
+      if (got.next !== undefined) partial++
+      wanted = got.omitted ?? []
+      startRow = got.next ?? (wanted[0] ?? 0) * TIMELINE_PAGE_ROWS
+    }
+    expect(partial).toBeGreaterThan(0)
+    expect(meaning(state)).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('without `startRow` a page is answered whole, as before (older clients)', async () => {
+    const mem = memoryStore()
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history: buffered(events),
+      agentStartedTurns: true,
+      pageBudgetBytes: 8 * 1024
+    })
+    const open = await p.openSnapshot()
+    const got = await p.pagesAsOf([0, 1], open.seq, open.epoch)
+    if (got.expired) throw new Error('expired')
+    expect(got.pages.map((x) => x.page)).toEqual([0])
+    expect(got.pages[0].rows).toHaveLength(TIMELINE_PAGE_ROWS)
+    expect(got.omitted).toEqual([1])
+    expect(got).not.toHaveProperty('next')
+  })
+})
+
+describe('historical rows that became smaller after the snapshot', () => {
+  test.each([
+    ['resident', 'rows'],
+    ['stored', 'rows'],
+    ['resident', 'pages'],
+    ['stored', 'pages']
+  ] as const)('%s %s are sized after undo and remain fully reachable', async (cache, mode) => {
+    const mem = memoryStore()
+    const history = buffered(buildLongSession({ events: 12_000, seed: 21, askEveryTool: true }))
+    const original = fullReplay(history, true)
+    const tools = (page: number) =>
+      original.timeline
+        .slice(page * TIMELINE_PAGE_ROWS, (page + 1) * TIMELINE_PAGE_ROWS)
+        .filter((row): row is Extract<TimelineItem, { kind: 'tool' }> => row?.kind === 'tool')
+    const targets = [0, 1].flatMap((page) => tools(page).slice(0, 2))
+    expect(targets).toHaveLength(4)
+    const expanded = buffered(
+      targets.map((row, i) => ({
+        kind: 'tool-result',
+        toolUseId: row.invocation.id,
+        isError: false,
+        rawContent: `historical-${i}:` + 'µ'.repeat(96 * 1024),
+        structured: null
+      })),
+      history.length
+    )
+    const budget = 768 * 1024
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history: [...history, ...expanded],
+      agentStartedTurns: true,
+      pageBudgetBytes: budget
+    })
+    try {
+      const snapshot = await p.openSnapshot()
+      const expected = fullReplay([...history, ...expanded], true).timeline.slice(
+        0,
+        2 * TIMELINE_PAGE_ROWS
+      )
+      // Each historical page fits alone, both together do not. Each historical
+      // row fits too; the one-oversized-row/page allowance cannot mask the bug.
+      for (let page = 0; page < 2; page++)
+        expect(
+          Buffer.byteLength(
+            JSON.stringify(
+              expected.slice(page * TIMELINE_PAGE_ROWS, (page + 1) * TIMELINE_PAGE_ROWS)
+            )
+          )
+        ).toBeLessThan(budget)
+      expect(Buffer.byteLength(JSON.stringify(expected))).toBeGreaterThan(budget)
+      let seq = snapshot.seq + 1
+      // Two changes per row exercise newest-to-oldest undo, not just one value.
+      for (const text of ['intermediate', 'tiny'])
+        for (const row of targets)
+          await p.apply({
+            seq: seq++,
+            at: 99_000,
+            event: {
+              kind: 'tool-result',
+              toolUseId: row.invocation.id,
+              isError: false,
+              rawContent: text,
+              structured: null
+            }
+          })
+      if (cache === 'stored') {
+        // Touch other pages through real late results, then flush: pages 0/1
+        // leave the resident cache while their historical undo remains valid.
+        expect(snapshot.summaries.length).toBeGreaterThan(12)
+        for (let page = 2; page < snapshot.summaries.length; page++) {
+          const [row] = tools(page)
+          if (row)
+            await p.apply({
+              seq: seq++,
+              at: 99_000,
+              event: {
+                kind: 'tool-result',
+                toolUseId: row.invocation.id,
+                isError: false,
+                rawContent: 'evict earlier pages',
+                structured: null
+              }
+            })
+        }
+      }
+      await p.flush()
+      const reads = vi.spyOn(mem.store, 'loadPages')
+      const collected: TimelineItem[] = []
+      let wanted = [0, 1],
+        start = 0,
+        replies = 0
+      while (wanted.length) {
+        expect(replies++).toBeLessThan(20)
+        const got = await p.pagesAsOf(
+          wanted,
+          snapshot.seq,
+          snapshot.epoch,
+          mode === 'rows' ? start : undefined
+        )
+        if (got.expired) throw new Error('historical snapshot expired')
+        expect(got.pages.length).toBeGreaterThan(0)
+        const bytes =
+          mode === 'rows'
+            ? got.pages
+                .flatMap((page) => page.rows)
+                .reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
+            : got.pages.reduce((sum, page) => sum + Buffer.byteLength(JSON.stringify(page.rows)), 0)
+        expect(bytes).toBeLessThanOrEqual(budget)
+        for (const page of got.pages) {
+          expect(page.from).toBe(collected.length)
+          collected.push(...page.rows)
+        }
+        wanted = got.omitted ?? []
+        if (got.next !== undefined) {
+          expect(mode).toBe('rows')
+          expect(got.next).toBe(collected.length)
+          expect(wanted[0]).toBe(Math.floor(got.next / TIMELINE_PAGE_ROWS))
+        }
+        start = got.next ?? (wanted[0] ?? 0) * TIMELINE_PAGE_ROWS
+      }
+      expect(replies).toBeGreaterThan(1)
+      expect(collected).toEqual(expected)
+      expect(reads.mock.calls.some(([pages]) => pages.includes(0))).toBe(cache === 'stored')
+      // Undo must not mutate the live rows while serving historical text.
+      const live = await p.openSnapshot()
+      const current = await p.pagesAsOf([0, 1], live.seq, live.epoch)
+      if (current.expired) throw new Error('live snapshot expired')
+      expect(JSON.stringify(current.pages)).not.toContain('historical-')
+      expect(JSON.stringify(current.pages)).toContain('tiny')
+    } finally {
+      await p.close()
+    }
+  })
 })

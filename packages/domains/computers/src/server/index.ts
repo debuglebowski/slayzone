@@ -13,6 +13,7 @@ export {
   revokeComputer,
   unrevokeComputer,
   deleteComputer,
+  replaceComputer,
   setComputerRemovedListener,
   setComputerDisabled,
   renameComputer,
@@ -22,7 +23,13 @@ export {
   setProjectDefaultComputer,
   setComputerOwner,
   resolveTaskComputerId,
+  TASK_COMPUTER_SQL,
+  TASK_COMPUTER_EXPR,
+  assertTaskMovable,
+  TaskFoldersElsewhereError,
   resolveTaskComputerIdOrDefault,
+  computerStanding,
+  type ComputerStanding,
   type RegisterComputerInput
 } from './store'
 export {
@@ -123,10 +130,19 @@ export {
   computerDisabledError,
   computerHasRunningWorkError,
   computerIsLocalError,
+  computerIsConnectedError,
   computerNameReservedError,
   COMPUTER_NAME_RESERVED,
   COMPUTER_DISABLED,
   COMPUTER_HAS_RUNNING_WORK,
   COMPUTER_IS_LOCAL,
+  COMPUTER_IS_CONNECTED,
+  COMPUTER_REPLACE_REFUSED,
   type ComputerStateCode
 } from './computer-state-errors'
+export {
+  listComputerTakeovers,
+  replaceRefusal,
+  type ComputerTakeover,
+  type TakeoverCandidate
+} from './takeovers'

@@ -143,7 +143,6 @@ function harness(
     },
     broadcastStateChange: () => {},
     eventStore: {
-      load: async () => [],
       insert: async (_tab, seq, event) => {
         if (seen.has(seq)) {
           h.clashes++
@@ -153,8 +152,7 @@ function harness(
         h.rows.push({ seq, event })
         return 'inserted'
       },
-      readRange: async (_tab, after, before) =>
-        h.rows.filter((r) => r.seq > after && r.seq < before).sort((a, b) => a.seq - b.seq)
+      ...mgr.memoryChatEventReads(() => [...h.rows].sort((a, b) => a.seq - b.seq))
     },
     ...(opts.alive ? { isProcessAlive: opts.alive } : {}),
     ...(opts.timings ? { watchdogTimings: opts.timings } : {}),
@@ -661,5 +659,55 @@ test('an agent on a computer that cannot confirm writes: the chat says so once, 
   expect(notices).toHaveLength(1)
   expect(notices[0]).toMatchObject({ level: 'warning' })
   expect((notices[0] as { text: string }).text).toContain('Settings')
+  await mgr.removeSession(TAB_OPTS.tabId)
+})
+
+// The hub restores every chat that ran at shutdown in the computer's background
+// lane. A user start of the same tab meanwhile joins that start — and must move it
+// to the front of the queue instead of waiting its FIFO turn.
+test('a user start joining a queued restore asks its computer to start it next', async () => {
+  const {
+    transportHarness,
+    fakeChild,
+    until: waitUntil,
+    TAB_OPTS
+  } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  const prioritized: string[] = []
+  let release!: () => void
+  const admitted = new Promise<void>((r) => {
+    release = r
+  })
+  let spawns = 0
+  transportHarness({
+    deps: {
+      backend: {
+        prioritize: (sessionId: string) => {
+          prioritized.push(sessionId)
+        },
+        // Waits for its admission slot until released.
+        spawn: async () => {
+          spawns++
+          await admitted
+          setImmediate(() => f.emitter.emit('spawn'))
+          return childProcessToHandle(f.child)
+        }
+      }
+    }
+  })
+  await mgr.hydrateSession({ ...TAB_OPTS, admission: 'background' })
+  const restore = mgr.ensureSpawned(TAB_OPTS.tabId)
+  // A restore joining a restore is not a reason to jump the queue.
+  const again = mgr.ensureSpawned(TAB_OPTS.tabId)
+  expect(prioritized).toEqual([])
+  const user = mgr.ensureSpawned(TAB_OPTS.tabId, { prioritize: true })
+  expect(prioritized).toHaveLength(1)
+  release()
+  await Promise.all([restore, again, user])
+  expect(spawns).toBe(1)
+  // Up: a later user start has nothing to move.
+  await mgr.ensureSpawned(TAB_OPTS.tabId, { prioritize: true })
+  expect(prioritized).toHaveLength(1)
+  await waitUntil(() => true)
   await mgr.removeSession(TAB_OPTS.tabId)
 })

@@ -1,13 +1,14 @@
 import type { Express } from 'express'
-import { formatChatTranscript, transcriptRows } from '@slayzone/terminal/chat-transcript'
+import { formatChatTranscript } from '@slayzone/terminal/chat-transcript'
+import { chatHistoryTranscript } from '@slayzone/terminal/chat-history'
 import type { RestApiDeps } from '../types'
 import {
   chatHandler,
   describePrompts,
   pendingPrompts,
   promptContext,
-  reducedHistory,
-  turnStatus
+  turnStatus,
+  withChatTabHistory
 } from './_chat'
 import { waitForChat, type ChatWaitUntil } from './_wait'
 
@@ -56,12 +57,12 @@ export function registerChatReadRoutes(app: Express, deps: RestApiDeps): void {
   app.get(
     '/api/chat/:id/prompts',
     chatHandler(deps, async ({ chat, target, res }) => {
-      const [status, history, ctx] = await Promise.all([
+      const [status, state, ctx] = await Promise.all([
         turnStatus(chat, target),
-        reducedHistory(chat, target),
+        withChatTabHistory(chat, target, async (history) => history.state),
         promptContext(chat, target)
       ])
-      res.json({ ok: true, data: describePrompts(pendingPrompts(history.state, status), ctx) })
+      res.json({ ok: true, data: describePrompts(pendingPrompts(state, status), ctx) })
     })
   )
 
@@ -69,17 +70,22 @@ export function registerChatReadRoutes(app: Express, deps: RestApiDeps): void {
   app.get(
     '/api/chat/:id/transcript',
     chatHandler(deps, async ({ chat, target, req, res }) => {
-      const { state, lastSeq } = await reducedHistory(chat, target)
-      const rows = transcriptRows(state, {
-        since: intParam(req.query.since),
-        last: intParam(req.query.last),
-        verbose: req.query.verbose === '1' || req.query.verbose === 'true'
-      })
-      if (req.query.format === 'json') {
-        res.json({
-          ok: true,
-          data: { rows, lastRow: state.timeline.length - 1, lastSeq }
+      // Only the rows the answer needs are read (`--last N`: the pages holding them).
+      const { rows, lastRow, lastSeq } = await withChatTabHistory(
+        chat,
+        target,
+        async (history) => ({
+          rows: await chatHistoryTranscript(history, {
+            since: intParam(req.query.since),
+            last: intParam(req.query.last),
+            verbose: req.query.verbose === '1' || req.query.verbose === 'true'
+          }),
+          lastRow: history.state.timeline.length - 1,
+          lastSeq: history.lastSeq
         })
+      )
+      if (req.query.format === 'json') {
+        res.json({ ok: true, data: { rows, lastRow, lastSeq } })
         return
       }
       res.type('text/plain').send(formatChatTranscript(rows))

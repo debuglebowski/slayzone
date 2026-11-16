@@ -46,6 +46,8 @@ export interface ImportTxnResult {
   projectCount?: number
   taskCount?: number
   importedProjects?: Array<{ id: string; name: string }>
+  /** Imported tasks' custom folders, for the caller to hand to their computer (§9 7e). */
+  importedBaseDirs?: Array<{ taskId: string; baseDir: string }>
   error?: string
 }
 
@@ -88,6 +90,27 @@ function buildFkInfo(db: Database, table: string): Map<string, FkColInfo> {
   return result
 }
 
+const columnsCache = new WeakMap<Database, Map<string, Set<string>>>()
+/** The columns `table` has in this database. */
+function tableColumns(db: Database, table: string): Set<string> {
+  if (!IMPORT_TABLES.has(table)) throw new Error(`Unknown import table: ${table}`)
+  let byTable = columnsCache.get(db)
+  if (!byTable) {
+    byTable = new Map()
+    columnsCache.set(db, byTable)
+  }
+  let cols = byTable.get(table)
+  if (!cols) {
+    cols = new Set(
+      (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map(
+        (c) => c.name
+      )
+    )
+    byTable.set(table, cols)
+  }
+  return cols
+}
+
 function insertRow(
   db: Database,
   table: string,
@@ -119,7 +142,10 @@ function insertRow(
     }
   }
 
-  const cols = Object.keys(remapped)
+  // Only this schema's columns: a bundle from another version may name columns this
+  // one dropped (e.g. the `*_conversation_id` columns, robustness plan §9).
+  const known = tableColumns(db, table)
+  const cols = Object.keys(remapped).filter((c) => known.has(c))
   const quotedCols = cols.map((c) => (RESERVED_COLUMNS.has(c) ? `"${c}"` : c)).join(', ')
   const placeholders = cols.map(() => '?').join(', ')
   db.prepare(`INSERT INTO ${table} (${quotedCols}) VALUES (${placeholders})`).run(
@@ -127,14 +153,19 @@ function insertRow(
   )
 }
 
+/**
+ * Session ids are the agent's computer's (robustness plan §9): never carried over.
+ * A bundle from an older version may still hold them in `provider_config`.
+ */
 function clearProviderConversationIds(providerConfig: string | null): string | null {
   if (!providerConfig) return providerConfig
   try {
     const parsed = JSON.parse(providerConfig)
     for (const mode of Object.keys(parsed)) {
-      if (parsed[mode]?.conversationId) {
-        parsed[mode].conversationId = null
-      }
+      if (!parsed[mode] || typeof parsed[mode] !== 'object') continue
+      delete parsed[mode].conversationId
+      delete parsed[mode].conversationHistory
+      delete parsed[mode].chatConversationId
     }
     return JSON.stringify(parsed)
   } catch {
@@ -193,19 +224,22 @@ function importBundle(
   }
 
   // Clean non-portable task fields
+  const importedBaseDirs: Array<{ taskId: string; baseDir: string }> = []
   for (const t of data.tasks) {
     t.computer_id = null
-    t.worktree_path = null
+    // A worktree never travels (a checkout of the exporting machine), nor where the
+    // task's folders were. A custom folder does (as before §9 7d): the hub records it
+    // is set, and the caller hands it to the importer's computer (the column is gone,
+    // dropped below; an older bundle names it the same way).
+    const baseDir = typeof t.base_dir === 'string' && t.base_dir ? t.base_dir : null
+    if (baseDir) importedBaseDirs.push({ taskId: remap.get(t.id as string)!, baseDir })
+    t.has_worktree = 0
+    t.has_base_dir = baseDir ? 1 : 0
+    t.worktree_computer_id = null
     t.worktree_parent_branch = null
     t.merge_state = null
     t.merge_context = null
     t.provider_config = clearProviderConversationIds(t.provider_config as string | null)
-    // Clear legacy conversation ID columns too
-    if ('claude_conversation_id' in t) t.claude_conversation_id = null
-    if ('codex_conversation_id' in t) t.codex_conversation_id = null
-    if ('cursor_conversation_id' in t) t.cursor_conversation_id = null
-    if ('gemini_conversation_id' in t) t.gemini_conversation_id = null
-    if ('opencode_conversation_id' in t) t.opencode_conversation_id = null
   }
 
   const fkInfoByTable = new Map<string, Map<string, FkColInfo>>()
@@ -283,7 +317,11 @@ function importBundle(
     success: true,
     projectCount: data.projects.length,
     taskCount: data.tasks.length,
-    importedProjects
+    importedProjects,
+    // Only tasks actually inserted (a row whose required link is gone is skipped).
+    importedBaseDirs: importedBaseDirs.filter(
+      ({ taskId }) => db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId) !== undefined
+    )
   }
 }
 

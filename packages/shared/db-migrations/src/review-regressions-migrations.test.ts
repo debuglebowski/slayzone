@@ -57,14 +57,15 @@ describe('K4: a DB already at main’s v194 reaches the latest version', () => {
     runMigrations(db)
 
     expect(db.pragma('user_version', { simple: true })).toBe(LATEST_MIGRATION_VERSION)
-    const cursorCols = db.prepare('PRAGMA table_info(usage_parse_state)').all() as Array<{
+    // v209 turned the hub's cursors into a one-time handoff to the computers.
+    const cursorCols = db.prepare('PRAGMA table_info(usage_cursor_handoff)').all() as Array<{
       name: string
     }>
     expect(cursorCols.map((c) => c.name)).toEqual(
       expect.arrayContaining(['computer_id', 'file_path', 'last_offset', 'last_modified_ms'])
     )
     if (hasOldCursors) {
-      expect(db.prepare('SELECT * FROM usage_parse_state').all()).toEqual([
+      expect(db.prepare('SELECT * FROM usage_cursor_handoff').all()).toEqual([
         {
           computer_id: '',
           file_path: '/home/u/.claude/projects/x.jsonl',

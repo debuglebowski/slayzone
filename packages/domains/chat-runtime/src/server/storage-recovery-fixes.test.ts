@@ -68,7 +68,7 @@ test('upgrade repairs a retained imported reference after its source pin was del
   const ref = attachment(r, 'sealed imported attachment')
   // Simulate the pre-fix importer, which wrote history without destination pins.
   r.storage.compose((db) => {
-    db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(
+    db.prepare('INSERT INTO events(conversation_id,seq,saved_at,event) VALUES(?,?,?,?)').run(
       'destination',
       0,
       1,
@@ -154,7 +154,6 @@ test.each([true, false])(
       cwd: '/tmp',
       revision: 2,
       providerConfig: { chatModel: 'old-model' },
-      providerConfigRevision: 0,
       defaultFlags: null,
       env: {}
     })

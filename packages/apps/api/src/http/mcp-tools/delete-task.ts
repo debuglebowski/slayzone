@@ -7,7 +7,7 @@ import type { McpToolsDeps } from './types'
 export function registerDeleteTaskTool(server: McpServer, deps: McpToolsDeps): void {
   server.tool(
     'delete_task',
-    'Permanently delete a task (soft-delete via deleted_at). Accepts a task id. In task terminals, source from $SLAYZONE_TASK_ID. Fails if the task is linked to an external provider.',
+    'Permanently erase a task and its SlayZone content, with no undo. Accepts a task id. In task terminals, source from $SLAYZONE_TASK_ID. Fails if the task is linked to an external provider. Reports any incomplete computer/file cleanup.',
     {
       ...deleteTaskInputSchema.shape,
       id: deleteTaskInputSchema.shape.id.optional()
@@ -45,12 +45,23 @@ export function registerDeleteTaskTool(server: McpServer, deps: McpToolsDeps): v
         }
       }
 
-      if (typeof result === 'object' && result.blocked) {
+      if (typeof result === 'object' && 'blocked' in result) {
         return {
           content: [
             {
               type: 'text' as const,
               text: `Task ${id} cannot be deleted: linked to an external provider. Unlink first.`
+            }
+          ],
+          isError: true
+        }
+      }
+      if (typeof result === 'object' && 'incomplete' in result) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({ id, deleted: false, erasure: result.erasure })
             }
           ],
           isError: true

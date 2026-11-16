@@ -92,6 +92,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.clearBuffer': null,
   'pty.list': null,
   'pty.prioritize': null,
+  // An ordering hint for a queued chat agent start; starts nothing by itself.
+  'proc.prioritize': null,
   'pty.backgroundJobs': null,
   'pty.doctor': null,
   // Runs `<binary> --version` on the computer; starts no session, changes nothing.
@@ -100,6 +102,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   // hub does for the user's own delete, which is audited where it happened.
   'pty.forget': null,
   'pty.warmAdopt': null,
+  // Re-attaches a running session to this hub (after a hub restart); starts nothing.
+  'pty.adopt': null,
   'pty.warmList': null,
   // AI-config files: its writes (instructions, skills, MCP config) are audited, its
   // reads are not.
@@ -166,6 +170,7 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'fs.listDir': null,
   'fs.readDir': null,
   'fs.readFile': null,
+  'fs.readBytes': null,
   'fs.gitStatus': null,
   'fs.searchFiles': null,
   'fs.listAllFiles': null,
@@ -214,6 +219,10 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'computer.shutdown': { event: 'computer.shutdown', detail: (p) => ({ reason: p.reason }) },
   'project.resolvePath': null,
   'project.setPath': null,
+  'project.relocate': {
+    event: 'computer.fs.rename',
+    detail: (p) => ({ projectId: p.projectId, from: p.sourcePath, path: p.path, mode: p.mode })
+  },
   'project.forgetPath': null,
   'project.list': null,
   ping: null,

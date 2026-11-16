@@ -6,7 +6,7 @@
  *
  * @module terminal/shared/chat-transcript
  */
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { chatBlobJsonReplacer, type AgentEvent } from '@slayzone/terminal-contracts'
 import {
   initialState,
   reducer,
@@ -60,7 +60,8 @@ function toolSummary(name: string, input: unknown): string {
     if (typeof v === 'string' && v !== '') return `${name}: ${v}`
   }
   if (Array.isArray(o.command)) return `${name}: ${o.command.join(' ')}`
-  const json = JSON.stringify(input ?? {})
+  // Stored images / files print as `[image/png · 120 KB]`, never as their JSON.
+  const json = JSON.stringify(input ?? {}, chatBlobJsonReplacer)
   return json === '{}' ? name : `${name}: ${json}`
 }
 
@@ -74,7 +75,7 @@ function resultText(raw: unknown): string {
       })
       .filter(Boolean)
       .join('\n')
-  return raw == null ? '' : JSON.stringify(raw)
+  return raw == null ? '' : JSON.stringify(raw, chatBlobJsonReplacer)
 }
 
 function preview(text: string): string {
@@ -110,7 +111,15 @@ function rowOf(item: TimelineItem, verbose: boolean): Omit<ChatTranscriptRow, 'r
     case 'agent-problem':
       return { role: 'status', text: `agent problem: ${item.message}` }
     case 'interrupted':
-      return { role: 'status', text: 'interrupted' }
+      return {
+        role: 'status',
+        text:
+          item.reason === 'watchdog'
+            ? 'interrupted by watchdog'
+            : item.reason === 'stop-request'
+              ? 'stopped by request'
+              : 'interrupted'
+      }
     case 'compaction':
       return {
         role: 'status',

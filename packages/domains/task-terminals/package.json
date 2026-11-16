@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task-terminals",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -47,7 +47,7 @@
     "diff": "^9.0.0",
     "fzf": "^0.5.2",
     "lucide-react": "^1.61.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

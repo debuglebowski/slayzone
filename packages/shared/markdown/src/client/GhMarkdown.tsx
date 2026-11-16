@@ -7,7 +7,7 @@ const PROSE_CLASSES = `prose prose-sm dark:prose-invert max-w-none
   prose-code:text-[11px] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:bg-muted
   [&_:not(pre)>code]:break-all
   [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:rounded-none
-  prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+  prose-a:text-primary prose-a:no-underline prose-a:hover:underline
   prose-blockquote:border-l-2 prose-blockquote:pl-3 prose-blockquote:text-muted-foreground prose-blockquote:my-2
   prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5
   prose-img:rounded-md prose-img:my-2

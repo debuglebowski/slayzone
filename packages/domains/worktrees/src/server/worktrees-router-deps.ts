@@ -10,6 +10,11 @@ export type WorktreesComputerTarget = {
   computerId?: string | null
   taskId?: string
   projectId?: string
+  /**
+   * The op is about the task's whole project (its Worktrees tab, B1): routed to the
+   * task's computer, run in the project's path scope (platform/path-scope).
+   */
+  projectWide?: boolean
 }
 
 export type WorktreesRouterDeps = {

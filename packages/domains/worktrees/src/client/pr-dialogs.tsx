@@ -1,4 +1,5 @@
 import type React from 'react'
+import { useTaskFolders, worktreeOrProject } from './task-folders'
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
@@ -32,7 +33,8 @@ export function CreatePrDialog({
   onCreated: (url: string) => void
 }) {
   const trpc = useTRPC()
-  const targetPath = task.worktree_path ?? projectPath
+  const folders = useTaskFolders(task)
+  const targetPath = worktreeOrProject(task, folders, projectPath)
   const [baseBranch, setBaseBranch] = useState(task.worktree_parent_branch ?? '')
   const [title, setTitle] = useState(task.title)
   const [body, setBody] = useState('')

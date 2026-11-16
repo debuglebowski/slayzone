@@ -4,17 +4,18 @@ import { getDefaultStatus, isKnownStatus } from '@slayzone/projects-contracts'
 import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,
+  CHAT_SETTING_KEYS,
   chatOwnsSpawnFlags,
   parseAgentStartupMode
 } from '@slayzone/terminal-contracts'
 import { taskEvents } from '../events.js'
 import { getTemplateForTask } from '../template-store.js'
 import {
-  colorOne,
   getEnabledModeDefaults,
   getProjectColumns,
   isAutoCreateWorktreeEnabled,
   maybeAutoCreateWorktree,
+  notifyTaskPaths,
   parseTask,
   type OpDeps
 } from './shared.js'
@@ -97,6 +98,18 @@ export async function createTaskOp(
     }
   }
 
+  // A template gives a new chat its starting values (decision 2): the chat's
+  // computer takes them when it first starts and owns them from then on.
+  for (const [mode, entry] of Object.entries(template?.provider_config ?? {})) {
+    if (!entry || typeof entry !== 'object') continue
+    const values = Object.fromEntries(
+      CHAT_SETTING_KEYS.filter((key) => (entry as Record<string, unknown>)[key] !== undefined).map(
+        (key) => [key, (entry as Record<string, unknown>)[key]]
+      )
+    )
+    if (Object.keys(values).length) providerConfig[mode] = { ...providerConfig[mode], ...values }
+  }
+
   const priority = data.priority ?? template?.default_priority ?? 3
   const dangerouslySkipPerms = template?.dangerously_skip_permissions ? true : false
   const panelVisibility = template?.panel_visibility
@@ -139,32 +152,51 @@ export async function createTaskOp(
   if (!initialTask) return null
 
   if (data.parentId) {
-    const parent = (await db.get<{
+    const parent = await db.get<{
       repo_name: string | null
-      worktree_path: string | null
+      has_worktree: number
       worktree_parent_branch: string | null
-      base_dir: string | null
+      worktree_computer_id: string | null
+      has_base_dir: number
+      computer_id: string | null
     }>(
-      'SELECT repo_name, worktree_path, worktree_parent_branch, base_dir FROM tasks WHERE id = ?',
+      'SELECT repo_name, has_worktree, worktree_parent_branch, worktree_computer_id, has_base_dir, computer_id FROM tasks WHERE id = ?',
       [data.parentId]
-    )) as
-      | {
-          repo_name: string | null
-          worktree_path: string | null
-          worktree_parent_branch: string | null
-          base_dir: string | null
-        }
-      | undefined
+    )
 
     if (parent) {
+      // The subtask's folders are its parent's, on the same computer. Inheriting them,
+      // it takes the parent's pin too: its work runs where those folders are, and a
+      // subtask left unpinned in a project defaulting elsewhere named a folder its
+      // computer did not have (found by tools/migration-personas, p10-v0380-worktrees).
+      // Its holder is the parent's recorded holder as is: the same folders, wherever
+      // they are. Not recorded yet stays unrecorded: its inherit then goes wherever the
+      // parent's paths go (hub computer-task-paths.ts `taskPathTarget`), after them, and
+      // the computer it reaches is recorded. A deleted holder stays deleted, never a live
+      // computer that never had the folder.
+      const inherits = parent.has_worktree === 1 || parent.has_base_dir === 1
+      const holder = inherits ? parent.worktree_computer_id : null
       await db.run(
         `
         UPDATE tasks
-        SET repo_name = ?, worktree_path = ?, worktree_parent_branch = ?, base_dir = ?, updated_at = datetime('now')
+        SET repo_name = ?, has_worktree = ?, worktree_parent_branch = ?, worktree_computer_id = ?,
+            has_base_dir = ?, computer_id = CASE WHEN ? THEN ? ELSE computer_id END,
+            updated_at = datetime('now')
         WHERE id = ?
       `,
-        [parent.repo_name, parent.worktree_path, parent.worktree_parent_branch, parent.base_dir, id]
+        [
+          parent.repo_name,
+          parent.has_worktree,
+          parent.worktree_parent_branch,
+          holder,
+          parent.has_base_dir,
+          inherits ? 1 : 0,
+          parent.computer_id,
+          id
+        ]
       )
+      // The subtask's computer copies its parent's paths (robustness plan §9, P0).
+      await notifyTaskPaths(id, { op: 'inherit', parentTaskId: data.parentId })
     }
   } else {
     await maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
@@ -179,7 +211,7 @@ export async function createTaskOp(
     // ids — no whole-board reload per create.
     onMutation?.({ taskIds: [id] })
   }
-  return colorOne(db, task)
+  return task
 }
 
 /**

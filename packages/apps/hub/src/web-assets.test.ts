@@ -14,6 +14,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
+import { EXPORT_FRAME_HTML, EXPORT_FRAME_PATH } from './export-frame.js'
 import { handleWebAssets } from './web-assets.js'
 
 /** A real `dist/web/` fixture: index.html + one hashed asset. */
@@ -196,5 +197,27 @@ test('path traversal cannot escape webRoot', async () => {
   } finally {
     await srv.close()
     rmSync(parent, { recursive: true, force: true })
+  }
+})
+
+test('/export-frame is the export page (not the shell), only beside a web shell', async () => {
+  const root = makeWebRoot()
+  const srv = await startServer(root)
+  const emptyRoot = mkdtempSync(join(tmpdir(), 'slz-web-assets-empty-'))
+  const bare = await startServer(emptyRoot)
+  try {
+    const page = await get(srv.port, EXPORT_FRAME_PATH)
+    expect(page.status, 'status').toBe(200)
+    expect(page.body, 'the bootstrap page').toBe(EXPORT_FRAME_HTML)
+    expect(page.headers.get('cache-control'), 'revalidated').toBe('no-cache')
+    const post = await get(srv.port, EXPORT_FRAME_PATH, { method: 'POST' })
+    expect(post.status, 'POST not claimed').toBe(404)
+    const noShell = await get(bare.port, EXPORT_FRAME_PATH)
+    expect(noShell.status, 'no web shell, no export page').toBe(404)
+  } finally {
+    await srv.close()
+    await bare.close()
+    rmSync(root, { recursive: true, force: true })
+    rmSync(emptyRoot, { recursive: true, force: true })
   }
 })

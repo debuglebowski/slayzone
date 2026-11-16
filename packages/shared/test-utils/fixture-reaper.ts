@@ -9,56 +9,44 @@
  *
  * `reapOnOwnerDeath(dir)` starts a small detached watchdog. While the owner (this test
  * process) lives it does nothing. If the owner dies while `dir` still exists, it
- * SIGKILLs every process whose command line names `dir`, repeating until none is left
- * (supervisors respawn), then removes `dir`. If `dir` disappears first (normal
- * cleanup), it exits without touching anything.
+ * SIGKILLs every process rooted in `dir` (its command line names `dir`, or it descends
+ * from one that does), repeating until none is left (supervisors respawn), then removes
+ * `dir`. If `dir` disappears first (normal cleanup), it exits without touching anything.
  *
- * Every fixture process must name `dir` in its command line: the fixture's entry
- * script lives under it.
+ * Every fixture process must name `dir` in its command line or descend from one that
+ * does: the fixture's entry script lives under it. A process started from a script
+ * outside `dir` (a repo `dist/bin.cjs`) gets {@link fixtureMarkerArgs} in front.
+ *
+ * A test's own teardown calls {@link killFixtureProcesses} (the same rule, at once),
+ * and the harness fails any file that leaves such processes behind (fixture-guard.ts).
  */
 import { spawn, type ChildProcess } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import * as core from './fixture-processes.cjs'
 
-const WATCHDOG = String.raw`
-const { execFileSync } = require('node:child_process')
-const { existsSync, rmSync } = require('node:fs')
-const { sep } = require('node:path')
-const [owner, dir] = process.argv.slice(-2).map((v, i) => (i === 0 ? Number(v) : v))
-const alive = (pid) => {
-  try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
+export type { FixtureProcess } from './fixture-processes.cjs'
+
+/** The live processes rooted in `dirs`: naming one, or descending from one that does. */
+export const fixtureProcesses = core.fixtureProcesses
+
+/** SIGKILL every process rooted in `dirs` until none is left; returns those killed. */
+export const killFixtureProcesses = core.killFixtureProcesses
+
+/**
+ * Node/Electron arguments that make a process name `dir` although its script lives
+ * elsewhere: `--require <dir>/.fixture-marker.cjs` (an empty module). Put them before
+ * the script.
+ */
+export function fixtureMarkerArgs(dir: string): string[] {
+  const marker = join(dir, '.fixture-marker.cjs')
+  writeFileSync(marker, '')
+  return ['--require', marker]
 }
-const names = (cmd) => cmd.includes(dir + sep) || cmd.endsWith(dir)
-const fixturePids = () => {
-  const out = process.platform === 'win32'
-    ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }'],
-        { encoding: 'utf8', windowsHide: true })
-    : execFileSync('ps', ['-Ao', 'pid=,args='], { encoding: 'utf8' })
-  const pids = []
-  for (const line of out.split(/\r?\n/)) {
-    const m = /^\s*(\d+)\s+(.*)$/.exec(line)
-    if (m && Number(m[1]) !== process.pid && names(m[2])) pids.push(Number(m[1]))
-  }
-  return pids
-}
-const reap = () => {
-  for (let round = 0; round < 20; round++) {
-    let pids = []
-    try { pids = fixturePids() } catch {}
-    if (pids.length === 0) break
-    for (const pid of pids) { try { process.kill(pid, 'SIGKILL') } catch {} }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
-  }
-  try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) } catch {}
-}
-const tick = setInterval(() => {
-  if (!existsSync(dir)) process.exit(0)
-  if (!alive(owner)) { clearInterval(tick); reap(); process.exit(0) }
-}, 500)
-`
 
 /** Watch `ownerPid`; reap `dir`'s processes if it dies before `dir` is removed. */
 export function spawnFixtureReaper(dir: string, ownerPid: number): ChildProcess {
-  const watchdog = spawn(process.execPath, ['-e', WATCHDOG, String(ownerPid), dir], {
+  const watchdog = spawn(process.execPath, [core.WATCHDOG_PATH, String(ownerPid), dir], {
     // The harness runs under Electron's node; without this the watchdog is a GUI app.
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     detached: true,

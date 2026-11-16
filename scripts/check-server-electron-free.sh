@@ -158,13 +158,12 @@ if [ -n "$client_hits" ]; then
   fail=1
 fi
 
-# (4) Task ops that feed the renderer's task store MUST hydrate the conversation
-#     ledger field (currentConversationByMode) via parseAndColorTask(s) — never
-#     bare parseTask(s). A bare parse ships tasks with no conversation id, so on
-#     boot every auto-respawned terminal reads null and mints a FRESH session
-#     that durably shadows the real conversation (the restart-clobber regression).
-#     The 4 get-ops already comply; this keeps load-board-data + any future list
-#     op honest.
+# (4) Task ops that feed the renderer's task store MUST build their rows through
+#     `parseTask(s)`: the one parse that keeps hub-only columns (a task's computer
+#     paths, robustness plan §9 Phase 7d) out of every client-bound row. A
+#     hand-rolled row would leak them. (This guard used to require the
+#     conversation-id hydration `parseAndColorTask(s)`; the session ledger and the
+#     worktree colours both moved off the hub, so that parse is gone.)
 BOARD_OPS="packages/domains/task/src/server/ops/load-board-data.ts \
   packages/domains/task/src/server/ops/get-all.ts \
   packages/domains/task/src/server/ops/get-by-project.ts \
@@ -179,11 +178,11 @@ for f in $BOARD_OPS; do
     continue
   fi
   status=0
-  grep -q "parseAndColorTask" "$f" || status=$?
+  grep -q "parseTask" "$f" || status=$?
   [ "$status" -le 1 ] || fail_error "grep failed (exit $status) reading $f"
   if [ "$status" -eq 1 ]; then
-    echo "Task op feeds the renderer store but does not hydrate currentConversationByMode:"
-    echo "  $f — use parseAndColorTask(s) (see attachCurrentConversationByMode), not bare parseTask(s)."
+    echo "Task op feeds the renderer store but does not build rows with parseTask(s):"
+    echo "  $f — use parseTask(s) (it keeps hub-only columns such as task paths out)."
     fail=1
   fi
 done

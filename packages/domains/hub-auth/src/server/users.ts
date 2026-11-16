@@ -5,7 +5,8 @@ import type { HubRole } from '../shared/types'
 import { isBreakGlassEmail, isDisabled, OPERATOR_PROVISIONED, readRole } from './account'
 import type { HubAuth } from './auth'
 import { COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
-import { ENTRA_PROVIDER_ID, isEntraSsoAuth } from './entra'
+import { ENTRA_PROVIDER_ID, isEntraSsoAuth, ssoProviderOf } from './entra'
+import { auditIdp, IDP_AUDIT_SERVICE, isIdpRolesAuth } from './idp-roles'
 import { isPasswordSignInEnabled } from './password'
 
 /**
@@ -98,9 +99,40 @@ export type EnableHubUserResult = 'ok' | 'not-found' | 'protected'
 /**
  * Why `setHubUserRole` declined, or 'ok'. `protected`: the service user is never admin;
  * a break-glass account's role is break-glass's own.
- * `sso-managed`: the hub has Entra sign-in, where roles come from the Entra app role.
+ * `sso-managed`: the Entra setup with the IdP-role mode off, where roles come from the
+ * `SlayZone.*` app roles (unchanged since O-4).
+ * `idp-managed`: the IdP-role mode is on (./idp-roles.ts): 409 `ROLES_MANAGED_BY_IDP`.
  */
-export type SetHubUserRoleResult = 'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'
+export type SetHubUserRoleResult =
+  | 'ok'
+  | 'not-found'
+  | 'protected'
+  | 'last-admin'
+  | 'sso-managed'
+  | 'idp-managed'
+
+/** Who manages roles on this hub: the IdP-role mode, the Entra app roles, or the hub. */
+function roleAuthority(auth: HubAuth): 'idp' | 'entra-app-roles' | 'hub' {
+  if (isIdpRolesAuth(auth)) return 'idp'
+  return ssoProviderOf(auth)?.roleMode === 'entra-app-roles' ? 'entra-app-roles' : 'hub'
+}
+
+/** The contract's audit line for a refused in-hub role change. */
+function auditLocalRefusal(target: string | null, role: HubRole): void {
+  auditIdp(
+    {
+      event: 'idp_roles.local_change_refused',
+      service: IDP_AUDIT_SERVICE,
+      actor: 'operator',
+      subject: target ?? 'unknown',
+      source: 'local',
+      previousGrants: [],
+      newGrants: [role],
+      reason: 'roles_managed_by_idp'
+    },
+    'denied'
+  )
+}
 
 export interface DisableHubUserOptions {
   /**
@@ -174,11 +206,18 @@ export async function createHubUser(
   auth: HubAuth,
   input: CreateHubUserInput,
   opts: { reason?: 'break_glass'; password?: string } = {}
-): Promise<CreatedHubUser | { error: 'exists' | 'sso-managed' }> {
+): Promise<CreatedHubUser | { error: 'exists' | 'sso-managed' | 'idp-managed' }> {
+  const authority = roleAuthority(auth)
+  // A role asked for in the IdP-role mode is a local role change: refused first.
+  if (authority === 'idp' && input.role !== undefined) {
+    auditUser('user.create', 'denied', null, { reason: 'idp_managed', role: input.role })
+    auditLocalRefusal(null, input.role)
+    return { error: 'idp-managed' }
+  }
   assertHubPasswordEnabled('user.create', { op: 'create' }, isPasswordSignInEnabled(auth))
   const ctx = await auth.$context
   const email = normalizeEmail(input.email)
-  const sso = isEntraSsoAuth(auth)
+  const sso = authority !== 'hub'
   if (sso && input.role === 'admin') {
     auditUser('user.create', 'denied', null, { reason: 'sso_managed', role: 'admin' })
     return { error: 'sso-managed' }
@@ -213,12 +252,7 @@ export async function createHubUser(
   const hash = await ctx.password.hash(password)
 
   const name = input.name?.trim() || email.split('@')[0]!
-  // The first account on a hub with no enabled admin is the admin, so the
-  // "at least one enabled admin" invariant holds from the first account on rather
-  // than only after the next boot's `ensureFirstAdmin`.
-  const role: HubRole = sso
-    ? 'user'
-    : (input.role ?? ((await listHubUsers(auth)).some(isEnabledAdmin) ? 'user' : 'admin'))
+  const role: HubRole = sso ? 'user' : (input.role ?? (await roleForNewAccount(auth)))
   // emailVerified: true — a DELIBERATE divergence from sign-up's `false`. This hub
   // configures no mail sender, so a verification mail can never be sent and the
   // account would be permanently unverifiable. Marking an operator-created account
@@ -241,6 +275,17 @@ export async function createHubUser(
     ...(opts.reason ? { reason: opts.reason } : {})
   })
   return { id: created.id, email: created.email, name: created.name, role, password }
+}
+
+/**
+ * The role a new account gets on a hub that manages roles itself: `admin` when the hub
+ * has no enabled admin yet, else `user` — so the "at least one enabled admin" invariant
+ * holds from the first account on rather than only after the next boot's
+ * {@link ensureFirstAdmin}. Operator-created accounts, and accounts a generic OIDC
+ * sign-in creates with the IdP-role mode off (entra.ts, role mode `hub`).
+ */
+export async function roleForNewAccount(auth: HubAuth): Promise<HubRole> {
+  return (await listHubUsers(auth)).some(isEnabledAdmin) ? 'user' : 'admin'
 }
 
 /**
@@ -415,7 +460,14 @@ export async function setHubUserRole(
     auditUser('user.role_change', 'denied', null, { reason: 'break_glass', role })
     return 'protected'
   }
-  if (isEntraSsoAuth(auth)) {
+  const authority = roleAuthority(auth)
+  if (authority === 'idp') {
+    const target = (await findHuman(auth, email))?.target.id ?? null
+    auditUser('user.role_change', 'denied', target, { reason: 'idp_managed', role })
+    auditLocalRefusal(target, role)
+    return 'idp-managed'
+  }
+  if (authority === 'entra-app-roles') {
     const target = (await findHuman(auth, email))?.target.id ?? null
     auditUser('user.role_change', 'denied', target, { reason: 'sso_managed', role })
     return 'sso-managed'

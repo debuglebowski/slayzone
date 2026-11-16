@@ -21,6 +21,10 @@ import { registerHubComputersRoute } from './computers.js'
 
 const h = await createTestHarness()
 await registerComputer(h.slayDb, { id: 'c-1', name: 'laptop', platform: 'p', version: '0' })
+await registerComputer(h.slayDb, { id: 'old', name: 'ci-box', platform: 'p', version: '0' })
+await registerComputer(h.slayDb, { id: 'new', name: 'ci-box', platform: 'p', version: '0' })
+/** Socket-open computers the fake gateway reports. */
+let live: string[] = ['new']
 
 const dropped: string[] = []
 /** Who the hub's bearer gate bound (null: login off, nobody). */
@@ -37,10 +41,13 @@ registerHubComputersRoute(app, {
   computers: {
     getHubUrl: () => null,
     getGateway: () => ({
-      listComputers: () => [],
+      listComputers: () => live.map((computerId) => ({ computerId })),
       listUsableComputers: () => [],
       disconnect: (id: string) => void dropped.push(id)
-    })
+    }),
+    takeoverCandidates: () => [
+      { conversationId: 'conv', taskId: 'task', ownerComputerId: 'old', holderComputerId: 'new' }
+    ]
   }
 })
 const r = await mountRestApp(app)
@@ -96,6 +103,70 @@ describe('PATCH /api/hub/computers', () => {
       setAuthGate(() => false)
       principal = null
     }
+  })
+})
+
+describe('takeovers + replace (`slay hub computers takeovers|replace`)', () => {
+  test('GET takeovers offers replacing the offline old computer with the one holding its chats', async () => {
+    const res = await r.request('GET', '/api/hub/computers/takeovers')
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({
+      ok: true,
+      data: [
+        {
+          former: expect.objectContaining({ id: 'old', name: 'ci-box', revoked: false }),
+          successor: { id: 'new', name: 'ci-box', connected: true },
+          conversations: 1,
+          tasks: 1
+        }
+      ]
+    })
+  })
+
+  test('replace: 400 without ids, 404 unknown, 409 while the old one is connected', async () => {
+    expect((await r.request('POST', '/api/hub/computers/replace', { id: 'old' })).status).toBe(400)
+    expect(
+      (await r.request('POST', '/api/hub/computers/replace', { id: 'nope', successorId: 'new' }))
+        .status
+    ).toBe(404)
+    live = ['old', 'new']
+    try {
+      const res = await r.request('POST', '/api/hub/computers/replace', {
+        id: 'old',
+        successorId: 'new'
+      })
+      expect(res.status).toBe(409)
+      expect(res.body).toMatchObject({ ok: false, code: 'COMPUTER_IS_CONNECTED' })
+    } finally {
+      live = ['new']
+    }
+    expect(await getComputer(h.slayDb, 'old')).not.toBeNull()
+  })
+
+  test('replace: the old row goes, its work moves, one audit line', async () => {
+    const lines: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => lines.push(JSON.parse(line) as Record<string, unknown>))
+    try {
+      const res = await r.request('POST', '/api/hub/computers/replace', {
+        id: 'old',
+        successorId: 'new'
+      })
+      expect(res.status).toBe(200)
+      expect(res.body).toEqual({ ok: true, data: { id: 'old', successorId: 'new' } })
+    } finally {
+      setSecurityLogSink()
+    }
+    expect(await getComputer(h.slayDb, 'old')).toBeNull()
+    expect(
+      await h.slayDb.get('SELECT successor_id FROM computer_retirements WHERE computer_id = ?', [
+        'old'
+      ])
+    ).toEqual({ successor_id: 'new' })
+    expect(lines.map((l) => `${l.event}:${l.outcome}:${l.targetId}`)).toEqual([
+      'computer.replace:success:old'
+    ])
+    const after = await r.request('GET', '/api/hub/computers/takeovers')
+    expect(after.body).toEqual({ ok: true, data: [] })
   })
 })
 

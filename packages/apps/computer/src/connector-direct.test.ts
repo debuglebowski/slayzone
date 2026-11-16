@@ -35,6 +35,11 @@ it('a connector-mode computer advertises its direct listener and WebRTC to the h
     const [computer] = hub.gateway.listComputers()
     expect(computer?.directAddress).toMatch(/^127\.0\.0\.1:\d+$/)
     expect(computer?.directRtc).toBe(true)
+    expect(computer).toMatchObject({
+      chatHistoryPages: true,
+      chatTimelineRowSlices: true,
+      promptSummariesAll: true
+    })
   } finally {
     await connector?.stop()
     control.close()

@@ -124,9 +124,16 @@ describe('better-auth rate limit', () => {
   })
 
   it('a hub that turns it off (the desktop app’s loopback hub) refuses nothing', async () => {
+    // Through the Entra sign-in start: the limiter answers before any route runs (the
+    // limited hub refuses start 11, above), and it costs no password hash — thirty
+    // wrong-password sign-ins, a deliberately slow hash each, outran the test on a
+    // loaded machine. One password sign-in still gets its own answer.
     for (let i = 0; i < SIGN_IN_MAX * 3; i++) {
-      expect((await signIn(unlimited, '127.0.0.1')).status).toBe(401)
+      expect((await signIn(unlimited, '127.0.0.1', undefined, '/sign-in/social')).status).not.toBe(
+        429
+      )
     }
+    expect((await signIn(unlimited, '127.0.0.1')).status).toBe(401)
   })
 })
 

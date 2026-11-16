@@ -63,8 +63,8 @@ function enrollFrame(directAddress?: string | null, directRtc?: boolean) {
 }
 
 describe('protocol v8: direct-link address', () => {
-  it('is v8', () => {
-    expect(COMPUTER_PROTOCOL_VERSION).toBe(8)
+  it('is at least v8', () => {
+    expect(COMPUTER_PROTOCOL_VERSION).toBeGreaterThanOrEqual(8)
   })
 
   it('keeps the address an enrolling computer advertises, and its loopback-ness', async () => {
@@ -130,4 +130,48 @@ describe('protocol v8: direct-link address', () => {
       gateway.close()
     }
   })
+})
+
+describe('runtime feature flags (additive, no protocol bump)', () => {
+  it.each([
+    'chatHistoryPages',
+    'chatTimelineRowSlices',
+    'aiConfigHashFiles',
+    'promptSummariesAll'
+  ] as const)(
+    'keeps %s from each live handshake, never from stored enrollment tags',
+    async (feature) => {
+      for (const [advertised, kept] of [
+        [true, true],
+        [false, false],
+        [undefined, false]
+      ] as const) {
+        const { gateway, connect } = setup('203.0.113.9')
+        const first = connect()
+        const enroll = enrollFrame(null)
+        first.frame({
+          ...enroll,
+          params: {
+            ...enroll.params,
+            capabilities: [...enroll.params.capabilities, 'agentConfig.hashFiles'],
+            ...(advertised !== undefined ? { [feature]: advertised } : {})
+          }
+        })
+        await flush()
+        expect(gateway.listComputers()[0]?.[feature]).toBe(kept)
+        const { apiKey } = first.response(1)!.result as { apiKey: string }
+        first.close()
+        // An older build reconnecting under the same identity advertises nothing.
+        const second = connect()
+        second.frame({
+          id: 2,
+          method: 'hello',
+          params: { apiKey, protocolVersion: COMPUTER_PROTOCOL_VERSION }
+        })
+        await flush()
+        expect(gateway.listComputers()[0]?.[feature]).toBe(false)
+        gateway.close()
+      }
+    }
+  )
 })

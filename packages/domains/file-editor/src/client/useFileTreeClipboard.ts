@@ -5,7 +5,7 @@ import { useTrack } from '@slayzone/telemetry/client'
 import { safeClipboardWriteText } from '@slayzone/ui'
 import type { DirEntry } from '../shared'
 import { uniqueName, duplicateName } from '../shared'
-import { useWorkspaceIsLocal, useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceIsLocal, useWorkspaceScope } from './workspace-target'
 
 export interface ClipboardState {
   paths: string[]
@@ -52,7 +52,7 @@ export function useFileTreeClipboard({
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   const queryClient = useQueryClient()
   // mutateAsync is identity-stable across renders (the mutation objects are not).
   const { mutateAsync: copyPath } = useMutation(trpc.fileEditor.copy.mutationOptions())
@@ -141,14 +141,14 @@ export function useFileTreeClipboard({
             try {
               if (clipboard.mode === 'copy') {
                 await copyPath({
-                  ...target,
+                  ...requireScope(scope),
                   rootPath: projectPath,
                   srcPath,
                   destPath
                 })
               } else {
                 await renamePath({
-                  ...target,
+                  ...requireScope(scope),
                   rootPath: projectPath,
                   oldPath: srcPath,
                   newPath: destPath
@@ -178,14 +178,14 @@ export function useFileTreeClipboard({
                 targetDir
               )
               await copyPath({
-                ...target,
+                ...requireScope(scope),
                 rootPath: projectPath,
                 srcPath: srcRel,
                 destPath
               })
             } else {
               await copyIn({
-                ...target,
+                ...requireScope(scope),
                 rootPath: projectPath,
                 absoluteSrc: abs,
                 targetDir
@@ -212,7 +212,7 @@ export function useFileTreeClipboard({
       copyIn,
       queryClient,
       trpc,
-      target,
+      scope,
       track
     ]
   )
@@ -230,7 +230,7 @@ export function useFileTreeClipboard({
         const destPath = parentDir ? `${parentDir}/${destName}` : destName
         try {
           await copyPath({
-            ...target,
+            ...requireScope(scope),
             rootPath: projectPath,
             srcPath: entry.path,
             destPath
@@ -243,7 +243,7 @@ export function useFileTreeClipboard({
       track('file_duplicated')
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, dirContents, loadDir, copyPath, target, track]
+    [projectPath, dirContents, loadDir, copyPath, scope, track]
   )
 
   const handleCopyPath = useCallback(

@@ -5,6 +5,7 @@ import { findSourceRepo, getCurrentBranch, isGitRepo } from '../../git'
 import { resolveId } from './_shared'
 
 export interface UpdateOpts {
+  project?: string
   title?: string
   description?: string
   appendDescription?: string
@@ -15,6 +16,8 @@ export interface UpdateOpts {
   permanent?: boolean
   agent?: string
   worktreePath?: string
+  /** With a terminal --status: complete even while an agent is mid-reply. */
+  force?: boolean
 }
 
 export async function updateAction(idPrefix: string | undefined, opts: UpdateOpts): Promise<void> {
@@ -24,6 +27,7 @@ export async function updateAction(idPrefix: string | undefined, opts: UpdateOpt
     process.exit(1)
   }
   if (
+    opts.project === undefined &&
     opts.title === undefined &&
     opts.description === undefined &&
     opts.appendDescription === undefined &&
@@ -56,10 +60,12 @@ export async function updateAction(idPrefix: string | undefined, opts: UpdateOpt
   // prefix goes straight to the hub — no local DB read, which is what let a
   // remote hub work.
   const body: Record<string, unknown> = {}
+  if (opts.project !== undefined) body.project = opts.project
   if (opts.title !== undefined) body.title = opts.title
   if (opts.description !== undefined) body.description = opts.description || null
   if (opts.appendDescription !== undefined) body.appendDescription = opts.appendDescription
   if (opts.status !== undefined) body.status = opts.status
+  if (opts.force) body.force = true
   if (opts.priority) body.priority = parseInt(opts.priority, 10)
   if (typeof opts.due === 'string') body.dueDate = opts.due
   else if (opts.due === false) body.dueDate = null

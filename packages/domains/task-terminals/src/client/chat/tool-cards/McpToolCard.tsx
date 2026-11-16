@@ -1,7 +1,9 @@
 import { Plug } from 'lucide-react'
+import { chatBlobJsonReplacer } from '@slayzone/terminal-contracts'
 import { LinkText, ToolShell, type ToolProps } from './card-shell'
 import { mcpResultBlocks, parseMcpToolName, type McpBlock } from './mcp'
 import { codexMcpInvocation } from './codex-items'
+import { ChatImage } from './chat-images'
 
 function InputValue({ value }: { value: unknown }) {
   if (typeof value === 'string') {
@@ -16,7 +18,7 @@ function InputValue({ value }: { value: unknown }) {
   }
   return (
     <pre className="max-h-48 overflow-y-auto rounded bg-muted/30 p-1.5 font-mono whitespace-pre-wrap">
-      {JSON.stringify(value, null, 2)}
+      {JSON.stringify(value, chatBlobJsonReplacer, 2)}
     </pre>
   )
 }
@@ -24,8 +26,8 @@ function InputValue({ value }: { value: unknown }) {
 function OutputBlock({ block, isError }: { block: McpBlock; isError: boolean }) {
   if (block.kind === 'image') {
     return (
-      <img
-        src={block.src}
+      <ChatImage
+        source={block}
         alt="Tool output"
         className="max-h-64 max-w-full rounded border border-border/50"
       />

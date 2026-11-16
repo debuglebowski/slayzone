@@ -48,12 +48,16 @@ export interface TaskBranchCtx {
   treeShowStatus: boolean
   treeShowPriority: boolean
   treeShowWorktree: boolean
+  /** Task id → its worktree's colour (absent: not known / none — neutral pill). */
+  worktreeColors: ReadonlyMap<string, string>
   /** Task id → tags to render as chips. Empty when "Show tags" is off. */
   tagsByTaskId: Map<string, Tag[]>
   /** Task ids to mark with a "Blocked" icon. Empty when the toggle is off. */
   blockedBadgeTaskIds: ReadonlySet<string>
   treeCrossOutDone: boolean
   treeGroupBy: 'none' | 'status' | 'priority'
+  treeGroupBlocked: boolean
+  blockedTaskIds?: Set<string>
   treeGroupPinned: boolean
   onTaskClick?: (taskId: string) => void
   onRowSelectClick: (event: ReactMouseEvent<HTMLButtonElement>, taskId: string) => void

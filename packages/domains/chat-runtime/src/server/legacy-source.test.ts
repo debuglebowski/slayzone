@@ -135,31 +135,14 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
         "INSERT INTO chat_tab_state(tab_id,draft_text,rev,updated_at) VALUES('tab','private draft',4,12346)"
       )
       .run()
+    // Task-wide legacy content (prompts and turns are handed off since v207).
     h.db
       .prepare(
-        "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','claude-chat','private prompt',12340)"
+        "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','message','[]')"
       )
       .run()
-    h.db
-      .prepare(
-        "INSERT INTO agent_turns(id,task_id,worktree_path,terminal_tab_id,snapshot_sha,prompt_preview,created_at) VALUES('turn','task','/project','tab','abc','private preview',12340)"
-      )
-      .run()
-    h.db
-      .prepare(
-        'INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?)'
-      )
-      .run('session-1', 'task', 'claude-chat', 'native', 'user-selected', 1)
-    h.db
-      .prepare(
-        'INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?)'
-      )
-      .run('session-2', 'task', 'claude-chat', 'native', 'user-selected', 2)
-    h.db
-      .prepare(
-        'INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?,?,?)'
-      )
-      .run('terminal-session', 'task', 'claude-code', 'native', 'user-selected', 2)
+    // Session history is not part of the chat export: the task's session ledger
+    // reaches its computer through the handoff (robustness plan §9).
     h.db
       .prepare(
         "INSERT INTO session_resets(id,task_id,mode,created_at) VALUES('reset','task','claude-chat',3)"
@@ -220,25 +203,12 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
     expect(dest.getRecord('c', 'draft', 'state')).toMatchObject({
       draft: { text: 'private draft', rev: 4 }
     })
-    expect(dest.getRecord('c', 'prompt', 'prompt')).toMatchObject({
-      text: 'private prompt',
-      createdAt: 12340
-    })
+    expect(dest.getRecord('c', 'settings', 'attachment-message:message')).toEqual([])
     expect(dest.read('c', 9)[0].at).toBe(Date.parse('2026-01-01T12:00:00Z'))
-    expect(dest.getRecord('c', 'settings', 'session:["claude-chat","native"]')).toMatchObject({
-      conversationId: 'native',
-      mode: 'claude-chat'
-    })
-    expect(dest.getRecord('c', 'settings', 'session:["claude-code","native"]')).toMatchObject({
-      conversationId: 'native',
-      mode: 'claude-code'
-    })
-    expect(dest.getRecord('c', 'settings', 'session:reset:claude-chat')).toMatchObject({
-      mode: 'claude-chat',
-      conversationId: null,
-      origin: 'manual-reset',
-      createdAt: 3
-    })
+    expect(
+      dest.findRecords('settings').filter((r) => r.id.startsWith('session:')),
+      'no session records: the ledger is handed off, the resets are delivered intents'
+    ).toEqual([])
     // Source cleanup itself requires a committed receipt, even if called incorrectly.
     await expect(source.cleanup(owner)).rejects.toThrow(/committed/i)
     await ownership.beginMigration('c', {
@@ -252,9 +222,8 @@ test('legacy export preserves content and timestamps; cleanup leaves metadata on
     await source.cleanup(committed)
     expect(h.db.prepare('SELECT count(*) AS n FROM chat_events').get()).toEqual({ n: 0 })
     expect(h.db.prepare('SELECT count(*) AS n FROM chat_tab_state').get()).toEqual({ n: 0 })
-    expect(h.db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
-    expect(h.db.prepare('SELECT prompt_preview FROM agent_turns').get()).toEqual({
-      prompt_preview: ''
+    expect(h.db.prepare('SELECT count(*) AS n FROM chat_attachment_messages').get()).toEqual({
+      n: 0
     })
     expect(await ownership.forTab('tab')).toMatchObject({ computerId: 'pc', epoch: 2 })
   } finally {

@@ -1,12 +1,21 @@
 import type { Express } from 'express'
 import { TRPCError } from '@trpc/server'
 import { updateTaskInputSchema, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
-import { getTaskOp, switchMainAgentMode, updateTaskOp } from '@slayzone/task/server'
-import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
+import {
+  getTaskOp,
+  InvalidTaskUpdateError,
+  switchMainAgentMode,
+  TaskFoldersUnavailableError,
+  ProjectNotFoundError,
+  updateTaskOp
+} from '@slayzone/task/server'
+import { isTerminalStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
-import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { isResolveFailure, resolveByIdPrefix, resolveProjectRef } from '../resolve'
 import { resolveAgentIdAlias } from '../../agent-id-alias'
+import { respondComputerRefusal } from '../computer-refusal'
+import { refuseCompletionWhileMidReply } from './_agent-guard'
 
 /**
  * PATCH /api/tasks/:id — update a task (CLI `slay tasks update`, plus the
@@ -34,6 +43,10 @@ import { resolveAgentIdAlias } from '../../agent-id-alias'
  *   Unknown/disabled agent = 400. Runs after the other fields validate.
  *   `terminalMode` is accepted as its deprecated old name (`resolveAgentIdAlias`).
  *
+ * - A `status` in a terminal category (completed/canceled) stops every agent of
+ *   the task, so it is refused with 409 while one is mid-reply unless `force`
+ *   (CLI `--force`) — the same guard as `POST /api/tasks/:id/done`.
+ *
  * `appendDescription` is resolved to a concrete `description` before the domain
  * schema parses, so the strict `updateTaskInputSchema` stays free of
  * CLI-shaped fields.
@@ -41,6 +54,8 @@ import { resolveAgentIdAlias } from '../../agent-id-alias'
 export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
   app.patch('/api/tasks/:id', async (req, res) => {
     const body = { ...((req.body ?? {}) as Record<string, unknown>) }
+    const force = body.force === true
+    delete body.force
 
     const alias = resolveAgentIdAlias(body)
     if (!alias.ok) {
@@ -68,18 +83,37 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       const task = resolved.row
       body.id = task.id
+      if (typeof body.project === 'string') {
+        const project = await resolveProjectRef(deps.db, body.project)
+        if (isResolveFailure(project)) {
+          res.status(project.status).json({ ok: false, error: project.error })
+          return
+        }
+        body.projectId = project.row.id
+        delete body.project
+      }
 
       if (typeof body.status === 'string') {
+        // With a project change the status belongs to the project the task moves to.
+        const statusProjectId =
+          typeof body.projectId === 'string' ? body.projectId : task.project_id
         const row = await deps.db.get<{ columns_config: string | null }>(
           `SELECT columns_config FROM projects WHERE id = ? LIMIT 1`,
-          [task.project_id]
+          [statusProjectId]
         )
-        const statusId = resolveStatusId(body.status, parseColumnsConfig(row?.columns_config))
+        const columns = parseColumnsConfig(row?.columns_config)
+        const statusId = resolveStatusId(body.status, columns)
         if (!statusId) {
           res.status(400).json({
             ok: false,
             error: `Unknown status "${body.status}" for this task's project.`
           })
+          return
+        }
+        if (
+          isTerminalStatus(statusId, columns) &&
+          (await refuseCompletionWhileMidReply(deps, res, task.id, force))
+        ) {
           return
         }
         body.status = statusId
@@ -155,7 +189,20 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       res.json({ ok: true, data: updated })
     } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      // The computer refused the folder by its own policy (B3): 409, its message.
+      if (respondComputerRefusal(res, err)) return
+      // A path no connected computer can take now (§9 7e): the caller can fix it.
+      // A projectId this hub has no project for, or an update breaking a task
+      // invariant (e.g. a relative path): the caller's mistake.
+      const status =
+        err instanceof TaskFoldersUnavailableError
+          ? 409
+          : err instanceof ProjectNotFoundError || err instanceof InvalidTaskUpdateError
+            ? 400
+            : 500
+      res
+        .status(status)
+        .json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
 }
