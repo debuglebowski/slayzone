@@ -25,13 +25,16 @@ export type SqliteWorkerRequest =
  * An `Error` as it crosses the thread boundary. Structured clone keeps only
  * `name`/`message`/`stack`, so own primitive properties (better-sqlite3's
  * `SqliteError.code` = `SQLITE_CONSTRAINT_UNIQUE`, a domain error's `code`) travel
- * in `props` and are restored, because callers match on them.
+ * in `props` and are restored, because callers match on them. Recovery causes and
+ * AggregateError members travel explicitly; circular references become labeled errors.
  */
 export type SerializedError = {
   name: string
   message: string
   stack?: string
   props?: Record<string, string | number | boolean | bigint | null>
+  cause?: SerializedError
+  errors?: SerializedError[]
 }
 
 export type SqliteWorkerResponse =
@@ -41,7 +44,13 @@ export type SqliteWorkerResponse =
   | { id: number; ok: false; error: SerializedError }
 
 export function serializeError(err: unknown): SerializedError {
+  return serializeErrorGraph(err, new Set())
+}
+
+function serializeErrorGraph(err: unknown, ancestors: Set<Error>): SerializedError {
   if (!(err instanceof Error)) return { name: 'Error', message: String(err) }
+  if (ancestors.has(err)) return { name: 'Error', message: 'Circular error reference' }
+  ancestors.add(err)
   const props: NonNullable<SerializedError['props']> = {}
   for (const [key, value] of Object.entries(err)) {
     if (
@@ -54,7 +63,12 @@ export function serializeError(err: unknown): SerializedError {
       props[key] = value
     }
   }
-  return { name: err.name, message: err.message, stack: err.stack, props }
+  const result: SerializedError = { name: err.name, message: err.message, stack: err.stack, props }
+  if (err.cause !== undefined) result.cause = serializeErrorGraph(err.cause, ancestors)
+  if (err instanceof AggregateError)
+    result.errors = err.errors.map((error: unknown) => serializeErrorGraph(error, ancestors))
+  ancestors.delete(err)
+  return result
 }
 
 /**
@@ -63,7 +77,14 @@ export function serializeError(err: unknown): SerializedError {
  * query — exactly as an in-process throw did; the worker's own frames follow.
  */
 export function deserializeError(e: SerializedError, callSite?: Error): Error {
-  const err = new Error(e.message)
+  const options = e.cause ? { cause: deserializeError(e.cause) } : undefined
+  const err = e.errors
+    ? new AggregateError(
+        e.errors.map((error) => deserializeError(error)),
+        e.message,
+        options
+      )
+    : new Error(e.message, options)
   err.name = e.name
   if (e.props) Object.assign(err, e.props)
   const head = `${e.name}: ${e.message}`

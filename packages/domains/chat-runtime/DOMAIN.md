@@ -248,3 +248,9 @@ dropped, or restored when it is the only copy).
   the fsync. Exceptions that still fsync on this thread: boot (the store-session mark),
   the compaction swap window (replay commit, directory sync) and `close()` without
   `shutdown()`.
+
+- 2026-11-16 (fu-2 R1, S6a preparation): reuse the platform SQLite worker with
+  connection epochs, async final-close hooks and preserved recovery error chains.
+  `storage-fence.ts` supplies a real FULL marker commit for an owner worker. It is
+  not yet wired into the live runtime: S5's main-thread WAL restart sync and unsafe
+  inactive-checkpointer flush remain pending the full S6 caller/event migration.

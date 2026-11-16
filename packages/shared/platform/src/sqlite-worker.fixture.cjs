@@ -23,7 +23,15 @@ if (mode === 'init-error') {
   parentPort.on('message', (req) => {
     if (req.type === 'close') {
       parentPort.postMessage({ id: req.id, ok: true, result: undefined })
-      parentPort.close()
+      if (mode === 'delayed-close') {
+        Atomics.store(workerData.gate, 0, 1)
+        const poll = setInterval(() => {
+          if (Atomics.load(workerData.gate, 0) === 2) {
+            clearInterval(poll)
+            parentPort.close()
+          }
+        }, 5)
+      } else parentPort.close()
       return
     }
     if (req.type === 'get' && req.sql === 'die') {

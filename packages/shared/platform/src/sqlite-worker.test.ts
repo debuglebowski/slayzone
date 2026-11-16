@@ -133,3 +133,48 @@ test('protocol helpers: serializeError keeps only primitive own props; reviveBuf
   const date = new Date(0)
   expect(reviveBuffers({ d: date }).d).toBe(date)
 })
+
+test('recovery errors retain aggregate members, causes and SQLite codes across structured clone', () => {
+  const original = Object.assign(new Error('rename failed'), { code: 'EACCES' })
+  const reopen = Object.assign(new Error('cannot reopen'), { code: 'SQLITE_CANTOPEN' })
+  const failure = new AggregateError([original, reopen], 'swap recovery failed', {
+    cause: original
+  })
+  const received = deserializeError(structuredClone(serializeError(failure)))
+  expect(received).toBeInstanceOf(AggregateError)
+  expect(received.cause).toMatchObject({ message: 'rename failed', code: 'EACCES' })
+  expect((received as AggregateError).errors).toMatchObject([
+    { message: 'rename failed', code: 'EACCES' },
+    { message: 'cannot reopen', code: 'SQLITE_CANTOPEN' }
+  ])
+})
+
+test('cyclic error causes stay cloneable without losing the original failure', () => {
+  const failure = new Error('original')
+  failure.cause = failure
+  const received = deserializeError(structuredClone(serializeError(failure)))
+  expect(received.message).toBe('original')
+  expect(received.cause).toBeInstanceOf(Error)
+  expect((received.cause as Error).message).toMatch(/circular/i)
+})
+
+test('close resolves only after the worker exits, not merely after its close reply', async () => {
+  const gate = new Int32Array(new SharedArrayBuffer(4))
+  const db = await openSqliteWorker({
+    label: 'delayed exit',
+    workerPath: FIXTURE,
+    workerData: { mode: 'delayed-close', gate }
+  })
+  let settled = false
+  const closing = db.close().finally(() => {
+    settled = true
+  })
+  try {
+    await vi.waitFor(() => expect(Atomics.load(gate, 0)).toBe(1))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(settled).toBe(false)
+  } finally {
+    Atomics.store(gate, 0, 2)
+    await closing
+  }
+})

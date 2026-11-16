@@ -102,11 +102,16 @@ class SqliteWorkerDb implements SlayzoneDb {
   private closed = false
   private closing: Promise<void> | null = null
   private dead: Error | null = null
+  private readonly exited: Promise<void>
 
   constructor(
     private readonly worker: Worker,
     private readonly opts: OpenSqliteWorkerOptions
   ) {
+    let markExited: () => void = () => undefined
+    this.exited = new Promise<void>((resolve) => {
+      markExited = resolve
+    })
     worker.on('message', (msg: SqliteWorkerResponse) => this.onMessage(msg))
     let cause: Error | undefined
     worker.on('error', (err) => {
@@ -116,6 +121,7 @@ class SqliteWorkerDb implements SlayzoneDb {
     // pending rather than leave a caller hanging forever.
     worker.on('messageerror', (err) => this.failAll(err))
     worker.on('exit', (code) => {
+      markExited()
       if (this.closed && this.pending.size === 0) return
       const err = new Error(
         `${opts.label}: worker exited unexpectedly (code ${String(code)})${cause ? `: ${cause.message}` : ''}`,
@@ -139,13 +145,15 @@ class SqliteWorkerDb implements SlayzoneDb {
 
   private settle(id: number): void {
     this.pending.delete(id)
-    if (this.pending.size === 0) this.worker.unref()
+    // A close reply precedes actual exit. Keep the owner alive until its files and
+    // worker resources are released, even when no request remains outstanding.
+    if (this.pending.size === 0 && !this.closed) this.worker.unref()
   }
 
   private failAll(err: Error): void {
     const entries = [...this.pending.values()]
     this.pending.clear()
-    this.worker.unref()
+    if (!this.closed) this.worker.unref()
     for (const e of entries) e.reject(err)
   }
 
@@ -211,14 +219,21 @@ class SqliteWorkerDb implements SlayzoneDb {
   /**
    * Resolves once the worker has closed the connection (WAL checkpointed, file
    * released — a restore overwrites it next). Calls made before `close()` still
-   * run first; calls made after reject. Idempotent.
+   * run first; calls made after reject. Waits for actual worker exit on both success
+   * and failure, so a replacement cannot overlap its old owner. Idempotent.
    */
   close(): Promise<void> {
     if (this.closing) return this.closing
     if (this.dead) return Promise.resolve()
-    const closing = this.send<void>({ type: 'close' })
+    const reply = this.send<void>({ type: 'close' })
     this.closed = true
-    this.closing = closing
-    return closing
+    this.closing = reply.then(
+      () => this.exited,
+      async (error: unknown) => {
+        await this.exited
+        throw error
+      }
+    )
+    return this.closing
   }
 }

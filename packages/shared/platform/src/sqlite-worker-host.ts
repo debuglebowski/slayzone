@@ -32,6 +32,10 @@ export type SqliteWorkerHostOptions<Data> = {
   open: (data: Data) => Database.Database | Promise<Database.Database>
   /** Named transactions this DB serves. Absent = it serves none. */
   txns?: Readonly<Record<string, SqliteNamedTxn>>
+  /** Changes after replacing/reopening the connection: old compiled statements are invalid. */
+  connectionEpoch?: () => unknown
+  /** Own final fencing, maintenance shutdown and native file release instead of db.close(). */
+  close?: (db: Database.Database) => void | Promise<void>
 }
 
 /**
@@ -49,7 +53,13 @@ export function serveSqliteWorker<Data>(opts: SqliteWorkerHostOptions<Data>): vo
 
   let db: Database.Database
   const cache = new Map<string, Database.Statement>()
+  let cacheEpoch: unknown
   const stmt = (sql: string): Database.Statement => {
+    const epoch = opts.connectionEpoch?.()
+    if (epoch !== cacheEpoch) {
+      cache.clear()
+      cacheEpoch = epoch
+    }
     let s = cache.get(sql)
     if (s) {
       cache.delete(sql)
@@ -119,10 +129,11 @@ export function serveSqliteWorker<Data>(opts: SqliteWorkerHostOptions<Data>): vo
   const onMessage = (req: SqliteWorkerRequest): void => {
     if (req.type === 'close') {
       closing = true
-      void Promise.allSettled([...inflight]).then(() => {
+      void Promise.allSettled([...inflight]).then(async () => {
         try {
           cache.clear()
-          db.close()
+          if (opts.close) await opts.close(db)
+          else db.close()
           reply(req.id, undefined)
         } catch (err) {
           fail(req.id, err)
