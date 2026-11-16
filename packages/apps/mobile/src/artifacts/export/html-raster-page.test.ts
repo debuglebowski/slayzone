@@ -8,6 +8,7 @@ import {
   EXPORT_RENDER_SOURCE,
   HTML_DRAW_TIMEOUT_MS,
   HTML_PAGE,
+  HTML_PAGES_AHEAD,
   HTML_RENDER_IDLE_MS,
   HTML_STAGE_POLICY,
   htmlArtifactDocument,
@@ -174,6 +175,36 @@ describe('htmlRasterPage: the host page', () => {
     ])
     const reply = h.replies[0]
     expect(reply.type === 'pages' && reply.pages.length).toBe(10)
+  })
+
+  // Follow-up N3: the app writes each page into the PDF and then says so; the page draws
+  // no further while more than a few pages wait on the app, so however long the report,
+  // only a few pictures are ever on their way.
+  it('waits for the app before drawing more: never more than a few pages unanswered', async () => {
+    const { host: h } = host('x', { heightCss: 20 * 780, ack: false })
+    const pagesSent = () => h.received.filter((m) => m.type === 'page').length
+    h.post(SNAPSHOT('<p>long</p>'))
+    await until(() => pagesSent() > 0)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const held = pagesSent()
+    expect(held).toBeLessThan(20)
+    expect(held).toBeLessThanOrEqual(HTML_PAGES_AHEAD + 5)
+    const draws = callsOf(h).length
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    // Still waiting: nothing more drawn or sent.
+    expect(pagesSent()).toBe(held)
+    expect(callsOf(h).length).toBe(draws)
+    // The app answers each page as it takes it: the rest come.
+    h.ack(held)
+    await until(() => pagesSent() > held)
+    const answer = setInterval(() => h.ack(pagesSent()), 10)
+    try {
+      await until(() => h.replies.length > 0)
+    } finally {
+      clearInterval(answer)
+    }
+    const reply = h.replies[0]
+    expect(reply.type === 'pages' && reply.pages.length).toBe(20)
   })
 
   it('draws the snapshot in a stage that runs nothing: sandboxed, a no-script policy first', async () => {

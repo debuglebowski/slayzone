@@ -7,7 +7,10 @@
  * only thing it may load — and is unmounted when the page answers, fails, goes longer
  * than its idle timeout without a message ({@link EXPORT_RENDER_IDLE_MS} unless the page
  * says otherwise; a script that never yields), or its viewer goes away. There is no cap
- * on a render that keeps sending: each message restarts the clock.
+ * on a render that keeps sending: each message restarts the clock. An html artifact's
+ * pages go to the render's sink as they come, and the page is told each time one was
+ * taken: it draws no further while a few wait (`HTML_PAGES_AHEAD`), so pages never pile
+ * up between the page and the app.
  *
  * WKWebView runs a page's script only inside the window, so the view is mounted, not
  * offscreen: laid over the screen at zero opacity.
@@ -17,6 +20,8 @@ import { StyleSheet } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import {
   collectExportReply,
+  exportAckScript,
+  type ExportPageSink,
   type ExportRenderMessage,
   type ExportRenderPage,
   type ExportRenderReply,
@@ -54,16 +59,20 @@ interface PendingRender {
   page: ExportRenderPage
   resolve: (reply: ExportRenderReply) => void
   reject: (error: Error) => void
-  /** Puts the page's messages together into its reply. */
+  /** Puts the page's messages together into its reply (its pages to the sink). */
   take: (message: ExportRenderMessage) => ExportRenderReply | null
 }
 
 let nextRenderId = 0
 
+/** A render ended (or refused) because its viewer went away. */
+const VIEWER_CLOSED_MESSAGE = 'The export was cancelled: the viewer was closed.'
+
 export interface ExportRenderer {
   /** The hidden web view while a page renders, else null. */
   view: ReactNode
-  render: (page: ExportRenderPage) => Promise<ExportRenderReply>
+  /** `sink`: where an html artifact's pages go as they come (none is kept here). */
+  render: (page: ExportRenderPage, sink?: ExportPageSink) => Promise<ExportRenderReply>
 }
 
 export function useExportRenderer(): ExportRenderer {
@@ -72,6 +81,10 @@ export function useExportRenderer(): ExportRenderer {
   // while one is pending, and a viewer that goes away, end it — nothing is left pending
   // forever.
   const live = useRef<PendingRender | null>(null)
+  // The web view: told each time it has pages taken, so it draws on (`exportAckScript`).
+  const webView = useRef<WebView<object>>(null)
+  // The pending render's pages taken so far, restarts included: what its page is told.
+  const pagesTaken = useRef(0)
   // The pending render's idle timer: (re)started when it starts and at each of its messages.
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
   const stopIdle = () => {
@@ -102,18 +115,34 @@ export function useExportRenderer(): ExportRenderer {
     return stopIdle
   }, [pending, startIdle])
 
-  useEffect(
-    () => () => {
-      live.current?.reject(new Error('The export was cancelled: the viewer was closed.'))
-    },
-    []
-  )
+  // Set once the viewer has gone away: a render asked for after that (the export was
+  // reading a script from disk when it closed) is cancelled at once — no view would
+  // ever mount to answer it or time it out. Cleared on (re)mount.
+  const unmounted = useRef(false)
+  useEffect(() => {
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+      live.current?.reject(new Error(VIEWER_CLOSED_MESSAGE))
+    }
+  }, [])
 
-  const render = (page: ExportRenderPage) =>
+  const render = (page: ExportRenderPage, sink?: ExportPageSink) =>
     new Promise<ExportRenderReply>((resolve, reject) => {
+      if (unmounted.current) {
+        reject(new Error(VIEWER_CLOSED_MESSAGE))
+        return
+      }
       const replaced = live.current
       nextRenderId += 1
-      const next = { id: nextRenderId, page, resolve, reject, take: collectExportReply() }
+      const next = {
+        id: nextRenderId,
+        page,
+        resolve,
+        reject,
+        take: collectExportReply(sink)
+      }
+      pagesTaken.current = 0
       live.current = next
       setPending(next)
       replaced?.reject(new Error('The export was replaced by another one.'))
@@ -132,6 +161,11 @@ export function useExportRenderer(): ExportRenderer {
     if (!message) return
     const reply = pending.take(message)
     if (!reply) {
+      if (message.type === 'page') {
+        // Taken (written out): the page may draw on.
+        pagesTaken.current += 1
+        webView.current?.injectJavaScript(exportAckScript(pagesTaken.current))
+      }
       // Still going: the clock starts again.
       startIdle(pending)
       return
@@ -143,6 +177,7 @@ export function useExportRenderer(): ExportRenderer {
   const view = pending ? (
     <WebView
       key={pending.id}
+      ref={webView}
       testID="artifact-export-renderer"
       source={{ html: pending.page.html }}
       originWhitelist={['*']}

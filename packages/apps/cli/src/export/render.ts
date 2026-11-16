@@ -101,12 +101,35 @@ export class DocumentNavigationError extends Error {
 }
 
 /**
- * `print()` made a no-op in a window: the page's own print never competes with the
- * export's. Run in the page before its document goes in (`setDocumentContent` keeps
- * the window) and in every document made later (child frames).
+ * Run in the page before its document goes in (`setDocumentContent` keeps the window)
+ * and in every document made later (child frames):
+ *  - `print()` is a no-op: the page's own print never competes with the export's.
+ *  - A click on a link marked as a download (`<a download>`, `<area download>`) does
+ *    nothing: downloads are denied (`Browser.setDownloadBehavior`), and Chrome reports
+ *    such a click to an http(s) URL as an ordinary navigation of the page (a
+ *    `currentTab` anchor click, with nothing saying it is a download), which the
+ *    navigation guard would take for the document leaving and fail the export. A
+ *    download does not leave the document; desktop cancels it and exports. The listener
+ *    is the window's first (capture), so nothing of the page's runs before it; the
+ *    document going in (`document.open()`) erases the window's listeners, so an observer
+ *    of the document puts it back (observers outlive `document.open()`, and the parser
+ *    runs them before each of the document's scripts). Missed anyway, the click is still
+ *    a navigation the guard refuses: the export fails, nothing is fetched.
  */
-const PRINT_NOOP =
-  "(() => { try { Object.defineProperty(window, 'print', { value: function print() {}, writable: true, configurable: true, enumerable: true }) } catch {} })()"
+const PAGE_SCRIPT = `(() => {
+  try { Object.defineProperty(window, 'print', { value: function print() {}, writable: true, configurable: true, enumerable: true }) } catch {}
+  const deny = (event) => {
+    for (const node of event.composedPath()) {
+      if ((node instanceof HTMLAnchorElement || node instanceof HTMLAreaElement) && node.hasAttribute('download')) {
+        event.preventDefault()
+        return
+      }
+    }
+  }
+  const watch = () => addEventListener('click', deny, true)
+  watch()
+  try { new MutationObserver(watch).observe(document, { childList: true, subtree: true }) } catch {}
+})()`
 
 /** Navigation types that stay in the same document (`Page.frameStartedNavigating`). */
 const SAME_DOCUMENT = new Set(['sameDocument', 'historySameDocument'])
@@ -175,7 +198,8 @@ async function guardDocument(
         return
       case 'Page.frameRequestedNavigation':
         // Other dispositions open no document here (a popup, blocked without a
-        // gesture; a download, denied).
+        // gesture; a download, denied). A click on an `<a download>` never gets here:
+        // the page cancels it (PAGE_SCRIPT).
         if (params.frameId === frameId && params.disposition === 'currentTab') refuse(params.url)
         return
       case 'Page.frameStartedNavigating':
@@ -248,8 +272,8 @@ async function withPage<T>(
     )
     const frameId = frameTree.frame.id
     guard = await guardDocument(b, sessionId, frameId)
-    await b.send('Page.addScriptToEvaluateOnNewDocument', { source: PRINT_NOOP }, sessionId)
-    await evaluate(b, sessionId, PRINT_NOOP)
+    await b.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_SCRIPT }, sessionId)
+    await evaluate(b, sessionId, PAGE_SCRIPT)
     await b.send('Page.setDocumentContent', { frameId, html }, sessionId)
     guard.committed()
     // Subresources (images in markdown) loaded, then web fonts settled.

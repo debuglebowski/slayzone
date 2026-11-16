@@ -333,6 +333,20 @@ describe('PDF: the export frame navigated away', () => {
     port.close()
   })
 
+  // Follow-up N1: a dialog that never reports closing is no success: nothing is known
+  // to have been printed.
+  it('a dialog that never reports closing fails the export after the backstop', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { frame, say, id, port, result } = await startPdf()
+    say({ slayzoneExport: id, state: 'ready', settled: true })
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1_000)
+    const res = await result
+    expect(res.ok).toBe(false)
+    expect('error' in res ? res.error : '').toMatch(/print dialog/i)
+    expect(frame.isConnected).toBe(false)
+    port.close()
+  })
+
   it('a load while the dialog is open (the bootstrap is blocked in print) waits for it', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const { frame, load, say, id, port, result } = await startPdf()

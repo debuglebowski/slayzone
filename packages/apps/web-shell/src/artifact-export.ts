@@ -34,8 +34,14 @@ import { canExportAsHtml, canExportAsPdf, canExportAsPng } from '@slayzone/task-
 import type { RenderMode } from '@slayzone/task-contracts'
 import { withExportDirective } from './mermaid-export-source'
 
-/** Leftover print frame removed even if the browser never reports `afterprint`. */
+/**
+ * How long the print dialog may stay open. The frame reports `done` when it closes, or
+ * an error when it never opened; silence past this is a failure, frame removed.
+ */
 const PRINT_FRAME_MAX_MS = 30 * 60_000
+/** The dialog never reported closing: nothing is known to have been printed. */
+export const PRINT_DIALOG_NEVER_CLOSED_ERROR =
+  'The print dialog never reported closing, so the export could not be confirmed. Try exporting again.'
 const FRAME_LOAD_TIMEOUT_MS = 15_000
 
 /** The hub's export frame (hub export-frame.ts) and the protocol version it speaks. */
@@ -254,10 +260,11 @@ function printDocument(html: string, waitForReady: boolean): Promise<void> {
       } else if (data.state === 'ready' && stage === 'rendering') {
         // The bootstrap posts this in the task that opens the dialog: the document it
         // prints is its own. Cancel is indistinguishable from Save; both end the
-        // export. A browser that never reports afterprint still gets the frame back.
+        // export. A dialog that never opened is the frame's error; one that never
+        // reports closing fails the export at the backstop, frame removed.
         stage = 'printing'
         clearTimeout(vouchTimer)
-        wait(PRINT_FRAME_MAX_MS, () => finish())
+        wait(PRINT_FRAME_MAX_MS, () => finish(new Error(PRINT_DIALOG_NEVER_CLOSED_ERROR)))
       } else if (data.state === 'done') {
         finish()
       }

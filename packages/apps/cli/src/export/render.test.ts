@@ -212,7 +212,7 @@ describe('what the page may do (review 9, F1 / F2 / L1)', () => {
     )
   })
 
-  test('the navigation guard and the print() no-op are in place before the document', async () => {
+  test('the navigation guard, the print() no-op and the download-click denial are in place before the document', async () => {
     script = { close: async () => undefined, answer: page() }
     await renderPdf('/fake', '<p>x</p>', { waitReady: false })
     const doc = methods().indexOf('Page.setDocumentContent')
@@ -225,6 +225,10 @@ describe('what the page may do (review 9, F1 / F2 / L1)', () => {
     // Documents made later (child frames), and the window the document goes into.
     const later = calls.find((c) => c.method === 'Page.addScriptToEvaluateOnNewDocument')
     expect(later?.params.source).toMatch(/'print'/)
+    // Follow-up N4: a click on an <a download> is cancelled in the page, re-armed after
+    // the document goes in (render.integration: the real browser).
+    expect(later?.params.source).toMatch(/hasAttribute\('download'\)/)
+    expect(later?.params.source).toMatch(/MutationObserver/)
     const now = calls.findIndex(
       (c) => c.method === 'Runtime.evaluate' && /'print'/.test(String(c.params.expression))
     )

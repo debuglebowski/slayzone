@@ -3,13 +3,14 @@
  */
 /**
  * Review 7, #1 and #2: an html artifact exported as PDF, end to end — `exportArtifact`
- * with the real pages, run in jsdom as the hidden web view would run them, and the
- * document handed to expo-print parsed for real (`JSDOM`, the HTML parser).
+ * with the real pages, run in jsdom as the hidden web view would run them, and the PDF
+ * written from their pictures read back (follow-up N3: written page by page, no
+ * document printed).
  *
  * #1: the artifact's scripts can write DOM whose serialization re-parses into live
  * elements (raw-text elements, style text, CSSOM strings, declarative shadow roots). None
- * of it may reach the printed document: it holds the page pictures and nothing the
- * artifact wrote — no frame, refresh, script, plugin, or artifact text.
+ * of it may reach the PDF: it holds the page pictures and nothing the artifact wrote —
+ * no text, link, action, script, or URL.
  * #2: the artifact runs only inside a `sandbox="allow-scripts"` frame (no allow-modals:
  * alert/confirm/prompt never become native dialogs; a frame it creates inherits that).
  */
@@ -43,15 +44,29 @@ jest.mock('expo-file-system', () => {
     }
     create() {}
     async write() {}
-    delete() {}
+    delete() {
+      mockWritten.delete(this.uri)
+    }
     async move(to: { uri: string }) {
       this.uri = to.uri
     }
+    open() {
+      const chunks: Uint8Array[] = []
+      mockWritten.set(this.uri, chunks)
+      return { writeBytesSync: (b: Uint8Array) => chunks.push(b.slice()), close() {} }
+    }
   }
-  return { Directory: FakeDirectory, File: FakeFile, Paths: { cache: { uri: 'file:///cache' } } }
+  return {
+    Directory: FakeDirectory,
+    File: FakeFile,
+    FileMode: { Truncate: 'wt' },
+    Paths: { cache: { uri: 'file:///cache' } }
+  }
 })
 
 const print = jest.mocked(printToFileAsync)
+/** What was written through each file's handle (the html artifact's PDF). */
+const mockWritten = new Map<string, Uint8Array[]>()
 
 /** Text only the artifact holds: it must never be in the printed document. */
 const MARKER = 'ARTIFACT-MARKER-7f3a'
@@ -125,73 +140,74 @@ function elementsOf(root: { querySelectorAll: (s: string) => ArrayLike<Element> 
   return found
 }
 
-/** The printed document, parsed as WebKit parses it. */
-async function printedFor(content: string): Promise<{ html: string; doc: Document }> {
+/** The PDF written for an html artifact, as text (its structure is ASCII). */
+async function pdfFor(content: string): Promise<string> {
   print.mockReset()
-  print.mockResolvedValue({ uri: 'file:///cache/Print/x.pdf', numberOfPages: 1 })
-  await exportArtifact({ content, mode: 'html-preview', title: 'r.html', format: 'pdf' }, deps())
-  const html = print.mock.calls[0]?.[0]?.html
-  if (typeof html !== 'string') throw new Error('nothing was printed')
-  return { html, doc: new JSDOM(html).window.document }
+  mockWritten.clear()
+  const uri = await exportArtifact(
+    { content, mode: 'html-preview', title: 'r.html', format: 'pdf' },
+    deps()
+  )
+  // Nothing printed: the pictures are written into the PDF themselves.
+  expect(print).not.toHaveBeenCalled()
+  const chunks = mockWritten.get(uri)
+  if (!chunks) throw new Error('no PDF was written')
+  return chunks.map((b) => Buffer.from(b).toString('latin1')).join('')
 }
 
-function expectOnlyPictures(html: string, doc: Document) {
-  const elements = elementsOf(doc)
-  const tags = elements.map((el) => el.localName)
-  // Nothing that can run, navigate or load a page.
-  for (const tag of [
-    'iframe',
-    'frame',
-    'script',
-    'object',
-    'embed',
-    'template',
-    'noscript',
-    'link',
-    'base'
+/** The PDF holds page pictures and nothing else. */
+function expectOnlyPictures(pdf: string) {
+  expect(pdf.startsWith('%PDF-1.4')).toBe(true)
+  // Every object: the catalog, the page tree, pages, their pictures and the contents
+  // that place them. Nothing that runs, links, opens or annotates.
+  const kinds = new Set(
+    [...pdf.matchAll(/\d+ 0 obj\n<< (\/Type \/\w+(?: \/Subtype \/\w+)?|\/Length \d+)/g)].map((m) =>
+      m[1].startsWith('/Length') ? 'contents' : m[1]
+    )
+  )
+  expect(kinds).toEqual(
+    new Set([
+      '/Type /Catalog',
+      '/Type /Pages',
+      '/Type /Page',
+      '/Type /XObject /Subtype /Image',
+      'contents'
+    ])
+  )
+  for (const contents of pdf.matchAll(/<< \/Length \d+ >>\nstream\n([^\n]*)\nendstream/g)) {
+    expect(contents[1]).toMatch(/^q [\d.]+ 0 0 [\d.]+ [\d.]+ [\d.]+ cm \/Im0 Do Q$/)
+  }
+  for (const key of [
+    '/JavaScript',
+    '/JS',
+    '/URI',
+    '/Launch',
+    '/OpenAction',
+    '/AA',
+    '/Annots',
+    '/Font'
   ]) {
-    expect(tags).not.toContain(tag)
+    expect(pdf).not.toContain(key)
   }
-  // Review 9, F2: no URL at all but the pictures' own data: ones.
-  for (const el of elements) {
-    for (const attr of Array.from(el.attributes)) {
-      if (/^[a-z][a-z0-9+.-]*:/i.test(attr.value.trim()) && attr.name !== 'content') {
-        expect(`${attr.name}=${attr.value}`).toMatch(/^src=data:image\/png;base64,/)
-      }
-    }
-  }
-  expect(html).not.toMatch(/(https?|file|blob|javascript):/i)
-  const metas = elements.filter((el) => el.localName === 'meta')
-  expect(metas.map((m) => m.getAttribute('http-equiv'))).toEqual(['Content-Security-Policy'])
-  // Nothing of the artifact's: our page pictures only.
-  expect(new Set(tags)).toEqual(new Set(['html', 'head', 'meta', 'style', 'body', 'img']))
-  expect(html).not.toContain(MARKER)
-  for (const img of elements.filter((el) => el.localName === 'img')) {
-    expect(img.getAttribute('src')).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/)
-  }
-  // The printer loads nothing but those pictures.
-  const policy = metas[0].getAttribute('content') ?? ''
-  expect(policy).toContain("default-src 'none'")
-  expect(policy).toContain('img-src data:')
-  expect(doc.head.firstElementChild).toBe(metas[0])
+  expect(pdf).not.toMatch(/(https?|file|blob|javascript):/i)
+  expect(pdf).not.toContain(MARKER)
 }
 
 describe('an html artifact printed as PDF holds only its page pictures', () => {
   it.each(SHAPES)(
     '%s never becomes live markup in the printed document',
     async (_, build) => {
-      const { html, doc } = await printedFor(artifact(build))
-      expectOnlyPictures(html, doc)
+      expectOnlyPictures(await pdfFor(artifact(build)))
     },
     20_000
   )
 
   it('an ordinary report prints as pictures too', async () => {
-    const { html, doc } = await printedFor(
+    const pdf = await pdfFor(
       `<h1>${MARKER}</h1><p>Report</p><canvas id="c"></canvas><script>document.title = 'x'</script>`
     )
-    expectOnlyPictures(html, doc)
-    expect(doc.querySelectorAll('img').length).toBeGreaterThan(0)
+    expectOnlyPictures(pdf)
+    expect(pdf).toMatch(/\/Count [1-9]/)
   }, 20_000)
 })
 
@@ -199,11 +215,10 @@ describe('the artifact runs only inside a sandboxed frame (#2: no native dialogs
   it('the page the web view loads is not the artifact: a sandbox="allow-scripts" frame holds it', async () => {
     const pages: string[] = []
     const d = deps()
-    d.render = (page) => {
+    d.render = (page, sink) => {
       pages.push(page.html)
-      return webViewRender(page)
+      return webViewRender(page, sink)
     }
-    print.mockResolvedValue({ uri: 'file:///cache/Print/x.pdf', numberOfPages: 1 })
     await exportArtifact(
       { content: artifact("alert('hi')"), mode: 'html-preview', title: 'r.html', format: 'pdf' },
       d

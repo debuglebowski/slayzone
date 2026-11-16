@@ -44,6 +44,7 @@
     "expo-status-bar": "~58.0.4",
     "expo-video": "~58.0.13",
     "expo-web-browser": "~58.0.7",
+    "fflate": "^0.8.2",
     "html2canvas-pro": "2.6.0",
     "marked": "^18.1.1",
     "mermaid": "^12.2.0",

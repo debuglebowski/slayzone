@@ -17,7 +17,7 @@
  * expo-print prints (on `didFinish`): pictures moved in delay the load as they always did.
  *
  * Text stays text: the PDF's text can be selected and searched, as on desktop. (An html
- * artifact's PDF is page pictures instead: `htmlPrintDocument`.)
+ * artifact's PDF is page pictures instead, written by `pages-pdf.ts`.)
  */
 import { exportDocumentPolicy } from '@slayzone/task-artifacts/export-html'
 import { inlineScript, newNonce } from '../pages/page-style'

@@ -1,8 +1,11 @@
 import { act, render, screen } from '@testing-library/react-native'
 import type { ReactNode } from 'react'
+import { injectedJavaScript } from '../webview-mock'
 import {
   EXPORT_RENDER_SOURCE,
+  type ExportPageSink,
   type ExportRenderPage,
+  exportAckScript,
   type ExportRenderReply,
   HTML_RENDER_IDLE_MS,
   htmlRasterPage
@@ -12,7 +15,7 @@ import { EXPORT_RENDER_IDLE_MS, useExportRenderer } from './use-export-renderer'
 /** The view is hidden from accessibility on purpose: look for it anyway. */
 const HIDDEN = { includeHiddenElements: true }
 
-type Render = (page: ExportRenderPage) => Promise<ExportRenderReply>
+type Render = (page: ExportRenderPage, sink?: ExportPageSink) => Promise<ExportRenderReply>
 
 const TOKEN = 'page-token'
 const page = (html: string, extra: Partial<ExportRenderPage> = {}): ExportRenderPage => ({
@@ -193,6 +196,22 @@ it('rejects a pending render when the viewer unmounts', async () => {
   expect(String(await settled)).toMatch(/closed/)
 })
 
+// Follow-up N2: the viewer closed while the export read its script from disk; the
+// export then asks for a render. That render is cancelled at once: nothing is left
+// pending forever (no view mounts to time it out).
+it('a render asked for after the viewer unmounted is rejected at once', async () => {
+  let run: Render | null = null
+  function Host(): ReactNode {
+    const renderer = useExportRenderer()
+    run = renderer.render
+    return renderer.view
+  }
+  const view = await render(<Host />)
+  await act(async () => view.unmount())
+  const late = (run as unknown as Render)(page('<html>late</html>'))
+  await expect(late).rejects.toThrow(/closed/)
+})
+
 // Review 8, L11: WKWebView hands its message handler to every frame: an html artifact's
 // own frame (`about:srcdoc`) can post to the app without the host page. Only the page
 // itself (its frame, `about:blank`) answers.
@@ -257,12 +276,30 @@ describe('useExportRenderer: progress, not a fixed budget', () => {
   const IDLE = 10_000
   const slow = () => page('<html/>', { idleTimeoutMs: IDLE })
 
-  it('a render that keeps reporting progress well past 90 s completes, its pages put together', async () => {
+  /** Where the pages go (the PDF being written): what it was handed. */
+  function sink() {
+    const pages: string[] = []
+    return {
+      pages,
+      page: (index: number, base64: string) => {
+        pages[index] = base64
+      },
+      restart: () => {
+        pages.length = 0
+      }
+    }
+  }
+
+  // Follow-up N3: no page is kept: each goes to the sink as it comes, and the page is
+  // told it was taken (it draws no further while a few wait).
+  it('a render that keeps reporting progress well past 90 s completes, each page handed on and answered', async () => {
     jest.useFakeTimers()
     const host = await mount()
+    const into = sink()
+    injectedJavaScript.length = 0
     let result: Promise<ExportRenderReply> | null = null
     await act(async () => {
-      result = host.run()(slow())
+      result = host.run()(slow(), into)
     })
     const props = viewProps()
     for (let i = 0; i < 12; i++) {
@@ -282,11 +319,10 @@ describe('useExportRenderer: progress, not a fixed budget', () => {
     await act(async () =>
       props.onMessage(reply({ type: 'pages-end', count: 6, textLabels: false }))
     )
-    await expect(result).resolves.toEqual({
-      type: 'pages',
-      pages: ['UA0=', 'UA2=', 'UA4=', 'UA6=', 'UA8=', 'UA10='],
-      textLabels: false
-    })
+    await expect(result).resolves.toEqual({ type: 'pages', count: 6, textLabels: false })
+    expect(into.pages).toEqual(['UA0=', 'UA2=', 'UA4=', 'UA6=', 'UA8=', 'UA10='])
+    // Each page answered once it was taken, counting every page taken so far.
+    expect(injectedJavaScript).toEqual([1, 2, 3, 4, 5, 6].map(exportAckScript))
     expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
     jest.useRealTimers()
   })
@@ -296,7 +332,7 @@ describe('useExportRenderer: progress, not a fixed budget', () => {
     const host = await mount()
     let result: Promise<ExportRenderReply> | null = null
     await act(async () => {
-      result = host.run()(slow())
+      result = host.run()(slow(), sink())
     })
     const settled = expect(result).rejects.toThrow(
       'Rendering the export stalled: nothing came back from it for 10 s.'
