@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import Database from 'better-sqlite3'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -423,7 +424,11 @@ test.skipIf(process.platform === 'win32')(
       racingPrefixes: true,
       pendingDuringSync: true,
       failedCode: 'SQLITE_IOERR_FSYNC',
-      integrity: 'ok'
+      integrity: 'ok',
+      recoveredSwap: true,
+      successfulSwap: true,
+      uncleanRotation: true,
+      rotationWaitedForSync: true
     })
     expect(result.deathFenceSyncs).toBeGreaterThan(0)
   }
@@ -483,4 +488,52 @@ test('pausing a failed checker cancels pending recovery until explicitly resumed
   await vi.waitFor(async () =>
     expect(await owner.db.get('PRAGMA synchronous')).toEqual({ synchronous: 1 })
   )
+})
+
+test('actual owner invalidates cached statements on refused swap and preserves registrations on successful swap', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  await owner.append('c', 1, event('kept'))
+  await owner.maintenance.pauseCheckpointer()
+  const sql = 'SELECT count(*) n FROM events'
+  expect(await owner.db.get(sql)).toEqual({ n: 1 }) // populate platform statement cache
+  const epoch = await owner.maintenance.connectionEpoch()
+  const copy = await owner.maintenance.tempPath()
+  await owner.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  await owner.db.run('VACUUM INTO ?', [copy])
+  const rogue = new Database(owner.path, { readonly: true, fileMustExist: true })
+  try {
+    rogue.prepare('SELECT count(*) FROM events').get()
+    await owner.append('c', 1, event('wal tail'))
+    await expect(owner.maintenance.swapIn(copy)).rejects.toMatchObject({
+      name: 'ChatStorageSwapError',
+      usable: true,
+      selectedFile: owner.path,
+      cause: { name: 'ChatStorageSwapRefused' }
+    })
+    expect(await owner.maintenance.connectionEpoch()).toBe(epoch + 1)
+    expect(await owner.db.get(sql)).toEqual({ n: 2 })
+  } finally {
+    rogue.close()
+    await owner.maintenance.resumeCheckpointer()
+  }
+  await owner.append('c', 1, event('after refusal'))
+  await owner.maintenance.pauseCheckpointer()
+  try {
+    const next = await owner.maintenance.tempPath()
+    await owner.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    await owner.db.run('VACUUM INTO ?', [next])
+    const id = await owner.storeId()
+    await owner.maintenance.swapIn(next)
+    expect(await owner.storeId()).toBe(id)
+    expect(await owner.db.get(sql)).toEqual({ n: 3 })
+    expect(
+      (await owner.db.get<{ n: number }>('SELECT chat_storage_owner_thread() n'))!.n
+    ).toBeGreaterThan(0)
+  } finally {
+    await owner.maintenance.resumeCheckpointer()
+  }
+  await owner.append('c', 1, event('after success'))
+  await owner.flush()
+  expect(await owner.nextSeq('c')).toBe(4)
 })

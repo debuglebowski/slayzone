@@ -187,7 +187,7 @@ connection; that pragma switch alone does not fence the older NORMAL tail (R1 H2
 The worker-owned replacement below is awaiting complete caller migration.
 **Durability window: a process crash loses nothing; an OS crash or power
 loss can lose the commits of the last ~1 s that no durable ack covered.** A start
-after such an unclean stop on another machine boot rotates the store id, so the hub
+after every unclean stop conservatively rotates the store id, so the hub
 re-reads every conversation (another database = rollback) and clients reload: they
 converge on what the computer kept, never on duplicated or interleaved sequences. `compose` hands out
 a stable handle (`chat-db-handle`) that always reaches the current connection, so
@@ -363,3 +363,33 @@ dropped, or restored when it is the only copy).
   [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md) for FU1 API/lifetime duties,
   evidence and remaining integration. Public staging/final-invoke adapters, whole
   H2/native/scale/control acceptance, S7/S8 and independent review remain open.
+
+- 2026-11-16 (fu-2 R1, S7): every unclean start rotates store identity, including
+  process-only restarts, missing session markers and OS boots less than two minutes
+  apart. Only a durable clean marker preserves identity across restart. Clean shutdowns
+  preserve identity. The existing FULL boot transaction commits the new identity
+  and unclean session mark before serving; production opens and syncs remain on the
+  canonical owner worker. Uptime is diagnostic only, never a rollback veto.
+
+  The entire native-close/swap/replay/cleanup sequence shares one recovery guard.
+  BUSY close preserves the open facade. After actual close, recovery restores the
+  old live name, or verifies/selects the new file if rollback rename is refused;
+  state replay precedes facade publication. Every selection changes connection
+  epoch, including reopened-old refusals; unavailable recovery also invalidates
+  cached connection tokens. Captured database methods follow replacements while
+  prepared statements and transaction wrappers remain bound to their connection.
+
+  `ChatStorageSwapError` carries the original cause, all recovery/cleanup errors,
+  `usable`, `selectedFile` and `retainedConnections` through existing worker error
+  serialization. No usable selection means a fenced facade (`open=false`, SQL and
+  durability calls reject); unrelated stores continue. Every attempted connection,
+  including preflight verification, stays owned until physical close or selection.
+  A failed close prevents another replacement writer; store close retries retained
+  candidates. Checkpointer resume never opens on an unavailable store. Export,
+  secondary, copy-helper and blob lifetimes keep their existing exclusions.
+
+  Native S7 proof uses actual packaged owner, real EISDIR recovery and successful
+  swap, statement-cache reuse, unclean restart and blocked boot sync: zero main
+  SQLite xSync calls. Direct storage fault/crash fixtures exercise core recovery
+  boundaries; they are not actual computer control-route responsiveness proof.
+  Full composed FU2 acceptance and archive recovery/serialization (S8) stay separate.

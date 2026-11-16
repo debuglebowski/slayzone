@@ -329,9 +329,8 @@ export function openChatStorage(opts: {
   stateDir: string
   hubScope: string
   /**
-   * When this machine booted (epoch ms). Default: now − `os.uptime()`. A start after
-   * an unclean stop on ANOTHER boot (an OS crash or power loss: the last second of
-   * commits may be gone) rotates the store id — see `store-session`.
+   * Diagnostic boot time (epoch ms). Default: now − `os.uptime()`. Every unclean
+   * start rotates identity: uptime cannot reliably distinguish short OS boots.
    */
   machineBootedAt?: number
   /** WAL sync / checkpoint cadence of the off-thread checkpointer (ms). Default 1000. */
@@ -534,12 +533,10 @@ export function openChatStorage(opts: {
     'CREATE TABLE IF NOT EXISTS store_identity (id INTEGER PRIMARY KEY CHECK(id=1), store_id TEXT NOT NULL)'
   )
   db.prepare('INSERT OR IGNORE INTO store_identity VALUES(1,?)').run(randomUUID())
-  // Commits are durable within about a second (NORMAL + the off-thread checkpointer).
-  // An OS crash can therefore leave this store behind what the hub and its clients
-  // already saw. Such a start — not cleanly stopped, and the machine booted since —
-  // counts as another database: a new store id makes the hub re-read every
-  // conversation's metadata from here (counted in another store = rollback) and its
-  // clients reload their history. A process crash loses nothing: same boot, same id.
+  // An unclean start can follow an OS crash with a lost NORMAL tail. Uptime-based
+  // boot estimates cannot distinguish short reboots reliably. Rotate conservatively
+  // after EVERY unclean run, including process-only crashes; clean restarts keep ID.
+  // The FULL session commit publishes both identity and unclean mark before serving.
   const machineBootedAt = Math.round(opts.machineBootedAt ?? Date.now() - uptime() * 1000)
   const session = (
     db.prepare("SELECT value FROM maintenance_cursors WHERE id='store-session'").get() as
@@ -547,10 +544,8 @@ export function openChatStorage(opts: {
       | undefined
   )?.value
   const previous = session ? (JSON.parse(session) as StoreSession) : null
-  const rebooted =
-    !!previous &&
-    !previous.clean &&
-    Math.abs(machineBootedAt - previous.bootedAt) > STORE_SESSION_BOOT_SLACK_MS
+  // Absence (legacy/restored state) is not proof of a clean shutdown either.
+  const unclean = previous?.clean !== true
   const saveSession = (clean: boolean) =>
     db
       .prepare(
@@ -561,7 +556,7 @@ export function openChatStorage(opts: {
   // later in this run must find "not clean".
   db.pragma('synchronous = FULL')
   db.transaction(() => {
-    if (rebooted) db.prepare('UPDATE store_identity SET store_id=? WHERE id=1').run(randomUUID())
+    if (unclean) db.prepare('UPDATE store_identity SET store_id=? WHERE id=1').run(randomUUID())
     saveSession(false)
   })()
   db.pragma('synchronous = NORMAL')
@@ -570,6 +565,9 @@ export function openChatStorage(opts: {
   ).store_id
   const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
+  let unavailable: ChatStorageSwapError | undefined
+  // Retain every attempted replacement until physical close or facade selection.
+  const swapConnections = new Set<Database.Database>()
   /** `on`: another connection on this file (an export's read snapshot); default the store's. */
   const row = (id: string, on: Database.Database = db) =>
     on.prepare('SELECT * FROM conversations WHERE id=?').get(id) as OwnerRow | undefined
@@ -1084,9 +1082,20 @@ export function openChatStorage(opts: {
     close() {
       if (!closed) {
         for (const closeReader of [...exportReaders]) closeReader()
-        // Its files are free when this returns (callers remove them right after).
+        // Failed native closes retain ownership for a later close retry.
         checkpointer.closeSync()
-        connection.current().close()
+        const errors: unknown[] = []
+        for (const native of new Set([connection.current(), ...swapConnections])) {
+          try {
+            if (native.open) native.close()
+          } catch (error) {
+            errors.push(error)
+          }
+          if (!native.open) swapConnections.delete(native)
+        }
+        if (errors.length === 1) throw errors[0]
+        if (errors.length)
+          throw new AggregateError(errors, 'Chat storage close failed', { cause: errors[0] })
         closed = true
       }
     },
@@ -1097,6 +1106,10 @@ export function openChatStorage(opts: {
      */
     async shutdown(): Promise<void> {
       if (closed) return
+      if (unavailable) {
+        api.close()
+        return
+      }
       for (const closeReader of [...exportReaders]) closeReader()
       if (opts.ownerWorker) {
         // A real FULL commit of the clean mark includes every earlier NORMAL frame.
@@ -1119,8 +1132,10 @@ export function openChatStorage(opts: {
      * and will drop, a durable state change). Never for live output.
      */
     async flush(): Promise<void> {
+      if (unavailable) throw unavailable
       if (closed) throw new Error('Chat storage is closed')
       while (resumed) await resumed.promise
+      if (unavailable) throw unavailable
       if (opts.ownerWorker) {
         commitStorageFence(db, { resumeNormal: !inline && checkpointer.active })
         return
@@ -1863,7 +1878,10 @@ export function openChatStorage(opts: {
     tailStart,
     records,
     /** See `store_identity`. */
-    storeId: () => storeId,
+    storeId: () => {
+      if (unavailable) throw unavailable
+      return storeId
+    },
     nextSeq,
     /** See `task_state_versions`. 0 = nothing written since this table existed. */
     stateVersion(taskId: string): number {
@@ -2617,7 +2635,7 @@ export function openChatStorage(opts: {
   const checkpointer = (opts.ownerWorker?.createCheckpointer ?? attachCheckpointer)(path, {
     intervalMs: opts.checkpointIntervalMs,
     onRecovered: () => {
-      if (closed || !opts.ownerWorker) return
+      if (closed || unavailable || !opts.ownerWorker) return
       try {
         commitStorageFence(db, { resumeNormal: true })
         inline = false
@@ -2627,7 +2645,7 @@ export function openChatStorage(opts: {
       }
     },
     onFailure: (message) => {
-      if (closed || (inline && !opts.ownerWorker)) return
+      if (closed || unavailable || (inline && !opts.ownerWorker)) return
       inline = true
       if (opts.ownerWorker) {
         try {
@@ -2680,7 +2698,7 @@ export function openChatStorage(opts: {
       if (closed) return
       const waiting = resumed
       resumed = null
-      if (opts.ownerWorker || !inline) void checkpointer.open()
+      if (!unavailable && (opts.ownerWorker || !inline)) void checkpointer.open()
       waiting?.resolve()
     },
     /** A checkpoint now, off this thread (complete unless a reader holds old frames). */
@@ -2724,17 +2742,24 @@ export function openChatStorage(opts: {
      * connection (refused while busy) → no WAL may survive the close (an unregistered
      * connection would leave one: applied to the new file it would corrupt it) → link
      * the live file to `.pre-compact` → rename the copy over it → reopen; any failure
-     * after the close puts the old file back. Boot recovery: `recoverInterruptedSwap`.
+     * after the close restores old or selects the verified new file; if neither can
+     * open/replay safely, this store fails closed. Boot recovery: `recoverInterruptedSwap`.
      * `phase`: test hook at each step (crash injection).
      */
     swapIn(
       compacted: string,
       opts: { phase?(step: ChatSwapPhase): void } = {}
     ): { holdMs: number } {
+      if (unavailable) throw unavailable
       if (closed) throw new Error('Chat storage is closed')
       const started = performance.now()
       if (dirname(compacted) !== dir || !basename(compacted).startsWith(COMPACT_PREFIX))
         throw new Error('Swap source must be a compaction file of this store')
+      if (swapConnections.size)
+        throw new ChatStorageSwapRefused(
+          'a retained native connection still needs physical close',
+          true
+        )
       if (secondaries.size)
         throw new ChatStorageSwapRefused(
           `a secondary connection is open (${[...secondaries.values()].join(', ')})`,
@@ -2747,52 +2772,122 @@ export function openChatStorage(opts: {
         throw new ChatStorageSwapRefused(reason, false)
       }
       const version = db.pragma('user_version', { simple: true }) as number
-      const candidate = describeStoreFile(compacted)
+      let candidate: ReturnType<typeof describeConnection>
+      try {
+        candidate = describeStoreFile(compacted, swapConnections)
+      } catch (cause) {
+        throw new ChatStorageSwapError(cause, [cause], {
+          usable: true,
+          selectedFile: path,
+          retainedConnections: swapConnections.size
+        })
+      }
       if (candidate.storeId !== storeId) discard('the compacted copy has another store identity')
       if (candidate.version !== version) discard('the compacted copy has another schema version')
       if (existsSync(`${compacted}-journal`) || existsSync(`${compacted}-wal`))
         discard('the compacted copy is not settled')
       opts.phase?.('verified')
       const old = connection.current()
-      try {
-        old.close()
-      } catch (error) {
-        throw new ChatStorageSwapRefused(
-          `the live connection is busy (${error instanceof Error ? error.message : String(error)})`,
-          true
-        )
-      }
-      opts.phase?.('closed')
-      const reopenOld = () => connection.replace(openChatConnection(path))
-      if (existsSync(`${path}-wal`)) {
-        reopenOld()
-        discard('the live WAL is still in use by an unregistered connection')
-      }
-      rmSync(`${path}-shm`, { force: true })
       const pre = join(dir, PRE_COMPACT)
-      rmSync(pre, { force: true })
-      linkSync(path, pre)
-      opts.phase?.('linked')
-      renameSync(compacted, path)
-      syncDirSync(dir)
-      opts.phase?.('renamed')
-      let next: Database.Database | undefined
-      try {
-        next = openChatConnection(path)
+      let linked = false
+      let renamed = false
+      let selected = false
+      const select = () => {
+        // fileMustExist prevents an IO/recovery failure from manufacturing an empty store.
+        const next = openChatConnection(path, {
+          fileMustExist: true,
+          opened: (native) => swapConnections.add(native)
+        })
         const opened = describeConnection(next)
         if (opened.storeId !== storeId || opened.version !== version)
           throw new Error('the swapped-in file does not match this store')
-      } catch (error) {
-        next?.close()
-        renameSync(pre, path)
-        syncDirSync(dir)
-        reopenOld()
-        throw error
+        // replace replays state before publishing. Until it succeeds, next is ours.
+        connection.replace(next)
+        swapConnections.delete(next)
+        connectionEpoch++
+        selected = true
       }
-      connection.replace(next)
-      connectionEpoch++
-      // Not synced: a `.pre-compact` link a crash brings back is removed at boot.
-      unlinkSync(pre)
+      try {
+        try {
+          old.close()
+        } catch (error) {
+          // SQLite BUSY leaves this exact connection usable. A close that really
+          // closed before throwing must instead enter recovery and change epoch.
+          if (!old.open) throw error
+          throw new ChatStorageSwapRefused(
+            `the live connection is busy (${error instanceof Error ? error.message : String(error)})`,
+            true,
+            { cause: error }
+          )
+        }
+        opts.phase?.('closed')
+        if (existsSync(`${path}-wal`))
+          throw new ChatStorageSwapRefused(
+            'the live WAL is still in use by an unregistered connection',
+            false
+          )
+        rmSync(`${path}-shm`, { force: true })
+        rmSync(pre, { force: true })
+        linkSync(path, pre)
+        linked = true
+        opts.phase?.('linked')
+        renameSync(compacted, path)
+        renamed = true
+        syncDirSync(dir)
+        opts.phase?.('renamed')
+        select()
+        // Not synced: a resurrected link is harmless and removed at boot.
+        unlinkSync(pre)
+      } catch (cause) {
+        if (old.open) throw cause // native busy close: never disturb the live facade
+        const errors: unknown[] = [cause]
+        const attempt = (work: () => void) => {
+          try {
+            work()
+          } catch (error) {
+            errors.push(error)
+          }
+        }
+        // Never rename/reopen under an unused connection whose close failed.
+        for (const native of swapConnections) {
+          attempt(() => {
+            if (native.open) native.close()
+          })
+          if (!native.open) swapConnections.delete(native)
+        }
+        if (!selected && !swapConnections.size) {
+          if (renamed && linked) {
+            attempt(() => renameSync(pre, path))
+            attempt(() => syncDirSync(dir))
+          }
+          // A refused rollback rename can leave the verified new file at path.
+          // Select only after checking identity/version and replaying all state.
+          attempt(select)
+          // Initialization/replay can itself fail after opening another connection.
+          for (const native of swapConnections) {
+            attempt(() => {
+              if (native.open) native.close()
+            })
+            if (!native.open) swapConnections.delete(native)
+          }
+        }
+        if (selected) {
+          if (linked) attempt(() => rmSync(pre, { force: true }))
+          attempt(() => rmCompaction(compacted))
+        }
+        const failure = new ChatStorageSwapError(cause, errors, {
+          usable: selected,
+          selectedFile: selected ? path : null,
+          retainedConnections: swapConnections.size
+        })
+        if (!selected) {
+          unavailable = failure
+          // Invalidate cached statements/tokens even when no usable replacement won.
+          connectionEpoch++
+          connection.invalidate(failure)
+        }
+        throw failure
+      }
       return { holdMs: performance.now() - started }
     }
   }
@@ -2806,8 +2901,6 @@ interface StoreSession {
   /** When the machine had booted (epoch ms) during that run. */
   bootedAt: number
 }
-/** Boot times derived from uptime drift a little: further apart than this = another boot. */
-const STORE_SESSION_BOOT_SLACK_MS = 120_000
 
 /** Name prefix of compacted copies in a store dir (`<prefix><pid>-<uuid>`). */
 const COMPACT_PREFIX = 'chat.sqlite.compact-'
@@ -2831,16 +2924,47 @@ export type ChatSwapPhase = 'verified' | 'closed' | 'linked' | 'renamed'
 export class ChatStorageSwapRefused extends Error {
   constructor(
     reason: string,
-    readonly transient: boolean
+    readonly transient: boolean,
+    options?: ErrorOptions
   ) {
-    super(`Chat storage swap refused: ${reason}`)
+    super(`Chat storage swap refused: ${reason}`, options)
     this.name = 'ChatStorageSwapRefused'
   }
 }
 
+/** A post-close failure, with truthful facade selection and all recovery/cleanup causes. */
+export class ChatStorageSwapError extends AggregateError {
+  readonly usable: boolean
+  readonly selectedFile: string | null
+  readonly retainedConnections: number
+  constructor(
+    cause: unknown,
+    errors: unknown[],
+    state: {
+      usable: boolean
+      selectedFile: string | null
+      retainedConnections: number
+    }
+  ) {
+    super(
+      errors,
+      `Chat storage swap failed (${state.usable ? 'recovered' : 'store unavailable'}): ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause }
+    )
+    this.name = 'ChatStorageSwapError'
+    this.usable = state.usable
+    this.selectedFile = state.selectedFile
+    this.retainedConnections = state.retainedConnections
+  }
+}
+
 /** The store's one connection: the same settings at boot and after a swap. */
-export function openChatConnection(path: string): Database.Database {
-  const db = new Database(path)
+export function openChatConnection(
+  path: string,
+  opts: { fileMustExist?: boolean; opened?(db: Database.Database): void } = {}
+): Database.Database {
+  const db = new Database(path, { fileMustExist: opts.fileMustExist ?? false })
+  opts.opened?.(db)
   try {
     chmodSync(path, 0o600)
     db.pragma('journal_mode = WAL')
@@ -2853,7 +2977,13 @@ export function openChatConnection(path: string): Database.Database {
     db.pragma('secure_delete = ON')
     db.pragma(`journal_size_limit = ${CHAT_WAL_SIZE_LIMIT}`)
   } catch (error) {
-    db.close()
+    try {
+      db.close()
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'Chat connection initialization cleanup failed', {
+        cause: error
+      })
+    }
     throw error
   }
   return db
@@ -2866,27 +2996,57 @@ function describeConnection(db: Database.Database) {
   return { storeId: row?.store_id, version: db.pragma('user_version', { simple: true }) as number }
 }
 /** Read-write on purpose: a read-only connection to a WAL file leaves its -wal/-shm behind. */
-function describeStoreFile(file: string) {
-  const db = new Database(file, { fileMustExist: true })
+function describeStoreFile(file: string, owned: Set<Database.Database>) {
+  const native = new Database(file, { fileMustExist: true })
+  owned.add(native)
+  let description: ReturnType<typeof describeConnection> | undefined
+  const errors: unknown[] = []
   try {
-    return describeConnection(db)
-  } catch {
-    return { storeId: undefined, version: -1 }
-  } finally {
-    db.close()
+    description = describeConnection(native)
+  } catch (error) {
+    errors.push(error)
   }
+  try {
+    native.close()
+  } catch (error) {
+    errors.push(error)
+  }
+  if (!native.open) owned.delete(native)
+  if (errors.length === 1) throw errors[0]
+  if (errors.length)
+    throw new AggregateError(errors, 'Compaction file verification failed', { cause: errors[0] })
+  return description!
 }
 function rmCompaction(file: string) {
-  for (const suffix of ['', '-journal', '-wal', '-shm']) rmSync(`${file}${suffix}`, { force: true })
+  const errors: unknown[] = []
+  for (const suffix of ['', '-journal', '-wal', '-shm']) {
+    try {
+      rmSync(`${file}${suffix}`, { force: true })
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length)
+    throw new AggregateError(errors, 'Compaction file cleanup failed', { cause: errors[0] })
 }
 function syncDirSync(dir: string) {
   if (process.platform === 'win32') return
   const fd = openSync(dir, 'r')
+  const errors: unknown[] = []
   try {
     fsyncSync(fd)
-  } finally {
-    closeSync(fd)
+  } catch (error) {
+    errors.push(error)
   }
+  try {
+    closeSync(fd)
+  } catch (error) {
+    errors.push(error)
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length)
+    throw new AggregateError(errors, 'Compaction directory sync failed', { cause: errors[0] })
 }
 /**
  * Before opening: finish what an interrupted swap left. A compacted copy never swapped

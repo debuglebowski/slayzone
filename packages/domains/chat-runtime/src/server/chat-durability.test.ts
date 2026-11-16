@@ -1,7 +1,7 @@
 /**
  * S5: the store's own connection never fsyncs (NORMAL, no checkpoint); an off-thread
  * checkpointer syncs the WAL and checkpoints; `flush` is the durability barrier; a clean
- * `shutdown` loses nothing; a start after an unclean stop on another boot rotates the
+ * `shutdown` loses nothing; every start after an unclean stop rotates the
  * store id (the hub re-reads, clients reload); a dead checkpointer falls back to FULL.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
@@ -58,20 +58,19 @@ test('a clean shutdown checkpoints everything and is remembered: no rotation on 
   expect(next.read(identity.id, -1)).toHaveLength(1)
 })
 
-test('an unclean stop: same boot keeps the store id; another boot rotates it', async () => {
-  const { store, root } = open()
-  store.createConversation(identity)
-  const id = store.storeId()
-  store.close() // no shutdown: a process crash
-  stores.splice(stores.indexOf(store), 1)
-  const sameBoot = open(root, 1_000_000 + 30_000).store // uptime drift, same boot
-  expect(sameBoot.storeId()).toBe(id)
-  sameBoot.close()
-  stores.splice(stores.indexOf(sameBoot), 1)
-  const rebooted = open(root, 1_000_000 + DAY).store // an OS crash: another boot
-  expect(rebooted.storeId()).not.toBe(id)
-  expect(rebooted.conversation(identity.id)?.state).toBe('active')
-})
+test.each([0, 30_000, 60_000, DAY])(
+  'every unclean start rotates identity (boot delta %s ms)',
+  async (delta) => {
+    const { store, root } = open()
+    store.createConversation(identity)
+    const id = store.storeId()
+    store.close() // no shutdown: a process crash
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = open(root, 1_000_000 + delta).store
+    expect(reopened.storeId()).not.toBe(id)
+    expect(reopened.conversation(identity.id)?.state).toBe('active')
+  }
+)
 
 test('a dead checkpointer: the store commits with FULL again and flush still resolves', async () => {
   const { store } = open()
@@ -89,4 +88,19 @@ test('a dead checkpointer: the store commits with FULL again and flush still res
   other.createConversation(identity)
   await other.flush()
   expect(other.compose((db) => db.pragma('synchronous', { simple: true }))).toBe(1)
+})
+
+test('missing clean-shutdown marker conservatively rotates an existing store', () => {
+  const { store, root } = open()
+  store.createConversation(identity)
+  store.append(identity.id, 1, text('retained'))
+  const id = store.storeId()
+  store.compose((db) =>
+    db.prepare("DELETE FROM maintenance_cursors WHERE id='store-session'").run()
+  )
+  store.close()
+  stores.splice(stores.indexOf(store), 1)
+  const next = open(root).store
+  expect(next.storeId()).not.toBe(id)
+  expect(next.read(identity.id, -1).map((row) => row.event)).toEqual([text('retained')])
 })

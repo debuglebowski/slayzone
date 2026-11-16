@@ -46,19 +46,27 @@ export interface SwappableDb {
   readonly db: Database.Database
   /** The connection the handle reaches right now (the store's own use only). */
   current(): Database.Database
+  /** Refuse all SQL until a verified replacement is selected. */
+  invalidate(error: Error): void
   /** Point the handle at `next`, after re-applying recorded connection state. Returns the previous one. */
   replace(next: Database.Database): Database.Database
 }
 
 export function createSwappableDb(initial: Database.Database): SwappableDb {
   let conn = initial
+  let failure: Error | undefined
+  const available = () => {
+    if (failure) throw failure
+  }
   const registrations: Array<{ method: string; args: unknown[] }> = []
   const pragmas = new Map<string, string>()
-  // Bound methods of the current connection, made once per connection.
+  // Forwarding methods of the current connection, made once per connection.
   let bound = new Map<PropertyKey, unknown>()
 
-  const call = (method: string, args: unknown[]) =>
-    (conn as unknown as Record<string, (...a: unknown[]) => unknown>)[method](...args)
+  const call = (method: string, args: unknown[]) => {
+    available()
+    return (conn as unknown as Record<string, (...a: unknown[]) => unknown>)[method](...args)
+  }
 
   function special(key: PropertyKey): unknown {
     if (key === 'close')
@@ -73,6 +81,7 @@ export function createSwappableDb(initial: Database.Database): SwappableDb {
       }
     if (key === 'pragma')
       return (source: string, options?: unknown) => {
+        available()
         const result = conn.pragma(source, options as Database.PragmaOptions)
         const set = /^\s*(\w+)\s*=\s*(.+?)\s*;?\s*$/.exec(source)
         if (set && CONNECTION_PRAGMAS.has(set[1].toLowerCase()))
@@ -84,13 +93,24 @@ export function createSwappableDb(initial: Database.Database): SwappableDb {
 
   const handle = new Proxy(Object.create(null) as Database.Database, {
     get(_target, key) {
+      if (failure && key === 'open') return false
+      available()
       const own = special(key)
       if (own) return own
       const value = Reflect.get(conn, key, conn)
       if (typeof value !== 'function') return value
       let fn = bound.get(key)
       if (!fn) {
-        fn = value.bind(conn)
+        // Captured methods keep following the facade; returned statements remain
+        // pinned to the physical connection that prepared them.
+        const captured = conn
+        fn = (...args: unknown[]) => {
+          available()
+          // Preserve a captured method when tests/services wrap it on this same
+          // connection; looking it up again would recurse into their override.
+          const method = conn === captured ? value : Reflect.get(handle, key)
+          return Reflect.apply(method, conn, args)
+        }
         bound.set(key, fn)
       }
       return fn
@@ -99,6 +119,7 @@ export function createSwappableDb(initial: Database.Database): SwappableDb {
     // A property set on the handle lands on the current connection (tests wrap
     // `prepare` this way to inject faults); it does not outlive a swap.
     set(_target, key, value) {
+      available()
       bound.delete(key)
       return Reflect.set(conn, key, value, conn)
     },
@@ -110,12 +131,16 @@ export function createSwappableDb(initial: Database.Database): SwappableDb {
   return {
     db: handle,
     current: () => conn,
+    invalidate: (error) => {
+      failure = error
+    },
     replace(next) {
       for (const [name, value] of pragmas) next.pragma(`${name} = ${value}`)
       for (const r of registrations)
         (next as unknown as Record<string, (...a: unknown[]) => unknown>)[r.method](...r.args)
       const previous = conn
       conn = next
+      failure = undefined
       bound = new Map()
       return previous
     }
