@@ -100,12 +100,21 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
     return peer
   }
   let peer = await connect()
-  const request = (params: unknown) =>
-    peer.rpc.request('dispatch', {
-      method: 'chat.request',
-      params,
-      actor: { userId: null, route: null }
-    })
+  const request = async (params: unknown) => {
+    try {
+      return await peer.rpc.request('dispatch', {
+        method: 'chat.request',
+        params,
+        actor: { userId: null, route: null }
+      })
+    } catch (cause) {
+      const request = params as { kind?: string; value?: { method?: string } }
+      throw new Error(
+        `chat journal request failed: ${request.kind} ${request.value?.method ?? ''}`,
+        { cause }
+      )
+    }
+  }
   const route = { id: 'store', epoch: 1 }
   const storedEventCount = () => {
     const namespace = readdirSync(runtimeDir(root), { withFileTypes: true }).find(

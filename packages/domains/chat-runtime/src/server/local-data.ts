@@ -135,36 +135,9 @@ export function createLocalChatData(
     store.removeRecord(i.id, i.epoch, kind, key)
   }
   function timelineRecords(tabId: string): TimelineRecordStore {
-    // Capture once: a late worker reply must never write into a replacement owner.
-    const identity = owner(tabId)
-    function readable() {
-      const current = store.conversation(identity.id)
-      if (!current || current.state === 'deleted' || current.identity.epoch !== identity.epoch)
-        throw new Error('Timeline ownership changed')
-    }
-    return {
-      load: async (key) => {
-        readable()
-        return store.timelineRecord(identity.id, key)
-      },
-      pageIds: async () => {
-        readable()
-        return store.timelinePageIds(identity.id)
-      },
-      loadSummaries: async () => {
-        readable()
-        return store.timelineSummaries(identity.id, identity.epoch)
-      },
-      searchPages: async (needle) => {
-        readable()
-        return store.searchTimelinePages(identity.id, identity.epoch, needle)
-      },
-      save: async (write) => store.writeTimeline(identity.id, identity.epoch, write),
-      discard: async () => {
-        await dropTimelineInSteps(store, identity.id, identity.epoch)
-      }
-    }
+    return capturedTimelineRecords(store, owner(tabId))
   }
+
   function taskTab(taskId: string, mode?: string) {
     const choices = store
       .listForTask(taskId)
@@ -1382,5 +1355,40 @@ export function createLocalChatData(
     pendingMetadata,
     cancelPendingQueueAdmissions,
     repairQueueIdentities
+  }
+}
+
+/** A data-only captured owner is safe to send over the private store channel. */
+export function capturedTimelineRecords(
+  store: ChatStorage,
+  identity: ConversationIdentity
+): TimelineRecordStore {
+  // Capture once: a late worker reply must never write into a replacement owner.
+  function readable() {
+    const current = store.conversation(identity.id)
+    if (!current || current.state === 'deleted' || current.identity.epoch !== identity.epoch)
+      throw new Error('Timeline ownership changed')
+  }
+  return {
+    load: async (key) => {
+      readable()
+      return store.timelineRecord(identity.id, key)
+    },
+    pageIds: async () => {
+      readable()
+      return store.timelinePageIds(identity.id)
+    },
+    loadSummaries: async () => {
+      readable()
+      return store.timelineSummaries(identity.id, identity.epoch)
+    },
+    searchPages: async (needle) => {
+      readable()
+      return store.searchTimelinePages(identity.id, identity.epoch, needle)
+    },
+    save: async (write) => store.writeTimeline(identity.id, identity.epoch, write),
+    discard: async () => {
+      await dropTimelineInSteps(store, identity.id, identity.epoch)
+    }
   }
 }

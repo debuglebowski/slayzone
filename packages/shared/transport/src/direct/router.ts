@@ -176,7 +176,7 @@ export interface DirectChatService {
     epoch: number,
     onEvent: (event: DirectChatEvent) => void,
     onEnd: (reason: 'epoch' | 'deleted' | 'disposed') => void
-  ): (() => void) | null
+  ): (() => void) | null | Promise<(() => void) | null>
 }
 
 /** One chat event, in the hub's `chat.onEvent` shape. */
@@ -476,23 +476,56 @@ export function createDirectRouter(services: DirectRouterServices) {
       onEvent: t.procedure.input(z.object({ tabId })).subscription(({ ctx, input }) => {
         const { service, epoch } = chatFor(ctx, input.tabId)
         return observable<DirectChatEvent>((emit) => {
-          const stopWatch = service.watch(
-            input.tabId,
-            epoch,
-            (event) => emit.next(event),
-            () => emit.error(noCapability())
-          )
-          if (!stopWatch) {
-            emit.error(noCapability())
-            return () => undefined
+          let disposed = false,
+            stopWatch: (() => void) | null = null,
+            stopGrant: (() => void) | null = null
+          const cleanup = () => {
+            disposed = true
+            const watch = stopWatch,
+              grant = stopGrant
+            stopWatch = stopGrant = null
+            try {
+              watch?.()
+            } finally {
+              grant?.()
+            }
           }
-          const stopGrant = ctx.socket.onTargetEnded({ kind: 'chat', tabId: input.tabId }, () =>
-            emit.error(noCapability())
-          )
-          return () => {
-            stopWatch()
-            stopGrant()
+          const refuse = () => {
+            if (disposed) return
+            try {
+              cleanup()
+            } finally {
+              emit.error(noCapability())
+            }
           }
+          const grant = ctx.socket.onTargetEnded({ kind: 'chat', tabId: input.tabId }, refuse)
+          if (disposed) grant()
+          else stopGrant = grant
+          void Promise.resolve()
+            .then(() =>
+              disposed
+                ? null
+                : service.watch(
+                    input.tabId,
+                    epoch,
+                    (event) => {
+                      if (!disposed) emit.next(event)
+                    },
+                    refuse
+                  )
+            )
+            .then((stop) => {
+              if (disposed) {
+                stop?.()
+                return
+              }
+              // Own the disposer before any grant/service revalidation can throw.
+              stopWatch = stop
+              const current = chatFor(ctx, input.tabId)
+              if (!stop || current.service !== service || current.epoch !== epoch) refuse()
+            })
+            .catch(refuse)
+          return cleanup
         })
       })
     }),

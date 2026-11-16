@@ -1,3 +1,4 @@
+import type { ChatTaskAdmission, ChatTaskPermit } from '@slayzone/chat-runtime/server'
 /**
  * Computer-side child-process exec handlers. Spawns non-pty processes on the computer
  * and streams their stdout/stderr back to the hub as `proc.data` notifications,
@@ -159,7 +160,8 @@ export interface ProcHandlers {
 }
 
 export interface ProcHandlerOptions {
-  assertTaskActive?: (taskId: string) => void
+  assertTaskActive?: (taskId: string) => void | Promise<void>
+  taskAdmission?: ChatTaskAdmission
   /** The computer-wide agent-start queue (see spawn-admission.ts); tests get a private one. */
   admission?: SpawnAdmission
   /**
@@ -195,6 +197,15 @@ export function createProcHandlers(
   const admission = options.admission ?? createSpawnAdmission()
   const spawnProcess = options.spawnProcess ?? spawn
   const queued = new Map<string, QueuedProcSpawn>()
+  type Starting = {
+    taskId?: string
+    spawnId?: string
+    cancelled: boolean
+    promise: Promise<{ pid: number | null }>
+    resolve(value: { pid: number | null } | PromiseLike<{ pid: number | null }>): void
+  }
+  const starting = new Map<string, Starting>()
+  let disposed = false
   const ledger =
     options.groupLedgerPath && PROCESS_TREE_DETACHED
       ? createProcGroupLedger(options.groupLedgerPath, ctx.log, options.ledgerOwner)
@@ -289,10 +300,59 @@ export function createProcHandlers(
     return { ok: true, queued: item ? admission.prioritize(item.ticket) : false }
   }
 
-  function startProc(params: ProcSpawnParams, slot: AdmissionSlot | null): { pid: number | null } {
+  function startProc(
+    params: ProcSpawnParams,
+    slot: AdmissionSlot | null
+  ): { pid: number | null } | Promise<{ pid: number | null }> {
+    if (disposed) throw new Error('Process controller is closed')
     ctx.assertWorkAllowed?.()
     const taskId = params.taskId ?? params.env?.SLAYZONE_TASK_ID
-    if (taskId) options.assertTaskActive?.(taskId)
+    const check = taskId && !options.taskAdmission ? options.assertTaskActive?.(taskId) : undefined
+    if (!taskId || (!options.taskAdmission && !(check && typeof check.then === 'function')))
+      return startProcNow(params, slot)
+    const prior = starting.get(params.sessionId)
+    if (prior && params.spawnId !== undefined && prior.spawnId === params.spawnId) {
+      slot?.release()
+      return prior.promise
+    }
+    let resolve!: (value: { pid: number | null } | PromiseLike<{ pid: number | null }>) => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<{ pid: number | null }>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    const item: Starting = { taskId, spawnId: params.spawnId, cancelled: false, promise, resolve }
+    starting.set(params.sessionId, item)
+    if (prior) {
+      prior.cancelled = true
+      prior.resolve(promise)
+    }
+    void (async () => {
+      let permit: ChatTaskPermit | undefined
+      try {
+        if (options.taskAdmission) permit = await options.taskAdmission.acquire(taskId)
+        else await check
+        if (disposed || item.cancelled || starting.get(params.sessionId) !== item)
+          throw new Error('Process start was cancelled')
+        permit?.assert()
+        resolve(startProcNow(params, slot))
+      } catch (error) {
+        slot?.release()
+        reject(error)
+      } finally {
+        permit?.release()
+        if (starting.get(params.sessionId) === item) starting.delete(params.sessionId)
+      }
+    })()
+    return promise
+  }
+
+  function startProcNow(
+    params: ProcSpawnParams,
+    slot: AdmissionSlot | null
+  ): { pid: number | null } {
+    ctx.assertWorkAllowed?.()
+    const taskId = params.taskId ?? params.env?.SLAYZONE_TASK_ID
     if (params.spawnId !== undefined) {
       const live = procs.get(params.sessionId)
       // The hub re-sent an attempt whose reply it lost: this process IS it.
@@ -504,6 +564,9 @@ export function createProcHandlers(
    */
   async function procKill(rawParams: unknown): Promise<{ ok: true; clean: boolean }> {
     const params = procKillParamsSchema.parse(rawParams)
+    const pending = starting.get(params.sessionId)
+    if (pending && (params.spawnId === undefined || params.spawnId === pending.spawnId))
+      pending.cancelled = true
     const session = procs.get(params.sessionId)
     if (!session) {
       // Idempotent: the process may already have exited (network race).
@@ -618,6 +681,8 @@ export function createProcHandlers(
   }
 
   function disposeAll(): void {
+    disposed = true
+    for (const item of starting.values()) item.cancelled = true
     for (const item of queued.values()) {
       admission.cancel(item.ticket)
       item.reject(new Error('computer shutting down'))
@@ -697,6 +762,7 @@ export function createProcHandlers(
       }
     },
     async stopTask(taskId: string) {
+      for (const item of starting.values()) if (item.taskId === taskId) item.cancelled = true
       for (const [id, item] of queued)
         if (item.taskId === taskId) {
           admission.cancel(item.ticket)
@@ -714,9 +780,10 @@ export function createProcHandlers(
       tombstones.forgetTask(taskId)
     },
     hasTaskWork: (taskId: string) =>
+      [...starting.values()].some((item) => item.taskId === taskId) ||
       [...procs.values(), ...queued.values()].some((s) => s.taskId === taskId),
     hasFolderWork: (contains) => [...procs.values()].some((session) => contains(session.cwd)),
-    hasWork: () => procs.size > 0 || queued.size > 0,
+    hasWork: () => procs.size > 0 || queued.size > 0 || starting.size > 0,
     ownedPids: () =>
       [...procs.values()]
         .map((session) => session.child.pid)

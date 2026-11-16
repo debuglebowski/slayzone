@@ -46,37 +46,13 @@ import {
 } from '@slayzone/platform/legacy-chat-tables'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
-import {
-  type DataImportKinds,
-  historyImports,
-  sessionLedgerImports,
-  taskPathImport
-} from '@slayzone/chat-runtime/server'
+import { buildStoreFixture } from './computer-store-worker.fixture'
 import {
   createComputerTaskPaths,
   TASK_PATH_KIND,
   recordHolder,
   taskPathHandoffKind
 } from './computer-task-paths'
-import { z } from 'zod'
-
-/** A computer-only data kind as later phases register them: keyed rows, newer `at` wins. */
-const soakData: DataImportKinds = {
-  soak: {
-    value: z.object({ text: z.string(), at: z.number() }),
-    apply(storage, item) {
-      storage.compose((db) => {
-        db.exec(
-          'CREATE TABLE IF NOT EXISTS soak_data(key TEXT PRIMARY KEY, task_id TEXT, text TEXT, at INTEGER)'
-        )
-        db.prepare(
-          `INSERT INTO soak_data VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET text=excluded.text,at=excluded.at
-           WHERE excluded.at > soak_data.at`
-        ).run(item.key, item.taskId, item.value.text, item.value.at)
-      })
-    }
-  }
-}
 
 /**
  * Restart soak: normal user actions, then a restart of hub and computer, over
@@ -87,6 +63,7 @@ const soakData: DataImportKinds = {
  * live task still opens every chat and starts agents.
  */
 test('normal use across repeated hub and computer restarts never leaves a task unusable', async () => {
+  const worker = await buildStoreFixture('soak')
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-soak-'))
   // Any provider spawn resolves `claude` to the scripted fake, never to a real
@@ -100,12 +77,7 @@ test('normal use across repeated hub and computer restarts never leaves a task u
       hubScope: 'hub',
       computerId: () => pcId,
       getProjectPaths: () => null,
-      dataImports: {
-        ...sessionLedgerImports,
-        ...historyImports,
-        'task-path': taskPathImport,
-        ...soakData
-      },
+      workerPath: worker.path,
       ctx: {
         config: {
           hubUrl: 'ws://hub/computers',
@@ -931,6 +903,7 @@ test('normal use across repeated hub and computer restarts never leaves a task u
     warnings.mockRestore()
     errors.mockRestore()
     await pc.close()
+    worker.cleanup()
     fakeClaude.dispose()
     h.cleanup()
     rmSync(dir, { recursive: true, force: true })

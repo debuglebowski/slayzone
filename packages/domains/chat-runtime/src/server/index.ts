@@ -91,3 +91,18 @@ export {
   type ChatScopeAuthority,
   type ChatScopeSnapshot
 } from './scope-authority'
+
+export {
+  openComputerChatRuntime,
+  type OnlineComputerChatRuntime,
+  type OpenComputerChatRuntimeOptions
+} from './computer-online-runtime'
+export type { ChatTaskAdmission, ChatTaskPermit } from './task-admission'
+
+export {
+  computerRequestSchema,
+  sessionMoveFileRefSchema,
+  type SessionMoveFileRef,
+  type ComputerChatRequest
+} from './computer-request'
+export { chatTestRequestSchema, type ComputerChatTestRequest } from './computer-testing-schema'

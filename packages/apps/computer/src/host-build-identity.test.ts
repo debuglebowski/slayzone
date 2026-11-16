@@ -42,6 +42,8 @@ it('defers a rebuilt same-version host until work stops, including with auto-upg
     hubUrl: hub.url
   })
   const native = await connectorHost(root, grant, hub.url, {})
+  // Simulate the connector's authenticated identity delivery before scoped work.
+  await native.rpc.request('connected', { computerId: 'computer-1', mode: 'hello' })
   await native.rpc.request('dispatch', {
     method: 'proc.spawn',
     actor: { userId: null, route: null },

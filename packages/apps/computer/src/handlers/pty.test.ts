@@ -1643,13 +1643,14 @@ describe('agent-start admission', () => {
   it('a spawn WITHOUT admission (plain shell, older hub) starts at once, even with the queue full', async () => {
     const { ctx } = makeCtx()
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
-    void pty.handlers['pty.spawn'](holder('holder'))
+    const holderStart = pty.handlers['pty.spawn'](holder('holder'))
     const shell = pty.handlers['pty.spawn']({
       sessionId: 'shell',
       command: 'cat',
       cwd
     })
     expect((shell as SpawnResult).pid).toBeGreaterThan(0)
+    await holderStart
     pty.disposeAll()
   })
 
@@ -1999,3 +2000,52 @@ describe('pty.spawn for a project this computer has no folder for', () => {
     pty.disposeAll()
   })
 })
+
+it.each(['kill', 'dispose'] as const)(
+  'late task authority cannot start PTY after %s',
+  async (ending) => {
+    const { ctx } = makeCtx()
+    let release!: () => void, entered!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const checking = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const spawnPty = vi.fn()
+    const releasePermit = vi.fn()
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty,
+      taskAdmission: {
+        acquire: async () => {
+          entered()
+          await pending
+          return { assert() {}, release: releasePermit }
+        }
+      }
+    })
+    const work = Promise.resolve(
+      pty.handlers['pty.spawn']({
+        sessionId: 'late',
+        spawnId: 'one',
+        taskId: 't',
+        command: 'cat',
+        cwd: process.cwd()
+      })
+    )
+    const failed = expect(work).rejects.toThrow(/killed|disposed/)
+    await checking
+    expect(pty.hasTaskWork('t')).toBe(true)
+    if (ending === 'kill')
+      expect(await pty.handlers['pty.kill']({ sessionId: 'late', spawnId: 'one' })).toMatchObject({
+        ok: true
+      })
+    else pty.disposeAll()
+    release()
+    await failed
+    expect(spawnPty).not.toHaveBeenCalled()
+    expect(releasePermit).toHaveBeenCalledTimes(1)
+    expect(pty.hasTaskWork('t')).toBe(false)
+    pty.disposeAll()
+  }
+)

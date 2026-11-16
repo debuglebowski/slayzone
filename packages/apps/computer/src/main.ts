@@ -314,7 +314,7 @@ export interface HubRequestDispatch {
   /** Late-bind the computer loopback agent-hook URL once its listener has bound
    *  (the port is ephemeral, resolved async after the dispatch is built). The
    *  ctx is shared by reference, so pty spawns issued after this see the URL. */
-  captureAgentHook(hook: import('@slayzone/terminal-contracts').ResolvedAgentHook): void
+  captureAgentHook(hook: import('@slayzone/terminal-contracts').ResolvedAgentHook): Promise<void>
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
@@ -354,7 +354,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   void cliReady?.catch(() => log('CLI relay is unavailable'))
 
   const pty = createPtyHandlers(ctx, deps.getProjectPaths, {
-    assertTaskActive: (taskId) => chat.assertTaskActive(taskId),
+    taskAdmission: { acquire: (taskId) => chat.taskAdmission.acquire(taskId) },
     // Task terminals' output outlives this process — per hub: one hub's sessions
     // never restore into another's.
     history: createPtyHistory({
@@ -368,7 +368,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   })
   // Chat agents (proc.spawn with an admission lane) share the pty agents' start queue.
   const proc = createProcHandlers(ctx, deps.getProjectPaths, {
-    assertTaskActive: (taskId) => chat.assertTaskActive(taskId),
+    taskAdmission: { acquire: (taskId) => chat.taskAdmission.acquire(taskId) },
     ...(deps.admission ? { admission: deps.admission } : {}),
     // The computer's protected runtime dir: no hub frame can read or rewrite it.
     groupLedgerPath: join(
@@ -397,14 +397,14 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   const { recoverRelocation, assertRelocationAvailable, ...projectHandlers } =
     createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null), {
       assertIdle: async (projectId) => {
-        chat.assertProjectIdle(projectId)
+        await chat.assertProjectIdle(projectId)
         const roots = (await chat.scopeBounds({ kind: 'project', projectId })).roots
         const contains = (cwd: string) => roots.some((root) => isWithinDirectory(cwd, root))
         if (
           [...relocationHosts].some((host) => host.hasFolderWork(contains)) ||
-          chat
-            .projectTaskIds(projectId)
-            .some((id) => pty.hasTaskWork(id) || proc.hasTaskWork(id) || chat.hasTaskWork(id))
+          (await chat.projectTaskIds(projectId)).some(
+            (id) => pty.hasTaskWork(id) || proc.hasTaskWork(id) || chat.hasTaskWork(id)
+          )
         )
           throw new Error(
             'Stop this project’s running terminals, agents and processes before relocating it.'

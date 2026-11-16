@@ -63,7 +63,9 @@ const cursors: UsageCursors = {}
 const computer = createUsageCollector({
   store: () => ({
     all: () => ({ ...cursors }),
-    seed: (c) => Object.assign(cursors, { ...c, ...cursors }),
+    seed: (c) => {
+      Object.assign(cursors, { ...c, ...cursors })
+    },
     commit: (entries) => {
       for (const e of entries)
         cursors[e.sourceFile] = { offset: e.offset, modifiedMs: e.modifiedMs }

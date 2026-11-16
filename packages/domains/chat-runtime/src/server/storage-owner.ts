@@ -1,3 +1,4 @@
+import type { OnlineStoreData, HostCall, StoreNotification } from './computer-store-protocol'
 /** Async host facade. This module never opens SQLite or synchronously waits on a worker. */
 import { mkdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -82,6 +83,9 @@ export interface OpenStorageOwnerOptions {
   hubScope: string
   /** Explicit composition-root entry. The domain never imports the computer app. */
   workerPath: string
+  online?: OnlineStoreData
+  onHostRequest?(request: HostCall): Promise<unknown>
+  onStoreNotification?(notification: StoreNotification): void
   checkpointIntervalMs?: number
   checkpointerRetryMs?: number
   onUnexpectedExit?(error: Error): void
@@ -161,6 +165,10 @@ async function openStorageOwner(
     }
   })
   port1.on('message', (request: OwnerControl) => {
+    if (request.type === 'store-notification') {
+      opts.onStoreNotification?.(request.notification)
+      return
+    }
     if (request.type !== 'request') return
     void (async () => {
       try {
@@ -172,6 +180,9 @@ async function openStorageOwner(
           request.operation === 'copy-terminate'
         ) {
           result = await copies.request(request)
+        } else if (request.operation === 'runtime-host') {
+          if (!opts.onHostRequest) throw new Error('Online host operation unavailable')
+          result = await opts.onHostRequest(request.call)
         } else if (request.operation === 'open') {
           checkpointerWanted = true
           await checkpointer.open()
@@ -216,7 +227,8 @@ async function openStorageOwner(
       hubScope: opts.hubScope,
       checkpointIntervalMs: opts.checkpointIntervalMs,
       control: port2,
-      maintenance: profile
+      maintenance: profile,
+      online: opts.online
     }
     raw = await openSqliteWorker<StorageOwnerTxnRegistry>({
       label: 'chat storage owner',

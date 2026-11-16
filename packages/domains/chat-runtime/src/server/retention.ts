@@ -27,7 +27,8 @@ export function createChatRetention(opts: {
   storage: ChatStorage
   local: ReturnType<typeof createLocalChatData>
   busy(owner: ChatOwnership): boolean
-  quiesce(tabId: string): Promise<(() => Promise<void>) | void>
+  quiesce(tabId: string): Promise<(() => Promise<void>) | void | false>
+  releaseQuiesced?(tabId: string): Promise<void>
   collectGarbage(): void
   changed(tabId: string): void
 }) {
@@ -85,9 +86,10 @@ export function createChatRetention(opts: {
         release = resolve
       })
     )
-    let resume: (() => Promise<void>) | void = undefined
+    let resume: (() => Promise<void>) | void | false = undefined
     try {
       resume = await opts.quiesce(i.tabId)
+      if (resume === false) return false
       if (!valid()) return false
       await work()
       return true
@@ -95,8 +97,12 @@ export function createChatRetention(opts: {
       try {
         if (resume && ownedNow(owner, allowPaused) && !stopped) await resume()
       } finally {
-        locks.delete(i.taskId)
-        release()
+        try {
+          await opts.releaseQuiesced?.(i.tabId)
+        } finally {
+          locks.delete(i.taskId)
+          release()
+        }
       }
     }
   }

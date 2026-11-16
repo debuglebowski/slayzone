@@ -12,8 +12,8 @@ vi.mock('@slayzone/chat-runtime/server', async (load) => {
   const real = await load<typeof import('@slayzone/chat-runtime/server')>()
   return {
     ...real,
-    createComputerChatRuntime: (o: Parameters<typeof real.createComputerChatRuntime>[0]) => {
-      const r = real.createComputerChatRuntime(o)
+    openComputerChatRuntime: async (o: Parameters<typeof real.openComputerChatRuntime>[0]) => {
+      const r = await real.openComputerChatRuntime(o)
       const flush = r.storage.flush.bind(r.storage)
       r.storage.flush = async () => {
         events.push('flush:start')

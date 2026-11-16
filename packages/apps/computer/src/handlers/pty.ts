@@ -1,3 +1,4 @@
+import type { ChatTaskAdmission, ChatTaskPermit } from '@slayzone/chat-runtime/server'
 /**
  * Computer-side pty exec handlers. Spawns node-pty processes on the computer
  * machine and streams their output back to the hub as `pty.data` notifications,
@@ -299,6 +300,7 @@ export interface PtyHandlers {
 export interface PtyHandlerOptions {
   /** Rechecked at the actual start/adoption, after admission waits. */
   assertTaskActive?(taskId: string): void
+  taskAdmission?: ChatTaskAdmission
   /**
    * Agent-start admission queue. Production passes ONE instance shared by every
    * hub connection (the contention is the machine's); absent, this handler set
@@ -380,6 +382,8 @@ export function createPtyHandlers(
     // Best-effort: a file it could not remove is swept next start.
   })
 
+  let disposed = false
+
   function serializeStart<T>(
     id: string,
     spawnId: string | undefined,
@@ -394,15 +398,27 @@ export function createPtyHandlers(
       cancelled: false
     }
     const assertActive = (): void => {
+      if (disposed) throw new Error(`pty ${id}: handler disposed`)
       if (record.cancelled) throw new Error(`pty ${id}: spawn killed before start`)
     }
     const current = prior
       .catch(() => {
         // A refused predecessor must not block a later attempt.
       })
-      .then(() => {
-        assertActive()
-        return run(assertActive)
+      .then(async () => {
+        let permit: ChatTaskPermit | undefined
+        try {
+          assertActive()
+          if (taskId && options.taskAdmission) permit = await options.taskAdmission.acquire(taskId)
+          assertActive()
+          permit?.assert()
+          return await run(() => {
+            assertActive()
+            permit?.assert()
+          })
+        } finally {
+          permit?.release()
+        }
       })
     record.promise = current
     starts.set(id, record)
@@ -537,8 +553,9 @@ export function createPtyHandlers(
       buffer?: RingBuffer
     }
   ): PtySession {
+    if (disposed) throw new Error('PTY handler disposed')
     ctx.assertWorkAllowed?.()
-    if (opts.taskId) options.assertTaskActive?.(opts.taskId)
+    if (opts.taskId && !options.taskAdmission) options.assertTaskActive?.(opts.taskId)
     if (opts.taskId && !opts.warm) taskOfSession.set(id, opts.taskId)
     const cwd = resolveCwd(opts)
     if (sessions.has(id)) throw new Error(`pty ${id}: old process still live`)
@@ -956,7 +973,7 @@ export function createPtyHandlers(
     )
       throw new Error('PTY task identity mismatch')
     params.taskId ??= params.env?.SLAYZONE_TASK_ID
-    if (params.taskId) options.assertTaskActive?.(params.taskId)
+    if (params.taskId && !options.taskAdmission) options.assertTaskActive?.(params.taskId)
     const starting = starts.get(params.sessionId)
     if (starting && params.spawnId !== undefined && starting.spawnId === params.spawnId) {
       return starting.promise
@@ -1048,14 +1065,27 @@ export function createPtyHandlers(
   })
 
   /** `pty.adopt`: see `ptyAdoptParamsSchema`. */
-  function adopt(rawParams: unknown): {
+  function adopt(rawParams: unknown) {
+    const params = ptyAdoptParamsSchema.parse(rawParams)
+    if (!params.taskId || !options.taskAdmission) return adoptNow(rawParams)
+    return options.taskAdmission.acquire(params.taskId).then((permit) => {
+      try {
+        if (disposed) throw new Error('PTY handler disposed')
+        permit.assert()
+        return adoptNow(rawParams)
+      } finally {
+        permit.release()
+      }
+    })
+  }
+  function adoptNow(rawParams: unknown): {
     pid: number
     seq: number
     detection: true
     detected?: PtyDetectedSnapshot
   } {
     const params = ptyAdoptParamsSchema.parse(rawParams)
-    if (params.taskId) options.assertTaskActive?.(params.taskId)
+    if (params.taskId && !options.taskAdmission) options.assertTaskActive?.(params.taskId)
     const live = sessions.get(params.sessionId)
     if (live && !live.warm && live.spawnId === params.spawnId) {
       // A re-sent adopt whose reply was lost: already this attempt.
@@ -1091,7 +1121,7 @@ export function createPtyHandlers(
       // under this id is superseded by this one, like a live session would be.
       const prior = queued.get(params.sessionId)
       const reply =
-        sessions.has(params.sessionId) || starts.has(params.sessionId)
+        sessions.has(params.sessionId) || starts.has(params.sessionId) || !!options.taskAdmission
           ? serializeStart(
               params.sessionId,
               params.spawnId,
@@ -1262,14 +1292,27 @@ export function createPtyHandlers(
     for (const id of [...queued.keys()]) cancelQueued(id, reason)
   }
 
-  function warmAdopt(rawParams: unknown): {
+  function warmAdopt(rawParams: unknown) {
+    const params = ptyWarmAdoptParamsSchema.parse(rawParams)
+    if (!params.taskId || !options.taskAdmission) return warmAdoptNow(rawParams)
+    return options.taskAdmission.acquire(params.taskId).then((permit) => {
+      try {
+        if (disposed) throw new Error('PTY handler disposed')
+        permit.assert()
+        return warmAdoptNow(rawParams)
+      } finally {
+        permit.release()
+      }
+    })
+  }
+  function warmAdoptNow(rawParams: unknown): {
     pid: number
     data: string
     seq: number
     detection?: true
   } {
     const params = ptyWarmAdoptParamsSchema.parse(rawParams)
-    if (params.taskId) options.assertTaskActive?.(params.taskId)
+    if (params.taskId && !options.taskAdmission) options.assertTaskActive?.(params.taskId)
     const adopted = sessions.get(params.sessionId)
     if (adopted?.taskId && params.taskId && adopted.taskId !== params.taskId)
       throw new Error('PTY task identity mismatch')
@@ -1664,6 +1707,8 @@ export function createPtyHandlers(
   }
 
   function disposeAll(): void {
+    disposed = true
+    for (const record of starts.values()) record.cancelled = true
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
       endDirectWatchers(session, 'disposed')
@@ -1759,7 +1804,8 @@ export function createPtyHandlers(
 
   return {
     direct,
-    hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
+    hasWork: () =>
+      [...sessions.values()].some((session) => !session.warm) || queued.size > 0 || starts.size > 0,
     ownedPids: () =>
       [...sessions.values()]
         .map((session) => session.proc.pid)

@@ -976,3 +976,97 @@ describe.skipIf(process.platform === 'win32')('M5: groups orphaned by a crashed 
     next.disposeAll()
   })
 })
+
+it.each(['kill', 'dispose'] as const)(
+  'late task authority cannot spawn after %s',
+  async (ending) => {
+    const { ctx } = makeCtx(roots)
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const spawnProcess = vi.fn()
+    const releasePermit = vi.fn()
+    const proc = createProcHandlers(ctx, undefined, {
+      spawnProcess,
+      taskAdmission: {
+        acquire: async () => {
+          await pending
+          return { assert() {}, release: releasePermit }
+        }
+      }
+    })
+    const work = Promise.resolve(
+      proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'late',
+        spawnId: 'one',
+        taskId: 't',
+        command: process.execPath,
+        cwd: dir
+      })
+    )
+    const failed = expect(work).rejects.toThrow(/cancelled|disposed/)
+    expect(proc.hasTaskWork('t')).toBe(true)
+    if (ending === 'kill')
+      expect(
+        await proc.handlers[ProcMethods.procKill]({ sessionId: 'late', spawnId: 'one' })
+      ).toMatchObject({ clean: true })
+    else proc.disposeAll()
+    release()
+    await failed
+    expect(spawnProcess).not.toHaveBeenCalled()
+    expect(releasePermit).toHaveBeenCalledTimes(1)
+    expect(proc.hasTaskWork('t')).toBe(false)
+    proc.disposeAll()
+  }
+)
+
+it('generation kill cancels a pending replacement while preserving its older live process', async () => {
+  const { ctx } = makeCtx(roots)
+  let release!: () => void, entered!: () => void
+  const checking = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let checks = 0
+  const spawnProcess = vi.fn(spawn)
+  const proc = createProcHandlers(ctx, undefined, {
+    spawnProcess: spawnProcess as unknown as typeof spawn,
+    taskAdmission: {
+      acquire: async () => {
+        if (++checks === 2) {
+          entered()
+          await gate
+        }
+        return { assert() {}, release() {} }
+      }
+    }
+  })
+  const spec = {
+    sessionId: 'replace',
+    taskId: 't',
+    command: process.execPath,
+    args: ['-e', 'setInterval(()=>{},1000)'],
+    cwd: dir,
+    env: { ELECTRON_RUN_AS_NODE: '1' }
+  }
+  try {
+    await proc.handlers[ProcMethods.procSpawn]({ ...spec, spawnId: 'old' })
+    const replacement = Promise.resolve(
+      proc.handlers[ProcMethods.procSpawn]({ ...spec, spawnId: 'new' })
+    )
+    const refused = expect(replacement).rejects.toThrow(/cancelled/)
+    await checking
+    await proc.handlers[ProcMethods.procKill]({ sessionId: 'replace', spawnId: 'new' })
+    release()
+    await refused
+    expect(spawnProcess).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(await proc.handlers[ProcMethods.procList]({}))).toContain('old')
+  } finally {
+    release()
+    await proc.handlers[ProcMethods.procKill]({ sessionId: 'replace', spawnId: 'old' })
+    proc.disposeAll()
+  }
+})

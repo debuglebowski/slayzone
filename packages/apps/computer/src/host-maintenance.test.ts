@@ -63,6 +63,8 @@ it('discards an incompatible release canceled by the hub before idle maintenance
     hubUrl: config.hubUrl
   })
   const connector = await connectorHost(root, grant, config.hubUrl, {})
+  // Simulate the connector's authenticated identity delivery before scoped work.
+  await connector.rpc.request('connected', { computerId: 'computer-1', mode: 'hello' })
   await connector.rpc.request('dispatch', {
     method: 'proc.spawn',
     actor: { userId: null, route: null },

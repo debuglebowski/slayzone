@@ -166,3 +166,45 @@ describe('createAgentHookServer (computer loopback relay)', () => {
     }
   })
 })
+
+it('hook ack and relay wait for local durable capture; failed capture returns 503 without relay', async () => {
+  const { ctx, notifies } = makeCtx()
+  let release!: () => void, entered!: () => void
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const capturing = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  let fail = false
+  const server = await createAgentHookServer(ctx, async () => {
+    entered()
+    await pending
+    if (fail) throw new Error('native fence failed')
+  })
+  const payload = JSON.stringify({
+    agentId: 'claude-code',
+    taskId: 'task',
+    hookEvent: 'UserPromptSubmit',
+    prompt: 'private'
+  })
+  try {
+    let acknowledged = false
+    const request = post(server.url, payload).then((value) => {
+      acknowledged = true
+      return value
+    })
+    await capturing
+    expect(acknowledged).toBe(false)
+    expect(notifies).toEqual([])
+    release()
+    expect((await request).status).toBe(200)
+    expect(notifies).toHaveLength(1)
+    fail = true
+    expect((await post(server.url, payload)).status).toBe(503)
+    expect(notifies).toHaveLength(1)
+  } finally {
+    release()
+    await server.close()
+  }
+})

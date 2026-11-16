@@ -67,11 +67,13 @@ export interface UsageCollectResponse {
 
 /** This computer's read offsets (its per-hub store). */
 export interface UsageCursorStore {
-  all(): UsageCursors
+  all(): UsageCursors | Promise<UsageCursors>
   /** Insert the cursors this store has none for; never overwrites one it keeps. */
-  seed(cursors: UsageCursors): void
+  seed(cursors: UsageCursors): void | Promise<void>
   /** Move these files' cursors (one transaction). */
-  commit(entries: Array<{ sourceFile: string; offset: number; modifiedMs: number }>): void
+  commit(
+    entries: Array<{ sourceFile: string; offset: number; modifiedMs: number }>
+  ): void | Promise<void>
 }
 
 /**
@@ -131,7 +133,7 @@ export function pageUsage(
 
 export function createUsageCollector(opts: {
   /** This computer's cursor store; throws when it is unavailable (the collect fails). */
-  store: () => UsageCursorStore
+  store: () => UsageCursorStore | Promise<UsageCursorStore>
   /** Parse from these cursors (`collectUsage`, plus the caller's task tagging). */
   collect: (cursors: UsageCursors) => Promise<ParseResult[]>
   pageBytes?: number
@@ -141,7 +143,12 @@ export function createUsageCollector(opts: {
   const now = opts.now ?? Date.now
   const held = new Map<
     string,
-    { pages: UsageCollectEntry[][]; acked: Set<number>; expiresAt: number }
+    {
+      pages: UsageCollectEntry[][]
+      acked: Set<number>
+      pending: Map<number, Promise<void>>
+      expiresAt: number
+    }
   >()
 
   const reply = (token: string, index: number): UsageCollectResponse => {
@@ -157,28 +164,38 @@ export function createUsageCollector(opts: {
   }
 
   /** The hub stored page `index`: its complete files' cursors move, in page order. */
-  const acknowledge = (ack: UsageCollectPage) => {
+  const acknowledge = async (ack: UsageCollectPage) => {
     const h = held.get(ack.token)
     if (!h || h.acked.has(ack.index)) return
+    const pending = h.pending.get(ack.index)
+    if (pending) return pending
     const page = h.pages[ack.index]
     if (!page) return
-    opts.store().commit(
-      page
-        .filter((e) => e.complete !== false)
-        .map((e) => ({
-          sourceFile: e.sourceFile,
-          offset: e.endOffset,
-          modifiedMs: e.fileMtimeMs
-        }))
-    )
-    h.acked.add(ack.index)
-    if (h.acked.size >= h.pages.length) held.delete(ack.token)
+    const work = (async () => {
+      await (await opts.store()).commit(
+        page
+          .filter((e) => e.complete !== false)
+          .map((e) => ({
+            sourceFile: e.sourceFile,
+            offset: e.endOffset,
+            modifiedMs: e.fileMtimeMs
+          }))
+      )
+      h.acked.add(ack.index)
+      if (h.acked.size >= h.pages.length) held.delete(ack.token)
+    })()
+    h.pending.set(ack.index, work)
+    try {
+      await work
+    } finally {
+      h.pending.delete(ack.index)
+    }
   }
 
   async function handle(request: UsageCollectRequest): Promise<UsageCollectResponse> {
     const at = now()
     for (const [token, h] of held) if (h.expiresAt < at) held.delete(token)
-    if (request.ack) acknowledge(request.ack)
+    if (request.ack) await acknowledge(request.ack)
     if (request.page) {
       const h = held.get(request.page.token)
       // Expired or unknown: nothing more here; the next collect parses again.
@@ -188,15 +205,15 @@ export function createUsageCollector(opts: {
     }
     // A bare acknowledgement (after the last page) parses nothing.
     if (request.ack) return { results: [] }
-    const store = opts.store()
-    if (request.seed && Object.keys(request.seed).length) store.seed(request.seed)
-    const cursors = store.all()
+    const store = await opts.store()
+    if (request.seed && Object.keys(request.seed).length) await store.seed(request.seed)
+    const cursors = await store.all()
     const pages = pageUsage(await opts.collect(cursors), cursors, budget)
     // Nothing new: no cursor to move, no receipt to acknowledge.
     if (pages.length === 1 && pages[0]!.length === 0) return { results: [] }
     while (held.size >= MAX_HELD) held.delete(held.keys().next().value as string)
     const token = randomUUID()
-    held.set(token, { pages, acked: new Set(), expiresAt: at + PAGES_TTL_MS })
+    held.set(token, { pages, acked: new Set(), pending: new Map(), expiresAt: at + PAGES_TTL_MS })
     return reply(token, 0)
   }
 

@@ -1,16 +1,10 @@
+import { createChatStoreServices } from './computer-chat-stores'
 import { createChatScopeAuthority } from './scope-authority'
 import { createChatRetention } from './retention'
 import { parseChatInvocation, type ChatTabTransition } from '../shared'
-import { createLocalArtifacts } from './artifacts'
-import { createChatBackups } from './backups'
-import { createLocalPrompts } from './prompts'
-import { createChatTransfers } from './transfers'
-import { createSessionMoves, sessionLedgerMoveImport } from './session-moves'
-import { createLocalWorkspaceStore } from './workspace-store'
 import { createChatInvoker } from './invocation'
-import { createLocalAttachments } from './attachments'
 import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
-import { createEventMarkerBackfill, type EventMarkerBackfillOptions } from './event-marker-backfill'
+import type { EventMarkerBackfillOptions } from './event-marker-backfill'
 import { createStorageCompaction, type StorageCompactionOptions } from './storage-compaction'
 import {
   createChatTransport,
@@ -22,27 +16,12 @@ import {
 } from '@slayzone/terminal/runtime'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { openChatStorage, type ChatStorage } from './storage'
-import { createLocalChatData, type ChatBootstrap, type ChatMetadataUpdate } from './local-data'
+import type { ChatBootstrap, ChatMetadataUpdate } from './local-data'
 import { randomUUID } from 'node:crypto'
-import { createComputerTaskData, type DataImportKinds } from './task-data'
-import { createSessionLedgerService } from './session-ledger-service'
+import type { DataImportKinds } from './task-data'
 import type { ConversationHealIo } from './conversation-heal'
-import { sessionLedgerImports } from './session-ledger-imports'
-import { historyImports } from './history-imports'
-import { chatSettingsImport } from './chat-settings-import'
-import { createTaskPaths, taskPathImport } from './task-paths'
-import { createAgentTurns, type TurnGit } from './agent-turns'
+import type { TurnGit } from './agent-turns'
 
-/** No turn git wired (a runtime without a checkout): every turn operation refuses. */
-const refuseTurnGit = () =>
-  Promise.reject(new Error('Agent turns are unavailable on this computer'))
-const refusingTurnGit: TurnGit = {
-  canonical: refuseTurnGit,
-  snapshot: refuseTurnGit,
-  deleteTurnRef: refuseTurnGit,
-  diffIsEmpty: refuseTurnGit,
-  filterTurns: refuseTurnGit
-}
 import {
   prepareStoredTaskErasure,
   finishStoredTaskErasure,
@@ -88,80 +67,27 @@ export function assembleComputerChatRuntime(
   storage: ChatStorage,
   opts: ComputerChatRuntimeOptions
 ) {
-  // Register before artifact purge listeners: every deletion delivery captures
-  // retry identifiers before its source records disappear, including old clients.
-  storage.onTaskPurge((taskId) => storage.compose((raw) => prepareStoredTaskErasure(raw, taskId)))
-  const diagnosticsConfig = () =>
-    storage.getRecord<{ enabled: boolean; verbose: boolean }>(
-      '__slz_settings__',
-      'settings',
-      'diagnostics-config'
-    ) ?? { enabled: true, verbose: false }
-  const configureDiagnostics = (value: { enabled: boolean; verbose: boolean }) => {
-    storage.transaction(() => {
-      storage.createConversation({
-        id: '__slz_settings__',
-        taskId: '__slz_settings__',
-        tabId: '__slz_settings__',
-        mode: 'claude-chat',
-        epoch: 1
-      })
-      storage.putRecord('__slz_settings__', 1, {
-        kind: 'settings',
-        id: 'diagnostics-config',
-        value,
-        at: Date.now()
-      })
-    })
-  }
-  // Indexes conversations saved before `event_markers` (FU5), so session summaries
-  // stop scanning every event of a task; a chat a summary had to scan goes first.
-  const markerBackfill = createEventMarkerBackfill({
-    ...opts.markerBackfill,
-    storage,
-    automatic: opts.markerBackfill?.automatic ?? !opts.maintenance,
-    ...(opts.log ? { log: opts.log } : {})
-  })
-  const prompts = createLocalPrompts(storage, {
-    uncovered: (ids) => markerBackfill.prioritize(ids)
-  })
-  // Agent-turn snapshots (robustness plan §9, P0): only here, never on the hub.
-  const turns = createAgentTurns(storage, opts.turnGit ?? refusingTurnGit)
-  // The agent-session ledger (robustness plan §9, P0): only here, never on the hub.
-  const ledger = createSessionLedgerService(storage, { healIo: opts.healIo })
-  // Bound once the transport exists: a session recorded before that has no listener.
   let sessionsChanged: (tabId: string) => void = () => undefined
-  // Task worktree paths / base dirs (robustness plan §9, P0, Phase 7a): only here.
-  const taskPaths = createTaskPaths(storage)
-  const local = createLocalChatData(storage, opts.onMetadata, ledger, (tabId) =>
-    sessionsChanged(tabId)
-  )
-  const taskData = createComputerTaskData({
-    storage,
-    computerId: opts.computerId,
-    imports: opts.dataImports ?? {
-      ...sessionLedgerImports,
-      ...historyImports,
-      'task-path': taskPathImport,
-      'chat-settings': chatSettingsImport,
-      'session-ledger-move': sessionLedgerMoveImport
-    },
-    providerConfig: local.providerConfig,
-    taskPath: taskPaths.get
+  const services = createChatStoreServices(storage, opts, {
+    sessionsChanged: (id) => sessionsChanged(id)
   })
-  // A restarted runtime has no in-flight admission to renew these slots. Cancel
-  // them before draining so a lost hub/host cannot block later accepted messages.
-  local.cancelPendingQueueAdmissions()
-  const transfers = createChatTransfers(storage)
-  transfers.collectActivated()
-  const sessionMoves = createSessionMoves(storage)
-  const attachments = createLocalAttachments(storage, local)
-  const artifacts = createLocalArtifacts(storage, local, attachments)
-  const backups = createChatBackups(storage, {
-    automatic: !opts.maintenance,
-    workerFactory: opts.compaction?.workerFactory
-  })
-  const workspaceStore = createLocalWorkspaceStore(storage, local)
+  const {
+    diagnosticsConfig,
+    configureDiagnostics,
+    markerBackfill,
+    prompts,
+    turns,
+    ledger,
+    taskPaths,
+    local,
+    taskData,
+    transfers,
+    sessionMoves,
+    attachments,
+    artifacts,
+    backups,
+    workspaceStore
+  } = services
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
   const userInputSessions = new Set<string>()

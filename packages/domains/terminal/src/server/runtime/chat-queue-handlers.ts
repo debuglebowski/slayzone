@@ -216,10 +216,15 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
    * could each pop a message and both go out at once. A pop that lost the race is
    * put back at the head.
    */
+  const legacyQueueDb = (db: SlayzoneDb | null): SlayzoneDb => {
+    if (!db) throw new Error('Chat queue requires its injected store and attachment lookup')
+    return db
+  }
+
   function drainChatQueue(
-    db: SlayzoneDb,
+    db: SlayzoneDb | null,
     tabId: string,
-    data: ChatQueueData = createDbChatQueueData(db)
+    data: ChatQueueData = createDbChatQueueData(legacyQueueDb(db))
   ): Promise<void> {
     if (closing) return Promise.resolve()
     const previous = draining.get(tabId) ?? Promise.resolve()
@@ -299,8 +304,25 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
    */
   function createChatQueueOps(
     db: SlayzoneDb,
-    data: ChatQueueData & Partial<ChatQueueAdmissions> = createDbChatQueueData(db),
-    lookup: AttachmentLookup = createDbAttachmentLookup(db)
+    data?: ChatQueueData & Partial<ChatQueueAdmissions>,
+    lookup?: AttachmentLookup
+  ): ReturnType<typeof composeChatQueueOps>
+  function createChatQueueOps(
+    db: null,
+    data: ChatQueueData & Partial<ChatQueueAdmissions>,
+    lookup: AttachmentLookup
+  ): ReturnType<typeof composeChatQueueOps>
+  function createChatQueueOps(
+    db: SlayzoneDb | null,
+    data?: ChatQueueData & Partial<ChatQueueAdmissions>,
+    lookup?: AttachmentLookup
+  ) {
+    return composeChatQueueOps(db, data, lookup)
+  }
+  function composeChatQueueOps(
+    db: SlayzoneDb | null,
+    data: ChatQueueData & Partial<ChatQueueAdmissions> = createDbChatQueueData(legacyQueueDb(db)),
+    lookup: AttachmentLookup = createDbAttachmentLookup(legacyQueueDb(db))
   ) {
     const admissionKey = (tabId: string, key: string) => JSON.stringify([tabId, key])
     const clearAdmissionTimer = (tabId: string, key: string) => {

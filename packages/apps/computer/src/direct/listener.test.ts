@@ -110,7 +110,7 @@ function fakeChat() {
       epoch: number,
       onEvent: (e: { tabId: string; event: unknown; seq: number }) => void,
       onEnd: (r: 'epoch') => void
-    ) => {
+    ): (() => void) | null | Promise<(() => void) | null> => {
       watchers.set(tabId, { onEvent: onEvent as (e: unknown) => void, onEnd, epoch })
       return () => watchers.delete(tabId)
     }
@@ -121,6 +121,7 @@ function fakeChat() {
 async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits']) {
   const pty = fakePty()
   const chat = fakeChat()
+  const chatLookup = { get: (hubKey: string) => (hubKey === 'hub' ? chat.service : null) }
   const taskReads: Array<{ taskId: string; request: unknown }> = []
   const taskData = {
     read: async (taskId: string, request: unknown) => {
@@ -137,14 +138,14 @@ async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits
     audit: (line) => audit.push({ ...line }),
     services: {
       pty: (hubKey) => (hubKey === 'hub' ? pty.service : null),
-      chat: (hubKey) => (hubKey === 'hub' ? chat.service : null),
+      chat: (hubKey) => chatLookup.get(hubKey),
       taskData: (hubKey) => (hubKey === 'hub' ? taskData : null)
     },
     ...(limits ? { limits } : {})
   })
   cleanups.push(() => listener.close())
   cleanups.push(() => store.close())
-  return { store, listener, audit, pty, chat, taskReads }
+  return { store, listener, audit, pty, chat, chatLookup, taskReads }
 }
 
 function client(listener: DirectListener, token: string | null) {
@@ -752,4 +753,227 @@ describe('direct listener: data channels', () => {
     store.revoke('hub', { by: 'grant', grantIds: [a.grantId] })
     await waitFor(() => socket.readyState === 3)
   })
+})
+
+it('revocation during async chat watch releases the late owner subscription and suppresses its events', async () => {
+  const { store, listener, chat } = await setup()
+  const { token, grantId } = grant(store, { chat: { tabId: 'late', epoch: 3 } })
+  const { trpc } = client(listener, token)
+  const other = grant(store, { sessionId: 's1' })
+  await trpc.authorize.mutate({ token: other.token })
+  const original = chat.service.watch
+  let release!: () => void,
+    entered!: () => void,
+    stopped = 0
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const checking = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  chat.service.watch = async (...args) => {
+    entered()
+    await pending
+    const off = await original(...args)
+    return () => {
+      stopped++
+      off?.()
+    }
+  }
+  const got: unknown[] = [],
+    errors: unknown[] = []
+  const subscription = trpc.chat.onEvent.subscribe(
+    { tabId: 'late' },
+    { onData: (e) => got.push(e), onError: (e) => errors.push(e) }
+  )
+  try {
+    await checking
+    store.revoke('hub', { by: 'grant', grantIds: [grantId] })
+    await waitFor(() => errors.length > 0)
+    release()
+    await waitFor(() => stopped === 1)
+    expect(chat.watchers.has('late')).toBe(false)
+    expect(got).toEqual([])
+  } finally {
+    release()
+    subscription.unsubscribe()
+  }
+})
+
+it.each(['unavailable', 'throws', 'replacement', 'epoch'] as const)(
+  'async chat watch cleans its returned disposer when revalidation %s with the grant still present',
+  async (mode) => {
+    const { store, listener, chat, chatLookup } = await setup()
+    const { token, grantId } = grant(store, { chat: { tabId: 'late', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    const original = chat.service.watch
+    let release!: () => void,
+      entered!: () => void,
+      stopped = 0
+    let lateEvent: Parameters<typeof chat.service.watch>[2] | undefined
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const checking = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    chat.service.watch = async (...args) => {
+      lateEvent = args[2]
+      entered()
+      await pending
+      const off = await original(...args)
+      return () => {
+        stopped++
+        off?.()
+      }
+    }
+    const got: unknown[] = [],
+      errors: unknown[] = []
+    const subscription = trpc.chat.onEvent.subscribe(
+      { tabId: 'late' },
+      { onData: (event) => got.push(event), onError: (error) => errors.push(error) }
+    )
+    try {
+      await checking
+      if (mode === 'epoch') {
+        const newer = grant(store, { chat: { tabId: 'late', epoch: 4 } })
+        await trpc.authorize.mutate({ token: newer.token })
+      } else if (mode === 'replacement') {
+        const replacement = { ...chat.service }
+        chatLookup.get = () => replacement
+      } else
+        chatLookup.get = () => {
+          if (mode === 'throws') throw new Error('service lookup failed')
+          return null
+        }
+      release()
+      await waitFor(() => errors.length === 1)
+      await waitFor(() => stopped === 1)
+      expect(chat.watchers.has('late')).toBe(false)
+      lateEvent?.({ tabId: 'late', event: { kind: 'after-end' }, seq: 1 })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(got).toEqual([])
+      expect(store.get(grantId)).not.toBeNull()
+      // The capability itself remains valid: no revocation callback caused cleanup.
+      expect(await trpc.ping.query()).toEqual({ protocol: 1 })
+      subscription.unsubscribe()
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(stopped).toBe(1)
+    } finally {
+      release()
+      subscription.unsubscribe()
+    }
+  }
+)
+
+it('async chat watch releases its late disposer after unsubscribe', async () => {
+  const { store, listener, chat } = await setup()
+  const { token } = grant(store, { chat: { tabId: 'late', epoch: 3 } })
+  const { trpc } = client(listener, token)
+  const original = chat.service.watch
+  let release!: () => void,
+    entered!: () => void,
+    stopped = 0
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const checking = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  chat.service.watch = async (...args) => {
+    entered()
+    await pending
+    const off = await original(...args)
+    return () => {
+      stopped++
+      off?.()
+    }
+  }
+  const got: unknown[] = [],
+    errors: unknown[] = []
+  const subscription = trpc.chat.onEvent.subscribe(
+    { tabId: 'late' },
+    { onData: (e) => got.push(e), onError: (e) => errors.push(e) }
+  )
+  try {
+    await checking
+    subscription.unsubscribe()
+    // Frames are ordered: this response follows the subscription stop on the server.
+    await trpc.ping.query()
+    release()
+    await waitFor(() => stopped === 1)
+    expect(chat.watchers.has('late')).toBe(false)
+    expect(got).toEqual([])
+    expect(errors).toEqual([])
+  } finally {
+    release()
+    subscription.unsubscribe()
+  }
+})
+
+it.each(['end', 'revocation', 'unsubscribe'] as const)(
+  'active chat watch disposes exactly once after %s and ignores later events',
+  async (mode) => {
+    const { store, listener, chat } = await setup()
+    const { token, grantId } = grant(store, { chat: { tabId: 'late', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    const other = grant(store, { sessionId: 's1' })
+    await trpc.authorize.mutate({ token: other.token })
+    const original = chat.service.watch
+    let stopped = 0
+    chat.service.watch = async (...args) => {
+      const off = await original(...args)
+      return () => {
+        stopped++
+        off?.()
+      }
+    }
+    const got: unknown[] = [],
+      errors: unknown[] = []
+    const subscription = trpc.chat.onEvent.subscribe(
+      { tabId: 'late' },
+      { onData: (e) => got.push(e), onError: (e) => errors.push(e) }
+    )
+    try {
+      await waitFor(() => chat.watchers.has('late'))
+      const watcher = chat.watchers.get('late')!
+      if (mode === 'end') watcher.onEnd('epoch')
+      else if (mode === 'revocation') store.revoke('hub', { by: 'grant', grantIds: [grantId] })
+      else subscription.unsubscribe()
+      await trpc.ping.query()
+      await waitFor(() => stopped === 1)
+      expect(chat.watchers.has('late')).toBe(false)
+      watcher.onEvent({ tabId: 'late', event: { kind: 'after-end' }, seq: 1 })
+      subscription.unsubscribe()
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(stopped).toBe(1)
+      expect(got).toEqual([])
+      if (mode === 'unsubscribe') expect(errors).toEqual([])
+      else expect(errors).toHaveLength(1)
+    } finally {
+      subscription.unsubscribe()
+    }
+  }
+)
+
+it('async chat watch rejection errors the subscription while keeping its grant usable', async () => {
+  const { store, listener, chat } = await setup()
+  const { token, grantId } = grant(store, { chat: { tabId: 'late', epoch: 3 } })
+  const { trpc } = client(listener, token)
+  chat.service.watch = async () => {
+    throw new Error('watch setup failed')
+  }
+  const errors: unknown[] = []
+  const subscription = trpc.chat.onEvent.subscribe(
+    { tabId: 'late' },
+    { onError: (error) => errors.push(error) }
+  )
+  try {
+    await waitFor(() => errors.length === 1)
+    expect(chat.watchers.has('late')).toBe(false)
+    expect(store.get(grantId)).not.toBeNull()
+    expect(await trpc.ping.query()).toEqual({ protocol: 1 })
+  } finally {
+    subscription.unsubscribe()
+  }
 })

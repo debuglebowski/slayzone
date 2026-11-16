@@ -1,7 +1,9 @@
+import * as runtimeFactory from '@slayzone/chat-runtime/server'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
+import Database from 'better-sqlite3'
 import { build } from 'esbuild'
 import { TIMELINE_PROJECTION_VERSION } from '@slayzone/terminal/timeline-projection'
 import { createChatRuntimeHandlers } from './chat-runtime'
@@ -50,6 +52,31 @@ function setup(extra: Partial<Parameters<typeof createChatRuntimeHandlers>[0]> =
   handles.push(h)
   return { h, stateDir, notifications }
 }
+test('online runtime readiness, bootstrap, drafts and metadata use the worker owner without native SQL on main', async () => {
+  const { h } = setup()
+  const methods = ['prepare', 'exec', 'pragma', 'backup', 'close'] as const
+  const native = methods.map((method) => vi.spyOn(Database.prototype, method))
+  try {
+    await h.request({ kind: 'bootstrap', value: bootstrap })
+    await h.request({
+      kind: 'invoke',
+      value: {
+        route: { id: 'store', epoch: 1 },
+        target: 'ops',
+        method: 'saveTabDraft',
+        operationId: 'owner-draft',
+        args: ['tab', { text: 'worker owned', attachments: [] }]
+      }
+    })
+    expect(await h.request({ kind: 'metadata.snapshot', id: 'store' })).toMatchObject({
+      identity: bootstrap.identity
+    })
+    await h.close()
+    for (const method of native) expect(method).not.toHaveBeenCalled()
+  } finally {
+    for (const method of native) method.mockRestore()
+  }
+})
 test('computer endpoints persist drafts and reject foreign tab commands', async () => {
   const { h } = setup()
   await h.request({ kind: 'bootstrap', value: bootstrap })
@@ -235,18 +262,18 @@ test('lifecycle fences native starts before awaiting their stop acknowledgement'
     .then(() => {
       acknowledged = true
     })
-  expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
+  await expect(h.assertTaskActive('task')).rejects.toThrow(/admission|paused|deleted/i)
   await vi.waitFor(() => expect(stopTask).toHaveBeenCalledWith('task', 'paused'))
   expect(acknowledged).toBe(false)
   release()
   await pause
   await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'active', revision: 2 })
-  expect(() => h.assertTaskActive('task')).not.toThrow()
+  await expect(h.assertTaskActive('task')).resolves.toBeUndefined()
   await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'deleted', revision: 3 })
   // A purge says so: the task's terminals' saved output goes with it (pty-history).
   expect(stopTask).toHaveBeenLastCalledWith('task', 'deleted')
-  expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
-  expect(() => h.assertTaskActive('other')).not.toThrow()
+  await expect(h.assertTaskActive('task')).rejects.toThrow(/admission|paused|deleted/i)
+  await expect(h.assertTaskActive('other')).resolves.toBeUndefined()
 })
 
 test('direct link: history reads under the granted epoch; a stale epoch is refused by the computer itself', async () => {
@@ -281,14 +308,14 @@ test('direct link: history reads under the granted epoch; a stale epoch is refus
     h.direct.read('tab', 1, 'saveTabDraft' as never, ['tab', { text: 'x', attachments: [] }])
   ).rejects.toThrow(/not a direct chat read/)
   expect(
-    h.direct.watch(
+    await h.direct.watch(
       'tab',
       2,
       () => undefined,
       () => undefined
     )
   ).toBeNull()
-  const stop = h.direct.watch(
+  const stop = await h.direct.watch(
     'tab',
     1,
     () => undefined,
@@ -559,4 +586,34 @@ test('storage compaction: status, refused start with its reason, cancel, malform
   await expect(h.request({ kind: 'storage.compact' })).rejects.toThrow(/backfill/i)
   expect(await h.request({ kind: 'storage.cancel' })).toBeNull()
   await expect(h.request({ kind: 'storage.compact', force: true })).rejects.toThrow()
+})
+
+test('online handler close drains remaining controllers and keeps its failed result on repeated close', async () => {
+  const open = runtimeFactory.openComputerChatRuntime
+  const error = new Error('store cleanup failed after physical exit')
+  const factory = vi
+    .spyOn(runtimeFactory, 'openComputerChatRuntime')
+    .mockImplementation(async (opts) => {
+      const r = await open(opts)
+      const close = r.close.bind(r)
+      return {
+        ...r,
+        close: async () => {
+          await close()
+          throw error
+        }
+      }
+    })
+  const { h } = setup()
+  try {
+    await h.request({ kind: 'bootstrap', value: bootstrap })
+    const closing = h.close()
+    await expect(closing).rejects.toBe(error)
+    expect(h.close()).toBe(closing)
+    await expect(h.close()).rejects.toBe(error)
+    expect(h.ownedPids()).toEqual([])
+  } finally {
+    factory.mockRestore()
+    handles.splice(handles.indexOf(h), 1)
+  }
 })

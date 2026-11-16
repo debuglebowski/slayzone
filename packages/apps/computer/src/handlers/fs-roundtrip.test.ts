@@ -201,14 +201,17 @@ describe('fs.* hub⇄computer round trip — watch', () => {
     // recursive also fires once for the watched directory itself (relPath = the
     // dir's own basename), which lands first and would satisfy a bare
     // "something arrived" check before the real change ever shows up.
-    await vi.waitFor(
-      () => {
-        writeFileSync(join(dir, 'watched.txt'), String(seen.length))
-        expect(seen).toContain('changed:watched.txt')
-      },
-      { timeout: 5000, interval: 100 }
-    )
-    stop()
+    try {
+      // This bridge installs the computer watcher synchronously. One change lets its 100ms
+      // debounce settle; rewriting every 100ms from the assertion can keep resetting it.
+      writeFileSync(join(dir, 'watched.txt'), 'changed')
+      await vi.waitFor(() => expect(seen).toContain('changed:watched.txt'), {
+        timeout: 5000,
+        interval: 100
+      })
+    } finally {
+      stop()
+    }
   })
 })
 

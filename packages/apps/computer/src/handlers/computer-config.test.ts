@@ -228,6 +228,7 @@ describe('standalone live folder policy', () => {
       createDialer: (options) => {
         dispatch = options.onHubRequest!
         const dialer = new HubDialer(options)
+        vi.spyOn(dialer, 'computerId', 'get').mockReturnValue('fixture-computer')
         vi.spyOn(dialer, 'start').mockImplementation(() => {})
         return dialer
       }

@@ -7,50 +7,25 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
-import type { DataImportKinds } from '@slayzone/chat-runtime/server'
 import { afterEach, expect, test } from 'vitest'
-import { z } from 'zod'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { createComputerDataHandoff } from './computer-data-handoff'
+import { buildStoreFixture } from './computer-store-worker.fixture'
 
 const cleanups: Array<() => unknown> = []
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
-/** The kind a later phase registers for real: keyed rows, the newer `at` wins. */
-const probe: DataImportKinds = {
-  probe: {
-    value: z.object({ text: z.string(), at: z.number() }),
-    apply(storage, item) {
-      storage.compose((db) => {
-        db.exec(
-          'CREATE TABLE IF NOT EXISTS probe(key TEXT PRIMARY KEY, task_id TEXT, text TEXT, at INTEGER)'
-        )
-        db.prepare(
-          `INSERT INTO probe VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET text=excluded.text,at=excluded.at
-           WHERE excluded.at > probe.at`
-        ).run(item.key, item.taskId, item.value.text, item.value.at)
-      })
-      // A deterministic failure of the real kinds ("Conversation deleted", "of
-      // another task", a malformed local row): the item's own data cannot apply.
-      if (item.value.text === 'boom') throw new Error('Session of another task')
-    }
-  }
-}
-/** Same rows under the real kinds' names: the priority order is by kind. */
-for (const kind of ['task-path', 'chat-settings', 'agent-session', 'agent-prompt', 'agent-turn'])
-  (probe as Record<string, unknown>)[kind] = probe.probe
-
-function computer(id: string) {
+function computer(id: string, workerPath: string) {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), `handoff-${id}-`))
   const pc = createChatRuntimeHandlers({
     stateDir: dir,
     hubScope: 'hub',
     computerId: () => id,
     getProjectPaths: () => null,
-    dataImports: probe,
+    workerPath,
     ctx: {
       config: {
         hubUrl: 'ws://hub/computers',
@@ -75,7 +50,9 @@ async function fixture() {
   h.db.exec(`INSERT INTO projects(id,name,color) VALUES('p','Project','#000');
     INSERT INTO computers(id,name,platform,version,capabilities_json,created_at) VALUES('pc','pc','linux','1','{}',0),('pc2','pc2','linux','1','{}',0);
     INSERT INTO tasks(id,project_id,title,computer_id) VALUES('t1','p','One','pc'),('t2','p','Two','pc'),('t3','p','Three',NULL);`)
-  const pcs = { pc: computer('pc'), pc2: computer('pc2') }
+  const worker = await buildStoreFixture('handoff')
+  cleanups.push(() => worker.cleanup())
+  const pcs = { pc: computer('pc', worker.path), pc2: computer('pc2', worker.path) }
   const online = new Set(['pc', 'pc2'])
   const sent: Array<{ computerId: string; request: { kind: string } }> = []
   let fail: Error | null = null

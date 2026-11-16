@@ -1,3 +1,6 @@
+import { createOnlineChatStores, type OnlineChatStores } from './computer-online-stores'
+import type { DataImportKinds } from './task-data'
+import type { HostCall } from './computer-store-protocol'
 /** Computer bundle worker branch. SQLite is opened only after this branch is selected. */
 import { isMainThread, threadId } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
@@ -26,16 +29,28 @@ import {
   type StorageOwnerTxns
 } from './storage-owner-protocol'
 
-export function serveChatStorageOwner(): void {
+export function serveChatStorageOwner(compiled: { dataImports?: DataImportKinds } = {}): void {
   if (isMainThread) throw new Error('Chat storage must be owned by a worker')
   let storage: ChatStorage
+  let online: OnlineChatStores | undefined
   let runtime: ReturnType<typeof assembleComputerChatRuntime> | undefined
   let control: StorageOwnerData['control']
   const leases = new Map<string, { release(): void }>()
   const readers = new Map<string, ChatExportReader>()
   const allowed = new Set<string>(STORAGE_METHODS)
   const txns: StorageOwnerTxns = {
-    'chatAuthority.scope': (_db, scope) => readChatScope(storage, scope),
+    'chatRuntime.call': (_db, call) => {
+      if (!online) throw new Error('Online chat store is not open')
+      return online.call(call)
+    },
+    'chatRuntime.timeline': (_db, call) => {
+      if (!online) throw new Error('Online chat store is not open')
+      return online.timeline(call)
+    },
+    'chatAuthority.scope': (_db, scope) => {
+      online?.assertAvailable()
+      return readChatScope(storage, scope)
+    },
     'chatMaintenance.eraseTask': async (_db, { taskId, revision }) => {
       if (!runtime) throw new Error('Chat maintenance profile is not open')
       return runtime.eraseTask(taskId, revision)
@@ -73,7 +88,7 @@ export function serveChatStorageOwner(): void {
     'chatStorage.call': (_db, call: StorageCall) => {
       if (!allowed.has(call.method)) throw new Error('Unknown chat storage operation')
       const fn = storage[call.method] as (...args: unknown[]) => unknown
-      return fn(...call.args)
+      return online ? online.execute(call.args, () => fn(...call.args)) : fn(...call.args)
     },
     'chatStorage.flush': () => storage.flush(),
     'chatStorage.prepareClose': () => storage.maintenance.releasePauseForClose(),
@@ -113,6 +128,20 @@ export function serveChatStorageOwner(): void {
         })
         const db = storage.compose((db) => db)
         db.function('chat_storage_owner_thread', () => threadId)
+        if (data.online && data.maintenance)
+          throw new Error('Online and maintenance profiles cannot share an owner')
+        if (data.online)
+          online = createOnlineChatStores(
+            storage,
+            { ...data.online, stateDir: data.stateDir, hubScope: data.hubScope },
+            {
+              call: bridge.hostCall,
+              copyWorker: bridge.copyWorker,
+              notify: (notification) =>
+                control.postMessage({ type: 'store-notification', notification })
+            },
+            compiled.dataImports
+          )
         if (data.maintenance) {
           runtime = assembleComputerChatRuntime(storage, {
             stateDir: data.stateDir,
@@ -132,6 +161,7 @@ export function serveChatStorageOwner(): void {
       } catch (error) {
         const errors: unknown[] = [error]
         try {
+          await online?.close()
           await (runtime ? runtime.close() : storage?.shutdown())
         } catch (cleanupError) {
           errors.push(cleanupError)
@@ -163,6 +193,7 @@ export function serveChatStorageOwner(): void {
         readers.clear()
         for (const lease of leases.values()) await attempt(() => lease.release())
         leases.clear()
+        if (online) await attempt(() => online!.close())
         await attempt(() => (runtime ? runtime.close() : storage.shutdown()))
         if (errors.length === 1) throw errors[0]
         if (errors.length)
@@ -213,7 +244,10 @@ function createCheckpointerBridge(port: StorageOwnerData['control']) {
     else call.reject(deserializeError(message.error))
   })
   const send = (
-    body: CopyControl | { operation: 'open' | 'close' | 'checkpoint'; final?: boolean }
+    body:
+      | CopyControl
+      | { operation: 'runtime-host'; call: HostCall }
+      | { operation: 'open' | 'close' | 'checkpoint'; final?: boolean }
   ) =>
     new Promise<unknown>((resolve, reject) => {
       const id = ++next
@@ -302,6 +336,7 @@ function createCheckpointerBridge(port: StorageOwnerData['control']) {
       return api
     },
     close,
-    copyWorker
+    copyWorker,
+    hostCall: (call: HostCall) => send({ operation: 'runtime-host', call })
   }
 }

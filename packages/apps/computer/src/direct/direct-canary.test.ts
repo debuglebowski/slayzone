@@ -127,7 +127,7 @@ const handle = startComputer(
       onHubRequest = options.onHubRequest as typeof onHubRequest
       return {
         events: { on: () => undefined },
-        computerId: null,
+        computerId: 'canary-computer',
         start: () => undefined,
         stop: async () => undefined,
         notify: () => true

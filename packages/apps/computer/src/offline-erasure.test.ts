@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import {
   mkdtempSync,
   rmSync,
@@ -24,7 +25,10 @@ const eraseComputerOffline = (
   request: unknown,
   options: { worktreesVerified?: boolean } = {}
 ) =>
-  erase(root, request, { ...options, workerPath: resolve('packages/apps/computer/dist/bin.cjs') })
+  erase(root, request, {
+    ...options,
+    workerPath: fileURLToPath(new URL('../dist/bin.cjs', import.meta.url))
+  })
 
 import { adoptHookJournal, hookJournalPath } from './hook-journal'
 
@@ -246,7 +250,7 @@ test('packaged offline CLI erases through worker dispatch with every main-thread
       [
         '--require',
         guard,
-        resolve('packages/apps/computer/dist/bin.cjs'),
+        fileURLToPath(new URL('../dist/bin.cjs', import.meta.url)),
         '--erase-data',
         requestFile,
         '--receipt',

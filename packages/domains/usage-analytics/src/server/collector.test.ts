@@ -119,3 +119,37 @@ describe('usage collector', () => {
     expect(await c.handle({ ack: { token: 'gone', index: 0 } })).toEqual({ results: [] })
   })
 })
+
+test('overlapping acknowledgements share one durable commit, failed commit can retry', async () => {
+  const { store, cursors } = memoryStore()
+  let release!: () => void, reject!: (error: Error) => void
+  let calls = 0
+  const original = store.commit
+  store.commit = async (entries) => {
+    calls++
+    await new Promise<void>((resolve, rejectCommit) => {
+      release = resolve
+      reject = rejectCommit
+    })
+    await original(entries)
+  }
+  const c = createUsageCollector({
+    store: async () => store,
+    collect: fakeLog('/f', ['a']).collect
+  })
+  const page = await c.handle({})
+  const first = c.handle({ ack: page.receipt })
+  const second = c.handle({ ack: page.receipt })
+  await new Promise((resolve) => setImmediate(resolve))
+  expect(calls).toBe(1)
+  expect(cursors['/f']).toBeUndefined()
+  reject(new Error('native fence failed'))
+  await expect(first).rejects.toThrow('native fence failed')
+  await expect(second).rejects.toThrow('native fence failed')
+  const retry = c.handle({ ack: page.receipt })
+  await new Promise((resolve) => setImmediate(resolve))
+  expect(calls).toBe(2)
+  release()
+  await retry
+  expect(cursors['/f']).toEqual({ offset: 1, modifiedMs: 1 })
+})

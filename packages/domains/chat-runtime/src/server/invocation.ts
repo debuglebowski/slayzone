@@ -1,12 +1,21 @@
 import { parseChatInvocation, CHAT_READ_OPERATIONS, type ChatOperation } from '../shared/protocol'
 import type { createChatOps, ChatQueueRuntime } from '@slayzone/terminal/runtime'
 import type { ChatStorage } from './storage'
-import type { createLocalChatData } from './local-data'
 import { assertChatTabStateScope, type ChatTabStateScope } from '@slayzone/terminal-contracts'
 
 type Runtime = {
-  storage: ChatStorage
-  local: ReturnType<typeof createLocalChatData>
+  storage: {
+    [K in
+      | 'conversation'
+      | 'getRecord'
+      | 'taskLifecycle'
+      | 'acceptCommand'
+      | 'receipt'
+      | 'completeCommand']: (
+      ...args: Parameters<ChatStorage[K]>
+    ) => ReturnType<ChatStorage[K]> | Promise<Awaited<ReturnType<ChatStorage[K]>>>
+  }
+  local?: unknown
   ops: ReturnType<typeof createChatOps>
   queueOps: ReturnType<ChatQueueRuntime['createChatQueueOps']>
 }
@@ -51,7 +60,7 @@ const taskOperations = new Set([
 
 /** Validate ownership before touching runtime state, including when serving a cached receipt. */
 export function createChatInvoker(runtime: Runtime) {
-  const inFlight = new Map<string, Promise<unknown>>()
+  const inFlight = new Map<string, { input: string; promise: Promise<unknown> }>()
   // Side answers belong to the renderer, not durable chat history. A short,
   // bounded cache still lets a disconnected caller recover its response without
   // billing another provider request. The durable receipt fences retries after
@@ -72,7 +81,7 @@ export function createChatInvoker(runtime: Runtime) {
   }
   const invoke = async function (input: unknown): Promise<unknown> {
     const req = parseChatInvocation(input),
-      owner = runtime.storage.conversation(req.route.id)
+      owner = await runtime.storage.conversation(req.route.id)
     if (!owner || owner.identity.epoch !== req.route.epoch)
       throw new Error('Chat ownership epoch mismatch')
     if (owner.state !== 'active') throw new Error(`Chat conversation ${owner.state}`)
@@ -135,11 +144,11 @@ export function createChatInvoker(runtime: Runtime) {
     if (
       !read &&
       !['kill', 'remove'].includes(req.method) &&
-      runtime.storage.getRecord(identity.id, 'settings', 'tab-transition-pending')
+      (await runtime.storage.getRecord(identity.id, 'settings', 'tab-transition-pending'))
     )
       throw new Error('Chat provider transition is pending')
     if (
-      runtime.storage.taskLifecycle(identity.taskId).state !== 'active' &&
+      (await runtime.storage.taskLifecycle(identity.taskId)).state !== 'active' &&
       !read &&
       !['hydrate', 'kill', 'remove'].includes(req.method)
     )
@@ -152,48 +161,54 @@ export function createChatInvoker(runtime: Runtime) {
       throw new Error('Chat storage is unavailable. Restart chat after fixing storage.')
     const operationId = req.operationId!,
       flightKey = JSON.stringify([identity.id, operationId])
-    const accepted = runtime.storage.acceptCommand(identity.id, identity.epoch, operationId, {
-      target: req.target,
-      method: req.method,
-      args: req.args
-    })
-    if (accepted === 'duplicate') {
-      const running = inFlight.get(flightKey)
-      if (running) return running
-      const previous = runtime.storage.receipt(identity.id, operationId)!
-      if (req.method === 'askSideQuestion' && previous.state === 'delivered') {
-        expireEphemeral()
-        const cached = ephemeralResults.get(flightKey)
-        if (cached) return cached.result
-        throw new Error('Ephemeral operation result is unavailable; operation was not repeated')
-      }
-      if (previous.resultExpired)
-        throw new Error('Operation result expired under chat retention; operation was not repeated')
-      if (previous.state === 'delivered') return previous.result
-      throw new Error(
-        'Operation acceptance is durable but completion is unconfirmed; reconcile state before an explicit retry'
-      )
+    const inputKey = JSON.stringify({ target: req.target, method: req.method, args: req.args })
+    const pending = inFlight.get(flightKey)
+    if (pending) {
+      if (pending.input !== inputKey) throw new Error('Operation id reused with different input')
+      return pending.promise
     }
-    const run = Promise.resolve()
-      .then(() => operation(...req.args))
-      .then((result) => {
-        const saved = result ?? null
-        const ephemeral = req.method === 'askSideQuestion'
-        runtime.storage.completeCommand(
-          identity.id,
-          identity.epoch,
-          operationId,
-          ephemeral ? null : saved
-        )
-        if (ephemeral) {
-          const bytes = Buffer.byteLength(JSON.stringify(saved))
-          ephemeralResults.set(flightKey, { result: saved, at: Date.now(), bytes })
-          ephemeralBytes += bytes
+    const run = (async () => {
+      const accepted = await runtime.storage.acceptCommand(
+        identity.id,
+        identity.epoch,
+        operationId,
+        { target: req.target, method: req.method, args: req.args }
+      )
+      if (accepted === 'duplicate') {
+        const previous = (await runtime.storage.receipt(identity.id, operationId))!
+        if (req.method === 'askSideQuestion' && previous.state === 'delivered') {
           expireEphemeral()
+          const cached = ephemeralResults.get(flightKey)
+          if (cached) return cached.result
+          throw new Error('Ephemeral operation result is unavailable; operation was not repeated')
         }
-        return saved
-      })
-    inFlight.set(flightKey, run)
+        if (previous.resultExpired)
+          throw new Error(
+            'Operation result expired under chat retention; operation was not repeated'
+          )
+        if (previous.state === 'delivered') return previous.result
+        throw new Error(
+          'Operation acceptance is durable but completion is unconfirmed; reconcile state before an explicit retry'
+        )
+      }
+      const result = await operation(...req.args)
+      const saved = result ?? null,
+        ephemeral = req.method === 'askSideQuestion'
+      await runtime.storage.completeCommand(
+        identity.id,
+        identity.epoch,
+        operationId,
+        ephemeral ? null : saved
+      )
+      if (ephemeral) {
+        const bytes = Buffer.byteLength(JSON.stringify(saved))
+        ephemeralResults.set(flightKey, { result: saved, at: Date.now(), bytes })
+        ephemeralBytes += bytes
+        expireEphemeral()
+      }
+      return saved
+    })()
+    inFlight.set(flightKey, { input: inputKey, promise: run })
     void run.then(
       () => inFlight.delete(flightKey),
       () => inFlight.delete(flightKey)
@@ -201,11 +216,14 @@ export function createChatInvoker(runtime: Runtime) {
     return run
   }
   return Object.assign(invoke, {
+    settleAll: async () => {
+      await Promise.allSettled([...inFlight.values()].map((work) => work.promise))
+    },
     settle: async (conversationId: string) => {
       await Promise.allSettled(
         [...inFlight]
           .filter(([key]) => (JSON.parse(key) as string[])[0] === conversationId)
-          .map(([, work]) => work)
+          .map(([, work]) => work.promise)
       )
     }
   })

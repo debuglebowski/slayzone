@@ -32,7 +32,7 @@ export interface AgentHookServer {
  */
 export function createAgentHookServer(
   ctx: HandlerContext,
-  onHook?: (hook: ResolvedAgentHook) => void
+  onHook?: (hook: ResolvedAgentHook) => unknown | Promise<unknown>
 ): Promise<AgentHookServer> {
   const server = http.createServer((req, res) => {
     // Only the hook path + POST are meaningful; everything else is a fast 404.
@@ -56,7 +56,7 @@ export function createAgentHookServer(
       }
       chunks.push(c)
     })
-    req.on('end', () => {
+    req.on('end', async () => {
       if (aborted) return
 
       const bodyText = Buffer.concat(chunks).toString('utf8')
@@ -73,14 +73,16 @@ export function createAgentHookServer(
         return
       }
       try {
-        onHook?.(hook)
+        await onHook?.(hook)
       } catch {
-        res
-          .writeHead(503, { 'content-type': 'application/json' })
-          .end('{"error":"Local prompt storage unavailable"}')
+        if (!res.writableEnded && !res.destroyed)
+          res
+            .writeHead(503, { 'content-type': 'application/json' })
+            .end('{"error":"Local prompt storage unavailable"}')
         return
       }
-      res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+      if (!res.writableEnded && !res.destroyed)
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
       try {
         ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: AGENT_HOOK_EVENT_NAME,

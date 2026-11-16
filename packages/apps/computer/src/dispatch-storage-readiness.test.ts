@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import { symlinkSync } from 'node:fs'
+import { build } from 'esbuild'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -143,3 +148,115 @@ test('path/project readiness does not delay validated controls; a placed project
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test.skipIf(process.platform === 'win32')(
+  'real native sync leaves authorized scoped controls responsive across actual online hubs',
+  async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'dispatch-native-owner-')))
+    try {
+      const require = createRequire(import.meta.url)
+      const extension = join(
+        root,
+        process.platform === 'darwin' ? 'syncprobe.dylib' : 'syncprobe.so'
+      )
+      const source = fileURLToPath(
+        new URL(
+          '../../../domains/chat-runtime/src/server/storage-fence.syncprobe.c',
+          import.meta.url
+        )
+      )
+      execFileSync('cc', [
+        '-std=c11',
+        ...(process.platform === 'darwin' ? ['-dynamiclib'] : ['-shared', '-fPIC']),
+        '-O2',
+        '-pthread',
+        '-I',
+        fileURLToPath(
+          new URL('../../../../node_modules/better-sqlite3/deps/sqlite3', import.meta.url)
+        ),
+        source,
+        '-o',
+        extension
+      ])
+      const fixture = join(root, 'dispatch.cjs')
+      symlinkSync(
+        new URL('../../../../node_modules', import.meta.url),
+        join(root, 'node_modules'),
+        'dir'
+      )
+      await build({
+        entryPoints: [
+          fileURLToPath(new URL('./dispatch-storage-readiness.native.fixture.ts', import.meta.url))
+        ],
+        outfile: fixture,
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        target: 'node24',
+        external: [
+          'better-sqlite3',
+          'node-pty',
+          'node-datachannel',
+          'bufferutil',
+          'utf-8-validate'
+        ],
+        logLevel: 'silent',
+        plugins: [
+          {
+            name: 'native-dispatch-fixture',
+            setup(build) {
+              build.onResolve({ filter: /\?raw$/ }, (args) => ({
+                path: require.resolve(args.path.slice(0, -4), { paths: [args.resolveDir] }),
+                namespace: 'raw'
+              }))
+              build.onLoad({ filter: /.*/, namespace: 'raw' }, async (args) => ({
+                contents: await (await import('node:fs/promises')).readFile(args.path, 'utf8'),
+                loader: 'text'
+              }))
+              // Actual packaged worker; fixture bundles only the host/controller dispatch.
+              build.onLoad({ filter: /computer-worker-entry\.ts$/ }, () => ({
+                contents: `export function computerStorageWorkerEntry() {return ${JSON.stringify(fileURLToPath(new URL('../dist/bin.cjs', import.meta.url)))}}`,
+                loader: 'ts'
+              }))
+            }
+          }
+        ]
+      })
+      const output = execFileSync(
+        process.execPath,
+        [
+          '--require',
+          fileURLToPath(
+            new URL(
+              '../../../domains/chat-runtime/src/server/computer-online-no-main-sqlite.fixture.cjs',
+              import.meta.url
+            )
+          ),
+          fixture,
+          root,
+          extension
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          timeout: 25000
+        }
+      )
+      process.stdout.write('POSIX native dispatch proof ' + output.trim() + '\n')
+      expect(JSON.parse(output)).toMatchObject({
+        actualDispatch: true,
+        actualOnlineRuntime: true,
+        packagedWorker: true,
+        multiHub: true,
+        actorChecked: true,
+        scopedPingAndPhysicalStopWhileNativeSyncBlocked: true,
+        freshFilesystemWaited: true,
+        mainConstructorsRefused: true,
+        mainNativeCalls: 0,
+        mainSyncs: 0
+      })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+)

@@ -157,6 +157,8 @@ test('new connectors keep a busy same-contract pre-capability host on chat fallb
     for (const feature of ['chatHistoryPages', 'chatTimelineRowSlices', 'promptSummariesAll'])
       expect(identity[feature]).toBeUndefined()
     await native.rpc.request('connected', { computerId: 'retained-fixture', mode: 'hello' })
+    // Simulate the connector's authenticated identity delivery before scoped work.
+    await native.rpc.request('connected', { computerId: 'computer-1', mode: 'hello' })
     await native.rpc.request('dispatch', {
       method: 'proc.spawn',
       actor,
@@ -350,6 +352,8 @@ test.each([1, 2])(
         protocolVersion: COMPUTER_PROTOCOL_VERSION - 1
       })
       await native.rpc.request('connected', { computerId: 'retained-fixture', mode: 'hello' })
+      // Simulate the connector's authenticated identity delivery before scoped work.
+      await native.rpc.request('connected', { computerId: 'computer-1', mode: 'hello' })
       await native.rpc.request('dispatch', {
         method: 'proc.spawn',
         params: {
@@ -375,6 +379,8 @@ test.each([1, 2])(
       await expect(invoke('getTabState', ['tab', { expectedMode: 'claude-chat' }])).rejects.toThrow(
         /too_big|<=1|at most|Too big/i
       )
+      // Simulate the connector's authenticated identity delivery before scoped work.
+      await native.rpc.request('connected', { computerId: 'computer-1', mode: 'hello' })
       await native.rpc.request('dispatch', {
         method: 'chat.request',
         actor,
@@ -589,6 +595,8 @@ test('supervisor defers retained v2 replacement while busy, then publishes v3 ho
     )
     const grant = await control!.rpc.request<ConnectorGrant>('reserve', { hubUrl: hub.url })
     native = await connectorHost(root, grant, hub.url, {})
+    // Simulate the connector's authenticated identity delivery before scoped work.
+    await native.rpc.request('connected', { computerId: 'computer-1', mode: 'hello' })
     await native.rpc.request('dispatch', {
       method: 'proc.spawn',
       actor,

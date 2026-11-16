@@ -34,7 +34,7 @@ export function createUsageCollectHandlers(
      * This hub's cursor store (its chat store). Throws while the hub's runtime is
      * unavailable: the collect then fails, and the hub asks again next refresh.
      */
-    cursors: () => UsageCursorStore
+    cursors: () => UsageCursorStore | Promise<UsageCursorStore>
     pageBytes?: number
     collect?: typeof collectUsage
     /**
@@ -42,20 +42,22 @@ export function createUsageCollectHandlers(
      * (robustness plan §9: only here). A record of a session it names is
      * attributed to that task before it leaves.
      */
-    taskOf?: (sessionIds: string[]) => Record<string, string>
+    taskOf?: (sessionIds: string[]) => Record<string, string> | Promise<Record<string, string>>
     /**
      * The task whose worktree each folder is, from this computer's task paths (§9
      * Phase 7c: only here). A record no session names is attributed by its folder.
      */
-    taskOfCwd?: (cwds: string[]) => Record<string, string>
+    taskOfCwd?: (cwds: string[]) => Record<string, string> | Promise<Record<string, string>>
   }
 ): HubMethodTable {
   const collectRaw = opts.collect ?? collectUsage
   /** Attribute records `pick` keys to a task through `lookup`; no answer = unattributed. */
-  const attribute = (
+  const attribute = async (
     results: ParseResult[],
     pick: (rec: ParseResult['records'][number]) => string | null | undefined,
-    lookup: ((keys: string[]) => Record<string, string>) | undefined
+    lookup:
+      | ((keys: string[]) => Record<string, string> | Promise<Record<string, string>>)
+      | undefined
   ) => {
     if (!lookup) return
     const keys = new Set<string>()
@@ -67,7 +69,7 @@ export function createUsageCollectHandlers(
     if (!keys.size) return
     let tasks: Record<string, string>
     try {
-      tasks = lookup([...keys])
+      tasks = await lookup([...keys])
     } catch {
       // No store for this hub yet (its chat runtime is not up): unattributed.
       return
@@ -80,8 +82,8 @@ export function createUsageCollectHandlers(
   }
   const collect = async (cursors: UsageCursors): Promise<ParseResult[]> => {
     const results = await collectRaw(cursors)
-    attribute(results, (rec) => rec.sessionId, opts.taskOf)
-    attribute(results, (rec) => rec.cwd, opts.taskOfCwd)
+    await attribute(results, (rec) => rec.sessionId, opts.taskOf)
+    await attribute(results, (rec) => rec.cwd, opts.taskOfCwd)
     return results
   }
   const collector = createUsageCollector({

@@ -45,7 +45,6 @@ import {
   writeSync
 } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { z } from 'zod'
 import { claudeTranscriptPath, locateClaudeTranscript } from '@slayzone/terminal/claude-transcripts'
 import { ptyHistoryDir } from '../pty-history'
 
@@ -55,18 +54,8 @@ const SCROLLBACK_NAME = /^[a-f0-9]{40}\.txt$/
 const ROLLOUT_NAME = /^rollout-[A-Za-z0-9._:-]{1,120}\.jsonl$/
 const ROLLOUT_DATE = /^\d{4}\/\d{2}\/\d{2}$/
 
-export const sessionMoveFileRefSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('claude-transcript'), sessionId: z.string().regex(SAFE_SESSION_ID) }),
-  z.object({ kind: z.literal('pty-history'), name: z.string().regex(SCROLLBACK_NAME) }),
-  z.object({
-    kind: z.literal('codex-rollout'),
-    sessionId: z.string().regex(SAFE_SESSION_ID),
-    /** `YYYY/MM/DD` under the Codex sessions folder. */
-    date: z.string().regex(ROLLOUT_DATE),
-    name: z.string().regex(ROLLOUT_NAME)
-  })
-])
-export type SessionMoveFileRef = z.infer<typeof sessionMoveFileRefSchema>
+export { sessionMoveFileRefSchema, type SessionMoveFileRef } from '@slayzone/chat-runtime/server'
+import { type SessionMoveFileRef } from '@slayzone/chat-runtime/server'
 
 export interface SessionMoveFileEntry {
   ref: SessionMoveFileRef
@@ -168,7 +157,7 @@ export function createSessionMoveFiles(opts: {
   /** The folder this computer keeps `projectId` in, or null. */
   projectFolder(projectId: string): string | null
   /** The Claude session ids the task's ledger knows. */
-  sessionIds(taskId: string): string[]
+  sessionIds(taskId: string): string[] | Promise<string[]>
 }) {
   const historyDir = ptyHistoryDir(opts.stateDir, opts.hubScope)
   const scrollbackDir = (taskId: string): string => {
@@ -219,7 +208,7 @@ export function createSessionMoveFiles(opts: {
             hash: sha256File(path)
           })
         }
-      for (const sessionId of [...new Set(opts.sessionIds(taskId))].sort()) {
+      for (const sessionId of [...new Set(await opts.sessionIds(taskId))].sort()) {
         if (!SAFE_SESSION_ID.test(sessionId)) continue
         const path = await sourcePath(taskId, projectId, { kind: 'claude-transcript', sessionId })
         if (!path) continue
@@ -230,7 +219,7 @@ export function createSessionMoveFiles(opts: {
         })
       }
       // A Codex thread id names its rollout the same way: found by the id, wherever dated.
-      for (const sessionId of [...new Set(opts.sessionIds(taskId))].sort()) {
+      for (const sessionId of [...new Set(await opts.sessionIds(taskId))].sort()) {
         if (!SAFE_SESSION_ID.test(sessionId)) continue
         const found = findCodexRollout(sessionId)
         if (!found) continue

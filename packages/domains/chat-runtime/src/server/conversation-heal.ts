@@ -59,7 +59,7 @@ export interface ConversationHealIo {
   /** The checked-out branch of the repo at `cwd`, or null. */
   currentBranch(cwd: string): Promise<string | null>
   /** Claude's transcript retention in ms (null = unknown). */
-  retentionMs(): number | null
+  retentionMs(): number | null | Promise<number | null>
 }
 
 /** This process's disk, unjailed — for tests and single-machine harnesses only. */
@@ -165,7 +165,7 @@ export async function healConversation(
   }
 
   const storedFirstSeenAtMs = await ledger.getConversationFirstSeenAt(db, storedId)
-  const retentionMs = io.retentionMs()
+  const retentionMs = await io.retentionMs()
   const decision = decideConversationHeal({
     storedId,
     storedExists: false,

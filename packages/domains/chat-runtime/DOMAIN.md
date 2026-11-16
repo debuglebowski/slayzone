@@ -321,3 +321,34 @@ dropped, or restored when it is the only copy).
   are controller evidence, not blocked-native production latency proof. Full
   runtime/local-data/event/caller cutover, chat cancel, provider/control ACK flow,
   staged publication, S7/S8 and final native/scale acceptance remain pending.
+
+
+- 2026-11-16 (fu-2 R1, S6b2b4): production computer handler readiness now opens
+  `openComputerChatRuntime`. Main retains transport/provider/process/queue controllers,
+  scoped filesystem IO, authoritative async readiness, and physical copy/checker
+  lifetimes. Its canonical worker composes local data, queue/prompt transactions,
+  ledger/turn/task-path/import services, attachments/artifacts, transfers, backups,
+  fault ledger, retention/backfills and compaction using the existing transaction
+  bodies. No transaction spans an await. Private compiled typed groups carry data;
+  no callbacks/native handles cross threads. Custom import test fixtures compile
+  their registrations into isolated worker entries. Offline lease purge remains
+  exclusive to the verified stopped maintenance profile.
+  Mutations and metadata notifications await actual owner FULL fences. History
+  publication uses the committed sequence returned by that worker. A failed fence
+  latches the online store unavailable and suppresses notifications; cleanup remains
+  available. Timeline methods retain captured owner/store identities through
+  private data-only adapters. Maintenance holds a main admission/quiescence lease
+  through controller drain, native work and restoration, including failures. Task
+  spawn permits reserve lifetime before fresh native authority and recheck revocation
+  before physical spawn. Lifecycle/deletion/close stop admission and drain accepted
+  main callers, queue drainers and projections before releasing native ownership;
+  stale lifecycle deliveries retain the active controller. Pending starts cannot
+  survive kill/disposal. Hook capture
+  ACK/relay and usage cursor ACKs await the worker's durable reply. Main subscriptions
+  drain late async watch setup after grant revocation; close preserves failed results.
+  POSIX native VFS proofs cover the actual online history pipeline and production
+  actor-validated/scoped multi-hub ping/process stop during blocked native xSync,
+  failed-fence suppression and zero main native calls. Full heartbeat/chat-cancel
+  while provider stdout is held, all-provider/control-ACK bounded-flow proof, shared
+  history scheduling/scale, staged publication/inventory/lifetimes, S7/S8 and fresh
+  review remain required. This production cutover slice does not complete H1/H2.

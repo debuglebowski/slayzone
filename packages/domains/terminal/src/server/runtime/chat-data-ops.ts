@@ -166,7 +166,11 @@ export interface ChatDataOps {
    * One bounded chunk of an out-of-line payload the tab's conversation pins (a blob
    * of another conversation is refused). Absent: no blob store here.
    */
-  readChatEventBlob?(tabId: string, sha256: string, offset: number): ChatBlobChunk
+  readChatEventBlob?(
+    tabId: string,
+    sha256: string,
+    offset: number
+  ): ChatBlobChunk | Promise<ChatBlobChunk>
   /** Original artifact references across this task’s tabs and forks, including reset tabs. */
   loadUserMessageContent?(taskId: string, ids: string[]): Promise<Map<string, UserContentBlock[]>>
   getNextSeqForTab(tabId: string): Promise<number>

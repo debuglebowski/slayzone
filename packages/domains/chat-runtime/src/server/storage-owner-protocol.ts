@@ -1,3 +1,10 @@
+import type {
+  StoreCall,
+  TimelineCall,
+  HostCall,
+  StoreNotification,
+  OnlineStoreData
+} from './computer-store-protocol'
 import type { WirePathScope } from '@slayzone/platform/path-scope'
 import type { ChatScopeSnapshot } from './scope-authority'
 import type { MessagePort } from 'node:worker_threads'
@@ -15,6 +22,7 @@ export interface StorageOwnerData {
   checkpointIntervalMs?: number
   control: MessagePort
   maintenance?: { computerId: string }
+  online?: OnlineStoreData
 }
 
 export const STORAGE_METHODS = [
@@ -128,12 +136,16 @@ export type CopyControl =
   | { operation: 'copy-terminate'; token: string }
 export type ControlRequest = { type: 'request'; id: number } & (
   | CopyControl
+  | { operation: 'runtime-host'; call: HostCall }
   | {
       operation: 'open' | 'close' | 'checkpoint'
       final?: boolean
     }
 )
-export type OwnerControl = ControlRequest | { type: 'purged'; taskId: string }
+export type OwnerControl =
+  | ControlRequest
+  | { type: 'store-notification'; notification: StoreNotification }
+  | { type: 'purged'; taskId: string }
 export type HostControl =
   | { type: 'copy-progress'; token: string; bytes: number }
   | { type: 'copy-exit'; token: string }
@@ -146,6 +158,8 @@ export type MaintenanceResult = { taskId: string; revision: number; erased: true
 
 // One compiled, typed command surface; no function or transaction closure crosses threads.
 export type StorageOwnerTxns = {
+  'chatRuntime.call': (db: Database.Database, call: StoreCall) => Promise<unknown>
+  'chatRuntime.timeline': (db: Database.Database, call: TimelineCall) => unknown
   'chatAuthority.scope': (db: Database.Database, scope: WirePathScope) => ChatScopeSnapshot
   'chatMaintenance.eraseTask': (
     db: Database.Database,
