@@ -151,6 +151,15 @@ export function createSessionMoves(store: ChatStorage) {
   /** Exports running, by move and task: a retry while one runs gets its answer. */
   const exporting = new Map<string, Promise<SessionMoveExport>>()
 
+  function closeReader(reader: ChatExportReader | undefined, failed: boolean): void {
+    try {
+      reader?.close()
+    } catch (error) {
+      if (!failed) throw error
+      console.error('[session-moves] closing failed export snapshot:', error)
+    }
+  }
+
   async function exportTaskNow(moveId: string, taskId: string): Promise<SessionMoveExport> {
     const dir = dirOf(moveId)
     const manifestPath = join(dir, 'manifest.json')
@@ -173,21 +182,27 @@ export function createSessionMoves(store: ChatStorage) {
       // Frozen only while its read snapshot opens (synchronous): live writes go on
       // while the snapshot is streamed to the file.
       store.freeze(conversationId, epoch, migrationId)
-      let reader: ChatExportReader
+      let reader: ChatExportReader | undefined
+      let failed = false
       try {
-        reader = store.openExportReader(conversationId, epoch, migrationId)
-      } finally {
-        store.unfreeze(conversationId, epoch, migrationId)
-      }
-      try {
-        transfers.push(
-          await writeExportTransfer(reader, fileOf(moveId, conversationId), { move: true })
-        )
+        try {
+          reader = store.openExportReader(conversationId, epoch, migrationId)
+        } finally {
+          store.unfreeze(conversationId, epoch, migrationId)
+        }
+        try {
+          transfers.push(
+            await writeExportTransfer(reader, fileOf(moveId, conversationId), { move: true })
+          )
+        } catch (error) {
+          store.recordExportBlobFault(conversationId, error)
+          throw error
+        }
       } catch (error) {
-        store.recordExportBlobFault(conversationId, error)
+        failed = true
         throw error
       } finally {
-        reader.close()
+        closeReader(reader, failed)
       }
     }
     // Read again: another task of the same move may have answered meanwhile.

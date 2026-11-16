@@ -178,8 +178,9 @@ async function fixture(
       failAt = nth
       seen = 0
     },
-    async restart() {
+    async restart(afterClose?: () => void) {
       await computer.close()
+      afterClose?.()
       computer = openComputer()
     },
     async close() {
@@ -564,6 +565,146 @@ async function prepareOldGuardedTransfer(f: Awaited<ReturnType<typeof fixture>>,
   }
   return { owner: (await f.ownership.get('store'))!, manifest: payload.manifest }
 }
+
+/** Scratch operator recovery: restore backed-up events without changing the gate. */
+function restoreGuardedSource(f: Awaited<ReturnType<typeof fixture>>) {
+  const triggers = f.h.db
+    .prepare(
+      "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='chat_events' ORDER BY name"
+    )
+    .all() as Array<{ name: string; sql: string }>
+  f.h.db.transaction(() => {
+    for (const trigger of triggers)
+      f.h.db.exec(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`)
+    f.h.db
+      .prepare("INSERT INTO chat_events(tab_id,seq,event,saved_at) VALUES('tab',0,?,1)")
+      .run(
+        JSON.stringify({ kind: 'assistant-text', messageId: 'old', text: 'sole source history' })
+      )
+    for (const trigger of triggers) f.h.db.exec(trigger.sql)
+  })()
+  expect(
+    f.h.db
+      .prepare(
+        "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='chat_events' ORDER BY name"
+      )
+      .all()
+  ).toEqual(triggers)
+}
+
+test.each(['prepared', 'lost-activation-ack'] as const)(
+  'a failed safety-record write cannot authorize a repaired old %s proof',
+  async (phase) => {
+    const f = await fixture()
+    try {
+      await f.source.assertSafe!((await f.ownership.get('store'))!)
+      const old = await prepareOldGuardedTransfer(f, phase)
+      f.h.db.exec(
+        "CREATE TRIGGER fail_safety_record BEFORE INSERT ON chat_legacy_migration_safety BEGIN SELECT RAISE(ABORT,'safety record write failed'); END"
+      )
+      await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+        'safety record write failed'
+      )
+      f.h.db.exec('DROP TRIGGER fail_safety_record')
+      restoreGuardedSource(f)
+      const before = sourceHistory(f)
+      await f.restart()
+      await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+        /LEGACY_CHAT_HISTORY_UNREPLAYABLE.*proof/i
+      )
+      expect(sourceHistory(f)).toEqual(before)
+      expect(await f.ownership.get('store')).toEqual(old.owner)
+      expect(
+        f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+      ).toEqual({ n: 1 })
+    } finally {
+      await f.close()
+    }
+  }
+)
+
+test('canonical unavailable-owner reseed re-exports repaired history after a failed recovery copy', async () => {
+  const f = await fixture()
+  try {
+    const old = await prepareOldGuardedTransfer(f, 'lost-activation-ack')
+    await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(guardedHistory)
+    restoreGuardedSource(f)
+    const before = sourceHistory(f)
+    // Actual loss of this scratch computer store. Production recovery then
+    // marks the missing owner unavailable and invokes its existing reseed gate.
+    await f.restart(() => rmSync(join(f.dir, 'computer-runtime'), { recursive: true, force: true }))
+    await f.ownership.markUnavailable('store', 'pc', old.owner.epoch)
+    f.failReply('transfer.chunk')
+    await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+      'Lost reply after transfer.chunk'
+    )
+    const pending = (await f.ownership.get('store'))!
+    expect(pending).toMatchObject({ state: 'copying', computerId: null, epoch: 3 })
+    expect(pending.migrationId).not.toBe(old.owner.migrationId)
+    expect(sourceHistory(f).pages).toEqual(before.pages)
+    expect(sourceHistory(f).drafts).toEqual(before.drafts)
+    expect(
+      f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+    ).toEqual({ n: 1 })
+    await f.restart()
+    const complete = await f.migration().ensure('store', 'pc')
+    expect(complete).toMatchObject({ state: 'active', epoch: 4, cleanupPending: false })
+    const local = openChatStorage({ stateDir: f.dir, hubScope: 'audit' })
+    try {
+      expect(local.read('store', -1)).toMatchObject([{ event: { text: 'sole source history' } }])
+    } finally {
+      local.close()
+    }
+    expect(
+      f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+    ).toEqual({ n: 0 })
+  } finally {
+    await f.close()
+  }
+})
+
+test.each(['prepared', 'verified', 'cleanup-pending', 'lost-activation-ack'] as const)(
+  'source repair never authorizes the old empty %s destination proof',
+  async (phase) => {
+    const f = await fixture()
+    try {
+      const old = await prepareOldGuardedTransfer(f, phase)
+      await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(guardedHistory)
+      const before = sourceHistory(f)
+      restoreGuardedSource(f)
+      expect(await f.ownership.get('store')).toEqual(old.owner)
+      await f.restart()
+      for (let retry = 0; retry < 2; retry++) {
+        await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+          /LEGACY_CHAT_HISTORY_UNREPLAYABLE.*(?:proof|generation)/i
+        )
+        expect(await f.ownership.get('store')).toEqual(old.owner)
+        expect(sourceHistory(f)).toEqual(before)
+        expect(f.h.db.prepare("SELECT event FROM chat_events WHERE tab_id='tab'").all()).toEqual([
+          {
+            event: JSON.stringify({
+              kind: 'assistant-text',
+              messageId: 'old',
+              text: 'sole source history'
+            })
+          }
+        ])
+        if (phase === 'cleanup-pending' || phase === 'lost-activation-ack')
+          await expect(f.source.cleanup(old.owner)).rejects.toThrow(
+            /LEGACY_CHAT_HISTORY_UNREPLAYABLE/
+          )
+      }
+      const local = openChatStorage({ stateDir: f.dir, hubScope: 'audit' })
+      try {
+        expect(local.read('store', -1)).toEqual([])
+      } finally {
+        local.close()
+      }
+    } finally {
+      await f.close()
+    }
+  }
+)
 test.each([
   'prepared',
   'verified',
@@ -599,6 +740,29 @@ test.each([
         expect(await f.request('pc', { kind: 'migration.prepared', id: 'store' })).toMatchObject({
           hash: old.manifest.hash
         })
+    } finally {
+      await f.close()
+    }
+  }
+)
+
+test.each(['prepared', 'verified', 'cleanup-pending', 'lost-activation-ack'] as const)(
+  'an unobserved old empty %s proof cannot authorize already-repaired source events',
+  async (phase) => {
+    const f = await fixture()
+    try {
+      const old = await prepareOldGuardedTransfer(f, phase)
+      restoreGuardedSource(f)
+      const before = sourceHistory(f)
+      await f.restart()
+      await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+        /LEGACY_CHAT_HISTORY_UNREPLAYABLE.*proof/i
+      )
+      expect(sourceHistory(f)).toEqual(before)
+      expect(await f.ownership.get('store')).toEqual(old.owner)
+      expect(
+        f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+      ).toEqual({ n: 1 })
     } finally {
       await f.close()
     }
@@ -760,7 +924,7 @@ test('cleanup rechecks source history after activation; an old cleanup caller ca
   }
 })
 
-test.each(['epoch', 'history'] as const)(
+test.each(['epoch', 'history', 'proof'] as const)(
   'cleanup atomically rechecks %s at its final transaction boundary',
   async (change) => {
     const f = await fixture()
@@ -791,7 +955,9 @@ test.each(['epoch', 'history'] as const)(
         f.h.db.exec(
           change === 'epoch'
             ? "UPDATE chat_ownership SET epoch=epoch+1 WHERE id='store'"
-            : "DELETE FROM chat_events WHERE tab_id='tab'"
+            : change === 'proof'
+              ? "UPDATE chat_legacy_migration_safety SET proof_hash='bad-old-proof' WHERE conversation_id='store'"
+              : "DELETE FROM chat_events WHERE tab_id='tab'"
         )
       }
       const batch = f.h.slayDb.batchTxn.bind(f.h.slayDb)

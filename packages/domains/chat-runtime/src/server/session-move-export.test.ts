@@ -328,6 +328,67 @@ test('failed initialization after acquiring a blob lease closes the connection a
   store.unfreeze('c1', 1, 'move:m1')
 })
 
+test('an actual SQLite unfreeze failure closes the acquired snapshot, lease and renewal', async () => {
+  const { store, moves } = computer()
+  store.createConversation({ id: 'c1', taskId: TASK, tabId: 'tab', mode: 'claude-chat', epoch: 1 })
+  store.append('c1', 1, { kind: 'assistant-text', messageId: 'old', text: 'preserved history' }, 1)
+  store.compose((db) =>
+    db.exec(`CREATE TRIGGER fail_export_unfreeze BEFORE UPDATE ON conversations
+    WHEN OLD.state='frozen' AND NEW.state='active' BEGIN SELECT RAISE(ABORT,'simulated unfreeze write failure'); END`)
+  )
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const acquire = vi.spyOn(store, 'acquireBlobLease')
+  let connection: Database.Database | undefined
+  const prepare = Database.prototype.prepare
+  vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (
+    this: Database.Database,
+    sql
+  ) {
+    if (this.readonly) connection = this
+    return prepare.call(this, sql)
+  })
+  await expect(moves.exportTask('m1', TASK)).rejects.toThrow('simulated unfreeze write failure')
+  expect(store.conversation('c1')?.state).toBe('frozen')
+  store.compose((db) => db.exec('DROP TRIGGER fail_export_unfreeze'))
+  store.unfreeze('c1', 1, 'move:m1')
+  expect(store.hasExportReaders()).toBe(false)
+  expect(store.hasBlobLeases()).toBe(false)
+  expect(connection?.open).toBe(false)
+  expect(vi.getTimerCount()).toBe(0)
+  vi.advanceTimersByTime(120_000)
+  expect(acquire).toHaveBeenCalledTimes(1)
+  expect(store.read('c1', -1)[0].event).toMatchObject({ text: 'preserved history' })
+})
+
+test('unfreeze SQLite error remains primary even if closing the acquired snapshot also fails', async () => {
+  const { store, moves } = computer()
+  store.createConversation({ id: 'c1', taskId: TASK, tabId: 'tab', mode: 'claude-chat', epoch: 1 })
+  store.compose((db) =>
+    db.exec(`CREATE TRIGGER fail_export_unfreeze BEFORE UPDATE ON conversations
+    WHEN OLD.state='frozen' AND NEW.state='active' BEGIN SELECT RAISE(ABORT,'primary unfreeze failure'); END`)
+  )
+  const open = store.openExportReader.bind(store)
+  vi.spyOn(store, 'openExportReader').mockImplementation((...args) => {
+    const reader = open(...args)
+    const close = reader.close
+    reader.close = () => {
+      close()
+      throw new Error('secondary close failure')
+    }
+    return reader
+  })
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await expect(moves.exportTask('m1', TASK)).rejects.toThrow('primary unfreeze failure')
+  expect(error).toHaveBeenCalledWith(
+    '[session-moves] closing failed export snapshot:',
+    expect.objectContaining({ message: 'secondary close failure' })
+  )
+  expect(store.hasExportReaders()).toBe(false)
+  expect(store.hasBlobLeases()).toBe(false)
+  store.compose((db) => db.exec('DROP TRIGGER fail_export_unfreeze'))
+  store.unfreeze('c1', 1, 'move:m1')
+})
+
 test('a retained body failing during export closes its reader, blob lease and renewal', async () => {
   const { store, moves } = computer()
   store.createConversation({ id: 'c1', taskId: TASK, tabId: 'tab', mode: 'claude-chat', epoch: 1 })

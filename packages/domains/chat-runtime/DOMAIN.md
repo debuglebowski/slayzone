@@ -51,6 +51,18 @@ These guards do not prove complete partial-event coverage: a high maximum seq
 does not establish replayability. Immutable historical recovery and coverage/
 retention compatibility remain separate work; no baseline format is introduced.
 
+`chat_legacy_migration_safety` binds a migration token/source epoch to its manifest
+hash and captured newest-event header. Unsafe generations remain durably blocked
+after event repair; a zero-event destination proof cannot authorize a nonempty
+source. Prepared proofs are checked before reuse/commit. Active cleanup requires a
+matching saved source-bound receipt; old committed proofs without one defer too.
+Cleanup rechecks both receipt and source headers in its delete transaction. These
+are empty-proof/generation vetoes, not a claim that nonzero counts prove full
+historical equivalence. Repairing source events alone never clears a blocked
+generation. Existing unavailable-owner recovery can reseed at a new fenced epoch
+and re-export; copying/verified generations without such recovery stay deferred
+for managed recovery/support. No ad hoc ownership reset or new baseline format.
+
 Binary payloads of saved events (tool-result screenshots and files, base64 ≥ 1 KiB)
 are stored once in the content-addressed `blobs/` dir; the event keeps a typed
 reference in place (`chat-blobs`, terminal-contracts). Each conversation pins the
@@ -102,6 +114,9 @@ at most one page and writes at most 4 MiB of encoded lines (one whole row always
 Reader construction, failure and close share connection/lease/timer cleanup;
 renewal starts only after construction succeeds. Each reader owns a unique lease,
 so closing an overlapping export cannot release another snapshot's blob protection.
+The task-move caller owns that reader in an outer `finally` covering unfreeze as
+well as streaming. A failed frozen-to-active write closes its snapshot/lease/timer;
+the original error remains primary if close also reports a failure.
 
 Timeline projection records (`kind='timeline'`, derived from the events) are never
 decoded to drop a page range: drops are SQL on ids. `writeTimeline` and discards

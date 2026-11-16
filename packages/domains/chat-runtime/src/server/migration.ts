@@ -5,7 +5,7 @@ import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
 
 export interface ChatMigrationSource {
   /** Cheap conservation check, also required when resuming older prepared state. */
-  assertSafe?(owner: HubChatOwnership): Promise<void>
+  assertSafe?(owner: HubChatOwnership, proof?: ChatTransferManifest): Promise<void>
   /** Called after the durable gate closes. Await all in-flight writers and flush. */
   quiesce(owner: HubChatOwnership): Promise<void>
   /** Deterministic, repeatable stream while the ownership gate is closed. */
@@ -42,11 +42,11 @@ export function createChatMigration(opts: {
   async function run(id: string, computerId: string) {
     let owner = await current(id)
     if (owner.state === 'active' && !owner.cleanupPending) return owner
-    if (owner.state === 'active') await opts.source.assertSafe?.(owner)
     // Committed, but the destination lost its copy before activation: the hub
     // source was never cleaned up, so copy again from it.
     if (owner.state === 'active' && (await opts.ownership.unavailable(id)))
       owner = await opts.ownership.reseedFromSource(id, owner.epoch)
+    if (owner.state === 'active') await opts.source.assertSafe?.(owner)
     if (owner.state === 'legacy') {
       // Deferral must not freeze a task whose existing agents are still running.
       await opts.source.quiesce(owner)
@@ -93,6 +93,7 @@ export function createChatMigration(opts: {
         )
           throw new Error('Prepared destination migration proof mismatch')
         manifest = prepared.manifest
+        await opts.source.assertSafe?.(owner, manifest)
       } else {
         const source = await opts.source.open(owner, migrationId)
         manifest = source.manifest
@@ -143,7 +144,7 @@ export function createChatMigration(opts: {
         missing: ChatAttachment[]
       }
       if (complete.missing.length) throw new Error('Destination attachment verification incomplete')
-      await opts.source.assertSafe?.(owner)
+      await opts.source.assertSafe?.(owner, manifest)
       await opts.ownership.markVerified(id, migrationId, manifest.hash)
       owner = await opts.ownership.commitMigration(id, migrationId, manifest.hash)
     }

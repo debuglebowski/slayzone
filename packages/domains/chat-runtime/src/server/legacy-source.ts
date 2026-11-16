@@ -31,7 +31,7 @@ import type {} from './migration-history-txns'
 function assertReplayable(issue: LegacyHistoryIssue | null): void {
   if (issue)
     throw new Error(
-      `[LEGACY_CHAT_HISTORY_UNREPLAYABLE] Migration deferred: legacy timeline records cannot be proven replayable from stored events (${issue}). Original history and attachments retained on this hub. Validate or restore source events from a verified backup before retrying; contact support if recovery is needed.`
+      `[LEGACY_CHAT_HISTORY_UNREPLAYABLE] Migration deferred (${issue}). Original history and attachments retained on this hub. Repair source history before starting a fresh migration. Existing blocked or unbound destination proofs require fenced recovery/reseed and re-export; restoring source events alone cannot validate that migration generation. Contact support for recovery.`
     )
 }
 
@@ -497,8 +497,13 @@ export function createLegacyChatSource(opts: {
   }
   const source: ChatMigrationSource = {
     quiesce: opts.quiesce,
-    async assertSafe(owner) {
-      assertReplayable(await db.namedTxn('chat-migration:check-source-history', { owner }))
+    async assertSafe(owner, proof) {
+      assertReplayable(
+        await db.namedTxn('chat-migration:check-source-history', {
+          owner,
+          ...(proof ? { proof } : {})
+        })
+      )
     },
     async pinAttachments(owner, refs) {
       if (!refs.length) return
@@ -676,6 +681,7 @@ export function createLegacyChatSource(opts: {
         bytes += b.length
       }
       const manifest: ChatTransferManifest = { header, bytes, hash: hash.digest('hex') }
+      await source.assertSafe!(owner, manifest)
       await db.batchTxn([
         {
           type: 'run',
