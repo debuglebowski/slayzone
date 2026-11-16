@@ -330,6 +330,127 @@ async function openWithServer(
   return h.children[0]
 }
 
+test.each([
+  ['turn-1', false],
+  ['turn-1', true],
+  ['unknown-old-turn', false],
+  ['unknown-old-turn', true]
+] as const)(
+  'late completion %s cannot settle the current turn (approval pending %s)',
+  async (oldTurn, parked) => {
+    const tab = 'tab-late-completion'
+    const server = turnServer()
+    const c = await openWithServer(server, tab)
+    mgr.dispatchUserMessage(tab, { id: 'first', content: [{ type: 'text', text: 'first' }] })
+    await until(() => c.requests('turn/start').length === 1)
+    c.send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } })
+    await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+
+    mgr.dispatchUserMessage(tab, { id: 'second', content: [{ type: 'text', text: 'second' }] })
+    await until(() => c.requests('turn/start').length === 2)
+    c.send({ method: 'turn/started', params: { threadId: 'thr-stop', turn: { id: 'turn-2' } } })
+    if (parked) {
+      c.send({
+        id: 400,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 'thr-stop',
+          turnId: 'turn-2',
+          itemId: 'approval-2',
+          command: 'echo synthetic',
+          cwd: '/tmp'
+        }
+      })
+      await until(() => mgr.isSessionAwaitingUserInput(tab))
+    }
+    c.send({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thr-stop',
+        turn: { id: oldTurn, status: 'completed' }
+      }
+    })
+    // A subsequent packet proves the stale completion passed through the driver.
+    c.send({
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: 'thr-stop',
+        turnId: 'turn-2',
+        itemId: 'second-progress',
+        delta: 'after stale packet'
+      }
+    })
+    c.send({
+      method: 'item/completed',
+      params: {
+        threadId: 'thr-stop',
+        turnId: 'turn-2',
+        item: {
+          type: 'agentMessage',
+          id: 'second-progress',
+          text: 'after stale packet'
+        }
+      }
+    })
+    await until(() =>
+      h.events.some((e) => e.kind === 'assistant-text' && e.text === 'after stale packet')
+    )
+    expect(h.events.filter((e) => e.kind === 'result')).toHaveLength(1)
+    expect(mgr.getTurnStatus(tab)).toMatchObject({
+      state: parked ? 'idle' : 'running',
+      turnOpen: true,
+      pendingRequestIds: parked ? ['400'] : []
+    })
+    expect(mgr.__getOutboxStateForTests(tab, 'second')).toBe('delivered')
+    expect(mgr.isReadyForQueuedMessage(tab)).toBe(false)
+
+    await mgr.stopTurn(tab, stopOpts(tab))
+    expect(c.requests('turn/interrupt').at(-1)).toMatchObject({ turnId: 'turn-2' })
+    await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+  }
+)
+
+test('a fast completion before the start reply settles once and its late start cannot revive it', async () => {
+  setup([handshake('fast-thread', (method) => (method === 'turn/start' ? 'hang' : undefined))])
+  await open('tab-fast-completion', null)
+  const c = h.children[0]
+  mgr.dispatchUserMessage('tab-fast-completion', {
+    id: 'fast-message',
+    content: [{ type: 'text', text: 'synthetic fast request' }]
+  })
+  await until(() => c.requests('turn/start').length === 1)
+  const request = c.stdin.find((message) => message.method === 'turn/start')!
+  c.send({
+    method: 'turn/completed',
+    params: {
+      threadId: 'fast-thread',
+      turn: { id: 'fast-turn', status: 'completed' }
+    }
+  })
+  await until(() => mgr.getTurnStatus('tab-fast-completion')?.turnOpen === false)
+  c.send({ id: request.id, result: { turn: { id: 'fast-turn', status: 'inProgress', items: [] } } })
+  c.send({ method: 'turn/started', params: { threadId: 'fast-thread', turn: { id: 'fast-turn' } } })
+  c.send({
+    method: 'turn/completed',
+    params: {
+      threadId: 'fast-thread',
+      turn: { id: 'fast-turn', status: 'completed' }
+    }
+  })
+  // The following request is a protocol barrier after all the packets above.
+  mgr.dispatchUserMessage('tab-fast-completion', {
+    id: 'following-message',
+    content: [{ type: 'text', text: 'next request' }]
+  })
+  await until(() => c.requests('turn/start').length === 2)
+  expect(h.events.filter((event) => event.kind === 'result')).toHaveLength(1)
+  expect(mgr.__getOutboxStateForTests('tab-fast-completion', 'fast-message')).toBe('answered')
+  expect(mgr.getTurnStatus('tab-fast-completion')).toMatchObject({
+    state: 'running',
+    turnOpen: true
+  })
+})
+
 // A done task keeps no agent: completion stops chats too, even mid-turn. The CLI
 // refuses `slay tasks done` on a task whose agent is mid-reply unless `--force`
 // (REST done/update routes), so reaching this teardown mid-turn is deliberate.

@@ -33,6 +33,23 @@ const history = (n: number) =>
     event: { kind: 'stderr', text: `old ${seq}` } as AgentEvent
   }))
 
+test.each([undefined, 'background-agent'])(
+  'hydrate only interrupts unfinished main tools (parent %s)',
+  async (parentToolUseId) => {
+    const h = transportHarness({
+      history: [
+        { seq: 0, event: { kind: 'interrupted' } },
+        {
+          seq: 1,
+          event: { kind: 'tool-call', id: 'late-tool', name: 'Bash', input: {}, parentToolUseId }
+        }
+      ]
+    })
+    await mgr.hydrateSession({ ...TAB_OPTS })
+    expect(h.savedKinds().includes('interrupted')).toBe(parentToolUseId === undefined)
+  }
+)
+
 test('a replay of a history longer than the in-memory cache returns all of it, in order', async () => {
   const total = CACHED_EVENTS_PER_TAB + 500
   transportHarness({ history: history(total) })

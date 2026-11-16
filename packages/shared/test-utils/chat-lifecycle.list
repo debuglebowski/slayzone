@@ -1,0 +1,14 @@
+packages/domains/terminal/src/server/runtime/chat-lifecycle-contract.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-background-work.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-history.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-turn-status.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-agent-turn.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-chaos.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-stop.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-steer.test.ts
+packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts
+packages/domains/terminal/src/server/agents/codex/codex-chat-session.fake.test.ts
+packages/domains/terminal/src/server/agents/codex/codex-driver-turns.test.ts
+packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
+packages/domains/terminal/src/client/useChatSession.test.tsx

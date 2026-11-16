@@ -1647,7 +1647,15 @@ class CodexChatSession implements ChatSessionDriver {
       }
       case 'turn/completed': {
         const p = params as CodexTurnNotification
-        if (p.turn?.id) this.endedTurns.add(p.turn.id)
+        const id = p.turn?.id
+        // A duplicate completion, or a delayed completion for an older turn,
+        // must not settle the current turn, close its stream, or clear prompts.
+        // A fast turn can complete before turn/start answers with its id: accept
+        // that end while no current id is known, then fence its late start reply.
+        if (id) {
+          if (this.endedTurns.has(id) || (this.currentTurnId && this.currentTurnId !== id)) return
+          this.endedTurns.add(id)
+        }
         this.closeStream(ctx)
         this.emitTurnResult(ctx, p.turn?.status ?? 'completed', p.turn?.durationMs ?? 0)
         this.patchOutput.clear()
