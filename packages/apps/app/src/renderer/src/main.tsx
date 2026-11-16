@@ -16,10 +16,9 @@ import {
   getHubConnectTraces,
   setDirectLinkProbe,
   setDirectRtcPeerFactory,
-  useHubRegistryStore
+  seedHubRegistry
 } from '@slayzone/transport/client'
 import { getHubClient, getTrpcClient, initTrpcClient } from './trpc'
-import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
@@ -154,7 +153,11 @@ if (isFloatingGlobalAgentPanel) {
   // No RemoteConfigScreen fallback here — secondary windows can only be opened
   // from a main window that already has a working server connection.
   Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(
-    ([server, windowId]) => {
+    async ([server, windowId]) => {
+      // Same hub registry as the main window: without it every "is this hub local?"
+      // check (local agents' file:, the camera button, the browser's cookie jar) read
+      // the desktop's own hub as remote in a task window.
+      await seedHubRegistry(server, electronBootstrap)
       createRoot(document.getElementById('root')!).render(
         <TrpcProvider url={withWindowId(server.url, windowId)}>
           <PtyProvider>
@@ -279,15 +282,15 @@ if (isFloatingGlobalAgentPanel) {
     // single-hub tree stays byte-identical. windowId is appended per-hub via the
     // same withWindowId the singleton used. Remote/extra hubs (multi_hub on)
     // carry their own urls from the registry.
-    const hubs: HubEntry[] = registry.hubs.map((h) =>
-      h.id === registry.defaultHubId ? { ...h, url: server.url } : h
-    )
     const decorateUrl = (url: string): string => withWindowId(url, windowId)
     // Seed the live hub registry once with the exact data that used to flow
     // directly into FederationProvider's props. A sign-in pushes fresh tokens
     // into this store post-boot (no relaunch needed) — FederatedRoot below is
     // the seam that turns a store update into an actual re-render.
-    useHubRegistryStore.getState().seed(hubs, registry.defaultHubId, hubTokens)
+    await seedHubRegistry(server, {
+      getHubRegistry: async () => registry,
+      getHubTokens: async () => hubTokens
+    })
 
     performance.mark('sz:reactMount')
     electronBootstrap.bootMark('reactMount')

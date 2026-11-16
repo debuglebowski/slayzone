@@ -133,6 +133,7 @@ import {
   BrowserRelay,
   setBrowserRelayRouterDeps,
   restComputerOf,
+  restPrincipalOf,
   setAuthEvents,
   setComputersDeps,
   setHubAdminDeps,
@@ -2009,6 +2010,8 @@ export function composeServer(opts: {
     // Browser routes run HERE, where the `tasks.browser_tabs` row they read and write
     // lives; each operation on a live tab is relayed to the client that owns it.
     browser: {
+      isDesktopLocalHub: supervised,
+      hasCapableClient: (req) => browserRelay.hasClient(restPrincipalOf(req)?.userId ?? null),
       // The caller is on THIS machine when it reached the hub over loopback directly
       // (no proxy in between), or through the hub's own co-located computer. A client
       // trusts the claim only from its own local hub (task-browser `runRelayRequest`).

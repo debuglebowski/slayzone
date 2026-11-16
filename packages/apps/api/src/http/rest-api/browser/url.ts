@@ -6,6 +6,7 @@ export function registerBrowserUrlRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/browser/url', async (req, res) => {
     const result = await ensureBrowserTab(
       deps,
+      req,
       req.query.taskId as string,
       (req.query.panel as 'visible' | 'hidden') ?? 'hidden',
       res,

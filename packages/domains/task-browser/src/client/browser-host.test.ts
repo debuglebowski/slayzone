@@ -21,7 +21,9 @@ vi.mock('@slayzone/transport/client', () => ({
 vi.mock('./trpc', () => ({ useTRPC: () => ({}), useTRPCClient: () => ({}) }))
 
 const { getBrowserHost } = await import('./browser-host')
-const { runRelayRequest, hubMayNavigateTo } = await import('./useBrowserRelayHost')
+const { runRelayRequest, hubMayNavigateTo, hubSuppliedUrlAllowed } = await import(
+  './useBrowserRelayHost'
+)
 
 const emit = (event: string, payload: unknown): void => {
   for (const l of listeners) l(event, payload)
@@ -38,6 +40,17 @@ describe('getBrowserHost', () => {
   it('is null where the device hosts no web views', () => {
     rawHost = null
     expect(getBrowserHost()).toBeNull()
+  })
+
+  it("strips Electron's IPC error prefix so callers see the host's own message", async () => {
+    invoke.mockRejectedValueOnce(
+      new Error(
+        "Error invoking remote method 'browser-host:invoke': Error: Browser tab not available (task t) — it may have closed."
+      )
+    )
+    await expect(getBrowserHost()!.call('tabs.getUrl', 't', null)).rejects.toThrow(
+      /^Browser tab not available \(task t\)/
+    )
   })
 
   it('call forwards the method and positional args', async () => {
@@ -121,19 +134,19 @@ describe('runRelayRequest', () => {
     await expect(
       runRelayRequest(host(), { ...req, op: 'execJs', code: '6*7' }, panel)
     ).resolves.toBe(42)
-    expect(sent('tabs.execJs').at(-1)).toEqual(['tabs.execJs', ['t', 'x', '6*7']])
+    expect(sent('tabs.execJs').at(-1)?.[1].slice(0, 3)).toEqual(['t', 'x', '6*7'])
 
     await expect(
       runRelayRequest(host(), { ...req, op: 'loadUrl', url: 'https://a.test/' }, panel)
     ).resolves.toBeNull()
-    expect(sent('tabs.loadUrl').at(-1)).toEqual(['tabs.loadUrl', ['t', 'x', 'https://a.test/']])
+    expect(sent('tabs.loadUrl').at(-1)?.[1].slice(0, 3)).toEqual(['t', 'x', 'https://a.test/'])
 
     await expect(runRelayRequest(host(), { ...req, op: 'getUrl' }, panel)).resolves.toBe(
       'https://site.test/'
     )
     // No tab named → the panel's active tab, resolved HERE, never left to the host.
     await runRelayRequest(host(), { ...req, tabId: null, op: 'execJs', code: '1' }, panel)
-    expect(sent('tabs.execJs').at(-1)).toEqual(['tabs.execJs', ['t', 'x', '1']])
+    expect(sent('tabs.execJs').at(-1)?.[1].slice(0, 3)).toEqual(['t', 'x', '1'])
   })
 
   it('sends a capture back as base64 PNG, or null when empty', async () => {
@@ -225,7 +238,7 @@ describe('runRelayRequest', () => {
         reset()
         pageUrl = 'file:///Users/u/.ssh/id_ed25519'
         const r = op === 'execJs' ? { ...req, op, code: 'document.body.innerText' } : { ...req, op }
-        await expect(runRelayRequest(host(), r, panel)).rejects.toThrow(/local page/)
+        await expect(runRelayRequest(host(), r, panel)).rejects.toThrow(/this computer/)
         // Only the URL probe ran: nothing read, driven or captured.
         expect(sent('tabs.execJs')).toEqual([])
         expect(sent('tabs.capturePng')).toEqual([])
@@ -276,6 +289,68 @@ describe('runRelayRequest', () => {
       })
     }
 
+    const privateTargets = [
+      'http://127.0.0.1:51100/health',
+      'http://localhost:3000/',
+      'http://app.localhost/',
+      'http://printer.local/',
+      'http://192.168.1.1/',
+      'http://10.0.0.1/',
+      'http://172.16.0.5/',
+      'http://169.254.169.254/latest/meta-data',
+      'http://[::1]:51100/',
+      'http://[fd00::1]/',
+      'http://0.0.0.0:51100/'
+    ]
+    for (const url of privateTargets) {
+      it(`navigation to ${url} from an untrusted caller (loopback pivot)`, async () => {
+        reset()
+        await expect(
+          runRelayRequest(host(), { ...req, op: 'loadUrl', url }, panel)
+        ).rejects.toThrow(/private network|this computer/)
+        expect(sent('tabs.loadUrl')).toEqual([])
+      })
+    }
+
+    it('reads of a tab showing a private host are refused for untrusted callers', async () => {
+      reset()
+      pageUrl = 'http://127.0.0.1:51100/health'
+      await expect(
+        runRelayRequest(host(), { ...req, op: 'execJs', code: 'fetch("/api/pty")' }, panel)
+      ).rejects.toThrow(/this computer/)
+      expect(sent('tabs.execJs')).toEqual([])
+    })
+
+    it('a local agent on its own local hub keeps localhost (main parity)', async () => {
+      reset()
+      const local = { ...panel, hubIsLocal: true }
+      const r = { ...req, origin: 'hub-machine' as const }
+      await runRelayRequest(host(), { ...r, op: 'loadUrl', url: 'http://localhost:3000/' }, local)
+      pageUrl = 'http://localhost:3000/'
+      await runRelayRequest(host(), { ...r, op: 'execJs', code: '1' }, local)
+      expect(sent('tabs.loadUrl')).toHaveLength(1)
+      expect(sent('tabs.execJs')).toHaveLength(1)
+    })
+
+    it('tells the host when the caller is untrusted, and the result cap', async () => {
+      reset()
+      await runRelayRequest(host(), { ...req, op: 'loadUrl', url: 'https://a.test/' }, panel)
+      expect(sent('tabs.loadUrl').at(-1)?.[1].at(-1)).toEqual({
+        untrusted: true,
+        maxResultBytes: 32 * 1024 * 1024
+      })
+      const local = { ...panel, hubIsLocal: true }
+      await runRelayRequest(
+        host(),
+        { ...req, origin: 'hub-machine', op: 'execJs', code: '1' },
+        local
+      )
+      expect(sent('tabs.execJs').at(-1)?.[1].at(-1)).toEqual({
+        untrusted: false,
+        maxResultBytes: 32 * 1024 * 1024
+      })
+    })
+
     it('a result over the size cap is refused with a clear error', async () => {
       reset()
       evalResult = 'x'.repeat(33 * 1024 * 1024)
@@ -308,5 +383,26 @@ describe('hubMayNavigateTo (hub-supplied URLs: new tab, auto-open)', () => {
     ]) {
       expect(hubMayNavigateTo(u, { fileAllowed: true })).toBe(false)
     }
+  })
+})
+
+describe('hubSuppliedUrlAllowed (open-panel / new-tab / auto-open, with the caller origin)', () => {
+  const remote = { hubIsLocal: false, origin: 'elsewhere' as const }
+  const localAgent = { hubIsLocal: true, origin: 'hub-machine' as const }
+  const elsewhereOnLocal = { hubIsLocal: true, origin: 'elsewhere' as const }
+  it('public web pages from anyone', () => {
+    expect(hubSuppliedUrlAllowed('https://a.test/', remote)).toBe(true)
+  })
+  it('file: and private addresses only for a local agent on its own hub', () => {
+    for (const u of ['file:///tmp/x.html', 'http://127.0.0.1:51100/', 'http://192.168.0.2/']) {
+      expect(hubSuppliedUrlAllowed(u, remote)).toBe(false)
+      expect(hubSuppliedUrlAllowed(u, elsewhereOnLocal)).toBe(false)
+      expect(hubSuppliedUrlAllowed(u, localAgent)).toBe(true)
+    }
+  })
+  it('a missing origin (older hub) is treated as elsewhere', () => {
+    expect(
+      hubSuppliedUrlAllowed('file:///tmp/x.html', { hubIsLocal: true, origin: undefined })
+    ).toBe(false)
   })
 })

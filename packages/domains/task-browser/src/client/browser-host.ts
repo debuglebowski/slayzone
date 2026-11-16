@@ -37,13 +37,23 @@ export const BROWSER_CLIENT_KEY: string =
 
 let cached: { raw: object; client: BrowserHostClient } | null = null
 
+/** Electron wraps a host error as "Error invoking remote method '…': Error: <message>". */
+function withoutIpcPrefix(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err)
+  return new Error(message.replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, ''))
+}
+
 export function getBrowserHost(): BrowserHostClient | null {
   const raw = electronBootstrap.browserHost()
   if (!raw) return null
   if (cached?.raw === raw) return cached.client
   const client: BrowserHostClient = {
     call: (method, ...args) =>
-      raw.invoke(method, args) as Promise<Awaited<ReturnType<BrowserHostMethods[typeof method]>>>,
+      (
+        raw.invoke(method, args) as Promise<Awaited<ReturnType<BrowserHostMethods[typeof method]>>>
+      ).catch((err: unknown) => {
+        throw withoutIpcPrefix(err)
+      }),
     on: (event, listener) => {
       let active = true
       const off = raw.on((name, payload) => {

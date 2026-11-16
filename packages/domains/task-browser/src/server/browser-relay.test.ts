@@ -266,3 +266,48 @@ test('a stale reply (unknown request id) is ignored', () => {
     relay.reply(null, { hostId: a.hostId, requestId: 'nope', ok: true, result: 1 })
   ).not.toThrow()
 })
+
+test('a request that keeps reporting progress is not cut off by the timeout', async () => {
+  vi.useFakeTimers()
+  try {
+    const relay = new BrowserRelay({ requestTimeoutMs: 1000 })
+    const a = host(relay, 't1')
+    relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
+    const p = relay.run('t1', null, { op: 'loadUrl', url: 'https://slow.test/' }, 'elsewhere')
+    const [req] = a.requests()
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(800)
+      relay.progress(null, { hostId: a.hostId, requestId: req.requestId })
+    }
+    relay.reply(null, { hostId: a.hostId, requestId: req.requestId, ok: true, result: null })
+    await expect(p).resolves.toBeNull()
+    // Silence still times out.
+    const q = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+    const assertion = expect(q).rejects.toThrow(/did not answer/)
+    await vi.advanceTimersByTimeAsync(1001)
+    await assertion
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('progress from another principal is refused', () => {
+  const relay = new BrowserRelay()
+  const a = host(relay, 't1', 'alice')
+  expect(() => relay.progress('bob', { hostId: a.hostId, requestId: 'r' })).toThrow(
+    /Unknown browser host/
+  )
+})
+
+test('a desktop app connected for a user, per principal', () => {
+  const relay = new BrowserRelay()
+  expect(relay.hasClient(null)).toBe(false)
+  const off = relay.attachClient('alice')
+  expect(relay.hasClient('alice')).toBe(true)
+  expect(relay.hasClient('bob')).toBe(false)
+  const off2 = relay.attachClient('alice')
+  off()
+  expect(relay.hasClient('alice')).toBe(true)
+  off2()
+  expect(relay.hasClient('alice')).toBe(false)
+})

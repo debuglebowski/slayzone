@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { ALLOWED_NAVIGATE_SCHEMES, requireBrowser } from './shared'
+import { ALLOWED_NAVIGATE_SCHEMES, NO_DESKTOP, refuseTarget, requireBrowser } from './shared'
 import type { RestApiDeps } from '../types'
 
 interface BrowserTabRow {
@@ -39,6 +39,7 @@ export function registerBrowserNewTabRoute(app: Express, deps: RestApiDeps): voi
         res.status(400).json({ error: 'Invalid URL' })
         return
       }
+      if (refuseTarget(browser, req, url, res)) return
     }
 
     if (panel !== 'visible' && panel !== 'hidden') {
@@ -52,15 +53,21 @@ export function registerBrowserNewTabRoute(app: Express, deps: RestApiDeps): voi
       return
     }
 
+    if (!browser.hasCapableClient(req)) {
+      res.status(503).json({ error: NO_DESKTOP })
+      return
+    }
+
     const tabId = generateTabId()
+    const origin = browser.originOf(req)
 
     if (panel === 'visible') {
       // Open panel first (no-op if already open), then dispatch tab creation.
-      deps.menu?.emit('browser-ensure-panel-open', { taskId })
+      deps.menu?.emit('browser-ensure-panel-open', { taskId, origin })
       deps.legacyBroadcast?.('browser:ensure-panel-open', taskId) // slice 5: drop legacy send
     }
 
-    deps.menu?.emit('browser-create-tab', { taskId, tabId, url, background })
+    deps.menu?.emit('browser-create-tab', { taskId, tabId, url, background, origin })
     deps.legacyBroadcast?.('browser:create-tab', { taskId, tabId, url, background }) // slice 5: drop legacy send
 
     try {

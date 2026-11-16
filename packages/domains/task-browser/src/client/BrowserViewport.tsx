@@ -7,6 +7,8 @@ import {
 } from './BrowserTabPlaceholder'
 import { BrowserLoadingAnimation } from './BrowserLoadingAnimation'
 import type { BrowserViewState } from './useBrowserView'
+import { useBrowserPartition, useHubIsLocal } from './useHubIsLocal'
+import { hubMayNavigateTo } from './useBrowserRelayHost'
 
 interface BrowserViewportProps {
   tabs: BrowserTabsState
@@ -41,6 +43,15 @@ export function BrowserViewport({
   setHiddenByOverlay,
   onTabViewChange
 }: BrowserViewportProps) {
+  // The local hub's tasks keep `persist:browser-tabs`; a remote hub's get its own jar.
+  const partition = useBrowserPartition()
+  // Tab URLs stored in a REMOTE hub's row (written by that hub, a template or an
+  // agent) load only if they are web pages — the same scheme rule as a relayed
+  // navigation. The local hub's stored tabs (incl. the user's own local files) load
+  // as they always did.
+  const hubIsLocal = useHubIsLocal()
+  const initialUrl = (url: string | undefined): string =>
+    !url || (!hubIsLocal && !hubMayNavigateTo(url, { fileAllowed: false })) ? 'about:blank' : url
   return (
     <div className="relative flex-1 min-h-0">
       {/* Render a placeholder per tab — each owns its own WebContentsView */}
@@ -50,8 +61,8 @@ export function BrowserViewport({
           ref={getTabRef(tab.id)}
           tabId={tab.id}
           taskId={taskId || ''}
-          url={tab.url || 'about:blank'}
-          partition="persist:browser-tabs"
+          url={initialUrl(tab.url)}
+          partition={partition}
           visible={tab.id === tabs.activeTabId && !extensionsManagerOpen}
           hidden={!!loadError || extensionsManagerOpen || !hasLoadedRealPage}
           offScreen={isActive === false}

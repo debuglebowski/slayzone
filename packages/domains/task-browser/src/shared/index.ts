@@ -27,7 +27,8 @@ export type {
   BrowserHostMethods,
   BrowserHostMethod,
   BrowserHostEvents,
-  BrowserHostEvent
+  BrowserHostEvent,
+  RelayedTabOpts
 } from './browser-host'
 export { BROWSER_HOST_METHODS } from './browser-host'
 export type {
@@ -39,3 +40,9 @@ export type {
   BrowserRelayTabsState
 } from './browser-relay'
 export { BROWSER_RELAY_MAX_RESULT_BYTES } from './browser-relay'
+export {
+  LOCAL_BROWSER_PARTITION,
+  WEB_PANEL_PARTITION,
+  browserPartitionForHub,
+  isBrowserPanelPartition
+} from './browser-partition'

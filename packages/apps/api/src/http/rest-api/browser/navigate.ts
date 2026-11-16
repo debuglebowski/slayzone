@@ -20,7 +20,7 @@ export function registerBrowserNavigateRoute(app: Express, deps: RestApiDeps): v
       res.status(400).json({ error: 'Invalid URL' })
       return
     }
-    const result = await ensureBrowserTab(deps, taskId, panel, res, url, tabId)
+    const result = await ensureBrowserTab(deps, req, taskId, panel, res, url, tabId)
     if (!result) return
     try {
       // Skip loadUrl when panel was just auto-opened — the renderer already created a tab with this URL

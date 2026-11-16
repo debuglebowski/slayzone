@@ -1,4 +1,5 @@
-import type { Response } from 'express'
+import type { Request, Response } from 'express'
+import { isNonPublicHostname } from '@slayzone/platform/browser-network'
 import type { BrowserAccess, RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 
@@ -10,6 +11,47 @@ export interface BrowserTabResult {
   tabId: string | null
   /** true when the panel was just auto-opened (renderer already navigated to `url`) */
   autoOpened: boolean
+}
+
+/** No client that can host the browser panel is connected for the caller. */
+export const NO_DESKTOP =
+  'No SlayZone desktop app is connected to this hub for you; the browser panel runs in the desktop app. Open the task there.'
+
+/**
+ * Refuse (403) a URL the desktop would refuse from this caller, so `slay browser`
+ * says so instead of answering ok while the panel opens blank. The desktop enforces it
+ * regardless (task-browser `runRelayRequest` / `hubMayNavigateTo`); this only reports.
+ * Returns true when it answered.
+ */
+export function refuseTarget(
+  browser: BrowserAccess,
+  req: Request,
+  url: string,
+  res: Response
+): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  const trustedLocal = browser.isDesktopLocalHub && browser.originOf(req) === 'hub-machine'
+  if (trustedLocal) return false
+  if (parsed.protocol === 'file:') {
+    res.status(403).json({
+      error:
+        'A local file can only be opened from the computer the browser runs on (an agent there, on its own hub).'
+    })
+    return true
+  }
+  if (isNonPublicHostname(parsed.hostname)) {
+    res.status(403).json({
+      error:
+        'That address is on this computer or its private network; it can only be opened from the computer the browser runs on.'
+    })
+    return true
+  }
+  return false
 }
 
 /** 501s + returns null when the host has no WCV browser (standalone server). */
@@ -31,6 +73,7 @@ export function requireBrowser(deps: RestApiDeps, res: Response): BrowserAccess 
  */
 export async function ensureBrowserTab(
   deps: RestApiDeps,
+  req: Request,
   taskId: string | undefined,
   panel: 'visible' | 'hidden' | undefined,
   res: Response,
@@ -43,12 +86,18 @@ export async function ensureBrowserTab(
     res.status(400).json({ error: 'taskId required' })
     return null
   }
+  if (url && refuseTarget(browser, req, url, res)) return null
   if (await browser.hasBrowserTab(taskId, tabId)) {
     return { tabId: await browser.getResolvedBrowserTabId(taskId, tabId), autoOpened: false }
   }
+  if (!browser.hasCapableClient(req)) {
+    res.status(503).json({ error: NO_DESKTOP })
+    return null
+  }
 
   if (panel === 'visible') {
-    deps.menu?.emit('browser-ensure-panel-open', { taskId, url, tabId })
+    const origin = browser.originOf(req)
+    deps.menu?.emit('browser-ensure-panel-open', { taskId, url, tabId, origin })
     deps.legacyBroadcast?.('browser:ensure-panel-open', taskId, url, tabId) // slice 5: drop legacy send
     try {
       await browser.waitForBrowserRegistration(taskId, { tabId })

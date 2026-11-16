@@ -71,7 +71,12 @@ import { claimServerPort } from './port-claim.js'
 import { createHubTrpcContext } from './trpc-socket-context.js'
 import { parseCookieHeader, withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
-import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import { cookieOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
+import {
+  apiRequestDecision,
+  trpcUpgradeDecision,
+  type BrowserGuardOptions
+} from './browser-request-guard.js'
 import { createWebSessionRoutes } from './web-session-routes.js'
 import {
   mintBrowserWebSession,
@@ -414,6 +419,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // public origin (plus SLAYZONE_HUB_ALLOWED_WEB_ORIGINS).
   const loopbackBind = !boot.reachable
   const allowedWsOrigins = resolveAllowedWebOrigins()
+  const browserGuard: BrowserGuardOptions = {
+    loopbackBind,
+    supervised,
+    requireLogin: switches.requireLogin,
+    allowedOrigins: allowedWsOrigins,
+    publicHosts: publicHostsOf(boot.publicAddress, allowedWsOrigins)
+  }
   // The web shell's session cookie (T-13) authenticates a `/trpc` socket or a
   // state-changing request only from the hub's own page — see ws-origin.ts.
   const isCookieOriginAllowed = (req: IncomingMessage): boolean =>
@@ -557,7 +569,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     mcpRest.app(req, res)
   }
   let cliRelay: ReturnType<typeof createHubCliRelay> | null = null
-  const gatedDispatch = withRestAuth({
+  const authGatedDispatch = withRestAuth({
     resolveInternalPrincipal: (req) => cliRelay?.principalOf(req),
     getHubAuthRequired: () => hubAuthRequired,
     getSsoActive: () => boot.ssoActive,
@@ -569,6 +581,30 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     isCookieOriginAllowed,
     next: dispatchRequest
   })
+  // The API is for native clients and the hub's own page only (browser-request-guard.ts):
+  // never a page inside SlayZone's browser panel, another site, or a rebound hostname.
+  // In front of auth, for direct and CLI-relayed requests alike.
+  const gatedDispatch = (req: IncomingMessage, res: ServerResponse): void => {
+    const path = (req.url ?? '').split('?')[0]
+    const isApi =
+      path.startsWith('/api/') || path === '/api' || path === '/mcp' || path.startsWith('/mcp/')
+    if (isApi && apiRequestDecision(req, browserGuard) === 'reject') {
+      securityEvent({
+        event: 'authz.denied',
+        outcome: 'denied',
+        actor: null,
+        ip: clientAddress(req),
+        route: routeOf(req.method, req.url),
+        detail: { reason: 'browser-page', origin: req.headers.origin ?? null }
+      })
+      res.writeHead(403, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({ error: 'This hub API does not accept requests from a browser page.' })
+      )
+      return
+    }
+    authGatedDispatch(req, res)
+  }
   const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
     adoptClientAddress(req, trustedProxies)
     // /health answers BEFORE the gate: a liveness probe has no credentials, and
@@ -595,7 +631,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     // owner it acts for passes the same IdP-role gate as a session (hub-auth
     // authorizeDelegatedHuman: persisted mode, current grant, fresh evidence).
     account: async (id) => (hubAuth ? relayOwnerAccount(hubAuth, id) : null),
-    dispatch: gatedDispatch
+    // Relayed requests reach the hub through the computer gateway, not a browser: the
+    // computer's relay demands a per-task bearer and forwards an allow-list of headers
+    // (no Origin, Sec-Fetch-*, cookies; Host is its own fixed "relay"). The browser-page
+    // guard is for this hub's own socket.
+    dispatch: authGatedDispatch
   })
   computerGateway?.setCliRelayHandler(cliRelay.request)
   computerGateway?.events.on('computer-disconnected', ({ computerId }) =>
@@ -606,13 +646,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // The decision is a pure, unit-tested function; this is only the wiring. A hub that
   // other machines can reach accepts only no-Origin (non-browser) callers plus its own
   // configured public origin (`loopbackBind` / `allowedWsOrigins`, defined above).
-  const isAllowedWsOrigin = (origin: string | undefined): boolean =>
-    wsOriginDecision({
-      origin,
-      requireLogin: switches.requireLogin,
-      loopbackBind,
-      allowedOrigins: allowedWsOrigins
-    }) === 'accept'
+
   // Both WS endpoints ride the ONE `httpServer` as `noServer` handlers, demuxed by
   // path in the single `upgrade` listener below. A `server`-bound WSS would destroy
   // any socket whose path it doesn't own, so two endpoints on one server MUST both
@@ -643,7 +677,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Origin guard (was verifyClient; noServer skips it). A drive-by web page or
       // DNS-rebind must not reach the full app router — native/loopback origins only.
       const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
-      if (!isAllowedWsOrigin(origin)) {
+      if (trpcUpgradeDecision(req, browserGuard) === 'reject') {
         // A browser page from another origin (or a DNS rebind) tried to open the full
         // app router — the signature this guard exists for, so it is audited (T-03).
         securityEvent({
@@ -944,4 +978,24 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       log('stopped')
     }
   }
+}
+
+/** Hostnames the hub is published under: its public address and allowed web origins. */
+function publicHostsOf(
+  publicAddress: string | null | undefined,
+  origins: readonly string[]
+): string[] {
+  const hosts = new Set<string>()
+  if (publicAddress) {
+    const a = publicAddress.trim().toLowerCase()
+    hosts.add(a.startsWith('[') ? a.slice(1, a.indexOf(']')) : a.replace(/:\d+$/, ''))
+  }
+  for (const o of origins) {
+    try {
+      hosts.add(new URL(o).hostname.toLowerCase().replace(/^\[|\]$/g, ''))
+    } catch {
+      /* resolveAllowedWebOrigins already dropped unparseable entries */
+    }
+  }
+  return [...hosts]
 }

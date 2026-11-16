@@ -10,7 +10,7 @@ export function registerBrowserEvalRoute(app: Express, deps: RestApiDeps): void 
       res.status(400).json({ error: 'code required' })
       return
     }
-    const bwc = await ensureBrowserTab(deps, taskId, panel, res, undefined, tabId)
+    const bwc = await ensureBrowserTab(deps, req, taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const result = await execJs(

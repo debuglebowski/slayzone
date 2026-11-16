@@ -60,6 +60,8 @@ interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
+  /** Re-arm the silence timer (the client reported progress). */
+  rearm: () => void
 }
 
 interface Waiter {
@@ -87,6 +89,8 @@ export class BrowserRelay {
   private readonly waiters = new Map<string, Waiter[]>()
   /** `lastUseKey(principal, client, task)` → use clock. Survives host detach. */
   private readonly lastUse = new Map<string, number>()
+  /** Connected browser-capable clients per principal. */
+  private readonly clients = new Map<string, number>()
   private readonly requestTimeoutMs: number
   private readonly maxResultBytes: number
   private useClock = 0
@@ -138,6 +142,34 @@ export class BrowserRelay {
       const oldest = this.lastUse.keys().next().value
       if (oldest !== undefined) this.lastUse.delete(oldest)
     }
+  }
+
+  /** The client is still working on a request: its silence timer starts over. */
+  progress(principalKey: string | null, input: { hostId: string; requestId: string }): void {
+    const host = this.requireHost(principalKey, input.hostId)
+    const pending = this.requests.get(input.requestId)
+    if (pending && pending.hostId === host.hostId) pending.rearm()
+  }
+
+  /**
+   * A desktop app (a client that can host the browser panel) is connected for
+   * `principalKey`, panel open or not. Returns the detach.
+   */
+  attachClient(principalKey: string | null): () => void {
+    const key = principalKey ?? ''
+    this.clients.set(key, (this.clients.get(key) ?? 0) + 1)
+    let attached = true
+    return () => {
+      if (!attached) return
+      attached = false
+      const n = (this.clients.get(key) ?? 1) - 1
+      if (n > 0) this.clients.set(key, n)
+      else this.clients.delete(key)
+    }
+  }
+
+  hasClient(principalKey: string | null): boolean {
+    return (this.clients.get(principalKey ?? '') ?? 0) > 0
   }
 
   /** The client's answer to one request. Unknown request ids (late, timed out) are ignored. */
@@ -220,12 +252,25 @@ export class BrowserRelay {
     const targetTabId = tabId ?? host.activeTabId
     const requestId = randomUUID()
     return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      // A SILENCE limit, not a cap: the client reports progress while an operation
+      // runs (a slow page load), and each report re-arms it.
+      const expire = (): void => {
         this.requests.delete(requestId)
         host.pending.delete(requestId)
         reject(new Error('The client showing this browser tab did not answer in time.'))
-      }, this.requestTimeoutMs)
-      this.requests.set(requestId, { hostId: host.hostId, resolve, reject, timer })
+      }
+      const timer = setTimeout(expire, this.requestTimeoutMs)
+      const pending: PendingRequest = {
+        hostId: host.hostId,
+        resolve,
+        reject,
+        timer,
+        rearm: () => {
+          clearTimeout(pending.timer)
+          pending.timer = setTimeout(expire, this.requestTimeoutMs)
+        }
+      }
+      this.requests.set(requestId, pending)
       host.pending.add(requestId)
       try {
         host.send({ type: 'request', requestId, taskId, tabId: targetTabId, origin, ...op })

@@ -167,11 +167,20 @@ export interface BrowserHostMethods {
   'tabs.unregister': (taskId: string, tabId: string) => void
   'tabs.setActive': (taskId: string, tabId: string | null) => void
   /** Runs in the tab's main frame. `tabId` null = the task's active tab. */
-  'tabs.execJs': (taskId: string, tabId: string | null, code: string) => unknown
-  'tabs.loadUrl': (taskId: string, tabId: string | null, url: string) => void
-  'tabs.getUrl': (taskId: string, tabId: string | null) => string | null
+  'tabs.execJs': (
+    taskId: string,
+    tabId: string | null,
+    code: string,
+    opts?: RelayedTabOpts
+  ) => unknown
+  'tabs.loadUrl': (taskId: string, tabId: string | null, url: string, opts?: RelayedTabOpts) => void
+  'tabs.getUrl': (taskId: string, tabId: string | null, opts?: RelayedTabOpts) => string | null
   /** PNG bytes of the visible page; null when the capture came back empty. */
-  'tabs.capturePng': (taskId: string, tabId: string | null) => Uint8Array | null
+  'tabs.capturePng': (
+    taskId: string,
+    tabId: string | null,
+    opts?: RelayedTabOpts
+  ) => Uint8Array | null
 }
 
 export type BrowserHostMethod = keyof BrowserHostMethods
@@ -185,12 +194,24 @@ export interface BrowserHostEvents {
   focused: { viewId: string }
   'create-task-from-link': BrowserCreateTaskFromLinkIntent
   /** Genuine user input in a task's view (throttled) — the hub's idle-close clock. */
-  engaged: { taskId: string }
+  engaged: { taskId: string; hostWebContentsId?: number | null }
   /** A shortcut pressed inside a DOM `<webview>` (multi-device slot). */
   'webview-shortcut': { webviewId: number; key: string; shift: boolean }
 }
 
 export type BrowserHostEvent = keyof BrowserHostEvents
+
+/**
+ * How a relayed `slay browser` op may act. `untrusted`: the caller is a remote hub or
+ * an agent on another computer — the host keeps it to the public internet (no
+ * loopback, private or link-local address, by name, DNS or the IP a response came
+ * from) and returns nothing from a tab that touched one. Results over
+ * `maxResultBytes` are refused where they are produced.
+ */
+export interface RelayedTabOpts {
+  untrusted?: boolean
+  maxResultBytes?: number
+}
 
 /** Every method name, for the host-side dispatcher's allowlist. */
 export const BROWSER_HOST_METHODS = [

@@ -65,13 +65,21 @@ import {
   unregisterBrowserTab,
   setActiveBrowserTab,
   clearBrowserRegistry,
+  setBrowserNetworkGuard,
   browserExecJs,
   browserLoadUrl,
   browserGetUrl,
   browserCapturePng
 } from './browser-registry'
 import { registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
-import type { BrowserViewEvent } from '@slayzone/task-browser/shared'
+import { PrivateNetworkGuard } from './browser-private-network-guard'
+import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
+import {
+  LOCAL_BROWSER_PARTITION,
+  WEB_PANEL_PARTITION,
+  isBrowserPanelPartition,
+  type BrowserViewEvent
+} from '@slayzone/task-browser/shared'
 import {
   BrowserViewManager,
   browserViewEvents,
@@ -789,6 +797,9 @@ const splashHTML = (version: string) => `
 let splashWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
 const browserViewManager = new BrowserViewManager()
+/** Set once the panel sessions are configured (whenReady); validates + sets up a partition. */
+let ensurePanelPartition: ((partition: string) => Electron.Session) | null = null
+let browserNetworkGuardRef: PrivateNetworkGuard | null = null
 // Inline DevTools BrowserView system removed — using native docked DevTools via WebContentsView
 let linearSyncPoller: NodeJS.Timeout | null = null
 let discoveryPoller: NodeJS.Timeout | null = null
@@ -2955,7 +2966,10 @@ app
 
     // Strawberry-style: strip Electron from UA header on every request (belt-and-suspenders
     // alongside session.setUserAgent). No Sec-CH-UA override — let Chromium send native brands.
-    const stripElectronFromHeaders = (
+    // And mark every request as a browser-panel page's: a hub refuses its API to it
+    // (hub browser-request-guard.ts) — no page in the panel may drive a hub, which is
+    // the loopback pivot. Set here, after page script, so a page cannot remove it.
+    const panelRequestHeaders = (
       details: Electron.OnBeforeSendHeadersListenerDetails,
       cb: (resp: Electron.BeforeSendResponse) => void
     ) => {
@@ -2967,10 +2981,33 @@ app
         const cleaned = ua.replace(/\s*Electron\/\S+/i, '').replace(/\s*slayzone\/\S+/i, '')
         if (ua !== cleaned) details.requestHeaders[uaKey] = cleaned
       }
+      details.requestHeaders[BROWSER_PANEL_REQUEST_HEADER] = '1'
       cb({ requestHeaders: details.requestHeaders })
     }
-    browserSession.webRequest.onBeforeSendHeaders(stripElectronFromHeaders)
-    webPanelSession.webRequest.onBeforeSendHeaders(stripElectronFromHeaders)
+    browserSession.webRequest.onBeforeSendHeaders(panelRequestHeaders)
+    webPanelSession.webRequest.onBeforeSendHeaders(panelRequestHeaders)
+
+    // What an untrusted `slay browser` caller can reach (browser-private-network-guard.ts):
+    // the guard sees every request before it is sent and the IP every response came from.
+    // Resolved through the tab session's own Chromium resolver: the same host cache
+    // the connection then uses, so a rebinding answer cannot differ between the two.
+    const browserNetworkGuard = new PrivateNetworkGuard(async (host, wcId) => {
+      const wc = wcId != null ? webContents.fromId(wcId) : undefined
+      const sess = wc && !wc.isDestroyed() ? wc.session : browserSession
+      return (await sess.resolveHost(host)).endpoints.map((e) => e.address)
+    })
+    setBrowserNetworkGuard(browserNetworkGuard)
+    browserNetworkGuardRef = browserNetworkGuard
+    const noteRedirectIp = (details: Electron.OnBeforeRedirectListenerDetails) => {
+      if (typeof details.webContentsId !== 'number') return
+      browserNetworkGuard.noteRedirect(
+        details.webContentsId,
+        details.ip,
+        details.resourceType === 'mainFrame'
+      )
+    }
+    browserSession.webRequest.onBeforeRedirect(noteRedirectIp)
+    webPanelSession.webRequest.onBeforeRedirect(noteRedirectIp)
 
     const shouldCancelLoopbackHandoffRequest = (
       details: Electron.OnBeforeRequestListenerDetails
@@ -3008,6 +3045,16 @@ app
       }
       if (shouldCancelLoopbackHandoffRequest(details)) {
         callback({ cancel: true })
+        return
+      }
+      // A tab an untrusted caller drives reaches the public internet only — every
+      // request (redirects included) re-checked by name and DNS.
+      const wcId = details.webContentsId
+      if (typeof wcId === 'number' && browserNetworkGuard.isUntrusted(wcId)) {
+        browserNetworkGuard.shouldBlock(wcId, details.url).then(
+          (block) => callback({ cancel: block }),
+          () => callback({ cancel: true })
+        )
         return
       }
       callback({ cancel: false })
@@ -3080,21 +3127,50 @@ app
       session.defaultSession.protocol.handle(scheme, blockProtocol)
     }
 
-    browserSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    const panelPermissionRequest = (
+      _webContents: Electron.WebContents,
+      permission: string,
+      callback: (granted: boolean) => void
+    ) => {
       const deniedPermissions = ['geolocation', 'notifications']
       callback(!deniedPermissions.includes(permission))
-    })
+    }
+    const panelDevicePermission = (details: { deviceType: string }) =>
+      details.deviceType === 'hid' || details.deviceType === 'usb'
+    browserSession.setPermissionRequestHandler(panelPermissionRequest)
 
     // Allow all permission checks (Strawberry-style). Without this, Chromium's default
     // behavior may deny checks that BotGuard relies on to validate the environment.
     browserSession.setPermissionCheckHandler(() => true)
 
-    browserSession.setDevicePermissionHandler((details) => {
-      if (details.deviceType === 'hid' || details.deviceType === 'usb') {
-        return true
+    browserSession.setDevicePermissionHandler(panelDevicePermission)
+
+    // A remote hub's tasks browse in that hub's OWN partition (task-browser
+    // browser-partition.ts), set up like the local one — minus extensions, which are
+    // installed on the local partition only — the first time a view or webview asks.
+    const configuredPanelPartitions = new Set<string>([
+      LOCAL_BROWSER_PARTITION,
+      WEB_PANEL_PARTITION
+    ])
+    ensurePanelPartition = (partition: string): Electron.Session => {
+      if (!isBrowserPanelPartition(partition)) {
+        throw new Error(`Not a browser-panel partition: ${partition}`)
       }
-      return false
-    })
+      const sess = session.fromPartition(partition)
+      if (configuredPanelPartitions.has(partition)) return sess
+      configuredPanelPartitions.add(partition)
+      sess.setUserAgent(_chromeUa)
+      sess.webRequest.onBeforeSendHeaders(panelRequestHeaders)
+      sess.webRequest.onBeforeRequest(handleBeforeRequest)
+      sess.webRequest.onBeforeRedirect(noteRedirectIp)
+      sess.protocol.handle('slz-file', slzFileHandler)
+      for (const scheme of BLOCKED_EXTERNAL_PROTOCOLS) sess.protocol.handle(scheme, blockProtocol)
+      sess.setPermissionRequestHandler(panelPermissionRequest)
+      sess.setPermissionCheckHandler(() => true)
+      sess.setDevicePermissionHandler(panelDevicePermission)
+      return sess
+    }
+    browserViewManager.setSessionResolver((partition) => ensurePanelPartition!(partition))
 
     // Initialize Chrome Web Store support for service worker lifecycle management.
     const extensionsPath = join(app.getPath('userData'), 'Extensions')
@@ -3323,6 +3399,10 @@ app
     // The browser panel's client-local host: this app's renderers drive the web views
     // here directly (never through the hub), in local AND remote-hub mode. Registered
     // before any window loads so a renderer's subscribe is never dropped.
+    const userNavigated = (viewId: string): void => {
+      const wcId = browserViewManager.getWebContentsId(viewId)
+      if (wcId != null) browserNetworkGuardRef?.clearUntrusted(wcId)
+    }
     const browserHostImpl: BrowserHostImpl = {
       'view.create': (_s, opts) => browserViewManager.createView(opts),
       'view.destroy': (_s, viewId) => browserViewManager.destroyView(viewId),
@@ -3339,10 +3419,24 @@ app
       'view.showAll': () => browserViewManager.showAll(),
       'view.setHandoffPolicy': (_s, viewId, policy) =>
         browserViewManager.setHandoffPolicy(viewId, policy),
-      'view.navigate': (_s, viewId, url) => browserViewManager.navigate(viewId, url),
-      'view.goBack': (_s, viewId) => browserViewManager.goBack(viewId),
-      'view.goForward': (_s, viewId) => browserViewManager.goForward(viewId),
-      'view.reload': (_s, viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+      // The user navigating a tab makes it theirs again (an untrusted caller's
+      // restriction ends — browser-private-network-guard.ts).
+      'view.navigate': (_s, viewId, url) => {
+        userNavigated(viewId)
+        return browserViewManager.navigate(viewId, url)
+      },
+      'view.goBack': (_s, viewId) => {
+        userNavigated(viewId)
+        return browserViewManager.goBack(viewId)
+      },
+      'view.goForward': (_s, viewId) => {
+        userNavigated(viewId)
+        return browserViewManager.goForward(viewId)
+      },
+      'view.reload': (_s, viewId, ignoreCache) => {
+        userNavigated(viewId)
+        return browserViewManager.reload(viewId, ignoreCache)
+      },
       'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
       'view.executeJs': (_s, viewId, code) => browserViewManager.executeJs(viewId, code),
       'view.insertCss': (_s, viewId, css) => browserViewManager.insertCss(viewId, css),
@@ -3390,10 +3484,10 @@ app
         registerBrowserTab(taskId, tabId, webContentsId),
       'tabs.unregister': (_s, taskId, tabId) => unregisterBrowserTab(taskId, tabId),
       'tabs.setActive': (_s, taskId, tabId) => setActiveBrowserTab(taskId, tabId),
-      'tabs.execJs': (_s, taskId, tabId, code) => browserExecJs(taskId, tabId, code),
-      'tabs.loadUrl': (_s, taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
-      'tabs.getUrl': (_s, taskId, tabId) => browserGetUrl(taskId, tabId),
-      'tabs.capturePng': (_s, taskId, tabId) => browserCapturePng(taskId, tabId)
+      'tabs.execJs': (_s, taskId, tabId, code, opts) => browserExecJs(taskId, tabId, code, opts),
+      'tabs.loadUrl': (_s, taskId, tabId, url, opts) => browserLoadUrl(taskId, tabId, url, opts),
+      'tabs.getUrl': (_s, taskId, tabId, opts) => browserGetUrl(taskId, tabId, opts),
+      'tabs.capturePng': (_s, taskId, tabId, opts) => browserCapturePng(taskId, tabId, opts)
     }
     registerBrowserHostIpc({
       viewEvents: browserViewEvents,
@@ -4708,6 +4802,17 @@ const webviewOps = {
 const WEBVIEW_INIT_SCRIPT = WEBVIEW_DESKTOP_HANDOFF_SCRIPT
 
 app.on('web-contents-created', (_, wc) => {
+  // A DOM <webview> (multi-device emulation) only on a browser-panel partition, set up
+  // like the panel's own views (marker header, network guard).
+  wc.on('will-attach-webview', (event, _prefs, params) => {
+    const partition = params.partition
+    if (!partition) return
+    try {
+      ensurePanelPartition?.(partition)
+    } catch {
+      event.preventDefault()
+    }
+  })
   // No page can veto its unload: Electron has no dialog for it, so a veto silently
   // cancels the close — and an app quit with it (see lifecycle/unload-veto.ts).
   overrideUnloadVetoes(wc, {

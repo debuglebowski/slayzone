@@ -288,6 +288,7 @@ run_harness packages/apps/api/src/routers/hub-local-paths.test.ts
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
 run_harness packages/apps/hub/src/ws-origin.test.ts
+run_harness packages/apps/hub/src/browser-request-guard.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 # Agent-start tracker behind the sidebar's startup card (queued / booting per agent).
@@ -505,6 +506,9 @@ run_harness packages/shared/platform/src/client-settings.test.ts
 # The one-time move out of the shared DB. Copy-only, sentinel-gated, and it must
 # REFUSE the sentinel when read-back fails — a wrong "done" is permanent.
 run_harness packages/apps/app/src/main/client-settings-migration.test.ts
+# Untrusted browser callers reach public addresses only (DNS, rebinding taint)
+run_harness packages/apps/app/src/main/browser-private-network-guard.test.ts
+run_harness packages/apps/app/src/main/browser-host-routing.test.ts
 # Criterion 4: the same migration against a COPY of a real store. Opt-in — no-ops
 # unless SLAYZONE_REAL_STORE_FIXTURE points at a real slayzone.sqlite. Asserts the
 # ORIGINAL is byte-untouched, because a test that reads your live database is one
@@ -683,6 +687,7 @@ run_harness packages/apps/hub/src/tab-change-coalescer.test.ts
 run_harness packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only addresses + the scheme from the HOST (loopback → http/ws, else https/wss).
 run_harness packages/shared/platform/src/hub-addr.test.ts
+run_harness packages/shared/platform/src/browser-network.test.ts
 run_harness packages/shared/platform/src/computer-path.test.ts
 # Security audit events on stdout (T-03).
 run_harness packages/shared/platform/src/security-log.test.ts
@@ -759,9 +764,11 @@ run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 run_harness packages/apps/api/src/routers/history.test.ts
 # Browser relay: which client owns a task's tabs + slay browser request/reply — no DB
 run_harness packages/domains/task-browser/src/server/browser-relay.test.ts
+run_harness packages/domains/task-browser/src/shared/browser-partition.test.ts
 run_harness packages/domains/task-browser/src/server/relay-router.test.ts
 # slay browser screenshot: PNG bytes to the requester, nothing written on the hub
 run_harness packages/apps/api/src/http/rest-api/browser/screenshot.test.ts
+run_harness packages/apps/api/src/http/rest-api/browser/browser-routes.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
@@ -1453,6 +1460,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/task-browser/src/client/browser-host.test.ts \
   packages/domains/task-browser/src/client/useBrowserEngagementForwarder.test.tsx \
+  packages/domains/task-browser/src/client/useHubIsLocal.test.tsx \
   packages/domains/task-browser/src/client/useBrowserFind.test.tsx \
   packages/domains/task-browser/src/client/useBrowserLock.test.tsx \
   packages/domains/task-browser/src/client/useBrowserImportUrls.test.tsx \

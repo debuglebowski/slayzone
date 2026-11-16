@@ -175,7 +175,7 @@ import {
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
-import { getBrowserHost, hubMayNavigateTo } from '@slayzone/task-browser'
+import { getBrowserHost, hubSuppliedUrlAllowed } from '@slayzone/task-browser'
 import type { LinkOpenTarget } from '@slayzone/editor'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
@@ -1728,13 +1728,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     else void trpcClient.app.shell.openExternal.mutate({ url: href })
   })
 
-  // A URL the HUB sends (slay browser new / --panel visible) is loaded on THIS device:
-  // only web pages, plus file: from this device's own local hub (main's behaviour for
-  // local agents). Anything else opens the panel without loading it.
-  const hubUrlAllowed = (url: string | null | undefined): url is string =>
-    !!url &&
-    hubMayNavigateTo(url, {
-      fileAllowed: hubs.some((h) => h.id === (hubId ?? defaultHubId) && h.kind === 'local')
+  // A URL the HUB sends (slay browser new / --panel visible / auto-open) is loaded on
+  // THIS device, by the same rule as a relayed navigation: web pages only — no local
+  // file, no address on this computer or its private network — except for an agent on
+  // this very machine through this device's own local hub (main's behaviour). Anything
+  // else opens the panel without loading it.
+  const hubUrlAllowed = (
+    url: string | null | undefined,
+    origin: 'hub-machine' | 'elsewhere' | undefined
+  ): url is string =>
+    hubSuppliedUrlAllowed(url, {
+      hubIsLocal: hubs.some((h) => h.id === (hubId ?? defaultHubId) && h.kind === 'local'),
+      origin
     })
 
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
@@ -1742,14 +1747,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     ({
       taskId,
       url: rawUrl,
-      tabId
+      tabId,
+      origin
     }: {
       taskId: string
       url?: string | null
       tabId?: string | null
+      origin?: 'hub-machine' | 'elsewhere'
     }) => {
       if (!task || taskId !== task.id) return
-      const url = hubUrlAllowed(rawUrl) ? rawUrl : null
+      const url = hubUrlAllowed(rawUrl, origin) ? rawUrl : null
       if (tabId) {
         // CLI targeted an existing tab — open panel and switch to that tab.
         // The navigate route will load `url` into the targeted tab's webContents.
@@ -1778,16 +1785,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       taskId,
       tabId,
       url,
-      background
+      background,
+      origin
     }: {
       taskId: string
       tabId: string
       url?: string | null
       background?: boolean
+      origin?: 'hub-machine' | 'elsewhere'
     }) => {
       if (!task || taskId !== task.id) return
       handlePanelToggle('browser', true)
-      const tabUrl = hubUrlAllowed(url) ? url : 'about:blank'
+      const tabUrl = hubUrlAllowed(url, origin) ? url : 'about:blank'
       const newTab = {
         id: tabId,
         url: tabUrl,

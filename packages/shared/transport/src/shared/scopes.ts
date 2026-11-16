@@ -281,6 +281,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'app.backup.revealInFinder': 'never',
   'app.backup.setSettings': 'never',
   'app.browserRelay.engaged': 'never',
+  'app.browserRelay.present': 'never',
+  'app.browserRelay.progress': 'never',
   'app.browserRelay.reply': 'never',
   'app.browserRelay.serve': 'never',
   'app.browserRelay.sync': 'never',

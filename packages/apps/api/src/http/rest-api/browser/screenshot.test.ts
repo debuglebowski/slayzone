@@ -20,6 +20,8 @@ const captured: Array<[string, string | null]> = []
 
 const browser: BrowserAccess = {
   originOf: () => 'elsewhere',
+  isDesktopLocalHub: false,
+  hasCapableClient: () => true,
   getResolvedBrowserTabId: async (_taskId, tabId) => tabId ?? 'tab-a',
   listBrowserTabs: async () => [{ tabId: 'tab-a', active: true }],
   hasBrowserTab: async () => true,

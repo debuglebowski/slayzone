@@ -6,6 +6,7 @@ export function registerBrowserContentRoute(app: Express, deps: RestApiDeps): vo
   app.get('/api/browser/content', async (req, res) => {
     const bwc = await ensureBrowserTab(
       deps,
+      req,
       req.query.taskId as string,
       (req.query.panel as 'visible' | 'hidden') ?? 'hidden',
       res,

@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain, type WebContents } from 'electron'
 import type { EventEmitter } from 'node:events'
+import { recipientsFor } from './browser-host-routing'
 import {
   BROWSER_HOST_METHODS,
   type BrowserHostEvent,
@@ -54,11 +55,8 @@ export function registerBrowserHostIpc(deps: BrowserHostIpcDeps): void {
   const subscribers = new Set<WebContents>()
 
   const send = <E extends BrowserHostEvent>(event: E, payload: BrowserHostEvents[E]): void => {
-    for (const wc of subscribers) {
-      if (wc.isDestroyed()) {
-        subscribers.delete(wc)
-        continue
-      }
+    for (const wc of subscribers) if (wc.isDestroyed()) subscribers.delete(wc)
+    for (const wc of recipientsFor(event, payload, [...subscribers])) {
       wc.send('browser-host:event', event, payload)
     }
   }

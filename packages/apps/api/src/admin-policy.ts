@@ -196,6 +196,8 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'app.backup.revealInFinder': 'admin',
   'app.backup.setSettings': 'admin',
   'app.browserRelay.engaged': 'user',
+  'app.browserRelay.present': 'user',
+  'app.browserRelay.progress': 'user',
   'app.browserRelay.reply': 'user',
   'app.browserRelay.serve': 'user',
   'app.browserRelay.sync': 'user',

@@ -105,7 +105,7 @@ export {
 } from './hubIssues'
 export { electronBootstrap } from './electron-bootstrap'
 export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
-export { useHubRegistryStore } from './hubRegistryStore'
+export { useHubRegistryStore, seedHubRegistry } from './hubRegistryStore'
 export {
   useHubOwnershipStore,
   getClientForHub,

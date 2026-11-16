@@ -15,12 +15,18 @@
  */
 
 export interface TaskPaneEventPayloads {
-  'browser-ensure-panel-open': { taskId: string; url?: string | null; tabId?: string | null }
+  'browser-ensure-panel-open': {
+    taskId: string
+    url?: string | null
+    tabId?: string | null
+    origin?: 'hub-machine' | 'elsewhere'
+  }
   'browser-create-tab': {
     taskId: string
     tabId: string
     url?: string | null
     background?: boolean
+    origin?: 'hub-machine' | 'elsewhere'
   }
   'open-artifact': { taskId: string; artifactId: string }
   'respawn-suggested': { taskId: string }

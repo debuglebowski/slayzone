@@ -12,6 +12,7 @@ import {
 import type { DeviceSlot, DeviceEmulation, GridLayout, MultiDeviceConfig } from '../shared'
 import { presetsForSlot } from './device-presets'
 import { DeviceWebview, type DeviceLayout } from './DeviceWebview'
+import { useBrowserPartition } from './useHubIsLocal'
 
 const SLOTS: DeviceSlot[] = ['desktop', 'tablet', 'mobile']
 
@@ -77,6 +78,7 @@ function DeviceColumn({
     onPresetChange?.({ name: 'Custom', width: w, height: h, deviceScaleFactor: 1, mobile: false })
   }
 
+  const partition = useBrowserPartition()
   const labelTop = layout ? layout.topOffset + layout.scaledHeight + 12 : 0
 
   return (
@@ -84,7 +86,7 @@ function DeviceColumn({
       <DeviceWebview
         url={url}
         preset={preset}
-        partition="persist:browser-tabs"
+        partition={partition}
         isResizing={isResizing}
         reloadTrigger={reloadTrigger}
         forceReloadTrigger={forceReloadTrigger}

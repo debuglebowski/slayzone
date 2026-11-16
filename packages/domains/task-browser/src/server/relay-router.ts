@@ -71,6 +71,17 @@ export const appBrowserRelayRouter = router({
       })
     )
     .mutation(({ input, ctx }) => onHost(() => relayDeps().relay.sync(principalKey(ctx), input))),
+  /** A desktop app that can host the browser panel is connected (for as long as this
+   *  stays open), so `slay browser` can say "no desktop app" when none is. */
+  present: publicProcedure.subscription(({ ctx }) =>
+    observable<never>(() => relayDeps().relay.attachClient(principalKey(ctx)))
+  ),
+  /** The client is still working on a request (a slow page load): no timeout yet. */
+  progress: publicProcedure
+    .input(z.object({ hostId: id, requestId: id }))
+    .mutation(({ input, ctx }) =>
+      onHost(() => relayDeps().relay.progress(principalKey(ctx), input))
+    ),
   /** The answer to one relayed request. */
   reply: publicProcedure
     .input(

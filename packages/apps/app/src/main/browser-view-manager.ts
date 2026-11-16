@@ -20,7 +20,10 @@ export const browserViewEvents = new EventEmitter() as EventEmitter & {
   on(event: 'event', listener: (e: unknown) => void): EventEmitter
   on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
   on(event: 'focused', listener: (payload: { viewId: string }) => void): EventEmitter
-  on(event: 'engaged', listener: (payload: { taskId: string }) => void): EventEmitter
+  on(
+    event: 'engaged',
+    listener: (payload: { taskId: string; hostWebContentsId: number | null }) => void
+  ): EventEmitter
   on(event: 'create-task-from-link', listener: (intent: unknown) => void): EventEmitter
   off(event: string, listener: (...args: unknown[]) => void): EventEmitter
 }
@@ -154,6 +157,12 @@ let viewCounter = 0
 export class BrowserViewManager {
   private views = new Map<string, ViewEntry>()
   private mainWindow: BrowserWindow | null = null
+  private sessionResolver: ((partition: string) => Electron.Session) | null = null
+
+  /** How a partition becomes a configured session (validated by the host). */
+  setSessionResolver(resolve: (partition: string) => Electron.Session): void {
+    this.sessionResolver = resolve
+  }
   /** viewId → ts of the last deliberate focus request (focus API / CLI click).
    * The nav focus-steal guard treats focus gains near these as intentional. */
   private explicitFocusAt = new Map<string, number>()
@@ -197,6 +206,10 @@ export class BrowserViewManager {
 
     const viewId = `bv-${++viewCounter}`
     const partition = opts.partition || 'persist:browser-tabs'
+    // Validates the partition and sets its session up (marker header, network guard).
+    const viewSession = this.sessionResolver
+      ? this.sessionResolver(partition)
+      : session.fromPartition(partition)
     const kind: ViewKind = opts.kind ?? 'browser-tab'
 
     // LRU eviction: enforce cap for single-device views (skip web-panel kind)
@@ -209,7 +222,7 @@ export class BrowserViewManager {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
-        session: session.fromPartition(partition),
+        session: viewSession,
         preload: join(__dirname, '../preload/browser-chrome-preload.js')
       }
     })
@@ -1493,7 +1506,10 @@ export class BrowserViewManager {
         // idle clock fresh so it isn't hibernated out from under an active user.
         // The sessions live in the hub, which touches on this event (relayed over
         // the desktop bridge — apps/hub/src/idle-close.ts).
-        browserViewEvents.emit('engaged', { taskId: entry.taskId })
+        browserViewEvents.emit('engaged', {
+          taskId: entry.taskId,
+          hostWebContentsId: this.windowFor(entry)?.webContents.id ?? null
+        })
         browserViewEvents.emit('focused', { viewId })
       },
       onStolen: (owner) => {
@@ -1547,7 +1563,10 @@ export class BrowserViewManager {
       const now = Date.now()
       if (!shouldReportEngagement(lastEngagementTouchAt, now)) return
       lastEngagementTouchAt = now
-      browserViewEvents.emit('engaged', { taskId: entry.taskId })
+      browserViewEvents.emit('engaged', {
+        taskId: entry.taskId,
+        hostWebContentsId: this.windowFor(entry)?.webContents.id ?? null
+      })
     })
 
     wc.on('did-navigate', (_e, url) => {

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from 'react'
 import { Pin } from 'lucide-react'
 import { useSubscription } from '@slayzone/transport/client'
+import { useBrowserEngagementForwarder } from '@slayzone/task-browser/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task, PanelVisibility } from '@slayzone/task-contracts'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
@@ -41,6 +42,9 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   // This window has no board, so it gets no board-driven refresh: refresh the task's
   // per-task queries (artifacts, tags, sub-tasks) on external changes here.
   useTaskScopedQueriesFreshOnTasksChanged()
+  // Input in this window's web views → the task's hub (idle-close, `slay browser` owner).
+  // The main window may be closed (macOS), so this window forwards its own.
+  useBrowserEngagementForwarder()
   const [taskId, setTaskId] = useState(initialTaskId)
   const [data, setData] = useState<TaskDetailData | null>(null)
   const [error, setError] = useState<string | null>(null)

@@ -22,7 +22,7 @@ export function registerBrowserScreenshotRoute(app: Express, deps: RestApiDeps):
       })
       return
     }
-    const bwc = await ensureBrowserTab(deps, taskId, panel, res, undefined, tabId)
+    const bwc = await ensureBrowserTab(deps, req, taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const png = await deps.browser!.capturePng(taskId, bwc.tabId, deps.browser!.originOf(req))

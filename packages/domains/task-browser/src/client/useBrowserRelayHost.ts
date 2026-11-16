@@ -1,5 +1,7 @@
 import { createContext, useContext, useMemo, useRef } from 'react'
-import { useHubId, useHubRegistryStore, useSubscription } from '@slayzone/transport/client'
+import { useSubscription } from '@slayzone/transport/client'
+import { useHubIsLocal } from './useHubIsLocal'
+import { isNonPublicHostname } from '@slayzone/platform/browser-network'
 import { useStableCallback } from '@slayzone/ui'
 import {
   BROWSER_RELAY_MAX_RESULT_BYTES,
@@ -29,6 +31,8 @@ export interface BrowserRelayHostHandle {
 }
 
 const USE_THROTTLE_MS = 5000
+/** Under the hub's 30 s silence limit with room for a slow round trip. */
+const PROGRESS_INTERVAL_MS = 10_000
 
 export const BrowserRelayHostContext = createContext<BrowserRelayHostHandle | null>(null)
 
@@ -44,11 +48,7 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
   const hasHost = getBrowserHost() !== null
   // Whether this panel's hub is this device's OWN local hub: only then does a
   // request's `hub-machine` origin mean anything (see runRelayRequest).
-  const hubId = useHubId()
-  const hubIsLocal = useHubRegistryStore((s) => {
-    const id = hubId ?? s.defaultHubId
-    return s.hubs.some((h) => h.id === id && h.kind === 'local')
-  })
+  const hubIsLocal = useHubIsLocal()
   const hostIdRef = useRef<string | null>(null)
   const lastUseRef = useRef(0)
   const tabsRef = useRef(new Set<string>())
@@ -78,16 +78,30 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
       void settle({ ok: false, error: 'That task is not open here.' })
       return
     }
+    // A slow page load is still work, not silence: report progress so the hub does
+    // not cut the request off (its limit is on silence, not on duration).
+    // Must fire while the window is hidden: agents drive the browser exactly then, and a
+    // missed beat lets the hub cut a slow load off. Lives only as long as one request.
+    // eslint-disable-next-line no-restricted-syntax
+    const keepAlive = setInterval(() => {
+      trpcClient.app.browserRelay.progress
+        .mutate({ hostId, requestId: req.requestId })
+        .catch(() => {
+          /* the reply (or the hub's timeout) settles it */
+        })
+    }, PROGRESS_INTERVAL_MS)
     runRelayRequest(host, req, {
       taskId,
       liveTabIds: tabsRef.current,
       activeTabId: activeRef.current,
       hubIsLocal
-    }).then(
-      (result) => settle({ ok: true, result }),
-      (err: unknown) =>
-        settle({ ok: false, error: err instanceof Error ? err.message : String(err) })
-    )
+    })
+      .then(
+        (result) => settle({ ok: true, result }),
+        (err: unknown) =>
+          settle({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      )
+      .finally(() => clearInterval(keepAlive))
   })
 
   const onFrame = useStableCallback((frame: BrowserRelayFrame) => {
@@ -195,10 +209,15 @@ export async function runRelayRequest(
   }
   const taskId = panel.taskId
 
-  /** Reads and drives only web pages, unless the caller is a trusted local agent. */
+  // What the host enforces for us: an untrusted caller stays on the public internet
+  // (by DNS too) and gets nothing from a tab that touched a non-public address; and
+  // results over the cap are refused where they are produced.
+  const opts = { untrusted: !trustedLocal, maxResultBytes: BROWSER_RELAY_MAX_RESULT_BYTES }
+
+  /** Reads and drives only public web pages, unless the caller is a trusted local agent. */
   const requireWebPage = async (): Promise<void> => {
     if (trustedLocal) return
-    const current = await host.call('tabs.getUrl', taskId, tabId)
+    const current = await host.call('tabs.getUrl', taskId, tabId, opts)
     if (!isRemoteReadable(current)) {
       throw new RelayRefusal('This tab shows a local page; it can only be read from this computer.')
     }
@@ -211,7 +230,7 @@ export async function runRelayRequest(
         throw new RelayRefusal('Malformed browser request.')
       }
       await requireWebPage()
-      result = await host.call('tabs.execJs', taskId, tabId, r.code)
+      result = await host.call('tabs.execJs', taskId, tabId, r.code, opts)
       break
     }
     case 'loadUrl': {
@@ -223,15 +242,20 @@ export async function runRelayRequest(
       if (!hubMayNavigateTo(r.url, { fileAllowed: trustedLocal })) {
         throw new RelayRefusal(`Navigation to ${url.protocol} is not allowed from here.`)
       }
-      await host.call('tabs.loadUrl', taskId, tabId, r.url)
+      if (!trustedLocal && WEB_SCHEMES.has(url.protocol) && isNonPublicHostname(url.hostname)) {
+        throw new RelayRefusal(
+          'That address is on this computer or its private network; it can only be opened from this computer.'
+        )
+      }
+      await host.call('tabs.loadUrl', taskId, tabId, r.url, opts)
       result = null
       break
     }
     case 'getUrl': {
-      const current = await host.call('tabs.getUrl', taskId, tabId)
+      const current = await host.call('tabs.getUrl', taskId, tabId, opts)
       if (!trustedLocal && !isRemoteReadable(current)) {
         throw new RelayRefusal(
-          'This tab shows a local page; it can only be read from this computer.'
+          'This tab shows a page on this computer or its private network; it can only be read from this computer.'
         )
       }
       result = current
@@ -239,7 +263,7 @@ export async function runRelayRequest(
     }
     case 'capturePng': {
       await requireWebPage()
-      const bytes = await host.call('tabs.capturePng', taskId, tabId)
+      const bytes = await host.call('tabs.capturePng', taskId, tabId, opts)
       result = { pngBase64: bytes ? bytesToBase64(bytes) : null }
       break
     }
@@ -269,11 +293,29 @@ export function hubMayNavigateTo(raw: string, opts: { fileAllowed: boolean }): b
   return WEB_SCHEMES.has(url.protocol) || (opts.fileAllowed && url.protocol === 'file:')
 }
 
-/** A page a remote caller may read: a web page, or a blank/empty tab. */
+/**
+ * Whether a URL a hub sends OUTSIDE the relay (open-panel / new-tab / auto-open) may
+ * load here — the relay's own rule: web pages only, never this computer's or its
+ * private network's addresses; `file:` and local addresses only for an agent on this
+ * machine (`origin: hub-machine`) through this device's own local hub.
+ */
+export function hubSuppliedUrlAllowed(
+  url: string | null | undefined,
+  ctx: { hubIsLocal: boolean; origin: 'hub-machine' | 'elsewhere' | undefined }
+): url is string {
+  if (!url) return false
+  const trustedLocal = ctx.hubIsLocal && ctx.origin === 'hub-machine'
+  if (!hubMayNavigateTo(url, { fileAllowed: trustedLocal })) return false
+  if (trustedLocal) return true
+  const parsed = parseUrl(url)
+  return !!parsed && !(WEB_SCHEMES.has(parsed.protocol) && isNonPublicHostname(parsed.hostname))
+}
+
+/** A page a remote caller may read: a public web page, or a blank/empty tab. */
 function isRemoteReadable(current: string | null): boolean {
   if (!current || current === 'about:blank') return true
   const url = parseUrl(current)
-  return !!url && WEB_SCHEMES.has(url.protocol)
+  return !!url && WEB_SCHEMES.has(url.protocol) && !isNonPublicHostname(url.hostname)
 }
 
 function parseUrl(raw: string): URL | null {

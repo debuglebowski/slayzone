@@ -26,3 +26,27 @@ export const useHubRegistryStore = create<HubRegistryState>((set) => ({
   seed: (hubs, defaultHubId, tokens) => set({ hubs, defaultHubId, tokens }),
   setTokens: (tokens) => set({ tokens })
 }))
+
+/**
+ * Seed this window's registry from the host's hub registry — EVERY window does this at
+ * boot (main window and task windows), so "is this hub this device's own?" is answered
+ * the same everywhere. The DEFAULT hub is pinned to the url the window dials
+ * (`server.url`), so its client is the window's boot connection.
+ */
+export async function seedHubRegistry(
+  server: { url: string },
+  bootstrap: {
+    getHubRegistry: () => Promise<{ hubs: HubEntry[]; defaultHubId: string }>
+    getHubTokens: () => Promise<Record<string, string>>
+  }
+): Promise<{ hubs: HubEntry[]; defaultHubId: string; tokens: Record<string, string> }> {
+  const [registry, tokens] = await Promise.all([
+    bootstrap.getHubRegistry(),
+    bootstrap.getHubTokens()
+  ])
+  const hubs = registry.hubs.map((h) =>
+    h.id === registry.defaultHubId ? { ...h, url: server.url } : h
+  )
+  useHubRegistryStore.getState().seed(hubs, registry.defaultHubId, tokens)
+  return { hubs, defaultHubId: registry.defaultHubId, tokens }
+}

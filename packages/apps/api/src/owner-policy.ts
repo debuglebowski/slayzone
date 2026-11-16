@@ -647,6 +647,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.browserRelay.sync': none('a browser host the caller opened (bound to its user)'),
   'app.browserRelay.reply': none('a browser host the caller opened (bound to its user)'),
   'app.browserRelay.engaged': checked(task('taskId')),
+  'app.browserRelay.present': none('marks the caller as a connected desktop app'),
+  'app.browserRelay.progress': none('a browser host the caller opened (bound to its user)'),
   'app.floatingAgent.setEnabled': none(HOST),
   'app.floatingAgent.setSessionId': checked(session('sessionId')),
   'app.floatingAgent.setPanelOpen': none(HOST),

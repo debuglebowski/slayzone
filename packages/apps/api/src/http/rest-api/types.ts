@@ -204,6 +204,12 @@ export interface BrowserAccess {
    * local hub; it is how a local agent keeps file:// navigation and nothing more.
    */
   originOf: (req: IncomingMessage) => 'hub-machine' | 'elsewhere'
+  /** This hub is a desktop app's own local hub: the only hub whose `hub-machine`
+   *  callers a desktop lets load local files (the client decides; this only reports). */
+  isDesktopLocalHub: boolean
+  /** A desktop app that can host the browser panel is connected for this request's
+   *  user (any task). False → the routes say a desktop app is needed. */
+  hasCapableClient: (req: IncomingMessage) => boolean
   getResolvedBrowserTabId: (taskId: string, tabId?: string) => Promise<string | null>
   listBrowserTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
   /** True when a live tab is registered — the "is the panel open?" probe. */
