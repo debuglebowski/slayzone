@@ -1,3 +1,4 @@
+import type { TimelineRecordStore } from './chat-timeline-records'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   LegacyChatStorageRetiredError,
@@ -178,6 +179,8 @@ export interface ChatDataOps {
   /** The tab's saved events — and the timeline projection derived from them. */
   clearChatEventsForTab(tabId: string): Promise<void>
   /** The hub's timeline projection (derived; `chat-timeline-store.ts`). */
+  /** Raw computer-local records, fenced to the owner captured at projection open. */
+  timelineRecords?(tabId: string): TimelineRecordStore
   loadTimelineCheckpoint(tabId: string): Promise<TimelineCheckpointRow | null>
   loadTimelinePages(
     tabId: string,

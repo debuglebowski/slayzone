@@ -124,7 +124,13 @@ export const ComputerTransportErrorCodes = {
    * (answered with this error instead). Not transient. `data`: `{ method, bytes, limitBytes }`
    * (`bytes: null` = too large to serialize at all).
    */
-  frameTooLarge: FRAME_TOO_LARGE_CODE
+  frameTooLarge: FRAME_TOO_LARGE_CODE,
+  /**
+   * `pty.adopt` refused: the session is not running as the named attempt, runs no
+   * output detection, runs as another mode or task, or another start of it is in
+   * flight. Not transient for that attempt; the message says which.
+   */
+  sessionNotAdoptable: -32009
 } as const
 
 /** Is `err` a frame-limit refusal (an `RpcError` with `frameTooLarge`)? */
@@ -238,6 +244,18 @@ export const enrollParamsSchema = z.object({
    * for the whole reads it knows. Additive; no protocol bump.
    */
   chatHistoryPages: z.boolean().optional(),
+  /**
+   * Whether this computer answers a task's prompt summaries in one request
+   * (`prompt.summaries` with `all: true`; FU5). Absent = an older computer: the hub
+   * asks it 500 session ids at a time. Additive; no protocol bump.
+   */
+  promptSummariesAll: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat-runtime `timelinePages` by row slices from a
+   * `startRow` (5th argument). Absent = an older computer: the hub asks it for whole
+   * pages (it refuses a 5th argument). Additive; no protocol bump.
+   */
+  chatTimelineRowSlices: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -284,6 +302,18 @@ export const helloParamsSchema = z.object({
    * for the whole reads it knows. Additive; no protocol bump.
    */
   chatHistoryPages: z.boolean().optional(),
+  /**
+   * Whether this computer answers a task's prompt summaries in one request
+   * (`prompt.summaries` with `all: true`; FU5). Absent = an older computer: the hub
+   * asks it 500 session ids at a time. Additive; no protocol bump.
+   */
+  promptSummariesAll: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat-runtime `timelinePages` by row slices from a
+   * `startRow` (5th argument). Absent = an older computer: the hub asks it for whole
+   * pages (it refuses a 5th argument). Additive; no protocol bump.
+   */
+  chatTimelineRowSlices: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),
@@ -479,7 +509,15 @@ export const computerEventLoopStallPayloadSchema = z.object({
     5
   ).optional(),
   /** Earlier reports the computer could not deliver (hub away, outbox full). */
-  dropped: z.number().int().nonnegative().optional()
+  dropped: z.number().int().nonnegative().optional(),
+  // FU5: the detector's verdict and its evidence (platform `event-loop-stall`). Absent
+  // from an older computer's reports.
+  verdict: z.enum(['busy', 'starved', 'blocked']).optional(),
+  loadAvg1: z.number().nonnegative().nullable().optional(),
+  cpuCount: z.number().int().positive().optional(),
+  majorPageFaults: z.number().int().nonnegative().optional(),
+  voluntaryCtxSwitches: z.number().int().nonnegative().optional(),
+  involuntaryCtxSwitches: z.number().int().nonnegative().optional()
 })
 export type ComputerEventLoopStallPayload = z.infer<typeof computerEventLoopStallPayloadSchema>
 
@@ -699,6 +737,11 @@ export const HubToComputerMethods = {
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
+  /**
+   * Take over a live session as a new attempt (a restarted hub adopting what its
+   * previous run left running) — no process starts or stops. See `ptyAdoptParamsSchema`.
+   */
+  ptyAdopt: 'pty.adopt',
   ptyWarmKill: 'pty.warmKill',
   ptyWarmList: 'pty.warmList',
   // git ops (routed WorktreeExecAdapters — see server/exec-proxies)
@@ -890,6 +933,19 @@ export const ptySpawnParamsSchema = z
      * detected either way. Absent (an older hub): always streamed.
      */
     relay: z.boolean().optional(),
+    /**
+     * A FIRST spawn of this session id by this hub run: if the computer already runs
+     * a live session under the id (a previous hub run left it — hub processes restart,
+     * computers keep their ptys), take that process over as this attempt instead of
+     * replacing it, when it runs detection as `mode`. The reply then carries
+     * `adopted`; otherwise (`replacedLive` says why) it is replaced as before. An
+     * older computer ignores it and replaces.
+     */
+    adoptLive: z
+      .object({
+        mode: z.string().min(1).max(200).optional()
+      })
+      .optional(),
     carryOutput: z
       .object({
         /** The exited attempt whose buffer continues; absent = it is long gone. */
@@ -961,9 +1017,60 @@ export const ptySpawnResultSchema = z.object({
    *  retained session host) that predates it — the hub then detects itself. */
   detection: z.literal(true).optional(),
   /** With `carryOutput`: the highest seq already in the continued buffer. */
-  seq: z.number().int().optional()
+  seq: z.number().int().optional(),
+  /**
+   * With `adoptLive`: the computer took the session it was running over as this
+   * attempt — no process started. `seq` is its highest seq (output up to it is the
+   * session's scrollback, read by replay), `detected` its settled detection.
+   */
+  adopted: z
+    .object({
+      seq: z.number().int(),
+      detected: ptyDetectedSnapshotSchema.optional()
+    })
+    .optional(),
+  /**
+   * With `adoptLive`: a live session under the id was replaced instead of taken over
+   * (the attempt it was, and why — e.g. `mode-mismatch`, `no-detection`).
+   */
+  replacedLive: z
+    .object({
+      spawnId: z.string().min(1).optional(),
+      reason: z.string().min(1).max(64)
+    })
+    .optional()
 })
 export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
+
+/**
+ * Take over a session the computer runs as a new attempt: the restarted hub adopting
+ * what its previous run left running. Nothing starts or stops; from here on the
+ * process answers to `spawnId` (writes, kills, its output and signals carry it). Only
+ * the exact listed attempt (`fromSpawnId`), only one running detection (the hub
+ * mirrors signals, it parses nothing), only as `mode` when given. Refused otherwise.
+ */
+export const ptyAdoptParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  /** The new attempt key the process answers to from now on. */
+  spawnId: z.string().min(1),
+  /** The attempt `pty.list` named: a different (or no) process under the id is refused. */
+  fromSpawnId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  /** Refused unless the session's detection runs as this mode. */
+  mode: z.string().min(1).max(200).optional(),
+  /** See `pty.spawn` `relay`. */
+  relay: z.boolean().optional()
+})
+export type PtyAdoptParams = z.infer<typeof ptyAdoptParamsSchema>
+
+export const ptyAdoptResultSchema = z.object({
+  pid: z.number().int(),
+  /** Its highest seq: everything up to it is scrollback, read by replay. */
+  seq: z.number().int(),
+  detection: z.literal(true),
+  detected: ptyDetectedSnapshotSchema.optional()
+})
+export type PtyAdoptResult = z.infer<typeof ptyAdoptResultSchema>
 
 export const ptyKillParamsSchema = z.object({
   sessionId: z.string().min(1),
@@ -971,6 +1078,17 @@ export const ptyKillParamsSchema = z.object({
   signal: z.string().optional()
 })
 export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>
+
+export const ptyKillResultSchema = z.object({
+  ok: z.literal(true),
+  /**
+   * Whether the named attempt was running here and is now stopped. False: nothing
+   * matched (it exited, or another attempt took the process over). Absent from older
+   * computers — the hub then re-lists to find out.
+   */
+  killed: z.boolean().optional()
+})
+export type PtyKillResult = z.infer<typeof ptyKillResultSchema>
 
 /**
  * The user is now looking at this session: if its spawn is still waiting for an
@@ -1225,7 +1343,17 @@ export const ptyListResultSchema = z.object({
       /** The computer runs output detection for it (absent from older computers). */
       detection: z.literal(true).optional(),
       /** With `detection`: what it has detected so far. */
-      detected: ptyDetectedSnapshotSchema.optional()
+      detected: ptyDetectedSnapshotSchema.optional(),
+      /**
+       * With `detection`: the terminal mode it detects as (what the hub spawned or
+       * adopted it as). A restarted hub adopts a session only into a tab of that mode.
+       * Absent from older computers.
+       */
+      mode: z.string().min(1).max(200).optional(),
+      /** With `detection`: when its process started (ms epoch). Absent from older computers. */
+      startedAt: z.number().int().nonnegative().optional(),
+      /** A later attempt took this process over (`pty.adopt` / `adoptLive`): no start of its own. */
+      adopted: z.literal(true).optional()
     })
   ),
   /** Recently reaped sessions. Absent from older computers, which keep none. */

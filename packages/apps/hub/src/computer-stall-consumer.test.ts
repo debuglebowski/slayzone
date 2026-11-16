@@ -45,6 +45,22 @@ describe('attachComputerStallConsumer', () => {
     expect(recorded[0].message).toContain('7000ms')
   })
 
+  test("keeps the computer's verdict and its evidence (FU5)", () => {
+    const recorded: DiagnosticEvent[] = []
+    const gw = fakeGateway()
+    attachComputerStallConsumer(gw, (e) => recorded.push(e))
+    const evidence = {
+      verdict: 'starved',
+      loadAvg1: 151.2,
+      cpuCount: 10,
+      majorPageFaults: 0,
+      voluntaryCtxSwitches: 0,
+      involuntaryCtxSwitches: 812
+    }
+    gw.emit({ computerId: 'pc-1', name: 'event-loop-stall', payload: { ...stall, ...evidence } })
+    expect(recorded[0]?.payload).toMatchObject(evidence)
+  })
+
   test('ignores other events and malformed reports', () => {
     const recorded: DiagnosticEvent[] = []
     const gw = fakeGateway()

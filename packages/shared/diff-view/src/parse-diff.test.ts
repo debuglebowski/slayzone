@@ -216,6 +216,81 @@ test('addition and deletion counts across hunks', () => {
   expect(f.deletions).toBe(3)
 })
 
+// ── Plain unified diffs (diff -u, svn, hg): no `diff --git` header ──
+
+test('a plain diff -u file is parsed from its ---/+++ headers', () => {
+  const patch = `--- a/src/app.ts\t2026-11-15 10:00:00
++++ b/src/app.ts\t2026-11-15 10:01:00
+@@ -1,3 +1,3 @@
+ const a = 1
+-const b = 2
++const b = 3
+ const c = 4`
+  const files = parseUnifiedDiff(patch)
+  expect(files).toHaveLength(1)
+  expect(files[0].path).toBe('src/app.ts')
+  expect(files[0].oldPath).toBe(null)
+  expect(files[0].additions).toBe(1)
+  expect(files[0].deletions).toBe(1)
+  expect(files[0].hunks[0].lines.map((l) => l.type)).toEqual([
+    'context',
+    'delete',
+    'add',
+    'context'
+  ])
+})
+
+test('plain diffs: several files, renames, and new/deleted files via /dev/null', () => {
+  const patch = `Index: notes
+--- old/name.txt
++++ new/name.txt
+@@ -1 +1 @@
+-x
++y
+--- /dev/null
++++ b/added.txt
+@@ -0,0 +1,2 @@
++one
++two
+--- a/gone.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-bye`
+  const files = parseUnifiedDiff(patch)
+  expect(files.map((f) => f.path)).toEqual(['name.txt', 'added.txt', 'gone.txt'])
+  expect(files[0].oldPath).toBe(null)
+  expect(files[1].isNew).toBe(true)
+  expect(files[1].additions).toBe(2)
+  expect(files[2].isDeleted).toBe(true)
+  expect(files[2].path).toBe('gone.txt')
+})
+
+test('plain diffs: a deleted line that reads like a header stays in its hunk', () => {
+  // SQL comments: deleting "-- note" shows as "--- note"; the hunk's line counts,
+  // not the text, say where the hunk ends.
+  const patch = `--- a/q.sql
++++ b/q.sql
+@@ -1,2 +1,1 @@
+--- note
+ select 1;
+--- a/r.sql
++++ b/r.sql
+@@ -1 +1 @@
+-a
++b`
+  const files = parseUnifiedDiff(patch)
+  expect(files.map((f) => f.path)).toEqual(['q.sql', 'r.sql'])
+  expect(files[0].hunks[0].lines).toEqual([
+    { type: 'delete', content: '-- note', oldLineNo: 1, newLineNo: null },
+    { type: 'context', content: 'select 1;', oldLineNo: 2, newLineNo: 1 }
+  ])
+  expect(files[1].additions).toBe(1)
+})
+
+test('text with no diff in it is no files', () => {
+  expect(parseUnifiedDiff('just some notes\n--- not a header\n')).toEqual([])
+})
+
 // ── computeInlineHighlights ──────────────────────────────────────────
 
 test('empty strings return empty highlights', () => {

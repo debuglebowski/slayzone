@@ -79,11 +79,30 @@ const options = {
   metafile: true
 }
 
-const build = () =>
-  esbuild.build({
-    ...options,
-    define: { ...options.define, __SLAYZONE_COMPUTER_BUILD_ID__: JSON.stringify(randomUUID()) }
+// The worker is pure projection code: it never opens another SQLite connection.
+// Inline its source into the one published executable, and watch its inputs too.
+async function build(write = true) {
+  const worker = await esbuild.build({
+    entryPoints: ['../../domains/terminal/src/server/runtime/chat-timeline-worker-entry.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node20',
+    write: false,
+    metafile: true
   })
+  const result = await esbuild.build({
+    ...options,
+    write,
+    define: {
+      ...options.define,
+      __SLAYZONE_COMPUTER_BUILD_ID__: JSON.stringify(randomUUID()),
+      __SLAYZONE_TIMELINE_WORKER_SOURCE__: JSON.stringify(worker.outputFiles[0].text)
+    }
+  })
+  result.metafile.inputs = { ...result.metafile.inputs, ...worker.metafile.inputs }
+  return result
+}
 
 const initialMetafile = process.argv.includes('--no-initial') ? null : (await build()).metafile
 
@@ -122,7 +141,7 @@ if (process.argv.includes('--watch')) {
   // fails (src is mid-edit), watch src/ until a build succeeds.
   watcher.update(
     initialMetafile ??
-      (await esbuild.build({ ...options, write: false, logLevel: 'silent' }).then(
+      (await build(false).then(
         (r) => r.metafile,
         () => null
       ))

@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
+import { invalidateSoon } from './coalesced-invalidate'
 import { useTRPC } from './trpc'
 import type {
   TaskSessionRow,
@@ -27,19 +28,22 @@ function useAgentSessions(
   tabId?: string
 ): readonly TaskSessionRow[] {
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
 
-  const query = useQuery(
-    trpc.agentSessions.list.queryOptions(
-      { taskId, agentId, ...(tabId ? { tabId } : {}) },
-      { enabled }
-    )
+  const listOptions = trpc.agentSessions.list.queryOptions(
+    { taskId, agentId, ...(tabId ? { tabId } : {}) },
+    { enabled }
   )
+  const query = useQuery(listOptions)
+  // One re-read per burst of notices (FU5): both notices of one change, from every
+  // mounted list of this query, are one re-read — not one `refetch()` each.
+  const listKey = listOptions.queryKey
 
   useSubscription(
     trpc.agentSessions.onChanged.subscriptionOptions(undefined, {
       enabled,
       onData: (changedTaskId) => {
-        if (changedTaskId === taskId) void query.refetch()
+        if (changedTaskId === taskId) invalidateSoon(queryClient, listKey)
       }
     })
   )
@@ -48,7 +52,7 @@ function useAgentSessions(
     trpc.agentPrompts.onChanged.subscriptionOptions(undefined, {
       enabled,
       onData: (changedTaskId) => {
-        if (changedTaskId === taskId) void query.refetch()
+        if (changedTaskId === taskId) invalidateSoon(queryClient, listKey)
       }
     })
   )

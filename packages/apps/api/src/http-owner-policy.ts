@@ -44,8 +44,10 @@ import type { OwnerMark } from './owner-policy'
  *               neither ambiguous nor theirs.
  *   projectRef  a project's id OR a case-insensitive name substring, else a unique
  *               id prefix (`resolveProjectRef`); same rule.
+ *   taskSession exact session ownership for `<taskId>:<tabId>` keys; other keys
+ *               have no task owner and require a separate computer check.
  */
-export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef'
+export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef' | 'taskSession'
 
 /**
  * Where an id sits. REST: `params.<name>`, `query.<name>` or `body.<path>` (dotted;
@@ -101,6 +103,8 @@ const tagPrefix = ref('tag', 'prefix')
 const template = ref('template', 'exact')
 const templatePrefix = ref('template', 'prefix')
 const session = ref('session', 'exact')
+/** Task/tab keys require their task's owner; pooled keys have only a computer owner. */
+const taskSession = ref('session', 'taskSession')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
@@ -153,6 +157,23 @@ const bareRows =
   (toResource: (row: Record<string, unknown>) => OwnedResource | null): HttpOutputFilter =>
   async (body, scope) =>
     Array.isArray(body) ? keepRows(body, toResource, scope) : body
+
+/** Unattached terminal sessions: on the caller's computer, and — when the session
+ *  belongs to a task (`<taskId>:<tabId>`) — of a task the caller may access. */
+const unattachedRows: HttpOutputFilter = async (body, scope) => {
+  if (!Array.isArray(body)) return body
+  const out: unknown[] = []
+  for (const row of body) {
+    if (!isRecord(row)) continue
+    const resources = [res('computer', row.computerId)]
+    if (typeof row.sessionId === 'string' && /^[^:]+:[^:]+$/.test(row.sessionId))
+      resources.push(res('session', row.sessionId))
+    const all = resources.filter((r): r is OwnedResource => r !== null)
+    if (all.length > 0 && resources.every((r) => r !== null) && (await scope.allowsAll(all)))
+      out.push(row)
+  }
+  return out
+}
 
 /** `{ ok, data: [...] }`. */
 const dataRows =
@@ -350,6 +371,17 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/:id/write': checked(session('params.id')),
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
+  // A previous hub run's sessions still running on a computer: its owner's.
+  // And the task's, when the session belongs to one (same rule as tRPC/list).
+  'GET /api/pty/unattached': listed(unattachedRows),
+  'POST /api/pty/unattached/:computerId/:sessionId/attach': checked(
+    computer('params.computerId'),
+    taskSession('params.sessionId')
+  ),
+  'DELETE /api/pty/unattached/:computerId/:sessionId': checked(
+    computer('params.computerId'),
+    taskSession('params.sessionId')
+  ),
 
   // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──
   'GET /api/chat/:id/status': checked(taskPrefix('params.id'), tab('query.tab')),

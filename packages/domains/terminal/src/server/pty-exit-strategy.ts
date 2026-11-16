@@ -14,11 +14,33 @@ export interface ExitContext {
    *  friendly "session expired" dead overlay surfaces instead of burying the
    *  "No conversation found" error in a raw recovery shell. */
   isStale: boolean
+  /** SlayZone asked for this exit ({@link exitWasRequested}): never a recovery shell. A
+   *  computer-routed kill reports a null code, mapped to 1 — the code alone cannot tell. */
+  requested: boolean
 }
 
 /** Should we spawn an interactive shell after the CLI exits? */
 export function shouldShellFallback(ctx: ExitContext): boolean {
-  return ctx.hasPostSpawnCommand && ctx.exitCode !== 0 && !ctx.usedShellFallback && !ctx.isStale
+  return (
+    ctx.hasPostSpawnCommand &&
+    ctx.exitCode !== 0 &&
+    !ctx.usedShellFallback &&
+    !ctx.isStale &&
+    !ctx.requested
+  )
+}
+
+/**
+ * Did SlayZone ask for this exit? A kill (tab close, replace, task done, hand-off),
+ * app shutdown or hibernation ends the session — never a recovery shell, a retry or
+ * a resume, whatever the exit code says.
+ */
+export function exitWasRequested(ctx: {
+  killRequested: boolean
+  shuttingDown: boolean
+  hibernating: boolean
+}): boolean {
+  return ctx.killRequested || ctx.shuttingDown || ctx.hibernating
 }
 
 /**
@@ -167,6 +189,8 @@ export interface RecoveryAdoptionContext {
   sessionReplaced: boolean
   /** App-wide shutdown: the map may still be intact, but no pty may be adopted. */
   isShuttingDown: boolean
+  /** A kill was asked for while it spawned (the tab closed mid round trip). */
+  killRequested: boolean
 }
 
 /** What to do with a recovery shell that has just finished spawning. */
@@ -187,6 +211,7 @@ export type RecoveryAdoption =
  */
 export function decideRecoveryAdoption(ctx: RecoveryAdoptionContext): RecoveryAdoption {
   if (ctx.finalized) return { action: 'discard', finalize: false }
-  if (ctx.sessionReplaced || ctx.isShuttingDown) return { action: 'discard', finalize: true }
+  if (ctx.sessionReplaced || ctx.isShuttingDown || ctx.killRequested)
+    return { action: 'discard', finalize: true }
   return { action: 'adopt' }
 }

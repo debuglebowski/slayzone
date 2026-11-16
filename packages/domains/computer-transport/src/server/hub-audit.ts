@@ -102,6 +102,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   // hub does for the user's own delete, which is audited where it happened.
   'pty.forget': null,
   'pty.warmAdopt': null,
+  // Re-attaches a running session to this hub (after a hub restart); starts nothing.
+  'pty.adopt': null,
   'pty.warmList': null,
   // AI-config files: its writes (instructions, skills, MCP config) are audited, its
   // reads are not.

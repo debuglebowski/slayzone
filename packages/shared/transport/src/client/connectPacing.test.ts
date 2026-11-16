@@ -175,6 +175,81 @@ describe('connect pacing for an unreachable hub', () => {
     expect(probe).toHaveBeenCalledTimes(1)
   })
 
+  it("a probe still out when the loop's attempt comes due yields to the schedule", async () => {
+    let answer: (up: boolean) => void = () => undefined
+    const probe = vi.fn(
+      (_url: string) =>
+        new Promise<boolean>((r) => {
+          answer = r
+        })
+    )
+    const { pacer, clock, t0 } = await pacerInFailureStreak(probe)
+
+    // A query probes 100ms before the loop's attempt is due; the (wrong, slow) "down"
+    // arrives after it. The loop's attempt joins this one, so it must get a socket.
+    clock.set(t0 + 1900)
+    const joined = pacer.url()
+    clock.set(t0 + 2100)
+    answer(false)
+    expect(await joined).toBe(WS_URL)
+
+    // A "down" that arrives while the loop is still sleeping defers, as before.
+    pacer.onCloseOrError()
+    expect(pacer.retryDelayMs(2)).toBe(4000)
+    clock.set(t0 + 2200)
+    const early = pacer.url()
+    answer(false)
+    await expect(early).rejects.toBeInstanceOf(HubConnectDeferredError)
+    expect(probe).toHaveBeenCalledTimes(2)
+  })
+
+  it('after a stuck socket is given up while the hub answers, the next attempt is immediate and unprobed — once', async () => {
+    const probe = vi.fn(async (_url: string) => false)
+    const { pacer, clock, t0 } = await pacerInFailureStreak(probe)
+
+    // Query path: the next attempt skips the probe (it just said up)…
+    pacer.noteHubAnswered()
+    clock.set(t0 + 300)
+    expect(await pacer.url()).toBe(WS_URL)
+    expect(probe).not.toHaveBeenCalled()
+    // …and only that one.
+    pacer.onCloseOrError()
+    await expect(pacer.url()).rejects.toBeInstanceOf(HubConnectDeferredError)
+    expect(probe).toHaveBeenCalledTimes(1)
+
+    // Loop path: the loop's next delay is 0 instead of its backoff, then back to normal.
+    pacer.noteHubAnswered()
+    expect(pacer.retryDelayMs(5)).toBe(0)
+    expect(await pacer.url()).toBe(WS_URL)
+    pacer.onCloseOrError()
+    expect(pacer.retryDelayMs(6)).toBe(30_000)
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
+  it('a hard deadline expedites one retry without claiming health or losing it to a deferred query', async () => {
+    const probe = vi.fn(async (_url: string) => false)
+    const { pacer, clock, t0 } = await pacerInFailureStreak(probe)
+    clock.set(t0 + 300)
+    pacer.noteHandshakeTimedOut()
+
+    // Timeout is not evidence that the hub answered. A query that wins the race
+    // still consults the installed probe, and cannot consume the reserved retry
+    // by being deferred without creating a socket.
+    await expect(pacer.url()).rejects.toBeInstanceOf(HubConnectDeferredError)
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(pacer.retryDelayMs(5)).toBe(0)
+    expect(await pacer.url()).toBe(WS_URL)
+    expect(probe).toHaveBeenCalledTimes(1)
+
+    // Only that replacement was expedited; neither failure streak nor retry index
+    // was reset. A failed replacement restores normal pacing and probe gating.
+    pacer.onCloseOrError()
+    expect(pacer.retryDelayMs(6)).toBe(30_000)
+    clock.set(t0 + 600)
+    await expect(pacer.url()).rejects.toBeInstanceOf(HubConnectDeferredError)
+    expect(probe).toHaveBeenCalledTimes(2)
+  })
+
   it('a real client: first connect unprobed, probe "down" opens no socket, probe "up" reconnects before the next backoff tick', async () => {
     let accepting = false
     let handshakes = 0

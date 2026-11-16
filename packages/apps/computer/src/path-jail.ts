@@ -27,6 +27,22 @@
  * WHAT THIS BOUNDS: hub frames. A shell or agent the hub starts runs as this OS user
  * and can touch anything that user can; the real boundary is the OS account.
  *
+ * ROOT SPELLINGS ARE REMEMBERED FOR 2 s (FU5 computer stalls). Judging a path used to
+ * `realpath` every allowed root and every root of the request's scope — a task's own
+ * folders plus every other task's worktree carved out of them (≈ 50 on a busy
+ * computer): 3 ms a call, and request bursts judge hundreds of paths. So the
+ * canonical spelling of a ROOT (allowed roots, scope roots, carve-outs, foreign roots)
+ * is reused for at most {@link ROOT_SPELLING_TTL_MS}, and forgotten at once whenever a
+ * hub frame may have changed the tree: any judgement for `write` / `entry` / a new
+ * root, and every {@link jailedFs} write. Never cached: the judged path itself (the
+ * walk, its links, its canonical spelling) and the protected-path identities. A root
+ * remembered as missing is re-checked with one `lstat` (it counts the moment it exists).
+ * Why this bound is acceptable: what can change a root's spelling WITHOUT a jailed
+ * write is a process running as this user — a shell or agent the hub started, or the
+ * user — which could touch the same files directly anyway (see above); its change
+ * reaches the jail within 2 s, the same order as the judge-then-act race every op
+ * already has.
+ *
  * @module computer/path-jail
  */
 import {
@@ -55,6 +71,7 @@ import { write as writeCb } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
   canonicalComputerPath,
+  computerPathKeyWithin,
   computerPathWithin,
   pathFoldsCase
 } from '@slayzone/platform/computer-path'
@@ -152,7 +169,7 @@ function protectedHit(judged: string, subtree: boolean): boolean {
   const chain = identityChain(judged)
   const self = identity(judged)
   for (const guarded of protectedPaths) {
-    if (isInside(judged, guarded) || (subtree && isInside(guarded, judged))) return true
+    if (isInsideRoot(judged, guarded) || (subtree && isInside(guarded, judged))) return true
     const id = identity(guarded)
     if (id && chain.has(id)) return true
     if (subtree && self && identityChain(guarded).has(self)) return true
@@ -169,6 +186,43 @@ function protectedHit(judged: string, subtree: boolean): boolean {
  */
 function isInside(path: string, dir: string): boolean {
   return computerPathWithin(path, dir, pathFoldsCase(dir))
+}
+
+/**
+ * Comparison keys of ROOTS (allowed roots, scope roots and carve-outs, protected
+ * paths): a pure function of (spelling, case folding), the same few strings on every
+ * judgement — remembered, bounded (review R1: only roots; a judged path is never kept).
+ */
+const ROOT_KEYS_MAX = 10_000
+const rootKeys = new Map<string, string>()
+function rootKey(root: string, folds: boolean): string {
+  const id = (folds ? '1' : '0') + root
+  let key = rootKeys.get(id)
+  if (key === undefined) {
+    if (rootKeys.size >= ROOT_KEYS_MAX) rootKeys.clear()
+    key = canonicalComputerPath(root, folds)
+    rootKeys.set(id, key)
+  }
+  return key
+}
+/**
+ * A judgement compares a couple of paths (the judged one, the scope's home root) with
+ * every root: their keys, in a few slots — nothing else is kept.
+ */
+const PATH_KEY_SLOTS = 4
+const pathKeys: Array<{ path: string; folds: boolean; key: string }> = []
+function pathKey(path: string, folds: boolean): string {
+  for (const slot of pathKeys) if (slot.path === path && slot.folds === folds) return slot.key
+  const key = canonicalComputerPath(path, folds)
+  pathKeys.unshift({ path, folds, key })
+  if (pathKeys.length > PATH_KEY_SLOTS) pathKeys.pop()
+  return key
+}
+
+/** {@link isInside} where `root` is a ROOT (see {@link rootKey}): its key is remembered. */
+function isInsideRoot(path: string, root: string): boolean {
+  const folds = pathFoldsCase(root)
+  return computerPathKeyWithin(pathKey(path, folds), rootKey(root, folds))
 }
 
 /**
@@ -217,15 +271,55 @@ interface LiveRoot {
   real: string
 }
 
+/** How long a root's canonical spelling is reused (see the module doc). */
+export const ROOT_SPELLING_TTL_MS = 2_000
+const ROOT_SPELLINGS_MAX = 10_000
+/** Bumped by every judged or performed write: remembered spellings are void at once. */
+let rootGeneration = 0
+const rootSpellings = new Map<
+  string,
+  { real: string; exists: boolean; at: number; generation: number }
+>()
+
+/** A hub frame may have changed the tree: forget every remembered root spelling. */
+function forgetRootSpellings(): void {
+  rootGeneration++
+}
+
+/**
+ * The canonical spelling of ROOT `lexical` (resolved): `exists` when the whole path
+ * resolves (its `realpath`), else the realpath of its deepest existing ancestor plus
+ * the rest ({@link canonical}). Remembered per the module doc; a remembered absence
+ * is re-checked with one `lstat`, so a root counts the moment it exists.
+ */
+function rootSpelling(lexical: string): { real: string; exists: boolean } {
+  const now = Date.now()
+  const hit = rootSpellings.get(lexical)
+  if (
+    hit &&
+    hit.generation === rootGeneration &&
+    now - hit.at < ROOT_SPELLING_TTL_MS &&
+    (hit.exists || lstatOrNull(lexical) === null)
+  )
+    return hit
+  let spelling: { real: string; exists: boolean }
+  try {
+    spelling = { real: realpathSync.native(lexical), exists: true }
+  } catch {
+    spelling = { real: canonical(lexical), exists: false }
+  }
+  if (rootSpellings.size >= ROOT_SPELLINGS_MAX) rootSpellings.clear()
+  rootSpellings.set(lexical, { ...spelling, at: now, generation: rootGeneration })
+  return spelling
+}
+
 function liveRoots(allowedRoots: readonly string[]): LiveRoot[] {
   const out: LiveRoot[] = []
   for (const root of allowedRoots) {
     const lexical = resolve(root)
-    try {
-      out.push({ lexical, real: realpathSync.native(lexical) })
-    } catch {
-      // A configured root that does not exist cannot contain anything.
-    }
+    // A configured root that does not exist cannot contain anything.
+    const spelling = rootSpelling(lexical)
+    if (spelling.exists) out.push({ lexical, real: spelling.real })
   }
   return out
 }
@@ -300,8 +394,8 @@ function walk(
         hops
       )
     }
-    if (!isInside(target, root.real)) {
-      const other = liveRoots(allowedRoots).find((r) => isInside(target, r.real))
+    if (!isInsideRoot(target, root.real)) {
+      const other = liveRoots(allowedRoots).find((r) => isInsideRoot(target, r.real))
       if (!other) throw outside(candidate, allowedRoots)
       root = other
     }
@@ -311,7 +405,7 @@ function walk(
   // for `entry`, of its folder only — the entry itself is never followed.
   const real =
     access === 'entry' && current !== root.real ? canonicalEntry(current) : canonical(current)
-  if (!isInside(real, root.real)) throw outside(candidate, allowedRoots)
+  if (!isInsideRoot(real, root.real)) throw outside(candidate, allowedRoots)
   return real
 }
 
@@ -325,7 +419,7 @@ function within(
   hops: { n: number }
 ): string {
   for (const base of [root.lexical, root.real]) {
-    if (isInside(normalized, base)) {
+    if (isInsideRoot(normalized, base)) {
       return walk(root, components(normalized, base), access, candidate, allowedRoots, hops)
     }
   }
@@ -342,6 +436,8 @@ export function judgePath(
   allowedRoots: readonly string[],
   opts: JailOptions = {}
 ): string {
+  // A write is about to happen: no root spelling remembered from before it is reused.
+  if ((opts.access ?? 'read') !== 'read' || opts.newRoot === true) forgetRootSpellings()
   const judged = judgeMachine(candidate, allowedRoots, opts)
   const scope = scopeStore.getStore()
   if (!scope || (opts.hostRead === true && scope.hostReads)) return judged
@@ -395,7 +491,7 @@ export function currentScopeJail(): ScopeJail | undefined {
 /** The canonical (real) spelling of a root, or null when it does not exist here. */
 function realRoot(root: string): string | null {
   try {
-    return canonical(resolve(root))
+    return rootSpelling(resolve(root)).real
   } catch {
     return null
   }
@@ -410,7 +506,7 @@ function realRoot(root: string): string | null {
  */
 function judgeScope(judged: string, candidate: string, scope: ScopeJail): string {
   const roots = scope.roots.map(realRoot).filter((r): r is string => r !== null)
-  const home = roots.find((r) => isInside(judged, r))
+  const home = roots.find((r) => isInsideRoot(judged, r))
   if (!home) {
     throw new JailViolationError(
       roots.length === 0
@@ -421,8 +517,8 @@ function judgeScope(judged: string, candidate: string, scope: ScopeJail): string
   for (const excluded of scope.excluded) {
     const real = realRoot(excluded)
     // Another task's root that IS (or holds) this scope's own root is not carved out.
-    if (!real || isInside(home, real)) continue
-    if (isInside(judged, real)) {
+    if (!real || isInsideRoot(home, real)) continue
+    if (isInsideRoot(judged, real)) {
       throw new JailViolationError(
         `path '${candidate}' is inside another task's folder, not ${scope.label}'s; refused`
       )
@@ -452,8 +548,8 @@ function judgeNewRoot(judged: string, candidate: string, scope: ScopeJail): stri
   const own = scope.roots.map(realRoot).filter((r): r is string => r !== null)
   for (const root of scope.foreign) {
     const real = realRoot(root)
-    if (!real || own.some((r) => isInside(r, real))) continue
-    if (isInside(judged, real)) {
+    if (!real || own.some((r) => isInsideRoot(r, real))) continue
+    if (isInsideRoot(judged, real)) {
       throw new JailViolationError(
         `path '${candidate}' is inside a folder that is not ${scope.label}'s; refused`
       )
@@ -481,7 +577,7 @@ function judgeMachine(
   const hops = { n: 0 }
   let judged: string | null = null
   for (const root of roots) {
-    if (isInside(normalized, root.lexical) || isInside(normalized, root.real)) {
+    if (isInsideRoot(normalized, root.lexical) || isInsideRoot(normalized, root.real)) {
       judged = within(root, normalized, access, candidate, allowedRoots, hops)
       break
     }
@@ -489,7 +585,7 @@ function judgeMachine(
   if (judged === null) {
     // Spelled through a link above a root (`/tmp/r` for a root `/private/tmp/r`).
     const canon = canonical(normalized)
-    const root = roots.find((r) => isInside(canon, r.real))
+    const root = roots.find((r) => isInsideRoot(canon, r.real))
     if (!root) throw outside(candidate, allowedRoots)
     judged = walk(root, components(canon, root.real), access, candidate, allowedRoots, hops)
   }
@@ -602,7 +698,8 @@ function assertParentUnchanged(judged: string): void {
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
   try {
-    return lstatSync(p)
+    // A missing entry is an answer, not an error: no exception built per probe (FU5).
+    return lstatSync(p, { throwIfNoEntry: false }) ?? null
   } catch {
     return null
   }
@@ -773,10 +870,35 @@ async function copyEntryAsync(
 }
 
 /**
+ * Every op of `ops`, forgetting the remembered root spellings once it has acted
+ * (an async one once it settles) — whether it succeeded or not.
+ */
+function forgettingRootSpellings<T extends Record<string, (...args: never[]) => unknown>>(
+  ops: T
+): T {
+  const out: Record<string, (...args: never[]) => unknown> = {}
+  for (const [name, op] of Object.entries(ops))
+    out[name] = (...args: never[]) => {
+      let result: unknown
+      try {
+        result = op(...args)
+      } catch (error) {
+        forgetRootSpellings()
+        throw error
+      }
+      if (result instanceof Promise) return result.finally(forgetRootSpellings)
+      forgetRootSpellings()
+      return result
+    }
+  return out as T
+}
+
+/**
  * The only writes a hub frame can cause. Every path is one {@link judgePath}
  * returned (with the access the op needs); each op re-checks right before it acts.
+ * Each one forgets the remembered root spellings once it has acted (module doc).
  */
-export const jailedFs = {
+export const jailedFs = forgettingRootSpellings({
   /** Create or overwrite a file (its folders too). */
   writeFile(judged: string, content: string | Uint8Array): void {
     const fd = openForWrite(judged, false)
@@ -864,4 +986,4 @@ export const jailedFs = {
     }
     await copyEntryAsync(judgedSrc, judgedDest, { n: 0, buf: Buffer.allocUnsafe(256 * 1024) })
   }
-}
+})

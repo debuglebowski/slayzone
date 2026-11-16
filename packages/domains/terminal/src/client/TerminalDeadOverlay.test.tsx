@@ -37,3 +37,26 @@ it('without a detail, shows only the reason', () => {
   expect(screen.getByText("The computer couldn't start the agent.")).toBeTruthy()
   expect(container.querySelector('[data-testid="terminal-dead-detail"]')).toBeNull()
 })
+
+// A tab whose session is gone without an exit (the hub restarted and has not
+// attached it): never a terminal that looks alive. Says so plainly, offers Restart —
+// and Attach when the computer still runs this tab's session from before.
+it('a session that is not attached says so, with Restart (and Attach when one is running)', () => {
+  const onRestart = vi.fn()
+  const onAttach = vi.fn()
+  const { rerender } = render(
+    <TerminalDeadOverlay {...props({ deadExitCode: null, notAttached: { onRestart } })} />
+  )
+  expect(screen.getByText('Session not attached')).toBeTruthy()
+  expect(screen.queryByText('Attach')).toBeNull()
+  expect(screen.queryByText('Doctor')).toBeNull()
+  screen.getByText('Restart').click()
+  expect(onRestart).toHaveBeenCalledOnce()
+
+  rerender(
+    <TerminalDeadOverlay {...props({ deadExitCode: null, notAttached: { onRestart, onAttach } })} />
+  )
+  expect(screen.getByText(/still running on its computer/)).toBeTruthy()
+  screen.getByText('Attach').click()
+  expect(onAttach).toHaveBeenCalledOnce()
+})

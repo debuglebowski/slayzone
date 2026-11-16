@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
@@ -19,6 +19,8 @@ import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-serve
 import { type ArtifactStore } from './artifact-store'
 import { getArtifactStorage } from './artifact-storage'
 import { signalTasksChanged } from './artifacts-router-deps'
+import { listZipBytes, listZipFile } from './zip-listing'
+import type { ArchiveListing } from '../shared/types'
 
 /** The largest piece `readBytesChunk` serves (bytes before base64): the shared cap. */
 export const ARTIFACT_CHUNK_MAX = ARTIFACT_CHUNK_MAX_BYTES
@@ -52,7 +54,11 @@ const renderMode = z.enum([
   'mermaid-preview',
   'image',
   'pdf',
-  'video'
+  'video',
+  'audio',
+  'diff',
+  'archive',
+  'font'
 ]) satisfies z.ZodType<RenderMode>
 const createArtifactInput = z.object({
   taskId: z.string(),
@@ -116,6 +122,50 @@ const updateFolderInput = z.object({
 const versionRef = z.union([z.number(), z.string()])
 
 const store = getArtifactStorage
+
+/** Largest artifact `readBase64` sends (a font is a few MiB; CJK families reach ~20). */
+export const READ_BASE64_MAX_BYTES = 32 * 1024 * 1024
+
+/**
+ * The hub's own working file for an artifact, or null when it has none here: an
+ * artifact a computer holds (`storage`) arrives as bytes only.
+ */
+async function hubFileOf(s: ArtifactStore, db: SlayzoneDb, id: string): Promise<string | null> {
+  const artifact = await s.getArtifact(db, id)
+  if (!artifact || ('storage' in artifact && artifact.storage)) return null
+  const path = await s.getArtifactPath(db, id)
+  return path && existsSync(path) ? path : null
+}
+
+/** A zip artifact's entries; null for an unknown artifact. */
+async function listArchive(
+  s: ArtifactStore,
+  db: SlayzoneDb,
+  id: string
+): Promise<ArchiveListing | null> {
+  if (!(await s.getArtifact(db, id))) return null
+  const path = await hubFileOf(s, db, id)
+  return path ? listZipFile(path) : listZipBytes(await s.readArtifactBytes(db, id))
+}
+
+/** A small binary artifact's current bytes, base64; null for an unknown artifact. */
+async function readBase64(s: ArtifactStore, db: SlayzoneDb, id: string): Promise<string | null> {
+  if (!(await s.getArtifact(db, id))) return null
+  const tooLarge = (size: number) =>
+    new TRPCError({
+      code: 'PAYLOAD_TOO_LARGE',
+      message: `Artifact is ${size} bytes; at most ${READ_BASE64_MAX_BYTES} can be read inline.`
+    })
+  const path = await hubFileOf(s, db, id)
+  // Refuse a large file on the hub's disk before reading any of it.
+  if (path) {
+    const { size } = statSync(path)
+    if (size > READ_BASE64_MAX_BYTES) throw tooLarge(size)
+  }
+  const bytes = await s.readArtifactBytes(db, id)
+  if (bytes.byteLength > READ_BASE64_MAX_BYTES) throw tooLarge(bytes.byteLength)
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
+}
 
 // Every write tells the other clients when it changed what `getByTask` or
 // `foldersGetByTask` answers for a task — `notify.onTasksChanged` naming that task,
@@ -361,6 +411,20 @@ export const artifactsRouter = router({
   getMtime: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).getArtifactMtime(ctx.db, input.id)),
+
+  /** A zip artifact's entries (the archive viewer), read from its central directory. */
+  listArchive: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => listArchive(store(ctx.dataRoot), ctx.db, input.id)),
+
+  /**
+   * A small binary artifact's bytes, base64 (the font viewer: a font must be loaded
+   * from bytes, since `slz-file:` is not readable by CORS fetches). At most
+   * `READ_BASE64_MAX_BYTES`, else PAYLOAD_TOO_LARGE.
+   */
+  readBase64: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => readBase64(store(ctx.dataRoot), ctx.db, input.id)),
 
   // --- Binary uploads (bytes via superjson) ---
   // `upload`/`uploadDir` read a client-named path off the hub's disk (see

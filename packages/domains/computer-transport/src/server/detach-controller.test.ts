@@ -22,7 +22,9 @@ import {
   detachControllerStats,
   joinDetachController,
   toSessionList,
-  type DetachableEntry
+  type DetachableEntry,
+  type DetachControllerOptions,
+  type ListedSession
 } from './detach-controller'
 import type { ComputerDescriptor, ComputerGatewayEvents } from './hub-gateway'
 
@@ -70,8 +72,13 @@ class Gateway {
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
-function join(gateway: Gateway, sessions = new Map<string, DetachableEntry>()) {
+function join(
+  gateway: Gateway,
+  sessions = new Map<string, DetachableEntry>(),
+  extra: Partial<DetachControllerOptions<DetachableEntry>> = {}
+) {
   const membership = joinDetachController({
+    ...extra,
     gateway,
     sessions,
     kind: 'test',
@@ -221,5 +228,99 @@ describe('the record of abandoned attempts stays bounded', () => {
       membership.abandon(entry(`s${String(i)}`), 'closed-while-detached')
     }
     expect(detachControllerStats(gateway)[0]?.abandonedRecords).toBe(ABANDONED_MAX_PER_COMPUTER)
+  })
+})
+
+// ── A previous hub run's sessions: offered for adoption, never killed for it ──────
+//
+// A hub restart leaves the computer running sessions no participant tracks. They are
+// kept (unknown is no kill reason) AND handed to the participants that can adopt
+// them (`onUntracked`), so a restart is invisible to the agents.
+
+describe('untracked sessions are offered to the participants', () => {
+  type Offer = Array<{ sessionId: string; spawnId?: string }>
+  const offers = () => {
+    const seen: Offer[] = []
+    const onUntracked = (
+      _computerId: string,
+      _epoch: string | undefined,
+      kept: Array<{ sessionId: string; listed: ListedSession }>
+    ) => {
+      seen.push(kept.map((k) => ({ sessionId: k.sessionId, spawnId: k.listed.spawnId })))
+    }
+    return { seen, onUntracked }
+  }
+
+  it('first contact and every same-epoch reconnect offer exactly the kept sessions', async () => {
+    const gateway = new Gateway()
+    const { seen, onUntracked } = offers()
+    const { sessions } = join(gateway, undefined, { onUntracked })
+    gateway.listed = [{ sessionId: 'old', spawnId: 'run-1' }]
+    gateway.connect('epoch-a')
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual([{ sessionId: 'old', spawnId: 'run-1' }]))
+
+    // One the hub tracks itself is never offered; an emptied list clears the offer.
+    sessions.set('mine', entry('mine'))
+    gateway.listed = [{ sessionId: 'mine', spawnId: 'mine-a' }]
+    await gateway.blip()
+    expect(seen.at(-1)).toEqual([])
+    expect(gateway.kills()).toEqual([])
+  })
+
+  it('an attempt the hub recorded giving up on is killed, not offered', async () => {
+    const gateway = new Gateway()
+    const { seen, onUntracked } = offers()
+    const { membership } = join(gateway, undefined, { onUntracked })
+    gateway.connect('epoch-a')
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual([]))
+    membership.abandon(entry('a'), 'closed-while-detached')
+    gateway.listed = [{ sessionId: 'a', spawnId: 'a-a' }]
+    await gateway.blip()
+    expect(gateway.kills()).toEqual([{ sessionId: 'a', spawnId: 'a-a' }])
+    expect(seen.at(-1)).toEqual([])
+  })
+
+  it('a computer back as a different process withdraws the offer', async () => {
+    const gateway = new Gateway()
+    const { seen, onUntracked } = offers()
+    join(gateway, undefined, { onUntracked })
+    gateway.listed = [{ sessionId: 'old', spawnId: 'run-1' }]
+    gateway.connect('epoch-a')
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual([{ sessionId: 'old', spawnId: 'run-1' }]))
+    await gateway.blip('epoch-b')
+    await vi.waitFor(() => expect(seen.at(-1)).toEqual([]))
+  })
+})
+
+// Review H1: a spawn sent before the computer's first hello (a restarted app opening a
+// tab) must not stop the first-contact list — every OTHER session a previous hub run
+// left on the computer is still offered (adopted or surfaced), never silently skipped.
+describe('first contact with a spawn already waiting', () => {
+  it('resends the spawn AND still lists, offering the other kept sessions', async () => {
+    const gateway = new Gateway()
+    const sessions = new Map<string, DetachableEntry>()
+    const seen: Array<Array<{ sessionId: string }>> = []
+    join(gateway, sessions, {
+      onUntracked: (_c, _e, kept) => seen.push(kept.map((k) => ({ sessionId: k.sessionId })))
+    })
+    const resent: string[] = []
+    sessions.set('tab-a', {
+      ...entry('tab-a', 'new-a'),
+      detached: true,
+      pendingSpawn: { resend: () => resent.push('tab-a'), confirm: () => undefined }
+    })
+    gateway.listed = [
+      { sessionId: 'tab-a', spawnId: 'run-1-a' },
+      { sessionId: 'tab-b', spawnId: 'run-1-b' },
+      { sessionId: 'tab-c', spawnId: 'run-1-c' }
+    ]
+    gateway.connect('epoch-a')
+
+    await vi.waitFor(() =>
+      expect(seen.at(-1)).toEqual([{ sessionId: 'tab-b' }, { sessionId: 'tab-c' }])
+    )
+    expect(resent).toEqual(['tab-a'])
+    // The waiting spawn's id is owned (its resend is on the way): never swept, never offered.
+    expect(gateway.kills()).toEqual([])
   })
 })

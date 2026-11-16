@@ -12,7 +12,15 @@ import {
 import { CACHED_EVENTS_PER_TAB, pageOfRows, type BufferedEvent } from '../chat-events-store'
 import * as mgr from './chat-transport-manager'
 import { TIMELINE_PROJECTION_VERSION } from './chat-timeline-projection'
-import { emitLine, sj, startTab, TAB_OPTS, transportHarness, until } from './chat-transport-testkit'
+import {
+  emitLine,
+  sj,
+  startTab,
+  TAB_OPTS,
+  transportHarness,
+  until,
+  wait
+} from './chat-transport-testkit'
 
 afterEach(() => {
   mgr.__resetForTests()
@@ -267,4 +275,45 @@ test('a burst of hydrates reads about one history page per event-loop turn in to
     const opened = await mgr.openTimeline(`tab-${i}`, TIMELINE_PROJECTION_VERSION)
     expect(opened.kind).toBe('paged')
   }
+})
+
+test('openTimeline answers the events saved while its snapshot waited within a page budget, consistent with the live part', async () => {
+  // The snapshot waits for every queued projection step; what is saved meanwhile
+  // followed it UNPAGED (the whole ring of up to 2,000 events, MB-sized rows).
+  const store = memoryTimelineStore()
+  let gate: Promise<void> | null = null
+  let release: () => void = () => undefined
+  let saves = 0
+  const save = store.save
+  store.save = async (w) => {
+    saves++
+    if (gate) await gate
+    return save(w)
+  }
+  const h = transportHarness({ deps: { timelineStore: () => store } })
+  await startTab()
+  const f = h.fakes[0]
+  emitLine(f, sj.init('sid-open'))
+  await until(() => h.rows.length > 0)
+  // The projection's next write waits: every step queued behind it waits too.
+  gate = new Promise<void>((r) => {
+    release = r
+  })
+  const before = saves
+  await until(() => saves > before, 5_000)
+  const opening = mgr.openTimeline(TAB_OPTS.tabId, TIMELINE_PROJECTION_VERSION)
+  await wait(20)
+  const rowsBefore = h.rows.length
+  const big = 'x'.repeat(1024 * 1024)
+  for (let i = 0; i < 6; i++) emitLine(f, sj.text(`${i}:${big}`, { id: `msg_big_${i}` }))
+  await until(() => h.rows.length >= rowsBefore + 6)
+  release()
+  gate = null
+  const opened = await opening
+  expect(opened.kind).toBe('paged')
+  if (opened.kind !== 'paged') return
+  const bytes = opened.events.reduce((n, e) => n + jsonByteLength(e.event), 0)
+  expect(bytes).toBeLessThanOrEqual(CHAT_HISTORY_PAGE_MAX_BYTES)
+  // The snapshot plus its events reach exactly the live part's start.
+  expect(opened.events.at(-1)?.seq ?? opened.snapshot.seq).toBe(opened.live.afterSeq)
 })

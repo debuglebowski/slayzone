@@ -38,7 +38,7 @@ function page(afterSeq: number, budget?: ChatHistoryPageBudget) {
   return { events, hasMore: cut.more }
 }
 
-async function setup(pages: boolean) {
+async function setup(pages: boolean, rowSlices = false) {
   const h = await createTestHarness()
   h.db.exec(
     "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
@@ -54,12 +54,18 @@ async function setup(pages: boolean) {
   })
   /** Every history answer the computer sent, and its size. */
   const answers: Array<{ method: string; bytes: number }> = []
+  /** Arguments of every `timelinePages` the computer was asked. */
+  const timelineArgs: unknown[][] = []
   const request = vi.fn<ChatComputerRequest>(async (_pc, raw) => {
     const p = raw as { kind: string; value: { method: string; args: unknown[] } }
     if (p.kind === 'pendingMetadata') return []
     if (p.kind !== 'invoke') throw new Error('Unexpected request')
     const [, afterSeq, budget] = p.value.args as [string, number, ChatHistoryPageBudget?]
     let answer: unknown
+    if (p.value.method === 'timelinePages') {
+      timelineArgs.push(p.value.args)
+      return { expired: false, pages: [] }
+    }
     if (p.value.method === 'getEventPage' && pages) answer = page(afterSeq, budget)
     else if (p.value.method === 'getReplayPage' && pages) {
       const got = page(afterSeq, budget)
@@ -76,6 +82,7 @@ async function setup(pages: boolean) {
     ownership,
     request,
     chatHistoryPages: () => pages,
+    chatTimelineRowSlices: () => rowSlices,
     resolveComputer: async () => 'pc',
     defaultComputer: async () => 'pc',
     bootstrap: async () => {
@@ -85,7 +92,7 @@ async function setup(pages: boolean) {
       throw new Error('No migration expected')
     }
   })
-  return { h, relay, answers }
+  return { h, relay, answers, timelineArgs }
 }
 
 const whole = history
@@ -138,4 +145,37 @@ test('an older computer (no pages): a page read asks for its whole read once and
   } finally {
     h.cleanup()
   }
+})
+
+test('timelinePages from a row (`startRow`) reaches a computer that slices rows; an older one gets whole pages', async () => {
+  // An older computer's operation schema is a 4-tuple: a 5th argument is refused.
+  for (const rowSlices of [true, false]) {
+    const { h, relay, timelineArgs } = await setup(true, rowSlices)
+    try {
+      await relay.ops.timelinePages('tab', [1, 2], 5, 1, 300)
+      await relay.ops.timelinePages('tab', [3], 5, 1)
+      expect(timelineArgs).toEqual(
+        rowSlices
+          ? [
+              ['tab', [1, 2], 5, 1, 300],
+              ['tab', [3], 5, 1]
+            ]
+          : [
+              ['tab', [1, 2], 5, 1],
+              ['tab', [3], 5, 1]
+            ]
+      )
+    } finally {
+      h.cleanup()
+    }
+  }
+})
+
+test('the computer takes `timelinePages` with and without `startRow`, never a null one', async () => {
+  const { chatOperationSchemas } = await import('../shared/protocol')
+  const schema = chatOperationSchemas.timelinePages
+  expect(schema.safeParse(['tab', [1], 5, 1]).success).toBe(true)
+  expect(schema.safeParse(['tab', [1], 5, 1, 300]).success).toBe(true)
+  expect(schema.safeParse(['tab', [1], 5, 1, null]).success).toBe(false)
+  expect(schema.safeParse(['tab', [1], 5, 1, -1]).success).toBe(false)
 })

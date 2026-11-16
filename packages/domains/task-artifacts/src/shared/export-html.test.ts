@@ -25,6 +25,19 @@ describe('buildDocumentHtml', () => {
     expect(html).toContain('<td class="line-numbers">2</td><td>b</td>')
   })
 
+  // Main's diff artifacts (merged in): a diff exports as its source, line-numbered
+  // like code, as main's exporter did.
+  it('numbers a diff like code', () => {
+    const html = buildDocumentHtml('-a\n+b <x>', 'diff', 'p.diff')
+    expect(html).toContain('<td class="line-numbers">1</td><td>-a</td>')
+    expect(html).toContain('<td class="line-numbers">2</td><td>+b &lt;x&gt;</td>')
+    // Exactly as it exports as code (main's task/electron/artifact-export.test.ts).
+    const patch = '--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-const a = 1\n+const a = 2'
+    expect(buildDocumentHtml(patch, 'diff', 'fix.diff')).toBe(
+      buildDocumentHtml(patch, 'code', 'fix.diff')
+    )
+  })
+
   it('embeds html and svg as-is', () => {
     expect(buildDocumentHtml('<p id="raw">x</p>', 'html-preview', 't')).toContain(
       '<body><p id="raw">x</p></body>'

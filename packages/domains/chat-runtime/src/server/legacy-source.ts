@@ -25,6 +25,15 @@ import {
   LEGACY_CHAT_BLOB_PIN_SCOPE,
   type MigrationAttachmentScope
 } from './migration-attachment-txns'
+import type { LegacyHistoryIssue } from './migration-history-txns'
+import type {} from './migration-history-txns'
+
+function assertReplayable(issue: LegacyHistoryIssue | null): void {
+  if (issue)
+    throw new Error(
+      `[LEGACY_CHAT_HISTORY_UNREPLAYABLE] Migration deferred (${issue}). Original history and attachments retained on this hub. Repair source history before starting a fresh migration. Existing blocked or unbound destination proofs require fenced recovery/reseed and re-export; restoring source events alone cannot validate that migration generation. Contact support for recovery.`
+    )
+}
 
 const timestamp = (value: string) =>
   Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : value + 'Z')
@@ -34,6 +43,7 @@ type Item = { kind: 'event'; value: StoredChatEvent } | { kind: 'record'; value:
 export interface LegacyChatDiagnostics {
   freeze(taskId: string): Promise<number>
   records(taskId: string, cutoff: number): AsyncIterable<ChatRecord>
+  /** Retried after a committed source cleanup: idempotent for the same cutoff. */
   cleanup(taskId: string, cutoff: number): Promise<void>
   tasks(): Promise<string[]>
   hasTask?(taskId: string): Promise<boolean>
@@ -488,6 +498,14 @@ export function createLegacyChatSource(opts: {
   }
   const source: ChatMigrationSource = {
     quiesce: opts.quiesce,
+    async assertSafe(owner, proof) {
+      assertReplayable(
+        await db.namedTxn('chat-migration:check-source-history', {
+          owner,
+          ...(proof ? { proof } : {})
+        })
+      )
+    },
     async pinAttachments(owner, refs) {
       if (!refs.length) return
       const scope = await migrationAttachmentScope(db, owner)
@@ -540,6 +558,7 @@ export function createLegacyChatSource(opts: {
     },
     async open(owner, migrationId) {
       if (owner.computerId) throw new Error('Legacy source cannot export computer-owned history')
+      await source.assertSafe!(owner)
       let metadata = (await opts.freezeMetadata?.(owner, migrationId)) ?? null
       if (!metadata) {
         const candidate: ChatRecord[] = []
@@ -663,6 +682,7 @@ export function createLegacyChatSource(opts: {
         bytes += b.length
       }
       const manifest: ChatTransferManifest = { header, bytes, hash: hash.digest('hex') }
+      await source.assertSafe!(owner, manifest)
       await db.batchTxn([
         {
           type: 'run',
@@ -793,7 +813,7 @@ export function createLegacyChatSource(opts: {
         sql: "INSERT INTO settings(key,value) VALUES('computer_chat_compaction_generation','2') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(settings.value AS INTEGER)+1 AS TEXT)",
         params: []
       })
-      await db.batchTxn(ops)
+      assertReplayable(await db.namedTxn('chat-migration:cleanup-source', { owner, ops }))
       const checkpoint = await db.get<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
       if (checkpoint?.busy) throw new Error('Hub cleanup checkpoint is busy; retry cleanup')
       if (opts.diagnostics && diagnosticsCutoff !== null)

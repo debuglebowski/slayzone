@@ -27,8 +27,9 @@ export interface ChatHubSlice {
       unknown
     >
     readBlob: Query<{ tabId: string; sha256: string; offset: number }, unknown>
+    /** With `startRow`: row slices (`next`); an older peer answers whole pages. */
     timelinePages: Query<
-      { tabId: string; pages: number[]; asOfSeq: number; epoch: number },
+      { tabId: string; pages: number[]; asOfSeq: number; epoch: number; startRow?: number },
       unknown
     >
     searchTimeline: Query<{ tabId: string; query: string }, unknown>

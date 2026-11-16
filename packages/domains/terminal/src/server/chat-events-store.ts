@@ -3,6 +3,7 @@ import {
   legacyChatTables
 } from '@slayzone/platform/legacy-chat-tables'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { historyReadTurns, yieldToEventLoop } from './history-turns'
 import {
   clampChatHistoryPageBudget,
   cutChatHistoryPage,
@@ -130,37 +131,9 @@ export function tailStartOfRows(rows: readonly BufferedEvent[], count: number): 
   return count >= 1 && rows.length >= count ? rows[rows.length - count].seq : null
 }
 
-/** Let the event loop run (timers, sockets, heartbeats) between two pages of a long read. */
-export function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve))
-}
-
-/**
- * Turns for reading history pages, shared by every chat log of this process: one
- * page read (and what its caller does with it before awaiting again) per turn;
- * while other reads wait, the event loop runs between turns. A burst of hydrates
- * (a restore opening dozens of tabs) then parses about one page per loop turn in
- * total — never one page per tab per turn — so heartbeats and sockets stay
- * answered. (A lone long read yields between its own pages: `ChatEventLog.pages`.)
- */
-export class HistoryReadTurns {
-  private tail: Promise<void> = Promise.resolve()
-  private waiting = 0
-
-  take<T>(work: () => Promise<T>): Promise<T> {
-    this.waiting++
-    const run = this.tail.then(() => {
-      this.waiting--
-      return work()
-    })
-    const next = () => (this.waiting > 0 ? yieldToEventLoop() : undefined)
-    this.tail = run.then(next, next)
-    return run
-  }
-}
-
-/** This process's {@link HistoryReadTurns}. */
-export const historyReadTurns = new HistoryReadTurns()
+// The process's turns for heavy history work: their own module (no transport, no
+// child processes), so a store a hub bundles can take turns too.
+export { HistoryReadTurns, historyReadTurns, yieldToEventLoop } from './history-turns'
 
 /** Saved events of one {@link ChatEventLog.readPage}, oldest first; `hasMore`: read on after the last. */
 export interface ChatLogPage {

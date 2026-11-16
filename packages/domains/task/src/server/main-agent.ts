@@ -27,7 +27,7 @@ import { parseProject } from '@slayzone/projects/server'
 import { getRuntimeAdapters, readTaskPaths } from './ops/shared'
 import { resetConversation } from './ops/task-conversations'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
-import { getChatDeps, getPtyDeps } from '@slayzone/terminal/hub'
+import { getChatDeps, getPtyDeps, type UnattachedLaunchResolver } from '@slayzone/terminal/hub'
 import {
   isChatSupported,
   spawnConversationIds,
@@ -190,6 +190,64 @@ export async function resolveChatAgentLaunch(
     mode,
     cwd: await resolveTaskAgentCwd(db, task, project),
     providerFlagsOverride: tab.is_main ? getProviderFlags(task.provider_config, mode) : null
+  }
+}
+
+/**
+ * A terminal tab's launch (the `pty.create` input), from stored task/tab state: what
+ * a restarted hub adopts a session its previous run left running into (terminal
+ * `unattached-sessions`). The same derivation the desktop mounts the tab with — the
+ * main tab follows the task's agent and flags (`mainTerminalProps`), any other tab
+ * its own mode (a plain shell included) with no agent flags — so a later resume of
+ * the adopted agent launches it exactly as the tab would.
+ *
+ * Not adoptable when the tab runs another agent now than the process does
+ * (`mode-mismatch`), or the task or tab is gone. A folder its computer cannot answer
+ * for right now does not stop the adoption: the process already runs where it runs;
+ * the folder only matters for a later resume, which resolves it again.
+ */
+export async function resolveTerminalTabLaunch(
+  db: SlayzoneDb,
+  { taskId, tabId, mode: running }: { taskId: string; tabId: string; mode?: string },
+  getTask: (taskId: string) => Promise<Task | null>
+): ReturnType<UnattachedLaunchResolver> {
+  const task = await getTask(taskId)
+  if (!task) return { ok: false, reason: 'launch-unresolved', detail: 'task not found' }
+  const project = parseProject(
+    await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
+  )
+  let mode: string
+  let providerFlags: string | null = null
+  if (tabId === taskId) {
+    const props = mainTerminalProps(task, project, await getPtyDeps().ops.agentsList())
+    mode = props.mode
+    providerFlags = props.providerFlags || null
+  } else {
+    const tab = await db.get<{ task_id: string; mode: string }>(
+      'SELECT task_id, mode FROM terminal_tabs WHERE id = ?',
+      [tabId]
+    )
+    if (!tab || tab.task_id !== taskId)
+      return { ok: false, reason: 'launch-unresolved', detail: 'tab not found' }
+    mode = tab.mode
+  }
+  if (running && running !== mode) {
+    return {
+      ok: false,
+      reason: 'mode-mismatch',
+      detail: `the process runs ${running}, the tab ${mode}`
+    }
+  }
+  const cwd = await resolveTaskAgentCwd(db, task, project).catch(() => '')
+  return {
+    ok: true,
+    launch: {
+      sessionId: `${taskId}:${tabId}`,
+      cwd,
+      mode,
+      providerFlags,
+      executionContext: project?.execution_context ?? null
+    }
   }
 }
 

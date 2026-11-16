@@ -77,17 +77,25 @@ export interface PendingSpawn {
    * `listedBySpawnId` — the computer named the attempt by its key, i.e. it is new
    * enough to have honoured everything the request asked of it.
    */
-  confirm: (pid: number | null, listedBySpawnId: boolean) => void
+  confirm: (pid: number | null, listedBySpawnId: boolean, listed?: ListedSession) => void
 }
 
 /** A live session as the computer reports it in `pty.list` / `proc.list`. */
 export interface ListedSession {
   pid?: number
   spawnId?: string
+  /** Highest seq the computer assigned; -1 when nothing yet (`pty.list` only). */
+  seq?: number
   /** The computer runs output detection for it (`pty.list` only). */
   detection?: boolean
   /** What it has detected so far (`pty.list` only). */
   detected?: PtyDetectedSnapshot
+  /** The mode its detection runs as (`pty.list`, newer computers only). */
+  mode?: string
+  /** When its process started, ms epoch (`pty.list`, newer computers only). */
+  startedAt?: number
+  /** A later attempt took the process over (`pty.adopt` / `adoptLive`; `pty.list` only). */
+  adopted?: boolean
 }
 
 /** A session the computer reaped and remembers (a tombstone). */
@@ -124,8 +132,12 @@ export function toSessionList(parsed: {
     sessionId: string
     pid?: number
     spawnId?: string
+    seq?: number
     detection?: boolean
     detected?: PtyDetectedSnapshot
+    mode?: string
+    startedAt?: number
+    adopted?: boolean
   }>
   exited?: Array<{
     sessionId: string
@@ -143,8 +155,12 @@ export function toSessionList(parsed: {
         {
           pid: s.pid,
           spawnId: s.spawnId,
+          ...(s.seq !== undefined ? { seq: s.seq } : {}),
           ...(s.detection ? { detection: true } : {}),
-          ...(s.detected ? { detected: s.detected } : {})
+          ...(s.detected ? { detected: s.detected } : {}),
+          ...(s.mode ? { mode: s.mode } : {}),
+          ...(s.startedAt !== undefined ? { startedAt: s.startedAt } : {}),
+          ...(s.adopted ? { adopted: true } : {})
         }
       ])
     ),
@@ -187,6 +203,21 @@ export interface DetachControllerOptions<E extends DetachableEntry> {
   keepUntracked?: (computerId: string, sessionId: string) => boolean
   /** See {@link OwnerGoneProbe}. Absent: an untracked session is never ended on it. */
   ownerGone?: OwnerGoneProbe
+  /**
+   * After every list of the computer (first contact, same-epoch reconnect): the live
+   * sessions it holds that the sweep KEPT — tracked by nothing here, no record of
+   * giving up on them, owner not proven gone. A previous hub run's, typically: what a
+   * participant may adopt so a hub restart is invisible to them. Called with the
+   * complete set each time (empty included), and with an empty set when the
+   * computer comes back as a different process (the old ones went with it).
+   */
+  onUntracked?: (computerId: string, epoch: string | undefined, kept: UntrackedListed[]) => void
+}
+
+/** A live session the computer holds that nothing here tracks (see `onUntracked`). */
+export interface UntrackedListed {
+  sessionId: string
+  listed: ListedSession
 }
 
 /**
@@ -270,6 +301,7 @@ interface DetachParticipant {
   onDetach?: (entry: DetachableEntry) => void
   keepUntracked?: (computerId: string, sessionId: string) => boolean
   ownerGone?: OwnerGoneProbe
+  onUntracked?: (computerId: string, epoch: string | undefined, kept: UntrackedListed[]) => void
 }
 
 /** An attempt this hub gave up on while the computer may still run it. */
@@ -304,7 +336,8 @@ export function joinDetachController<E extends DetachableEntry>(
     settleExited: options.settleExited as DetachParticipant['settleExited'],
     ...(options.onDetach ? { onDetach: options.onDetach as DetachParticipant['onDetach'] } : {}),
     ...(options.keepUntracked ? { keepUntracked: options.keepUntracked } : {}),
-    ...(options.ownerGone ? { ownerGone: options.ownerGone } : {})
+    ...(options.ownerGone ? { ownerGone: options.ownerGone } : {}),
+    ...(options.onUntracked ? { onUntracked: options.onUntracked } : {})
   }
 
   let byKind = detachControllers.get(options.gateway)
@@ -446,6 +479,24 @@ function createDetachController<E extends DetachableEntry>(
     pruneAbandoned()
   }
 
+  // ── Untracked sessions: offered for adoption ─────────────────────────────
+
+  /** Hand the participants that adopt the computer's untracked sessions the full set. */
+  function offerUntracked(
+    computerId: string,
+    epoch: string | undefined,
+    kept: UntrackedListed[]
+  ): void {
+    for (const p of participants) {
+      if (!p.onUntracked) continue
+      try {
+        p.onUntracked(computerId, epoch, kept)
+      } catch {
+        /* one participant's failure must not stop the reconnect */
+      }
+    }
+  }
+
   // ── Grace window ─────────────────────────────────────────────────────────
 
   function clearGrace(computerId: string): void {
@@ -564,13 +615,23 @@ function createDetachController<E extends DetachableEntry>(
       abandoned.delete(computerId)
     }
     let detached = liveEntries(computerId).filter((o) => o.entry.detached)
+    // A different process: whatever an earlier list offered went with the old one.
+    if (previousEpoch !== undefined && epoch !== previousEpoch)
+      offerUntracked(computerId, epoch, [])
+
     // First contact with this computer: nothing was ever detached here, so there is
     // nothing to resolve. Only a previous hub run's leftovers can be listed — worth
-    // the round-trip only when the hub can say which of them it has finished with.
-    if (previousEpoch === undefined && detached.length === 0) {
-      if (!participants.some((p) => p.ownerGone)) return
+    // the round-trip when the hub can say which of them it has finished with
+    // (`ownerGone`) or can adopt them (`onUntracked`).
+    // Every way out of a first contact ends here: whatever else happened, the
+    // previous run's sessions are listed and offered (review H1).
+    const firstContactSweep = async (): Promise<void> => {
+      if (!participants.some((p) => p.ownerGone || p.onUntracked)) return
       const listed = await listComputer(computerId)
       if (listed) await sweep(computerId, epoch, listed, [], { firstContact: true })
+    }
+    if (previousEpoch === undefined && detached.length === 0) {
+      await firstContactSweep()
       return
     }
     clearGrace(computerId)
@@ -578,7 +639,9 @@ function createDetachController<E extends DetachableEntry>(
     // First contact, yet spawns are waiting: they were sent while this hub had never
     // reached the computer (a restarted app opening its task before the computer's
     // first hello). No earlier process of it can hold them, so this is no
-    // "reconnected as a different process" — start them now, the same attempt.
+    // "reconnected as a different process" — start them now, the same attempt. (A
+    // first spawn of a session the computer already runs, from a previous hub run,
+    // takes that process over there instead of replacing it: `adoptLive`.)
     if (previousEpoch === undefined) {
       const waiting = detached.filter((o) => o.entry.pendingSpawn && !o.entry.disposed)
       for (const o of waiting) {
@@ -593,7 +656,12 @@ function createDetachController<E extends DetachableEntry>(
         })
       }
       detached = detached.filter((o) => !waiting.includes(o))
-      if (detached.length === 0) return
+      // The resent ids are owned (`pendingSpawn` until confirmed): the sweep neither
+      // kills nor offers them, so nothing races the resend.
+      if (detached.length === 0) {
+        await firstContactSweep()
+        return
+      }
     }
 
     // A missing epoch on EITHER side proves nothing — an old computer that cannot
@@ -603,6 +671,8 @@ function createDetachController<E extends DetachableEntry>(
     if (epoch === undefined || previousEpoch === undefined || epoch !== previousEpoch) {
       if (detached.length === 0) return
       for (const o of detached) o.owner.finalize(o.entry, 'computer-restarted')
+      // A first contact that also had entries to give up on still offers the rest.
+      if (previousEpoch === undefined) void firstContactSweep()
       record('computer.sessions_disposed', 'error', detached, computerId, {
         previousEpoch: previousEpoch ?? null,
         epoch: epoch ?? null,
@@ -775,6 +845,7 @@ function createDetachController<E extends DetachableEntry>(
     const ours = [...liveEntries(computerId), ...resolved]
     const kills: Array<{ sessionId: string; spawnId?: string; reason: string }> = []
     const unknown: Array<[string, ListedSession]> = []
+    const offer = (kept: UntrackedListed[]): void => offerUntracked(computerId, epoch, kept)
     for (const [sessionId, running] of listed.live) {
       if (owns(computerId, sessionId, running) || keptByOwner(computerId, sessionId)) continue
       const recorded = abandonedReason(computerId, sessionId, running)
@@ -788,7 +859,10 @@ function createDetachController<E extends DetachableEntry>(
       else unknown.push([sessionId, running])
     }
     killStrays(computerId, kills)
-    if (unknown.length === 0) return
+    if (unknown.length === 0) {
+      offer([])
+      return
+    }
 
     if (participants.length === 0) {
       // Nothing of this kind is tracked here at all, yet the computer runs some: the
@@ -805,13 +879,14 @@ function createDetachController<E extends DetachableEntry>(
             `${kind} backend is tracking any — left running.`
         }
       )
+      offer([])
       return
     }
 
     // Leftovers the hub may have finished with (a previous run's, whose tab was
     // closed or task deleted while it was down): only its own record can say.
     const ownerKills: Array<{ sessionId: string; spawnId?: string; reason: string }> = []
-    const kept: string[] = []
+    const kept: UntrackedListed[] = []
     await Promise.all(
       unknown.map(async ([sessionId, running]) => {
         const why = await ownerGoneReason(computerId, sessionId)
@@ -829,18 +904,28 @@ function createDetachController<E extends DetachableEntry>(
             reason: `owner-gone:${why}`
           })
         } else if (!owns(computerId, sessionId, running)) {
-          kept.push(sessionId)
+          kept.push({ sessionId, listed: running })
         }
       })
     )
     killStrays(computerId, ownerKills)
+    // In list order, whatever order the probes answered in.
+    const order = [...listed.live.keys()]
+    kept.sort((a, b) => order.indexOf(a.sessionId) - order.indexOf(b.sessionId))
     if (kept.length > 0) {
-      emit('computer.untracked_sessions_kept', 'info', computerId, kept, {
-        message:
-          `Computer runs ${String(kept.length)} ${kind} session(s) this hub does not track and ` +
-          'has no record of giving up on — left running.'
-      })
+      emit(
+        'computer.untracked_sessions_kept',
+        'info',
+        computerId,
+        kept.map((k) => k.sessionId),
+        {
+          message:
+            `Computer runs ${String(kept.length)} ${kind} session(s) this hub does not track and ` +
+            'has no record of giving up on — left running.'
+        }
+      )
     }
+    offer(kept)
   }
 
   gateway.events.on('computer-lost', (p) => detachComputer(p.computerId, 'computer-lost'))

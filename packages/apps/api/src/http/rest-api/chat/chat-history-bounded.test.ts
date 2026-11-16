@@ -75,7 +75,8 @@ function expectBounded() {
     expect(a.op).not.toBe('getBufferSince')
     expect(a.op).not.toBe('getReplay')
     // A page (or the projection's open snapshot) — never the whole history.
-    // One unit (an event, a timeline page of 256 rows) always fits, alone.
+    // One unit (an event, a timeline row) always fits, alone — a 256-row page does
+    // not (long tool output made one 6.6 MB).
     if (a.op !== 'openTimeline' && a.units > 1)
       expect({ op: a.op, bytes: a.bytes }).toEqual({
         op: a.op,

@@ -213,3 +213,67 @@ describe('pty.killTask', () => {
     expect(stopped).toEqual(['t1'])
   })
 })
+
+// Sessions a previous hub run left running on a computer (runtime/unattached-sessions).
+describe('unattached sessions', () => {
+  const calls: unknown[][] = []
+  let notify: () => void = () => undefined
+  const ops = {
+    ptyCreate: async (opts: unknown) => {
+      calls.push(['create', opts])
+      return { success: true }
+    },
+    unattachedList: () => [{ computerId: 'pc', sessionId: 't:t', status: 'unattached' }],
+    unattachedAttach: async (computerId: string, sessionId: string) => {
+      calls.push(['attach', computerId, sessionId])
+      return { ok: true }
+    },
+    unattachedKill: async (computerId: string, sessionId: string) => {
+      calls.push(['kill', computerId, sessionId])
+      return { ok: true }
+    },
+    onUnattachedChange: (cb: () => void) => {
+      notify = cb
+      return () => {
+        notify = () => undefined
+      }
+    }
+  }
+  const withOps = () => {
+    calls.length = 0
+    setPtyDeps({ ops, events } as unknown as PtyDeps)
+    return ptyRouter.createCaller(ctx)
+  }
+
+  test('a client cannot ask pty.create to attach (hub-internal only)', async () => {
+    const caller = withOps()
+    await caller.create({ sessionId: 't:t', cwd: '/w', attach: { computerId: 'pc', spawnId: 's' } })
+    expect(calls).toEqual([['create', { sessionId: 't:t', cwd: '/w' }]])
+  })
+
+  test('list, attach and stop name the computer and the session', async () => {
+    const caller = withOps()
+    expect(await caller.unattachedList()).toEqual(ops.unattachedList())
+    expect(await caller.unattachedAttach({ computerId: 'pc', sessionId: 't:t' })).toEqual({
+      ok: true
+    })
+    expect(await caller.unattachedKill({ computerId: 'pc', sessionId: 't:t' })).toEqual({
+      ok: true
+    })
+    expect(calls).toEqual([
+      ['attach', 'pc', 't:t'],
+      ['kill', 'pc', 't:t']
+    ])
+  })
+
+  test('onUnattachedChange: the snapshot on subscribe, then one per change', async () => {
+    const caller = withOps()
+    const obs = await caller.onUnattachedChange()
+    const got: unknown[] = []
+    const sub = obs.subscribe({ next: (v) => got.push(v) })
+    notify()
+    sub.unsubscribe()
+    notify()
+    expect(got).toEqual([ops.unattachedList(), ops.unattachedList()])
+  })
+})

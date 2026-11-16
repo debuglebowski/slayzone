@@ -136,6 +136,10 @@ export function createComputerChatServices(opts: {
   chatRuntimeReady?(computerId: string): boolean
   /** Whether the computer answers chat history in bounded pages (its `chatHistoryPages`). */
   chatHistoryPages?(computerId: string): boolean
+  /** Whether the computer answers a task's prompt summaries in one request (FU5). */
+  promptSummariesAll?(computerId: string): boolean
+  /** Whether the computer slices timeline pages by rows (its `chatTimelineRowSlices`). */
+  chatTimelineRowSlices?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   /**
@@ -701,14 +705,23 @@ export function createComputerChatServices(opts: {
     const { computers, deferred } = await promptComputers(taskId)
     type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
     const result = new Map<string, Summary>()
+    const wanted = new Set(conversationIds)
     for (const computerId of computers) {
-      for (let offset = 0; offset < conversationIds.length; offset += 500) {
-        const summaries = (await historyRequest(computerId, taskId, {
-          kind: 'prompt.summaries',
-          taskId,
-          conversationIds: conversationIds.slice(offset, offset + 500)
-        })) as Summary[]
+      // One request for the whole task where the computer can (FU5: each request is a
+      // summaries read of the whole task); 500 ids at a time for an older computer.
+      const requests = !conversationIds.length
+        ? []
+        : opts.promptSummariesAll?.(computerId)
+          ? [{ kind: 'prompt.summaries', taskId, all: true }]
+          : Array.from({ length: Math.ceil(conversationIds.length / 500) }, (_, i) => ({
+              kind: 'prompt.summaries',
+              taskId,
+              conversationIds: conversationIds.slice(i * 500, i * 500 + 500)
+            }))
+      for (const value of requests) {
+        const summaries = (await historyRequest(computerId, taskId, value)) as Summary[]
         for (const summary of summaries) {
+          if (!wanted.has(summary.conversationId)) continue
           const prior = result.get(summary.conversationId)
           if (!prior) result.set(summary.conversationId, summary)
           else
@@ -719,9 +732,13 @@ export function createComputerChatServices(opts: {
         }
       }
     }
+    // In the order asked for (as the 500-id requests answered).
     const merged: Array<{ conversationId: string; count: number; firstPrompt: string }> = [
-      ...result.values()
-    ]
+      ...wanted
+    ].flatMap((id) => {
+      const summary = result.get(id)
+      return summary ? [summary] : []
+    })
     if (!deferred) return merged
     // Codex chat prompts of conversations still waiting in the hub's legacy chat
     // events: the larger count of the two sources stands (they overlap once moved).

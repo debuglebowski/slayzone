@@ -83,6 +83,20 @@ describe('sanitizeStallForHub', () => {
     // What the hub accepts.
     expect(computerEventLoopStallPayloadSchema.safeParse(out).success).toBe(true)
   })
+
+  it('keeps the verdict and its evidence (FU5)', () => {
+    const evidence = {
+      verdict: 'starved' as const,
+      loadAvg1: 151.2,
+      cpuCount: 10,
+      majorPageFaults: 3,
+      voluntaryCtxSwitches: 0,
+      involuntaryCtxSwitches: 812
+    }
+    const out = sanitizeStallForHub({ ...stall, ...evidence })
+    expect(out).toMatchObject(evidence)
+    expect(computerEventLoopStallPayloadSchema.parse(out)).toMatchObject(evidence)
+  })
 })
 
 describe('createStallReporter', () => {
@@ -186,5 +200,73 @@ describe('what each hub may see', () => {
     reporter.report(many)
     expect(JSON.stringify(lines[0])).toContain('"pid":77')
     expect(JSON.stringify(lines[0])).toContain('topCpu')
+  })
+})
+
+describe('the computer.log line stays small with dozens of agents running', () => {
+  // 2026-11-14: each stall line listed every child (~60 agents, 3 samples): 7–24 KB.
+  // The children are there to name what a blocking spawnSync/execFileSync waited on —
+  // a child born during the freeze. Agents running for minutes cannot be that one.
+  const agents = (n: number, command: string, from: number) =>
+    Array.from({ length: n }, (_, i) => ({ pid: from + i, elapsed: '21:15', command }))
+  const crowded: EventLoopStall = {
+    ...stall,
+    children: [1_068, 2_052, 3_062].map((atMs) => ({
+      atMs,
+      processes: [
+        ...agents(50, '/usr/local/bin/claude --resume x', 1_000),
+        ...agents(10, '/opt/codex app-server', 2_000),
+        { pid: 4_242, elapsed: '00:01', command: '/usr/bin/git status --porcelain' }
+      ]
+    }))
+  }
+
+  it('counts per executable, and in full only the children born during the stall', () => {
+    const lines: Array<Record<string, unknown> | undefined> = []
+    const reporter = createStallReporter({ log: (_m, meta) => lines.push(meta) })
+    reporter.report(crowded)
+    const text = JSON.stringify(lines[0])
+    expect(text.length).toBeLessThan(2_000)
+    const children = lines[0]!.children as Array<{
+      atMs: number
+      total: number
+      byCommand: Record<string, number>
+      born: Array<{ pid: number; elapsed: string; command: string }>
+    }>
+    expect(children).toHaveLength(3)
+    expect(children[0]).toEqual({
+      atMs: 1_068,
+      total: 61,
+      byCommand: { claude: 50, codex: 10, git: 1 },
+      born: [{ pid: 4_242, elapsed: '00:01', command: 'git' }]
+    })
+    // The same born child in a later sample: counted, not listed again.
+    expect(children[1]).toMatchObject({ total: 61, born: [], bornEarlier: 1 })
+    // Measurements, stacks and machine-wide CPU stay in the line.
+    expect(lines[0]).toMatchObject({
+      durationMs: 7_000,
+      stacks: stall.stacks,
+      topCpu: stall.topCpu
+    })
+  })
+
+  it('what a hub is sent is unchanged (its own processes, listed)', () => {
+    const reporter = createStallReporter({ log: () => undefined })
+    const d = new FakeDialer()
+    reporter.attach(d, { primary: false, ownedPids: () => [1_000, 1_001, 4_242] })
+    reporter.report(crowded)
+    const sent = d.stalls()[0].children as Array<{ processes: Array<{ pid: number }> }>
+    expect(sent[0].processes.map((p) => p.pid)).toEqual([1_000, 1_001, 4_242])
+  })
+
+  it('an elapsed time it cannot read is kept in full', () => {
+    const lines: Array<Record<string, unknown> | undefined> = []
+    const reporter = createStallReporter({ log: (_m, meta) => lines.push(meta) })
+    reporter.report({
+      ...stall,
+      children: [{ atMs: 1_000, processes: [{ pid: 5, elapsed: '?', command: 'node x' }] }]
+    })
+    const children = lines[0]!.children as Array<{ born: Array<{ pid: number }> }>
+    expect(children[0].born.map((p) => p.pid)).toEqual([5])
   })
 })

@@ -45,6 +45,12 @@ export interface ComputerIdentity {
   chatRuntimeReady?: boolean
   /** Supplied by the host that actually implements the filesystem handler. */
   aiConfigHashFiles?: boolean
+  /** Implementing host answers bounded event/replay pages. Absent = legacy whole reads. */
+  chatHistoryPages?: boolean
+  /** Implementing host accepts `timelinePages`' optional fifth `startRow` argument. */
+  chatTimelineRowSlices?: boolean
+  /** Implementing host answers `prompt.summaries` with `all: true`. Absent = 500-id batches. */
+  promptSummariesAll?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -351,8 +357,11 @@ export class HubDialer {
       directRtc: this.opts.identity.directRtc?.() ?? false,
       // The grant registry of this release enforces `notAfter` (apps/computer grants.ts).
       directNotAfter: true,
-      // This release's chat runtime answers history in bounded pages.
-      chatHistoryPages: true
+      // A compatible connector can be newer than its busy retained session host.
+      // Only that runtime's identity proves which chat requests it implements.
+      chatHistoryPages: this.opts.identity.chatHistoryPages === true,
+      chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
+      promptSummariesAll: this.opts.identity.promptSummariesAll === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -398,7 +407,9 @@ export class HubDialer {
             directAddress: this.opts.identity.directAddress?.() ?? null,
             directRtc: this.opts.identity.directRtc?.() ?? false,
             directNotAfter: true,
-            chatHistoryPages: true
+            chatHistoryPages: this.opts.identity.chatHistoryPages === true,
+            promptSummariesAll: this.opts.identity.promptSummariesAll === true,
+            chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

@@ -210,6 +210,7 @@ import {
   usePersistenceSaves,
   useDevServerDetection,
   useTaskTerminalSession,
+  useWorkspacePathProbe,
   TaskCompletedScreen,
   getTaskPanels,
   useTaskArtifacts,
@@ -1000,22 +1001,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     [trpcClient, probeTaskId]
   )
 
-  // Re-check on window focus — the directory may have moved while we were away.
-  useEffect(() => {
-    if (!projectRoot) return
-    const handleFocus = (): void => void probeWorkspacePath(projectRoot!)
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [projectRoot, probeWorkspacePath])
-
-  useEffect(() => {
-    if (!projectRoot) {
-      setProjectPathMissing(false)
-      setWorkspaceUnreachable(false)
-      return
-    }
-    void probeWorkspacePath(projectRoot)
-  }, [projectRoot, probeWorkspacePath])
+  // Re-checked by the VISIBLE tab only — on mount, folder change, reveal and window
+  // focus; a hidden tab asks when shown (FU5: N open tabs were N requests per focus).
+  const clearWorkspacePathState = useCallback(() => {
+    setProjectPathMissing(false)
+    setWorkspaceUnreachable(false)
+  }, [])
+  useWorkspacePathProbe(projectRoot, isActive ?? true, probeWorkspacePath, clearWorkspacePathState)
 
   // Handle terminal ready - memoized to prevent effect cascade
   const handleTerminalReady = useCallback(

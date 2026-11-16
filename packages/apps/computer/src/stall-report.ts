@@ -67,7 +67,72 @@ export function sanitizeStallForHub(stall: EventLoopStall): ComputerEventLoopSta
             }))
           }))
         }
+      : {}),
+    // FU5: the verdict and the counters behind it (numbers only, nothing to strip).
+    ...(stall.verdict !== undefined ? { verdict: stall.verdict } : {}),
+    ...(stall.loadAvg1 !== undefined ? { loadAvg1: stall.loadAvg1 } : {}),
+    ...(stall.cpuCount !== undefined ? { cpuCount: stall.cpuCount } : {}),
+    ...(stall.majorPageFaults !== undefined ? { majorPageFaults: stall.majorPageFaults } : {}),
+    ...(stall.voluntaryCtxSwitches !== undefined
+      ? { voluntaryCtxSwitches: stall.voluntaryCtxSwitches }
+      : {}),
+    ...(stall.involuntaryCtxSwitches !== undefined
+      ? { involuntaryCtxSwitches: stall.involuntaryCtxSwitches }
       : {})
+  }
+}
+
+/** Seconds of a `ps` elapsed time (`[[dd-]hh:]mm:ss`, or bare seconds); null: unreadable. */
+function elapsedSeconds(elapsed: string): number | null {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(?:(\d+):)?(\d+)$/.exec(elapsed.trim())
+  if (!m) return null
+  const [, days, a, b, seconds] = m
+  // `mm:ss` fills the first optional group; `hh:mm:ss` both.
+  const hours = b !== undefined ? Number(a) : 0
+  const minutes = b !== undefined ? Number(b) : a !== undefined ? Number(a) : 0
+  return Number(days ?? 0) * 86_400 + hours * 3_600 + minutes * 60 + Number(seconds)
+}
+
+/**
+ * The stall as computer.log keeps it: everything the hub payload has, but each
+ * children sample as counts per executable plus, in full, only the children BORN
+ * during the freeze (elapsed ≤ the sample's time into it, +1 s for rounding; an
+ * unreadable elapsed counts as born). Children are there to name what a blocking
+ * `spawnSync` / `execFileSync` waits for — a child started by that call, so after
+ * the freeze began; the agents running for minutes beside it never are. On
+ * 2026-11-14 the full lists (~60 agents × 3 samples) made each line 7–24 KB.
+ * A born child is listed in full at the first sample it is in; later samples count it
+ * (`bornEarlier`) — a restore spawning 22 agents during one freeze listed them 5×.
+ * Machine-wide CPU (`topCpu`, who was busy) is kept as it is.
+ */
+export function compactStallForLog(
+  payload: ComputerEventLoopStallPayload
+): Record<string, unknown> {
+  const listed = new Set<number>()
+  return {
+    ...payload,
+    children: payload.children.map((sample) => {
+      const byCommand: Record<string, number> = {}
+      const born: typeof sample.processes = []
+      let bornEarlier = 0
+      for (const p of sample.processes) {
+        byCommand[p.command] = (byCommand[p.command] ?? 0) + 1
+        const seconds = elapsedSeconds(p.elapsed)
+        if (seconds !== null && seconds > Math.ceil(sample.atMs / 1000) + 1) continue
+        if (listed.has(p.pid)) bornEarlier++
+        else {
+          listed.add(p.pid)
+          born.push(p)
+        }
+      }
+      return {
+        atMs: sample.atMs,
+        total: sample.processes.length,
+        byCommand,
+        born,
+        ...(bornEarlier > 0 ? { bornEarlier } : {})
+      }
+    })
   }
 }
 
@@ -132,9 +197,10 @@ export function createStallReporter(opts: {
     },
     report(stall) {
       const payload = sanitizeStallForHub(stall)
-      opts.log(`event loop stall: main thread froze for ${String(stall.durationMs)}ms`, {
-        ...payload
-      })
+      opts.log(
+        `event loop stall: main thread froze for ${String(stall.durationMs)}ms`,
+        compactStallForLog(payload)
+      )
       const owned = new Map<StallReportDialer, Set<number>>()
       for (const [dialer, box] of outboxes) owned.set(dialer, new Set(box.scope.ownedPids()))
       const ownedByAny = new Set([...owned.values()].flatMap((pids) => [...pids]))

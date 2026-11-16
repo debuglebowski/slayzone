@@ -57,6 +57,7 @@ import { registerPtyWaitRoute } from './pty/wait'
 import { registerPtyWriteRoute } from './pty/write'
 import { registerPtySubmitRoute } from './pty/submit'
 import { registerPtyKillRoute } from './pty/kill'
+import { registerPtyUnattachedRoutes } from './pty/unattached'
 import { registerPtyRespawnRoute } from './pty/respawn'
 import { registerPtyStartRoute } from './pty/start'
 import { registerChatRoutes } from './chat'
@@ -181,6 +182,7 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerPtyWriteRoute(app, deps)
   registerPtySubmitRoute(app, deps)
   registerPtyKillRoute(app, deps)
+  registerPtyUnattachedRoutes(app, deps)
   registerPtyRespawnRoute(app, deps)
   registerPtyStartRoute(app, deps)
 

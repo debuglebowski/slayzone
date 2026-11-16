@@ -21,7 +21,7 @@ import { createComputerChatServices } from './computer-chat'
  * rows there), so prompt history, prompt summaries and the session list read the
  * computer before, during and after the migration, without duplicates.
  */
-async function fixture() {
+async function fixture(opts: { promptSummariesAll?: boolean } = {}) {
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-live-fallback-'))
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
@@ -66,6 +66,9 @@ async function fixture() {
     },
     resolveComputer: async () => 'pc',
     defaultComputer: async () => 'pc',
+    ...(opts.promptSummariesAll !== undefined
+      ? { promptSummariesAll: () => opts.promptSummariesAll === true }
+      : {}),
     hasLiveTask: async () => state.live,
     flushTask: async (taskId: string, computerId: string) => {
       state.log.push(`flush:${taskId}:${computerId}`)
@@ -233,5 +236,31 @@ test("prompt reads through the relay deliver the task's staged data first", asyn
     }
   } finally {
     await f.close()
+  }
+})
+
+/**
+ * FU5 (computer stalls, request fan-out): a session list's prompt summaries were one
+ * computer request per 500 session ids — each a full summaries read of the task.
+ * A computer that answers a whole task at once (`promptSummariesAll`) gets ONE; an
+ * older one still gets its 500-id requests. Same answer either way.
+ */
+test('prompt summaries: one request per task where the computer can, 500-id chunks where not', async () => {
+  const ids = ['sess-1', ...Array.from({ length: 1_199 }, (_, i) => `absent-${i}`)]
+  const count = (log: string[]) => log.filter((l) => l === 'request:prompt.summaries').length
+  const capable = await fixture({ promptSummariesAll: true })
+  const older = await fixture({ promptSummariesAll: false })
+  try {
+    capable.state.log.length = 0
+    older.state.log.length = 0
+    const one = await capable.services.promptSummaries('task', ids)
+    const chunked = await older.services.promptSummaries('task', ids)
+    expect(one).toEqual(chunked)
+    expect(one).toMatchObject([{ conversationId: 'sess-1', count: 2, firstPrompt: 'old prompt' }])
+    expect(count(capable.state.log)).toBe(1)
+    expect(count(older.state.log)).toBe(3)
+  } finally {
+    await capable.close()
+    await older.close()
   }
 })

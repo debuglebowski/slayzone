@@ -29,6 +29,7 @@ import {
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { effectiveHubUrls, hostConfigurationKey, type ComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
+import { createComputerLog } from './file-log'
 import { adoptHookJournal, readHookJournal } from './hook-journal'
 import {
   forEachIsolatedSync,
@@ -40,6 +41,20 @@ import {
   quarantineWrite,
   readJsonTolerant
 } from '@slayzone/platform/quarantine'
+
+/**
+ * The standalone session host's log: `[host] …` lines to its stdout (its launcher's
+ * `computer-runtime/host.log`, or the service journal) AND, timestamped and rotated,
+ * to `<root>/logs/computer.log` — the same file the desktop's computer writes (its
+ * state dir is `root` too). Before, its lines (event-loop stalls included) reached
+ * only the unrotated stdout sink.
+ */
+export function sessionHostLog(
+  root: string,
+  stdout?: (text: string) => void
+): (message: string, meta?: Record<string, unknown>) => void {
+  return createComputerLog({ stateDir: root, tag: 'host', ...(stdout ? { stdout } : {}) })
+}
 
 export function runtimeDir(root: string): string {
   return join(root, 'computer-runtime')

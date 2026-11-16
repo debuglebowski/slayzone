@@ -16,6 +16,7 @@ import { markSkipCache } from '@slayzone/terminal'
 import { markForceStart, requestAgentStart } from '@slayzone/task-terminals'
 import { useStableCallback } from '@slayzone/ui'
 import { takeTaskPaneEvents } from '../taskPaneEvents'
+import { invalidateSoon } from '../coalesced-invalidate'
 
 export interface UseTaskTerminalSessionParams {
   task: Task | null
@@ -103,8 +104,7 @@ export function useTaskTerminalSession({
     trpc.agentSessions.onChanged.subscriptionOptions(undefined, {
       enabled: !!task,
       onData: (changedTaskId) => {
-        if (changedTaskId === task?.id)
-          void queryClient.invalidateQueries({ queryKey: currentQueryKey })
+        if (changedTaskId === task?.id) invalidateSoon(queryClient, currentQueryKey)
       }
     })
   )

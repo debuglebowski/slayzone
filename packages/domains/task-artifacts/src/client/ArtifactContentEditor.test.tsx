@@ -20,7 +20,11 @@ vi.mock('./trpc', () => {
     }
   }
   const trpcClient = {
-    artifacts: { getMtime: { query: async ({ id }: { id: string }) => disk.mtime[id] ?? null } },
+    artifacts: {
+      getMtime: { query: async ({ id }: { id: string }) => disk.mtime[id] ?? null },
+      listArchive: { query: (input: { id: string }) => hub.listArchive(input) },
+      readBase64: { query: (input: { id: string }) => hub.readBase64(input) }
+    },
     app: { shell: { openExternal: { mutate: vi.fn() } } }
   }
   return { useTRPC: () => trpc, useTRPCClient: () => trpcClient }
@@ -69,6 +73,15 @@ vi.mock('@slayzone/file-editor/client/SearchableCodeView', () => ({
   )
 }))
 vi.mock('@slayzone/file-editor/client/EditorToc', () => ({ EditorToc: () => null }))
+vi.mock('@slayzone/diff-view', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@slayzone/diff-view')>()),
+  DiffView: ({ diff }: { diff: { path: string } }) => <div data-testid="diff-file">{diff.path}</div>
+}))
+/** The hub queries the binary viewers make (stubbed per test). */
+const hub = {
+  listArchive: vi.fn(async (_: { id: string }): Promise<unknown> => null),
+  readBase64: vi.fn(async (_: { id: string }): Promise<string | null> => null)
+}
 
 const { ArtifactContentEditor } = await import('./ArtifactContentEditor')
 
@@ -107,14 +120,17 @@ const VIDEO = artifact('vid', 'clip.mp4')
 function Tab({
   mode,
   art = NOTES,
-  viewMode = 'raw'
+  viewMode = 'raw',
+  siblings = []
 }: {
   mode: 'visible' | 'hidden'
   art?: TaskArtifact
   viewMode?: 'preview' | 'split' | 'raw'
+  siblings?: TaskArtifact[]
 }) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
     artifact: art,
+    siblingArtifacts: [art, ...siblings],
     viewMode,
     readText,
     saveContent,
@@ -256,6 +272,206 @@ describe('ArtifactContentEditor video', () => {
     await flush()
     fireEvent.error(video())
     expect(screen.getByTestId('artifact-video-error').textContent).toMatch(/can't be played/i)
+  })
+})
+
+describe('ArtifactContentEditor audio', () => {
+  it('plays the file in a native audio player and never reads it as text', async () => {
+    render(<Tab mode="visible" art={artifact('aud', 'voice.mp3')} />)
+    await flush()
+    const audio = screen.getByTestId('artifact-audio') as HTMLAudioElement
+    expect(audio.tagName).toBe('AUDIO')
+    expect(audio.getAttribute('src')).toBe(toSlzFileUrl('/data/aud', 1))
+    expect(audio.controls).toBe(true)
+    expect(readText).not.toHaveBeenCalled()
+  })
+})
+
+describe('ArtifactContentEditor video subtitles', () => {
+  const addCue = vi.fn()
+  const tracks: { kind: string; label: string; language: string; mode: string }[] = []
+  beforeEach(() => {
+    addCue.mockClear()
+    tracks.length = 0
+    // jsdom has no TextTrack API.
+    HTMLMediaElement.prototype.addTextTrack = function (kind, label = '', language = '') {
+      const track = { kind, label, language, mode: 'disabled', addCue }
+      tracks.push(track)
+      return track as unknown as TextTrack
+    }
+    ;(globalThis as { VTTCue?: unknown }).VTTCue = class {
+      constructor(
+        public startTime: number,
+        public endTime: number,
+        public text: string
+      ) {}
+    }
+  })
+  afterEach(() => {
+    delete (HTMLMediaElement.prototype as { addTextTrack?: unknown }).addTextTrack
+    delete (globalThis as { VTTCue?: unknown }).VTTCue
+  })
+
+  it('a same-named .vtt/.srt beside the video becomes its text tracks, the first one shown', async () => {
+    disk.content.sub = 'WEBVTT\n\n00:00.500 --> 00:01.500\nHello'
+    disk.content.subsv = '1\n00:00:01,000 --> 00:00:02,000\nHej'
+    render(
+      <Tab
+        mode="visible"
+        art={VIDEO}
+        siblings={[artifact('sub', 'clip.vtt'), artifact('subsv', 'clip.sv.srt')]}
+      />
+    )
+    await flush()
+    await flush()
+    expect(tracks.map((t) => [t.kind, t.label, t.language, t.mode])).toEqual([
+      ['subtitles', 'Subtitles', '', 'showing'],
+      ['subtitles', 'sv', 'sv', 'hidden']
+    ])
+    expect(addCue.mock.calls.map(([c]) => [c.startTime, c.endTime, c.text])).toEqual([
+      [0.5, 1.5, 'Hello'],
+      [1, 2, 'Hej']
+    ])
+  })
+})
+
+describe('ArtifactContentEditor diff', () => {
+  const PATCH = [
+    'diff --git a/src/a.ts b/src/a.ts',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1 +1 @@',
+    '-old',
+    '+new',
+    'diff --git a/b.md b/b.md',
+    '--- a/b.md',
+    '+++ b/b.md',
+    '@@ -1 +1 @@',
+    '-x',
+    '+y'
+  ].join('\n')
+
+  it('previews a patch as one diff per file, under its path', async () => {
+    disk.content.d1 = PATCH
+    render(<Tab mode="visible" art={artifact('d1', 'fix.diff')} viewMode="preview" />)
+    await flush()
+    expect(screen.getAllByTestId('diff-file').map((e) => e.textContent)).toEqual([
+      'src/a.ts',
+      'b.md'
+    ])
+  })
+
+  it('text with no diff in it says so', async () => {
+    disk.content.d2 = 'just notes'
+    render(<Tab mode="visible" art={artifact('d2', 'fix.patch')} viewMode="preview" />)
+    await flush()
+    expect(screen.getByTestId('artifact-diff-empty')).toBeTruthy()
+  })
+
+  it('split view keeps the editable source beside the diff', async () => {
+    disk.content.d1 = PATCH
+    render(<Tab mode="visible" art={artifact('d1', 'fix.diff')} viewMode="split" />)
+    await flush()
+    expect(code()?.value).toBe(PATCH)
+    expect(screen.getAllByTestId('diff-file')).toHaveLength(2)
+  })
+})
+
+describe('ArtifactContentEditor archive', () => {
+  it("lists a zip's entries with their sizes, and the totals", async () => {
+    hub.listArchive.mockResolvedValueOnce({
+      entries: [
+        {
+          path: 'docs/',
+          isDirectory: true,
+          size: 0,
+          compressedSize: 0,
+          modified: '2026-11-15T09:30:00',
+          encrypted: false
+        },
+        {
+          path: 'docs/readme.md',
+          isDirectory: false,
+          size: 2048,
+          compressedSize: 512,
+          modified: '2026-11-15T09:30:10',
+          encrypted: false
+        }
+      ],
+      totalEntries: 2,
+      totalSize: 2048
+    })
+    render(<Tab mode="visible" art={artifact('z1', 'bundle.zip')} />)
+    await flush()
+    expect(hub.listArchive).toHaveBeenCalledWith({ id: 'z1' })
+    const rows = screen.getAllByTestId('archive-entry').map((r) => r.textContent)
+    expect(rows[0]).toContain('docs/')
+    expect(rows[1]).toContain('docs/readme.md')
+    expect(rows[1]).toContain('2 KB')
+    expect(screen.getByTestId('archive-summary').textContent).toMatch(/2 entries.*2 KB/)
+    expect(readText).not.toHaveBeenCalled()
+  })
+
+  it('a listing that fails shows why, with a retry', async () => {
+    hub.listArchive.mockRejectedValueOnce(
+      new Error('Not a zip archive: no end-of-central-directory record')
+    )
+    render(<Tab mode="visible" art={artifact('z2', 'bad.zip')} />)
+    await flush()
+    expect(screen.getByTestId('archive-error').textContent).toMatch(/not a zip archive/i)
+    hub.listArchive.mockResolvedValueOnce({ entries: [], totalEntries: 0, totalSize: 0 })
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await flush()
+    expect(screen.getByTestId('archive-summary').textContent).toMatch(/0 entries/)
+  })
+})
+
+describe('ArtifactContentEditor font', () => {
+  const added: unknown[] = []
+  const deleted: unknown[] = []
+  let loads: 'ok' | 'fail' = 'ok'
+  beforeEach(() => {
+    added.length = 0
+    deleted.length = 0
+    loads = 'ok'
+    ;(globalThis as { FontFace?: unknown }).FontFace = class {
+      constructor(
+        public family: string,
+        public source: ArrayBuffer
+      ) {}
+      load() {
+        return loads === 'ok' ? Promise.resolve(this) : Promise.reject(new Error('bad font'))
+      }
+    }
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { add: (f: unknown) => added.push(f), delete: (f: unknown) => deleted.push(f) }
+    })
+  })
+  afterEach(() => {
+    delete (globalThis as { FontFace?: unknown }).FontFace
+    delete (document as { fonts?: unknown }).fonts
+  })
+
+  it('loads the font from its bytes and sets a specimen in it; unmounting removes it', async () => {
+    hub.readBase64.mockResolvedValueOnce(btoa('\u0000\u0001\u0000\u0000'))
+    const view = render(<Tab mode="visible" art={artifact('f1', 'face.woff2')} />)
+    await flush()
+    expect(hub.readBase64).toHaveBeenCalledWith({ id: 'f1' })
+    const face = added[0] as { family: string; source: ArrayBuffer }
+    expect(new Uint8Array(face.source)).toEqual(new Uint8Array([0, 1, 0, 0]))
+    const specimen = screen.getByTestId('artifact-font')
+    expect(specimen.style.fontFamily).toContain(face.family)
+    view.unmount()
+    expect(deleted).toEqual([face])
+  })
+
+  it("a file the browser can't load as a font says so", async () => {
+    loads = 'fail'
+    hub.readBase64.mockResolvedValueOnce(btoa('nope'))
+    render(<Tab mode="visible" art={artifact('f2', 'broken.ttf')} />)
+    await flush()
+    expect(screen.getByTestId('artifact-font-error').textContent).toMatch(/can't be loaded/i)
   })
 })
 

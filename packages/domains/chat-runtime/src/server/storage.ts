@@ -12,6 +12,7 @@ import { eventAttachmentReferences, recordAttachmentReferences } from './attachm
 import { createBlobStore } from './blob-store'
 import {
   chatBlobRefs,
+  clampChatHistoryPageBudget,
   cutChatHistoryPage,
   escapeChatBlobLiterals,
   extractChatBlobs,
@@ -33,6 +34,8 @@ import type {
   ChatTabTransition
 } from '../shared'
 import { CHAT_RECORD_KINDS } from '../shared'
+import type { EncodedTimelineWrite } from '@slayzone/terminal/timeline-records'
+import { historyReadTurns } from '@slayzone/terminal/history-turns'
 
 function digest(value: unknown): string {
   return createHash('sha256')
@@ -76,8 +79,37 @@ export const CHAT_STORAGE_SCHEMA_VERSION = 13
  * direct link's 1 MiB message and any hub↔computer frame limit. Clients page.
  */
 export const CHAT_BLOB_CHUNK_BYTES = 512 * 1024
+/**
+ * Stored bytes of timeline pages one `dropTimelineStep` deletes at most (one page
+ * always): the event loop runs between steps (secure-delete zero-fills every freed
+ * byte, so a chat's whole projection at once froze the computer for seconds).
+ */
+export const TIMELINE_DROP_STEP_BYTES = 4 * 1024 * 1024
 
 /** A referenced event blob cannot be read back (export / transfer refuses: no lossy copy). */
+/** How long an export's blob lease lasts without renewal (renewed while it runs). */
+const EXPORT_LEASE_MS = 60_000
+
+/** A move's export of one conversation, from a read snapshot (`openExportReader`). */
+export interface ChatExportReader {
+  readonly identity: ConversationIdentity
+  readonly migrationId: string
+  /** Saved events in the snapshot. */
+  readonly eventCount: number
+  /** Counts only: no retained or derived body is loaded while the source is frozen. */
+  readonly recordCount: number
+  readonly receiptCount: number
+  /** One history page (stored form) after `afterSeq`; `more`: pages follow. */
+  eventPage(afterSeq: number): { events: StoredChatEvent[]; more: boolean }
+  /** Retained records in `(kind,id)` order; excluded kinds never load their bodies. */
+  recordPage(after?: Pick<ChatRecord, 'kind' | 'id'>): { records: ChatRecord[]; more: boolean }
+  receiptPage(afterId?: string): { receipts: CommandReceipt[]; more: boolean }
+  /** A stored event's raw form (images back inline, hash-verified). */
+  resolve(event: AgentEvent): AgentEvent
+  /** End the snapshot, release its blob lease. Idempotent. */
+  close(): void
+}
+
 export class EventBlobUnavailableError extends Error {
   constructor(
     readonly sha256: string,
@@ -112,6 +144,84 @@ const LOCAL_ONLY_RECORD_KINDS = [
   'pinned-message',
   'event-blob'
 ] as const satisfies readonly ChatRecordKind[]
+/** The event kinds `prompts.summaries` reads: they name a native conversation, or are a prompt. */
+export const EVENT_MARKER_KINDS = ['turn-init', 'conversation-branch', 'user-message'] as const
+const MARKER_KINDS_SQL = EVENT_MARKER_KINDS.map((k) => `'${k}'`).join(',')
+/** One marker row's values from event JSON `e` — the extracts the old full scan made. */
+const markerValues = (e: string) =>
+  `json_extract(${e},'$.kind'),json_extract(${e},'$.sessionId'),json_extract(${e},'$.conversationId'),json_extract(${e},'$.id')`
+/** `e` is a valid event of a marker kind (an invalid row never refuses its write). */
+const isMarker = (e: string) =>
+  `json_valid(${e}) AND json_extract(${e},'$.kind') IN (${MARKER_KINDS_SQL})`
+
+/**
+ * Event markers (FU5 computer stalls; derived, no schema version): the ~0.4 % of event
+ * rows `prompts.summaries` needs, so it never parses every event of a task again.
+ *
+ * - `event_markers`: per marker-kind row, the values the old scan extracted. Value
+ *   columns have NO declared type: they keep `json_extract`'s exact SQL type.
+ * - `event_marker_coverage`: conversations whose rows are ALL indexed. Born covered
+ *   (the conversation row exists before any of its events: FK); a conversation from
+ *   before markers is covered once `event-marker-backfill.ts` reaches its end.
+ * - Triggers, not the JS insert path: every writer is covered (inserts, the legacy-row
+ *   rewrite, retention / clear deletes) — including an OLDER build reopening this
+ *   file, because the triggers live in it. That is why no version bump is needed.
+ */
+export const EVENT_MARKERS_DDL = `
+  CREATE TABLE IF NOT EXISTS event_markers (
+    conversation_id TEXT NOT NULL, seq INTEGER NOT NULL, kind, session_id, branch_id, message_id,
+    PRIMARY KEY(conversation_id, seq)
+  ) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS event_marker_coverage (conversation_id TEXT PRIMARY KEY) WITHOUT ROWID;
+  CREATE TRIGGER IF NOT EXISTS event_markers_insert AFTER INSERT ON events
+  WHEN ${isMarker('NEW.event')}
+  BEGIN
+    INSERT OR REPLACE INTO event_markers VALUES(NEW.conversation_id,NEW.seq,${markerValues('NEW.event')});
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_markers_update AFTER UPDATE OF conversation_id,seq,event ON events
+  BEGIN
+    DELETE FROM event_markers WHERE conversation_id=OLD.conversation_id AND seq=OLD.seq;
+    INSERT OR REPLACE INTO event_markers
+      SELECT NEW.conversation_id,NEW.seq,${markerValues('NEW.event')} WHERE ${isMarker('NEW.event')};
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_markers_delete AFTER DELETE ON events
+  BEGIN
+    DELETE FROM event_markers WHERE conversation_id=OLD.conversation_id AND seq=OLD.seq;
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_marker_coverage_insert AFTER INSERT ON conversations
+  BEGIN
+    INSERT OR IGNORE INTO event_marker_coverage VALUES(NEW.id);
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_marker_coverage_delete AFTER DELETE ON conversations
+  BEGIN
+    DELETE FROM event_marker_coverage WHERE conversation_id=OLD.id;
+  END;
+`
+
+/** Derived metadata: old writers invalidate it without decoding page bodies. */
+const TIMELINE_METADATA_DDL = `
+  CREATE TABLE IF NOT EXISTS timeline_page_metadata (
+    conversation_id TEXT NOT NULL, page_id TEXT NOT NULL,
+    summary TEXT NOT NULL, search_text TEXT NOT NULL,
+    PRIMARY KEY(conversation_id,page_id)
+  ) WITHOUT ROWID;
+  CREATE TRIGGER IF NOT EXISTS timeline_page_metadata_insert AFTER INSERT ON records
+  WHEN NEW.kind='timeline' AND NEW.id GLOB 'page:*' BEGIN
+    DELETE FROM timeline_page_metadata WHERE conversation_id=NEW.conversation_id AND page_id=NEW.id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS timeline_page_metadata_update AFTER UPDATE OF conversation_id,kind,id,value ON records
+  BEGIN
+    DELETE FROM timeline_page_metadata WHERE OLD.kind='timeline'
+      AND conversation_id=OLD.conversation_id AND page_id=OLD.id;
+    DELETE FROM timeline_page_metadata WHERE NEW.kind='timeline'
+      AND conversation_id=NEW.conversation_id AND page_id=NEW.id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS timeline_page_metadata_delete AFTER DELETE ON records
+  WHEN OLD.kind='timeline' AND OLD.id GLOB 'page:*' BEGIN
+    DELETE FROM timeline_page_metadata WHERE conversation_id=OLD.conversation_id AND page_id=OLD.id;
+  END;
+`
+
 /** Trigger body: bump `task_state_versions` for the task named by SQL expression `task`. */
 export function bumpTaskStateVersion(task: string): string {
   return `INSERT INTO task_state_versions(task_id,version) SELECT ${task},1 WHERE ${task} IS NOT NULL
@@ -129,6 +239,15 @@ export const SESSION_LEDGER_DDL = `
   CREATE INDEX IF NOT EXISTS agent_sessions_task_tab ON agent_sessions(task_id, mode, tab_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS agent_sessions_conversation ON agent_sessions(conversation_id);
   CREATE INDEX IF NOT EXISTS agent_sessions_pool ON agent_sessions(cwd, mode) WHERE status = 'pooled';
+  -- FU5: a chat task holds hundreds of spawns on ONE conversation. Without these the
+  -- resume / sessions-list rules probed every spawn of it per candidate row (n²;
+  -- 250–520 ms on the dev store). The first serves CURRENT_CONVERSATION_SQL's ORDER BY
+  -- (same expression) so the newest accepted row ends the walk; the second answers the
+  -- claim probes' (conversation, task) test from the index. Plain indexes: older builds
+  -- ignore them, inserts keep them.
+  CREATE INDEX IF NOT EXISTS agent_sessions_task_mode_owned
+    ON agent_sessions(task_id, mode, coalesce(bound_at, created_at) DESC);
+  CREATE INDEX IF NOT EXISTS agent_sessions_conversation_task ON agent_sessions(conversation_id, task_id);
   CREATE TABLE IF NOT EXISTS task_conversations (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, tab_id TEXT,
     conversation_id TEXT, origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL
@@ -293,6 +412,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     db.exec(USAGE_CURSORS_DDL)
     // v11: task worktree paths and base dirs (task-paths.ts).
     db.exec(TASK_PATHS_DDL)
+    // FU5: the event-marker index of `prompts.summaries` (derived; see the DDL).
+    db.exec(EVENT_MARKERS_DDL)
+    db.exec(TIMELINE_METADATA_DDL)
     // Version of the hub-facing metadata state, per task. Triggers are the one
     // choke point, so every writer (bootstrap, retention, migration, future code)
     // bumps it. Fail safe: a record kind counts unless it is known to stay local.
@@ -390,8 +512,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   ).store_id
   const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
-  const row = (id: string) =>
-    db.prepare('SELECT * FROM conversations WHERE id=?').get(id) as OwnerRow | undefined
+  /** `on`: another connection on this file (an export's read snapshot); default the store's. */
+  const row = (id: string, on: Database.Database = db) =>
+    on.prepare('SELECT * FROM conversations WHERE id=?').get(id) as OwnerRow | undefined
   const identity = (r: OwnerRow): ConversationIdentity => ({
     id: r.id,
     taskId: r.task_id,
@@ -412,10 +535,11 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   function read(
     id: string,
     afterSeq: number,
-    beforeSeq = Number.MAX_SAFE_INTEGER
+    beforeSeq = Number.MAX_SAFE_INTEGER,
+    on: Database.Database = db
   ): StoredChatEvent[] {
     return (
-      db
+      on
         .prepare(
           'SELECT seq,saved_at,event,blob_form FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq'
         )
@@ -444,9 +568,10 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     id: string,
     afterSeq: number,
     beforeSeq: number,
-    budget: Required<ChatHistoryPageBudget>
+    budget: Required<ChatHistoryPageBudget>,
+    on: Database.Database = db
   ): { through: number | null; more: boolean; sizes: Map<number, number> } {
-    const sizes = db
+    const sizes = on
       .prepare(
         'SELECT seq, octet_length(event) AS bytes FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq LIMIT ?'
       )
@@ -518,21 +643,27 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       .get(id, count - 1) as { seq: number } | undefined
     return r?.seq ?? null
   }
-  function records(id: string, kind?: ChatRecord['kind']): ChatRecord[] {
+  type RecordRow = { kind: ChatRecord['kind']; id: string; value: string; saved_at: number }
+  const decodeRecord = (r: RecordRow): ChatRecord => ({
+    kind: r.kind,
+    id: r.id,
+    value: JSON.parse(r.value),
+    at: r.saved_at
+  })
+  function records(
+    id: string,
+    kind?: ChatRecord['kind'],
+    on: Database.Database = db
+  ): ChatRecord[] {
     return (
-      db
+      on
         .prepare(
           'SELECT kind,id,value,saved_at FROM records WHERE conversation_id=?' +
             (kind ? ' AND kind=?' : '') +
             ' ORDER BY kind,id'
         )
-        .all(id, ...(kind ? [kind] : [])) as Array<{
-        kind: ChatRecord['kind']
-        id: string
-        value: string
-        saved_at: number
-      }>
-    ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
+        .all(id, ...(kind ? [kind] : [])) as RecordRow[]
+    ).map(decodeRecord)
   }
   function indexQueueMessage(id: string, record: Pick<ChatRecord, 'kind' | 'id' | 'value'>) {
     if (record.kind !== 'settings' || !record.id.startsWith('queue-message:')) return
@@ -567,13 +698,165 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       resultExpired: !!r.resultExpired
     }
   }
-  function receipts(id: string): CommandReceipt[] {
+  function receipts(id: string, on: Database.Database = db): CommandReceipt[] {
     return (
-      db
+      on
         .prepare(`SELECT ${receiptColumns} FROM receipts WHERE conversation_id=? ORDER BY id`)
         .all(id) as ReceiptRow[]
     ).map(decodeReceipt)
   }
+  /** What a migration export carries of a conversation's records: derived ones left out. */
+  const exportRecordWhere = "conversation_id=? AND kind NOT IN ('event-blob','timeline')"
+  function exportRecords(id: string, on: Database.Database = db): ChatRecord[] {
+    return (
+      on
+        .prepare(`SELECT kind,id,value,saved_at FROM records
+      WHERE ${exportRecordWhere} ORDER BY kind,id`)
+        .all(id) as RecordRow[]
+    ).map(decodeRecord)
+  }
+  /** Cut header-only candidates before loading a body; one oversized row always fits. */
+  function exportThrough<T extends { bytes: number }>(
+    headers: Iterable<T>,
+    budget: Required<ChatHistoryPageBudget>
+  ): { through: T | undefined; more: boolean } {
+    let n = 0,
+      bytes = 0
+    let through: T | undefined
+    for (const header of headers) {
+      if (n > 0 && (n >= budget.maxEvents || bytes + header.bytes > budget.maxBytes))
+        return { through, more: true }
+      through = header
+      bytes += header.bytes
+      n++
+    }
+    return { through, more: false }
+  }
+  function exportRecordPage(
+    id: string,
+    on: Database.Database,
+    after?: Pick<ChatRecord, 'kind' | 'id'>
+  ) {
+    const budget = clampChatHistoryPageBudget()
+    const where = exportRecordWhere + (after ? ' AND (kind,id)>(?,?)' : '')
+    const params = [id, ...(after ? [after.kind, after.id] : [])]
+    const headers = on
+      .prepare(`SELECT kind,id,octet_length(value)+octet_length(kind)+octet_length(id) AS bytes FROM records
+      WHERE ${where} ORDER BY kind,id LIMIT ?`)
+      .iterate(...params, budget.maxEvents + 1) as Iterable<{
+      kind: ChatRecord['kind']
+      id: string
+      bytes: number
+    }>
+    const { through, more } = exportThrough(headers, budget)
+    if (!through) return { records: [], more: false }
+    const found = on
+      .prepare(`SELECT kind,id,value,saved_at FROM records
+      WHERE ${where} AND (kind,id)<=(?,?) ORDER BY kind,id`)
+      .all(...params, through.kind, through.id) as RecordRow[]
+    return { records: found.map(decodeRecord), more }
+  }
+  function exportReceiptPage(id: string, on: Database.Database, afterId?: string) {
+    const budget = clampChatHistoryPageBudget()
+    const where = 'conversation_id=?' + (afterId !== undefined ? ' AND id>?' : '')
+    const params = [id, ...(afterId !== undefined ? [afterId] : [])]
+    const headers = on
+      .prepare(`SELECT id,octet_length(result)+octet_length(id)+octet_length(hash)
+        +octet_length(state)+COALESCE(octet_length(method),0) AS bytes FROM receipts
+      WHERE ${where} ORDER BY id LIMIT ?`)
+      .iterate(...params, budget.maxEvents + 1) as Iterable<{ id: string; bytes: number }>
+    const { through, more } = exportThrough(headers, budget)
+    if (!through) return { receipts: [], more: false }
+    const found = on
+      .prepare(`SELECT ${receiptColumns} FROM receipts
+      WHERE ${where} AND id<=? ORDER BY id`)
+      .all(...params, through.id) as ReceiptRow[]
+    return { receipts: found.map(decodeReceipt), more }
+  }
+  const timelineMetadataFrom = `records r LEFT JOIN timeline_page_metadata m
+    ON m.conversation_id=r.conversation_id AND m.page_id=r.id`
+  /** Migrate/read only a bounded page of metadata in each process history turn. */
+  async function readTimelineMetadata<T extends { page: number }>(
+    id: string,
+    epoch: number,
+    field: 'summary' | 'search_text',
+    read: (where: string, params: string[]) => T[]
+  ): Promise<T[]> {
+    const job = historyReadTurns.job({ yieldFirst: true })
+    const budget = clampChatHistoryPageBudget()
+    const out: T[] = []
+    let after = ''
+    for (let done = false; !done; ) {
+      const part = await job.step(() =>
+        api.transaction(() => {
+          const owner = row(id)
+          if (!owner || owner.state === 'deleted' || owner.epoch !== epoch)
+            throw new Error('Timeline ownership changed')
+          const where = `r.conversation_id=? AND r.kind='timeline' AND r.id>? AND r.id GLOB 'page:*'
+              AND CAST(substr(r.id,6) AS INTEGER) BETWEEN 0 AND 9007199254740991
+              AND r.id='page:' || CAST(CAST(substr(r.id,6) AS INTEGER) AS TEXT)`
+          const headers = db
+            .prepare(`SELECT r.id,
+          CASE WHEN m.page_id IS NULL THEN octet_length(r.value)
+            ELSE octet_length(m.${field}) END + octet_length(r.id) AS bytes
+          FROM ${timelineMetadataFrom} WHERE ${where} ORDER BY r.id LIMIT ?`)
+            .iterate(id, after, budget.maxEvents + 1) as Iterable<{ id: string; bytes: number }>
+          const { through, more } = exportThrough(headers, budget)
+          if (!through) return { rows: [] as T[], after, done: true }
+          const range = where + ' AND r.id<=?'
+          const params = [id, after, through.id]
+          // Frozen/prepared sources remain readable without acquiring new writes.
+          // Their missing metadata is read directly within this same bounded range.
+          if (owner.state === 'active')
+            db.prepare(`INSERT INTO timeline_page_metadata
+            SELECT r.conversation_id,r.id,json_extract(r.value,'$.summary'),json_extract(r.value,'$.searchText')
+            FROM ${timelineMetadataFrom} WHERE ${range} AND m.page_id IS NULL`).run(...params)
+          return { rows: read(range, params), after: through.id, done: !more }
+        })
+      )
+      out.push(...part.rows)
+      after = part.after
+      done = part.done
+    }
+    return out.sort((a, b) => a.page - b.page)
+  }
+  /** Serialize a conversation's derived operations across scheduled loop turns. */
+  const timelineWork = new Map<string, Promise<unknown>>()
+  function queueTimeline<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const run = (timelineWork.get(id) ?? Promise.resolve()).then(work, work)
+    timelineWork.set(id, run)
+    const clean = () => {
+      if (timelineWork.get(id) === run) timelineWork.delete(id)
+    }
+    void run.then(clean, clean)
+    return run
+  }
+  async function dropTimeline(id: string, epoch: number, from?: number): Promise<void> {
+    const job = historyReadTurns.job({ yieldFirst: true })
+    while (
+      !(await job.step(() => api.dropTimelineStep(id, epoch, TIMELINE_DROP_STEP_BYTES, from)))
+    );
+  }
+  /** Caller holds an owner-checked transaction and has already invalidated its checkpoint. */
+  function putTimeline(
+    id: string,
+    pages: EncodedTimelineWrite['pages'],
+    checkpoint: string | null
+  ) {
+    const put = db.prepare(`INSERT INTO records VALUES(?,'timeline',?,?,?)
+      ON CONFLICT(conversation_id,kind,id) DO UPDATE SET value=excluded.value,saved_at=excluded.saved_at`)
+    const metadata = db.prepare(`INSERT INTO timeline_page_metadata VALUES(?,?,?,?)
+      ON CONFLICT(conversation_id,page_id) DO UPDATE SET summary=excluded.summary,search_text=excluded.search_text`)
+    const at = Date.now()
+    for (const page of pages) {
+      put.run(id, `page:${page.page}`, page.value, at)
+      if (page.summary !== undefined && page.searchText !== undefined)
+        metadata.run(id, `page:${page.page}`, page.summary, page.searchText)
+    }
+    if (checkpoint !== null) put.run(id, 'checkpoint', checkpoint, at)
+  }
+  /** Open export read snapshots (`openExportReader`), closed with the store. */
+  const exportReaders = new Set<ChatExportReader>()
   function nextSeq(id: string): number {
     const last = (
       db
@@ -742,6 +1025,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     close() {
       if (!closed) {
+        for (const reader of [...exportReaders]) reader.close()
         db.close()
         closed = true
       }
@@ -1107,19 +1391,31 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       return { mediaType, size, offset, data: Buffer.from(bytes).toString('base64') }
     },
     /**
-     * Backfill (chat-blob-backfill.ts): up to `limit` LEGACY rows (form 0, saved
-     * before v13) of `id` after `afterSeq`, in seq order, as saved.
+     * Backfill (chat-blob-backfill.ts): seq and stored size (record header,
+     * `octet_length` — no row loaded) of up to `limit` LEGACY rows (form 0, saved
+     * before v13) of `id` after `afterSeq`, in seq order. The backfill reads a body
+     * only once it knows the row fits its slice (and could hold a blob at all).
      */
-    legacyEvents(
+    legacyEventSizes(
       id: string,
       afterSeq: number,
       limit: number
-    ): Array<{ seq: number; at: number; event: string }> {
+    ): Array<{ seq: number; bytes: number }> {
       return db
         .prepare(
-          'SELECT seq,saved_at AS at,event FROM events WHERE conversation_id=? AND seq>? AND blob_form=0 ORDER BY seq LIMIT ?'
+          'SELECT seq,octet_length(event) AS bytes FROM events WHERE conversation_id=? AND seq>? AND blob_form=0 ORDER BY seq LIMIT ?'
         )
-        .all(id, afterSeq, limit) as Array<{ seq: number; at: number; event: string }>
+        .all(id, afterSeq, limit) as Array<{ seq: number; bytes: number }>
+    },
+    /** Backfill: legacy row `seq` of `id` as saved (null: gone or no longer legacy). */
+    legacyEvent(id: string, seq: number): { seq: number; at: number; event: string } | null {
+      return (
+        (db
+          .prepare(
+            'SELECT seq,saved_at AS at,event FROM events WHERE conversation_id=? AND seq=? AND blob_form=0'
+          )
+          .get(id, seq) as { seq: number; at: number; event: string } | undefined) ?? null
+      )
     },
     /**
      * Backfill: legacy row `seq` — only if it is still exactly `original` and still
@@ -1157,13 +1453,261 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         )
       })
     },
-    /** Drop a conversation's timeline projection (derived; rebuilt from its events on next open). */
-    resetTimeline(id: string, epoch: number): number {
+    /** Pre-encoded bytes only. Large replacements drop old bodies in paced steps first. */
+    writeTimeline(id: string, epoch: number, write: EncodedTimelineWrite): Promise<void> {
+      return queueTimeline(id, async () => {
+        const job = historyReadTurns.job({ yieldFirst: true })
+        if (write.dropPagesFrom !== null) {
+          const atomic = await job.step(() =>
+            api.transaction(() => {
+              requireOwner(id, epoch)
+              if (write.pages.length > 2000) return false
+              const checkpoint = db
+                .prepare(
+                  "SELECT octet_length(value) AS bytes FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+                )
+                .get(id) as { bytes: number } | undefined
+              let bytes = (checkpoint?.bytes ?? 0) + Buffer.byteLength(write.checkpoint ?? '')
+              if (bytes > TIMELINE_DROP_STEP_BYTES) return false
+              for (const page of write.pages) {
+                bytes +=
+                  Buffer.byteLength(page.value) +
+                  Buffer.byteLength(page.summary ?? '') +
+                  Buffer.byteLength(page.searchText ?? '')
+                if (page.page < write.dropPagesFrom!) {
+                  const old = db
+                    .prepare(`SELECT octet_length(r.value)
+                    +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+                  FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline' AND r.id=?`)
+                    .get(id, `page:${page.page}`) as { bytes: number } | undefined
+                  bytes += old?.bytes ?? 0
+                }
+                if (bytes > TIMELINE_DROP_STEP_BYTES) return false
+              }
+              const old = db
+                .prepare(`SELECT octet_length(r.value)
+                +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+              FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline'
+                AND r.id GLOB 'page:*' AND CAST(substr(r.id,6) AS INTEGER)>=? LIMIT 2001`)
+                .iterate(id, write.dropPagesFrom) as Iterable<{ bytes: number }>
+              let count = 0
+              for (const page of old) {
+                bytes += page.bytes
+                if (++count + write.pages.length > 2000 || bytes > TIMELINE_DROP_STEP_BYTES)
+                  return false
+              }
+              // The entire affected range fits one turn: retain the old all-or-
+              // nothing rollback contract. The immediate transaction pins this plan.
+              db.prepare(
+                "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+              ).run(id)
+              db.prepare(
+                "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*' AND CAST(substr(id,6) AS INTEGER)>=?"
+              ).run(id, write.dropPagesFrom)
+              putTimeline(id, write.pages, write.checkpoint)
+              return true
+            })
+          )
+          if (atomic) return
+          await dropTimeline(id, epoch, write.dropPagesFrom)
+        }
+        let next = 0
+        for (let done = false; !done; )
+          done = await job.step(() =>
+            api.transaction(() => {
+              requireOwner(id, epoch)
+              const pages: EncodedTimelineWrite['pages'] = []
+              const oldCheckpoint = db
+                .prepare(
+                  "SELECT octet_length(value) AS bytes FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+                )
+                .get(id) as { bytes: number } | undefined
+              let bytes = oldCheckpoint?.bytes ?? 0
+              db.prepare(
+                "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+              ).run(id)
+              while (next < write.pages.length && pages.length < 2000) {
+                const page = write.pages[next]
+                const old = db
+                  .prepare(`SELECT octet_length(r.value)
+                  +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+                FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline' AND r.id=?`)
+                  .get(id, `page:${page.page}`) as { bytes: number } | undefined
+                const size =
+                  (old?.bytes ?? 0) +
+                  Buffer.byteLength(page.value) +
+                  Buffer.byteLength(page.summary ?? '') +
+                  Buffer.byteLength(page.searchText ?? '')
+                if ((pages.length > 0 || bytes > 0) && bytes + size > TIMELINE_DROP_STEP_BYTES)
+                  break
+                pages.push(page)
+                bytes += size
+                next++
+                if (bytes >= TIMELINE_DROP_STEP_BYTES) break
+              }
+              // A large checkpoint gets its own last turn; ordinary last-page and
+              // checkpoint writes remain atomic. Intermediate writes invalidate it.
+              const last =
+                next === write.pages.length &&
+                ((pages.length === 0 && !oldCheckpoint) ||
+                  bytes + Buffer.byteLength(write.checkpoint ?? '') <= TIMELINE_DROP_STEP_BYTES)
+              putTimeline(id, pages, last ? write.checkpoint : null)
+              return last
+            })
+          )
+      })
+    },
+    timelineRecord(id: string, key: string): string | null {
+      return (
+        (
+          db
+            .prepare(
+              "SELECT value FROM records WHERE conversation_id=? AND kind='timeline' AND id=?"
+            )
+            .get(id, key) as { value: string } | undefined
+        )?.value ?? null
+      )
+    },
+    timelinePageIds(id: string): number[] {
+      return (
+        db
+          .prepare(
+            "SELECT id FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'"
+          )
+          .all(id) as Array<{ id: string }>
+      )
+        .map((r) => Number(r.id.slice(5)))
+        .filter((page) => Number.isSafeInteger(page) && page >= 0)
+        .sort((a, b) => a - b)
+    },
+    /**
+     * One step of dropping a conversation's timeline projection (derived; rebuilt from
+     * its events on next open): the checkpoint first — so a drop stopped half way is
+     * never restored from — then pages, oldest first, up to `budget` stored bytes (one
+     * page always; sizes from record headers, no page loaded). A page can be MBs and
+     * every freed byte is zeroed (`secure_delete`): the caller lets the event loop run
+     * between steps (`dropTimelineInSteps`). True once nothing of it is left.
+     */
+    dropTimelineStep(id: string, epoch: number, budget: number, from?: number): boolean {
       return api.transaction(() => {
         requireOwner(id, epoch)
-        return db.prepare("DELETE FROM records WHERE conversation_id=? AND kind='timeline'").run(id)
-          .changes
+        const checkpoint = db
+          .prepare(
+            "SELECT octet_length(value) AS bytes FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+          )
+          .get(id) as { bytes: number } | undefined
+        db.prepare(
+          "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+        ).run(id)
+        const pages = db
+          .prepare(
+            `SELECT r.id, octet_length(r.value)
+                +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+              FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline'
+                AND ${from === undefined ? "r.id<>'checkpoint'" : "r.id GLOB 'page:*' AND CAST(substr(r.id,6) AS INTEGER)>=?"}
+              ORDER BY CAST(substr(r.id,6) AS INTEGER),r.id LIMIT 2001`
+          )
+          .all(id, ...(from === undefined ? [] : [from])) as Array<{ id: string; bytes: number }>
+        const remove = db.prepare(
+          "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id=?"
+        )
+        let bytes = checkpoint?.bytes ?? 0,
+          removed = 0
+        for (const p of pages) {
+          if (removed >= 2000 || ((removed > 0 || bytes > 0) && bytes + p.bytes > budget)) break
+          remove.run(id, p.id)
+          bytes += p.bytes
+          removed++
+        }
+        return removed === pages.length
       })
+    },
+    /**
+     * Marker backfill (event-marker-backfill.ts): conversations not yet covered by
+     * `event_markers` — rows saved before markers existed — oldest first. Deleted
+     * ones are skipped: nothing reads their summaries.
+     */
+    uncoveredMarkerConversations(): string[] {
+      return (
+        db
+          .prepare(
+            `SELECT c.id FROM conversations c WHERE c.state<>'deleted'
+              AND NOT EXISTS (SELECT 1 FROM event_marker_coverage v WHERE v.conversation_id=c.id)
+              ORDER BY c.rowid`
+          )
+          .all() as Array<{ id: string }>
+      ).map((r) => r.id)
+    },
+    /**
+     * Marker backfill: ONE slice — the markers of `id`'s rows after `afterSeq`, up to
+     * the budget (cut from record-header sizes, no body loaded: the first row always
+     * fits) — in one transaction. When no row follows the slice the conversation is
+     * covered in that same transaction: rows appended later carry markers already
+     * (trigger), so nothing can slip between the slice and the coverage.
+     */
+    backfillEventMarkers(
+      id: string,
+      afterSeq: number,
+      budget: Required<ChatHistoryPageBudget>
+    ): { through: number; done: boolean; bytes: number } {
+      return api.transaction(() => {
+        const bounds = pageBounds(id, afterSeq, Number.MAX_SAFE_INTEGER, budget)
+        let bytes = 0
+        if (bounds.through !== null) {
+          for (const [seq, size] of bounds.sizes) if (seq <= bounds.through) bytes += size
+          db.prepare(
+            `INSERT OR IGNORE INTO event_markers
+              SELECT conversation_id,seq,${markerValues('event')} FROM events
+              WHERE conversation_id=? AND seq>? AND seq<=? AND ${isMarker('event')}`
+          ).run(id, afterSeq, bounds.through)
+        }
+        if (!bounds.more)
+          db.prepare('INSERT OR IGNORE INTO event_marker_coverage VALUES(?)').run(id)
+        return { through: bounds.through ?? afterSeq, done: !bounds.more, bytes }
+      })
+    },
+    /**
+     * Timeline pages `from` and later go (a projection whose rows moved writes them
+     * again): by id, no page loaded.
+     */
+    dropTimelinePagesFrom(id: string, epoch: number, from?: number): Promise<void> {
+      return queueTimeline(id, () => dropTimeline(id, epoch, from))
+    },
+    /** Page-ordered indexed summaries, with paced migration of legacy page bodies. */
+    timelineSummaries(
+      id: string,
+      epoch: number
+    ): Promise<Array<{ page: number; summary: string }>> {
+      return queueTimeline(id, () =>
+        readTimelineMetadata(
+          id,
+          epoch,
+          'summary',
+          (where, params) =>
+            db
+              .prepare(`SELECT CAST(substr(r.id,6) AS INTEGER) AS page,
+          COALESCE(m.summary,json_extract(r.value,'$.summary')) AS summary
+          FROM ${timelineMetadataFrom} WHERE ${where}`)
+              .all(...params) as Array<{ page: number; summary: string }>
+        )
+      )
+    },
+    /** Stored timeline pages whose (lowercased) search text holds `needle`, ascending. */
+    async searchTimelinePages(id: string, epoch: number, needle: string): Promise<number[]> {
+      return queueTimeline(id, async () =>
+        (
+          await readTimelineMetadata(
+            id,
+            epoch,
+            'search_text',
+            (where, params) =>
+              db
+                .prepare(`SELECT CAST(substr(r.id,6) AS INTEGER) AS page FROM ${timelineMetadataFrom}
+          WHERE ${where} AND instr(COALESCE(m.search_text,json_extract(r.value,'$.searchText')),?)>0`)
+                .all(...params, needle) as Array<{ page: number }>
+          )
+        ).map((r) => r.page)
+      )
     },
     hasTimeline(id: string): boolean {
       return !!db
@@ -1401,28 +1945,137 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             // the timeline projection (pages embed rows as strings) is rebuilt from the
             // events where it lands.
             events: read(id, -1).map((e) => ({ ...e, event: resolveEventBlobs(e.event) })),
-            records: records(id).filter((r) => r.kind !== 'event-blob' && r.kind !== 'timeline'),
+            records: exportRecords(id),
             receipts: receipts(id)
           }
           return { ...body, hash: digest(body) }
         })()
       } catch (error) {
-        // The move fails (never a silently degraded copy). The fault — recorded after
-        // the read transaction, so it is kept — names the chat and the blob, no content.
-        if (error instanceof EventBlobUnavailableError)
-          api.faults.record(
-            {
-              pass: 'computer.chat-event-blob',
-              itemKey: `${id}:${error.sha256}`,
-              taskId: row(id)?.task_id ?? null,
-              kind: 'structural',
-              fingerprint: error.sha256,
-              error
-            },
-            Date.now()
-          )
+        api.recordExportBlobFault(id, error)
         throw error
       }
+    },
+    /**
+     * A move's export of conversation `id`, which the caller has frozen for it
+     * (`freeze` … this … `unfreeze`, all synchronous): a READ SNAPSHOT of the chat as
+     * of now, on its own read-only connection, held until `close()` — the chat is
+     * unfrozen again at once (live writes go on), while the export reads it a page
+     * at a time (`writeExportTransfer`) and gets exactly what `exportConversation`
+     * would have read here. A blob lease keeps every image it references (GC skips
+     * while one is held). Open readers are listed (`hasExportReaders`) and closed with
+     * the store; a file swap of the store must wait for them to close.
+     */
+    openExportReader(id: string, epoch: number, migrationId: string): ChatExportReader {
+      const conn = new Database(path, { readonly: true, fileMustExist: true })
+      let lease: { release(): void } | undefined
+      let renew: ReturnType<typeof setInterval> | undefined
+      let reader: ChatExportReader | undefined
+      let open = true
+      const live = () => {
+        if (!open) throw new Error('Export reader closed')
+      }
+      const close = () => {
+        if (!open) return
+        open = false
+        if (renew) clearInterval(renew)
+        if (reader) exportReaders.delete(reader)
+        // Closing rolls back this read-only transaction. Release the lease even
+        // if connection cleanup fails; initialization uses this same path.
+        try {
+          conn.close()
+        } finally {
+          if (!closed) lease?.release()
+        }
+      }
+      try {
+        conn.pragma('busy_timeout = 5000')
+        // The snapshot starts with the transaction's first read.
+        conn.exec('BEGIN')
+        const r = row(id, conn)
+        if (!r) throw new Error('Unknown conversation')
+        if (r.epoch !== epoch) throw new Error('Stale ownership epoch')
+        if (r.state !== 'frozen' || r.migration_id !== migrationId)
+          throw new Error('Migration must freeze source first')
+        const leaseId = `export:${migrationId}:${id}:${randomUUID()}`
+        lease = api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
+        reader = {
+          identity: identity(r),
+          migrationId,
+          eventCount: (
+            conn.prepare('SELECT COUNT(*) AS n FROM events WHERE conversation_id=?').get(id) as {
+              n: number
+            }
+          ).n,
+          recordCount: (
+            conn
+              .prepare(`SELECT COUNT(*) AS n FROM records WHERE ${exportRecordWhere}`)
+              .get(id) as { n: number }
+          ).n,
+          receiptCount: (
+            conn.prepare('SELECT COUNT(*) AS n FROM receipts WHERE conversation_id=?').get(id) as {
+              n: number
+            }
+          ).n,
+          eventPage(afterSeq) {
+            live()
+            const bounds = pageBounds(
+              id,
+              afterSeq,
+              Number.MAX_SAFE_INTEGER,
+              clampChatHistoryPageBudget(),
+              conn
+            )
+            if (bounds.through === null) return { events: [], more: false }
+            return { events: read(id, afterSeq, bounds.through + 1, conn), more: bounds.more }
+          },
+          recordPage(after) {
+            live()
+            return exportRecordPage(id, conn, after)
+          },
+          receiptPage(afterId) {
+            live()
+            return exportReceiptPage(id, conn, afterId)
+          },
+          resolve(event) {
+            live()
+            return resolveEventBlobs(event)
+          },
+          close
+        }
+        exportReaders.add(reader)
+        // No renewal or registry entry can outlive a failed construction.
+        renew = setInterval(() => {
+          if (open && !closed) api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
+        }, EXPORT_LEASE_MS / 3)
+        renew.unref?.()
+        return reader
+      } catch (error) {
+        close()
+        throw error
+      }
+    },
+    /** An export's read snapshot is open (`openExportReader`): a store file swap waits. */
+    hasExportReaders(): boolean {
+      return exportReaders.size > 0
+    },
+    /**
+     * An export failed on an image it could not read: the move fails (never a
+     * silently degraded copy); a structural fault names the chat and the blob, no
+     * content. Other errors: nothing recorded.
+     */
+    recordExportBlobFault(id: string, error: unknown): void {
+      if (!(error instanceof EventBlobUnavailableError)) return
+      api.faults.record(
+        {
+          pass: 'computer.chat-event-blob',
+          itemKey: `${id}:${error.sha256}`,
+          taskId: row(id)?.task_id ?? null,
+          kind: 'structural',
+          fingerprint: error.sha256,
+          error
+        },
+        Date.now()
+      )
     },
     stageTransfer(manifest: ChatTransferManifest, lines: Iterable<string>): void {
       const h = manifest.header

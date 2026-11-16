@@ -717,3 +717,77 @@ describe('pending-spawn windows and the sweep', () => {
     expect(await L.getCurrentConversationId(db, T, M)).toBe('kept')
   })
 })
+
+/**
+ * FU5 (computer stalls): chat tasks hold hundreds of spawn rows on ONE provider
+ * conversation (dev store: 577 / 387 / 338). The per-row claim / owner-tab probes made
+ * `getCurrentConversationId` and `listTaskSessionRows` quadratic in those rows
+ * (250–520 ms each), on every sessions-list refresh. Two indexes fix it with the rule
+ * SQL unchanged: the plans below are the gate; the timings are logged.
+ */
+describe('query plans: no row-count-squared work for one conversation with many spawns', () => {
+  const plan = (storage: ReturnType<typeof ledger>['storage'], sql: string, params: unknown[]) =>
+    storage
+      .compose((raw) => raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params))
+      .map((r) => (r as { detail: string }).detail)
+      .join('\n')
+
+  /** `n` spawn rows of one chat conversation in task T, one tab, proven resumable. */
+  function seedChatSpawns(storage: ReturnType<typeof ledger>['storage'], n: number) {
+    storage.compose((raw) => {
+      const insert = raw.prepare(
+        `INSERT INTO agent_sessions (id, mode, cwd, task_id, tab_id, conversation_id, origin, status, created_at)
+         VALUES (?, 'claude-chat', '/repo', ?, ?, 'CHAT', 'slay-spawned-resume', 'bound', ?)`
+      )
+      raw.transaction(() => {
+        for (let i = 0; i < n; i++) insert.run(`spawn-${i}`, T, T, 1_000 + i)
+        raw
+          .prepare(`INSERT INTO session_turns (conversation_id, first_turn_at) VALUES ('CHAT', 1)`)
+          .run()
+      })()
+    })
+  }
+
+  test('getCurrentConversationId walks the owned-at index in order and stops at the first hit', () => {
+    const { storage } = ledger()
+    const sql = L.CURRENT_CONVERSATION_SQL
+    const detail = plan(storage, sql, [...L.resetParams(T, M, T), T, M, T])
+    expect(detail).toMatch(/SEARCH s USING INDEX agent_sessions_task_mode_owned/)
+    expect(detail).not.toMatch(/TEMP B-TREE FOR ORDER BY/)
+  })
+
+  test('claim probes of one conversation read (conversation, task) from an index, not the table', () => {
+    const { storage } = ledger()
+    const detail = plan(storage, L.TASK_SESSION_ROWS_SQL, [T, M])
+    expect(detail).toMatch(/SEARCH o USING (COVERING )?INDEX agent_sessions_conversation_task/)
+  })
+
+  test('600 spawns of one chat: current conversation and session rows stay fast', async () => {
+    const { storage, db } = ledger()
+    seedChatSpawns(storage, 600)
+    let t0 = performance.now()
+    expect(await L.getCurrentConversationId(db, T, 'claude-chat')).toBe('CHAT')
+    const current = performance.now() - t0
+    t0 = performance.now()
+    const rows = await L.listTaskSessionRows(db, T, 'claude-chat')
+    const list = performance.now() - t0
+    expect(rows.map((r) => [r.conversationId, r.isCurrent])).toEqual([['CHAT', true]])
+    console.log(
+      `[fu5] 600 spawns / 1 conversation: getCurrentConversationId ${current.toFixed(1)} ms, listTaskSessionRows ${list.toFixed(1)} ms`
+    )
+    // Load-tolerant bound; the plan tests above are the gate.
+    expect(current + list).toBeLessThan(250)
+  })
+
+  test('worst case, no spawn resumable (no turn proof): measured, still bounded', async () => {
+    const { storage, db } = ledger()
+    seedChatSpawns(storage, 600)
+    storage.compose((raw) => raw.prepare('DELETE FROM session_turns').run())
+    const t0 = performance.now()
+    expect(await L.getCurrentConversationId(db, T, 'claude-chat')).toBeNull()
+    const ms = performance.now() - t0
+    console.log(`[fu5] 600 spawns, none resumable: getCurrentConversationId ${ms.toFixed(1)} ms`)
+    // Residual (accepted, see FU5 handoff): ~150 ms idle; generous bound for loaded CI boxes.
+    expect(ms).toBeLessThan(3_000)
+  })
+})

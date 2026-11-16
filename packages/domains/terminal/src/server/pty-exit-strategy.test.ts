@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   shouldShellFallback,
+  exitWasRequested,
   buildRecoveryMessage,
   decideRecoveryAdoption,
   shouldArmHubStartupDeadline,
@@ -21,7 +22,8 @@ const base = {
   hasPostSpawnCommand: true,
   resuming: false,
   usedShellFallback: false,
-  isStale: false
+  isStale: false,
+  requested: false
 }
 
 // --- shouldShellFallback ---
@@ -69,6 +71,29 @@ describe('shouldShellFallback', () => {
   test('true for a genuine non-zero crash on resume (not stale)', () => {
     expect(shouldShellFallback({ ...base, exitCode: 1, resuming: true, isStale: false })).toBe(true)
   })
+
+  test('false when SlayZone asked for the exit — a remote kill reports code 1', () => {
+    // A computer-routed kill arrives with a null code, mapped to 1: without this the
+    // user's "close" spawned a recovery shell into the tab they had just closed.
+    expect(shouldShellFallback({ ...base, exitCode: 1, requested: true })).toBe(false)
+    expect(shouldShellFallback({ ...base, exitCode: 129, requested: true })).toBe(false)
+  })
+})
+
+// --- exitWasRequested ---
+
+describe('exitWasRequested', () => {
+  const none = { killRequested: false, shuttingDown: false, hibernating: false }
+  test('an exit nobody asked for is not requested', () => {
+    expect(exitWasRequested(none)).toBe(false)
+  })
+  test.each([
+    ['a kill (close, replace, task done, hand-off)', { killRequested: true }],
+    ['app shutdown', { shuttingDown: true }],
+    ['hibernation', { hibernating: true }]
+  ])('%s is requested', (_why, over) => {
+    expect(exitWasRequested({ ...none, ...over })).toBe(true)
+  })
 })
 
 // --- decideRecoveryAdoption ---
@@ -80,7 +105,12 @@ describe('shouldShellFallback', () => {
 // round-trip, so the session can be torn down while it is in flight. Only the
 // happy path is reachable from e2e, hence these.
 
-const adopt = { finalized: false, sessionReplaced: false, isShuttingDown: false }
+const adopt = {
+  finalized: false,
+  sessionReplaced: false,
+  isShuttingDown: false,
+  killRequested: false
+}
 
 describe('decideRecoveryAdoption', () => {
   test('adopts when the session is still live', () => {
@@ -111,11 +141,20 @@ describe('decideRecoveryAdoption', () => {
     expect(v.action === 'discard' && v.finalize).toBe(true)
   })
 
+  test('discards + finalizes when a kill was asked for while it spawned', () => {
+    // The user closed the tab during the recovery round trip: the shell must not
+    // come up in it, and the exit they asked for is reported.
+    const v = decideRecoveryAdoption({ ...adopt, killRequested: true })
+    expect(v.action).toBe('discard')
+    expect(v.action === 'discard' && v.finalize).toBe(true)
+  })
+
   test('finalized wins over a concurrent replacement (no double finalize)', () => {
     const v = decideRecoveryAdoption({
       finalized: true,
       sessionReplaced: true,
-      isShuttingDown: true
+      isShuttingDown: true,
+      killRequested: true
     })
     expect(v.action).toBe('discard')
     expect(v.action === 'discard' && v.finalize).toBe(false)

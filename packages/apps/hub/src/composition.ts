@@ -1,5 +1,6 @@
 import { createChatRelayWatch } from './chat-relay-watch'
 import { createChatDirectWriteHandler } from './chat-direct-write'
+import { createTabChangeCoalescer } from './tab-change-coalescer'
 import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import {
   createDirectLinkIssuer,
@@ -77,6 +78,7 @@ import {
 } from '@slayzone/task/server'
 import { readHubSessionRetentionDays, readHubStunAddresses } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
+import { wireTerminalDisposal } from './terminal-disposal'
 import {
   createComputerChatMaintenance,
   createComputerChatCommandBarrier
@@ -162,6 +164,7 @@ import {
   getTaskOp,
   resolveMainAgentLaunch,
   resolveChatAgentLaunch,
+  resolveTerminalTabLaunch,
   startMainAgent,
   restoreRunningChatAgents,
   type TaskRuntimeAdapters
@@ -232,6 +235,8 @@ import {
   setTerminalCommandProbe,
   getPtyDirectTarget,
   onPtyInputSubmit,
+  setUnattachedLaunchResolver,
+  getPtyDeps,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/hub'
@@ -992,7 +997,9 @@ export function composeServer(opts: {
   })
   // The session ledger is on the computer running the agents (robustness plan §9):
   // the terminal runtime's ledger calls go there (`computerSessionLedger.store`).
-  setPtyDeps({ ops: createPtyOps(db, sessionStore), events: ptyEvents })
+  const ptyOps = createPtyOps(db, sessionStore)
+  setPtyDeps({ ops: ptyOps, events: ptyEvents })
+  wireTerminalDisposal(db, ptyOps)
 
   // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as
   // `wireIdleClose` below: the pty/chat runtimes live in THIS process, so the
@@ -1153,6 +1160,12 @@ export function composeServer(opts: {
     chatHistoryPages: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatHistoryPages ===
       true,
+    promptSummariesAll: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.promptSummariesAll ===
+      true,
+    chatTimelineRowSlices: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
+        ?.chatTimelineRowSlices === true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
@@ -1353,21 +1366,32 @@ export function composeServer(opts: {
       settle: afterBoot(d.settle)
     })
   }
+  /** How long the hub gathers one tab's prompt changes into one notification (FU5). */
+  const PROMPT_CHANGE_COALESCE_MS = 200
   setTaskSessionPromptReader((_db, taskId, ids) =>
     throughLocalBoot(() => computerChat.promptSummaries(taskId, ids), promptsOffline)
   )
   // Every saved event is reported to the hub (`saved`), relayed in full or not
   // (docs/direct-link.md): the prompt lists follow it even for a tab no hub client watches.
+  // Coalesced per tab (FU5): a message and its delivery receipt — or a burst of them —
+  // are ONE "prompts + sessions changed" per 200 ms, so every client re-reads the
+  // sessions list (a summaries read + ledger queries on the computer) once, not 2× per event.
+  const promptChanges = createTabChangeCoalescer({
+    delayMs: PROMPT_CHANGE_COALESCE_MS,
+    flush: (tabId) => {
+      void computerChat.ownership
+        .forTab(tabId)
+        .then((owner) => {
+          if (!owner) return
+          agentPromptsEvents.emit('agent-prompts:changed', owner.taskId)
+          agentSessionsEvents.emit('agent-sessions:changed', { taskId: owner.taskId })
+        })
+        .catch(() => console.error('[chat] prompt notification pending'))
+    }
+  })
   computerChat.relay.events.on('saved', (tabId, saved) => {
     if (saved.kind !== 'user-message' && saved.kind !== 'user-message-delivery') return
-    void computerChat.ownership
-      .forTab(tabId)
-      .then((owner) => {
-        if (!owner) return
-        agentPromptsEvents.emit('agent-prompts:changed', owner.taskId)
-        agentSessionsEvents.emit('agent-sessions:changed', { taskId: owner.taskId })
-      })
-      .catch(() => console.error('[chat] prompt notification pending'))
+    promptChanges.notify(tabId)
   })
   let resettingForTest = false
   const chatNotificationChains = new Map<string, Promise<void>>()
@@ -2099,7 +2123,12 @@ export function composeServer(opts: {
       subscribeToPtyData,
       subscribeToStateChange,
       onSessionChange,
-      getState
+      getState,
+      listUnattached: () => getPtyDeps().ops.unattachedList(),
+      attachUnattached: (computerId, sessionId) =>
+        getPtyDeps().ops.unattachedAttach(computerId, sessionId),
+      killUnattached: (computerId, sessionId) =>
+        getPtyDeps().ops.unattachedKill(computerId, sessionId)
     },
     // CLI completion guard: PTYs + chats (every computer) of the task mid-reply.
     taskAgents: {
@@ -2417,6 +2446,11 @@ export function composeServer(opts: {
     // tracks (a previous run's): a reconnect ends one only on that proof — its
     // task or tab gone, its process row deleted — never for being unknown.
     const sessionOwners = createComputerSessionOwners(db)
+    // Terminal sessions a previous hub run left running on a computer are adopted
+    // into their tabs, launched as those tabs would be (terminal unattached-sessions).
+    setUnattachedLaunchResolver((target) =>
+      resolveTerminalTabLaunch(db, target, (id) => getTaskOp(db, id))
+    )
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,
@@ -3028,6 +3062,8 @@ export function composeServer(opts: {
    */
   const resetForTest = async (): Promise<void> => {
     resettingForTest = true
+    // A change notified before the wipe names a tab that no longer exists.
+    promptChanges.close()
     try {
       await drainComputerChatMaintenance()
       await Promise.all(

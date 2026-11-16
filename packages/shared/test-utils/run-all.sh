@@ -177,6 +177,7 @@ run_harness packages/apps/hub/src/erasure-fanout.test.ts
 run_harness packages/apps/hub/src/computer-data-handoff.test.ts
 run_harness packages/apps/hub/src/computer-task-paths.test.ts
 run_harness packages/apps/hub/src/computer-session-owners.test.ts
+run_harness packages/apps/hub/src/terminal-disposal.test.ts
 # A task-scoped request (spawn, exec, file/git read) waits for the task's staged paths.
 run_harness packages/apps/hub/src/task-path-request-gate.test.ts
 # A restored chat's invoke delivers its staged settings first; open chats re-read them.
@@ -673,6 +674,7 @@ run_harness packages/shared/platform/src/startup-deadline.test.ts
 run_harness packages/shared/platform/src/event-loop-stall.test.ts
 # A computer's own main-thread stall, reported over its socket, becomes the hub diagnostic computer.event_loop_stall.
 run_harness packages/apps/hub/src/computer-stall-consumer.test.ts
+run_harness packages/apps/hub/src/tab-change-coalescer.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
 # computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_harness packages/shared/platform/src/device-status-queries.test.ts
@@ -769,6 +771,8 @@ run_harness packages/domains/usage-analytics/src/server/collector.test.ts
 run_harness packages/domains/usage-analytics/src/server/parser-ids.test.ts
 run_harness packages/domains/usage-analytics/src/server/codex-usage-attribution.test.ts
 run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
+# Sessions a previous hub run left running: listed with the reason, attached again or stopped.
+run_harness packages/apps/api/src/http/rest-api/pty/unattached.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
@@ -895,6 +899,8 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
 run_harness packages/domains/chat-runtime/src/server/session-moves.test.ts
+# A move's export streamed from a read snapshot, byte-identical (FU4).
+run_harness packages/domains/chat-runtime/src/server/session-move-export.test.ts
 run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/thread-close.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
@@ -915,6 +921,8 @@ run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
 run_harness packages/domains/chat-runtime/src/server/session-ledger.test.ts
 run_harness packages/domains/chat-runtime/src/server/agent-turns.test.ts
 run_harness packages/domains/chat-runtime/src/server/prompts.test.ts
+run_harness packages/domains/chat-runtime/src/server/event-markers.test.ts
+run_harness packages/domains/chat-runtime/src/server/event-marker-backfill.test.ts
 run_harness packages/domains/chat-runtime/src/server/task-paths.test.ts
 # Hub hand-off kinds on the computer: task-conversation, legacy-conversation-history, chat-settings (S6).
 run_harness packages/domains/chat-runtime/src/server/handoff-imports.test.ts
@@ -948,12 +956,16 @@ run_harness packages/domains/chat-runtime/src/server/hub-lifecycle-rebase.test.t
 run_harness packages/domains/chat-runtime/src/server/hub-recovery.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
+run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
+run_harness packages/domains/chat-runtime/src/server/timeline-storage-bounded.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
 # Event blobs: tool-result base64 moved to the blob store, pinned, GC/retention/erasure/backups.
 run_harness packages/domains/chat-runtime/src/server/event-blobs.test.ts
 # Backfill of pre-v13 inline rows: verified in-place rewrite, slices, resume, backup/erasure/retention exclusion.
 run_harness packages/domains/chat-runtime/src/server/chat-blob-backfill.test.ts
+# Timeline records: no page loaded to drop/list/search; drops in byte-bounded steps (FU4).
+run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
 # Migration, recovery and failure-atomicity regressions from the storage audits.
 run_harness packages/apps/hub/src/computer-chat-stability-audit.test.ts
 run_harness packages/apps/hub/src/artifacts-second-pass.test.ts
@@ -1056,6 +1068,13 @@ run_harness packages/domains/terminal/src/server/runtime/createpty-resume-locati
 run_harness packages/domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts
 # An agent that dies mid-session unasked is resumed in place, not buried under a recovery shell.
 run_harness packages/domains/terminal/src/server/runtime/pty-auto-resume.test.ts
+# A hub restart: the session a previous run left running is adopted (attached), never
+# re-launched or replaced; what cannot be adopted is surfaced with attach/stop.
+run_harness packages/domains/terminal/src/server/runtime/pty-attach.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-adoption-handoff.test.ts
+run_harness packages/domains/terminal/src/server/runtime/unattached-sessions.test.ts
+run_harness packages/domains/terminal/src/server/runtime/keyed-serializer.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-store-kill.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 
@@ -1179,6 +1198,8 @@ run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
 run_harness packages/apps/cli/src/commands/completions.test.ts
 run_harness packages/apps/cli/src/commands/transfers.test.ts
+# `slay pty`: unattached sessions in `list`, `unattached`, `attach`, `kill` (its --json unchanged).
+run_harness packages/apps/cli/src/commands/pty.test.ts
 run_harness packages/apps/api/src/http/rest-api/transfers.test.ts
 # Wave-3.5 CLI artifact commands routed through REST — metadata AND content
 # (read/create/upload/delete/download), incl. a no-local-database suite.
@@ -1284,6 +1305,7 @@ run_harness packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
 # Timeline checkpoint: decode + rest of events = full replay; reducer version hash guard.
 run_harness packages/domains/terminal/src/shared/chat-timeline-checkpoint.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-timeline-projection.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-timeline-worker.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-workspace-tracker.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-workspace.integration.test.ts
 run_harness packages/domains/terminal/src/server/workspace-changes-store.test.ts
@@ -1347,6 +1369,7 @@ run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
 run_harness packages/shared/diff-view/src/parse-diff.test.ts
+run_harness packages/domains/file-editor/src/client/long-lines.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts
 run_harness packages/domains/worktrees/src/server/list-project-repos.test.ts
 run_harness packages/domains/worktrees/src/server/remove-worktree.test.ts
@@ -1357,6 +1380,10 @@ run_harness packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts \
+  "event-loop measurement of many chats' timeline projections (machine-dependent, minutes); run it by hand, see its header"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/blob-backfill.perf.test.ts \
+  "event-loop + read-count measurement of the blob backfill (machine-dependent, minutes); run it by hand, see its header"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the
 # app's vitest config, not the node harness config above. The app
@@ -1391,6 +1418,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/connectPacing.test.ts \
+  packages/shared/transport/src/client/connectHandshake.test.ts \
+  packages/shared/transport/src/client/wsReconnect.test.ts \
   packages/shared/transport/src/client/direct-link.test.ts \
   packages/shared/transport/src/client/direct-lease-keeper.test.ts \
   packages/shared/transport/src/direct/rtc-channel.test.ts \
@@ -1411,6 +1440,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/search/src/SearchDialog.algorithm.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
+  packages/domains/task/src/client/coalesced-invalidate.test.ts \
+  packages/domains/task/src/client/task-detail/useWorkspacePathProbe.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/terminal-first.test.ts \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
@@ -1438,6 +1469,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerFaults.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerUnattachedSessions.test.tsx \
   packages/domains/settings/src/client/HubIssueBanners.test.tsx \
   packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \
@@ -1564,6 +1596,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tasks/src/client/KanbanListView.test.tsx \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
   packages/domains/terminal/src/client/TerminalDeadOverlay.test.tsx \
+  packages/domains/terminal/src/client/useUnattachedSession.test.tsx \
   packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
@@ -1683,6 +1716,7 @@ run_vitest_files "vitest (role gate)" \
 run_vitest_files "vitest (owner checks)" \
   packages/apps/api/src/owner-policy.test.ts \
   packages/apps/api/src/http-owner-policy.test.ts \
+  packages/apps/api/src/unattached-owner.test.ts \
   packages/apps/api/src/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no

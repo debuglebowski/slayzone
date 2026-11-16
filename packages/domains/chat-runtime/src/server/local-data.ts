@@ -1,3 +1,7 @@
+import {
+  timelineStoreFromRecords,
+  type TimelineRecordStore
+} from '@slayzone/terminal/timeline-records'
 import { randomUUID } from 'node:crypto'
 import type {
   ChatDataOps,
@@ -35,6 +39,7 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
+import { dropTimelineInSteps } from './timeline-drop'
 import { chatStorageMode, isStorageOnlyChatOwner, terminalStorageAgentId } from './storage-mode'
 import { createSessionLedgerService, type SessionLedgerService } from './session-ledger-service'
 
@@ -128,6 +133,37 @@ export function createLocalChatData(
   function remove(tabId: string, kind: ChatRecordKind, key: string) {
     const i = owner(tabId)
     store.removeRecord(i.id, i.epoch, kind, key)
+  }
+  function timelineRecords(tabId: string): TimelineRecordStore {
+    // Capture once: a late worker reply must never write into a replacement owner.
+    const identity = owner(tabId)
+    function readable() {
+      const current = store.conversation(identity.id)
+      if (!current || current.state === 'deleted' || current.identity.epoch !== identity.epoch)
+        throw new Error('Timeline ownership changed')
+    }
+    return {
+      load: async (key) => {
+        readable()
+        return store.timelineRecord(identity.id, key)
+      },
+      pageIds: async () => {
+        readable()
+        return store.timelinePageIds(identity.id)
+      },
+      loadSummaries: async () => {
+        readable()
+        return store.timelineSummaries(identity.id, identity.epoch)
+      },
+      searchPages: async (needle) => {
+        readable()
+        return store.searchTimelinePages(identity.id, identity.epoch, needle)
+      },
+      save: async (write) => store.writeTimeline(identity.id, identity.epoch, write),
+      discard: async () => {
+        await dropTimelineInSteps(store, identity.id, identity.epoch)
+      }
+    }
   }
   function taskTab(taskId: string, mode?: string) {
     const choices = store
@@ -1154,50 +1190,17 @@ export function createLocalChatData(
           )
       return found
     },
-    loadTimelineCheckpoint: async (tabId) => get(tabId, 'timeline', 'checkpoint'),
+    timelineRecords,
+    loadTimelineCheckpoint: async (tabId) =>
+      timelineStoreFromRecords(timelineRecords(tabId)).loadCheckpoint(),
     loadTimelinePages: async (tabId, pages) =>
-      pages.flatMap((page) => {
-        const r = get<{ rows: string }>(tabId, 'timeline', `page:${page}`)
-        return r ? [{ page, rows: r.rows }] : []
-      }),
-    loadTimelineSummaries: async (tabId) =>
-      store
-        .records(owner(tabId).id, 'timeline')
-        .filter((r) => r.kind === 'timeline' && r.id.startsWith('page:'))
-        .map((r) => ({
-          page: Number(r.id.slice(5)),
-          summary: (r.value as { summary: string }).summary
-        }))
-        .sort((a, b) => a.page - b.page),
+      timelineStoreFromRecords(timelineRecords(tabId)).loadPages(pages),
+    // Both paths use paced metadata, with the same captured ownership fence.
+    loadTimelineSummaries: async (tabId) => timelineRecords(tabId).loadSummaries!(),
     saveTimeline: async (tabId, write: TimelineWrite) =>
-      store.transaction(() => {
-        if (write.dropPagesFrom !== null)
-          for (const r of store.records(owner(tabId).id, 'timeline'))
-            if (
-              r.kind === 'timeline' &&
-              r.id.startsWith('page:') &&
-              Number(r.id.slice(5)) >= write.dropPagesFrom
-            )
-              remove(tabId, 'timeline', r.id)
-        for (const p of write.pages) set(tabId, 'timeline', `page:${p.page}`, p)
-        if (write.checkpoint) set(tabId, 'timeline', 'checkpoint', write.checkpoint)
-        else remove(tabId, 'timeline', 'checkpoint')
-      }),
-    searchTimelinePages: async (tabId, needle) =>
-      store
-        .records(owner(tabId).id, 'timeline')
-        .filter(
-          (r) =>
-            r.kind === 'timeline' &&
-            r.id.startsWith('page:') &&
-            (r.value as { searchText: string }).searchText.includes(needle)
-        )
-        .map((r) => Number(r.id.slice(5)))
-        .sort((a, b) => a - b),
-    clearTimeline: async (tabId) => {
-      for (const r of store.records(owner(tabId).id, 'timeline'))
-        if (r.kind === 'timeline') remove(tabId, 'timeline', r.id)
-    },
+      timelineStoreFromRecords(timelineRecords(tabId)).save(write),
+    searchTimelinePages: async (tabId, needle) => timelineRecords(tabId).searchPages!(needle),
+    clearTimeline: async (tabId) => timelineRecords(tabId).discard(),
     clearChatQueue: (tabId) => queue.clear(tabId),
     buildMcpEnv: async (taskId) =>
       get<ChatBootstrap>(taskTab(taskId), 'settings', 'bootstrap')?.env ?? {},

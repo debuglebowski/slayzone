@@ -214,11 +214,17 @@ export const chatOperationSchemas = {
   getInfo: z.tuple([id, z.string().optional()]),
   getTurnStatus: tab,
   openTimeline: z.tuple([id, z.string()]),
+  /**
+   * Optional 5th: `startRow` (absolute row: answered by row slices within the byte
+   * budget, `next` names where to go on). Only a computer that advertised
+   * `chatTimelineRowSlices` takes it; an older one refuses a 5-tuple.
+   */
   timelinePages: z.tuple([
     id,
     z.array(z.number().int().nonnegative()).max(512),
     z.number().int(),
-    z.number().int()
+    z.number().int(),
+    z.number().int().nonnegative().optional()
   ]),
   searchTimeline: z.tuple([id, z.string().max(1000)]),
   commandTaskOutput: z.tuple([id, id]),

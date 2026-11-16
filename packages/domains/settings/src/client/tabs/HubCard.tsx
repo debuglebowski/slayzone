@@ -30,6 +30,7 @@ import { useComputerActions } from './ComputerActions'
 import { MachineLabel } from './MachineLabel'
 import { ComputerName } from './ComputerName'
 import { ComputerFaults } from './ComputerFaults'
+import { ComputerUnattachedSessions } from './ComputerUnattachedSessions'
 import { ComputerTakeovers, computerLabel } from './ComputerTakeovers'
 import { HubUsersSection } from './HubUsersSection'
 
@@ -650,6 +651,7 @@ export function HubCard({
                     </div>
                     <OutdatedNote computer={computer} />
                     <ComputerFaults computerId={computer.id} />
+                    <ComputerUnattachedSessions computerId={computer.id} />
                   </td>
                   {/* The same component the hub header uses, so the dot, the
                       truncation and the tone are identical rather than merely

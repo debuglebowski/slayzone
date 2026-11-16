@@ -258,14 +258,25 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
         live: { afterSeq: snapshot.seq, liveSeq: 0, events: [] }
       })
     },
-    timelinePages: async (_tabId: string, pages: number[], asOfSeq: number, epoch: number) => {
+    timelinePages: async (
+      _tabId: string,
+      pages: number[],
+      asOfSeq: number,
+      epoch: number,
+      startRow?: number
+    ) => {
       if (fake.pagesDelayMs) await new Promise((r) => setTimeout(r, fake.pagesDelayMs))
       if (fake.expirePages > 0) {
         fake.expirePages--
         return answer('timelinePages', { expired: true as const })
       }
-      const got = await (await projectionOf()).pagesAsOf(pages, asOfSeq, epoch)
-      return answer('timelinePages', got, got.expired ? 0 : got.pages.length)
+      const got = await (await projectionOf()).pagesAsOf(pages, asOfSeq, epoch, startRow)
+      // Units: rows (one row always fits an answer, alone; a page no longer does).
+      return answer(
+        'timelinePages',
+        got,
+        got.expired ? 0 : got.pages.reduce((n, p) => n + p.rows.length, 0)
+      )
     },
     getAutoEligibility: () => ({ eligible: fake.autoOptedIn, optedIn: fake.autoOptedIn }),
     respondPermission: record('respondPermission', true),

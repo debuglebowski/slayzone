@@ -15,7 +15,7 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   useTheme: () => theme
 }))
 
-const { SearchableCodeView } = await import('./SearchableCodeView')
+const { SearchableCodeView, WRAP_MAX_LINE_CHARS } = await import('./SearchableCodeView')
 
 afterEach(cleanup)
 
@@ -81,5 +81,51 @@ describe('SearchableCodeView across a tab switch', () => {
     view.rerender(<Parent mode="hidden" value="b" />)
     view.rerender(<Parent mode="visible" value="b" />)
     expect(viewRef.current!.state.doc.toString()).toBe('b')
+  })
+})
+
+describe('SearchableCodeView line wrapping', () => {
+  // Wrapping a very long line: a 5 MB one-line JSON file blocked the window 1.1 s
+  // (Chromium laying out the wrapped line on CodeMirror's first selection read).
+  const long = `[${'x'.repeat(WRAP_MAX_LINE_CHARS + 1)}]`
+  function View({ value, version }: { value: string; version?: number }) {
+    return (
+      <SearchableCodeView
+        value={value}
+        version={version}
+        onChange={() => undefined}
+        viewHandleRef={viewRef}
+      />
+    )
+  }
+  const viewRef: MutableRefObject<EditorView | null> = { current: null }
+  // The configured class, not `view.lineWrapping`: that one follows a measure,
+  // which jsdom never runs.
+  const wraps = () => viewRef.current!.contentDOM.classList.contains('cm-lineWrapping')
+
+  it('wraps ordinary text', () => {
+    render(<View value={'short\nlines\n'} />)
+    expect(wraps()).toBe(true)
+  })
+
+  it('does not wrap a document with a line over the limit', () => {
+    render(<View value={`a\n${long}\nb`} />)
+    expect(wraps()).toBe(false)
+  })
+
+  it('follows a reload from disk, both ways', () => {
+    const view = render(<View value="short" version={1} />)
+    view.rerender(<View value={long} version={2} />)
+    expect(wraps()).toBe(false)
+    view.rerender(<View value="short again" version={3} />)
+    expect(wraps()).toBe(true)
+  })
+
+  it('typing a long line does not flip wrapping mid-edit', () => {
+    render(<View value="short" />)
+    act(() => {
+      viewRef.current!.dispatch({ changes: { from: 0, insert: long } })
+    })
+    expect(wraps()).toBe(true)
   })
 })

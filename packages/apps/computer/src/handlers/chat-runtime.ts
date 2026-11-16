@@ -1,3 +1,4 @@
+import { createComputerTimelineWorkers } from '../timeline-worker'
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
 import { isAbsolute, join, resolve } from 'node:path'
 import {
@@ -310,11 +311,19 @@ const requestSchema = z.discriminatedUnion('kind', [
     operationId: z.string().optional()
   }),
   z.object({ kind: z.literal('sessions') }),
-  z.object({
-    kind: z.literal('prompt.summaries'),
-    taskId: z.string(),
-    conversationIds: z.array(z.string()).max(500)
-  }),
+  z
+    .object({
+      kind: z.literal('prompt.summaries'),
+      taskId: z.string(),
+      conversationIds: z.array(z.string()).max(500).optional(),
+      // FU5: every provider conversation of the task in ONE answer (bounded by the
+      // task's own sessions). Asked only of a computer that advertised
+      // `promptSummariesAll`; exactly one of the two.
+      all: z.literal(true).optional()
+    })
+    .refine((r) => (r.all === true) !== (r.conversationIds !== undefined), {
+      message: 'prompt.summaries names its conversations or asks for all of them'
+    }),
   z.object({
     kind: z.literal('prompts'),
     taskId: z.string(),
@@ -452,6 +461,7 @@ export function createChatRuntimeHandlers(opts: {
 }) {
   let closed = false,
     resetting = false
+  const timelineWorkers = createComputerTimelineWorkers()
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
   let moveFilesInstance: SessionMoveFiles | null = null
   /** A moved task's session files here (Claude transcripts, scrollback): see session-move-files.ts. */
@@ -583,6 +593,7 @@ export function createChatRuntimeHandlers(opts: {
           omitted: number
         }>,
       transport: {
+        beginTimelineProjection: timelineWorkers?.begin,
         backend,
         onStateChange: (sessionId, newState, oldState) =>
           publish('state', {
@@ -909,7 +920,7 @@ export function createChatRuntimeHandlers(opts: {
       case 'prompts':
         return r.prompts(req.taskId, req.agentId, req.excluded)
       case 'prompt.summaries':
-        return r.promptSummaries(req.taskId, req.conversationIds)
+        return r.promptSummaries(req.taskId, req.all === true ? null : (req.conversationIds ?? []))
       case 'sessions':
         return r.transport.listChatSessions().map((row) => ({
           ...row,
@@ -1269,7 +1280,11 @@ export function createChatRuntimeHandlers(opts: {
       if (closed) return
       closed = true
       directFanout.endAll()
-      if (instance) await instance.close()
+      try {
+        if (instance) await instance.close()
+      } finally {
+        await timelineWorkers?.close()
+      }
       localProcs?.disposeAll()
       instance = null
       localProcs = null

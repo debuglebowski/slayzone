@@ -132,7 +132,8 @@ function checkMark(rule: HttpOwnerRule): void {
     expect(rule.ids ?? []).toEqual([])
     expect(rule.output).toBeUndefined()
   }
-  for (const r of rule.ids ?? []) expect(['exact', 'prefix', 'projectRef']).toContain(r.match)
+  for (const r of rule.ids ?? [])
+    expect(['exact', 'prefix', 'projectRef', 'taskSession']).toContain(r.match)
 }
 
 describe('each mark carries what the gate needs', () => {

@@ -545,6 +545,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           onReady: tab.isMain ? handleTerminalReady : undefined,
           onFirstInput: tab.isMain ? onFirstInput : undefined,
           onRetry: tab.isMain ? onRetry : undefined,
+          onRemount: () => {
+            markSkipCache(getSessionId(tab.id))
+            remountPane(tab.id)
+          },
           // Context menu callbacks
           onSplit: () => handleSplitGroup(activeGroup.id),
           onNewGroup: () => {
@@ -585,6 +589,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       handleTerminalReady,
       onFirstInput,
       onRetry,
+      remountPane,
       onTabSessionReset,
       resetTabSession,
       paneEpochs,

@@ -40,6 +40,11 @@ import {
 } from '../shared/text-read'
 import { Download, FileQuestion } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
+import { MediaPlayerViewer } from './MediaPlayerViewer'
+import { ArchiveViewer } from './ArchiveViewer'
+import { FontViewer } from './FontViewer'
+import { DiffPreview } from './DiffPreview'
+import { subtitlesFor } from './subtitles'
 import type { HtmlArtifactTheme } from './ArtifactsPanel.constants'
 import { formatByteSize } from './ArtifactsPanel.utils'
 
@@ -170,73 +175,6 @@ function PdfViewer({
   return <iframe ref={iframeRef} src={src} className="flex-1 w-full" title="PDF preview" />
 }
 
-// --- Video viewer ---
-
-/**
- * Chromium's native player over the slz-file URL. The bytes come through main's
- * slz-file handler from the hub, which answers `Range`, so the player can read an
- * mp4's index from the end of the file and seek without fetching it whole.
- */
-function VideoViewer({
-  artifactId,
-  contentVersion,
-  getFilePath
-}: {
-  artifactId: string
-  contentVersion: number
-  getFilePath: (id: string) => Promise<string | null>
-}) {
-  const hubId = useHubId()
-  const [src, setSrc] = useState<string | null>(null)
-  // The source the player refused, so a newer version of the file gets a fresh try.
-  const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
-
-  useEffect(() => {
-    getFilePath(artifactId).then((p) => {
-      if (p) setSrc(toArtifactFileUrl(hubId, artifactId, p, contentVersion))
-    })
-  }, [hubId, artifactId, contentVersion, getFilePath])
-
-  // Task tabs hide in <Activity>, which keeps this element in the DOM: pause on
-  // hide (effect cleanup) so a tab nobody is looking at never keeps playing sound.
-  useEffect(() => {
-    const video = videoRef.current
-    return () => video?.pause()
-  }, [src])
-
-  if (!src)
-    return (
-      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
-        Loading...
-      </div>
-    )
-  if (failedSrc === src)
-    return (
-      <div
-        data-testid="artifact-video-error"
-        className="flex-1 flex items-center justify-center px-6 text-center text-xs text-muted-foreground"
-      >
-        This video can't be played here: its format or codec isn't supported. Download it to open it
-        in another app.
-      </div>
-    )
-
-  return (
-    <div className="flex-1 min-h-0 flex items-center justify-center bg-muted/20 overflow-hidden">
-      <video
-        ref={videoRef}
-        data-testid="artifact-video"
-        src={src}
-        controls
-        preload="metadata"
-        className="max-w-full max-h-full"
-        onError={() => setFailedSrc(src)}
-      />
-    </div>
-  )
-}
-
 // --- Zoom ---
 
 /**
@@ -297,6 +235,7 @@ function countedSave(
 
 export function ArtifactContentEditor({
   artifact,
+  siblingArtifacts,
   viewMode,
   readText,
   saveContent,
@@ -314,6 +253,8 @@ export function ArtifactContentEditor({
   onDownload
 }: {
   artifact: TaskArtifact
+  /** The task's artifacts (a video's same-named `.srt`/`.vtt` become its subtitles). */
+  siblingArtifacts?: readonly TaskArtifact[]
   viewMode: ArtifactViewMode
   /** Fresh disk read: the text, or why it is not shown as text. */
   readText: (id: string) => Promise<ArtifactTextRead | null>
@@ -415,7 +356,9 @@ export function ArtifactContentEditor({
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
   const isBinary = isBinaryRenderMode(renderMode)
   const zoom = zoomPct / 100
-  const loading = !isBinary && loadedId !== artifact.id
+  // A binary preview waits for its first cache-bust version (set once the mtime
+  // baseline is in, below), so it loads once instead of at v0 and again at v1.
+  const loading = isBinary ? previewVersion === 0 : loadedId !== artifact.id
 
   // Read file + mtime from disk. Pure: callers apply the result.
   const readFromDisk = useCallback(
@@ -707,14 +650,23 @@ export function ArtifactContentEditor({
           getFilePath={getFilePath}
         />
       )
-    if (renderMode === 'video')
+    if (renderMode === 'video' || renderMode === 'audio')
       return (
-        <VideoViewer
+        <MediaPlayerViewer
+          kind={renderMode}
           artifactId={artifact.id}
           contentVersion={previewVersion}
           getFilePath={getFilePath}
+          subtitles={
+            renderMode === 'video' ? subtitlesFor(artifact, siblingArtifacts ?? []) : undefined
+          }
+          readSubtitle={(id) => readText(id).then((r) => (r?.kind === 'text' ? r.content : null))}
         />
       )
+    if (renderMode === 'archive')
+      return <ArchiveViewer artifactId={artifact.id} contentVersion={previewVersion} />
+    if (renderMode === 'font')
+      return <FontViewer artifactId={artifact.id} contentVersion={previewVersion} />
     if (renderMode === 'pdf')
       return (
         <PdfViewer
@@ -729,7 +681,8 @@ export function ArtifactContentEditor({
       renderMode === 'markdown' ||
       renderMode === 'html-preview' ||
       renderMode === 'svg-preview' ||
-      renderMode === 'mermaid-preview'
+      renderMode === 'mermaid-preview' ||
+      renderMode === 'diff'
 
     if (renderMode === 'markdown' && shownViewMode === 'preview') {
       return (
@@ -967,6 +920,7 @@ function ArtifactPreview({
     )
   if (renderMode === 'mermaid-preview' && content.trim())
     return <MermaidBlock code={content} fill />
+  if (renderMode === 'diff') return <DiffPreview content={content} />
   return null
 }
 

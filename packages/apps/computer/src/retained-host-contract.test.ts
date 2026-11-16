@@ -61,6 +61,223 @@ async function exitChild(child: ChildProcess) {
   clearTimeout(timeout)
 }
 
+test('new connectors keep a busy same-contract pre-capability host on chat fallbacks at enroll and hello', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'retained-chat-capabilities-'))
+  const require = createRequire(import.meta.url)
+  symlinkSync(
+    dirname(dirname(require.resolve('node-pty/package.json'))),
+    join(root, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  )
+  const hub = await startLoopbackHub({ floodLimits: false })
+  placeTestProject(root, hub.url, 'p1', root)
+  const config = {
+    hubUrl: hub.url,
+    name: 'retained-chat-capabilities',
+    allowedRoots: [root],
+    capabilities: ['proc'],
+    joinToken: 'jt-valid',
+    autoUpgrade: false
+  }
+  writeFileSync(
+    join(root, 'computer.config.json'),
+    JSON.stringify({
+      hubUrl: hub.url,
+      computerName: config.name,
+      allowedRoots: [root],
+      autoUpgrade: false
+    })
+  )
+  // Same local contract: the connector may be upgraded while this host stays
+  // busy. Restore its historical identity and chat request schemas.
+  const entry = retainedEntry(root, HOST_CONTRACT_VERSION)
+  let source = readFileSync(entry, 'utf8').replace(
+    /^ {4}(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll): true,\n/gm,
+    ''
+  )
+  const tuple = /^ {2}timelinePages: external_exports\.tuple\(\[[\s\S]*?\n {2}\]\),/m.exec(source)
+  expect(tuple).not.toBeNull()
+  const oldTuple = tuple![0].replace(
+    ',\n    external_exports.number().int().nonnegative().optional()',
+    ''
+  )
+  expect(oldTuple).not.toBe(tuple![0])
+  source = source.replace(tuple![0], oldTuple)
+  const summaries =
+    /^ {2}external_exports.object\(\{\n {4}kind: external_exports.literal\("prompt.summaries"\),[\s\S]*?\n {2}\}\),/m.exec(
+      source
+    )
+  expect(summaries).not.toBeNull()
+  source = source.replace(
+    summaries![0],
+    `  external_exports.object({
+    kind: external_exports.literal("prompt.summaries"),
+    taskId: external_exports.string(),
+    conversationIds: external_exports.array(external_exports.string()).max(500)
+  }),`
+  )
+  const pagedReads = /^ {2}(?:getReplayPage|getEventPage):.*\n/gm
+  expect(source.match(pagedReads)).toHaveLength(2)
+  source = source.replace(pagedReads, '')
+  writeFileSync(entry, source)
+  let output = ''
+  const child = spawn(process.execPath, [entry, '--session-host'], {
+    env: {
+      ...process.env,
+      SLAYZONE_ROOT: root,
+      HOME: root,
+      USERPROFILE: root,
+      XDG_CONFIG_HOME: join(root, '.config')
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  child.stdout!.on('data', (chunk) => {
+    output += chunk
+  })
+  child.stderr!.on('data', (chunk) => {
+    output += chunk
+  })
+  const previousRoot = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
+  let control: Awaited<ReturnType<typeof hostControl>> | undefined
+  let native: Awaited<ReturnType<typeof connectorHost>> | undefined
+  let connector: Awaited<ReturnType<typeof startConnector>> | undefined
+  try {
+    await vi.waitFor(
+      async () => {
+        control = await hostControl(root)
+      },
+      { timeout: 10000 }
+    )
+    const initial = await control!.rpc.request<ConnectorGrant>('reserve', { hubUrl: hub.url })
+    native = await connectorHost(root, initial, hub.url, {})
+    const identity = await native.rpc.request<Record<string, unknown>>('identity')
+    for (const feature of ['chatHistoryPages', 'chatTimelineRowSlices', 'promptSummariesAll'])
+      expect(identity[feature]).toBeUndefined()
+    await native.rpc.request('connected', { computerId: 'retained-fixture', mode: 'hello' })
+    await native.rpc.request('dispatch', {
+      method: 'proc.spawn',
+      actor,
+      params: {
+        sessionId: 'busy-host',
+        projectId: 'p1',
+        command: 'node',
+        args: ['-e', 'setInterval(()=>{},1000)'],
+        cwd: root
+      }
+    })
+    const health = await control!.rpc.request<HostHealth>('health')
+    expect(health).toMatchObject({ contract: HOST_CONTRACT_VERSION, idle: false })
+    const timeline = (args: unknown[]) => ({
+      kind: 'invoke',
+      value: { route: { id: 'old-chat', epoch: 1 }, target: 'ops', method: 'timelinePages', args }
+    })
+    await expect(
+      native.rpc.request('dispatch', {
+        method: 'chat.request',
+        actor,
+        params: timeline(['tab', [], -1, 0, 0])
+      })
+    ).rejects.toThrow(/too_big|<=4|at most|Too big/i)
+    await expect(
+      native.rpc.request('dispatch', {
+        method: 'chat.request',
+        actor,
+        params: { kind: 'prompt.summaries', taskId: 'task', all: true }
+      })
+    ).rejects.toThrow(/conversationIds/)
+    await expect(
+      native.rpc.request('dispatch', {
+        method: 'chat.request',
+        actor,
+        params: {
+          kind: 'invoke',
+          value: {
+            route: { id: 'old-chat', epoch: 1 },
+            target: 'ops',
+            method: 'getReplayPage',
+            args: ['tab', -1]
+          }
+        }
+      })
+    ).rejects.toThrow('Unknown chat operation')
+    native.close()
+    native = undefined
+    for (const mode of ['enroll', 'hello']) {
+      const grant = await control!.rpc.request<ConnectorGrant>('reserve', { hubUrl: hub.url })
+      connector = await startConnector(root, config, grant)
+      expect((await connector.dialer.events.once('connected')).mode).toBe(mode)
+      const [computer] = hub.gateway.listComputers()
+      expect(computer, output).toMatchObject({
+        chatRuntimeReady: true,
+        chatHistoryPages: false,
+        chatTimelineRowSlices: false,
+        promptSummariesAll: false
+      })
+      expect(await control!.rpc.request('health')).toMatchObject({
+        pid: health.pid,
+        epoch: health.epoch,
+        idle: false
+      })
+      if (mode === 'enroll')
+        await hub.gateway.request(computer.computerId, 'chat.request', {
+          kind: 'bootstrap',
+          value: {
+            identity: {
+              id: 'old-chat',
+              taskId: 'task',
+              tabId: 'tab',
+              mode: 'claude-chat',
+              epoch: 1
+            },
+            projectId: 'p1',
+            cwd: root,
+            revision: 1,
+            providerConfig: {},
+            defaultFlags: null,
+            env: {}
+          }
+        })
+      await expect(
+        hub.gateway.request(computer.computerId, 'chat.request', timeline(['tab', [], -1, 0]))
+      ).resolves.toMatchObject({ expired: true })
+      await expect(
+        hub.gateway.request(computer.computerId, 'chat.request', {
+          kind: 'invoke',
+          value: {
+            route: { id: 'old-chat', epoch: 1 },
+            target: 'ops',
+            method: 'getReplay',
+            args: ['tab', -1]
+          }
+        })
+      ).resolves.toBeDefined()
+      await expect(
+        hub.gateway.request(computer.computerId, 'chat.request', {
+          kind: 'prompt.summaries',
+          taskId: 'task',
+          conversationIds: []
+        })
+      ).resolves.toEqual([])
+      await connector.stop()
+      connector = undefined
+      await vi.waitFor(() => expect(hub.gateway.listComputers()).toHaveLength(0))
+    }
+    expect(hub.auth.enrollCalls).toHaveLength(1)
+    expect(hub.auth.helloCalls).toHaveLength(1)
+  } finally {
+    await connector?.stop()
+    native?.close()
+    await control?.rpc.request('stop', { force: true }).catch(() => undefined)
+    control?.close()
+    await exitChild(child)
+    if (previousRoot === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = previousRoot
+    await hub.close()
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  }
+}, 30000)
+
 test.each([1, 2])(
   'new connector restricts a real busy retained v%s host until idle replacement',
   async (contract) => {

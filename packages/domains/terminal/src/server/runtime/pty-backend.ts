@@ -4,6 +4,26 @@ import type { PtyInputFacts } from '../pty-input'
 import type { TerminalTheme } from '../sync-query-response'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 
+/** Cancel a hub-side wait; late completion is observed but cannot resume its caller. */
+export function awaitPtyOperation<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  if (!signal) return operation()
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted()
+        return operation()
+      })
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort))
+  })
+}
+
 /**
  * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
  * piece a remote computer replaces — pulled behind a backend seam. pty-manager
@@ -20,6 +40,8 @@ import type { BufferSinceResult } from '@slayzone/terminal-contracts'
  *  them and just spawns `file`/`args` with `options`. */
 export interface PtySpawnSpec {
   sessionId: string
+  /** False for an explicit fresh start: replace any surviving process, even offline. */
+  takeOver?: boolean
   taskId: string
   computerId: string | null
   /**
@@ -157,6 +179,54 @@ export interface PtySpawnConfirmation {
    * other end owns one (an older computer), and the caller keeps its own.
    */
   ownsStartupDeadline?: boolean
+  /**
+   * No process was started: the owner took over the session it was ALREADY running
+   * under this id (left by a previous hub run — see {@link PtyBackend.reattach} and
+   * `adoptLive`). The session is past its startup: `seq` is its highest seq (output
+   * up to it is scrollback, read by replay), `conversationId` what it detected.
+   */
+  attached?: { seq: number; conversationId: string | null }
+}
+
+/**
+ * A live terminal session a computer runs that nothing in this hub run tracks —
+ * left by a previous hub run (hub processes restart; computers keep their ptys).
+ * See {@link PtyBackend.untrackedSessions}.
+ */
+export interface UntrackedPtySession {
+  computerId: string
+  sessionId: string
+  /** The attempt it runs as: what {@link PtyBackend.reattach} names. */
+  spawnId?: string
+  pid?: number
+  /** Its highest seq; -1 when it printed nothing yet. */
+  seq?: number
+  /** The computer detects its output — required to take it over. */
+  detection: boolean
+  /** The mode its detection runs as (absent: an older computer). */
+  mode?: string
+  /** When its process started, ms epoch (absent: an older computer). */
+  startedAt?: number
+  conversationId?: string | null
+}
+
+/**
+ * Why {@link PtyBackend.reattach} refused, carried on its rejection as
+ * `reattachRefusal` (read it with {@link ptyReattachRefusal}).
+ * - `not-adoptable`: the computer refused (not running as that attempt any more,
+ *   no detection, another mode or task, another start in flight);
+ * - `computer-too-old`: the computer cannot take a session over (no `pty.adopt`);
+ * - `already-tracked`: this hub tracks a session under that id already.
+ */
+export type PtyReattachRefusal = 'not-adoptable' | 'computer-too-old' | 'already-tracked'
+
+/** The {@link PtyReattachRefusal} a reattach rejection carries; null for any other error. */
+export function ptyReattachRefusal(err: unknown): PtyReattachRefusal | null {
+  const reason =
+    err && typeof err === 'object' ? (err as { reattachRefusal?: unknown }).reattachRefusal : null
+  return reason === 'not-adoptable' || reason === 'computer-too-old' || reason === 'already-tracked'
+    ? reason
+    : null
 }
 
 /**
@@ -182,7 +252,17 @@ export interface PtyExit {
  * undefined — so the sync-query `writeSync(fd)` path throws and falls through to
  * its `pty.write()` fallback naturally, no remote-specific branch needed.
  */
+/** Routing owns the adopted attempt until the manager atomically registers it. */
+export interface PtyAdoptionLease {
+  /** Synchronous transfer; false means ownership was cancelled/superseded. */
+  commit(register: () => void): boolean
+  /** Idempotent exact-attempt abandonment, including after a failed manager commit. */
+  release(): void
+}
+
 export interface PtyHandle {
+  /** Present on a routed reattach; the consumer must commit or release ownership. */
+  readonly adoption?: PtyAdoptionLease
   /**
    * `null` means NOT YET KNOWN, never "dead".
    *
@@ -276,6 +356,47 @@ export interface PtyBackend {
     /** See `PtySpawnSpec.relay`. */
     relay?: boolean
   ): Promise<PtyHandle>
+  /**
+   * The live sessions computers run that nothing in this hub run tracks (a previous
+   * run's), as of each computer's latest reconnect list — minus those that exited,
+   * were taken over or killed since. Optional: only the routing backend knows.
+   */
+  untrackedSessions?(): UntrackedPtySession[]
+  /** `untrackedSessions()` changed. */
+  onUntrackedChange?(cb: () => void): { dispose(): void }
+  /**
+   * Take over a session `computerId` runs as attempt `fromSpawnId` (one of
+   * {@link untrackedSessions}): nothing starts or stops. The handle is an ordinary
+   * routed session from here on, its `whenSpawned` resolving with `attached`.
+   * Rejects with a {@link PtyReattachRefusal} when it cannot be taken over.
+   */
+  reattach?(
+    computerId: string,
+    sessionId: string,
+    fromSpawnId: string,
+    opts: {
+      /** Cosmetic, like `adopt`'s: `PtyHandle.process`. */
+      processName: string
+      taskId?: string
+      /** Refused unless the session's detection runs as this mode. */
+      mode?: string
+      /** See `PtySpawnSpec.relay`. */
+      relay?: boolean
+      /** Hub-side adoption lifetime; cancellation never kills a newer attempt. */
+      signal?: AbortSignal
+    }
+  ): Promise<PtyHandle>
+  /**
+   * End an untracked session — exactly that attempt (the user chose to stop it).
+   * `stopped: false` when that attempt is not what runs there any more (another one
+   * took the process over: it is listed instead), or the computer could not tell.
+   */
+  killUntracked?(
+    computerId: string,
+    sessionId: string,
+    spawnId: string,
+    signal?: AbortSignal
+  ): Promise<{ stopped: boolean }>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing
    * until `adopt` gives it a real session id — the hub has nowhere to route it to
@@ -416,6 +537,21 @@ export function getPtyBackend(): PtyBackend {
   return ptyBackend
 }
 
+const backendListeners = new Set<() => void>()
+
+/** `setPtyBackend` swapped the backend (the composition root installs the routing one). */
+export function onPtyBackendChange(cb: () => void): () => void {
+  backendListeners.add(cb)
+  return () => backendListeners.delete(cb)
+}
+
 export function setPtyBackend(backend: PtyBackend | null): void {
   ptyBackend = backend ?? noComputerPtyBackend
+  for (const cb of [...backendListeners]) {
+    try {
+      cb()
+    } catch {
+      /* a listener's failure must not stop the swap */
+    }
+  }
 }

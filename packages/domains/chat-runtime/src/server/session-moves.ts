@@ -4,10 +4,10 @@
  * TARGET takes the session ledger with. The bytes travel through the app (it is
  * authorised on both hubs); this module only produces and reads them.
  *
- *  - `exportTask`: each of the task's chats is frozen, read whole, encoded as the
- *    chat-migration transfer (same NDJSON, same sha-256) and unfrozen again — the
- *    copy is a file, so the freeze lasts one read and the source chat is untouched
- *    (it stays usable, and the task can move back). Plus the task's session ledger
+ *  - `exportTask`: each of the task's chats is frozen just long enough to open a
+ *    read snapshot of it, then streamed from that snapshot, a page at a time, as the
+ *    chat-migration transfer (same NDJSON, same sha-256) — the copy is a file, the
+ *    source chat stays usable meanwhile (live writes go on; the task can move back). Plus the task's session ledger
  *    (`ledger`): its sessions, their provenance, resumability proofs, resets,
  *    deletions, pre-ledger history and chat settings / session ids per mode.
  *    Repeatable: a retried export of the same move answers what the first did.
@@ -41,8 +41,8 @@ import {
 import { join } from 'node:path'
 import type { ChatTransferManifest } from '../shared'
 import type { DataImportKind } from './task-data'
-import type { ChatStorage } from './storage'
-import { encodeTransfer } from './transfers'
+import type { ChatExportReader, ChatStorage } from './storage'
+import { writeExportTransfer } from './transfers'
 
 import { sessionLedgerBundleSchema, type SessionLedgerBundle } from './session-ledger-bundle'
 
@@ -148,50 +148,93 @@ export function createSessionMoves(store: ChatStorage) {
     })
   }
 
-  return {
-    /**
-     * Freeze → read → encode → unfreeze each of the task's chats; the ledger beside
-     * them. The files and the answer persist under the move's id: a retry (the app
-     * lost the answer) is answered from them, never from chats that changed since.
-     */
-    exportTask(moveId: string, taskId: string): SessionMoveExport {
-      const dir = dirOf(moveId)
-      const manifestPath = join(dir, 'manifest.json')
-      const taken = (() => {
+  /** Exports running, by move and task: a retry while one runs gets its answer. */
+  const exporting = new Map<string, Promise<SessionMoveExport>>()
+
+  function closeReader(reader: ChatExportReader | undefined, failed: boolean): void {
+    try {
+      reader?.close()
+    } catch (error) {
+      if (!failed) throw error
+      console.error('[session-moves] closing failed export snapshot:', error)
+    }
+  }
+
+  async function exportTaskNow(moveId: string, taskId: string): Promise<SessionMoveExport> {
+    const dir = dirOf(moveId)
+    const manifestPath = join(dir, 'manifest.json')
+    const taken = (() => {
+      try {
+        return JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, SessionMoveExport>
+      } catch {
+        return {} as Record<string, SessionMoveExport>
+      }
+    })()
+    if (taken[taskId]) return taken[taskId]
+    if (store.taskLifecycle(taskId).state === 'deleted')
+      throw new Error('Task chat history was deleted')
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const migrationId = `move:${moveId}`
+    const transfers: ChatTransferManifest[] = []
+    for (const owner of store.listForTask(taskId)) {
+      if (owner.state !== 'active' || isArtifactStore(owner.identity.tabId)) continue
+      const { id: conversationId, epoch } = owner.identity
+      // Frozen only while its read snapshot opens (synchronous): live writes go on
+      // while the snapshot is streamed to the file.
+      store.freeze(conversationId, epoch, migrationId)
+      let reader: ChatExportReader | undefined
+      let failed = false
+      try {
         try {
-          return JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, SessionMoveExport>
-        } catch {
-          return {} as Record<string, SessionMoveExport>
-        }
-      })()
-      if (taken[taskId]) return taken[taskId]
-      if (store.taskLifecycle(taskId).state === 'deleted')
-        throw new Error('Task chat history was deleted')
-      mkdirSync(dir, { recursive: true, mode: 0o700 })
-      const migrationId = `move:${moveId}`
-      const transfers: ChatTransferManifest[] = []
-      for (const owner of store.listForTask(taskId)) {
-        if (owner.state !== 'active' || isArtifactStore(owner.identity.tabId)) continue
-        const { id: conversationId, epoch } = owner.identity
-        store.freeze(conversationId, epoch, migrationId)
-        let encoded: ReturnType<typeof encodeTransfer>
-        try {
-          encoded = encodeTransfer(store.exportConversation(conversationId, epoch, migrationId), {
-            move: true
-          })
+          reader = store.openExportReader(conversationId, epoch, migrationId)
         } finally {
           store.unfreeze(conversationId, epoch, migrationId)
         }
-        const path = fileOf(moveId, conversationId)
-        writeFileSync(`${path}.tmp`, encoded.bytes, { mode: 0o600 })
-        renameSync(`${path}.tmp`, path)
-        transfers.push(encoded.manifest)
+        try {
+          transfers.push(
+            await writeExportTransfer(reader, fileOf(moveId, conversationId), { move: true })
+          )
+        } catch (error) {
+          store.recordExportBlobFault(conversationId, error)
+          throw error
+        }
+      } catch (error) {
+        failed = true
+        throw error
+      } finally {
+        closeReader(reader, failed)
       }
-      const exported: SessionMoveExport = { transfers, ledger: readLedger(taskId) }
-      writeFileSync(manifestPath, JSON.stringify({ ...taken, [taskId]: exported }), {
-        mode: 0o600
-      })
-      return exported
+    }
+    // Read again: another task of the same move may have answered meanwhile.
+    const answered = (() => {
+      try {
+        return JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, SessionMoveExport>
+      } catch {
+        return {} as Record<string, SessionMoveExport>
+      }
+    })()
+    const exported: SessionMoveExport = { transfers, ledger: readLedger(taskId) }
+    writeFileSync(manifestPath, JSON.stringify({ ...answered, [taskId]: exported }), {
+      mode: 0o600
+    })
+    return exported
+  }
+
+  return {
+    /**
+     * Each of the task's chats is streamed from a read snapshot taken while it was
+     * frozen (`openExportReader`, then unfrozen at once) to its transfer file, a page
+     * at a time; the ledger beside them. The files and the answer persist under the
+     * move's id: a retry (the app lost the answer) is answered from them, never from
+     * chats that changed since; a retry while it runs waits for the same answer.
+     */
+    exportTask(moveId: string, taskId: string): Promise<SessionMoveExport> {
+      const key = `${moveId}\u0000${taskId}`
+      const running = exporting.get(key)
+      if (running) return running
+      const started = exportTaskNow(moveId, taskId).finally(() => exporting.delete(key))
+      exporting.set(key, started)
+      return started
     },
 
     /**

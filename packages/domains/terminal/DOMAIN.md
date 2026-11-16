@@ -33,6 +33,55 @@ session per 5 min; a second death in that window gets the recovery shell plus
 the interactive recovery shell, a stale resume its overlay, a requested kill ends.
 Regression: 2026-11-14, the hub's stray sweep SIGHUP'd 31 live agents (exit 129).
 
+An exit SlayZone asked for (`exitWasRequested`: `killPty` — close, replace, task
+done, hand-off — app quit, hibernation) always just ends the session: no recovery
+shell, no fast-exit retry, no resume, whatever the code. The code alone cannot tell:
+a computer-routed kill reports a null code, mapped to 1. A recovery shell still in
+flight when the kill comes is dropped (`decideRecoveryAdoption`). Recorded as
+`pty.exit_requested` when the code alone would have given a recovery shell.
+
+### Hub restart: adopt, else surface
+
+Hub processes restart (Restart local hub, a crashed sidecar, a standalone hub, a
+desktop restart with a remote computer); computers keep their ptys. A restarted hub
+never starts a second process for a tab whose agent still runs, and never kills it
+on no evidence:
+
+- **Adopt.** Every reconnect list hands the routing backend the sessions nothing in
+  this hub run tracks (`PtyBackend.untrackedSessions`). `unattached-sessions.ts`
+  resolves each `<taskId>:<tabId>` into its tab's launch (task domain
+  `resolveTerminalTabLaunch`, plain shell tabs included) and calls `pty.create`
+  with `attach`: nothing is launched; the computer hands the running process to a
+  new attempt (`pty.adopt`) and it is registered like any session (output, input,
+  state, exit, auto-resume). A tab's own start of such an id does the same through
+  `pty.spawn` `adoptLive` (the first spawn of an id in a hub run). Both record
+  `pty.orphan_adopted`.
+- **Ownership handoff.** A routed reattach returns a provisional lease. Its abort
+  lifetime continues after the RPC succeeds until the manager atomically commits
+  its registration. Abandonment releases only that routing generation and stops
+  its exact attempt, or surfaces it when cleanup cannot be confirmed. Failed
+  delivery/registration releases ownership too; newer registrations are untouched.
+  The registry retains queued/active adoption identities through this handoff,
+  independently of visible rows. Confirmed task disposal cancels all its identities
+  and ends already-committed manager sessions. No permanent deletion tombstone set.
+- **Surface.** What cannot be adopted (not a task tab, no detection or an older
+  computer, the task elsewhere, another agent in the tab now, the computer refused)
+  stays running and is listed with its reason (`pty.orphan_unattached`) — attach
+  again or stop it (`pty.orphan_killed`). A tab start in another mode replaces it
+  (`computer.orphan_replaced`).
+- **Restart/reset.** A tab stop records replacement intent for its next successful
+  start, even before the first session list or while its computer is offline.
+  That spawn omits `adoptLive`, including reconnect resends; proactive adoption
+  cannot consume the intent. The not-attached overlay Restart uses this same stop.
+  Whole best-effort cleanup has one 5 s deadline across adoption, launch resolution,
+  serialized preparation, all computers, kill and verification. Cancellation fences
+  late adoption replies without killing a newer attempt. A failed cleanup records
+  `pty.orphan_kill_failed` and returns false so reset, restart and tab close can finish.
+  Confirmed task/tab deletion or ops disposal removes replacement intents; a kill
+  after deletion checks the hub rows. Valid offline-tab intents have no expiry.
+  Content erasure publishes database-scoped task notifications after commit for
+  every scope (including project and user erasure); failed deletes retain intent.
+
 ### Codex silence and cancellation provenance
 
 The running watchdog checks Codex with a bounded `thread/read` before treating
@@ -100,7 +149,39 @@ read `getEventPage` / `getReplayPage` (tRPC: `getBufferSince` / `getReplay` with
 `page`); whole reads stay for older callers, assembled from pages. Hub routes read
 the reduced history through `@slayzone/terminal/chat-history` (projection snapshot,
 older rows on demand). `timelinePages` answers within the same byte budget and
-names what it left out (`omitted`).
+names what it left out (`omitted`). Asked from a row (`startRow`, what every current
+client sends) the budget cuts between ROWS — one row always fits — so a 256-row page
+larger than the budget (long tool output made one 6.6 MB) comes in slices: `next`
+names the row to ask from. Without `startRow` (an older client) whole pages, as
+before; a computer takes `startRow` only once it advertised `chatTimelineRowSlices`
+(hello/enroll, additive) — the hub drops it for an older one. `openTimeline`'s events
+after its snapshot are one history page at most: more, and it takes a fresh snapshot
+(up to 3), else answers `full`.
+
+Historical page reads restore undo values before sizing rows or whole pages, so
+late results that shrink content cannot overfill an older snapshot's answer.
+The worker forwards `startRow` with the captured sequence/epoch; continuations
+retain the same historical view and leave live rows unchanged.
+
+Heavy history work takes turns process-wide (`historyReadTurns`): a page read is
+one `take`; a projection's rebuild folds (256 events a step), its page writes
+(`TIMELINE_FLUSH_SLICE_BYTES`, 1 MiB of encoded rows a store write, one page always)
+and a stored projection's drop (chat-runtime `dropTimelineInSteps`) are `job`s whose
+steps each take a turn, with the event loop running between two steps even when
+nothing else waits — but no turn before a job's first step or after its last, so a
+lone open adds none before its agent spawns. A sliced flush drops the stored
+checkpoint with its first slice and stores the new one only with its last: stopped
+half way, the next open rebuilds. Measured (FU4, 60 chats × 2,000 events, real
+computer store): most main-thread CPU in one loop iteration, rebuild 5.0 s → 50 ms,
+restore 2.7 s → 28 ms, reset 4.1 s → 62 ms
+(`chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts`).
+
+Computer storage now schedules its own bounded deletion/write/metadata turns. The
+projection releases its encoding/checkpoint-read turn before awaiting these calls,
+so compatibility stores sharing the scheduler cannot deadlock. Worker stores can
+provide optional metadata callbacks; custom/older record stores keep a paced raw-page
+fallback. Encoded page bodies and metadata are still produced on the projection's
+thread; captured owner/epoch checks stay in the database owner for every step.
 
 ### Chat side questions (`/btw`)
 
@@ -192,6 +273,9 @@ interface BufferSinceResult { chunks: BufferChunk[]; currentSeq: number }
 ```
 
 ## Main Process (main/)
+
+`./pty-backend` exposes the PTY backend seam and cancellation wait helper without
+loading the full server runtime, for computer-transport and hub consumers.
 
 - `registerPtyHandlers(ipcMain, db)` - PTY lifecycle (create, write, resize, kill, getBufferSince)
 - `PtyManager` - Session management, buffer caching, state detection

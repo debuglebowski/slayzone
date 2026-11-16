@@ -177,6 +177,7 @@ packageExtensionsChecksum: sha256-yucxjBCEEEleMRdCSterOmma5oliL1xHpkU1vW5QBT0=
 patchedDependencies:
   '@convex-dev/auth@0.0.96': 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
   '@radix-ui/react-menu@2.2.1': 0d843dd4e468b20e6ce826e5090298cc344be58699a21084871c34d9fadf728a
+  '@trpc/client@11.19.0': f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7
   '@trpc/server@11.19.0': ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e
   '@xterm/addon-unicode-graphemes@0.5.0-beta.310': fd2ab7951f64746d15d0e1b24444695a175edb5432bf53a506e3996a529a4221
   app-builder-lib@26.18.0: fb86da384173fd3c2d15f34e7e3adca11814c3a886b214eb5f1a0c29017970d5
@@ -877,7 +878,7 @@ importers:
         version: link:../../shared/trpc-server
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
@@ -982,7 +983,7 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
@@ -1125,6 +1126,9 @@ importers:
       expo-status-bar:
         specifier: ~58.0.4
         version: 58.0.4(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)
+      expo-video:
+        specifier: ~58.0.13
+        version: 58.0.13(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)
       expo-web-browser:
         specifier: ~58.0.7
         version: 58.0.7(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))
@@ -1299,7 +1303,7 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
@@ -1348,7 +1352,7 @@ importers:
         version: link:../../shared/types
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
@@ -2805,6 +2809,9 @@ importers:
       '@slayzone/db-migrations':
         specifier: workspace:*
         version: link:../../shared/db-migrations
+      '@slayzone/diff-view':
+        specifier: workspace:*
+        version: link:../../shared/diff-view
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
@@ -3252,6 +3259,9 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
   packages/domains/terminal-contracts:
     dependencies:
@@ -3871,13 +3881,13 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       '@trpc/tanstack-react-query':
         specifier: ^11.19.0
-        version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -10496,6 +10506,13 @@ packages:
 
   expo-status-bar@58.0.4:
     resolution: {integrity: sha512-e6JJHziSSNb1v1VSzmDrAPf6GFoPRdVOIDrTCcK3bHfbJEAZGZ3YZXfqlorZtUFDT0z6NcjaZf0mPWifJZcqew==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
+
+  expo-video@58.0.13:
+    resolution: {integrity: sha512-3+ubjwi3L1QwCjGB39SOqhPy3hEtB5iWsd99k4jhBATB5UL0/qW5jfPnempJr6fGGL/2MBQy9NNFNL5OGwvV4w==}
     peerDependencies:
       expo: '*'
       react: '*'
@@ -18962,7 +18979,7 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)':
+  '@trpc/client@11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)':
     dependencies:
       '@trpc/server': 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       typescript: 7.1.0-dev.20261111.1
@@ -18971,10 +18988,10 @@ snapshots:
     dependencies:
       typescript: 7.1.0-dev.20261111.1
 
-  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)':
+  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)':
     dependencies:
       '@tanstack/react-query': 5.104.5(@types/react@19.3.0)(react@19.3.1)
-      '@trpc/client': 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+      '@trpc/client': 11.19.0(patch_hash=f76e24a1fe9021c06a46d25b2cc5359a865c1ed402025491394d375d34f6bfb7)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server': 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       react: 19.3.1
       typescript: 7.1.0-dev.20261111.1
@@ -21574,6 +21591,12 @@ snapshots:
       - typescript
 
   expo-status-bar@58.0.4(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1):
+    dependencies:
+      expo: 58.0.21(@babel/core@7.29.7(supports-color@7.2.0))(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.15)(bufferutil@4.1.0)(expo-router@58.0.28)(react-dom@19.3.1(react@19.3.1))(react-native-web@0.21.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-native-webview@14.0.1(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)(supports-color@7.2.0)(typescript@7.1.0-dev.20261111.1)
+      react: 19.3.1
+      react-native: 0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)
+
+  expo-video@58.0.13(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1):
     dependencies:
       expo: 58.0.21(@babel/core@7.29.7(supports-color@7.2.0))(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.15)(bufferutil@4.1.0)(expo-router@58.0.28)(react-dom@19.3.1(react@19.3.1))(react-native-web@0.21.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-native-webview@14.0.1(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)(supports-color@7.2.0)(typescript@7.1.0-dev.20261111.1)
       react: 19.3.1

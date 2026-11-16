@@ -119,6 +119,12 @@ is offline its scrollback is unavailable: clients show "Computer offline" and ca
 up from their last seq on reconnect. Idle-close stays a hub decision over the
 mirrored state.
 
+Computers keep their ptys when the hub restarts. The restarted hub adopts each
+session its previous run left running into its tab (`pty.adopt`, or `adoptLive` on
+the tab's own start) instead of starting or replacing one; what it cannot adopt
+stays running and is listed for the user to attach or stop (terminal DOMAIN.md,
+"Hub restart: adopt, else surface").
+
 ### Task CLI on a computer
 
 The computer gives each PTY or process a loopback CLI relay address and a session

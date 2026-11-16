@@ -22,6 +22,17 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  setHubConnectAbortListener,
+  type HubConnectAbort,
+  type HandshakeAbortReason
+} from './connectHandshake'
+export {
+  getHubConnectTrace,
+  getHubConnectTraces,
+  type HubConnectAttempt,
+  type HubConnectOutcome
+} from './connectTrace'
+export {
   attachDirectPty,
   readDirectPtyBuffer,
   DIRECT_CALL_DEADLINE_MS,

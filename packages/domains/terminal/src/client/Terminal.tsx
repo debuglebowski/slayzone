@@ -51,6 +51,7 @@ import { diag } from './terminal-webgl-diag'
 import { trimSelectionTrailingSpaces } from './Terminal.utils'
 import { syncMacOptionIsMeta } from './option-as-meta'
 import { noteTerminalOutput } from './focus-loss-diag'
+import { useUnattachedSession } from './useUnattachedSession'
 import { TerminalDeadOverlay } from './TerminalDeadOverlay'
 import { TerminalComputerOffline } from './TerminalComputerOffline'
 import { isComputerOfflineError, useComputerOffline } from './useComputerOffline'
@@ -127,6 +128,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onReady,
     onFirstInput,
     onRetry,
+    onRemount,
     onOpenUrl,
     onOpenFile
   },
@@ -1369,6 +1371,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const showDeadOverlay =
     ptyState === 'dead' && !isInitializing && deadExitCode !== null && mode !== 'terminal'
+  // Dead with NO exit: the hub holds no session for this tab (it restarted and has
+  // not attached it, or an exit went unseen). Never a terminal that looks alive —
+  // plain shells included. Attach offered when the computer still runs this tab's
+  // session from before the restart (terminal unattached-sessions).
+  const showNotAttached =
+    ptyState === 'dead' &&
+    !isInitializing &&
+    deadExitCode === null &&
+    !initError &&
+    !computerOffline
+  const remountPane = onRemount ?? onRetry
+  const { unattachedHere, attaching, handleNotAttachedRestart, handleNotAttachedAttach } =
+    useUnattachedSession(sessionId, showNotAttached, remountPane)
 
   // Stale-session case (issue #90): the CLI's stored conversation id was
   // auto-cleaned by the provider, so `--resume` failed. Show a friendly,
@@ -1430,6 +1445,26 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           />
         )}
         {computerOffline && !showDeadOverlay && <TerminalComputerOffline />}
+        {showNotAttached && remountPane && (
+          <TerminalDeadOverlay
+            isStaleSession={false}
+            providerLabel={providerLabel}
+            deadCrashOutput={null}
+            deadExitCode={null}
+            deadExitReason={null}
+            deadExitDetail={null}
+            onStartFresh={handleStartFresh}
+            onRetryClick={handleRetry}
+            onDoctor={() => void handleDoctor()}
+            doctorLoading={doctorLoading}
+            doctorResults={doctorResults}
+            notAttached={{
+              onRestart: handleNotAttachedRestart,
+              ...(unattachedHere ? { onAttach: handleNotAttachedAttach } : {}),
+              attaching
+            }}
+          />
+        )}
         {showDeadOverlay && (
           <TerminalDeadOverlay
             isStaleSession={isStaleSession}

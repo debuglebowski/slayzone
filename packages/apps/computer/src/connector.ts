@@ -125,9 +125,9 @@ export async function startConnector(
   }
   dialer = new HubDialer({
     url: config.hubUrl,
-    // The wire belongs to this connector. The separately checked local contract
-    // proves that the host implements its dispatch methods; compatible connector
-    // releases can still replace one another without stopping native sessions.
+    // The wire belongs to this connector; runtime capabilities come from its host,
+    // whose release can be older. The local contract permits connector replacement
+    // without stopping native sessions, independently of optional chat features.
     identity: {
       ...identity,
       version: COMPUTER_VERSION,

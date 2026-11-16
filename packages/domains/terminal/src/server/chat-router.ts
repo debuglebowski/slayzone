@@ -537,11 +537,15 @@ export const chatRouter = router({
         tabId: z.string(),
         pages: z.array(z.number().int().nonnegative()).max(512),
         asOfSeq: z.number().int(),
-        epoch: z.number().int()
+        epoch: z.number().int(),
+        // Answered by row slices from this row (`next`); an older hub drops it.
+        startRow: z.number().int().nonnegative().optional()
       })
     )
     .query(({ input }) =>
-      ops().timelinePages(input.tabId, input.pages, input.asOfSeq, input.epoch)
+      input.startRow === undefined
+        ? ops().timelinePages(input.tabId, input.pages, input.asOfSeq, input.epoch)
+        : ops().timelinePages(input.tabId, input.pages, input.asOfSeq, input.epoch, input.startRow)
     ),
   searchTimeline: publicProcedure
     .input(z.object({ tabId: z.string(), query: z.string().max(1000) }))

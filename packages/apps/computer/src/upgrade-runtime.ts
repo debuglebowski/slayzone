@@ -27,6 +27,7 @@ import type { LocalPeer } from '@slayzone/computer-runtime'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import type { ConnectorGrant } from './session-host'
+import { rotateLogFile } from './file-log'
 import {
   effectiveHubUrls,
   hostConfigurationKey,
@@ -445,6 +446,9 @@ export async function ensureSessionHost(
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
+  // Appended to from the host's start to its end, by its stdout/stderr: bounded at
+  // each start (one older generation kept). Its lines are in logs/computer.log too.
+  rotateLogFile(join(runtime, 'host.log'))
   const out = openSync(join(runtime, 'host.log'), 'a', 0o600)
   const launcher = ensureComputerLauncher(root, original)
   const child = spawn(process.execPath, [launcher, '--session-host'], {

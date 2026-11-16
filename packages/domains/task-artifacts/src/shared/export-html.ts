@@ -217,7 +217,9 @@ ${mermaidRunScript(mermaidJs, nonce)}
     case 'svg-preview':
       body = `<div style="display:flex;justify-content:center;padding:2rem">${inertNavigationTags(content)}</div>`
       break
+    // A diff exports as its source, line-numbered like code.
     case 'code':
+    case 'diff':
       body = codeTableHtml(content)
       break
     default:

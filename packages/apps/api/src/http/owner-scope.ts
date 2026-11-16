@@ -198,6 +198,9 @@ export async function refAllowed(
   ref: HttpIdRef,
   value: string
 ): Promise<boolean> {
+  if (ref.match === 'taskSession') {
+    return !/^[^:]+:[^:]+$/.test(value) || scope.allows({ kind: ref.kind, id: value })
+  }
   if (ref.match === 'exact') return scope.allows({ kind: ref.kind, id: value })
   const source = ref.match === 'projectRef' ? PROJECT_OF.project : PROJECT_OF[ref.kind]
   if (!source) return scope.allows({ kind: ref.kind, id: value })

@@ -4,7 +4,7 @@
  * The Electron-only download procedures are covered by e2e (93-artifacts-panel),
  * not here. The task row is seeded via createTaskOp (knows all columns + the FK).
  */
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
@@ -15,7 +15,8 @@ import type {
   CreateArtifactInput,
   CreateArtifactFolderInput
 } from '@slayzone/task-contracts'
-import { artifactsRouter } from './artifacts-router.js'
+import { artifactsRouter, READ_BASE64_MAX_BYTES } from './artifacts-router.js'
+import { getArtifactStorage, setArtifactStorage } from './artifact-storage.js'
 import { taskOps } from '@slayzone/task/server'
 
 const h = await createTestHarness()
@@ -137,4 +138,73 @@ test('artifacts router: missing id → null / false (no throw)', async () => {
   expect(await caller.get({ id: 'nope' })).toBeNull()
   expect(await caller.readContent({ id: 'nope' })).toBeNull()
   expect(await caller.delete({ id: 'nope' })).toBe(false)
+})
+
+// ── Binary viewers: a zip's listing and a font's bytes ──
+
+const ZIP_FIXTURE = readFileSync(new URL('./__fixtures__/python-made.zip', import.meta.url))
+
+test('artifacts router: listArchive lists a zip artifact from its central directory', async () => {
+  const a = await caller.uploadBlob({
+    taskId,
+    title: 'bundle.zip',
+    bytes: new Uint8Array(ZIP_FIXTURE)
+  })
+  const listing = await caller.listArchive({ id: a!.id })
+  expect(listing!.totalEntries).toBe(4)
+  expect(listing!.entries.map((e) => e.path)).toEqual([
+    'docs/',
+    'docs/readme.md',
+    'docs/naïve café.txt',
+    'big.bin'
+  ])
+  expect(await caller.listArchive({ id: 'nope' })).toBeNull()
+})
+
+test('artifacts router: listArchive on an artifact a computer holds lists its bytes', async () => {
+  const a = await caller.uploadBlob({
+    taskId,
+    title: 'remote.zip',
+    bytes: new Uint8Array(ZIP_FIXTURE)
+  })
+  const local = getArtifactStorage(ctx.dataRoot)
+  setArtifactStorage(ctx.dataRoot, {
+    ...local,
+    getArtifact: async (db, id) => {
+      const row = await local.getArtifact(db, id)
+      return row && id === a!.id ? { ...row, storage: { computerId: 'c1', available: true } } : row
+    },
+    // A computer-held artifact has no file on the hub's disk.
+    getArtifactPath: async (db, id) => (id === a!.id ? null : local.getArtifactPath(db, id))
+  })
+  try {
+    expect((await caller.listArchive({ id: a!.id }))!.totalEntries).toBe(4)
+  } finally {
+    setArtifactStorage(ctx.dataRoot, local)
+  }
+})
+
+test('artifacts router: listArchive on a file that is not a zip fails with the reason', async () => {
+  const a = await caller.uploadBlob({
+    taskId,
+    title: 'fake.zip',
+    bytes: new TextEncoder().encode('not a zip')
+  })
+  await expect(caller.listArchive({ id: a!.id })).rejects.toThrow(/not a zip archive/i)
+})
+
+test('artifacts router: readBase64 returns a small binary artifact, refuses a large one', async () => {
+  const bytes = new Uint8Array([0, 1, 2, 250, 255])
+  const a = await caller.uploadBlob({ taskId, title: 'face.woff2', bytes })
+  expect(await caller.readBase64({ id: a!.id })).toBe(Buffer.from(bytes).toString('base64'))
+  expect(await caller.readBase64({ id: 'nope' })).toBeNull()
+
+  const big = await caller.uploadBlob({
+    taskId,
+    title: 'huge.ttf',
+    bytes: new Uint8Array(READ_BASE64_MAX_BYTES + 1)
+  })
+  await expect(caller.readBase64({ id: big!.id })).rejects.toMatchObject({
+    code: 'PAYLOAD_TOO_LARGE'
+  })
 })

@@ -30,6 +30,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { ChatOwnership } from '../shared'
 import { EVENT_BLOBS_MAINTENANCE, type ChatStorage } from './storage'
+import { dropTimelineInSteps } from './timeline-drop'
 
 /** Done marker (`storage_maintenance`) and checkpoint key (`maintenance_cursors`). */
 export const CHAT_BLOB_BACKFILL = EVENT_BLOBS_MAINTENANCE
@@ -43,7 +44,8 @@ const TIMELINES = `${CHAT_BLOB_BACKFILL}:timelines`
 /** Chats a pass could not finish (frozen, prepared, ownership moved): retried first. */
 const PENDING = `${CHAT_BLOB_BACKFILL}:pending`
 const GiB = 1024 * 1024 * 1024
-const ROWS_PER_READ = 16
+/** Row sizes looked up per read (record headers only: no row is loaded). */
+const SIZES_PER_READ = 256
 
 export interface ChatBlobBackfillReport {
   /** Rows rewritten to stored form. */
@@ -237,10 +239,22 @@ export function createChatBlobBackfill(opts: ChatBlobBackfillOptions) {
       const start = now()
       let bytes = 0,
         finished = false
+      // Sizes first (record headers, no row loaded); a body is read once, only when
+      // the row fits what is left of the slice (the first row of a slice always does)
+      // and is long enough to hold a binary slot at all.
       slice: for (;;) {
-        const rows = store.legacyEvents(i.id, seq, ROWS_PER_READ)
-        for (const row of rows) {
-          if (mayHoldBlob(row.event))
+        const sizes = store.legacyEventSizes(i.id, seq, SIZES_PER_READ)
+        for (const candidate of sizes) {
+          // Shorter than any blob slot (UTF-8 bytes ≥ characters): the prefilter could
+          // never pass, so nothing is read.
+          if (candidate.bytes < CHAT_BLOB_MIN_BASE64) {
+            seq = candidate.seq
+            continue
+          }
+          // It would take this slice past its budget: the next slice starts with it.
+          if (bytes > 0 && bytes + candidate.bytes > sliceBytes) break slice
+          const row = store.legacyEvent(i.id, candidate.seq)
+          if (row && mayHoldBlob(row.event))
             try {
               rewrite(owner, row, report)
             } catch (error) {
@@ -258,14 +272,16 @@ export function createChatBlobBackfill(opts: ChatBlobBackfillOptions) {
                 now()
               )
             }
-          seq = row.seq
-          bytes += row.event.length
+          seq = candidate.seq
+          bytes += candidate.bytes
           if (bytes >= sliceBytes || now() - start >= sliceMs) break slice
         }
-        if (rows.length < ROWS_PER_READ) {
+        if (sizes.length < SIZES_PER_READ) {
           finished = true
           break
         }
+        // A long run of short rows: still bounded in time.
+        if (now() - start >= sliceMs) break
       }
       store.setMaintenanceCursor(CHAT_BLOB_BACKFILL, { conversation: i.id, seq } satisfies Cursor)
       if (finished) return 'done'
@@ -291,7 +307,9 @@ export function createChatBlobBackfill(opts: ChatBlobBackfillOptions) {
         (await opts.withQuiesced(
           owner,
           async () => {
-            store.resetTimeline(id, owner.identity.epoch)
+            // In byte-bounded steps, the event loop running between them (and so
+            // between chats: an idle chat's quiesce resolves without a loop turn).
+            await dropTimelineInSteps(store, id, owner.identity.epoch)
             report.timelines++
             opts.changed(owner.identity.tabId)
           },

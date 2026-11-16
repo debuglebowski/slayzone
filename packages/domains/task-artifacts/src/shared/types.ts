@@ -123,3 +123,24 @@ export interface ArtifactSearchReport {
   truncated: boolean
   skippedLarge: SkippedLargeArtifact[]
 }
+
+/** One entry of a zip artifact's listing (`artifacts.listArchive`). */
+export interface ArchiveEntry {
+  /** Path inside the archive, `/`-separated; a folder ends in `/`. */
+  path: string
+  isDirectory: boolean
+  /** Uncompressed bytes. */
+  size: number
+  compressedSize: number
+  /** `YYYY-MM-DDTHH:MM:SS` as stored (zip keeps no time zone); null when unset. */
+  modified: string | null
+  encrypted: boolean
+}
+
+/** A zip artifact's entries, capped; the totals count every entry. */
+export interface ArchiveListing {
+  entries: ArchiveEntry[]
+  totalEntries: number
+  /** Sum of every entry's uncompressed size. */
+  totalSize: number
+}

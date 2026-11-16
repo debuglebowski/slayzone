@@ -47,7 +47,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { eraseComputerOffline } from './offline-erasure'
 import { fork } from 'node:child_process'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
-import { atomicRuntimeJson, startSessionHost } from './session-host'
+import { atomicRuntimeJson, sessionHostLog, startSessionHost } from './session-host'
 import { startConnector } from './connector'
 import {
   HOST_CONTRACT_VERSION,
@@ -56,7 +56,7 @@ import {
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { StructuralFaultError } from '@slayzone/platform/isolation'
 import { readJsonTolerant } from '@slayzone/platform/quarantine'
-import { createComputerFileLog } from './file-log'
+import { createComputerLog } from './file-log'
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -200,6 +200,8 @@ async function main(): Promise<void> {
   }
   if (process.argv.includes('--session-host')) {
     const root = process.env.SLAYZONE_ROOT ?? process.cwd()
+    // stdout (its launcher's host.log / the service journal) and <root>/logs/computer.log.
+    const hostLog = sessionHostLog(root)
     // The seed only carries launch overrides on top of the computer's config file;
     // an unreadable seed is quarantined and the host starts from the file alone.
     const read = readJsonTolerant(
@@ -212,15 +214,13 @@ async function main(): Promise<void> {
       { root: join(root, 'computer-runtime'), pass: 'computer-host-config' }
     )
     if (read.status === 'corrupt')
-      process.stdout.write(
-        `[host] host-config.json unreadable; quarantined, starting from the config file ${JSON.stringify({ error: read.error.message })}\n`
-      )
+      hostLog('host-config.json unreadable; quarantined, starting from the config file', {
+        error: read.error.message
+      })
     const seed: Record<string, unknown> = read.status === 'ok' ? read.value : {}
     const config = loadBootComputerConfig(seed)
     if (!config.allowedRoots.length) config.allowedRoots = [root]
-    const host = await startSessionHost(root, config, (message, meta) =>
-      process.stdout.write(`[host] ${message} ${JSON.stringify(meta ?? {})}\n`)
-    )
+    const host = await startSessionHost(root, config, hostLog)
     process.send?.({ type: 'supervisor-ready' }, () => undefined)
     void host.closed.then(() => {
       if (process.connected) process.disconnect()
@@ -355,12 +355,7 @@ async function main(): Promise<void> {
   }
 
   // Also kept on disk (file-log.ts): a supervising app drops this process's stdout.
-  const fileLog = createComputerFileLog(dirname(getComputerConfigFilePath()))
-  const log = (message: string, meta?: Record<string, unknown>): void => {
-    const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : ''
-    process.stdout.write(`[computer] ${message}${suffix}\n`)
-    fileLog(`${message}${suffix}`)
-  }
+  const log = createComputerLog({ stateDir: dirname(getComputerConfigFilePath()), tag: 'computer' })
 
   // A certificate pin from an older release is ignored, never enforced (see
   // ignoredCertPinNotices) — said once at boot so the change is not silent.

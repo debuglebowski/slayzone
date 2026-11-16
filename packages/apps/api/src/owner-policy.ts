@@ -187,6 +187,49 @@ const snapshotRows = (field: string, kind: ResourceKind): EventFilter => {
   }
 }
 
+/**
+ * A terminal session a computer still runs from a previous hub run (terminal
+ * unattached-sessions): its computer's owner manages it — and when it belongs to a
+ * task (`<taskId>:<tabId>`), only one who may access that task too. A session with no
+ * task has its computer as its only owner (review L2).
+ */
+const TASK_TAB_SESSION = /^[^:]+:[^:]+$/
+const unattachedResources = (row: unknown): OwnedResource[] => {
+  if (!isRecord(row)) return []
+  const out: OwnedResource[] = []
+  const computer = res('computer', row.computerId)
+  if (computer) out.push(computer)
+  if (typeof row.sessionId === 'string' && TASK_TAB_SESSION.test(row.sessionId)) {
+    const session = res('session', row.sessionId)
+    if (session) out.push(session)
+  }
+  return out
+}
+const unattachedTarget: CustomRef = {
+  pick: unattachedResources,
+  sample: { kind: 'computer', input: (id) => ({ computerId: id, sessionId: 'no-task-session' }) }
+}
+const unattachedRows: OutputFilter = async (data, scope) => {
+  if (!Array.isArray(data)) return data
+  const out: unknown[] = []
+  for (const row of data) {
+    const resources = unattachedResources(row)
+    if (resources.length > 0 && (await scope.allowsAll(resources))) out.push(row)
+  }
+  return out
+}
+/** {@link unattachedRows} for a stream of full snapshots (see `snapshotRows`). */
+const unattachedSnapshots = (): EventFilter => {
+  const last = new WeakMap<StreamState, string>()
+  return async (event, state) => {
+    const out = await unattachedRows(event, state.scope)
+    const key = JSON.stringify(out)
+    if (last.get(state) === key) return DROP
+    last.set(state, key)
+    return out
+  }
+}
+
 /** Rows of a process list: the task when set, else the project. */
 const processRows: OutputFilter = async (data, scope) => {
   if (!Array.isArray(data)) return data
@@ -721,6 +764,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.readText': checked(artifact('id')),
   'artifacts.getFilePath': checked(artifact('id')),
   'artifacts.getMtime': checked(artifact('id')),
+  'artifacts.listArchive': checked(artifact('id')),
+  'artifacts.readBase64': checked(artifact('id')),
   'artifacts.upload': checked(task('taskId'), owned('sourcePath')),
   'artifacts.uploadBlob': checked(task('taskId'), folder('folderId')),
   'artifacts.copy': checked(artifact('artifactIds[]'), task('destTaskId'), folder('destFolderId')),
@@ -1142,6 +1187,12 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.clearBuffer': checked(session('sessionId')),
   'pty.getBufferSince': checked(session('sessionId')),
   'pty.list': listed(rows('sessionId', 'session')),
+  // A previous hub run's sessions still running on a computer: the computer's owner's.
+  // (A session that maps to no task has no other owner path.)
+  'pty.unattachedList': listed(unattachedRows),
+  'pty.unattachedAttach': checked(unattachedTarget),
+  'pty.unattachedKill': checked(unattachedTarget),
+  'pty.onUnattachedChange': streamed(unattachedSnapshots()),
   'pty.chatList': listed(rows('sessionId', 'session')),
   'pty.getState': checked(session('sessionId')),
   'pty.sessionList': listed(rows('sessionId', 'session')),

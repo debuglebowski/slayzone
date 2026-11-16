@@ -23,6 +23,9 @@ import {
 import { jailedFs, judgePath, outsideScopeJail, type JailAccess } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
+/** Paths `hashFiles` judges per turn of the event loop. */
+const HASH_JUDGE_CHUNK = 16
+
 export function createAgentConfigHandlers(
   ctx: HandlerContext,
   homedir: () => string = osHomedir
@@ -54,8 +57,13 @@ export function createAgentConfigHandlers(
     const fs = localAiConfigFs
     switch (p.op) {
       case 'hashFiles': {
-        // Authorize every entry before any hash can be reused or read.
-        const paths = p.paths.map((path) => allow(path))
+        // Authorize every entry before any hash can be reused or read — a chunk at a
+        // time, the event loop turning between chunks (FU5: never one long block).
+        const paths: string[] = []
+        for (let i = 0; i < p.paths.length; i += HASH_JUDGE_CHUNK) {
+          if (i > 0) await new Promise<void>((next) => setImmediate(next))
+          for (const path of p.paths.slice(i, i + HASH_JUDGE_CHUNK)) paths.push(allow(path))
+        }
         const hashes = await fs.hashFiles!(paths)
         return { result: hashes.map((row, i) => ({ path: p.paths[i], hash: row.hash })) }
       }
