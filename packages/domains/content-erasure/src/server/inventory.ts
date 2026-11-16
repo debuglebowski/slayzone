@@ -2,9 +2,18 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ErasureManifest } from './manifest'
+import {
+  readArtifactPreparationOwner,
+  assertNoUnattributedArtifactPreparations
+} from './artifact-journal'
 
 /** Old orphan files have lost their owner. Flag them; never guess and delete them. */
 export async function hasUnattributedFiles(db: SlayzoneDb, root: string): Promise<boolean> {
+  try {
+    assertNoUnattributedArtifactPreparations(root)
+  } catch {
+    return true
+  }
   const tasks = new Set(
     (
       await db.all<{ id: string }>(
@@ -48,7 +57,15 @@ export async function hasUnattributedFiles(db: SlayzoneDb, root: string): Promis
     for (const entry of readdirSync(journals, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const path = join(journals, entry.name, 'manifest.json')
-      if (!existsSync(path)) return true
+      if (!existsSync(path)) {
+        try {
+          const owner = readArtifactPreparationOwner(join(journals, entry.name))
+          if (!owner || !tasks.has(owner.taskId)) return true
+        } catch {
+          return true
+        }
+        continue
+      }
       let taskId: unknown
       try {
         taskId = (JSON.parse(readFileSync(path, 'utf8')) as { taskId?: unknown })?.taskId

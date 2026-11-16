@@ -34,11 +34,18 @@ const refusingTurnGit: TurnGit = {
 export function createChatStoreServices(
   storage: ChatStorage,
   opts: ComputerChatRuntimeOptions,
-  hooks: { sessionsChanged?(tabId: string): void } = {}
+  hooks: {
+    sessionsChanged?(tabId: string): void
+    failure?(error: unknown): void
+    available?(): void
+    artifactAccess?<T>(taskId: string, work: () => Promise<T>): Promise<T>
+  } = {}
 ) {
   // Register before artifact purge listeners: every deletion delivery captures
   // retry identifiers before its source records disappear, including old clients.
-  storage.onTaskPurge((taskId) => storage.compose((raw) => prepareStoredTaskErasure(raw, taskId)))
+  storage.onTaskPurge((taskId) =>
+    storage.compose((raw) => prepareStoredTaskErasure(raw, taskId, storage.dir))
+  )
   const diagnosticsConfig = () =>
     storage.getRecord<{ enabled: boolean; verbose: boolean }>(
       '__slz_settings__',
@@ -103,7 +110,7 @@ export function createChatStoreServices(
   transfers.collectActivated()
   const sessionMoves = createSessionMoves(storage)
   const attachments = createLocalAttachments(storage, local)
-  const artifacts = createLocalArtifacts(storage, local, attachments)
+  const artifacts = createLocalArtifacts(storage, local, attachments, hooks)
   const backups = createChatBackups(storage, {
     automatic: !opts.maintenance,
     workerFactory: opts.compaction?.workerFactory

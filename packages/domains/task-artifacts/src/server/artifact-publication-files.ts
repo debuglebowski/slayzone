@@ -1,10 +1,10 @@
 import { createHash, randomUUID, type Hash } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
 import { lstat, mkdir, open, readdir, rename, rm, rmdir, type FileHandle } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { setImmediate as turn } from 'node:timers/promises'
 import { isPathSafeId } from '@slayzone/platform/safe-path'
-import { workingCopyJournalDir } from './working-copy'
+import { workingCopyJournalDir, registerArtifactPublication } from './working-copy'
 
 export interface PublicationFileIdentity {
   dev: string
@@ -29,13 +29,14 @@ export interface PublicationPreparationOwner {
   conversationId: string
   operationId: string
   intentHash: string
+  artifactId?: string
 }
 
 export interface PrepareArtifactPublicationFilesOptions {
   /** Validated, exclusively owned storage root. No filesystem paths cross public RPC here. */
   dataDir: string
   owner: PublicationPreparationOwner
-  source: PublicationSourceFile
+  source: PublicationSourceFile | { data: string }
   /** Live working bytes may differ from immutable HEAD. Missing initially means no before image. */
   previous?: { path: string; expected?: Omit<PublicationSourceFile, 'path'> }
   append?: boolean
@@ -44,6 +45,8 @@ export interface PrepareArtifactPublicationFilesOptions {
   signal?: AbortSignal
   /** Worker-local lifecycle fence; must throw synchronously when no longer current. */
   assertCurrent?: () => void
+  /** Worker-local adoption: retain the original source FD through durable output preparation. */
+  prepareOutputs?: (images: PreparedArtifactPublicationFiles) => Promise<void>
 }
 
 export interface PreparedPublicationImage {
@@ -56,7 +59,7 @@ export interface PreparedArtifactPublicationFiles {
   jobId: string
   directory: string
   ownershipFile: string
-  source: Omit<PublicationSourceFile, 'path'>
+  source: { sha256: string; size: number; identity?: PublicationFileIdentity }
   before: (PreparedPublicationImage & { sourceSnapshot: PublicationFileSnapshot }) | null
   after: PreparedPublicationImage
   /** Only after publication/recovery no longer needs the images. Waits for native cleanup. */
@@ -68,6 +71,32 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const SHA256 = /^[a-f0-9]{64}$/
 type Check = () => void
 type CleanupResult = Awaited<ReturnType<PreparedArtifactPublicationFiles['cleanup']>>
+
+export class PublicationPhysicalIoError extends Error {
+  readonly physicalQuiescenceUnconfirmed = true
+}
+/** Failure is not proof that the descriptor closed; the physical owner must exit. */
+export async function closePublicationFile(file: FileHandle): Promise<void> {
+  try {
+    await file.close()
+  } catch (cause) {
+    const error = new PublicationPhysicalIoError(
+      `Publication descriptor close is unconfirmed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause }
+    )
+    if (cause && typeof cause === 'object' && 'code' in cause)
+      Object.assign(error, { code: cause.code })
+    throw error
+  }
+}
+export function publicationIoIsUnconfirmed(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  return (
+    error instanceof PublicationPhysicalIoError ||
+    publicationIoIsUnconfirmed(Reflect.get(error, 'cause')) ||
+    (error instanceof AggregateError && error.errors.some(publicationIoIsUnconfirmed))
+  )
+}
 
 // Serialize only users of the same private path. Unrelated preparations/control work stay live.
 const paths = new Map<string, Promise<void>>()
@@ -128,7 +157,8 @@ async function usingFile<T>(
   path: string,
   flags: number | string,
   check: Check,
-  use: (file: FileHandle) => Promise<T>
+  use: (file: FileHandle) => Promise<T>,
+  retain?: (file: FileHandle, value: T) => void
 ): Promise<T> {
   check()
   const file = await open(path, flags, 0o600)
@@ -142,10 +172,15 @@ async function usingFile<T>(
     failure = error
     failed = true
   }
+  if (!failed && retain) {
+    retain(file, value)
+    check()
+    return value
+  }
   // Closing must finish even when the caller is cancelled. Preserve both errors rather than
   // replacing an I/O failure with a close failure from a finally block.
   try {
-    await file.close()
+    await closePublicationFile(file)
   } catch (error) {
     failure = failed
       ? new AggregateError([failure, error], 'Publication I/O and close failed', { cause: failure })
@@ -156,6 +191,7 @@ async function usingFile<T>(
   check()
   return value
 }
+export const withPublicationFile = usingFile
 
 async function syncDirectory(path: string, check: Check): Promise<void> {
   // Same platform policy as working-copy.ts and platform/durable-fs. Output handles are writable
@@ -185,7 +221,9 @@ async function copyVerified(
   outputs: Array<{ file: FileHandle; hash?: Hash }>,
   buffer: Buffer,
   check: Check,
-  optional = false
+  optional = false,
+  allowTimestampTouch = false,
+  retain?: (file: FileHandle) => void
 ): Promise<{ sha256: string; size: number; sourceSnapshot: PublicationFileSnapshot } | null> {
   let initial: BigIntStats
   try {
@@ -236,13 +274,18 @@ async function copyVerified(
       if (
         size !== before.size ||
         !current.isFile() ||
-        !sameSnapshot(before, finish) ||
-        !sameSnapshot(before, snapshot(current)) ||
+        (allowTimestampTouch
+          ? !sameIdentity(before, finish) || before.size !== finish.size
+          : !sameSnapshot(before, finish)) ||
+        (allowTimestampTouch
+          ? !sameIdentity(before, snapshot(current)) || before.size !== Number(current.size)
+          : !sameSnapshot(before, snapshot(current))) ||
         (source.expected && sha256 !== source.expected.sha256)
       )
         throw new Error('Publication input changed or hash mismatch')
       return { sha256, size, sourceSnapshot: before }
-    }
+    },
+    retain
   )
 }
 
@@ -254,9 +297,18 @@ async function copyVerified(
 export async function prepareArtifactPublicationFiles(
   options: PrepareArtifactPublicationFilesOptions
 ): Promise<PreparedArtifactPublicationFiles> {
-  const { taskId, conversationId, operationId, intentHash } = options.owner
-  const owner = { taskId, conversationId, operationId, intentHash },
-    source = { ...options.source, identity: { ...options.source.identity } },
+  const { taskId, conversationId, operationId, intentHash, artifactId } = options.owner
+  const owner = {
+      taskId,
+      conversationId,
+      operationId,
+      intentHash,
+      ...(artifactId ? { artifactId } : {})
+    },
+    source =
+      'path' in options.source
+        ? { ...options.source, identity: { ...options.source.identity } }
+        : { ...options.source },
     dataDir = resolve(options.dataDir),
     append = options.append === true,
     signal = options.signal,
@@ -274,12 +326,18 @@ export async function prepareArtifactPublicationFiles(
   if (
     !UUID.test(jobId) ||
     !isPathSafeId(owner.taskId) ||
+    (artifactId !== undefined && !isPathSafeId(artifactId)) ||
     !boundedId(owner.conversationId, 500) ||
     !boundedId(owner.operationId, 200) ||
     !SHA256.test(owner.intentHash)
   )
     throw new Error('Invalid publication preparation owner')
-  validateSource(source)
+  if ('path' in source) validateSource(source)
+  else if (
+    source.data.length > 14_000_000 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(source.data)
+  )
+    throw new Error('Invalid inline publication input')
   if (previous?.expected) validateSource(previous.expected)
   const check = () => {
     signal?.throwIfAborted()
@@ -301,6 +359,13 @@ export async function prepareArtifactPublicationFiles(
     headerRetired = false,
     directoryRemoved = false
   let terminal: CleanupResult | undefined
+  let adopted = false
+  let sourceFile: FileHandle | undefined
+  async function closeSource() {
+    const file = sourceFile
+    sourceFile = undefined
+    if (file) await closePublicationFile(file)
+  }
 
   async function owns(path: string): Promise<boolean> {
     let info: BigIntStats
@@ -386,15 +451,24 @@ export async function prepareArtifactPublicationFiles(
     for (;;) {
       const target = join(root, randomUUID())
       const result = await withPath(target, async () => {
+        let certain = true
         try {
           await lstat(target)
           return undefined
         } catch (error) {
           if (!missing(error)) throw error
         }
-        await rename(directory, target)
-        claim = target
-        return cleanupClaim()
+        const release = registerArtifactPublication(dataDir, basename(target))
+        try {
+          await rename(directory, target)
+          claim = target
+          return await cleanupClaim()
+        } catch (error) {
+          certain = !publicationIoIsUnconfirmed(error)
+          throw error
+        } finally {
+          if (certain) release()
+        }
       })
       if (result !== undefined) return result
     }
@@ -422,7 +496,7 @@ export async function prepareArtifactPublicationFiles(
         afterPath = join(directory, 'after'),
         beforePath = join(directory, 'before')
       const afterHash = createHash('sha256')
-      const { after, before, sourceSnapshot } = await usingFile(
+      const { after, before, sourceSnapshot, input } = await usingFile(
         afterPath,
         'wx',
         check,
@@ -444,16 +518,40 @@ export async function prepareArtifactPublicationFiles(
             if (copied) before = { path: beforePath, ...copied }
             else await checked(rm(beforePath), check)
           }
-          const value = await copyVerified(
-            { path: source.path, expected: source },
-            [{ file, hash: afterHash }],
-            buffer,
-            check
-          )
+          let value: { sha256: string; size: number; sourceSnapshot?: PublicationFileSnapshot }
+          if ('path' in source) {
+            value = (await copyVerified(
+              { path: source.path, expected: source },
+              [{ file, hash: afterHash }],
+              buffer,
+              check,
+              false,
+              true,
+              (file) => {
+                sourceFile = file
+              }
+            ))!
+          } else {
+            const inputHash = createHash('sha256')
+            let size = 0
+            // Aligned base64 blocks decode to at most 256 KiB. Never decode a whole body.
+            const characters = Math.floor(BUFFER_BYTES / 3) * 4
+            for (let offset = 0; offset < source.data.length; offset += characters) {
+              check()
+              const bytes = Buffer.from(source.data.slice(offset, offset + characters), 'base64')
+              await writeAll(file, bytes, check)
+              inputHash.update(bytes)
+              afterHash.update(bytes)
+              size += bytes.length
+              await checked(turn(), check)
+            }
+            value = { sha256: inputHash.digest('hex'), size }
+          }
           await checked(file.sync(), check)
           return {
             before,
-            sourceSnapshot: value!.sourceSnapshot,
+            sourceSnapshot: value.sourceSnapshot,
+            input: { sha256: value.sha256, size: value.size },
             after: {
               path: afterPath,
               sha256: afterHash.digest('hex'),
@@ -463,38 +561,103 @@ export async function prepareArtifactPublicationFiles(
         }
       )
       await syncDirectory(directory, check)
-      // A source path/working file can change while later file flushes are pending. Refuse a
-      // stale preparation; the owner must revalidate these snapshots again at its publish fence.
-      const currentSource = await checked(lstat(source.path, { bigint: true }), check)
-      if (!currentSource.isFile() || !sameSnapshot(sourceSnapshot, snapshot(currentSource)))
-        throw new Error('Publication source replaced during preparation')
-      if (previous) {
-        let currentPrevious: BigIntStats | undefined
-        try {
-          currentPrevious = await checked(lstat(previous.path, { bigint: true }), check)
-        } catch (error) {
-          if (!missing(error)) throw error
-          check()
+      const verify = async () => {
+        // A source path/working file can change while later file flushes are pending. Refuse a
+        // stale preparation; the owner must revalidate these snapshots again at its publish fence.
+        if ('path' in source) {
+          const currentSource = await checked(lstat(source.path, { bigint: true }), check)
+          if (
+            !currentSource.isFile() ||
+            !sourceSnapshot ||
+            !sameIdentity(sourceSnapshot, snapshot(currentSource)) ||
+            sourceSnapshot.size !== Number(currentSource.size)
+          )
+            throw new Error('Publication source replaced during preparation')
         }
-        if (
-          before
-            ? !currentPrevious?.isFile() ||
-              !sameSnapshot(before.sourceSnapshot, snapshot(currentPrevious))
-            : currentPrevious
-        )
-          throw new Error('Publication previous image changed during preparation')
+        if (previous) {
+          let currentPrevious: BigIntStats | undefined
+          try {
+            currentPrevious = await checked(lstat(previous.path, { bigint: true }), check)
+          } catch (error) {
+            if (!missing(error)) throw error
+            check()
+          }
+          if (
+            before
+              ? !currentPrevious?.isFile() ||
+                !sameSnapshot(before.sourceSnapshot, snapshot(currentPrevious))
+              : currentPrevious
+          )
+            throw new Error('Publication previous image changed during preparation')
+        }
+        if ('path' in source && sourceFile && sourceSnapshot) {
+          const current = snapshot(await checked(sourceFile.stat({ bigint: true }), check))
+          if (!sameIdentity(current, sourceSnapshot) || current.size !== sourceSnapshot.size)
+            throw new Error('Publication source identity changed')
+          if (!sameSnapshot(current, sourceSnapshot)) {
+            // A legitimate legacy retry can touch mtime while pinned. Rehash on the
+            // SAME retained descriptor instead of treating timestamps as authority.
+            const hash = createHash('sha256')
+            let offset = 0
+            for (;;) {
+              const { bytesRead } = await checked(
+                sourceFile.read(
+                  buffer,
+                  0,
+                  Math.min(buffer.length, source.size - offset + 1),
+                  offset
+                ),
+                check
+              )
+              if (!bytesRead) break
+              offset += bytesRead
+              if (offset > source.size)
+                throw new Error('Publication source grew during verification')
+              hash.update(buffer.subarray(0, bytesRead))
+              await checked(turn(), check)
+            }
+            if (offset !== source.size || hash.digest('hex') !== source.sha256)
+              throw new Error('Publication source changed or hash mismatch after preparation')
+            const pathNow = await checked(lstat(source.path, { bigint: true }), check)
+            if (
+              !pathNow.isFile() ||
+              !sameIdentity(snapshot(pathNow), sourceSnapshot) ||
+              Number(pathNow.size) !== source.size
+            )
+              throw new Error('Publication source replaced during verification')
+          }
+        }
       }
-      check()
-      return {
+      await verify()
+      const prepared: PreparedArtifactPublicationFiles = {
         jobId,
         directory,
         ownershipFile,
-        source: { sha256: source.sha256, size: source.size, identity: source.identity },
+        source: { ...input, ...('identity' in source ? { identity: source.identity } : {}) },
         before,
         after,
         cleanup: () => withPath(directory, cleanupOwned)
       }
-    } catch (error) {
+      if (options.prepareOutputs) {
+        adopted = true
+        await options.prepareOutputs(prepared)
+        await verify()
+      }
+      await closeSource()
+      check()
+      return prepared
+    } catch (caught) {
+      let error = caught
+      try {
+        await closeSource()
+      } catch (closeError) {
+        error = new AggregateError(
+          [error, closeError],
+          'Publication preparation and source close failed',
+          { cause: error }
+        )
+      }
+      if (adopted) throw error // The canonical journal owner reconciles adopted outputs.
       if (!created) throw error // No content was opened before directory identity was captured.
       try {
         if ((await cleanupOwned()) === 'replaced')

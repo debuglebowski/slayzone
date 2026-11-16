@@ -352,3 +352,14 @@ dropped, or restored when it is the only copy).
   while provider stdout is held, all-provider/control-ACK bounded-flow proof, shared
   history scheduling/scale, staged publication/inventory/lifetimes, S7/S8 and fresh
   review remain required. This production cutover slice does not complete H1/H2.
+
+- 2026-11-16 (fu-2 R1, S6b2b5): the canonical worker now implements private staged-PATH
+  artifact publication through the existing `chatRuntime.call` surface. Main holds
+  exact upload leases through positively matched file quiescence or physical owner
+  exit; the owner uses the reviewed bounded file helper, existing blob/version and
+  working-copy journal semantics, atomic receipt/outbox completion and real FULL
+  fences. Preparing/claimed ownership and orphan blob hashes participate in recovery
+  and erasure. All artifact mutations share the full async mutation lane. See
+  [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md) for FU1 API/lifetime duties,
+  evidence and remaining integration. Public staging/final-invoke adapters, whole
+  H2/native/scale/control acceptance, S7/S8 and independent review remain open.

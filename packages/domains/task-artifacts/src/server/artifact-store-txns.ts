@@ -73,7 +73,7 @@ type Row = Record<string, unknown> | undefined
 // pattern), so the consuming REST route must be able to answer 400 rather than
 // 500, and it has no other way to tell the two apart after the message crosses
 // the worker boundary.
-function wrapVersionError<T>(fn: () => T): T {
+export function wrapVersionError<T>(fn: () => T): T {
   try {
     return fn()
   } catch (err: unknown) {

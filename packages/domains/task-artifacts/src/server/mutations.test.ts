@@ -191,6 +191,25 @@ describe('mutateVersion (CLI escape hatch)', () => {
   })
   afterEach(() => env.cleanup())
 
+  it('keeps rejected invalid-ref body out of the blob store', () => {
+    const original = createVersion(env.db, env.txn, env.blobStore, {
+      artifactId: 'a1',
+      bytes: 'original'
+    })
+    const hashes = env.blobStore.listAllHashes()
+    expect(() =>
+      mutateVersion(env.db, env.txn, env.blobStore, {
+        artifactId: 'a1',
+        ref: 999,
+        bytes: 'rejected invalid-ref body'
+      })
+    ).toThrowError(expect.objectContaining({ code: 'NOT_FOUND' }))
+    expect(env.blobStore.listAllHashes()).toEqual(hashes)
+    expect(listVersions(env.db, 'a1')).toEqual([original])
+    expect(currentVersionIdInDb(env, 'a1')).toBe(original.id)
+    expect(readVersionContent(env.blobStore, original).toString()).toBe('original')
+  })
+
   it('mutates a named (locked) version in place', () => {
     const v = createVersion(env.db, env.txn, env.blobStore, {
       artifactId: 'a1',
@@ -226,6 +245,29 @@ describe('createVersion (named / honorUnchanged)', () => {
     env.insertArtifact('a1')
   })
   afterEach(() => env.cleanup())
+
+  it.each([
+    ['pin', 'NAME_TAKEN'],
+    ['HEAD', 'NAME_RESERVED']
+  ])('keeps rejected %s name body out of the blob store', (name, code) => {
+    const original = createVersion(env.db, env.txn, env.blobStore, {
+      artifactId: 'a1',
+      bytes: 'original',
+      name: 'pin'
+    })
+    const hashes = env.blobStore.listAllHashes()
+    expect(() =>
+      createVersion(env.db, env.txn, env.blobStore, {
+        artifactId: 'a1',
+        bytes: `rejected ${name} body`,
+        name
+      })
+    ).toThrowError(expect.objectContaining({ code }))
+    expect(env.blobStore.listAllHashes()).toEqual(hashes)
+    expect(listVersions(env.db, 'a1')).toEqual([original])
+    expect(currentVersionIdInDb(env, 'a1')).toBe(original.id)
+    expect(readVersionContent(env.blobStore, original).toString()).toBe('original')
+  })
 
   it('with name, honors unchanged content (creates row anyway)', () => {
     createVersion(env.db, env.txn, env.blobStore, { artifactId: 'a1', bytes: 'same' })

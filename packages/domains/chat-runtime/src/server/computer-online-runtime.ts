@@ -15,6 +15,7 @@ import { openChatStorageOwner } from './storage-owner'
 import { createComputerStoreClient } from './computer-store-client'
 import { createChatInvoker } from './invocation'
 import { createChatTaskAdmission } from './task-admission'
+import { createArtifactPublicationClient } from './artifact-publication-client'
 import type { OnlineStoreData, HostCall, StoreNotification } from './computer-store-protocol'
 
 export type OpenComputerChatRuntimeOptions = Omit<
@@ -53,10 +54,12 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
   const active = new Map<string, Set<{ conversationId: string; done: Promise<void> }>>()
   const tagged = new Map<string, Set<Promise<unknown>>>()
   let onFailureAdmission: { close(): void } | undefined
+  let onFailurePublication: { close(): Promise<void> } | undefined
   const latchFailure = (error: unknown) => {
     failure ??= error instanceof Error ? error : new Error(String(error))
     // Revoke permits already awaiting preparation, without releasing physical leases.
     onFailureAdmission?.close()
+    void onFailurePublication?.close().catch(() => undefined)
   }
   let hostCall: ((request: HostCall) => Promise<unknown>) | null = null
   let notification: ((value: StoreNotification) => void) | null = null
@@ -130,6 +133,14 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         )
       }
     })
+    const artifactPublication = createArtifactPublicationClient(storage, {
+      assertCurrent(ctx) {
+        if (failure || stopped || closing || taskAdmission.blocked(ctx.taskId))
+          throw failure ?? new Error('Artifact publication admission is closed')
+      },
+      failure: latchFailure
+    })
+    onFailurePublication = artifactPublication
     const drain = async (token: string) => {
       // A completed reader open can enqueue its first bounded page in a microtask.
       // isolation: fatal — One lease barrier must retain admission until every accepted operation drains.
@@ -236,8 +247,15 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
     }
     notification = (message) => {
       if (stopped || closing) return
-      if (message.type === 'metadata') opts.onMetadata?.(message.update)
-      else if (message.type === 'sessions') {
+      if (message.type === 'metadata') {
+        const failed = () =>
+          console.error('[chat] Metadata consumer failed; retained update awaits acknowledgement')
+        try {
+          void Promise.resolve(opts.onMetadata?.(message.update)).catch(failed)
+        } catch {
+          failed()
+        }
+      } else if (message.type === 'sessions') {
         if (message.owner)
           publication.run(message.owner, () =>
             transport.chatEvents.emit('sessions-changed', message.tabId)
@@ -406,6 +424,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       events: transport.chatEvents,
       queueEvents: queueRuntime.chatQueueEvents,
       ...remote,
+      artifactPublication,
       authority: { scope: storage.readScope },
       taskAdmission,
       publicationVersion: () => publicationVersion,
@@ -455,6 +474,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         transitions.add(value.from.tabId)
         const block = taskAdmission.block(value.from.taskId)
         const work = (async () => {
+          await artifactPublication.cancelConversation(value.from.id)
           await block.ready
           await storage.prepareTabTransition(value)
           if (await storage.getRecord(value.from.id, 'settings', `tab-transition:${value.id}`))
@@ -478,6 +498,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         const block = taskAdmission.block(identity.taskId)
         try {
           const ending = transport.removeSession(identity.tabId)
+          await artifactPublication.cancelConversation(identity.id)
           await block.ready
           await ending
           await queueRuntime.settleTab(identity.tabId)
@@ -501,6 +522,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         const block = taskAdmission.block(taskId)
         try {
           const ending = state === 'active' ? Promise.resolve() : removeTaskSessions(taskId)
+          await artifactPublication.cancelTask(taskId)
           await block.ready
           await ending
           const applied = await remote.control.applyLifecycle(taskId, state, revision)
@@ -514,6 +536,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         const block = taskAdmission.block(taskId)
         try {
           const ending = removeTaskSessions(taskId)
+          await artifactPublication.cancelTask(taskId)
           await block.ready
           await ending
           const applied = await remote.control.prepareErasure(taskId, revision)
@@ -556,6 +579,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
             }
           }
           await attempt(() => storage.db.namedTxn('chatStorage.prepareClose', {}))
+          await attempt(() => artifactPublication.close())
           await attempt(() => remote.control.prepareClose())
           await attempt(() => queueRuntime.close())
           await attempt(() => transport.shutdownAll())

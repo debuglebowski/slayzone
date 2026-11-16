@@ -1105,7 +1105,7 @@ export function createChatBackups(
           .get()
       )
         db.exec('DELETE FROM artifact_blob_leases')
-      prepareStoredTaskErasure(db, taskId)
+      prepareStoredTaskErasure(db, taskId, path)
       ;({ compact } = finishStoredTaskErasure(db, path, taskId))
     } finally {
       db.close()

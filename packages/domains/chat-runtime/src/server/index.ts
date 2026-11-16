@@ -98,6 +98,28 @@ export {
   type OpenComputerChatRuntimeOptions
 } from './computer-online-runtime'
 export type { ChatTaskAdmission, ChatTaskPermit } from './task-admission'
+export {
+  createArtifactPublicationClient,
+  type ArtifactPublicationClient,
+  type ArtifactPublicationExecution,
+  type PublicationUploads,
+  type PublicationUploadLease
+} from './artifact-publication-client'
+export type {
+  InspectPublication,
+  Inspection,
+  PublicationContext,
+  PublicationIntent,
+  PublicationSourceGrant,
+  StagedPublicationRef,
+  PublicationSettlement,
+  PublicationOutcome,
+  PublicationValue,
+  PublicationControl,
+  PublicationStatus,
+  CancelReason,
+  OwnerStamp
+} from './artifact-publication-protocol'
 
 export {
   computerRequestSchema,

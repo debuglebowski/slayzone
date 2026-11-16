@@ -1,3 +1,8 @@
+import {
+  readArtifactPreparationOwner,
+  assertNoUnattributedArtifactPreparations,
+  removeArtifactJournal
+} from '@slayzone/content-erasure/server'
 import type { Database } from 'better-sqlite3'
 import { randomUUID, createHash } from 'node:crypto'
 import {
@@ -17,6 +22,9 @@ import {
   writeFileSync,
   statSync
 } from 'node:fs'
+import type { PreparedArtifactPublicationFiles } from './artifact-publication-files'
+import { hasArtifactBlobLeases, referencedArtifactBlobHashes } from './blob-pins'
+import { artifactBlobPath } from '@slayzone/task/server/artifact-paths'
 import path from 'node:path'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { isPathSafeId } from '@slayzone/platform/safe-path'
@@ -42,6 +50,22 @@ interface FileChange {
 export const workingCopyJournalDir = (dataDir: string) =>
   path.join(artifactsDirOf(dataDir), '.transactions')
 
+const activePublications = new Set<string>()
+/** Register before preparation yields. Recovery/erasure may never adopt a live job. */
+export function registerArtifactPublication(dataDir: string, jobId: string): () => void {
+  const dir = path.join(workingCopyJournalDir(dataDir), jobId)
+  if (activePublications.has(dir)) throw new Error('Artifact publication is already registered')
+  activePublications.add(dir)
+  return () => activePublications.delete(dir)
+}
+
+const preparationOwner = readArtifactPreparationOwner
+
+/** Keep durable attribution until every body has durably disappeared, including claimed UUIDs. */
+function removeJournal(dir: string): void {
+  removeArtifactJournal(dir, (file) => rmSync(file, { recursive: true, force: true }))
+}
+
 function syncDirectory(dir: string): void {
   if (process.platform === 'win32') return
   const fd = openSync(dir, 'r')
@@ -51,6 +75,7 @@ function syncDirectory(dir: string): void {
     closeSync(fd)
   }
 }
+export const syncWorkingCopyDirectory = syncDirectory
 
 function save(file: string, bytes: Buffer | string): void {
   const fd = openSync(file, 'wx', 0o600)
@@ -90,7 +115,18 @@ function sameContents(left: string, right: string): boolean {
 
 function manifest(dir: string): FileChange | null {
   const file = path.join(dir, 'manifest.json')
-  if (!existsSync(file)) return null // Publication never starts before this file is durable.
+  if (!existsSync(file)) {
+    // Preparing jobs and cleanup claims have an owner even before a final manifest exists.
+    let owner: ReturnType<typeof preparationOwner>
+    try {
+      owner = preparationOwner(dir)
+    } catch {
+      throw new StructuralFaultError('Unattributed artifact preparation owner')
+    }
+    if (!owner && readdirSync(dir).length)
+      throw new StructuralFaultError('Unattributed artifact preparation')
+    return null
+  }
   const value = JSON.parse(readFileSync(file, 'utf8')) as FileChange
   if (
     !value ||
@@ -185,21 +221,71 @@ export function publishWorkingCopy(
   syncDirectory(path.dirname(newPath))
 }
 
+/** Bulk images and the publish copy are already durable. Only metadata/renames in this txn. */
+export function publishPreparedWorkingCopy(
+  db: Database,
+  dataDir: string,
+  prepared: PreparedArtifactPublicationFiles,
+  change: Omit<FileChange, 'hadOriginal' | 'sequence'>
+): void {
+  const dir = prepared.directory
+  if (
+    dir !== path.join(workingCopyJournalDir(dataDir), prepared.jobId) ||
+    !activePublications.has(dir)
+  )
+    throw new Error('Prepared artifact journal is not owned')
+  const owner = preparationOwner(dir)
+  if (!owner || owner.taskId !== change.taskId)
+    throw new Error('Prepared artifact journal owner changed')
+  const oldPath = artifactFilePathIn(
+    artifactsDirOf(dataDir),
+    change.previousTaskId ?? change.taskId,
+    change.artifactId,
+    change.previousTitle
+  )
+  const newPath = artifactFilePathIn(
+    artifactsDirOf(dataDir),
+    change.taskId,
+    change.artifactId,
+    change.title
+  )
+  const sequence = Number(
+    db.prepare('INSERT INTO artifact_file_commits(operation_id) VALUES(?)').run(prepared.jobId)
+      .lastInsertRowid
+  )
+  save(
+    path.join(dir, 'manifest.tmp'),
+    JSON.stringify({ ...change, hadOriginal: !!prepared.before, sequence })
+  )
+  renameSync(path.join(dir, 'manifest.tmp'), path.join(dir, 'manifest.json'))
+  syncDirectory(dir)
+  syncDirectory(workingCopyJournalDir(dataDir))
+  mkdirSync(path.dirname(newPath), { recursive: true, mode: 0o700 })
+  renameSync(path.join(dir, 'publish'), newPath)
+  if (newPath !== oldPath) rmSync(oldPath, { force: true })
+  syncDirectory(path.dirname(newPath))
+}
+
 /** Called only with the writer lock, after any enclosing transaction has ended. */
-export function recoverWorkingCopies(db: Database, dataDir: string): void {
+export function recoverWorkingCopies(
+  db: Database,
+  dataDir: string,
+  options: { strict?: boolean } = {}
+): void {
   const root = workingCopyJournalDir(dataDir)
   if (!existsSync(root)) {
     db.prepare('DELETE FROM artifact_file_commits').run()
     return
   }
   const entries: Array<{ name: string; change: FileChange | null }> = []
-  forEachIsolatedSync(
+  const readReport = forEachIsolatedSync(
     readdirSync(root, { withFileTypes: true }).filter(
       (entry) => entry.isDirectory() && /^[a-f0-9-]{36}$/.test(entry.name)
     ),
     { pass: 'artifact-file-journal-read', key: (entry) => entry.name, isFatal: isStorageFatal },
     (entry) => {
       const dir = path.join(root, entry.name)
+      if (activePublications.has(dir)) return
       const read = readJournal(dir)
       if ('error' in read) {
         // The unreadable journal alone is set aside; its quarantine entry is the record.
@@ -209,7 +295,7 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
     }
   )
   entries.sort((a, b) => (b.change?.sequence ?? 0) - (a.change?.sequence ?? 0))
-  forEachIsolatedSync(
+  const recoveryReport = forEachIsolatedSync(
     entries,
     {
       pass: 'artifact-file-journal-recovery',
@@ -233,6 +319,11 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
       }
     }
   )
+  if (options.strict && (readReport.failed.length || recoveryReport.failed.length))
+    throw new AggregateError(
+      [...readReport.failed, ...recoveryReport.failed].map((entry) => entry.error),
+      'Artifact journal recovery incomplete'
+    )
   function recoverJournal(name: string, dir: string, change: FileChange | null) {
     const committed = db
       .prepare('SELECT 1 FROM artifact_file_commits WHERE operation_id=?')
@@ -278,9 +369,28 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
       if (newPath !== oldPath && !laterEdit) rmSync(newPath, { force: true })
       if (existsSync(path.dirname(oldPath))) syncDirectory(path.dirname(oldPath))
     }
+    const blobFile = path.join(dir, 'blob.json')
+    if (existsSync(blobFile)) {
+      const blob = JSON.parse(readFileSync(blobFile, 'utf8'))
+      if (
+        blob?.version !== 1 ||
+        !/^[a-f0-9]{64}$/.test(blob.sha256) ||
+        !Number.isSafeInteger(blob.size) ||
+        blob.size < 0
+      )
+        throw new StructuralFaultError('Invalid artifact publication blob inventory')
+      if (!referencedArtifactBlobHashes(db).has(blob.sha256)) {
+        // Another live job/backup may still use an unreferenced immutable image.
+        // Retain its attribution until the last pin drains; never forget these bytes.
+        if (hasArtifactBlobLeases(db)) return
+        const file = artifactBlobPath(dataDir, blob.sha256)
+        rmSync(file, { force: true })
+        if (existsSync(path.dirname(file))) syncDirectory(path.dirname(file))
+      }
+    }
     // A committed file was fsynced before its marker committed. Leave later
     // external-editor changes intact; recovery must not overwrite those bytes.
-    rmSync(dir, { recursive: true, force: true })
+    removeJournal(dir)
     db.prepare('DELETE FROM artifact_file_commits WHERE operation_id=?').run(name)
   }
   if (readdirSync(root).length === 0) rmSync(root, { recursive: true, force: true })
@@ -288,6 +398,7 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
 
 /** Task deletion must also erase private before-images from an interrupted edit. */
 export function cleanupTaskWorkingCopies(dataDir: string, taskId: string): void {
+  assertNoUnattributedArtifactPreparations(dataDir)
   const root = workingCopyJournalDir(dataDir)
   if (!existsSync(root)) return
   const dirs = readdirSync(root, { withFileTypes: true })
@@ -301,18 +412,27 @@ export function cleanupTaskWorkingCopies(dataDir: string, taskId: string): void 
       isFatal: isStorageFatal
     },
     (dir) => {
+      if (activePublications.has(dir))
+        throw new Error('Artifact publication is still physically active')
       const read = readJournal(dir)
       if ('error' in read) {
         // Unreadable: it may hold this task's bytes. Delete it if it names the task,
         // otherwise set it aside so it never blocks another task's deletion.
-        if (existsSync(dir) && readFileSync(path.join(dir, 'manifest.json')).includes(taskId))
-          rmSync(dir, { recursive: true, force: true })
+        const header = ['manifest.json', 'owner.json'].find((name) =>
+          existsSync(path.join(dir, name))
+        )
+        if (existsSync(dir) && header && readFileSync(path.join(dir, header)).includes(taskId))
+          removeJournal(dir)
         else quarantineJournal(dataDir, dir, read.error)
         return
       }
       const change = read.change
-      if (!change || change.taskId === taskId || change.previousTaskId === taskId)
-        rmSync(dir, { recursive: true, force: true })
+      if (
+        change
+          ? change.taskId === taskId || change.previousTaskId === taskId
+          : preparationOwner(dir)?.taskId === taskId
+      )
+        removeJournal(dir)
     }
   )
 }

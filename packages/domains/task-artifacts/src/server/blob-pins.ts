@@ -1,5 +1,19 @@
 import type { DbLike } from './db'
 
+const active = new WeakMap<DbLike, number>()
+/** Live owner jobs cannot lose GC protection merely because a TTL expires. */
+export function registerArtifactBlobLifetime(db: DbLike): () => void {
+  active.set(db, (active.get(db) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const count = active.get(db)! - 1
+    if (count) active.set(db, count)
+    else active.delete(db)
+  }
+}
+
 /** Opaque durable consumers may outlive an original or mutable version row. */
 export function ensureArtifactBlobPins(db: DbLike): void {
   db.prepare(`CREATE TABLE IF NOT EXISTS artifact_blob_pins(
@@ -26,6 +40,7 @@ export function ensureArtifactBlobPins(db: DbLike): void {
 }
 
 export function hasArtifactBlobLeases(db: DbLike): boolean {
+  if (active.has(db)) return true
   for (const table of ['artifact_blob_leases', 'blob_leases'])
     if (
       db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table) &&

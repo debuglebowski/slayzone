@@ -12,13 +12,17 @@ static atomic_int total_syncs;
 static atomic_int fail_next;
 static atomic_int block_sync;
 static atomic_int blocked;
+static atomic_int initialized;
+static atomic_int target_set;
+static pthread_t targetThread;
 typedef struct { sqlite3_io_methods methods; const sqlite3_io_methods *orig; } Methods;
 static int syncProbe(sqlite3_file *f, int flags) {
   Methods *m=(Methods*)f->pMethods;
   atomic_fetch_add(&total_syncs, 1);
   if(pthread_equal(pthread_self(),mainThread)) atomic_fetch_add(&syncs, 1);
-  if (atomic_exchange(&fail_next, 0)) return SQLITE_IOERR_FSYNC;
-  if (atomic_load(&block_sync)) {
+  int targeted = !atomic_load(&target_set) || pthread_equal(pthread_self(),targetThread);
+  if (targeted && atomic_exchange(&fail_next, 0)) return SQLITE_IOERR_FSYNC;
+  if (targeted && atomic_load(&block_sync)) {
     atomic_store(&blocked, 1);
     const struct timespec pause = {0, 1000000};
     while (atomic_load(&block_sync)) nanosleep(&pause, NULL);
@@ -50,21 +54,29 @@ static void total(sqlite3_context *ctx,int argc,sqlite3_value **argv) { sqlite3_
 static void fail(sqlite3_context *ctx,int argc,sqlite3_value **argv) { atomic_store(&fail_next, 1); sqlite3_result_null(ctx); }
 static void block(sqlite3_context *ctx,int argc,sqlite3_value **argv) { atomic_store(&block_sync, sqlite3_value_int(argv[0])); sqlite3_result_null(ctx); }
 static void waiting(sqlite3_context *ctx,int argc,sqlite3_value **argv) { sqlite3_result_int(ctx, atomic_load(&blocked)); }
+static void target(sqlite3_context *ctx,int argc,sqlite3_value **argv) {
+  atomic_store(&target_set, 0);
+  if (sqlite3_value_int(argv[0])) { targetThread=pthread_self(); atomic_store(&target_set, 1); }
+  sqlite3_result_null(ctx);
+}
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
 int sqlite3_syncprobe_init(sqlite3 *db,char **err,const sqlite3_api_routines *api) {
   SQLITE_EXTENSION_INIT2(api);
-  mainThread=pthread_self();
-  base=sqlite3_vfs_find(NULL);
-  wrapped=*base;
-  wrapped.zName="fu2-sync-probe";
-  wrapped.xOpen=openProbe;
-  sqlite3_vfs_register(&wrapped,1);
+  if (!atomic_exchange(&initialized, 1)) {
+    mainThread=pthread_self();
+    base=sqlite3_vfs_find(NULL);
+    wrapped=*base;
+    wrapped.zName="fu2-sync-probe";
+    wrapped.xOpen=openProbe;
+    sqlite3_vfs_register(&wrapped,1);
+  }
   sqlite3_create_function(db,"sync_count",0,SQLITE_UTF8,0,count,0,0);
   sqlite3_create_function(db,"total_sync_count",0,SQLITE_UTF8,0,total,0,0);
   sqlite3_create_function(db,"fail_next_sync",0,SQLITE_UTF8,0,fail,0,0);
   sqlite3_create_function(db,"block_sync",1,SQLITE_UTF8,0,block,0,0);
   sqlite3_create_function(db,"sync_blocked",0,SQLITE_UTF8,0,waiting,0,0);
+  sqlite3_create_function(db,"target_sync_thread",1,SQLITE_UTF8,0,target,0,0);
   return SQLITE_OK;
 }

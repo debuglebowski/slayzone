@@ -411,7 +411,7 @@ export function assembleComputerChatRuntime(
     },
     async eraseTask(taskId: string, revision: number, stopExternal?: () => Promise<void>) {
       compaction.abort('Content was erased during compaction; start again')
-      storage.compose((raw) => prepareStoredTaskErasure(raw, taskId))
+      storage.compose((raw) => prepareStoredTaskErasure(raw, taskId, storage.dir))
       const closing = storage
         .listForTask(taskId)
         .map((o) => transport.removeSession(o.identity.tabId))

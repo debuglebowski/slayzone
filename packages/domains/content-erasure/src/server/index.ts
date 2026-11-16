@@ -1,3 +1,15 @@
+import {
+  readArtifactPreparationOwner,
+  assertNoUnattributedArtifactPreparations,
+  removeArtifactJournal,
+  artifactPreparationBlobHashes
+} from './artifact-journal'
+export {
+  readArtifactPreparationOwner,
+  assertNoUnattributedArtifactPreparations,
+  removeArtifactJournal,
+  artifactPreparationBlobHashes
+} from './artifact-journal'
 import { randomUUID } from 'node:crypto'
 import {
   closeSync,
@@ -379,8 +391,11 @@ export function artifactJournalBelongsTo(
  * leave the others behind); the job stays incomplete if any remains.
  */
 function cleanupFiles(root: string, m: ErasureManifest, remove: (path: string) => void) {
+  assertNoUnattributedArtifactPreparations(root)
+  const journals = new Set<string>()
   const erase = (file: string) => {
-    remove(file)
+    if (journals.has(file)) removeArtifactJournal(file, remove)
+    else remove(file)
     if (existsSync(file)) throw new Error('FILE_REMAINS')
     syncDirectory(dirname(file))
   }
@@ -424,8 +439,27 @@ function cleanupFiles(root: string, m: ErasureManifest, remove: (path: string) =
       if (!entry.isDirectory() || !isPathSafeId(entry.name)) continue
       const journal = containedPath(journalRoot, entry.name)
       const manifest = join(journal, 'manifest.json')
-      if (!existsSync(manifest)) continue
-      if (artifactJournalBelongsTo(readFileSync(manifest), m)) paths.push(journal)
+      if (existsSync(manifest)) {
+        if (artifactJournalBelongsTo(readFileSync(manifest), m)) {
+          paths.push(journal)
+          journals.add(journal)
+        }
+      } else {
+        const owner = readArtifactPreparationOwner(journal)
+        if (!owner) throw new Error('Unattributed artifact preparation bytes remain')
+        if (
+          m.taskIds.includes(owner.taskId) ||
+          m.artifactTasks.some((entry) => entry.artifactId === owner.artifactId)
+        ) {
+          paths.push(journal)
+          journals.add(journal)
+        } else if (
+          m.scope.kind === 'artifacts' &&
+          !owner.artifactId &&
+          m.artifactTasks.some((entry) => entry.taskId === owner.taskId)
+        )
+          throw new Error('Unattributed artifact preparation selection')
+      }
     }
   const report = forEachIsolatedSync(
     paths,
@@ -837,6 +871,14 @@ export async function eraseContent(
   const id = randomUUID()
   const actorUserId = options.actorUserId ?? currentSecurityContext()?.actor ?? null
   const manifest = await db.namedTxn('content-erasure:prepare', { id, scope, actorUserId })
+  const preparing = artifactPreparationBlobHashes(root, manifest)
+  if (preparing.length) {
+    manifest.blobHashes = [...new Set([...manifest.blobHashes, ...preparing])]
+    await db.run('UPDATE content_erasure_jobs SET manifest=? WHERE id=?', [
+      JSON.stringify(manifest),
+      id
+    ])
+  }
   securityEvent({
     event: 'content.erase.started',
     outcome: 'success',

@@ -125,7 +125,7 @@ export function createComputerStoreControl(s: ChatStoreServices, jobs: ChatStore
     },
     prepareErasure(taskId: string, revision: number) {
       jobs.compaction.abort('Content was erased during compaction; start again')
-      storage.compose((db) => prepareStoredTaskErasure(db, taskId))
+      storage.compose((db) => prepareStoredTaskErasure(db, taskId, storage.dir))
       const applied = storage.applyTaskLifecycle(taskId, 'deleted', revision)
       if (applied.state !== 'deleted' || applied.revision < revision)
         throw new Error('Stale computer erasure request')

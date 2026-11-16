@@ -14,6 +14,12 @@ import {
 import { createStorageCopyBroker } from './storage-copy-broker'
 import { attachCheckpointer } from './checkpointer'
 import { chatStorageDigest } from './storage-digest'
+import type {
+  CancelPublication,
+  PublicationControl,
+  PublicationSettlement,
+  PublicationStatus
+} from './artifact-publication-protocol'
 import type { ChatExportReader, ChatStorage } from './storage'
 import {
   CHAT_STORAGE_OWNER_KIND,
@@ -51,6 +57,9 @@ export type AsyncChatStorage = Omit<
   readonly db: SlayzoneDb<StorageOwnerTxnRegistry>
   /** Physical writer exit, independent from lease-dependent close/cleanup. */
   readonly exited: Promise<void>
+  /** Release/control lane only. Never admits a new publication after close/failure. */
+  publicationControl(method: 'status', request: PublicationControl): Promise<PublicationStatus>
+  publicationControl(method: 'cancel', request: CancelPublication): Promise<PublicationSettlement>
   openExportReader(
     ...args: Parameters<ChatStorage['openExportReader']>
   ): Promise<AsyncChatExportReader>
@@ -420,6 +429,15 @@ async function openStorageOwner(
       path,
       db,
       exited: raw.exited,
+      publicationControl: (
+        method: 'status' | 'cancel',
+        request: PublicationControl | CancelPublication
+      ) =>
+        raw.namedTxn('chatRuntime.call', {
+          group: 'artifactPublication',
+          method,
+          args: [request]
+        } as import('./computer-store-protocol').StoreCall),
       async openExportReader(
         ...args: Parameters<ChatStorage['openExportReader']>
       ): Promise<AsyncChatExportReader> {

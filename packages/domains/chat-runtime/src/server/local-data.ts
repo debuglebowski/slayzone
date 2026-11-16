@@ -183,6 +183,7 @@ export function createLocalChatData(
           /* Runtime may have shut down before this notification. */
         }
       })
+      return update
     })
   }
   function providerState(

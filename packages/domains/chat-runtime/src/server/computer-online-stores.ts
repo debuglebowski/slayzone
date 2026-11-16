@@ -122,7 +122,13 @@ export function createOnlineChatStores(
     log: (line: string) => host.notify({ type: 'log', line })
   }
   const services = createChatStoreServices(storage, options, {
-    sessionsChanged: (tabId) => notify({ type: 'sessions', tabId })
+    sessionsChanged: (tabId) => notify({ type: 'sessions', tabId }),
+    available: assertAvailable,
+    artifactAccess: (taskId, work) => jobs.retention.access(taskId, work),
+    failure: (error) => {
+      durabilityFailure ??= error
+      host.notify({ type: 'failure', error: serializeError(error) })
+    }
   })
   const jobs = createChatStoreJobs(services, options, {
     async quiesce(owner) {
@@ -158,6 +164,7 @@ export function createOnlineChatStores(
     ...services,
     ...jobs,
     control,
+    artifactPublication: services.artifacts.publication,
     faults: createChatStoreFaults({ ...services, ...jobs }),
     requests: createStoreRequests({ ...services, ...jobs }),
     testing: {
@@ -223,7 +230,8 @@ export function createOnlineChatStores(
     args: unknown[],
     work: () => unknown | Promise<unknown>,
     resumeToken?: string,
-    maintenance = false
+    maintenance = false,
+    ownDurability = false
   ): Promise<unknown> {
     const perform = async () => {
       assertAvailable()
@@ -236,11 +244,12 @@ export function createOnlineChatStores(
           const result = await work()
           // Includes microtask metadata from the native transaction body.
           await Promise.resolve()
-          assertAvailable()
+          if (!ownDurability) assertAvailable()
           if (
-            changes() !== before ||
-            epoch !== storage.maintenance.connectionEpoch() ||
-            batch.length
+            !ownDurability &&
+            (changes() !== before ||
+              epoch !== storage.maintenance.connectionEpoch() ||
+              batch.length)
           ) {
             try {
               await storage.flush()
@@ -250,7 +259,7 @@ export function createOnlineChatStores(
               throw error
             }
           }
-          assertAvailable()
+          if (!ownDurability) assertAvailable()
           for (const message of batch) publish(message)
           return result
         } finally {
@@ -276,6 +285,15 @@ export function createOnlineChatStores(
     async call(request: StoreCall) {
       if (request.group === 'control' && request.method === 'prepareClose')
         return control.prepareClose()
+      if (
+        request.group === 'artifactPublication' &&
+        (request.method === 'status' || request.method === 'cancel')
+      )
+        return Reflect.apply(
+          groups.artifactPublication[request.method],
+          groups.artifactPublication,
+          request.args
+        )
       assertAvailable()
       if (!allowed.get(request.group)?.has(request.method))
         throw new Error('Unknown online store operation')
@@ -288,13 +306,15 @@ export function createOnlineChatStores(
       const method = (parent as Record<string, unknown>)[path.at(-1)!]
       if (typeof method !== 'function') throw new Error('Store operation unavailable')
       const maintenance =
+        request.group === 'artifactPublication' ||
         ['retention', 'blobBackfill', 'markerBackfill', 'compaction'].includes(request.group) ||
         (request.group === 'control' && ['prepareClose', 'finishErasure'].includes(request.method))
       return execute(
         request.args,
         () => Reflect.apply(method, parent, request.args),
         request.resumeToken,
-        maintenance
+        maintenance,
+        request.group === 'artifactPublication'
       )
     },
     timeline(request: TimelineCall) {

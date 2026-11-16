@@ -10,7 +10,13 @@ import {
 } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { eraseQuarantinedForTask } from '@slayzone/platform/quarantine'
-import { artifactJournalBelongsTo } from '@slayzone/content-erasure/server'
+import {
+  artifactJournalBelongsTo,
+  readArtifactPreparationOwner,
+  assertNoUnattributedArtifactPreparations,
+  removeArtifactJournal,
+  artifactPreparationBlobHashes
+} from '@slayzone/content-erasure/server'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
 
 interface Candidates {
@@ -67,7 +73,11 @@ const strings = (db: Database.Database, sql: string, taskId: string) =>
   (db.prepare(sql).all(taskId) as Array<{ hash: string }>).map((r) => r.hash)
 
 /** Capture hash-only retry evidence before a tombstone removes its source rows. */
-export function prepareStoredTaskErasure(db: Database.Database, taskId: string): void {
+export function prepareStoredTaskErasure(
+  db: Database.Database,
+  taskId: string,
+  root?: string
+): void {
   assertPathSafeId(taskId, 'taskId')
   if (!db.inTransaction) {
     db.pragma('secure_delete=ON')
@@ -102,6 +112,7 @@ export function prepareStoredTaskErasure(db: Database.Database, taskId: string):
       artifacts: [
         ...new Set([
           ...previous.artifacts,
+          ...(root ? artifactPreparationBlobHashes(root, { taskIds: [taskId] }) : []),
           ...(has(db, 'artifact_versions')
             ? strings(
                 db,
@@ -132,6 +143,7 @@ export function finishStoredTaskErasure(
   root: string,
   taskId: string
 ): { compact: boolean } {
+  assertNoUnattributedArtifactPreparations(root)
   assertPathSafeId(taskId, 'taskId')
   const saved = db
     .prepare('SELECT candidates FROM task_erasure_checks WHERE task_id=?')
@@ -237,11 +249,14 @@ export function finishStoredTaskErasure(
       if (!entry.isDirectory()) continue
       const path = containedPath(journals, assertPathSafeId(entry.name, 'journalId'))
       const manifest = join(path, 'manifest.json')
-      if (
-        existsSync(manifest) &&
-        artifactJournalBelongsTo(readFileSync(manifest), { taskIds: [taskId] })
-      )
-        erase(path)
+      if (existsSync(manifest)) {
+        if (artifactJournalBelongsTo(readFileSync(manifest), { taskIds: [taskId] }))
+          removeArtifactJournal(path, erase)
+      } else {
+        const owner = readArtifactPreparationOwner(path)
+        if (!owner) throw new Error('Unattributed artifact preparation bytes remain')
+        if (owner.taskId === taskId) removeArtifactJournal(path, erase)
+      }
     }
   // Quarantined files (unreadable journals, archives) that name the task.
   eraseQuarantinedForTask(root, taskId)

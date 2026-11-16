@@ -5,6 +5,7 @@ import { VersionError } from './errors'
 import { parseRow } from './parse'
 import { getCurrentVersion, isLocked, isReservedName, resolveVersionRef } from './resolve'
 import type {
+  ContentHash,
   ArtifactId,
   ArtifactVersion,
   AuthorContext,
@@ -81,12 +82,12 @@ function setCurrentVersionRow(
  */
 function insertNewVersion(
   db: DbLike,
-  blobStore: BlobStore,
-  args: CreateVersionArgs
+  content: VersionContent,
+  args: VersionMetadataArgs
 ): ArtifactVersion {
   if (args.name) checkNameAvailable(db, args.artifactId, args.name)
   const current = getCurrentVersion(db, args.artifactId)
-  const blob = blobStore.write(args.bytes)
+  const blob = materialize(content)
   const dedup = !args.honorUnchanged && !args.name
   if (dedup && current && current.content_hash === blob.hash) {
     return current
@@ -130,7 +131,7 @@ export function createVersion(
   blobStore: BlobStore,
   args: CreateVersionArgs
 ): ArtifactVersion {
-  return txn(() => insertNewVersion(db, blobStore, args))
+  return txn(() => insertNewVersion(db, () => blobStore.write(args.bytes), args))
 }
 
 /**
@@ -153,21 +154,7 @@ export function saveCurrent(
   blobStore: BlobStore,
   args: CreateVersionArgs
 ): ArtifactVersion {
-  return txn(() => {
-    const current = getCurrentVersion(db, args.artifactId)
-    if (!current || isLocked(db, current)) {
-      return insertNewVersion(db, blobStore, args)
-    }
-    const blob = blobStore.write(args.bytes)
-    if (current.content_hash === blob.hash) return current
-    insertBlobRow(db, blob.hash, blob.size)
-    db.prepare('UPDATE artifact_versions SET content_hash = ?, size = ? WHERE id = ?').run(
-      blob.hash,
-      blob.size,
-      current.id
-    )
-    return selectVersionById(db, current.id)
-  })
+  return txn(() => saveCurrentDecision(db, () => blobStore.write(args.bytes), args))
 }
 
 /** Back-compat alias. Callers should migrate to `saveCurrent`. */
@@ -213,18 +200,7 @@ export function mutateVersion(
   blobStore: BlobStore,
   args: MutateVersionArgs
 ): ArtifactVersion {
-  return txn(() => {
-    const target = resolveVersionRef(db, args.artifactId, args.ref)
-    const blob = blobStore.write(args.bytes)
-    if (target.content_hash === blob.hash) return target
-    insertBlobRow(db, blob.hash, blob.size)
-    db.prepare('UPDATE artifact_versions SET content_hash = ?, size = ? WHERE id = ?').run(
-      blob.hash,
-      blob.size,
-      target.id
-    )
-    return selectVersionById(db, target.id)
-  })
+  return txn(() => mutateVersionDecision(db, () => blobStore.write(args.bytes), args))
 }
 
 export function renameVersion(
@@ -244,4 +220,73 @@ export function renameVersion(
 
 export function readVersionContent(blobStore: BlobStore, version: ArtifactVersion): Buffer {
   return blobStore.read(version.content_hash)
+}
+
+/** Worker-local, already durable/verified blobs. Metadata decisions shared with byte callers. */
+export interface PreparedVersionBlob {
+  hash: ContentHash
+  size: number
+}
+// Legacy byte callers write only after validation; prepared callers already own durable blobs.
+type VersionContent = PreparedVersionBlob | (() => PreparedVersionBlob)
+const materialize = (content: VersionContent): PreparedVersionBlob =>
+  typeof content === 'function' ? content() : content
+
+export type VersionMetadataArgs = Omit<CreateVersionArgs, 'bytes'>
+export function createVersionFromBlob(
+  db: DbLike,
+  txn: TxnRunner,
+  blob: PreparedVersionBlob,
+  args: VersionMetadataArgs
+): ArtifactVersion {
+  return txn(() => insertNewVersion(db, blob, args))
+}
+export function saveCurrentFromBlob(
+  db: DbLike,
+  txn: TxnRunner,
+  blob: PreparedVersionBlob,
+  args: VersionMetadataArgs
+): ArtifactVersion {
+  return txn(() => saveCurrentDecision(db, blob, args))
+}
+function saveCurrentDecision(
+  db: DbLike,
+  content: VersionContent,
+  args: VersionMetadataArgs
+): ArtifactVersion {
+  const current = getCurrentVersion(db, args.artifactId)
+  if (!current || isLocked(db, current)) return insertNewVersion(db, content, args)
+  const blob = materialize(content)
+  if (current.content_hash === blob.hash) return current
+  insertBlobRow(db, blob.hash, blob.size)
+  db.prepare('UPDATE artifact_versions SET content_hash = ?, size = ? WHERE id = ?').run(
+    blob.hash,
+    blob.size,
+    current.id
+  )
+  return selectVersionById(db, current.id)
+}
+export function mutateVersionFromBlob(
+  db: DbLike,
+  txn: TxnRunner,
+  blob: PreparedVersionBlob,
+  args: Omit<MutateVersionArgs, 'bytes'>
+): ArtifactVersion {
+  return txn(() => mutateVersionDecision(db, blob, args))
+}
+function mutateVersionDecision(
+  db: DbLike,
+  content: VersionContent,
+  args: Omit<MutateVersionArgs, 'bytes'>
+): ArtifactVersion {
+  const target = resolveVersionRef(db, args.artifactId, args.ref)
+  const blob = materialize(content)
+  if (target.content_hash === blob.hash) return target
+  insertBlobRow(db, blob.hash, blob.size)
+  db.prepare('UPDATE artifact_versions SET content_hash = ?, size = ? WHERE id = ?').run(
+    blob.hash,
+    blob.size,
+    target.id
+  )
+  return selectVersionById(db, target.id)
 }

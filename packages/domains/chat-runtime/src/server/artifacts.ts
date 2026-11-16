@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { createArtifactPublicationOwner } from './artifact-publication-owner'
 import {
   mkdtempSync,
   writeFileSync,
@@ -183,9 +184,31 @@ export const computerArtifactRequestSchema = z.object({
 export function createLocalArtifacts(
   storage: ChatStorage,
   local: ReturnType<typeof createLocalChatData>,
-  attachments: ReturnType<typeof createLocalAttachments>
+  attachments: ReturnType<typeof createLocalAttachments>,
+  hooks: {
+    failure?(error: unknown): void
+    available?(): void
+    artifactAccess?<T>(taskId: string, work: () => Promise<T>): Promise<T>
+  } = {}
 ) {
   const context = new AsyncLocalStorage<import('../shared').ConversationIdentity>()
+  let mutationTail: Promise<unknown> = Promise.resolve()
+  let mutationPending = 0
+  function serialize<T>(work: () => Promise<T>): Promise<T> {
+    mutationPending++
+    const next = mutationTail.then(work).finally(() => {
+      mutationPending--
+    })
+    mutationTail = next.catch(() => undefined)
+    return next
+  }
+  const publication = createArtifactPublicationOwner(storage, local, {
+    serialize,
+    identity: (owner, work) => context.run(owner, work),
+    failure: (error) => hooks.failure?.(error),
+    available: () => hooks.available?.(),
+    access: (taskId, work) => hooks.artifactAccess?.(taskId, work) ?? work()
+  })
   const { db, store } = storage.compose((raw) =>
     createStandaloneArtifacts(raw, storage.dir, () => {
       const taskId = context.getStore()?.taskId
@@ -215,6 +238,7 @@ export function createLocalArtifacts(
     cleanupTimer.unref()
   }
   function cleanupTaskFiles(taskId: string) {
+    if (publication.active()) throw new Error('Artifact publication has not quiesced')
     try {
       store.cleanupTaskArtifacts(taskId)
     } catch (error) {
@@ -336,7 +360,7 @@ export function createLocalArtifacts(
     )
       throw new Error('Folder was deleted')
   }
-  function deleteFolders(taskId: string, folderIds: string[]) {
+  function deleteFoldersNow(taskId: string, folderIds: string[]) {
     storage.transaction(() =>
       storage.compose((raw) => {
         for (const id of folderIds) {
@@ -496,7 +520,7 @@ export function createLocalArtifacts(
           ])
         result = null
       } else if (req.method === 'deleteFolder') {
-        deleteFolders(taskId, [first])
+        deleteFoldersNow(taskId, [first])
         result = true
       } else if (req.method === 'listFoldersByTask')
         result = (await store.listFoldersByTask(db, taskId)).filter((f) =>
@@ -675,7 +699,7 @@ export function createLocalArtifacts(
       if (pending.input !== input) throw new Error('Operation id reused with different input')
       return pending.result
     }
-    const result = execute(req).finally(() => {
+    const result = serialize(() => execute(req)).finally(() => {
       if (inFlight.get(key)?.result === result) inFlight.delete(key)
     })
     inFlight.set(key, { input, result })
@@ -683,10 +707,13 @@ export function createLocalArtifacts(
   }
   return {
     invoke,
+    publication,
     cleanupDeletedTasks,
     async close() {
       closed = true
       if (cleanupTimer) clearTimeout(cleanupTimer)
+      await publication.close()
+      await mutationTail
       await erasureRetries.close()
     },
     async retryErasures(taskId: string) {
@@ -712,7 +739,23 @@ export function createLocalArtifacts(
         if (report.state !== 'complete') throw new Error('Computer file erasure has not finished')
       }
     },
-    deleteFolders,
+    deleteFolders(taskId: string, folderIds: string[]) {
+      // Preserve synchronous validation for the historical native adapter. Online
+      // callers await the same full mutation lane, including publication preparation.
+      storage.compose((raw) => {
+        for (const id of folderIds) {
+          const rows = raw
+            .prepare(
+              'SELECT task_id FROM artifact_folders WHERE id=? UNION ALL SELECT task_id FROM artifact_folder_tombstones WHERE id=?'
+            )
+            .all(id, id) as { task_id: string }[]
+          if (rows.some((row) => row.task_id !== taskId))
+            throw new Error('Folder is outside this task')
+        }
+      })
+      if (!mutationPending) return deleteFoldersNow(taskId, folderIds)
+      return serialize(async () => deleteFoldersNow(taskId, folderIds))
+    },
     deletedFolderInventory(after: number) {
       const rows = storage.compose((raw) =>
         raw

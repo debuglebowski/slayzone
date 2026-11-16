@@ -26,7 +26,11 @@ export type StoreModels = {
   sessionMoves: ChatStoreServices['sessionMoves']
   attachments: ChatStoreServices['attachments']
   backups: ChatStoreServices['backups']
-  artifacts: Omit<ChatStoreServices['artifacts'], 'store' | 'db'>
+  artifacts: Omit<ChatStoreServices['artifacts'], 'store' | 'db' | 'publication'>
+  artifactPublication: Pick<
+    ChatStoreServices['artifacts']['publication'],
+    'inspect' | 'publish' | 'status' | 'cancel'
+  >
   workspaceStore: ChatStoreServices['workspaceStore']
   prompts: ChatStoreServices['prompts']
   usageCursors: ChatStoreServices['usageCursors']
@@ -276,6 +280,7 @@ export const STORE_METHODS = {
     'collectGarbage',
     'metadata'
   ],
+  artifactPublication: ['inspect', 'publish', 'status', 'cancel'],
   workspaceStore: ['remove', 'begin', 'save', 'get', 'getFileDiff', 'recover'],
   retention: ['configure', 'runNow'],
   blobBackfill: ['runNow', 'done', 'close'],

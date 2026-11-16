@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
@@ -9,6 +9,100 @@ import {
   prepareStoredTaskErasure
 } from './erase-stored-task'
 import { rebuildStoreFile } from './storage-compaction'
+
+test('preparing blob inventory is captured durably before journals disappear; another task retains a shared hash', () => {
+  const { root, db } = store()
+  const mine = 'a'.repeat(64),
+    shared = 'b'.repeat(64)
+  try {
+    db.exec(
+      'CREATE TABLE task_artifacts(id TEXT,task_id TEXT); CREATE TABLE artifact_versions(artifact_id TEXT,content_hash TEXT); CREATE TABLE artifact_blobs(hash TEXT,size INTEGER);'
+    )
+    db.prepare('INSERT INTO task_artifacts VALUES(?,?)').run('bob-artifact', 'bob')
+    db.prepare('INSERT INTO artifact_versions VALUES(?,?)').run('bob-artifact', shared)
+    for (const [index, hash] of [mine, shared].entries()) {
+      const id = `00000000-0000-4000-8000-00000000000${index}`
+      const job = join(root, 'artifacts', '.transactions', id)
+      mkdirSync(job, { recursive: true })
+      writeFileSync(
+        join(job, 'owner.json'),
+        JSON.stringify({
+          version: 1,
+          kind: 'artifact-publication-preparing',
+          taskId: 'alice',
+          conversationId: 'c-alice',
+          operationId: `prepare-${index}`,
+          intentHash: 'c'.repeat(64),
+          jobId: id,
+          cleanupToken: id
+        })
+      )
+      writeFileSync(join(job, 'blob.json'), JSON.stringify({ version: 1, sha256: hash, size: 12 }))
+      mkdirSync(join(root, 'blobs', hash.slice(0, 2)), { recursive: true })
+      writeFileSync(join(root, 'blobs', hash.slice(0, 2), hash.slice(2)), 'private body')
+    }
+    prepareStoredTaskErasure(db, 'alice', root)
+    rmSync(join(root, 'artifacts', '.transactions'), { recursive: true })
+    finishStoredTaskErasure(db, root, 'alice')
+    expect(existsSync(join(root, 'blobs', mine.slice(0, 2), mine.slice(2)))).toBe(false)
+    expect(existsSync(join(root, 'blobs', shared.slice(0, 2), shared.slice(2)))).toBe(true)
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('erasure inventories preparing owner headers and claimed cleanup UUIDs without erasing another task', () => {
+  const { root, db } = store()
+  const jobs = join(root, 'artifacts', '.transactions')
+  const original = '00000000-0000-4000-8000-000000000001'
+  const mine = join(jobs, '00000000-0000-4000-8000-000000000002')
+  const other = join(jobs, '00000000-0000-4000-8000-000000000003')
+  try {
+    for (const [path, taskId] of [
+      [mine, 'alice'],
+      [other, 'bob']
+    ]) {
+      mkdirSync(path, { recursive: true })
+      writeFileSync(
+        join(path, 'owner.json'),
+        JSON.stringify({
+          version: 1,
+          kind: 'artifact-publication-preparing',
+          taskId,
+          conversationId: `c-${taskId}`,
+          operationId: 'preparing',
+          intentHash: 'a'.repeat(64),
+          jobId: original,
+          cleanupToken: original
+        })
+      )
+      writeFileSync(join(path, 'after'), 'private body')
+    }
+    prepareStoredTaskErasure(db, 'alice')
+    finishStoredTaskErasure(db, root, 'alice')
+    expect(existsSync(mine)).toBe(false)
+    expect(existsSync(other)).toBe(true)
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('unattributable preparation bytes prevent a verified computer erasure', () => {
+  const { root, db } = store()
+  const job = join(root, 'artifacts', '.transactions', '00000000-0000-4000-8000-000000000004')
+  try {
+    mkdirSync(job, { recursive: true })
+    writeFileSync(join(job, 'after'), 'unknown private body')
+    prepareStoredTaskErasure(db, 'alice')
+    expect(() => finishStoredTaskErasure(db, root, 'alice')).toThrow(/[Uu]nattributed|[Oo]wnership/)
+    expect(existsSync(job)).toBe(true)
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 function store() {
   const root = mkdtempSync(join(tmpdir(), 'stored-task-erasure-')),
