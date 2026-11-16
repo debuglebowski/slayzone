@@ -598,7 +598,6 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.clipboard.writeFilePaths': none(HOST),
   'app.clipboard.readFilePaths': none(HOST),
   'app.clipboard.hasFiles': none(HOST),
-  'app.screenshot.captureView': none(HOST),
   'app.leaderboard.getLocalStats': listed(SCOPED_IN_HANDLER),
   'app.exportImport.exportProject': checked(project('projectId')),
   // O-22: the caller's own projects only (export-import.ts scopes the query); the

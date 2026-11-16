@@ -25,17 +25,6 @@ export type AppClipboardRouter = typeof appClipboardRouter
 /** Where `@slayzone/api` mounts it: `app.clipboard`. */
 export type AppClipboardMounts = { app: { clipboard: AppClipboardRouter } }
 
-// Screenshot
-export const appScreenshotRouter = router({
-  captureView: publicProcedure
-    .input(z.object({ viewId: z.string() }))
-    .mutation(({ input }) => getHost().screenshotCaptureView(input.viewId))
-})
-
-export type AppScreenshotRouter = typeof appScreenshotRouter
-/** Where `@slayzone/api` mounts it: `app.screenshot`. */
-export type AppScreenshotMounts = { app: { screenshot: AppScreenshotRouter } }
-
 // Files
 export const appFilesRouter = router({
   pathExists: publicProcedure

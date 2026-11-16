@@ -133,6 +133,8 @@ export interface BrowserHostMethods {
   'view.isDevToolsOpen': (viewId: string) => boolean
   'view.getWebContentsId': (viewId: string) => number | null
   'view.list': () => BrowserViewSummary[]
+  /** Capture the view to a PNG in this device's temp dir (the panel's camera button). */
+  'view.captureToTempFile': (viewId: string) => { success: boolean; path?: string }
   /** One `state-snapshot` event per live view — what a new `event` listener replays
    *  first, so a listener attaching after a view loaded cannot miss its load. */
   'view.stateSnapshots': () => BrowserViewEvent[]
@@ -222,6 +224,7 @@ export const BROWSER_HOST_METHODS = [
   'view.isDevToolsOpen',
   'view.getWebContentsId',
   'view.list',
+  'view.captureToTempFile',
   'view.stateSnapshots',
   'extensions.list',
   'extensions.load',

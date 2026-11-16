@@ -168,6 +168,7 @@ import {
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
+import { getBrowserHost } from '@slayzone/task-browser'
 import type { LinkOpenTarget } from '@slayzone/editor'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
@@ -1071,13 +1072,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Screenshot: capture browser view and inject path into terminal
   const handleScreenshot = useCallback(
     async (viewId: string) => {
-      const result = await trpcClient.app.screenshot.captureView.mutate({ viewId })
+      // Captured on THIS device's browser host (the web view lives here, not on the hub).
+      const host = getBrowserHost()
+      if (!host) return
+      const result = await host.call('view.captureToTempFile', viewId)
       if (!result.success || !result.path) return
       track('screenshot_captured')
       const escaped = result.path.includes(' ') ? `"${result.path}"` : result.path
       await terminalApiRef.current?.write(escaped)
     },
-    [trpcClient, track]
+    [track]
   )
 
   const handleInsertElementSnippet = useCallback(

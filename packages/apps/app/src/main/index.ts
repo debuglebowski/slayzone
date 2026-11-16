@@ -70,7 +70,7 @@ import {
   browserGetUrl,
   browserCapturePng
 } from './browser-registry'
-import { registerBrowserHostIpc } from './browser-host-ipc'
+import { registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
 import type { BrowserViewEvent } from '@slayzone/task-browser/shared'
 import {
   BrowserViewManager,
@@ -2460,8 +2460,6 @@ app
               clipboardWriteFilePaths: writeFilePaths,
               clipboardReadFilePaths: readFilePaths,
               clipboardHasFiles: hasFilePaths,
-              screenshotCaptureView: (viewId: string) =>
-                captureBrowserViewScreenshot(browserViewManager, viewId),
               usageFetch: usageOps.fetch,
               usageTest: usageOps.test,
               filesPathExists,
@@ -3325,82 +3323,90 @@ app
     // The browser panel's client-local host: this app's renderers drive the web views
     // here directly (never through the hub), in local AND remote-hub mode. Registered
     // before any window loads so a renderer's subscribe is never dropped.
+    const browserHostImpl: BrowserHostImpl = {
+      'view.create': (_s, opts) => browserViewManager.createView(opts),
+      'view.destroy': (_s, viewId) => browserViewManager.destroyView(viewId),
+      'view.destroyAllForTask': (_s, taskId) => browserViewManager.destroyAllForTask(taskId),
+      'view.reparentToCurrentWindow': (sender, viewId) => {
+        const win = BrowserWindow.fromWebContents(sender)
+        if (!win || win.isDestroyed()) return { ok: false }
+        return { ok: browserViewManager.reparentView(viewId, win) }
+      },
+      'view.setBounds': (_s, viewId, bounds) => browserViewManager.setBounds(viewId, bounds),
+      'view.setVisible': (_s, viewId, visible) => browserViewManager.setVisible(viewId, visible),
+      'view.setLocked': (_s, viewId, locked) => browserViewManager.setLocked(viewId, locked),
+      'view.hideAll': () => browserViewManager.hideAll(),
+      'view.showAll': () => browserViewManager.showAll(),
+      'view.setHandoffPolicy': (_s, viewId, policy) =>
+        browserViewManager.setHandoffPolicy(viewId, policy),
+      'view.navigate': (_s, viewId, url) => browserViewManager.navigate(viewId, url),
+      'view.goBack': (_s, viewId) => browserViewManager.goBack(viewId),
+      'view.goForward': (_s, viewId) => browserViewManager.goForward(viewId),
+      'view.reload': (_s, viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+      'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
+      'view.executeJs': (_s, viewId, code) => browserViewManager.executeJs(viewId, code),
+      'view.insertCss': (_s, viewId, css) => browserViewManager.insertCss(viewId, css),
+      'view.removeCss': (_s, viewId, key) => browserViewManager.removeCss(viewId, key),
+      'view.setForcedTheme': (_s, viewId, theme) =>
+        browserViewManager.setForcedTheme(viewId, theme),
+      'view.setZoom': (_s, viewId, factor) => browserViewManager.setZoom(viewId, factor),
+      'view.focus': (_s, viewId) => browserViewManager.focus(viewId),
+      'view.findInPage': (_s, viewId, text, options) =>
+        browserViewManager.findInPage(viewId, text, options),
+      'view.stopFindInPage': (_s, viewId, action) =>
+        browserViewManager.stopFindInPage(viewId, action),
+      'view.setKeyboardPassthrough': (_s, viewId, enabled) =>
+        browserViewManager.setKeyboardPassthrough(viewId, enabled),
+      'view.sendInputEvent': (_s, viewId, input) =>
+        browserViewManager.sendInputEvent(viewId, input as Electron.KeyboardInputEvent),
+      'view.openDevTools': (_s, viewId, mode) => browserViewManager.openDevTools(viewId, mode),
+      'view.closeDevTools': (_s, viewId) => browserViewManager.closeDevTools(viewId),
+      'view.isDevToolsOpen': (_s, viewId) => browserViewManager.isDevToolsOpen(viewId),
+      'view.getWebContentsId': (_s, viewId) => browserViewManager.getWebContentsId(viewId),
+      'view.list': () => browserViewManager.listViews(),
+      'view.captureToTempFile': (_s, viewId) =>
+        captureBrowserViewScreenshot(browserViewManager, viewId),
+      'view.stateSnapshots': () => browserViewManager.getAllStateSnapshots() as BrowserViewEvent[],
+      'extensions.list': () => browserExtensionOps.getExtensions(),
+      'extensions.load': () => browserExtensionOps.loadExtension(),
+      'extensions.remove': (_s, extensionId) => browserExtensionOps.removeExtension(extensionId),
+      'extensions.discover': () => browserExtensionOps.discoverBrowserExtensions(),
+      'extensions.import': (_s, extPath) => browserExtensionOps.importExtension(extPath),
+      'extensions.activate': (_s, extensionId) =>
+        browserExtensionOps.activateExtension(extensionId),
+      'webview.registerShortcuts': (_s, id) => webviewOps.registerShortcuts(id),
+      'webview.setKeyboardPassthrough': (_s, id, enabled) =>
+        webviewOps.setKeyboardPassthrough(id, enabled),
+      'webview.setDesktopHandoffPolicy': (_s, id, policy) =>
+        webviewOps.setDesktopHandoffPolicy(id, policy),
+      'webview.openDevToolsBottom': (_s, id, options) => webviewOps.openDevToolsBottom(id, options),
+      'webview.openDevToolsDetached': (_s, id) => webviewOps.openDevToolsDetached(id),
+      'webview.closeDevTools': (_s, id) => webviewOps.closeDevTools(id),
+      'webview.isDevToolsOpened': (_s, id) => webviewOps.isDevToolsOpened(id),
+      'webview.enableDeviceEmulation': (_s, id, params) =>
+        webviewOps.enableDeviceEmulation(id, params),
+      'webview.disableDeviceEmulation': (_s, id) => webviewOps.disableDeviceEmulation(id),
+      'tabs.register': (_s, taskId, tabId, webContentsId) =>
+        registerBrowserTab(taskId, tabId, webContentsId),
+      'tabs.unregister': (_s, taskId, tabId) => unregisterBrowserTab(taskId, tabId),
+      'tabs.setActive': (_s, taskId, tabId) => setActiveBrowserTab(taskId, tabId),
+      'tabs.execJs': (_s, taskId, tabId, code) => browserExecJs(taskId, tabId, code),
+      'tabs.loadUrl': (_s, taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
+      'tabs.getUrl': (_s, taskId, tabId) => browserGetUrl(taskId, tabId),
+      'tabs.capturePng': (_s, taskId, tabId) => browserCapturePng(taskId, tabId)
+    }
     registerBrowserHostIpc({
       viewEvents: browserViewEvents,
       webviewEvents,
-      impl: {
-        'view.create': (_s, opts) => browserViewManager.createView(opts),
-        'view.destroy': (_s, viewId) => browserViewManager.destroyView(viewId),
-        'view.destroyAllForTask': (_s, taskId) => browserViewManager.destroyAllForTask(taskId),
-        'view.reparentToCurrentWindow': (sender, viewId) => {
-          const win = BrowserWindow.fromWebContents(sender)
-          if (!win || win.isDestroyed()) return { ok: false }
-          return { ok: browserViewManager.reparentView(viewId, win) }
-        },
-        'view.setBounds': (_s, viewId, bounds) => browserViewManager.setBounds(viewId, bounds),
-        'view.setVisible': (_s, viewId, visible) => browserViewManager.setVisible(viewId, visible),
-        'view.setLocked': (_s, viewId, locked) => browserViewManager.setLocked(viewId, locked),
-        'view.hideAll': () => browserViewManager.hideAll(),
-        'view.showAll': () => browserViewManager.showAll(),
-        'view.setHandoffPolicy': (_s, viewId, policy) =>
-          browserViewManager.setHandoffPolicy(viewId, policy),
-        'view.navigate': (_s, viewId, url) => browserViewManager.navigate(viewId, url),
-        'view.goBack': (_s, viewId) => browserViewManager.goBack(viewId),
-        'view.goForward': (_s, viewId) => browserViewManager.goForward(viewId),
-        'view.reload': (_s, viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
-        'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
-        'view.executeJs': (_s, viewId, code) => browserViewManager.executeJs(viewId, code),
-        'view.insertCss': (_s, viewId, css) => browserViewManager.insertCss(viewId, css),
-        'view.removeCss': (_s, viewId, key) => browserViewManager.removeCss(viewId, key),
-        'view.setForcedTheme': (_s, viewId, theme) =>
-          browserViewManager.setForcedTheme(viewId, theme),
-        'view.setZoom': (_s, viewId, factor) => browserViewManager.setZoom(viewId, factor),
-        'view.focus': (_s, viewId) => browserViewManager.focus(viewId),
-        'view.findInPage': (_s, viewId, text, options) =>
-          browserViewManager.findInPage(viewId, text, options),
-        'view.stopFindInPage': (_s, viewId, action) =>
-          browserViewManager.stopFindInPage(viewId, action),
-        'view.setKeyboardPassthrough': (_s, viewId, enabled) =>
-          browserViewManager.setKeyboardPassthrough(viewId, enabled),
-        'view.sendInputEvent': (_s, viewId, input) =>
-          browserViewManager.sendInputEvent(viewId, input as Electron.KeyboardInputEvent),
-        'view.openDevTools': (_s, viewId, mode) => browserViewManager.openDevTools(viewId, mode),
-        'view.closeDevTools': (_s, viewId) => browserViewManager.closeDevTools(viewId),
-        'view.isDevToolsOpen': (_s, viewId) => browserViewManager.isDevToolsOpen(viewId),
-        'view.getWebContentsId': (_s, viewId) => browserViewManager.getWebContentsId(viewId),
-        'view.list': () => browserViewManager.listViews(),
-        'view.stateSnapshots': () =>
-          browserViewManager.getAllStateSnapshots() as BrowserViewEvent[],
-        'extensions.list': () => browserExtensionOps.getExtensions(),
-        'extensions.load': () => browserExtensionOps.loadExtension(),
-        'extensions.remove': (_s, extensionId) => browserExtensionOps.removeExtension(extensionId),
-        'extensions.discover': () => browserExtensionOps.discoverBrowserExtensions(),
-        'extensions.import': (_s, extPath) => browserExtensionOps.importExtension(extPath),
-        'extensions.activate': (_s, extensionId) =>
-          browserExtensionOps.activateExtension(extensionId),
-        'webview.registerShortcuts': (_s, id) => webviewOps.registerShortcuts(id),
-        'webview.setKeyboardPassthrough': (_s, id, enabled) =>
-          webviewOps.setKeyboardPassthrough(id, enabled),
-        'webview.setDesktopHandoffPolicy': (_s, id, policy) =>
-          webviewOps.setDesktopHandoffPolicy(id, policy),
-        'webview.openDevToolsBottom': (_s, id, options) =>
-          webviewOps.openDevToolsBottom(id, options),
-        'webview.openDevToolsDetached': (_s, id) => webviewOps.openDevToolsDetached(id),
-        'webview.closeDevTools': (_s, id) => webviewOps.closeDevTools(id),
-        'webview.isDevToolsOpened': (_s, id) => webviewOps.isDevToolsOpened(id),
-        'webview.enableDeviceEmulation': (_s, id, params) =>
-          webviewOps.enableDeviceEmulation(id, params),
-        'webview.disableDeviceEmulation': (_s, id) => webviewOps.disableDeviceEmulation(id),
-        'tabs.register': (_s, taskId, tabId, webContentsId) =>
-          registerBrowserTab(taskId, tabId, webContentsId),
-        'tabs.unregister': (_s, taskId, tabId) => unregisterBrowserTab(taskId, tabId),
-        'tabs.setActive': (_s, taskId, tabId) => setActiveBrowserTab(taskId, tabId),
-        'tabs.execJs': (_s, taskId, tabId, code) => browserExecJs(taskId, tabId, code),
-        'tabs.loadUrl': (_s, taskId, tabId, url) => browserLoadUrl(taskId, tabId, url),
-        'tabs.getUrl': (_s, taskId, tabId) => browserGetUrl(taskId, tabId),
-        'tabs.capturePng': (_s, taskId, tabId) => browserCapturePng(taskId, tabId)
-      }
+      impl: browserHostImpl
     })
+    if (isPlaywright) {
+      // Swap one browser-host method for a fixed result (renderer → main, no hub).
+      ipcMain.handle('e2e:stub-browser-host', (_e, method: string, fakeResult: unknown) => {
+        ;(browserHostImpl as unknown as Record<string, () => unknown>)[method] = () => fakeResult
+        return { ok: true }
+      })
+    }
 
     // Set app user model id for windows (dev: the electron binary, so
     // notifications/taskbar group under it rather than a not-installed app id)

@@ -247,7 +247,6 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'app.meta.restartForUpdate': 'user',
   'app.meta.revealSidecarLog': 'user',
   'app.meta.setLabFlag': 'user',
-  'app.screenshot.captureView': 'user',
   'app.shell.openExternal': 'user',
   'app.shell.openPath': 'user',
   'app.shortcuts.changed': 'user',

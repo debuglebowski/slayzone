@@ -6,7 +6,6 @@ import type { WorkspaceMounts } from '@slayzone/file-editor/server'
 import type { HistoryMounts } from '@slayzone/history/server'
 import type {
   AppMetaMounts,
-  AppScreenshotMounts,
   AppShellMounts,
   AppTaskWindowsMounts,
   AppWindowMounts,
@@ -40,7 +39,6 @@ type TaskClientMounts = TaskMounts &
   MenuMounts &
   NotifyMounts &
   AppMetaMounts &
-  AppScreenshotMounts &
   AppShellMounts &
   AppTaskWindowsMounts &
   AppWindowMounts

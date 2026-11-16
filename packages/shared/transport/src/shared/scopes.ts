@@ -332,7 +332,6 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'app.meta.restartForUpdate': 'never',
   'app.meta.revealSidecarLog': 'never',
   'app.meta.setLabFlag': 'never',
-  'app.screenshot.captureView': 'never',
   'app.shell.openExternal': 'never',
   'app.shell.openPath': 'never',
   'app.shortcuts.changed': 'never',

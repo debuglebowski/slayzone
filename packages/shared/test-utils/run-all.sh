@@ -756,6 +756,8 @@ run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 run_harness packages/apps/api/src/routers/history.test.ts
 # Browser relay: which client owns a task's tabs + slay browser request/reply — no DB
 run_harness packages/domains/task-browser/src/server/browser-relay.test.ts
+# slay browser screenshot: PNG bytes to the requester, nothing written on the hub
+run_harness packages/apps/api/src/http/rest-api/browser/screenshot.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts

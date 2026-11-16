@@ -1,7 +1,6 @@
 import { router } from '@slayzone/trpc-server'
 import {
   appClipboardRouter,
-  appScreenshotRouter,
   appFilesRouter,
   appShellRouter,
   appMetaRouter,
@@ -30,7 +29,6 @@ import { appFloatingAgentRouter } from '@slayzone/agent-panels/server'
 export const appLevelRouter = router({
   backup: appBackupRouter,
   clipboard: appClipboardRouter,
-  screenshot: appScreenshotRouter,
   leaderboard: appLeaderboardRouter,
   exportImport: appExportImportRouter,
   usage: appUsageRouter,

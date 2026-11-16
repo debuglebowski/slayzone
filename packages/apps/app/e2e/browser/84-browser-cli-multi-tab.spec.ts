@@ -82,10 +82,15 @@ test.describe('Browser CLI multi-tab targeting', () => {
   })
 
   function runCli(...args: string[]): CliResult {
+    return runCliWithEnv({}, ...args)
+  }
+
+  function runCliWithEnv(extraEnv: Record<string, string>, ...args: string[]): CliResult {
     const r = spawnSync('node', [SLAY_JS, ...args], {
       env: {
         ...cliEnv(rootDir),
-        SLAYZONE_TASK_ID: taskId
+        SLAYZONE_TASK_ID: taskId,
+        ...extraEnv
       },
       encoding: 'utf8'
     })
@@ -153,6 +158,25 @@ test.describe('Browser CLI multi-tab targeting', () => {
     const bytes = fs.readFileSync(out)
     expect(bytes.length).toBeGreaterThan(100)
     expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+  })
+
+  // Remote-hub shape: the CLI's machine is not the hub's. The CLI gets its own temp
+  // dir (TMPDIR), so its disk and the hub's differ: the PNG must land on the CLI's
+  // side, and the hub must not write a screenshot to its own disk.
+  test('screenshot without --output writes on the CLI side, never on the hub', () => {
+    const cliTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cli-machine-'))
+    const hubShotsDir = path.join(os.tmpdir(), 'slayzone', 'browser-screenshots')
+    const hubShots = (): string[] =>
+      fs.existsSync(hubShotsDir) ? fs.readdirSync(hubShotsDir).sort() : []
+    const before = hubShots()
+
+    const r = runCliWithEnv({ TMPDIR: cliTmp }, 'tasks', 'browser', 'screenshot', '--tab', '0')
+    expect(r.status, r.stderr).toBe(0)
+    const written = r.stdout.trim()
+    expect(fs.realpathSync(written).startsWith(fs.realpathSync(cliTmp))).toBe(true)
+    const bytes = fs.readFileSync(written)
+    expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+    expect(hubShots()).toEqual(before)
   })
 
   test('out-of-range --tab idx errors with available tabs listed', () => {

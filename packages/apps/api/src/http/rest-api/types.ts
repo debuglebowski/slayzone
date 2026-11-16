@@ -183,23 +183,16 @@ export type ProcessStartResult =
         | 'old-run-unreachable'
     }
 
-/** The minimal WebContents surface the browser routes drive. Structural (NOT
- *  Electron's type — this package must stay electron-free); the Electron host's
- *  real WebContents conforms. */
 /**
- * WCV browser-panel access. Electron host only — the standalone server has no
- * WebContentsViews. Absent → browser routes 501.
+ * The browser panel's live tabs, as the REST browser routes (`slay browser`) reach
+ * them. The web views live on a CLIENT; the hub relays each operation to the client
+ * that owns the task's tabs (`@slayzone/task-browser` `BrowserRelay`). Absent →
+ * browser routes 501.
  *
- * OPS, NOT A HANDLE. This used to hand back a `BrowserWc` (a live `WebContents`
- * in disguise), which forced the whole route to run wherever that object lived —
- * i.e. on the desktop, which then needed its own connection to the shared DB to
- * read the `tasks.browser_tabs` row the same route updates. A `WebContents`
- * cannot cross a wire, but each of these operations can, so the route now runs on
- * the hub (where the row is) and only the operation is bridged.
- *
- * Keyed by `(taskId, tabId)` for the same reason: an identifier survives the
- * crossing, a handle does not. `capturePageToFile` writes to a path rather than
- * returning a buffer so a full-page PNG never travels over the bridge.
+ * Keyed by `(taskId, tabId)`: an identifier survives the relay, a handle does not.
+ * Results come back as values — a screenshot is its PNG bytes, never a path on some
+ * machine's disk: the requester (a CLI) may run on another machine than the hub and
+ * the client.
  */
 export interface BrowserAccess {
   getResolvedBrowserTabId: (taskId: string, tabId?: string) => Promise<string | null>
@@ -214,8 +207,8 @@ export interface BrowserAccess {
   execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
   loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
   getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
-  /** False when the captured image was empty. */
-  capturePageToFile: (taskId: string, tabId: string | null, destPath: string) => Promise<boolean>
+  /** PNG bytes of the visible page; null when the captured image was empty. */
+  capturePng: (taskId: string, tabId: string | null) => Promise<Uint8Array | null>
 }
 
 /**

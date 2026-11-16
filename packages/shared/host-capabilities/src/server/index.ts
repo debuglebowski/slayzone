@@ -7,7 +7,6 @@
  */
 export {
   appClipboardRouter,
-  appScreenshotRouter,
   appFilesRouter,
   appShellRouter,
   appMetaRouter,
@@ -18,8 +17,6 @@ export {
   appTaskWindowsRouter,
   type AppClipboardRouter,
   type AppClipboardMounts,
-  type AppScreenshotRouter,
-  type AppScreenshotMounts,
   type AppFilesRouter,
   type AppFilesMounts,
   type AppShellRouter,
@@ -46,7 +43,6 @@ export {
   type HostCapabilities,
   type HostCapabilitiesDeps,
   type ClipboardHost,
-  type ScreenshotHost,
   type FilesHost,
   type ShellHost,
   type MetaHost,

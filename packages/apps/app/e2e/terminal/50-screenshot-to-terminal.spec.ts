@@ -71,9 +71,9 @@ test.describe('Screenshot browser to terminal', () => {
     const btn = cameraButton(mainWindow)
     await expect(btn).toBeEnabled({ timeout: 10_000 })
 
-    // Post-cutover the camera button uses tRPC `app.screenshot.captureView`
-    // (renderer→sidecar→capability-bridge→host), NOT the legacy IPC handler. Spy
-    // on the HOST AppDeps method through the bridge with a deterministic path.
+    // The camera button captures on this device's browser host
+    // (`view.captureToTempFile`, renderer → Electron main, no hub). Stub that method
+    // with a deterministic path.
     // Short and fixed on purpose: the shell echoes the injected path, and one longer
     // than the terminal row (a path under the checkout — ~125 chars from a worktree)
     // is soft-wrapped by the line editor, so the raw buffer never holds the name
@@ -84,7 +84,7 @@ test.describe('Screenshot browser to terminal', () => {
       (fakePath) =>
         (
           window as unknown as { __testInvoke: (c: string, ...a: unknown[]) => Promise<unknown> }
-        ).__testInvoke('e2e:spy-app-dep', 'screenshotCaptureView', {
+        ).__testInvoke('e2e:stub-browser-host', 'view.captureToTempFile', {
           success: true,
           path: fakePath
         }),

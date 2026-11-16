@@ -1,4 +1,8 @@
 import { Command } from 'commander'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { apiGet, apiPost } from '../api'
 import { resolveId } from './tasks/_shared'
 
@@ -9,6 +13,22 @@ interface TabRow {
   url: string
   active: boolean
   registered: boolean
+}
+
+/** A fresh PNG path in this machine's temp dir; screenshots older than an hour go. */
+function defaultScreenshotPath(): string {
+  const dir = join(tmpdir(), 'slayzone', 'browser-screenshots')
+  mkdirSync(dir, { recursive: true })
+  const cutoff = Date.now() - 3_600_000
+  for (const f of readdirSync(dir)) {
+    const fp = join(dir, f)
+    try {
+      if (statSync(fp).mtimeMs < cutoff) unlinkSync(fp)
+    } catch {
+      /* raced with another cleanup */
+    }
+  }
+  return join(dir, `${randomUUID()}.png`)
 }
 
 async function fetchTabs(taskId: string): Promise<TabRow[]> {
@@ -218,18 +238,15 @@ export function browserCommand(): Command {
     .action(async (opts: CommonOpts & { output?: string }) => {
       const taskId = await resolveId()
       const tabId = await resolveTabId(taskId, opts.tab)
-      const { path } = await apiPost<{ ok: boolean; path: string }>('/api/browser/screenshot', {
-        taskId,
-        panel: panel(opts, 'hidden'),
-        tabId
-      })
-      if (opts.output) {
-        const { copyFileSync } = await import('fs')
-        copyFileSync(path, opts.output)
-        console.log(opts.output)
-      } else {
-        console.log(path)
-      }
+      // The hub returns the PNG bytes; the file is written HERE, on the machine this
+      // CLI runs on (the hub may be another machine).
+      const { pngBase64 } = await apiPost<{ ok: boolean; pngBase64: string }>(
+        '/api/browser/screenshot',
+        { taskId, panel: panel(opts, 'hidden'), tabId }
+      )
+      const out = opts.output ?? defaultScreenshotPath()
+      writeFileSync(out, Buffer.from(pngBase64, 'base64'))
+      console.log(out)
     })
 
   return cmd

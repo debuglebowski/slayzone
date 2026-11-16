@@ -57,6 +57,7 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
   'view.isDevToolsOpen': (a) => call(browser, 'isDevToolsOpen', a, false),
   'view.getWebContentsId': (a) => call(browser, 'getWebContentsId', a, null),
   'view.list': (a) => call(browser, 'listViews', a, []),
+  'view.captureToTempFile': () => ({ success: false }),
   // The shim's own `onEvent` replays state to each new subscriber already.
   'view.stateSnapshots': () => [],
   'extensions.list': (a) => call(browser, 'getExtensions', a, []),

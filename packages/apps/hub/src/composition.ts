@@ -103,7 +103,6 @@ import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
-import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -1524,8 +1523,6 @@ export function composeServer(opts: {
       clipboardReadFilePaths: stub('clipboardReadFilePaths'),
       clipboardHasFiles: stub('clipboardHasFiles'),
 
-      screenshotCaptureView: stub('screenshotCaptureView'),
-
       usageFetch: stub('usageFetch'),
       usageTest: stub('usageTest'),
 
@@ -2024,15 +2021,14 @@ export function composeServer(opts: {
         const url = await browserRelay.run(taskId, tabId, { op: 'getUrl' })
         return typeof url === 'string' ? url : null
       },
-      // The client sends the PNG as bytes; it lands in this hub's temp dir, as before.
-      capturePageToFile: async (taskId, tabId, destPath) => {
+      // The client sends the PNG bytes; they go straight back to the requester — the
+      // hub never writes a screenshot to its own disk.
+      capturePng: async (taskId, tabId) => {
         const reply = (await browserRelay.run(taskId, tabId, { op: 'capturePng' })) as {
           pngBase64?: unknown
         } | null
         const b64 = typeof reply?.pngBase64 === 'string' ? reply.pngBase64 : ''
-        if (!b64) return false
-        await writeFile(destPath, Buffer.from(b64, 'base64'))
-        return true
+        return b64 ? new Uint8Array(Buffer.from(b64, 'base64')) : null
       }
     },
     pty: {

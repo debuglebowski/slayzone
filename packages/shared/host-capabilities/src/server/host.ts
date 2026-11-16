@@ -15,10 +15,6 @@ export type ClipboardHost = {
   clipboardHasFiles: () => Promise<boolean>
 }
 
-export type ScreenshotHost = {
-  screenshotCaptureView: (viewId: string) => Promise<{ success: boolean; path?: string }>
-}
-
 export type FilesHost = {
   filesPathExists: (filePath: string) => Promise<boolean>
   filesSaveTempImage: (
@@ -170,7 +166,6 @@ export type TaskWindowsHost = {
 
 /** Every host capability this package's routers read: a strict subset of api's `AppDeps`. */
 export type HostCapabilities = ClipboardHost &
-  ScreenshotHost &
   FilesHost &
   ShellHost &
   MetaHost &

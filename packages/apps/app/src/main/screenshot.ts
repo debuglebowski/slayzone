@@ -4,8 +4,8 @@ import { join } from 'path'
 import { mkdirSync, writeFileSync } from 'fs'
 import type { BrowserViewManager } from './browser-view-manager'
 
-// Pure op shared by the IPC handler (below) and the tRPC `app.screenshot`
-// router (via setAppDeps). Both transports delegate here (coexistence til slice 5).
+// The browser panel's camera button: capture a view on THIS device (its browser
+// host's `view.captureToTempFile`) and write the PNG to this device's temp dir.
 export async function captureBrowserViewScreenshot(
   browserViewManager: BrowserViewManager,
   viewId: string
