@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { DiffView, parseUnifiedDiff } from '@slayzone/diff-view'
 vi.mock('../../../../shared/diff-view/src/highlight', () => ({ tokenizeContent: async () => [] }))
 import { DiffPreview } from './DiffPreview'
+import { observeListLayout } from '../../../../shared/diff-view/src/DiffView.layout'
 
 const file = (name: string, count = 200) =>
   `diff --git a/${name}.txt b/${name}.txt\nnew file mode 100644\n--- /dev/null\n+++ b/${name}.txt\n@@ -0,0 +1,${count} @@\n${Array.from({ length: count }, (_, i) => `+${name} line ${i}`).join('\n')}\n`
@@ -369,4 +370,221 @@ test('queued old observer callbacks cannot measure after effect cleanup', async 
   })
   expect(vi.mocked(HTMLElement.prototype.getBoundingClientRect).mock.calls).toHaveLength(reads)
   expect([...observers].some((observer) => observer.targets.size)).toBe(false)
+})
+
+const single = (show = true) => (
+  <StrictMode>
+    <Activity mode={show ? 'visible' : 'hidden'}>
+      <div data-viewport style={{ overflowY: 'auto' }}>
+        <DiffView diff={b} />
+      </div>
+    </Activity>
+  </StrictMode>
+)
+
+test.each(['initial no-overflow', 'bounded then fallback'] as const)(
+  'ancestor-only resize restores bounded rows after %s, without window resize or render',
+  async (start) => {
+    if (start === 'initial no-overflow') viewportHeight = 5000
+    const view = render(single())
+    const vp = view.container.querySelector<HTMLElement>('[data-viewport]')!
+    await resized()
+    if (start === 'bounded then fallback') {
+      expect(vp.querySelectorAll('[data-index]').length).toBeLessThan(100)
+      viewportHeight = 5000
+      await resized(vp)
+      await act(frame)
+    }
+    expect(vp.querySelectorAll('[data-index]')).toHaveLength(200)
+    viewportHeight = 200
+    // Deliver only boxes that changed: the full-height wrapper/list stay4000px.
+    await resized(vp)
+    await scrollTo(vp, 2000)
+    await expectLine(vp, 100)
+  }
+)
+
+test.each(['style', 'scroll'] as const)(
+  'fallback recovers from ancestor %s alone',
+  async (signal) => {
+    viewportHeight = 5000
+    const view = render(single())
+    const vp = view.container.querySelector<HTMLElement>('[data-viewport]')!
+    await resized()
+    expect(vp.querySelectorAll('[data-index]')).toHaveLength(200)
+    viewportHeight = 200
+    if (signal === 'style') {
+      await act(async () => {
+        vp.style.height = '200px'
+        await frame()
+        await frame()
+      })
+      // The ancestor's own style mutation must rediscover the root BEFORE scroll.
+      expect(vp.querySelectorAll('[data-index]').length).toBeLessThan(100)
+    }
+    await scrollTo(vp, 2000)
+    await expectLine(vp, 100)
+  }
+)
+
+test('window resize remains a recovery signal', async () => {
+  viewportHeight = 5000
+  const view = render(single())
+  const vp = view.container.querySelector<HTMLElement>('[data-viewport]')!
+  await resized()
+  viewportHeight = 200
+  await act(async () => {
+    window.dispatchEvent(new Event('resize'))
+    await frame()
+  })
+  await scrollTo(vp, 2000)
+  await expectLine(vp, 100)
+})
+
+test('fallback root follows ancestor replacement and releases old ancestor listeners', async () => {
+  viewportHeight = 5000
+  const oldVp = document.createElement('div')
+  oldVp.setAttribute('data-viewport', '')
+  oldVp.style.overflowY = 'auto'
+  const wrapper = document.createElement('div')
+  wrapper.className = 'overflow-x-auto'
+  const list = document.createElement('div')
+  list.style.height = '4000px'
+  wrapper.append(list)
+  oldVp.append(wrapper)
+  document.body.append(oldVp)
+  const updates: Array<{ parent: HTMLElement | null; offset: number }> = []
+  const release = observeListLayout(list, (layout) => updates.push(layout))
+  await act(frame)
+  const newVp = document.createElement('div')
+  try {
+    expect(updates.at(-1)?.parent).toBe(wrapper)
+    newVp.setAttribute('data-viewport', '')
+    newVp.style.overflowY = 'auto'
+    document.body.append(newVp)
+    viewportHeight = 200
+    await act(async () => {
+      newVp.append(wrapper)
+      await frame()
+      await frame()
+    })
+    expect(updates.at(-1)?.parent).toBe(newVp)
+    await act(frame)
+    const before = updates.length
+    oldVp.dispatchEvent(new Event('scroll'))
+    await act(frame)
+    expect(updates).toHaveLength(before)
+  } finally {
+    release()
+    oldVp.remove()
+    newVp.remove()
+  }
+})
+
+test('ancestor recovery and Activity replay retain no detached resource generation', async () => {
+  const view = render(single())
+  await resized()
+  viewportHeight = 5000
+  const vp = view.container.querySelector<HTMLElement>('[data-viewport]')!
+  await resized(vp)
+  view.rerender(single(false))
+  const stale = [...observers]
+  viewportHeight = 200
+  view.rerender(single())
+  await resized(vp)
+  await scrollTo(vp, 2000)
+  await expectLine(vp, 100)
+  view.unmount()
+  const reads = vi.mocked(HTMLElement.prototype.getBoundingClientRect).mock.calls.length
+  await act(async () => {
+    for (const observer of stale) observer.callback([], observer as unknown as ResizeObserver)
+    vp.dispatchEvent(new Event('scroll'))
+    await frame()
+  })
+  expect(vi.mocked(HTMLElement.prototype.getBoundingClientRect).mock.calls).toHaveLength(reads)
+  expect([...observers].filter((observer) => observer.targets.size)).toEqual([])
+})
+
+test('120 lists share coalesced structural observation, ignore unrelated subtree churn, and fully release', async () => {
+  const root = document.createElement('div')
+  root.setAttribute('data-viewport', '')
+  root.style.overflowY = 'auto'
+  const unrelated = document.createElement('section')
+  unrelated.style.height = '20px'
+  const sibling = document.createElement('div')
+  unrelated.append(sibling)
+  document.body.append(root, unrelated)
+  const lists = Array.from({ length: 120 }, () => {
+    const section = document.createElement('section')
+    const list = document.createElement('div')
+    list.style.height = '4000px'
+    for (let i = 0; i < 20; i++) {
+      const row = document.createElement('div')
+      row.setAttribute('data-index', String(i))
+      list.append(row)
+    }
+    section.append(list)
+    root.append(section)
+    return list
+  })
+  let publications = 0
+  const releases = lists.map((list) =>
+    observeListLayout(list, () => {
+      publications++
+    })
+  )
+  await act(frame)
+  expect(observers.size).toBe(1)
+  const native = [...observers][0]
+  const inside = () => [...native.targets].filter((node) => root.contains(node))
+  expect(inside()).toHaveLength(241)
+  expect([...native.targets].some((node) => node.hasAttribute('data-index'))).toBe(false)
+  expect([...native.targets].every((node) => root.contains(node) || node.contains(root))).toBe(true)
+  let before = publications
+  for (let i = 0; i < 10; i++) root.dispatchEvent(new Event('scroll'))
+  await act(frame)
+  expect(publications - before).toBe(120)
+  before = publications
+  await act(async () => {
+    sibling.style.color = 'red'
+    sibling.textContent = 'unrelated fixed-size subtree'
+    sibling.dispatchEvent(new Event('scroll'))
+    await frame()
+    await frame()
+  })
+  expect(publications).toBe(before)
+  releases.splice(0, 60).forEach((release) => release())
+  before = publications
+  await act(frame)
+  expect(publications - before).toBe(60)
+  expect(inside()).toHaveLength(181)
+  releases.forEach((release) => release())
+  before = publications
+  native.callback([], native as unknown as ResizeObserver)
+  root.dispatchEvent(new Event('scroll'))
+  document.body.dispatchEvent(new Event('scroll'))
+  await act(frame)
+  expect(publications).toBe(before)
+  expect(observers.size).toBe(0)
+  root.remove()
+  unrelated.remove()
+})
+
+test('preceding Load rest invalidates fallback lists when only a sibling box grows', async () => {
+  viewportHeight = 7000
+  const view = render(<Shared count={100} />)
+  const vp = view.container.firstElementChild as HTMLElement
+  await resized()
+  expect(vp.children[1].querySelectorAll('[data-index]')).toHaveLength(200)
+  // Only the preceding file grows; the ancestor viewport and later file keep
+  // their box sizes. Later DiffView's props stay memoized.
+  view.rerender(<Shared count={400} />)
+  await resized(vp.children[0])
+  await act(frame)
+  expect(vp.children[1].querySelectorAll('[data-index]').length).toBeLessThan(100)
+  await scrollTo(vp, 8020)
+  await waitFor(() => expect(screen.queryByText('b line 0')).not.toBeNull())
+  expect(
+    screen.getByText('b line 0').closest<HTMLElement>('[data-index]')!.getBoundingClientRect().top
+  ).toBe(102)
 })

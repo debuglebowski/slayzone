@@ -67,4 +67,38 @@ test('multi-file artifact diff scrolls every later file through its own bounded 
       expect(await vp.locator('[data-index]').count()).toBeLessThan(300)
     }
   }
+  // Local ancestor resize only: fit the entire patch, let lists migrate to the
+  // fallback wrappers, then make the same ancestor bounded again. No window
+  // resize, React rerender, or scrolling of an expanding horizontal wrapper.
+  await vp.evaluate((element) => {
+    element.style.scrollbarGutter = 'stable'
+    element.style.flex = 'none'
+    element.style.height = '100000px'
+  })
+  await expect(vp.locator('[data-index]')).toHaveCount(ROWS * 3)
+  // Complete the asynchronous root migration/observer rebind before shrinking.
+  await vp.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  )
+  await expect(vp.locator('[data-index]')).toHaveCount(ROWS * 3)
+  await vp.evaluate((element) => {
+    element.style.height = '200px'
+  })
+  await expect.poll(() => vp.locator('[data-index]').count()).toBeLessThan(300)
+  await vp.evaluate((element, rowHeight) => {
+    const section = element.children[1] as HTMLElement
+    const header = section.firstElementChild as HTMLElement
+    const origin =
+      section.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientTop +
+      element.scrollTop +
+      header.getBoundingClientRect().height
+    element.scrollTop = origin + 750 * rowHeight
+  }, rowHeight)
+  await expect(vp.getByText('bravo line 750', { exact: true })).toBeInViewport()
+  expect(await vp.locator('[data-index]').count()).toBeLessThan(300)
 })

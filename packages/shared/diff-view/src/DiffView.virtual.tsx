@@ -1,6 +1,13 @@
 import { useLayoutEffect, useState } from 'react'
-import { useVirtualizer } from '@tanstack/react-virtual'
+import { observeElementOffset, useVirtualizer } from '@tanstack/react-virtual'
 import { type ListLayout, observeListLayout } from './DiffView.layout'
+
+// A newly selected ancestor owns its current scroll position. TanStack otherwise
+// carries the previous wrapper's cached offset into the new element on attach.
+const observeCurrentOffset: typeof observeElementOffset<HTMLElement> = (instance, notify) => {
+  if (instance.scrollElement) notify(instance.scrollElement.scrollTop, false)
+  return observeElementOffset(instance, notify)
+}
 
 // ---- Virtualized row list (shared for unified + sbs) ----
 
@@ -38,6 +45,7 @@ export function VirtualRowList<Row>({
     // TanStack includes this origin in item starts and excludes it from total size.
     scrollMargin: offset,
     getScrollElement: () => parent,
+    observeElementOffset: observeCurrentOffset,
     estimateSize: () => estimateSize,
     overscan: 8,
     getItemKey: (i) => rowKey(rows[i])
