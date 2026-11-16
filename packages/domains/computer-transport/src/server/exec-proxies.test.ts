@@ -2499,7 +2499,13 @@ describe('createRoutingPtyBackend', () => {
         data: 'fresh'
       })
       expect(output).toBe('fresh')
-      expect(gateway.requestsOf('pty.kill')).toEqual([])
+      // Abandonment now stops its provisional attempt, never the replacement.
+      expect(gateway.requestsOf('pty.kill').map((c) => c.params)).toEqual([
+        {
+          sessionId: 'task-1:tab-1',
+          spawnId: (requireCall(gateway, 'pty.adopt').params as { spawnId: string }).spawnId
+        }
+      ])
     })
 
     // Review M1: the computer may have handed the process to another attempt meanwhile

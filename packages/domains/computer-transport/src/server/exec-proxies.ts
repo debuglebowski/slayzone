@@ -42,7 +42,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { awaitPtyOperation } from '@slayzone/terminal/pty-backend'
+import { awaitPtyOperation, type PtyAdoptionLease } from '@slayzone/terminal/pty-backend'
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
 import type { LocalWorkspaceFs, WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
@@ -1340,17 +1340,96 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         throw refusal('already-tracked', `session ${sessionId} is already tracked by this hub`)
       }
       const firstHere = !registeredKeys.has(key)
-      // Sealed until the reply says where its live output starts.
+      const previous = untracked.get(computerId)?.get(sessionId)
       const { entry, handle, setPid } = register(computerId, sessionId, opts.processName, true)
       const spawnId = randomUUID()
       entry.spawnId = spawnId
       entry.spawnInFlight = true
       entry.relay = opts.relay
       lastSpawnIds.set(key, spawnId)
-      const cancel = () => {
-        const ownsRegistration = sessions.get(key) === entry
-        finalize(entry, null, null, 'adopt-cancelled')
-        if (firstHere && ownsRegistration) registeredKeys.delete(key)
+      let state: 'provisional' | 'committed' | 'released' = 'provisional'
+      let known = previous
+      let cleanupNeeded = true
+      const surfaceKnown = (): void => {
+        const current = sessions.get(key)
+        if (!known || (current && !current.disposed)) return
+        const listed = untracked.get(computerId)?.get(sessionId)
+        if (listed?.spawnId && listed.spawnId !== fromSpawnId && listed.spawnId !== spawnId) return
+        const rows = untracked.get(computerId) ?? new Map<string, ListedSession>()
+        rows.set(sessionId, known)
+        untracked.set(computerId, rows)
+        notifyUntracked()
+      }
+      const stopReleasedAttempt = async (): Promise<void> => {
+        const deadline = Date.now() + 5_000
+        try {
+          const reply = ptyKillResultSchema.safeParse(
+            await gateway.request(
+              computerId,
+              HubToComputerMethods.ptyKill,
+              { sessionId, spawnId },
+              5_000
+            )
+          )
+          if (reply.success && reply.data.killed === true) {
+            dropUntracked(computerId, sessionId, spawnId)
+            dropUntracked(computerId, sessionId, fromSpawnId)
+            return
+          }
+        } catch {
+          // The process may still run. Re-list, or retain its last confirmed identity.
+        }
+        const live = await refreshUntracked(
+          computerId,
+          sessionId,
+          Math.max(1, deadline - Date.now())
+        )
+        if (live === undefined) surfaceKnown()
+      }
+      const cancel = (): void => lease.release()
+      const lease: PtyAdoptionLease = {
+        commit(registerManager) {
+          if (state !== 'provisional') return false
+          if (opts.signal?.aborted || entry.disposed || sessions.get(key) !== entry) {
+            lease.release()
+            return false
+          }
+          try {
+            // No await or callback dispatch between manager registration and transfer.
+            registerManager()
+            if (
+              state !== 'provisional' ||
+              opts.signal?.aborted ||
+              entry.disposed ||
+              sessions.get(key) !== entry
+            ) {
+              lease.release()
+              return false
+            }
+            state = 'committed'
+            opts.signal?.removeEventListener('abort', cancel)
+            return true
+          } catch (error) {
+            lease.release()
+            throw error
+          }
+        },
+        release() {
+          if (state === 'released') return
+          state = 'released'
+          opts.signal?.removeEventListener('abort', cancel)
+          const ownsRegistration = sessions.get(key) === entry
+          finalize(entry, null, null, 'adoption-released')
+          if (firstHere && ownsRegistration) registeredKeys.delete(key)
+          if (!ownsRegistration) return
+          recordPty(
+            'computer.adoption_released',
+            'warn',
+            'Released a terminal adoption abandoned by its manager.',
+            { computerId, sessionId, spawnId }
+          )
+          if (cleanupNeeded) void stopReleasedAttempt().catch(surfaceKnown)
+        }
       }
       opts.signal?.addEventListener('abort', cancel, { once: true })
       try {
@@ -1370,6 +1449,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           throw refusal('not-adoptable', 'This adoption was superseded.')
         const parsed = ptyAdoptResultSchema.parse(res)
         opts.signal?.throwIfAborted()
+        known = {
+          ...previous,
+          spawnId,
+          pid: parsed.pid,
+          seq: parsed.seq,
+          detection: true,
+          mode: opts.mode,
+          adopted: true,
+          ...(parsed.detected ? { detected: parsed.detected } : {})
+        }
         setPid(parsed.pid)
         bindTakenOver(
           entry,
@@ -1381,37 +1470,26 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           ownsStartupDeadline: true,
           attached: { seq: entry.lastSeq, conversationId: parsed.detected?.conversationId ?? null }
         }
-        return Object.assign(handle, { whenSpawned: Promise.resolve(confirmation) })
+        // The abort listener belongs to the lease, not this RPC's promise lifetime.
+        return Object.assign(handle, {
+          adoption: lease,
+          whenSpawned: Promise.resolve(confirmation)
+        })
       } catch (err) {
-        // Nothing to undo on the computer: a refused adopt changed nothing, and one
-        // whose reply was lost left the process running as `spawnId` — listed again
-        // (untracked) on the next reconnect, and taken over then.
-        const ownsRegistration = sessions.get(key) === entry
-        finalize(entry, null, null, 'adopt-failed', errorMessage(err))
-        if (firstHere && ownsRegistration) registeredKeys.delete(key)
         const refused =
           err instanceof RpcError &&
           (err.code === ComputerTransportErrorCodes.unimplemented ||
             err.code === ComputerTransportErrorCodes.sessionNotAdoptable)
-        // No verdict (a lost or timed-out reply): the computer may have handed the
-        // process over to `spawnId` already. Ask it, so the untracked entry names the
-        // attempt it runs NOW — never a stale one that Attach and Stop would miss.
-        if (!refused && !opts.signal?.aborted) void refreshUntracked(computerId, sessionId)
-        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
+        if (refused) cleanupNeeded = false
+        lease.release()
+        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented)
           throw refusal(
             'computer-too-old',
             'This computer cannot take a running session over (it predates pty.adopt).'
           )
-        }
-        if (
-          err instanceof RpcError &&
-          err.code === ComputerTransportErrorCodes.sessionNotAdoptable
-        ) {
+        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.sessionNotAdoptable)
           throw refusal('not-adoptable', err.message)
-        }
         throw err
-      } finally {
-        opts.signal?.removeEventListener('abort', cancel)
       }
     },
 

@@ -1695,6 +1695,30 @@ async function createPtyImpl(
     killPty(sessionId)
   }
 
+  let adoptedHandle: PtyHandle | undefined
+  let adoptionAccepted = false
+  let adoptionReleased = false
+  const releaseAdoption = (): void => {
+    if (!adoptedHandle || adoptionReleased) return
+    adoptionReleased = true
+    const current = sessions.get(sessionId)
+    if (current?.pty === (adoptedHandle as unknown as pty.IPty)) {
+      current.killRequested = true
+      stopSessionTimers(current)
+      current.finalizer?.(PTY_EXIT_KILLED_BY_HOST)
+      if (sessions.get(sessionId) === current) {
+        current.replyMirror.dispose()
+        sessions.delete(sessionId)
+        sessionTaskMap.delete(sessionId)
+        sessionTabMap.delete(sessionId)
+        stateMachine.unregister(sessionId)
+        notifySessionChange()
+      }
+    }
+    if (adoptedHandle.adoption) adoptedHandle.adoption.release()
+    else adoptedHandle.kill()
+  }
+
   try {
     const agentId = mode || 'claude-code'
     const adapter = getAdapter({
@@ -2316,6 +2340,7 @@ async function createPtyImpl(
           }),
         attach.signal
       )) as unknown as pty.IPty
+      adoptedHandle = ptyProcess as unknown as PtyHandle
     } else if (opts.adoptPty) {
       // Warm-process adoption: the agent is already running ON THE COMPUTER. Adopting
       // REKEYS it there (warmId → this sessionId) rather than spawning anything, so
@@ -2425,39 +2450,49 @@ async function createPtyImpl(
       stateMachine.unregister(sessionId)
     }
 
+    const registerSession = (): void => {
+      opts.attach?.signal?.throwIfAborted()
+      sessions.set(sessionId, {
+        win: carried?.win ?? originalWin,
+        pty: ptyProcess,
+        sessionId,
+        taskId,
+        mode: agentId,
+        adapter,
+        // Only checks for session errors if we're trying to resume
+        detector: new PtyOutputDetector({ adapter, mode: agentId, resuming }),
+        buffer: carried?.buffer ?? new RingBuffer(MAX_BUFFER_SIZE),
+        cols: spawnOptions.cols,
+        rows: spawnOptions.rows,
+        lastOutputTime: Date.now(),
+        lastUserInteractionAt: carried?.lastUserInteractionAt ?? Date.now(),
+        conversationId: effectiveConversationId ?? null,
+        createdAt: Date.now(),
+        state: 'starting',
+        // CLI state tracking
+        activity: 'unknown',
+        error: null,
+        // /status monitoring
+        inputBuffer: '',
+        syncQueryPending: '',
+        replyMirror: new TerminalReplyMirror(spawnOptions.cols, spawnOptions.rows, (reply) => {
+          const live = sessions.get(sessionId)
+          if (live) writeQueryReply(live, reply)
+        }),
+        lastEmittedTitle: '',
+        relayed: spawnRelay,
+        // Taken over, not started: marked at once (its confirmation settles a tick later).
+        ...(attaching ? { adoptedAt: Date.now() } : {})
+      })
+    }
+    if (adoptedHandle?.adoption) {
+      if (!adoptedHandle.adoption.commit(registerSession))
+        throw new Error('Attachment ownership was cancelled before manager registration.')
+    } else registerSession()
+    adoptionAccepted = true
+    // Disposal may re-enter immediately after the atomic ownership transfer.
     opts.attach?.signal?.throwIfAborted()
-    sessions.set(sessionId, {
-      win: carried?.win ?? originalWin,
-      pty: ptyProcess,
-      sessionId,
-      taskId,
-      mode: agentId,
-      adapter,
-      // Only checks for session errors if we're trying to resume
-      detector: new PtyOutputDetector({ adapter, mode: agentId, resuming }),
-      buffer: carried?.buffer ?? new RingBuffer(MAX_BUFFER_SIZE),
-      cols: spawnOptions.cols,
-      rows: spawnOptions.rows,
-      lastOutputTime: Date.now(),
-      lastUserInteractionAt: carried?.lastUserInteractionAt ?? Date.now(),
-      conversationId: effectiveConversationId ?? null,
-      createdAt: Date.now(),
-      state: 'starting',
-      // CLI state tracking
-      activity: 'unknown',
-      error: null,
-      // /status monitoring
-      inputBuffer: '',
-      syncQueryPending: '',
-      replyMirror: new TerminalReplyMirror(spawnOptions.cols, spawnOptions.rows, (reply) => {
-        const live = sessions.get(sessionId)
-        if (live) writeQueryReply(live, reply)
-      }),
-      lastEmittedTitle: '',
-      relayed: spawnRelay,
-      // Taken over, not started: marked at once (its confirmation settles a tick later).
-      ...(attaching ? { adoptedAt: Date.now() } : {})
-    })
+
     // Interest may have changed while the spawn was in flight.
     syncRelay(sessions.get(sessionId)!)
     // Adoption: the warm shell was spawned before any tab existed, so it has no
@@ -3661,6 +3696,7 @@ async function createPtyImpl(
       session: PtySession,
       taken: NonNullable<PtySpawnConfirmation['attached']>
     ): void => {
+      if (session.killRequested || opts.attach?.signal?.aborted) return
       if (firstOutputTs === null) firstOutputTs = Date.now()
       session.adoptedAt = Date.now()
       clearStartupTimeout()
@@ -3800,8 +3836,10 @@ async function createPtyImpl(
       else openSessionErrorWindow()
     }
 
+    opts.attach?.signal?.throwIfAborted()
     return { success: true }
   } catch (error) {
+    releaseAdoption()
     const err = error as Error
     // A refusal, not a spawn failure: its message is the whole story.
     if (err instanceof ConversationInUseError) {
@@ -3861,6 +3899,8 @@ async function createPtyImpl(
       success: false,
       error: `${err.message} (shell=${spawnAttempt?.shell ?? '?'}, cwd=${cwd || '?'})`
     }
+  } finally {
+    if (!adoptionAccepted) releaseAdoption()
   }
 }
 

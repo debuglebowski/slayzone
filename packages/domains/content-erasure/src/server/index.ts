@@ -31,6 +31,32 @@ import type {} from './worker-db'
 import { hasUnattributedFiles } from './inventory'
 import { currentSecurityContext, securityEvent } from '@slayzone/platform/security-log'
 
+const taskErasureListeners = new WeakMap<SlayzoneDb, Set<(taskId: string) => void>>()
+
+/** All erasure scopes, after confirmed task-row commit. Scoped to this database. */
+export function onTaskErased(db: SlayzoneDb, listener: (taskId: string) => void): () => void {
+  const listeners = taskErasureListeners.get(db) ?? new Set<(taskId: string) => void>()
+  taskErasureListeners.set(db, listeners)
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+    if (!listeners.size) taskErasureListeners.delete(db)
+  }
+}
+
+function notifyTasksErased(db: SlayzoneDb, taskIds: readonly string[]): void {
+  if (!taskIds.length) return
+  for (const taskId of taskIds) {
+    for (const listener of [...(taskErasureListeners.get(db) ?? [])]) {
+      try {
+        listener(taskId)
+      } catch {
+        // One observer/task cannot roll back committed erasure or skip the rest.
+      }
+    }
+  }
+}
+
 export interface ErasureOptions {
   actorUserId?: string | null
   beforeDelete?: (taskIds: string[]) => void | Promise<void>
@@ -560,6 +586,9 @@ async function run(
     ])
     return getErasureReport(db, id)
   }
+  // Also on a retry of an already-committed job: disposal is idempotent. Never
+  // notify before the transaction's acknowledgement (a failed delete keeps intent).
+  notifyTasksErased(db, m.taskIds)
   // Before computer cleanup: a newly resolved worktree computer joins it.
   await locateWorktrees(db, id, m, options)
   job = await jobOf(db, id)

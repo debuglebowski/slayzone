@@ -49,6 +49,14 @@ on no evidence:
   state, exit, auto-resume). A tab's own start of such an id does the same through
   `pty.spawn` `adoptLive` (the first spawn of an id in a hub run). Both record
   `pty.orphan_adopted`.
+- **Ownership handoff.** A routed reattach returns a provisional lease. Its abort
+  lifetime continues after the RPC succeeds until the manager atomically commits
+  its registration. Abandonment releases only that routing generation and stops
+  its exact attempt, or surfaces it when cleanup cannot be confirmed. Failed
+  delivery/registration releases ownership too; newer registrations are untouched.
+  The registry retains queued/active adoption identities through this handoff,
+  independently of visible rows. Confirmed task disposal cancels all its identities
+  and ends already-committed manager sessions. No permanent deletion tombstone set.
 - **Surface.** What cannot be adopted (not a task tab, no detection or an older
   computer, the task elsewhere, another agent in the tab now, the computer refused)
   stays running and is listed with its reason (`pty.orphan_unattached`) — attach
@@ -64,6 +72,8 @@ on no evidence:
   `pty.orphan_kill_failed` and returns false so reset, restart and tab close can finish.
   Confirmed task/tab deletion or ops disposal removes replacement intents; a kill
   after deletion checks the hub rows. Valid offline-tab intents have no expiry.
+  Content erasure publishes database-scoped task notifications after commit for
+  every scope (including project and user erasure); failed deletes retain intent.
 
 ### Codex silence and cancellation provenance
 

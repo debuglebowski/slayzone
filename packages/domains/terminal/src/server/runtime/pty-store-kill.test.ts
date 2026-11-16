@@ -139,6 +139,37 @@ test('an older create cannot consume a newer stop token', async () => {
   expect(vi.mocked(createPty).mock.calls.at(-1)?.[0].takeOver).not.toBe(false)
 })
 
+test('task disposal aborts active adoption identity after its visible row disappears', async () => {
+  let listed: UntrackedPtySession[] = [
+    { computerId: 'pc', sessionId: 'task-1:tab-1', spawnId: 'old', detection: true }
+  ]
+  const changes = new Set<() => void>()
+  setPtyBackend({
+    spawn: vi.fn(),
+    untrackedSessions: () => listed,
+    onUntrackedChange: (cb) => {
+      changes.add(cb)
+      return { dispose: () => changes.delete(cb) }
+    }
+  })
+  setUnattachedLaunchResolver(async ({ sessionId }) => ({
+    ok: true,
+    launch: { sessionId, cwd: '/repo', mode: 'terminal' }
+  }))
+  let signal: AbortSignal | undefined
+  vi.mocked(createPty).mockImplementationOnce(async (opts) => {
+    signal = opts.attach?.signal
+    listed = []
+    for (const cb of changes) cb()
+    return new Promise(() => undefined)
+  })
+  const ops = createPtyOps(db, createFakeTaskSessionStore())
+  await vi.waitFor(() => expect(signal).toBeDefined())
+  expect(ops.unattachedList()).toEqual([])
+  ops.ptyDisposeTask('task-1')
+  expect(signal!.aborted).toBe(true)
+})
+
 test('stop cancels adoption during serialized preparation; fresh create does not wait and late prep cannot bind', async () => {
   vi.useFakeTimers()
   let release!: (v: null) => void

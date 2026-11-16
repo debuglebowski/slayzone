@@ -180,6 +180,7 @@ run_harness packages/apps/hub/src/erasure-fanout.test.ts
 run_harness packages/apps/hub/src/computer-data-handoff.test.ts
 run_harness packages/apps/hub/src/computer-task-paths.test.ts
 run_harness packages/apps/hub/src/computer-session-owners.test.ts
+run_harness packages/apps/hub/src/terminal-disposal.test.ts
 # A task-scoped request (spawn, exec, file/git read) waits for the task's staged paths.
 run_harness packages/apps/hub/src/task-path-request-gate.test.ts
 # A restored chat's invoke delivers its staged settings first; open chats re-read them.
@@ -1050,6 +1051,7 @@ run_harness packages/domains/terminal/src/server/runtime/pty-auto-resume.test.ts
 # A hub restart: the session a previous run left running is adopted (attached), never
 # re-launched or replaced; what cannot be adopted is surfaced with attach/stop.
 run_harness packages/domains/terminal/src/server/runtime/pty-attach.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-adoption-handoff.test.ts
 run_harness packages/domains/terminal/src/server/runtime/unattached-sessions.test.ts
 run_harness packages/domains/terminal/src/server/runtime/keyed-serializer.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-store-kill.test.ts

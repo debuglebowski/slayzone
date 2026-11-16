@@ -74,11 +74,11 @@ import {
   setTaskMoveSessionsDelegate,
   setTaskPathsDelegate,
   setTaskSessionPromptReader,
-  agentSessionsEvents,
-  taskEvents
+  agentSessionsEvents
 } from '@slayzone/task/server'
 import { readHubSessionRetentionDays, readHubStunAddresses } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
+import { wireTerminalDisposal } from './terminal-disposal'
 import {
   createComputerChatMaintenance,
   createComputerChatCommandBarrier
@@ -999,10 +999,7 @@ export function composeServer(opts: {
   // the terminal runtime's ledger calls go there (`computerSessionLedger.store`).
   const ptyOps = createPtyOps(db, sessionStore)
   setPtyDeps({ ops: ptyOps, events: ptyEvents })
-  tabsEvents.on('tab:deleted', ({ taskId, tabId }) =>
-    ptyOps.ptyDisposeSession(`${taskId}:${tabId}`)
-  )
-  taskEvents.on('task:deleted', ({ taskId }) => ptyOps.ptyDisposeTask(taskId))
+  wireTerminalDisposal(db, ptyOps)
 
   // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as
   // `wireIdleClose` below: the pty/chat runtimes live in THIS process, so the

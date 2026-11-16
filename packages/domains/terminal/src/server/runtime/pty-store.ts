@@ -9,6 +9,7 @@ import {
   resizePty,
   getPtySize,
   killPty,
+  killPtysByTaskId,
   touchPty,
   interruptPty,
   prioritizePty,
@@ -475,14 +476,15 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptyDisposeSession = (sessionId: string) => {
     replaceNext.delete(sessionId)
     unattached.cancelAdoptions(sessionId)
+    if (hasLivePty(sessionId)) killPty(sessionId)
   }
   const ptyDisposeTask = (taskId: string) => {
     for (const sessionId of replaceNext.keys()) {
       if (sessionId.startsWith(`${taskId}:`)) ptyDisposeSession(sessionId)
     }
-    for (const entry of unattached.list()) {
-      if (entry.taskId === taskId) unattached.cancelAdoptions(entry.sessionId)
-    }
+    unattached.cancelTaskAdoptions(taskId)
+    // Covers deletion immediately after the atomic manager ownership commit too.
+    killPtysByTaskId(taskId)
   }
   const discardDeletedIntent = async (sessionId: string, token: object) => {
     const parts = sessionId.split(':')

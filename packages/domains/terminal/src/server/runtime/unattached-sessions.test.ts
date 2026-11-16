@@ -296,3 +296,34 @@ test('no "unattached" report for a session that left the set while its adoption 
   await idle()
   expect(diag.filter((d) => d.event === 'pty.orphan_unattached')).toEqual([])
 })
+
+test('task-scoped cancellation retires a hidden queued identity without cancelling other tasks', async () => {
+  const blockers = Array.from({ length: 4 }, (_, n) => live({ sessionId: `block-${n}:tab` }))
+  const h = harness([...blockers, live({ sessionId: 'queued:tab' })])
+  const release: Array<() => void> = []
+  h.resolver(
+    () =>
+      new Promise((resolve) => {
+        release.push(() => resolve({ ok: false, reason: 'launch-unresolved' }))
+      })
+  )
+  h.registry.start()
+  await vi.waitFor(() => expect(release).toHaveLength(4))
+  let stopped = false
+  const stopping = h.registry.kill('pc', 'queued:tab').then((answer) => {
+    stopped = true
+    return answer
+  })
+  await idle()
+  expect(stopped).toBe(false)
+  h.set(blockers) // visible queued row disappears before manager ownership
+  h.registry.cancelTaskAdoptions('queued')
+  await expect(stopping).resolves.toEqual({ ok: false, reason: 'not-found' })
+  expect(h.registry.list().every((entry) => entry.status === 'adopting')).toBe(true)
+  for (const finish of release) finish()
+  await idle()
+  await idle()
+  expect(h.created).toEqual([])
+  expect(h.killed).toEqual([])
+  h.registry.stop()
+})

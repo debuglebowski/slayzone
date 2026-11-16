@@ -252,7 +252,17 @@ export interface PtyExit {
  * undefined — so the sync-query `writeSync(fd)` path throws and falls through to
  * its `pty.write()` fallback naturally, no remote-specific branch needed.
  */
+/** Routing owns the adopted attempt until the manager atomically registers it. */
+export interface PtyAdoptionLease {
+  /** Synchronous transfer; false means ownership was cancelled/superseded. */
+  commit(register: () => void): boolean
+  /** Idempotent exact-attempt abandonment, including after a failed manager commit. */
+  release(): void
+}
+
 export interface PtyHandle {
+  /** Present on a routed reattach; the consumer must commit or release ownership. */
+  readonly adoption?: PtyAdoptionLease
   /**
    * `null` means NOT YET KNOWN, never "dead".
    *

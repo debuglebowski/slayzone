@@ -102,6 +102,8 @@ export interface UnattachedSessions {
   ): Promise<{ ok: true } | { ok: false; reason: string }>
   /** Supersede queued and in-flight adoptions before restarting or disposing a tab. */
   cancelAdoptions(sessionId: string): void
+  /** Includes queued and hidden transport-to-manager handoffs. */
+  cancelTaskAdoptions(taskId: string): void
   /**
    * The hub was asked to end the tab's session (a restart, reset, respawn, Start
    * fresh) while it tracks none there: end what the computer still runs under that
@@ -144,10 +146,16 @@ export function createUnattachedSessions(deps: {
   const listeners = new Set<() => void>()
   /** Reasons already recorded, per attempt: one diagnostic per (session, attempt, reason). */
   const recorded = new Set<string>()
-  const queue: string[] = []
-  /** Adoptions running now, per entry key: a Stop waits for one (review M1). */
-  const inflight = new Map<string, Promise<void>>()
-  const adoptions = new Map<string, AbortController>()
+  // Identity outlives its visible row, through the manager ownership commit.
+  type Adoption = {
+    entry: UnattachedSession
+    controller: AbortController
+    running: boolean
+    done: Promise<void>
+    finish: () => void
+  }
+  let queue: Adoption[] = []
+  const adoptions = new Set<Adoption>()
   let running = 0
   let subscription: { dispose(): void } | null = null
   let subscribedTo: PtyBackend | null = null
@@ -202,7 +210,7 @@ export function createUnattachedSessions(deps: {
     return null
   }
 
-  async function adopt(entry: UnattachedSession, signal: AbortSignal): Promise<void> {
+  async function adopt(entry: UnattachedSession, signal: AbortSignal): Promise<boolean | void> {
     const blocked = precheck(entry)
     if (blocked) return surface(entry, blocked)
     const spawnId = entry.spawnId!
@@ -254,61 +262,73 @@ export function createUnattachedSessions(deps: {
         entries.delete(keyOf(entry))
         changed()
       }
-      return
+      return true
     }
     surface(entry, result.attachRefusal ?? 'launch-unresolved', result.error)
   }
 
-  function runAdoption(entry: UnattachedSession): Promise<void> {
-    const key = keyOf(entry)
-    const controller = new AbortController()
-    adoptions.set(key, controller)
-    return track(entry, adopt(entry, controller.signal)).finally(() => {
-      if (adoptions.get(key) === controller) adoptions.delete(key)
-    })
+  function retire(job: Adoption): void {
+    adoptions.delete(job)
+    job.finish()
   }
 
-  function cancelAdoptions(sessionId: string): void {
-    for (const [key, controller] of adoptions) {
-      if (key.endsWith(`\u0000${sessionId}`))
-        controller.abort(new Error('Terminal adoption superseded by stop.'))
+  function cancelWhere(matches: (entry: UnattachedSession) => boolean): void {
+    for (const job of adoptions) {
+      if (!matches(job.entry)) continue
+      job.controller.abort(new Error('Terminal adoption superseded by disposal or stop.'))
+      if (!job.running) retire(job)
+      if (job.entry.status === 'adopting') surface(job.entry, 'not-adoptable', 'Stop requested.')
     }
-    for (const entry of entries.values()) {
-      if (entry.sessionId !== sessionId) continue
-      if (entry.status === 'adopting') surface(entry, 'not-adoptable', 'Stop requested.')
-    }
+    queue = queue.filter((job) => !job.controller.signal.aborted)
   }
+
+  const cancelAdoptions = (sessionId: string): void =>
+    cancelWhere((entry) => entry.sessionId === sessionId)
+  const cancelTaskAdoptions = (taskId: string): void =>
+    cancelWhere((entry) => entry.taskId === taskId)
 
   function pump(): void {
     while (running < ADOPT_CONCURRENCY && queue.length > 0) {
-      const key = queue.shift()!
-      const entry = entries.get(key)
-      if (!entry || entry.status !== 'adopting') continue
+      const job = queue.shift()!
+      if (job.controller.signal.aborted || entries.get(keyOf(job.entry)) !== job.entry) {
+        retire(job)
+        continue
+      }
+      job.running = true
       running++
-      void runAdoption(entry).then(() => {
-        running--
-        pump()
-      })
+      void adopt(job.entry, job.controller.signal)
+        .then((accepted) => {
+          if (!accepted)
+            job.controller.abort(new Error('Adoption was not accepted by its manager.'))
+        })
+        .catch(() => job.controller.abort(new Error('Adoption failed before ownership transfer.')))
+        .finally(() => {
+          running--
+          retire(job)
+          pump()
+        })
     }
   }
 
-  /** Remember `work` as `entry`'s adoption in flight until it settles (never rejects). */
-  function track(entry: UnattachedSession, work: Promise<void>): Promise<void> {
-    const key = keyOf(entry)
-    const settled = work.catch(() => undefined)
-    inflight.set(key, settled)
-    void settled.then(() => {
-      if (inflight.get(key) === settled) inflight.delete(key)
-    })
-    return settled
-  }
-
-  function schedule(entry: UnattachedSession): void {
+  function schedule(entry: UnattachedSession): Adoption {
+    const existing = [...adoptions].find(
+      (job) => job.entry === entry && !job.controller.signal.aborted
+    )
+    if (existing) return existing
+    // A newer listed attempt supersedes every older job for this computer/tab.
+    cancelWhere((prior) => keyOf(prior) === keyOf(entry))
     entry.status = 'adopting'
     delete entry.reason
     delete entry.detail
-    queue.push(keyOf(entry))
+    let finish!: () => void
+    const done = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const job: Adoption = { entry, controller: new AbortController(), running: false, done, finish }
+    adoptions.add(job)
+    queue.push(job)
     pump()
+    return job
   }
 
   /** Follow the backend's set: new attempts are adopted, gone ones leave. */
@@ -361,7 +381,7 @@ export function createUnattachedSessions(deps: {
       subscription = null
       subscribedTo = null
       entries.clear()
-      for (const controller of adoptions.values()) controller.abort(new Error('Registry disposed.'))
+      cancelWhere(() => true)
       queue.length = 0
       recorded.clear()
     },
@@ -377,7 +397,9 @@ export function createUnattachedSessions(deps: {
       delete entry.reason
       delete entry.detail
       changed()
-      await runAdoption(entry)
+      const job = schedule(entry)
+      await job.done
+      if (job.controller.signal.aborted) return { ok: false, reason: 'not-adoptable' }
       if (!entries.has(keyOf(entry))) return { ok: true }
       return {
         ok: false,
@@ -386,14 +408,22 @@ export function createUnattachedSessions(deps: {
       }
     },
     cancelAdoptions,
+    cancelTaskAdoptions,
     async kill(computerId, sessionId, signal) {
       // Being attached right now: wait for that first. Attached = it is its tab's
       // session now, stopped (if at all) there — never behind the tab's back.
-      const adopting = inflight.get(keyOf({ computerId, sessionId }))
+      const jobs = [...adoptions].filter(
+        (job) => keyOf(job.entry) === keyOf({ computerId, sessionId })
+      )
+      const adopting = jobs.length ? Promise.all(jobs.map((job) => job.done)) : null
       if (adopting) await awaitPtyOperation(() => adopting, signal)
       signal?.throwIfAborted()
       const entry = find(computerId, sessionId)
-      if (!entry) return { ok: false, reason: adopting ? 'attached' : 'not-found' }
+      if (!entry)
+        return {
+          ok: false,
+          reason: jobs.some((job) => !job.controller.signal.aborted) ? 'attached' : 'not-found'
+        }
       const backend = deps.backend()
       if (!entry.spawnId || !backend.killUntracked) return { ok: false, reason: 'no-attempt-key' }
       const { stopped } = await awaitPtyOperation(
