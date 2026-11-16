@@ -323,69 +323,86 @@ describe('createFsHandlers — watch lifecycle', () => {
     notify.mock.calls.filter((c) => (c[1] as { relPath: string }).relPath === relPath)
 
   /**
-   * Resolves once the watch on `dir` delivers changes, with nothing left in flight. A
-   * recursive `fs.watch` on macOS rides FSEvents, whose stream starts asynchronously and
-   * drops changes made before it is up — under load, a write made right after
-   * watchStart can land first and is lost for good, however long the test then waits.
-   * So re-touch a probe file until one arrives, then let its debounced repeats drain.
+   * FSEvents starts asynchronously. Only this watch's dedicated probe event proves
+   * readiness; an initial root-directory notification can arrive before file writes
+   * are observed. Stop touching the probe once acknowledged, then drain debounce.
    */
-  async function untilWatching(notify: Notify): Promise<void> {
+  async function untilWatching(notify: Notify, watchId: string): Promise<void> {
     let n = 0
+    const probeDelivered = () =>
+      notify.mock.calls.some(([method, raw]) => {
+        const event = raw as { watchId?: string; type?: string; relPath?: string } | undefined
+        return (
+          method === ComputerNotificationMethods.fsChange &&
+          event?.watchId === watchId &&
+          event.type === 'changed' &&
+          event.relPath === 'watch-probe.txt'
+        )
+      })
     await vi.waitFor(
       () => {
-        writeFileSync(join(dir, 'watch-probe.txt'), String(n++))
-        expect(notify).toHaveBeenCalled()
+        if (!probeDelivered()) writeFileSync(join(dir, 'watch-probe.txt'), String(n++))
+        expect(probeDelivered()).toBe(true)
       },
       { timeout: 10_000, interval: 200 }
     )
+    // Preserve the existing post-ack drain; no further probe writes reset debounce.
     await new Promise((r) => setTimeout(r, 300))
     notify.mockClear()
   }
 
   it('streams fs.change tagged with the hub-minted watchId, and stops on watchStop', async () => {
     const notify = vi.fn<ComputerDialer['notify']>(() => true)
-    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
-    expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
-    await untilWatching(notify)
-    writeFileSync(join(dir, 'touched.txt'), 'x')
-    // The watcher debounces 100ms before emitting.
-    await vi.waitFor(() => expect(changesFor(notify, 'touched.txt')).not.toHaveLength(0), {
-      timeout: 5000
-    })
+    try {
+      expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
+      await untilWatching(notify, 'w1')
+      writeFileSync(join(dir, 'touched.txt'), 'x')
+      // The watcher debounces 100ms before emitting.
+      await vi.waitFor(() => expect(changesFor(notify, 'touched.txt')).not.toHaveLength(0), {
+        timeout: 5000
+      })
 
-    const [method, params] = changesFor(notify, 'touched.txt')[0] as unknown as [
-      string,
-      { watchId: string }
-    ]
-    expect(method).toBe(ComputerNotificationMethods.fsChange)
-    expect(params.watchId).toBe('w1')
+      const [method, params] = changesFor(notify, 'touched.txt')[0] as unknown as [
+        string,
+        { watchId: string }
+      ]
+      expect(method).toBe(ComputerNotificationMethods.fsChange)
+      expect(params.watchId).toBe('w1')
 
-    expect(handlers[M.fsWatchStop]({ watchId: 'w1' })).toEqual({ ok: true })
-    notify.mockClear()
-    writeFileSync(join(dir, 'after-stop.txt'), 'x')
-    await new Promise((r) => setTimeout(r, 300))
-    expect(notify).not.toHaveBeenCalled()
+      expect(handlers[M.fsWatchStop]({ watchId: 'w1' })).toEqual({ ok: true })
+      notify.mockClear()
+      writeFileSync(join(dir, 'after-stop.txt'), 'x')
+      await new Promise((r) => setTimeout(r, 300))
+      expect(notify).not.toHaveBeenCalled()
+    } finally {
+      disposeAll()
+    }
   }, 20_000) // macOS `fs.watch` recursive rides FSEvents, whose latency grows with load. // Must exceed the waitFor above, or the test times out before the wait can.
 
   // A hub retry after reconnect must not leave two live subscriptions feeding one
   // client — the panel would see every change twice and refetch twice.
   it('is idempotent on watchId — a repeated start does not double-deliver', async () => {
     const notify = vi.fn<ComputerDialer['notify']>(() => true)
-    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
 
-    handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
-    handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
-    await untilWatching(notify)
-    writeFileSync(join(dir, 'once.txt'), 'x')
-    await vi.waitFor(() => expect(changesFor(notify, 'once.txt')).not.toHaveLength(0), {
-      timeout: 5000
-    })
-    await new Promise((r) => setTimeout(r, 300))
+    try {
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      await untilWatching(notify, 'w1')
+      writeFileSync(join(dir, 'once.txt'), 'x')
+      await vi.waitFor(() => expect(changesFor(notify, 'once.txt')).not.toHaveLength(0), {
+        timeout: 5000
+      })
+      await new Promise((r) => setTimeout(r, 300))
 
-    expect(changesFor(notify, 'once.txt')).toHaveLength(1)
+      expect(changesFor(notify, 'once.txt')).toHaveLength(1)
 
-    handlers[M.fsWatchStop]({ watchId: 'w1' })
+      handlers[M.fsWatchStop]({ watchId: 'w1' })
+    } finally {
+      disposeAll()
+    }
   }, 20_000)
 
   // Shutdown path: the hub never sends watchStop for a computer that is stopping, and
@@ -398,20 +415,31 @@ describe('createFsHandlers — watch lifecycle', () => {
     const before = liveWatches()
     const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)]))
 
-    handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
-    handlers[M.fsWatchStart]({ watchId: 'w2', rootPath: other })
-    expect(liveWatches()).toBeGreaterThan(before)
+    try {
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      handlers[M.fsWatchStart]({ watchId: 'w2', rootPath: other })
+      expect(liveWatches()).toBeGreaterThan(before)
 
-    disposeAll()
-    // `<=`, not `===`: a watch an earlier test stopped may still be closing at `before`.
-    await vi.waitFor(() => expect(liveWatches()).toBeLessThanOrEqual(before), { timeout: 2_000 })
+      disposeAll()
+      // `<=`, not `===`: a watch an earlier test stopped may still be closing at `before`.
+      await vi.waitFor(() => expect(liveWatches()).toBeLessThanOrEqual(before), { timeout: 2_000 })
+    } finally {
+      disposeAll()
+    }
   })
 
   it('refuses to watch a root outside the jail', () => {
     const child = join(dir, 'child')
     mkdirSync(child, { recursive: true })
-    const { handlers } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
-    expect(() => handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toThrow(/allowedRoots/)
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(child)]))
+
+    try {
+      expect(() => handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toThrow(
+        /allowedRoots/
+      )
+    } finally {
+      disposeAll()
+    }
   })
 })
 

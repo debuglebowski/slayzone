@@ -191,26 +191,56 @@ describe('fs.* hub⇄computer round trip — editor', () => {
 })
 
 describe('fs.* hub⇄computer round trip — watch', () => {
-  it('delivers a real file change from the computer watcher to the hub listener', async () => {
+  let seen: string[]
+  let stop: (() => void) | undefined
+  const stopWatching = () => {
+    const release = stop
+    stop = undefined
+    release?.()
+  }
+
+  beforeEach(async () => {
+    seen = []
     const fs = adaptersFor([dir])
+    // This adapter filters the real wire notification by computerId + watchId.
+    // A root-directory initial event must not establish native stream readiness.
+    stop = fs.watch(COMPUTER_ID, dir, (e) => seen.push(`${e.type}:${e.relPath}`))
+    try {
+      let n = 0
+      await vi.waitFor(
+        () => {
+          if (seen.includes('changed:watch-probe.txt')) return
+          writeFileSync(join(dir, 'watch-probe.txt'), String(n++))
+          throw new Error('waiting for this watch probe to reach the routed listener')
+        },
+        { timeout: 9000, interval: 200 }
+      )
+      // No probe write after its acknowledgement. Drain the known 100ms debounce;
+      // this is not a startup-readiness sleep. The 9s probe + 300ms drain use the
+      // existing 10s hook budget; the original target test body still gets 5000ms.
+      await new Promise((r) => setTimeout(r, 300))
+      seen.length = 0
+    } catch (error) {
+      stopWatching()
+      throw error
+    }
+  })
+  afterEach(stopWatching)
 
-    const seen: string[] = []
-    const stop = fs.watch(COMPUTER_ID, dir, (e) => seen.push(`${e.type}:${e.relPath}`))
-
+  it('delivers a real file change from the computer watcher to the hub listener', async () => {
     // Wait for THIS file's event, not merely for any event: macOS `fs.watch`
     // recursive also fires once for the watched directory itself (relPath = the
     // dir's own basename), which lands first and would satisfy a bare
     // "something arrived" check before the real change ever shows up.
     try {
-      // This bridge installs the computer watcher synchronously. One change lets its 100ms
-      // debounce settle; rewriting every 100ms from the assertion can keep resetting it.
+      // One target write, after the real probe proved native readiness.
       writeFileSync(join(dir, 'watched.txt'), 'changed')
       await vi.waitFor(() => expect(seen).toContain('changed:watched.txt'), {
         timeout: 5000,
         interval: 100
       })
     } finally {
-      stop()
+      stopWatching()
     }
   })
 })
