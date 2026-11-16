@@ -19,6 +19,49 @@ const bootstrap = {
   env: {}
 }
 
+test.each(['close', 'task fence'])(
+  'transient control ACK rechecks live authority after %s',
+  async (scenario) => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'online-control-epoch-'))
+    const runtime = await openComputerChatRuntime({
+      stateDir,
+      hubScope: 'h',
+      computerId: 'pc',
+      workerPath
+    })
+    let release!: () => void
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    let block: ReturnType<typeof runtime.taskAdmission.block> | undefined
+    try {
+      await runtime.bootstrap(bootstrap)
+      // Controller boundary fixture; actual provider/network/native ACKs have
+      // separate subprocess proofs. This isolates authority changing mid-ACK.
+      vi.spyOn(runtime.transport, 'controlSession').mockImplementation(async (_tab, spawnId) => {
+        await held
+        return { acknowledged: true, spawnId, scope: 'provider' }
+      })
+      const controlling = runtime.processControl({
+        kind: 'control',
+        identity: bootstrap.identity,
+        spawnId: 'generation',
+        action: 'interrupt'
+      })
+      void controlling.catch(() => undefined)
+      if (scenario === 'close') await runtime.close()
+      else block = runtime.taskAdmission.block('t')
+      release()
+      await expect(controlling).rejects.toThrow(/authority changed/)
+    } finally {
+      release()
+      block?.release()
+      await runtime.close()
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  }
+)
+
 test('online factory owns composed bootstrap/drafts/timeline/metadata on its worker; main retains its controller', async () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'online-chat-owner-'))
   const nativeMethods = ['prepare', 'exec', 'pragma', 'close', 'backup'] as const
@@ -239,6 +282,21 @@ test('fatal diagnostic rejection revokes the online controller permit and preser
     permit = await runtime.taskAdmission.acquire('t')
     const first = new Error('first diagnostic failure'),
       second = new Error('later diagnostic failure')
+    let releaseControl!: () => void
+    const controlGate = new Promise<void>((resolve) => {
+      releaseControl = resolve
+    })
+    vi.spyOn(runtime.transport, 'controlSession').mockImplementation(async (_tab, spawnId) => {
+      await controlGate
+      return { acknowledged: true, spawnId, scope: 'provider' }
+    })
+    const controlling = runtime.processControl({
+      kind: 'control',
+      identity: bootstrap.identity,
+      spawnId: 'generation',
+      action: 'interrupt'
+    })
+    void controlling.catch(() => undefined)
     const write = vi
       .spyOn(runtime.control, 'diagnostic')
       .mockRejectedValueOnce(first)
@@ -254,6 +312,8 @@ test('fatal diagnostic rejection revokes the online controller permit and preser
       await expect(runtime!.retention.access('c', async () => undefined)).rejects.toBe(first)
     })
     expect(() => permit!.assert()).toThrow(/admission/)
+    releaseControl()
+    await expect(controlling).rejects.toBe(first)
     diagnostic!('tab', event)
     await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setImmediate(resolve))

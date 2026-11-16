@@ -20,6 +20,17 @@ export const chatRouteSchema = z.object({
   id,
   epoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 })
+/** Process control ACK is transient provider/physical acknowledgement, never a
+ * durable command receipt. Normal invoke retains its acceptance/receipt fence. */
+export const chatProcessControlSchema = z
+  .object({
+    kind: z.literal('control'),
+    identity: chatIdentitySchema.strict(),
+    spawnId: id,
+    action: z.enum(['interrupt', 'kill'])
+  })
+  .strict()
+export type ChatProcessControl = z.infer<typeof chatProcessControlSchema>
 export const chatTabTransitionSchema = z
   .object({
     id: z.string().uuid(),

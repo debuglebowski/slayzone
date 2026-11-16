@@ -139,7 +139,10 @@ test('a delayed insert cannot reach replay, projection or broadcast before its c
   )
   try {
     await until(() => writing)
-    expect(f.stdout.isPaused()).toBe(true)
+    // Event consumption waits; same-pipe control responses must still progress.
+    await expect(
+      r.sendControlRequest('tab', { subtype: 'set_model', model: 'fixture' }, 1500)
+    ).resolves.toBeDefined()
     expect(r.getSessionTerminalState('tab')).toBe('idle')
     expect(broadcast.some((event) => event.kind === 'assistant-text')).toBe(false)
     expect(broadcast.some((event) => event.kind === 'stream-message-start')).toBe(false)

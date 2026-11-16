@@ -468,6 +468,32 @@ describe('Codex background terminals', () => {
 
   const job = { itemId: 'watch', processId: '42', command: 'watch-azure', cwd: '/work' }
 
+  it('does not schedule another background response while its output spill is blocked', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let release!: () => void
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    const context: Partial<ChatDriverContext> & { waitForOutput(): Promise<void> } = {
+      waitForOutput: () => held
+    }
+    const h = await harness(context)
+    try {
+      await vi.advanceTimersByTimeAsync(1000)
+      const first = h.request('thread/backgroundTerminals/list')!
+      await h.feed({ id: first.id, result: { data: [job], nextCursor: null } })
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(h.sent.filter((s) => s.method === 'thread/backgroundTerminals/list')).toHaveLength(1)
+      release()
+      await flush()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(h.sent.filter((s) => s.method === 'thread/backgroundTerminals/list')).toHaveLength(2)
+    } finally {
+      release()
+      h.driver.dispose()
+    }
+  })
+
   it('discovers jobs on resume, keeps them across turns, and streams their output', async () => {
     const { h, request } = await polling()
     const events = await h.feed({ id: request.id, result: { data: [job], nextCursor: null } })

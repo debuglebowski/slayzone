@@ -240,15 +240,28 @@ fragment cannot overtake an earlier pending save. Readers and lifecycle drains
 wait for the accepted prefix, including generated delivery events/notices. User
 dispatch commits its event/queue-handoff/prompt transaction before provider delivery.
 
-The local computer/host process bridge pauses provider pipes while that prefix is
-pending, scoped to the exact spawn generation. A current pipe chunk (or one whole
-protocol record) finishes; later chunks wait in the pipe. Imported history drains
-as one batch, not one queued promise per row. Physical process exit and stdio drain
-are separate: replacement/close retains the final tail and the watchdog excludes
-deliberate storage backpressure. Cleanup attempts every owned resource and preserves
-the original failure. The SQLite owner cutover, legacy external routed flow, and
-actual computer control responsiveness under blocked native sync still await the
-full FU2 S6 production caller migration; this event-pipeline slice does not close H1/H2.
+Each process generation owns an anonymous async output spool. Storage pauses event
+consumption; raw stdout keeps reading so Claude control responses and Codex RPC
+responses reach their real pending requests. Pipes pause only while one chunk (or
+one complete protocol record) spills, then resume independently of SQLite. Overflow
+has no data cap or per-event promise backlog. The private file is unlinked before
+content writes, reclaimed after drain, and physically closed before process exit
+acknowledgement. File failure stops the process and rejects its drain.
+Bidirectional drivers expose `handleControlLine`; custom stream-only drivers keep
+the same interface. Autonomous notification/poll readers await `waitForOutput`
+before producing another spill batch. Registered chat modes are Claude and Codex;
+other providers/custom modes use the existing PTY adapters.
+
+Imported history drains as one batch. Physical exit and stdio drain stay separate:
+replacement/close retains pre-EOF tail, terminal EOF rejects later bridge bytes,
+and the watchdog excludes deliberate storage pressure. Readers/lifecycle drains
+include the accepted spooled prefix. Codex observes turn control boundaries
+separately from delayed timeline processing, so interrupt-and-wait can acknowledge
+real completion without publishing it early. The computer-local routing bridge
+implements generation-scoped physical flow. Exported custom/legacy handles without
+an input-flow seam retain compatibility but cannot promise a bounded upstream
+producer. Current production chat runs on its owning computer; no new remote-raw
+route is introduced.
 
 ### Chat side questions (`/btw`)
 

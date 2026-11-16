@@ -410,6 +410,8 @@ export interface TransportShutdownResult {
 }
 
 export interface ChatSessionInfo {
+  /** Exact live process generation, for transient control requests. */
+  spawnId?: string
   storageUnavailable?: boolean
   sessionId: string
   tabId: string
@@ -1542,6 +1544,7 @@ export function createChatTransport(
   async function flushEvents(tab: ChatTab): Promise<void> {
     for (;;) {
       const prefix = publicationTail.get(tab)
+      await tab.proc?.flushOutput()
       await prefix
       await tab.log.flush()
       // An accepted action may produce a notice/delivery event. Drain those too.
@@ -3130,6 +3133,28 @@ export function createChatTransport(
     return proc.driver.applyControl(request, timeoutMs)
   }
 
+  /** Existing process only: never hydrate, read paths, persist receipts or respawn. */
+  async function controlSession(tabId: string, spawnId: string, action: 'interrupt' | 'kill') {
+    const tab = tabs.get(tabId),
+      proc = tab?.proc
+    if (
+      !tab ||
+      tab.closed ||
+      tab.ended ||
+      !proc ||
+      proc.ended ||
+      proc.replaced ||
+      proc.spawnId !== spawnId
+    )
+      throw new Error('Chat process generation mismatch')
+    if (action === 'interrupt') await sendControlRequest(tabId, { subtype: 'interrupt' })
+    else if ((await proc.stop()) === 'abandoned')
+      throw new Error('Chat process exit is unconfirmed')
+    if (tabs.get(tabId) !== tab || tab.proc !== proc || proc.replaced)
+      throw new Error('Chat process generation changed during control')
+    return { acknowledged: true, spawnId, scope: action === 'interrupt' ? 'provider' : 'process' }
+  }
+
   /** Permission transitions keep queued messages behind the continuation. */
   /**
    * Ask a side question (`/btw`) on the tab's agent process, started first when
@@ -4136,14 +4161,22 @@ export function createChatTransport(
             'Process exit is unconfirmed; chat history cannot close safely.'
           )
       }
+      // Startup failure may already be terminal while its anonymous file is
+      // still closing. Erasure/replacement must retain that physical lifetime.
+      await proc?.exited
       tab.closed = true
       await flushEvents(tab)
-    })()
-      .finally(() => tab.projection.then((p) => p?.close()).catch(() => undefined))
-      .finally(() => {
-        if (closing.get(tabId) === flushed) closing.delete(tabId)
-      })
+    })().finally(() => tab.projection.then((p) => p?.close()).catch(() => undefined))
     closing.set(tabId, flushed)
+    void flushed.then(
+      () => {
+        if (closing.get(tabId) === flushed) closing.delete(tabId)
+      },
+      () => {
+        // Retain the failed barrier (and its resources); a later hydrate/erasure
+        // must not treat an unconfirmed physical cleanup as an absent session.
+      }
+    )
     void flushed.catch(() => undefined)
     return flushed
   }
@@ -4355,6 +4388,7 @@ export function createChatTransport(
 
   function toInfo(tab: ChatTab): ChatSessionInfo {
     return {
+      ...(tab.proc && !tab.proc.ended ? { spawnId: tab.proc.spawnId } : {}),
       sessionId: tab.sessionId,
       tabId: tab.tabId,
       taskId: tab.taskId,
@@ -4605,6 +4639,7 @@ export function createChatTransport(
     sendUserMessage,
     sendToolResult,
     sendControlRequest,
+    controlSession,
     askSideQuestion,
     cancelSideQuestion,
     changeCodexPermissionsAndResume,

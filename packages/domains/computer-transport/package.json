@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./testing": "./src/testing/loopback.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

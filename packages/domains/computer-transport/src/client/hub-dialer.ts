@@ -53,6 +53,8 @@ export interface ComputerIdentity {
   promptSummariesAll?: boolean
   /** Implementing runtime owns chat storage compaction. Absent = unavailable. */
   chatStorageCompaction?: boolean
+  /** Host implements generation-scoped transient provider/process control ACKs. */
+  chatProcessControls?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -365,7 +367,8 @@ export class HubDialer {
       chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
       promptSummariesAll: this.opts.identity.promptSummariesAll === true,
       // ...and compacts its chat store on request.
-      chatStorageCompaction: this.opts.identity.chatStorageCompaction === true
+      chatStorageCompaction: this.opts.identity.chatStorageCompaction === true,
+      chatProcessControls: this.opts.identity.chatProcessControls === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -414,7 +417,8 @@ export class HubDialer {
             chatHistoryPages: this.opts.identity.chatHistoryPages === true,
             promptSummariesAll: this.opts.identity.promptSummariesAll === true,
             chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
-            chatStorageCompaction: this.opts.identity.chatStorageCompaction === true
+            chatStorageCompaction: this.opts.identity.chatStorageCompaction === true,
+            chatProcessControls: this.opts.identity.chatProcessControls === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

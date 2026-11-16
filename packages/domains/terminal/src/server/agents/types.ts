@@ -176,6 +176,9 @@ export interface ChatDriverContext {
   send?(line: string, opts?: ChatWriteOptions): Promise<void>
   /** Route one normalized event through the transport (buffer + persist + broadcast + state). */
   emit(event: AgentEvent): void
+  /** Await bounded async spill acceptance before another autonomous producer
+   * read/poll. Does not await SQLite or pause protocol control responses. */
+  waitForOutput?(): Promise<void>
   /** Working directory the subprocess was spawned in. */
   cwd: string
   /** Resume id when `resume` is true, otherwise a fresh uuid. */
@@ -233,6 +236,13 @@ export interface ChatSessionDriver {
   start(ctx: ChatDriverContext): void | Promise<void>
   /** Handle one stdout line. Emits zero or more events via `ctx.emit`. Must never throw. */
   handleLine(line: string): void
+  /**
+   * Consume only a correlated protocol response while event consumption waits
+   * for storage. True means consumed (never replay it); false is ordinary data,
+   * retained in the generation's lossless spool. Must not consume notifications
+   * or prompts. Stream-only/custom drivers may omit this seam.
+   */
+  handleControlLine?(line: string): boolean
   /** Read-only, bounded provider health check before a silent turn is killed.
    * True means the provider still answers; silence alone is not a failed turn.
    * Absent: the transport retains its stream-only watchdog policy.

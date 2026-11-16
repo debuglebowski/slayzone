@@ -149,7 +149,8 @@ export interface ChatProcHandle {
    * did not — never silently drops.
    */
   write(data: string, opts?: ChatWriteOptions): Promise<void>
-  /** Stop reading provider pipes while accepted events await persistence. Control stays live. */
+  /** Pause physical input until one bounded async output spill write completes.
+   * Never hold this for SQLite: protocol responses share the provider pipe. */
   setOutputPaused?(paused: boolean): void
   kill(signal?: string): void
 }

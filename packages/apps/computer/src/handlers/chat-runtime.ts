@@ -505,6 +505,8 @@ export function createChatRuntimeHandlers(opts: {
     r: OnlineComputerChatRuntime
   ): Promise<unknown> {
     switch (req.kind) {
+      case 'control':
+        return r.processControl(req)
       case 'relay.watch':
         relay.configure(req.all, req.tabIds)
         return { ok: true }

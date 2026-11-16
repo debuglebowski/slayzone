@@ -180,6 +180,26 @@ export class CodexAppServerClient {
     this.opts.onParseError?.(trimmed, new Error('unrecognized JSON-RPC message shape'))
   }
 
+  /** Response-only lane; notifications/server requests retain their event order. */
+  handleControlLine(line: string): boolean {
+    let msg: Record<string, unknown> | null
+    try {
+      msg = JSON.parse(line)
+    } catch {
+      return false
+    }
+    if (
+      !msg ||
+      typeof msg !== 'object' ||
+      msg.id == null ||
+      !('result' in msg || 'error' in msg) ||
+      'method' in msg
+    )
+      return false
+    this.resolvePending(msg.id as JsonRpcId, msg)
+    return true
+  }
+
   private resolvePending(id: JsonRpcId, msg: Record<string, unknown>): void {
     const pending = this.pending.get(id)
     if (!pending) return

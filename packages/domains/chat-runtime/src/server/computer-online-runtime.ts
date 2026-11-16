@@ -8,7 +8,12 @@ import {
   createChatOps,
   createChatQueueRuntime
 } from '@slayzone/terminal/runtime'
-import { parseChatInvocation, type ChatTabTransition, type ConversationIdentity } from '../shared'
+import {
+  parseChatInvocation,
+  chatProcessControlSchema,
+  type ChatTabTransition,
+  type ConversationIdentity
+} from '../shared'
 import type { ChatBootstrap } from './local-data'
 import type { ComputerChatRuntimeOptions } from './computer-runtime'
 import { openChatStorageOwner } from './storage-owner'
@@ -432,6 +437,41 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
         const identity = publication.getStore() ?? bindings.get(tabId)
         return identity?.tabId === tabId ? { identity } : null
       },
+      async processControl(input: unknown) {
+        const req = chatProcessControlSchema.parse(input),
+          identity = req.identity
+        const bound = bindings.get(identity.tabId)
+        if (
+          failure ||
+          stopped ||
+          closing ||
+          lockedTabs.has(identity.tabId) ||
+          transitions.has(identity.tabId) ||
+          taskAdmission.blocked(identity.taskId)
+        )
+          throw failure ?? new Error('Chat control admission is closed')
+        // Main owns this live process binding. Every replacement/lifecycle closes
+        // admission synchronously; this is not a cached filesystem permission.
+        if (
+          !bound ||
+          (['id', 'taskId', 'tabId', 'mode', 'epoch'] as const).some(
+            (key) => bound[key] !== identity[key]
+          )
+        )
+          throw new Error('Chat control ownership identity mismatch')
+        const result = await transport.controlSession(identity.tabId, req.spawnId, req.action)
+        if (
+          failure ||
+          stopped ||
+          closing ||
+          bindings.get(identity.tabId) !== bound ||
+          lockedTabs.has(identity.tabId) ||
+          transitions.has(identity.tabId) ||
+          taskAdmission.blocked(identity.taskId)
+        )
+          throw failure ?? new Error('Chat control authority changed before acknowledgement')
+        return result
+      },
       diagnosticsConfig: () => remote.control.diagnosticsConfig(),
       configureDiagnostics: (value: { enabled: boolean; verbose: boolean }) =>
         remote.control.configureDiagnostics(value),
@@ -578,11 +618,14 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
               errors.push(error)
             }
           }
+          // Start physical process control before any owner IO. Its eventual
+          // drain/anonymous-file close still waits for the accepted durable tail.
+          const stopping = attempt(() => transport.shutdownAll())
           await attempt(() => storage.db.namedTxn('chatStorage.prepareClose', {}))
           await attempt(() => artifactPublication.close())
           await attempt(() => remote.control.prepareClose())
           await attempt(() => queueRuntime.close())
-          await attempt(() => transport.shutdownAll())
+          await stopping
           await attempt(() => invoke.settleAll())
           await attempt(() => drainCalls())
           await attempt(() => storage.close())

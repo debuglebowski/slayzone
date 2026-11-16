@@ -8,6 +8,7 @@ import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
 import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
 import { createPtyHistory, ptyHistoryDir } from './pty-history'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
+import { chatProcessControlSchema } from '@slayzone/chat-runtime/shared'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
  * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
@@ -561,7 +562,10 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     const entry0 = Object.hasOwn(table, method) ? table[method] : undefined
     // The path scope the hub authorized (§9 Phase 7b): every path judged while this
     // request is served must lie inside that task's / project's own folders here.
-    const independent = storeIndependentControls.has(method)
+    const control =
+      method === HubToComputerMethods.chatRequest &&
+      (params as { kind?: unknown } | null)?.kind === 'control'
+    const independent = storeIndependentControls.has(method) || control
     const scope = independent ? undefined : actor.pathScope
     const scoped =
       entry0 && scope
@@ -615,11 +619,19 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       throw err
     }
     try {
+      if (control) {
+        const request = chatProcessControlSchema.parse(params)
+        if (actor.pathScope?.kind !== 'task' || actor.pathScope.taskId !== request.identity.taskId)
+          throw new RpcError(
+            ComputerTransportErrorCodes.refusedByComputer,
+            'Chat control task scope mismatch'
+          )
+      }
       if (
         method === HubToComputerMethods.ptySpawn ||
         method === HubToComputerMethods.ptyWarmSpawn ||
         method === HubToComputerMethods.procSpawn ||
-        method === HubToComputerMethods.chatRequest ||
+        (method === HubToComputerMethods.chatRequest && !control) ||
         method === HubToComputerMethods.slaySetup
       )
         await cliReady
@@ -630,11 +642,11 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
         deps.projectPathsReady &&
         (scope ||
           SCOPED_SPAWNS.has(method) ||
-          method === HubToComputerMethods.chatRequest ||
+          (method === HubToComputerMethods.chatRequest && !control) ||
           method.startsWith('project.'))
       )
         await deps.projectPathsReady
-      if (deps.getProjectPaths?.() && !relocationControls.has(method)) {
+      if (deps.getProjectPaths?.() && !relocationControls.has(method) && !independent) {
         await recoverRelocation()
         ctx.assertWorkAllowed?.()
       }
@@ -736,6 +748,7 @@ export function startComputer(
     chatTimelineRowSlices: true,
     promptSummariesAll: true,
     chatStorageCompaction: true,
+    chatProcessControls: true,
     capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own

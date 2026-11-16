@@ -94,7 +94,7 @@ test('new connectors keep a busy same-contract pre-capability host on chat fallb
   // busy. Restore its historical identity and chat request schemas.
   const entry = retainedEntry(root, HOST_CONTRACT_VERSION)
   let source = readFileSync(entry, 'utf8').replace(
-    /^[ \t]+(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll|chatStorageCompaction): true,\n/gm,
+    /^[ \t]+(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll|chatStorageCompaction|chatProcessControls): true,\n/gm,
     ''
   )
   const tuple = /^([ \t]+)timelinePages: external_exports\.tuple\(\[[\s\S]*?\n\1\]\),/m.exec(source)
@@ -217,7 +217,8 @@ test('new connectors keep a busy same-contract pre-capability host on chat fallb
         chatHistoryPages: false,
         chatTimelineRowSlices: false,
         promptSummariesAll: false,
-        chatStorageCompaction: false
+        chatStorageCompaction: false,
+        chatProcessControls: false
       })
       expect(await control!.rpc.request('health')).toMatchObject({
         pid: health.pid,

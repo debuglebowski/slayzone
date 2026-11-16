@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto'
 import { createLineSplitter, type ChatProcHandle } from './chat-proc-handle'
 import type { OpenToolBound } from './chat-watchdog'
 import type { OutboxProcess } from './chat-outbox'
+import { ChatOutputSpool } from './chat-output-spool'
 
 const NO_ATTACHMENTS = "This agent can't take attached files. Send the message without them."
 
@@ -136,9 +137,14 @@ export class ChatProcess implements OutboxProcess {
   private resolveReady!: () => void
   private rejectReady!: (err: Error) => void
   private resolveExited!: (e: { code: number | null; signal: string | null }) => void
+  private rejectExited!: (error: unknown) => void
+  private handlingLine = false
+  /** Terminal stdio EOF seals ingress synchronously; retained pre-EOF records still drain. */
+  private inputEnded = false
   /** `driver.start` was called: lines can be handed to it. */
   private driverHasContext = false
-  private readonly earlyLines: string[] = []
+  private readonly output: ChatOutputSpool
+  private outputFailure: Error | null = null
   private stderrBuf = ''
   private stderrTimer: ReturnType<typeof setTimeout> | null = null
   private stderrEmitted = 0
@@ -152,6 +158,28 @@ export class ChatProcess implements OutboxProcess {
     this.driver = opts.driver
     this.probeable = opts.probeable
     this.hooks = opts.hooks
+    this.output = new ChatOutputSpool({
+      flow: (paused) => this.handle.setOutputPaused?.(paused),
+      available: () => this.driverHasContext && !this.waitingForStorage,
+      consume: (record) => {
+        const [kind, value] = JSON.parse(record) as
+          | ['line', string]
+          | ['event', AgentEvent]
+          | ['history', AgentEvent[]]
+        if (kind === 'line') this.handleLine(value)
+        else if (kind === 'event') this.deliverEvent(value)
+        else this.hooks.onHistory?.(this, value)
+      },
+      failure: (error) => {
+        this.outputFailure ??= error
+        this.deliverEvent({
+          kind: 'error',
+          message: 'Chat output buffering failed',
+          detail: { cause: error.message }
+        })
+        this.kill('SIGKILL')
+      }
+    })
     this.readyPromise = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
@@ -159,9 +187,11 @@ export class ChatProcess implements OutboxProcess {
     // Observed: a start failure is reported through the hooks; an unawaited
     // `readyPromise` must not become an unhandled rejection.
     this.readyPromise.catch(() => undefined)
-    this.exited = new Promise((resolve) => {
+    this.exited = new Promise((resolve, reject) => {
       this.resolveExited = resolve
+      this.rejectExited = reject
     })
+    this.exited.catch(() => undefined)
     this.physicalExit = new Promise((resolve) => {
       this.resolvePhysical = resolve
     })
@@ -181,9 +211,12 @@ export class ChatProcess implements OutboxProcess {
         return p
       },
       emit: (event) => this.emit(event),
+      waitForOutput: () => this.output.acceptInput(),
       addHistory: (events) => {
         if (this.ended || this.replaced) return
-        this.hooks.onHistory?.(this, events)
+        if (!this.handlingLine && (this.waitingForStorage || this.output.busy))
+          this.output.push(JSON.stringify(['history', events]))
+        else this.hooks.onHistory?.(this, events)
       }
     }
 
@@ -209,7 +242,7 @@ export class ChatProcess implements OutboxProcess {
           starting = Promise.reject(err)
         }
         this.driverHasContext = true
-        for (const line of this.earlyLines.splice(0)) this.handleLine(line)
+        this.output.pump()
         Promise.all([starting, committed]).then(
           () => {
             if (this.ended) return
@@ -228,8 +261,11 @@ export class ChatProcess implements OutboxProcess {
     // Framing stays hub-side; the driver owns parsing. A line that arrives
     // before the driver has its context waits for it (never dropped).
     const lines = createLineSplitter((line) => {
-      if (!this.driverHasContext) this.earlyLines.push(line)
-      else this.handleLine(line)
+      if (this.ended || this.replaced || this.inputEnded) return
+      if (this.driverHasContext && this.driver.handleControlLine?.(line)) return
+      if (!this.driverHasContext || this.waitingForStorage || this.output.busy) {
+        this.output.push(JSON.stringify(['line', line]))
+      } else this.handleLine(line)
     })
     this.handle.onStdout(lines)
     // Routed output the computer no longer held: drop the torn line (never merge
@@ -256,16 +292,31 @@ export class ChatProcess implements OutboxProcess {
         text: 'Part of the agent’s output was lost on the way from its computer; the reply above may be incomplete.'
       })
     })
-    this.handle.onStderr((chunk) => this.bufferStderr(chunk))
-    this.handle.onExit(({ code, signal }) => this.finish(code, signal, false))
+    this.handle.onStderr((chunk) => {
+      if (!this.inputEnded) this.bufferStderr(chunk)
+    })
+    this.handle.onExit(({ code, signal }) => {
+      this.inputEnded = true
+      this.markPhysicalExit()
+      void this.flushOutput().then(
+        () => this.finish(code, signal, false),
+        () => this.finish(code, signal, false)
+      )
+    })
     this.handle.onError((err) => {
       if (!this.spawned) {
         this.ended = true
         this.clearStderrTimer()
         this.rejectReady(err)
         this.markPhysicalExit()
-        this.resolveExited({ code: null, signal: null })
         this.hooks.onStartError(this, err)
+        void this.output.close().then(
+          () => this.resolveExited({ code: null, signal: null }),
+          (cleanup) =>
+            this.rejectExited(
+              new AggregateError([err, cleanup], 'Chat startup cleanup failed', { cause: err })
+            )
+        )
         return
       }
       this.emit({ kind: 'error', message: err.message, detail: { name: err.name } })
@@ -276,20 +327,34 @@ export class ChatProcess implements OutboxProcess {
     return this.handle.pid
   }
 
-  /** Bound accepted output to the current pipe chunk (or one complete protocol atom). */
+  /** Event consumption waits for storage; raw/control input continues via bounded spill. */
   get waitingForStorage(): boolean {
     return this.outputHolds.size > 0
+  }
+
+  get outputBufferStats() {
+    return this.output.stats
   }
 
   holdOutputUntil(work: Promise<unknown>): void {
     if (this.outputHolds.has(work)) return
     this.outputHolds.add(work)
-    this.handle.setOutputPaused?.(true)
     const release = () => {
       this.outputHolds.delete(work)
-      if (!this.outputHolds.size) this.handle.setOutputPaused?.(false)
+      if (!this.outputHolds.size) this.output.pump()
     }
     void work.then(release, release)
+  }
+
+  async flushOutput(): Promise<void> {
+    for (;;) {
+      await Promise.allSettled([...this.outputHolds])
+      if (this.ended) {
+        await this.output.close()
+        if (this.outputFailure) throw this.outputFailure
+      } else await this.output.drain()
+      if (!this.outputHolds.size && !this.output.busy) return
+    }
   }
 
   /** Started and able to take a write. */
@@ -362,14 +427,30 @@ export class ChatProcess implements OutboxProcess {
 
   private handleLine(line: string): void {
     if (this.ended || this.replaced) return
+    this.handlingLine = true
     try {
       this.driver.handleLine(line)
     } catch (err) {
       console.error('[chat-process] driver.handleLine threw:', err)
+    } finally {
+      this.handlingLine = false
     }
   }
 
   private emit(event: AgentEvent): void {
+    if (
+      !this.ended &&
+      !this.replaced &&
+      !this.handlingLine &&
+      (this.waitingForStorage || this.output.busy)
+    ) {
+      this.output.push(JSON.stringify(['event', event]))
+      return
+    }
+    this.deliverEvent(event)
+  }
+
+  private deliverEvent(event: AgentEvent): void {
     if (this.ended || this.replaced) {
       this.hooks.onStale?.(this, event)
       return
@@ -394,8 +475,17 @@ export class ChatProcess implements OutboxProcess {
     } catch (err) {
       console.error('[chat-process] driver.dispose threw:', err)
     }
-    this.resolveExited({ code, signal })
-    this.hooks.onExit(this, code, signal, unconfirmed)
+    void this.output.close().then(
+      () => {
+        if (this.outputFailure) this.rejectExited(this.outputFailure)
+        else this.resolveExited({ code, signal })
+        this.hooks.onExit(this, code, signal, unconfirmed || !!this.outputFailure)
+      },
+      (error) => {
+        this.rejectExited(error)
+        this.hooks.onExit(this, code, signal, true)
+      }
+    )
   }
 
   private markPhysicalExit(): void {

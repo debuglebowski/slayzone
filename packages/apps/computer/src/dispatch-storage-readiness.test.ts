@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-import { symlinkSync } from 'node:fs'
+import { readFileSync, symlinkSync } from 'node:fs'
 import { build } from 'esbuild'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -149,9 +150,15 @@ test('path/project readiness does not delay validated controls; a placed project
   }
 })
 
-test.skipIf(process.platform === 'win32')(
-  'real native sync leaves authorized scoped controls responsive across actual online hubs',
-  async () => {
+test
+  .skipIf(process.platform === 'win32')
+  .each([
+    'dispatch-storage-readiness',
+    'dispatch-network-controls',
+    'dispatch-network-controls-codex'
+  ])(
+  '%s: real native sync leaves authorized scoped controls responsive across actual online hubs',
+  async (proof) => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'dispatch-native-owner-')))
     try {
       const require = createRequire(import.meta.url)
@@ -165,7 +172,7 @@ test.skipIf(process.platform === 'win32')(
           import.meta.url
         )
       )
-      execFileSync('cc', [
+      const ccArgv = [
         '-std=c11',
         ...(process.platform === 'darwin' ? ['-dynamiclib'] : ['-shared', '-fPIC']),
         '-O2',
@@ -177,7 +184,8 @@ test.skipIf(process.platform === 'win32')(
         source,
         '-o',
         extension
-      ])
+      ]
+      execFileSync('cc', ccArgv)
       const fixture = join(root, 'dispatch.cjs')
       symlinkSync(
         new URL('../../../../node_modules', import.meta.url),
@@ -186,7 +194,12 @@ test.skipIf(process.platform === 'win32')(
       )
       await build({
         entryPoints: [
-          fileURLToPath(new URL('./dispatch-storage-readiness.native.fixture.ts', import.meta.url))
+          fileURLToPath(
+            new URL(
+              `./${proof.startsWith('dispatch-network-controls') ? 'dispatch-network-controls' : proof}.native.fixture.ts`,
+              import.meta.url
+            )
+          )
         ],
         outfile: fixture,
         bundle: true,
@@ -222,27 +235,49 @@ test.skipIf(process.platform === 'win32')(
           }
         ]
       })
-      const output = execFileSync(
-        process.execPath,
-        [
-          '--require',
-          fileURLToPath(
-            new URL(
-              '../../../domains/chat-runtime/src/server/computer-online-no-main-sqlite.fixture.cjs',
-              import.meta.url
+      const nativeArgv = [
+        '--require',
+        proof.startsWith('dispatch-network-controls')
+          ? fileURLToPath(
+              new URL('./dispatch-network-controls.preload.fixture.cjs', import.meta.url)
             )
-          ),
-          fixture,
-          root,
-          extension
-        ],
-        {
-          encoding: 'utf8',
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-          timeout: 25000
+          : fileURLToPath(
+              new URL(
+                '../../../domains/chat-runtime/src/server/computer-online-no-main-sqlite.fixture.cjs',
+                import.meta.url
+              )
+            ),
+        fixture,
+        root,
+        extension,
+        proof.endsWith('-codex') ? 'codex-chat' : 'claude-chat'
+      ]
+      const output = execFileSync(process.execPath, nativeArgv, {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          SLAYZONE_TEST_CONTROL_SYNC_EXTENSION: extension
+        },
+        timeout: 25000
+      })
+      const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
+      const evidence = {
+        ...JSON.parse(output),
+        platform: process.platform,
+        arch: process.arch,
+        node: process.versions.node,
+        electron: process.versions.electron,
+        ccArgv: ['cc', ...ccArgv],
+        nativeArgv: [process.execPath, ...nativeArgv],
+        sha256: {
+          vfsSource: hash(source),
+          vfsBinary: hash(extension),
+          fixtureBundle: hash(fixture),
+          workerBundle: hash(fileURLToPath(new URL('../dist/bin.cjs', import.meta.url)))
         }
-      )
-      process.stdout.write('POSIX native dispatch proof ' + output.trim() + '\n')
+      }
+      process.stdout.write('POSIX native dispatch proof ' + JSON.stringify(evidence) + '\n')
       expect(JSON.parse(output)).toMatchObject({
         actualDispatch: true,
         actualOnlineRuntime: true,
@@ -255,6 +290,14 @@ test.skipIf(process.platform === 'win32')(
         mainNativeCalls: 0,
         mainSyncs: 0
       })
+      if (proof.startsWith('dispatch-network-controls'))
+        expect(JSON.parse(output)).toMatchObject({
+          actualNetwork: true,
+          authenticatedEnrollment: true,
+          providerCancelAcknowledged: true,
+          unrelatedHubWrite: true,
+          losslessEvents: 1200
+        })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

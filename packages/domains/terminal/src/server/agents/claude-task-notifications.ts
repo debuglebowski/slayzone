@@ -32,6 +32,7 @@ const POLL_INTERVAL_MS = 50
 
 export interface TaskNotificationsIo {
   emit(event: AgentEvent): void
+  waitForOutput?(): Promise<void>
   /** When this process started (host clock): older records are not its own. */
   startedAt: number
   /** The session file of `sessionId` run in `cwd` (default: the CLI's own path). */
@@ -100,6 +101,7 @@ export class ClaudeTaskNotifications {
   private readUntil = 0
   private timer: ReturnType<typeof setInterval> | null = null
   private inflight: Promise<void> | null = null
+  private pollAgain = false
   private disposed = false
 
   constructor(private readonly io: TaskNotificationsIo) {}
@@ -143,8 +145,18 @@ export class ClaudeTaskNotifications {
       return Promise.resolve()
     }
     // A read already running may have started before the newest append.
-    if (this.inflight) return this.inflight.then(() => this.poll())
-    const run = this.readAppended().catch(() => {
+    if (this.inflight) {
+      this.pollAgain = true
+      return this.inflight
+    }
+    const run = (async () => {
+      do {
+        this.pollAgain = false
+        await this.io.waitForOutput?.()
+        if (!this.reading || this.disposed || Date.now() > this.readUntil) return
+        await this.readAppended()
+      } while (this.pollAgain)
+    })().catch(() => {
       /* no session file yet, or it vanished: nothing to name */
     })
     this.inflight = run.finally(() => {

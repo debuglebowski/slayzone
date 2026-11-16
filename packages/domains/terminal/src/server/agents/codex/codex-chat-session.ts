@@ -487,6 +487,9 @@ class CodexChatSession implements ChatSessionDriver {
   private manualCompaction = false
   /** Waiters for the running turn to end (`turn/completed`). */
   private turnEndWaiters: Array<() => void> = []
+  /** Protocol control observation, independent of paused timeline consumption. */
+  private controlTurnId: string | null = null
+  private controlTurnObserved = false
   /** Latest token usage from `thread/tokenUsage/updated`, folded into `result`. */
   private lastUsage: TokenUsage = {
     inputTokens: 0,
@@ -914,6 +917,35 @@ class CodexChatSession implements ChatSessionDriver {
     this.client?.handleLine(line)
   }
 
+  handleControlLine(line: string): boolean {
+    if (this.client?.handleControlLine(line)) return true
+    let message: { method?: string; params?: { threadId?: string; turn?: { id?: string } } }
+    try {
+      message = JSON.parse(line)
+    } catch {
+      return false
+    }
+    const params = message?.params,
+      turnId = params?.turn?.id
+    if (params?.threadId === this.threadId && typeof turnId === 'string') {
+      if (message.method === 'turn/started') {
+        this.controlTurnObserved = true
+        this.controlTurnId = turnId
+        this.settleInterruptForTurn(turnId)
+      } else if (
+        message.method === 'turn/completed' &&
+        turnId === (this.controlTurnId ?? this.currentTurnId)
+      ) {
+        this.controlTurnObserved = true
+        this.controlTurnId = null
+        for (const wake of this.turnEndWaiters.splice(0)) wake()
+      }
+    }
+    // Observe the control boundary, then retain the original notification for
+    // ordinary driver/timeline processing in its original persisted order.
+    return false
+  }
+
   async probeLiveness(timeoutMs: number): Promise<boolean> {
     if (!this.client || !this.threadId || !this.handshakeDone || this.disposed) return false
     const threadId = this.threadId
@@ -1202,12 +1234,13 @@ class CodexChatSession implements ChatSessionDriver {
   private interrupt(timeoutMs?: number): Promise<unknown> {
     const client = this.client
     if (!client || !this.threadId) return Promise.resolve()
-    if (this.currentTurnId) {
+    const turnId = this.controlTurnObserved ? this.controlTurnId : this.currentTurnId
+    if (turnId) {
       return client.request(
         'turn/interrupt',
         {
           threadId: this.threadId,
-          turnId: this.currentTurnId
+          turnId
         },
         timeoutMs
       )
@@ -1273,6 +1306,10 @@ class CodexChatSession implements ChatSessionDriver {
     this.currentTurnId = turnId
     this.currentTurnMessageId = execution.messageId
     if (this.ctx && changed) this.emit(this.ctx, { kind: 'turn-started', execution })
+    this.settleInterruptForTurn(turnId)
+  }
+
+  private settleInterruptForTurn(turnId: string): void {
     const waiting = this.pendingInterrupt
     if (!waiting || !this.client || !this.threadId) return
     this.pendingInterrupt = null
@@ -1353,7 +1390,8 @@ class CodexChatSession implements ChatSessionDriver {
 
   /** Resolves once no turn runs (or after `timeoutMs`). */
   private turnEnded(timeoutMs: number, failOnTimeout = false): Promise<void> {
-    if (!this.currentTurnId && this.turnStartsInFlight === 0) return Promise.resolve()
+    const turnId = this.controlTurnObserved ? this.controlTurnId : this.currentTurnId
+    if (!turnId && this.turnStartsInFlight === 0) return Promise.resolve()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => done(true), timeoutMs)
       const waiters = this.turnEndWaiters
@@ -1976,6 +2014,11 @@ class CodexChatSession implements ChatSessionDriver {
         this.backgroundPollingUnsupported = true
       }
     } finally {
+      try {
+        await ctx.waitForOutput?.()
+      } catch {
+        this.backgroundPollingUnsupported = true
+      }
       this.scheduleBackgroundPoll()
     }
   }

@@ -1,5 +1,31 @@
 # Computer-owned chat
 
+### Transient process controls
+
+`chatProcessControls` is an additive implementing-host capability (absent means
+false). `chat.request {kind:'control', identity, spawnId, action:'interrupt'|'kill'}`
+controls only an already-bound live process. It requires the authenticated hub's
+matching task scope, exact conversation/owner epoch and process spawn generation.
+Main checks admission and binding again after the real provider/physical ACK.
+Ownership changes, close, task admission fences and owner failure reject stale
+controls. No filesystem permission snapshot is cached for this path.
+
+Its `{acknowledged, spawnId, scope:'provider'|'process'}` is transient control
+acknowledgement. It does not claim that history, prompt/queue edits or a command
+receipt committed. Existing `invoke` operations retain their durable acceptance
+and completion fences; public caller adoption/composition is separate. Filesystem
+requests still await fresh fail-closed authority. Main begins physical chat stop
+before awaiting SQLite during close, then retains output/file/store ownership
+through the accepted prefix and actual cleanup.
+
+POSIX native tests exercise both registered chat drivers with local protocol test
+children through real enrolled WS hubs, production scope dispatch and packaged
+canonical owner. A writer-thread-specific VFS fence holds hub A's FULL xSync while
+heartbeats, ping, process stop, provider interrupt ACK and hub B writes progress.
+They verify exact saved event content/order after release and physical close before
+the fence releases. This is isolated backend evidence, not external provider or
+public client integration evidence; Windows native responsiveness is not claimed.
+
 Computer-local storage for chat content, scoped to the authenticated hub. The hub
 retains task and routing metadata; it is not a fallback content store.
 

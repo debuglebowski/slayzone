@@ -37,3 +37,8 @@ Host contract v3 requires provider transitions and scoped draft/queue ownership
 preconditions. A new hub connection alone proves only the connector's protocol;
 retained v1/v2 hosts remain unready until idle replacement. Native inspection and
 stop controls bridge both versions; computer-owned chat stop/clear bridge v2 only.
+
+Optional `chatProcessControls` belongs to the implementing host identity, never
+the replacing connector's release. It advertises transient generation-scoped
+provider/physical control ACKs independently of durable chat command receipts.
+Older retained hosts omit it; enroll/hello explicitly propagate false.

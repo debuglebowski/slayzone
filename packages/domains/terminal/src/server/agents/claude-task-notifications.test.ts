@@ -128,6 +128,39 @@ describe('ClaudeTaskNotifications (reads the session file during a turn)', () =>
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('coalesces timer polls while the output spill waits, retaining the next notification', async () => {
+    tail.dispose()
+    let release!: () => void,
+      entered = false
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    const io = {
+      emit: (e: AgentEvent) => emitted.push(e),
+      startedAt: T0,
+      pathOf: () => file,
+      intervalMs: 0,
+      waitForOutput: () => {
+        entered = true
+        return held
+      }
+    }
+    tail = new ClaudeTaskNotifications(io)
+    write(notificationRecord('held', MONITOR_EVENT))
+    tail.turnStarted('/cwd', 'sid')
+    try {
+      await expect.poll(() => entered, { timeout: 1000 }).toBe(true)
+      const first = tail.poll()
+      for (let i = 0; i < 100; i++) expect(tail.poll()).toBe(first)
+      expect(emitted).toEqual([])
+      release()
+      await first
+      expect(uuids()).toEqual(['held'])
+    } finally {
+      release()
+    }
+  })
+
   it("the record the CLI writes after the turn's init is emitted", async () => {
     writeFileSync(file, '')
     tail.turnStarted('/cwd', 'sid')

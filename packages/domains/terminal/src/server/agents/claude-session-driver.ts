@@ -196,6 +196,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     this.notifications?.dispose()
     this.notifications = new ClaudeTaskNotifications({
       emit: (ev) => this.emitOwned(ev),
+      waitForOutput: () => ctx.waitForOutput?.() ?? Promise.resolve(),
       startedAt: Date.now()
     })
     this.readAttachment = ctx.attachmentReader ?? this.readAttachment
@@ -294,6 +295,18 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     }
 
     this.ctx?.emit(ev)
+  }
+
+  handleControlLine(line: string): boolean {
+    let raw: { type?: unknown }
+    try {
+      raw = JSON.parse(line)
+    } catch {
+      return false
+    }
+    if (!raw || raw.type !== 'control_response') return false
+    this.handleLine(line)
+    return true
   }
 
   sendUserMessage(text: string): void {
