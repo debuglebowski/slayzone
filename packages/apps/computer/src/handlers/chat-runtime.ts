@@ -507,6 +507,9 @@ export function createChatRuntimeHandlers(opts: {
     switch (req.kind) {
       case 'control':
         return r.processControl(req)
+      case 'control.prepare':
+      case 'control.cancel':
+        return r.prepareControl(req)
       case 'relay.watch':
         relay.configure(req.all, req.tabIds)
         return { ok: true }
@@ -788,6 +791,7 @@ export function createChatRuntimeHandlers(opts: {
       }
       case 'invoke': {
         const call = parseChatInvocation(req.value)
+        const original = call.controlToken ? structuredClone(call) : undefined
         const first = call.args[0]
         if (first && typeof first === 'object' && 'cwd' in first) {
           const o = first as { cwd: string }
@@ -811,7 +815,7 @@ export function createChatRuntimeHandlers(opts: {
         }
         if (['listSkills', 'listCommands', 'listAgents', 'listFiles'].includes(call.method))
           call.args[0] = await judgeChatPath(r, call.route.id, String(first))
-        return r.invoke(call)
+        return r.invoke(call, original)
       }
       case 'inspect':
         return await r.storage.conversation(req.id)
@@ -888,6 +892,7 @@ export function createChatRuntimeHandlers(opts: {
 
   return {
     request,
+    disconnected: () => instance?.cancelPreparedControls(undefined, true),
     hasFolderWork: (contains: (cwd: string) => boolean) =>
       localProcs?.hasFolderWork(contains) ?? false,
     hasTaskWork: (taskId: string) => localProcs?.hasTaskWork(taskId) ?? false,

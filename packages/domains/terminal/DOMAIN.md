@@ -247,6 +247,17 @@ one complete protocol record) spills, then resume independently of SQLite. Overf
 has no data cap or per-event promise backlog. The private file is unlinked before
 content writes, reclaimed after drain, and physically closed before process exit
 acknowledgement. File failure stops the process and rejects its drain.
+A prepared public control inserts a causal boundary into that same output spool.
+Pre-control events drain before the ordinary stop/pop decision; later records
+spill while protocol ACKs remain live. The continuation reuses the real provider
+result, fences workspace-delayed/outbox writes and queue drain, and releases the
+boundary before normal provider withdrawal/rewind waits. It validates the exact
+captured process generation; no replay can interrupt a later generation or user
+turn. Physical kill/remove keep outbox writes fenced through normal cleanup.
+A genuine close-only FileHandle failure retains generation/removal ownership and
+can retry physical close after repair. Lost writes or durable event failures stay
+fenced; hydrate/provider transition cannot pass an unresolved anonymous file.
+
 Bidirectional drivers expose `handleControlLine`; custom stream-only drivers keep
 the same interface. Autonomous notification/poll readers await `waitForOutput`
 before producing another spill batch. Registered chat modes are Claude and Codex;

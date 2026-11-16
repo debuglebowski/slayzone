@@ -55,6 +55,7 @@ export interface ComputerIdentity {
   chatStorageCompaction?: boolean
   /** Host implements generation-scoped transient provider/process control ACKs. */
   chatProcessControls?: boolean
+  chatControlInvocations?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -368,7 +369,8 @@ export class HubDialer {
       promptSummariesAll: this.opts.identity.promptSummariesAll === true,
       // ...and compacts its chat store on request.
       chatStorageCompaction: this.opts.identity.chatStorageCompaction === true,
-      chatProcessControls: this.opts.identity.chatProcessControls === true
+      chatProcessControls: this.opts.identity.chatProcessControls === true,
+      chatControlInvocations: this.opts.identity.chatControlInvocations === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -418,7 +420,8 @@ export class HubDialer {
             promptSummariesAll: this.opts.identity.promptSummariesAll === true,
             chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
             chatStorageCompaction: this.opts.identity.chatStorageCompaction === true,
-            chatProcessControls: this.opts.identity.chatProcessControls === true
+            chatProcessControls: this.opts.identity.chatProcessControls === true,
+            chatControlInvocations: this.opts.identity.chatControlInvocations === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

@@ -12,7 +12,7 @@ import {
   turnsRequestSchema,
   taskPathsRequestSchema
 } from '../shared'
-import { chatProcessControlSchema } from '../shared/protocol'
+import { chatProcessControlSchema, chatControlPreparationSchema } from '../shared/protocol'
 import { computerArtifactRequestSchema } from './artifacts'
 import { chatTestRequestSchema } from './computer-testing-schema'
 const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
@@ -34,6 +34,7 @@ export const sessionMoveFileRefSchema = z.discriminatedUnion('kind', [
 export type SessionMoveFileRef = z.infer<typeof sessionMoveFileRefSchema>
 
 export const computerRequestSchema = z.discriminatedUnion('kind', [
+  ...chatControlPreparationSchema.options,
   chatProcessControlSchema,
   ...chatTestRequestSchema.options,
   z.object({

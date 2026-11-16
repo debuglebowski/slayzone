@@ -144,6 +144,10 @@ export class ChatProcess implements OutboxProcess {
   /** `driver.start` was called: lines can be handed to it. */
   private driverHasContext = false
   private readonly output: ChatOutputSpool
+  private readonly boundaries = new Map<
+    string,
+    { enter(): void; release(): void; gate: Promise<void> }
+  >()
   private outputFailure: Error | null = null
   private stderrBuf = ''
   private stderrTimer: ReturnType<typeof setTimeout> | null = null
@@ -166,9 +170,17 @@ export class ChatProcess implements OutboxProcess {
           | ['line', string]
           | ['event', AgentEvent]
           | ['history', AgentEvent[]]
+          | ['boundary', string]
         if (kind === 'line') this.handleLine(value)
         else if (kind === 'event') this.deliverEvent(value)
-        else this.hooks.onHistory?.(this, value)
+        else if (kind === 'history') this.hooks.onHistory?.(this, value)
+        else {
+          const boundary = this.boundaries.get(value)
+          if (boundary) {
+            this.holdOutputUntil(boundary.gate)
+            boundary.enter()
+          }
+        }
       },
       failure: (error) => {
         this.outputFailure ??= error
@@ -305,6 +317,7 @@ export class ChatProcess implements OutboxProcess {
     })
     this.handle.onError((err) => {
       if (!this.spawned) {
+        for (const boundary of this.boundaries.values()) boundary.release()
         this.ended = true
         this.clearStderrTimer()
         this.rejectReady(err)
@@ -336,6 +349,35 @@ export class ChatProcess implements OutboxProcess {
     return this.output.stats
   }
 
+  /** A causal cut in accepted stdout. Later records spill while the durable
+   * control operation waits for admission; protocol ACKs keep their own lane. */
+  outputBoundary() {
+    const id = randomUUID()
+    let enter!: () => void,
+      reject!: (error: Error) => void,
+      resume!: () => void,
+      entered = false
+    const ready = new Promise<void>((yes, no) => {
+      enter = () => {
+        entered = true
+        yes()
+      }
+      reject = no
+    })
+    const gate = new Promise<void>((r) => {
+      resume = r
+    })
+    void ready.catch(() => undefined)
+    const release = () => {
+      this.boundaries.delete(id)
+      resume()
+      if (!entered) reject(new Error('Chat control output boundary was cancelled'))
+    }
+    this.boundaries.set(id, { enter, release, gate })
+    this.output.push(JSON.stringify(['boundary', id]))
+    return { ready, release }
+  }
+
   holdOutputUntil(work: Promise<unknown>): void {
     if (this.outputHolds.has(work)) return
     this.outputHolds.add(work)
@@ -354,6 +396,23 @@ export class ChatProcess implements OutboxProcess {
         if (this.outputFailure) throw this.outputFailure
       } else await this.output.drain()
       if (!this.outputHolds.size && !this.output.busy) return
+    }
+  }
+
+  /** Retry only physical close after a previously failed exit. The original
+   * exit rejection remains observable; a lost output/write prefix never heals. */
+  async settleExit(retryClose = false): Promise<void> {
+    try {
+      await this.exited
+    } catch (original) {
+      if (!retryClose || !this.ended || !this.physicalEnded || this.outputFailure) throw original
+      try {
+        await this.output.close()
+      } catch (cleanup) {
+        throw new AggregateError([original, cleanup], 'Chat physical cleanup retry failed', {
+          cause: original
+        })
+      }
     }
   }
 
@@ -460,6 +519,7 @@ export class ChatProcess implements OutboxProcess {
 
   private finish(code: number | null, signal: string | null, unconfirmed: boolean): void {
     if (this.ended) return
+    for (const boundary of this.boundaries.values()) boundary.release()
     if (!unconfirmed) this.markPhysicalExit()
     // Last words first, while it still counts.
     this.clearStderrTimer()

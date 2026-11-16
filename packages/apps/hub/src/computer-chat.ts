@@ -134,6 +134,7 @@ export function createComputerChatServices(opts: {
   connected?(computerId: string): boolean
   recovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
+  chatControlInvocations?(computerId: string): boolean
   /** Whether the computer answers chat history in bounded pages (its `chatHistoryPages`). */
   chatHistoryPages?(computerId: string): boolean
   /** Whether the computer answers a task's prompt summaries in one request (FU5). */

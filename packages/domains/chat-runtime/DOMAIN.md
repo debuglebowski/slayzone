@@ -13,7 +13,8 @@ controls. No filesystem permission snapshot is cached for this path.
 Its `{acknowledged, spawnId, scope:'provider'|'process'}` is transient control
 acknowledgement. It does not claim that history, prompt/queue edits or a command
 receipt committed. Existing `invoke` operations retain their durable acceptance
-and completion fences; public caller adoption/composition is separate. Filesystem
+and completion fences. Public caller adoption uses the distinct
+`chatControlInvocations` continuation contract described below. Filesystem
 requests still await fresh fail-closed authority. Main begins physical chat stop
 before awaiting SQLite during close, then retains output/file/store ownership
 through the accepted prefix and actual cleanup.
@@ -23,8 +24,9 @@ children through real enrolled WS hubs, production scope dispatch and packaged
 canonical owner. A writer-thread-specific VFS fence holds hub A's FULL xSync while
 heartbeats, ping, process stop, provider interrupt ACK and hub B writes progress.
 They verify exact saved event content/order after release and physical close before
-the fence releases. This is isolated backend evidence, not external provider or
-public client integration evidence; Windows native responsiveness is not claimed.
+the fence releases. These foundation tests establish isolated backend behavior;
+they do not alone establish final composed public-caller or external-provider
+acceptance. Windows native responsiveness is not claimed.
 
 Computer-local storage for chat content, scoped to the authenticated hub. The hub
 retains task and routing metadata; it is not a fallback content store.
@@ -420,7 +422,6 @@ dropped, or restored when it is the only copy).
   boundaries; they are not actual computer control-route responsiveness proof.
   Full composed FU2 acceptance and archive recovery/serialization (S8) stay separate.
 
-
 - 2026-11-16 (fu-2 R1, S8): restored archives serialize the complete native
   delete/rewrite/compacted-marker/manifest/index lifetime with reads and restore
   publication. Admission precedes awaits; close drains accepted operations. Every
@@ -442,3 +443,29 @@ dropped, or restored when it is the only copy).
   remove abandoned snapshots before certifying erasure. macOS/POSIX native VFS and
   real archive SIGKILL tests cover these paths; Windows native execution and parent
   composed/control-route/4GB acceptance remain outside this slice.
+
+- 2026-11-16 (S6 controls continuation): existing public chat interrupt, abort/pop,
+  kill and remove callers share the hub relay's host-owned `chatControlInvocations`
+  capability. This is distinct from raw `chatProcessControls`: a foundation host
+  cannot promise causal durable continuations. Missing/false retains ordinary
+  invocation and maintenance-stop behavior, including retained-host enroll/hello.
+
+  `control.prepare` validates the live full conversation identity and captures
+  one process generation before lifecycle/bootstrap/content IO. Its private ACK
+  explicitly leaves durability pending; no public/UI success or receipt is
+  synthesized. The ordinary invoke retains its operation ID, fresh ownership/path
+  checks, queue fence, durable command admission and completion. An opaque token
+  binds the exact wire input to that captured control; repeated delivered commands
+  use their existing receipt, never another interrupt. Refused provider ACKs feed
+  the original durable respawn fallback. Replacement/deletion/lifecycle revoke
+  preparation; disconnect revokes uncommitted preparation only. This adds no
+  storage owner, history scan, cached filesystem authorization or callback wire.
+
+The S8 archive/privacy and S7 recovery contracts remain in force alongside this
+public-control wiring and the B5 canonical-worker publication protocol. Their
+scoped native evidence does not replace final composed control, close, readiness
+and publication acceptance. Lease/concurrent-stop follow-ups, metadata review
+follow-ups and peer-browser integration remain separate composition work. The
+verified filesystem runtime-error recovery does not close the historical parallel
+FS deadline RED2 gate or attribute it to a product defect. Final composed gates and
+fresh whole-FU2 review remain required.

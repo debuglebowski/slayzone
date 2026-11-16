@@ -1,4 +1,9 @@
-import { parseChatInvocation, CHAT_READ_OPERATIONS, type ChatOperation } from '../shared/protocol'
+import {
+  parseChatInvocation,
+  CHAT_READ_OPERATIONS,
+  type ChatOperation,
+  type ChatInvocation
+} from '../shared/protocol'
 import type { createChatOps, ChatQueueRuntime } from '@slayzone/terminal/runtime'
 import type { ChatStorage } from './storage'
 import { assertChatTabStateScope, type ChatTabStateScope } from '@slayzone/terminal-contracts'
@@ -18,6 +23,7 @@ type Runtime = {
   local?: unknown
   ops: ReturnType<typeof createChatOps>
   queueOps: ReturnType<ChatQueueRuntime['createChatQueueOps']>
+  execute?(call: ChatInvocation, work: () => unknown): Promise<unknown>
 }
 const tabOperations = new Set([
   'releaseConversation',
@@ -191,7 +197,9 @@ export function createChatInvoker(runtime: Runtime) {
           'Operation acceptance is durable but completion is unconfirmed; reconcile state before an explicit retry'
         )
       }
-      const result = await operation(...req.args)
+      const result = await (runtime.execute
+        ? runtime.execute(req, () => operation(...req.args))
+        : operation(...req.args))
       const saved = result ?? null,
         ephemeral = req.method === 'askSideQuestion'
       await runtime.storage.completeCommand(

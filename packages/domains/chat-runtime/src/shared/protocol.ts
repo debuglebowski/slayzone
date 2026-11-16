@@ -31,6 +31,34 @@ export const chatProcessControlSchema = z
   })
   .strict()
 export type ChatProcessControl = z.infer<typeof chatProcessControlSchema>
+export const chatControlPreparationSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('control.prepare'),
+      identity: chatIdentitySchema.strict(),
+      value: z.unknown()
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('control.cancel'),
+      identity: chatIdentitySchema.strict(),
+      token: z.string().uuid()
+    })
+    .strict()
+])
+export const chatPreparedControlSchema = z.discriminatedUnion('available', [
+  z.object({ available: z.literal(false) }).strict(),
+  z
+    .object({
+      available: z.literal(true),
+      token: z.string().uuid(),
+      spawnId: id,
+      acknowledged: z.boolean(),
+      pendingDurability: z.literal(true)
+    })
+    .strict()
+])
 export const chatTabTransitionSchema = z
   .object({
     id: z.string().uuid(),
@@ -358,6 +386,8 @@ const envelope = z.object({
   target: z.enum(['ops', 'queue']),
   method: z.string(),
   operationId: id.optional(),
+  /** Private capability-gated continuation of an already acknowledged control. */
+  controlToken: id.optional(),
   args: z.array(z.unknown()).max(16)
 })
 export function parseChatInvocation(input: unknown) {

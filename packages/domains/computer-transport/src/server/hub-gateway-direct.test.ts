@@ -139,7 +139,8 @@ describe('runtime feature flags (additive, no protocol bump)', () => {
     'aiConfigHashFiles',
     'promptSummariesAll',
     'chatStorageCompaction',
-    'chatProcessControls'
+    'chatProcessControls',
+    'chatControlInvocations'
   ] as const)(
     'keeps %s from each live handshake, never from stored enrollment tags',
     async (feature) => {

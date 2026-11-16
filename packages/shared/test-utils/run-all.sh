@@ -307,6 +307,8 @@ run_harness packages/domains/terminal/src/server/runtime/idle-sweep.test.ts
 run_harness packages/domains/terminal/src/server/runtime/hub-local-spawn-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-proc-handle.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-process-flow.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-control-continuation.test.ts
+run_harness packages/apps/computer/src/connector-readiness.test.ts
 # node-pty optional in the published hub (T-30): loaded on the first local spawn, never at
 # import; missing → a clear refusal at that spawn.
 run_harness packages/domains/terminal/src/server/runtime/node-pty-optional.test.ts

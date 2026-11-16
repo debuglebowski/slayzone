@@ -4,10 +4,11 @@ const { isMainThread } = require('node:worker_threads')
 if (isMainThread) {
   const load = Module._load
   const proxies = new WeakMap()
-  let counterAvailable = true
+  // Public-caller fixtures also bootstrap one isolated hub metadata DB.
+  let countersAvailable = process.env.SLAYZONE_TEST_PUBLIC_CONTROLS === '1' ? 2 : 1
   const admit = (args) => {
-    if (counterAvailable && args[0] === ':memory:') {
-      counterAvailable = false
+    if (countersAvailable > 0 && args[0] === ':memory:') {
+      countersAvailable--
       return
     }
     throw new Error('Native SQLite constructor refused on computer main')

@@ -1172,6 +1172,9 @@ export function composeServer(opts: {
     chatStorageCompaction: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
         ?.chatStorageCompaction === true,
+    chatControlInvocations: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
+        ?.chatControlInvocations === true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),

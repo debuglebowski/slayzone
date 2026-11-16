@@ -8,7 +8,10 @@ import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
 import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
 import { createPtyHistory, ptyHistoryDir } from './pty-history'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
-import { chatProcessControlSchema } from '@slayzone/chat-runtime/shared'
+import {
+  chatProcessControlSchema,
+  chatControlPreparationSchema
+} from '@slayzone/chat-runtime/shared'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
  * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
@@ -564,7 +567,9 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     // request is served must lie inside that task's / project's own folders here.
     const control =
       method === HubToComputerMethods.chatRequest &&
-      (params as { kind?: unknown } | null)?.kind === 'control'
+      ['control', 'control.prepare', 'control.cancel'].includes(
+        String((params as { kind?: unknown } | null)?.kind)
+      )
     const independent = storeIndependentControls.has(method) || control
     const scope = independent ? undefined : actor.pathScope
     const scoped =
@@ -620,7 +625,10 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     }
     try {
       if (control) {
-        const request = chatProcessControlSchema.parse(params)
+        const request =
+          (params as { kind: string }).kind === 'control'
+            ? chatProcessControlSchema.parse(params)
+            : chatControlPreparationSchema.parse(params)
         if (actor.pathScope?.kind !== 'task' || actor.pathScope.taskId !== request.identity.taskId)
           throw new RpcError(
             ComputerTransportErrorCodes.refusedByComputer,
@@ -684,6 +692,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const hubDisconnected = (reason: string): void => {
+    chat.disconnected()
     pty.dropQueued(`hub disconnected (${reason})`)
     for (const cb of onHubDisconnected) cb()
   }
@@ -749,6 +758,7 @@ export function startComputer(
     promptSummariesAll: true,
     chatStorageCompaction: true,
     chatProcessControls: true,
+    chatControlInvocations: true,
     capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own

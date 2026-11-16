@@ -297,6 +297,13 @@ export class ChatOutbox {
     return { sent: entry.gen !== null, started: entry.cli === 'started' }
   }
 
+  /** Accepted messages whose writes have not begun; Stop records their cancellation. */
+  pendingWrites(): string[] {
+    return [...this.entries].flatMap(([id, entry]) =>
+      entry.state === 'queued' && !entry.written ? [id] : []
+    )
+  }
+
   /** Messages of `gen` the CLI holds queued (received, its turn not started yet). */
   heldByCli(gen: number): string[] {
     const ids: string[] = []

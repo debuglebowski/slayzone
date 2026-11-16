@@ -155,7 +155,9 @@ test
   .each([
     'dispatch-storage-readiness',
     'dispatch-network-controls',
-    'dispatch-network-controls-codex'
+    'dispatch-network-controls-codex',
+    'dispatch-network-controls-public',
+    'dispatch-network-controls-public-codex'
   ])(
   '%s: real native sync leaves authorized scoped controls responsive across actual online hubs',
   async (proof) => {
@@ -257,7 +259,8 @@ test
         env: {
           ...process.env,
           ELECTRON_RUN_AS_NODE: '1',
-          SLAYZONE_TEST_CONTROL_SYNC_EXTENSION: extension
+          SLAYZONE_TEST_CONTROL_SYNC_EXTENSION: extension,
+          ...(proof.includes('-public') ? { SLAYZONE_TEST_PUBLIC_CONTROLS: '1' } : {})
         },
         timeout: 25000
       })
@@ -286,10 +289,29 @@ test
         actorChecked: true,
         scopedPingAndPhysicalStopWhileNativeSyncBlocked: true,
         freshFilesystemWaited: true,
-        mainConstructorsRefused: true,
-        mainNativeCalls: 0,
         mainSyncs: 0
       })
+      if (proof.includes('-public'))
+        expect(JSON.parse(output)).toMatchObject({
+          actualPublicCaller: true,
+          promptRestored: true,
+          queueFencePreserved: true,
+          singleProviderInterrupt: true,
+          durableReceiptReplay: true,
+          publicKillRemove: true,
+          publicLosslessEvents: 1200,
+          replacementFenced: true,
+          reconnectFenced: true,
+          deletionFenced: true,
+          isolatedHubMetadataOnMain: true,
+          computerNativeConstructorsRefused: true,
+          computerMainNativeCalls: 0
+        })
+      else
+        expect(JSON.parse(output)).toMatchObject({
+          mainConstructorsRefused: true,
+          mainNativeCalls: 0
+        })
       if (proof.startsWith('dispatch-network-controls'))
         expect(JSON.parse(output)).toMatchObject({
           actualNetwork: true,

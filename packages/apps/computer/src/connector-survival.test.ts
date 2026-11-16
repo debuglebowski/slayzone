@@ -69,6 +69,9 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
       sessionId: 'job',
       projectId: 'p1',
       command: process.execPath,
+      // The spawn boundary deliberately strips inherited Electron launch flags.
+      // This fixture explicitly runs its Electron executable as a Node child.
+      env: { ELECTRON_RUN_AS_NODE: '1' },
       args: [
         '-e',
         `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(join(root, 'env.json'))}, JSON.stringify(process.env)); setInterval(()=> {if(fs.existsSync(${JSON.stringify(join(root, 'finish'))})) {console.log('output-during-handover');process.exit(7)}},50)`

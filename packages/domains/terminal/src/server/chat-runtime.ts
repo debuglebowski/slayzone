@@ -3,7 +3,8 @@ export {
   createChatTransport,
   type ChatTransport,
   type TransportDeps,
-  type CreateChatOpts
+  type CreateChatOpts,
+  type PreparedChatControl
 } from './runtime/chat-transport-manager'
 export { createConversationRegistry, type ConversationRegistry } from './runtime/live-conversations'
 export {

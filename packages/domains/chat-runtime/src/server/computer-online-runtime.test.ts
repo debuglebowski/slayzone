@@ -327,3 +327,57 @@ test('fatal diagnostic rejection revokes the online controller permit and preser
     rmSync(stateDir, { recursive: true, force: true })
   }
 })
+
+test('a lifecycle transition revokes a preparation admitted while its fresh lifecycle read was pending', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'online-control-lifecycle-'))
+  const runtime = await openComputerChatRuntime({
+    stateDir,
+    hubScope: 'h',
+    computerId: 'pc',
+    workerPath
+  })
+  let release!: () => void, entered!: () => void
+  const gate = new Promise<void>((r) => {
+      release = r
+    }),
+    reading = new Promise<void>((r) => {
+      entered = r
+    })
+  const close = vi.fn()
+  try {
+    await runtime.bootstrap(bootstrap)
+    const taskLifecycle = runtime.storage.taskLifecycle
+    vi.spyOn(runtime.storage, 'taskLifecycle').mockImplementation(async (task) => {
+      entered()
+      await gate
+      return taskLifecycle(task)
+    })
+    vi.spyOn(runtime.transport, 'prepareDurableControl').mockReturnValue({
+      spawnId: 'held-generation',
+      acknowledged: Promise.resolve(),
+      close,
+      run: async (work) => work()
+    })
+    const pausing = runtime.applyTaskLifecycle('t', 'paused', 1)
+    await reading
+    await runtime.prepareControl({
+      kind: 'control.prepare',
+      identity: bootstrap.identity,
+      value: {
+        route: { id: 'c', epoch: 1 },
+        target: 'ops',
+        method: 'interrupt',
+        operationId: 'during-lifecycle-read',
+        args: [{ taskId: 't', tabId: 'tab', mode: 'claude-chat', cwd: '/tmp' }]
+      }
+    })
+    expect(close).not.toHaveBeenCalled()
+    release()
+    await pausing
+    expect(close).toHaveBeenCalled()
+  } finally {
+    release()
+    await runtime.close()
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+})

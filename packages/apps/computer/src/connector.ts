@@ -59,6 +59,17 @@ export async function startConnector(
   if (grant.health.contract !== HOST_CONTRACT_VERSION && !maintenance)
     throw new Error('session host contract incompatible; maintenance required')
   let dialer: HubDialer
+  let stopped = false
+  const identityBarrier = () => {
+    let resolve!: () => void, reject!: (error: unknown) => void
+    const ready = new Promise<void>((yes, no) => {
+      resolve = yes
+      reject = no
+    })
+    void ready.catch(() => undefined)
+    return { ready, resolve, reject }
+  }
+  let authenticated = identityBarrier()
   let activate = (): void => undefined
   const ready = paused
     ? new Promise<void>((resolve) => {
@@ -141,7 +152,10 @@ export async function startConnector(
     credentialStore: createFileCredentialStore(hubHostFromUrl(config.hubUrl)),
     ...(config.joinToken ? { joinToken: config.joinToken } : {}),
     onHubRequest: async (method, params, actor) => {
-      await ready
+      const connection = authenticated
+      await Promise.all([ready, connection.ready])
+      if (stopped || connection !== authenticated)
+        throw new RpcError(-32001, 'Computer connection identity changed before dispatch')
       if (maintenance && !maintenanceMethods.has(method) && !isMaintenanceChatStop(method, params))
         throw new RpcError(
           -32001,
@@ -153,12 +167,29 @@ export async function startConnector(
       process.stdout.write(`[connector] ${message} ${JSON.stringify(meta ?? {})}\n`)
   })
   dialer.events.on('connected', (event) => {
-    void host.rpc.request('connected', event).catch(() => undefined)
+    const connection = authenticated
+    void host.rpc.request('connected', event).then(
+      () => {
+        if (stopped || connection !== authenticated)
+          connection.reject(new Error('Computer connection changed during identity delivery'))
+        else connection.resolve()
+      },
+      (error) => {
+        connection.reject(error)
+        // The hub authenticated, but this host did not admit that identity. Never
+        // dispatch using an identity left over from a previous connection.
+        if (connection === authenticated) void dialer.stop()
+      }
+    )
   })
   dialer.events.on('disconnected', (event) => {
+    authenticated.reject(new Error('Computer disconnected before identity admission'))
+    if (!stopped) authenticated = identityBarrier()
     void host.rpc.request('disconnected', event).catch(() => undefined)
   })
   host.socket.once('close', () => {
+    stopped = true
+    authenticated.reject(new Error('Computer host connection closed'))
     void dialer.stop()
   })
   if (!paused) await host.rpc.request('hooks', { directory: hookDirectory })
@@ -171,6 +202,8 @@ export async function startConnector(
     isIdle: () => true,
     setHookDirectory: () => undefined,
     stop: async () => {
+      stopped = true
+      authenticated.reject(new Error('Computer connector stopped'))
       await dialer.stop()
       host.close()
     }

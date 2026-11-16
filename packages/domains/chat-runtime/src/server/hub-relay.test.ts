@@ -11,6 +11,110 @@ import { applyComputerRetirements } from './hub-retirements'
 import { computerStanding } from '@slayzone/computers/server'
 import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
 
+test.each([undefined, false, true])(
+  'public abort prepares only with host continuation capability (%s), then awaits durable pop result',
+  async (capability) => {
+    const h = await createTestHarness()
+    let release!: () => void, entering!: () => void
+    let stopping: Promise<unknown> | undefined
+    const held = new Promise<void>((r) => {
+        release = r
+      }),
+      entered = new Promise<void>((r) => {
+        entering = r
+      })
+    try {
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      const ownership = createChatOwnershipStore(h.slayDb)
+      await ownership.register({
+        id: 'c',
+        taskId: 'task',
+        tabId: 'tab',
+        mode: 'claude-chat',
+        computerId: 'pc',
+        epoch: 1
+      })
+      const requests: Array<Record<string, unknown>> = []
+      const result = {
+        popped: true,
+        text: 'restored',
+        id: 'user',
+        content: [{ type: 'text', text: 'restored' }]
+      }
+      const request: ChatComputerRequest = async (_pc, raw) => {
+        const r = raw as Record<string, unknown>
+        requests.push(r)
+        if (r.kind === 'control.prepare')
+          return {
+            available: true,
+            token: '11111111-1111-4111-8111-111111111111',
+            spawnId: 'spawn',
+            acknowledged: true,
+            pendingDurability: true
+          }
+        if (r.kind === 'bootstrap')
+          return { ok: true, identity: (r.value as { identity: unknown }).identity }
+        if (r.kind === 'pendingMetadata') return []
+        if (r.kind === 'invoke') return result
+        if (r.kind === 'control.cancel') return { ok: true }
+        throw new Error('Unexpected public control request')
+      }
+      const options = {
+        db: h.slayDb,
+        ownership,
+        request,
+        stopRequest: request,
+        chatControlInvocations: () => capability === true,
+        bootstrap: async (owner: HubChatOwnership) => {
+          entering()
+          await held
+          return {
+            identity: owner,
+            projectId: 'p',
+            cwd: '/tmp',
+            revision: 1,
+            providerConfig: {},
+            defaultFlags: null,
+            env: {}
+          }
+        },
+        resolveComputer: async () => 'pc',
+        defaultComputer: async () => 'pc',
+        migrate: async () => {
+          throw new Error('unexpected migration')
+        },
+        onSessionsChanged: () => {}
+      }
+      const relay = createHubChatRelay(options)
+      let finished = false
+      stopping = relay.ops
+        .abortAndPop({ taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: '/tmp' })
+        .then((value) => {
+          finished = true
+          return value
+        })
+      void stopping.catch(() => undefined)
+      await entered
+      expect(requests.filter((x) => x.kind === 'control.prepare')).toHaveLength(capability ? 1 : 0)
+      expect(finished).toBe(false)
+      release()
+      expect(await stopping).toEqual(result)
+      const invoke = requests.find((x) => x.kind === 'invoke') as {
+        value: { controlToken?: string }
+      }
+      expect(invoke.value.controlToken).toBe(
+        capability ? '11111111-1111-4111-8111-111111111111' : undefined
+      )
+    } finally {
+      release()
+      await stopping?.catch(() => undefined)
+      h.cleanup()
+    }
+  }
+)
+
 test.each([false, true])(
   'history reads initialize new storage once and avoid repeated setup, existing=%s',
   async (existing) => {

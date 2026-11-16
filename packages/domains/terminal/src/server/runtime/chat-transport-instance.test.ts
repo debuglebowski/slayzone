@@ -1,7 +1,93 @@
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
+import files, { type FileHandle } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { createChatTransport, memoryChatEventReads } from './chat-transport-manager'
 
 const runtimes: Array<ReturnType<typeof createChatTransport>> = []
+
+test('genuine anonymous-file close failure fences removal/hydrate, then retries physical cleanup', async () => {
+  const { fakeChild, sj, until } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let release!: () => void,
+    repair = false,
+    file: FileHandle | undefined
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const fault = Object.assign(new Error('fixture close EIO'), { code: 'EIO' })
+  const originalOpen = files.open
+  const spy = vi.spyOn(files, 'open').mockImplementation(async (...args) => {
+    const handle = await originalOpen(...args)
+    if (String(args[0]).includes('slay-chat-output-')) {
+      file = handle
+      const close = handle.close.bind(handle)
+      vi.spyOn(handle, 'close').mockImplementation(async () => {
+        if (!repair) throw fault // Genuine rejection; the real FD remains open.
+        await close()
+      })
+    }
+    return handle
+  })
+  syncBuiltinESMExports()
+  const rows: import('../chat-events-store').BufferedEvent[] = []
+  const r = createChatTransport({
+    whichBinary: async () => '/fixture/claude',
+    spawn: () => {
+      setImmediate(() => f.emitter.emit('spawn'))
+      return f.child
+    },
+    eventStore: {
+      ...memoryChatEventReads(() => rows),
+      insert: async (_tab, seq, event, at) => {
+        if (event.kind === 'assistant-text' && event.text === 'one') await held
+        rows.push({ seq, event, at })
+        return 'inserted'
+      }
+    }
+  })
+  const opts = {
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  }
+  try {
+    await r.hydrateSession(opts)
+    await r.ensureSpawned('tab')
+    f.stdout.write([sj.text('one'), sj.text('two')].map((x) => JSON.stringify(x)).join('\n') + '\n')
+    await until(() => !!file)
+    release()
+    await r.readEventsSince('tab', -1)
+    expect((await file!.stat()).nlink).toBe(0)
+    await expect(r.removeSession('tab')).rejects.toBe(fault)
+    await expect(file!.stat()).resolves.toMatchObject({ nlink: 0 })
+    await expect(r.hydrateSession(opts)).rejects.toBe(fault)
+    const retried = await r.removeSession('tab').catch((error) => error)
+    expect(retried).toBeInstanceOf(AggregateError)
+    expect(retried.cause).toBe(fault)
+    expect(retried.errors).toContain(fault)
+    await expect(file!.stat()).resolves.toMatchObject({ nlink: 0 })
+    await expect(r.quiesceSession('tab')).rejects.toThrow('Chat physical cleanup retry failed')
+    repair = true
+    await expect(r.removeSession('tab')).resolves.toBeUndefined()
+    await expect(file!.stat()).rejects.toMatchObject({ code: 'EBADF' })
+    await expect(r.hydrateSession(opts)).resolves.toBeDefined()
+    expect(
+      rows
+        .filter((x) => x.event.kind === 'assistant-text')
+        .map((x) => (x.event as { text: string }).text)
+    ).toEqual(['one', 'two'])
+  } finally {
+    release()
+    repair = true
+    await file?.close()
+    await r.removeSession('tab').catch(() => undefined)
+    spy.mockRestore()
+    syncBuiltinESMExports()
+  }
+})
 afterEach(async () => {
   for (const r of runtimes.splice(0))
     await r.shutdownAll({ termGraceMs: 1, hardTimeoutMs: 10 }).catch(() => undefined)
@@ -82,6 +168,18 @@ test('a failed durable event save stops the process and reports a live storage e
     broadcast.find((x) => x.event.kind === 'error' && /storage/i.test(x.event.message))?.live
   ).toBeDefined()
   await expect(r.readEventsSince('tab', -1)).rejects.toThrow('disk full')
+  await expect(r.removeSession('tab')).rejects.toThrow('disk full')
+  await expect(r.removeSession('tab')).rejects.toThrow('disk full')
+  await expect(
+    r.hydrateSession({
+      tabId: 'tab',
+      taskId: 'task',
+      mode: 'claude-chat',
+      cwd: '/tmp',
+      providerFlags: [],
+      conversationId: null
+    })
+  ).rejects.toThrow('disk full')
 })
 
 test('a delayed insert cannot reach replay, projection or broadcast before its commit', async () => {

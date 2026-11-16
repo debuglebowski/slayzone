@@ -1,6 +1,7 @@
 import type { ChatAttachmentReader } from '../agents/chat-attachment-reader'
 import { spawn as realSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   ChatWorkspaceTracker,
   type WorkspaceCaptureBackend,
@@ -438,6 +439,13 @@ export interface ChatSessionInfo {
   chatCollaboration?: ChatCollaborationMode | null
   /** Whether Codex Fast Mode was enabled for this session's spawn. */
   chatFastMode?: boolean
+}
+
+export interface PreparedChatControl {
+  spawnId: string
+  acknowledged: Promise<unknown>
+  run<T>(work: () => T | Promise<T>): Promise<T>
+  close(): void
 }
 
 /**
@@ -897,7 +905,15 @@ export function createChatTransport(
 
   const tabs = new Map<string, ChatTab>()
   /** Closing tabs' final writes, awaited before the same tab is hydrated again. */
-  const closing = new Map<string, Promise<void>>()
+  const closing = new Map<string, { tab: ChatTab; work: Promise<void>; failed: boolean }>()
+  const pendingProcessControls = new WeakMap<ChatTab, Promise<void>>()
+  const controlContinuation = new AsyncLocalStorage<{
+    tab: ChatTab
+    proc: ChatProcess
+    ack: Promise<unknown>
+    release(): void
+    used: boolean
+  }>()
 
   function stateKey(tab: ChatTab): string {
     return `${tab.taskId}:${tab.tabId}`
@@ -2408,7 +2424,7 @@ export function createChatTransport(
       throw new ChatTransportError(`No agent backend registered for mode "${opts.mode}"`)
     }
     // A previous instance of this tab may still be writing its last events.
-    await closing.get(opts.tabId)
+    await closing.get(opts.tabId)?.work
     // Durable sequence floor (the log never numbers below it, nor below its newest event).
     const nextSeq = opts.initialNextSeq ?? (await deps.eventStore.nextSeq?.(opts.tabId)) ?? 0
 
@@ -2577,21 +2593,22 @@ export function createChatTransport(
     return new ChatOutbox({
       current,
       onCancelled: (id) => tab.workspaceTracker?.cancel(id),
-      ...(tab.workspaceTracker
-        ? {
-            beforeWriting: (proc: { gen: number }, id: string) =>
-              tab.workspaceTracker!.beforeSend(
-                {
-                  tabId: tab.tabId,
-                  gen: proc.gen,
-                  rootPath: tab.cwd,
-                  computerId: tab.respawnOpts.computerId ?? null,
-                  projectId: tab.respawnOpts.projectId
-                },
-                id
-              )
-          }
-        : {}),
+      beforeWriting: async (proc, id) => {
+        await pendingProcessControls.get(tab)
+        await tab.workspaceTracker?.beforeSend(
+          {
+            tabId: tab.tabId,
+            gen: proc.gen,
+            rootPath: tab.cwd,
+            computerId: tab.respawnOpts.computerId ?? null,
+            projectId: tab.respawnOpts.projectId
+          },
+          id
+        )
+        // A control can arrive while the workspace baseline is still pending.
+        // Its durable stop decides cancellation before this queued write runs.
+        await pendingProcessControls.get(tab)
+      },
       ensureReady: async () => {
         await permissionChanges.get(tab.tabId)
         if (tab.closed) throw new ChatTransportError('This chat tab was closed.')
@@ -3130,7 +3147,92 @@ export function createChatTransport(
       proc.interruptIssued = true
       proc.stoppingTurn = true
     }
-    return proc.driver.applyControl(request, timeoutMs)
+    return applyProcessControl(proc, request, timeoutMs)
+  }
+
+  function applyProcessControl(
+    proc: ChatProcess,
+    request: Record<string, unknown>,
+    timeoutMs: number
+  ): Promise<unknown> {
+    const continuation = controlContinuation.getStore()
+    if (continuation && request.subtype === 'interrupt' && !continuation.used) {
+      if (
+        continuation.proc !== proc ||
+        tabs.get(continuation.tab.tabId) !== continuation.tab ||
+        continuation.tab.proc !== proc
+      )
+        return Promise.reject(new Error('Chat control generation changed before continuation'))
+      continuation.used = true
+      continuation.release()
+      return continuation.ack
+    }
+    return proc.driver.applyControl!(request, timeoutMs)
+  }
+
+  function prepareDurableControl(
+    tabId: string,
+    method: 'interrupt' | 'abortAndPop' | 'kill' | 'remove'
+  ): PreparedChatControl | null {
+    const tab = tabs.get(tabId),
+      proc = liveProcess(tabId)
+    if (!tab || !proc) return null
+    if (pendingProcessControls.has(tab))
+      throw new Error('A chat control is already pending for this generation')
+    const stoppingProcess = method === 'kill' || method === 'remove'
+    const boundary = stoppingProcess
+        ? {
+            ready: Promise.resolve(),
+            release: () => {
+              // Physical process stop has no provider-turn decision boundary.
+            }
+          }
+        : proc.outputBoundary(),
+      previousStopping = proc.stoppingTurn
+    let running = false,
+      resume!: () => void
+    const waiting = new Promise<void>((r) => {
+      resume = r
+    })
+    pendingProcessControls.set(tab, waiting)
+    const release = () => {
+      boundary.release()
+      if (pendingProcessControls.get(tab) === waiting) pendingProcessControls.delete(tab)
+      resume()
+    }
+    proc.stoppingTurn = true
+    const acknowledged = stoppingProcess
+      ? controlSession(tabId, proc.spawnId, 'kill')
+      : sendControlRequest(tabId, { subtype: 'interrupt' }, STOP_INTERRUPT_TIMEOUT_MS)
+    void acknowledged.catch(() => {
+      // Keep the causal cut until durable fallback decides to replace this
+      // generation. A refused/timeout ACK is reused as a failure, never retried
+      // against a later turn.
+    })
+    return {
+      spawnId: proc.spawnId,
+      acknowledged,
+      async run<T>(work: () => T | Promise<T>): Promise<T> {
+        await boundary.ready.catch((error) => {
+          if (!proc.ended || proc.replaced) throw error
+        })
+        if (tabs.get(tabId) !== tab || tab.proc !== proc || proc.replaced || tab.closed)
+          throw new Error('Chat control generation changed before durable continuation')
+        running = true
+        try {
+          return await controlContinuation.run(
+            { tab, proc, ack: acknowledged, release, used: false },
+            work
+          )
+        } finally {
+          release()
+        }
+      },
+      close() {
+        release()
+        if (!running && tab.proc === proc) proc.stoppingTurn = previousStopping
+      }
+    }
   }
 
   /** Existing process only: never hydrate, read paths, persist receipts or respawn. */
@@ -3488,6 +3590,9 @@ export function createChatTransport(
     }
     const caps = chatCapabilitiesForMode(tab.mode)
     const proc = liveProcess(tabId)
+    const continuation = controlContinuation.getStore()
+    if (continuation && (continuation.tab !== tab || continuation.proc !== tab.proc))
+      throw new Error('Chat control generation changed before stop')
     const popped = opts.restorePrompt ? popTrailingUserMessage(tab) : null
     const reach = popped?.id ? tab.outbox.reach(popped.id) : null
     if (!popped) {
@@ -3496,7 +3601,13 @@ export function createChatTransport(
       recordInterrupted(tabId)
     }
 
+    // All writes before this public control are still on this side of its
+    // admission fence. Cancel them durably before releasing the workspace gate;
+    // none may create a later provider turn after the captured ACK.
+    if (continuation) for (const id of tab.outbox.pendingWrites()) tab.outbox.cancel(id)
+
     if (!proc || !caps.liveInterrupt || !proc.driver.applyControl) {
+      continuation?.release()
       await respawn(tabId, await opts.respawnOpts())
       if (popped?.id && caps.rewind) await forgetPopped(tab, popped.id)
       return stopResult(popped, 'respawn')
@@ -3512,6 +3623,7 @@ export function createChatTransport(
       // A running turn ends with a result; nothing else would clear the flag.
       if (tab.terminalState === 'running' || tab.pendingPrompts.size > 0) proc.stoppedTurn = true
     }
+    continuation?.release()
     // Messages the CLI holds queued would run right after the interrupt. A
     // steered one goes back to the queue; one the provider cannot withdraw
     // (Codex) dies with the turn it was added to — the queue sends it again.
@@ -3523,7 +3635,8 @@ export function createChatTransport(
 
     let ack: unknown
     try {
-      ack = await proc.driver.applyControl(
+      ack = await applyProcessControl(
+        proc,
         { subtype: 'interrupt' },
         opts.interruptTimeoutMs ?? STOP_INTERRUPT_TIMEOUT_MS
       )
@@ -4141,7 +4254,11 @@ export function createChatTransport(
    */
   function removeSession(tabId: string): Promise<void> {
     const tab = tabs.get(tabId)
-    if (!tab) return closing.get(tabId) ?? Promise.resolve()
+    if (!tab) {
+      const pending = closing.get(tabId)
+      if (!pending) return Promise.resolve()
+      return pending.failed ? finishRemoval(pending.tab, true) : pending.work
+    }
     tab.shadow?.close()
     tab.work.clear()
     transitionState(tab, 'dead')
@@ -4152,10 +4269,17 @@ export function createChatTransport(
     tab.outbox.dispose()
     const proc = tab.proc
     if (proc) proc.retiring = true
+    return finishRemoval(tab, false)
+  }
+
+  function finishRemoval(tab: ChatTab, retryClose: boolean): Promise<void> {
+    const tabId = tab.tabId,
+      proc = tab.proc
+    const ending = { tab, work: Promise.resolve(), failed: false }
     const flushed = (async () => {
       if (proc && !proc.ended) {
         const outcome = await proc.stop(2000, 2000)
-        await proc.exited
+        await proc.settleExit(retryClose)
         if (outcome === 'abandoned')
           throw new ChatTransportError(
             'Process exit is unconfirmed; chat history cannot close safely.'
@@ -4163,18 +4287,20 @@ export function createChatTransport(
       }
       // Startup failure may already be terminal while its anonymous file is
       // still closing. Erasure/replacement must retain that physical lifetime.
-      await proc?.exited
+      await proc?.settleExit(retryClose)
       tab.closed = true
       await flushEvents(tab)
     })().finally(() => tab.projection.then((p) => p?.close()).catch(() => undefined))
-    closing.set(tabId, flushed)
+    ending.work = flushed
+    closing.set(tabId, ending)
     void flushed.then(
       () => {
-        if (closing.get(tabId) === flushed) closing.delete(tabId)
+        if (closing.get(tabId) === ending) closing.delete(tabId)
       },
       () => {
-        // Retain the failed barrier (and its resources); a later hydrate/erasure
-        // must not treat an unconfirmed physical cleanup as an absent session.
+        // Retain ownership and the rejected barrier. An explicit remove/erase
+        // retries this same generation; hydrate cannot step past a live FD.
+        ending.failed = true
       }
     )
     void flushed.catch(() => undefined)
@@ -4184,7 +4310,7 @@ export function createChatTransport(
    * spawn) to exit, retaining final output before the log is flushed/closed. */
   async function quiesceSession(tabId: string): Promise<void> {
     const tab = tabs.get(tabId)
-    if (!tab) return closing.get(tabId) ?? Promise.resolve()
+    if (!tab) return removeSession(tabId)
     tab.outbox.dispose()
     const stop = async () => {
       const result = await shutdownSession(tab, {
@@ -4510,7 +4636,7 @@ export function createChatTransport(
           await flushEvents(tab)
         })().finally(() => tab.projection.then((p) => p?.close()))
       ),
-      ...closing.values()
+      ...[...closing.keys()].map(removeSession)
     ])
     return {
       total: results.length,
@@ -4640,6 +4766,7 @@ export function createChatTransport(
     sendToolResult,
     sendControlRequest,
     controlSession,
+    prepareDurableControl,
     askSideQuestion,
     cancelSideQuestion,
     changeCodexPermissionsAndResume,

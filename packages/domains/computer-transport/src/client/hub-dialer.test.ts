@@ -306,7 +306,8 @@ describe('computer protocol v3 (T-27)', () => {
         'chatTimelineRowSlices',
         'promptSummariesAll',
         'chatStorageCompaction',
-        'chatProcessControls'
+        'chatProcessControls',
+        'chatControlInvocations'
       ] as const
       // A retained host can omit these capabilities, explicitly disable them, or implement
       // each independently of the connector release and the other capabilities.

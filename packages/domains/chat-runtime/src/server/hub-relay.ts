@@ -28,6 +28,7 @@ import {
   chatOperationSchemas,
   chatQueueOperationSchemas,
   parseChatInvocation,
+  chatPreparedControlSchema,
   CHAT_READ_OPERATIONS,
   COMPUTER_OWNED_CHAT_KEYS,
   type ChatOperation,
@@ -120,6 +121,8 @@ export function createHubChatRelay(opts: {
   /** Pure stop controls skip lifecycle/recovery frames unsupported by an old host. */
   stopRequest?: ChatComputerRequest
   chatRuntimeReady?(computerId: string): boolean
+  /** Host supports causal prepare + durable control continuations, beyond raw ACKs. */
+  chatControlInvocations?(computerId: string): boolean
   /**
    * Whether this computer answers bounded history pages (`getEventPage`,
    * `getReplayPage`; it advertised `chatHistoryPages`). False/absent: an older
@@ -1289,7 +1292,10 @@ export function createHubChatRelay(opts: {
     const clearsQueue =
       (target === 'queue' && method === 'clear') ||
       (target === 'ops' && ['abortAndPop', 'reset', 'remove'].includes(method))
-    const ordered = (target === 'queue' && method === 'push') || clearsQueue
+    const ordered =
+      (target === 'queue' && method === 'push') ||
+      (target === 'ops' && ['send', 'interrupt', 'kill'].includes(method)) ||
+      clearsQueue
     const first = args[0]
     const entry = ordered ? enterQueue(tabIdOf(first)) : undefined
     let owner: HubChatOwnership | undefined
@@ -1297,6 +1303,7 @@ export function createHubChatRelay(opts: {
     let admission: QueueAdmission | undefined
     let renewal: ReturnType<typeof setInterval> | undefined
     let renewing = false
+    let preparedControl: { token: string; owner: HubChatOwnership } | undefined
     const queueControl = (name: string, values: unknown[], id: string = randomUUID()) => {
       if (!owner?.computerId) throw new Error('Queue ownership unavailable')
       return opts.request(owner.computerId, {
@@ -1311,6 +1318,52 @@ export function createHubChatRelay(opts: {
       })
     }
     try {
+      // Physical control precedes bootstrap/lifecycle/content IO and the queue
+      // fence. The normal durable mutation still observes that fence below.
+      if (target === 'ops' && ['interrupt', 'abortAndPop', 'kill', 'remove'].includes(method)) {
+        const existing = await ownership.forTab(tabIdOf(first))
+        if (
+          existing?.computerId &&
+          existing.state === 'active' &&
+          opts.chatControlInvocations?.(existing.computerId) === true &&
+          opts.chatRuntimeReady?.(existing.computerId) !== false
+        ) {
+          await opts.gate?.(existing.computerId, existing.taskId)
+          const call = parseChatInvocation({
+            route: { id: existing.id, epoch: existing.epoch },
+            target,
+            method,
+            args,
+            operationId: commandId
+          })
+          const context = call.args[0]
+          if (
+            typeof context === 'object' &&
+            context !== null &&
+            ((context as { tabId: string }).tabId !== existing.tabId ||
+              (context as { taskId: string }).taskId !== existing.taskId ||
+              (context as { mode: string }).mode !== existing.mode)
+          )
+            throw new Error('Chat stop ownership mismatch')
+          const result = chatPreparedControlSchema.parse(
+            await (opts.stopRequest ?? opts.request)(existing.computerId, {
+              kind: 'control.prepare',
+              identity: {
+                id: existing.id,
+                taskId: existing.taskId,
+                tabId: existing.tabId,
+                mode: existing.mode,
+                epoch: existing.epoch
+              },
+              value: call
+            })
+          )
+          if (result.available) {
+            if (typeof result.token !== 'string') throw new Error('Invalid prepared chat control')
+            preparedControl = { token: result.token, owner: existing }
+          }
+        }
+      }
       if (entry) await entry.ready
       if (
         (target === 'ops' && ['kill', 'abortAndPop'].includes(method)) ||
@@ -1371,6 +1424,13 @@ export function createHubChatRelay(opts: {
         }
       }
       owner = await route(target, method, args)
+      if (
+        preparedControl &&
+        (['id', 'taskId', 'tabId', 'mode', 'epoch', 'computerId'] as const).some(
+          (k) => owner![k] !== preparedControl!.owner[k]
+        )
+      )
+        throw new Error('Chat control ownership changed before durable invocation')
       if (target === 'ops' && ['getTabState', 'saveTabDraft', 'saveTabScroll'].includes(method))
         assertChatTabStateScope(
           owner,
@@ -1439,7 +1499,8 @@ export function createHubChatRelay(opts: {
           target,
           method,
           args,
-          ...(!read ? { operationId: commandId } : {})
+          ...(!read ? { operationId: commandId } : {}),
+          ...(preparedControl ? { controlToken: preparedControl.token } : {})
         }
       })
       if (!read) {
@@ -1467,6 +1528,18 @@ export function createHubChatRelay(opts: {
       }
       throw error
     } finally {
+      if (preparedControl) {
+        const p = preparedControl,
+          o = p.owner
+        await (opts.stopRequest ?? opts.request)(o.computerId!, {
+          kind: 'control.cancel',
+          token: p.token,
+          identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
+        }).catch(() => {
+          // Disconnect releases uncommitted preparation on its owning computer;
+          // an admitted durable invocation retains its ordinary completion path.
+        })
+      }
       if (renewal) clearInterval(renewal)
       entry?.release()
     }

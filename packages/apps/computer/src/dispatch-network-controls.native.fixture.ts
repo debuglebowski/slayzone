@@ -1,7 +1,7 @@
 /** Isolated real WS/enrollment/actor/scope dispatch + packaged canonical writer. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { startLoopbackHub } from '@slayzone/computer-transport/testing'
@@ -13,11 +13,32 @@ import {
 import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { runInPathScope } from '@slayzone/platform/path-scope'
 import { createHubRequestHandler } from './main'
+import { runMigrations } from '../../../shared/db-migrations/src/migrations'
+import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
+import { createChatOwnershipStore } from '../../../domains/chat-runtime/src/server/hub-ownership'
+import { createHubChatRelay } from '../../../domains/chat-runtime/src/server/hub-relay'
+import { chatRouter } from '../../../domains/terminal/src/server/chat-router'
+import { setChatDeps } from '../../../domains/terminal/src/server/chat-router-deps'
 
 const [root, extension, mode = 'claude-chat'] = process.argv.slice(2)
+let phase = 'setup'
 setSecurityLogSink(() => {
   // Keep fixture stdout a single metrics record; no audit contents are exported.
 })
+const publicControls = process.env.SLAYZONE_TEST_PUBLIC_CONTROLS === '1'
+// Isolated hub metadata bootstrap; computer production constructors stay refused.
+const hubDb = publicControls ? new Database(':memory:') : null
+if (hubDb) {
+  const log = console.log
+  try {
+    console.log = () => {
+      // Migration chatter is outside the single metrics record.
+    }
+    runMigrations(hubDb)
+  } finally {
+    console.log = log
+  }
+}
 const counter = new Database(':memory:')
 counter.loadExtension(extension)
 assert.throws(() => new Database(':memory:'), /Native SQLite constructor refused/)
@@ -42,7 +63,7 @@ const codex=process.env.FIXTURE_MODE==='codex-chat';
 let started=false;
 const timer=setInterval(async()=>{
  if(started||!fs.existsSync(process.env.FIXTURE_GATE))return;
- started=true;clearInterval(timer);
+ started=true;clearInterval(timer);fs.unlinkSync(process.env.FIXTURE_GATE);
  for(let i=0;i<1200;i++){
   const text=i+':'+'é'.repeat(1024);
   const record=codex?{method:'item/agentMessage/delta',params:{threadId:'thread',turnId:'turn',itemId:'item'+i,delta:text}}
@@ -58,13 +79,22 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
  if(m.type==='control_request'){
   if(m.request.subtype==='interrupt')fs.appendFileSync(process.env.FIXTURE_ACK,'ack\\n');
   out({type:'control_response',response:{subtype:'success',request_id:m.request_id,response:{ack:m.request.subtype}}});
+  if(m.request.subtype==='interrupt')out({type:'result',subtype:'error_during_execution',is_error:true,num_turns:1,terminal_reason:'aborted_streaming'});
+ }else if(m.type==='user'){
+  fs.appendFileSync(process.env.FIXTURE_SENT,'sent\\n');
+  out({type:'command_lifecycle',command_uuid:m.uuid,state:'started'});
  }else if(m.id!==undefined){
   let result={};
   if(m.method==='initialize')result={userAgent:'codex-cli/0.166.0'};
-  if(m.method==='thread/start')result={thread:{id:'thread'},model:'fixture',cwd:process.cwd()};
+  if(m.method==='thread/start'||m.method==='thread/resume')result={thread:{id:'thread',turns:[]},model:'fixture',cwd:process.cwd()};
+  if(m.method==='thread/read')result={thread:{id:'thread',turns:[]}};
   if(m.method==='thread/backgroundTerminals/list'||m.method==='model/list')result={data:[],nextCursor:null};
+  if(m.method==='turn/start')fs.appendFileSync(process.env.FIXTURE_SENT,'sent\\n');
+  if(m.method==='turn/start')result={turn:{id:'turn',status:'inProgress',items:[]}};
   if(m.method==='turn/interrupt')fs.appendFileSync(process.env.FIXTURE_ACK,'ack\\n');
   out({id:m.id,result});
+  if(m.method==='turn/start')out({method:'turn/started',params:{threadId:'thread',turn:{id:'turn',status:'inProgress'}}});
+  if(m.method==='turn/interrupt')out({method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'interrupted',items:[]}}});
   if(m.method==='thread/start')out({method:'turn/started',params:{threadId:'thread',turn:{id:'turn',status:'inProgress'}}});
  }
 });
@@ -94,7 +124,8 @@ async function connected(hubScope: string) {
       platform: process.platform + '-' + process.arch,
       version: 'fixture',
       capabilities: ['fs', 'proc'],
-      chatProcessControls: true
+      chatProcessControls: true,
+      chatControlInvocations: true
     },
     credentialStore: createMemoryCredentialStore(),
     joinToken: 'jt-valid',
@@ -118,6 +149,7 @@ async function connected(hubScope: string) {
       binOverrideDir: bin
     }
   })
+  dialer.events.on('disconnected', ({ reason }) => dispatch.hubDisconnected(String(reason)))
   const ready = dialer.events.once('connected')
   dialer.start()
   computerId = (await ready).computerId
@@ -132,6 +164,7 @@ async function connected(hubScope: string) {
     )
   return {
     hub,
+    computerId,
     dialer,
     dispatch,
     request,
@@ -148,6 +181,10 @@ async function run() {
   const a = await connected('native-a'),
     b = await connected('native-b')
   const pending: Promise<unknown>[] = []
+  const publicGates: Array<() => void> = []
+  let publicControlMs: number | undefined,
+    publicHeartbeats: number[] | undefined,
+    publicLosslessEvents: number | undefined
   try {
     const infos: Array<{ spawnId: string; pid: number }> = []
     for (const [index, h] of [a, b].entries()) {
@@ -172,6 +209,7 @@ async function run() {
             defaultFlags: null,
             env: {
               FIXTURE_MODE: mode,
+              FIXTURE_SENT: join(root, index === 0 ? 'sent-a' : 'sent-b'),
               FIXTURE_ACK: join(root, index === 0 ? 'ack-a' : 'ack-b'),
               FIXTURE_GATE: join(root, index === 0 ? 'burst-a' : 'burst-b'),
               ELECTRON_RUN_AS_NODE: '1'
@@ -323,6 +361,374 @@ async function run() {
       digest(texts),
       digest(Array.from({ length: 1200 }, (_, i) => i + ':' + 'é'.repeat(1024)))
     )
+    if (hubDb) {
+      const db = createSlayzoneDbAdapter(hubDb)
+      hubDb.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','T')"
+      )
+      hubDb
+        .prepare("INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t',?,0)")
+        .run(mode)
+      const ownership = createChatOwnershipStore(db)
+      await ownership.register({ ...identity, computerId: a.computerId })
+      const wires: Array<{
+        kind: string
+        value?: { method?: string; operationId?: string; controlToken?: string }
+        token?: string
+        spawnId?: string
+      }> = []
+      const request = async (_pc: string, raw: unknown) => {
+        const req = raw as (typeof wires)[number]
+        wires.push(req)
+        const result = await a.request(M.chatRequest, raw, true, 8000)
+        if (req.kind === 'control.prepare') wires.push({ kind: 'ACK', ...(result as object) })
+        return result
+      }
+      let bootstrapGate: Promise<void> | undefined
+      const holdBootstrap = () => {
+        let release!: () => void
+        bootstrapGate = new Promise<void>((r) => {
+          release = r
+        })
+        publicGates.push(release)
+        return () => {
+          bootstrapGate = undefined
+          release()
+        }
+      }
+      const relay = createHubChatRelay({
+        db,
+        ownership,
+        request,
+        stopRequest: request,
+        chatControlInvocations: () => true,
+        chatRuntimeReady: () => true,
+        resolveComputer: async () => a.computerId,
+        defaultComputer: async () => a.computerId,
+        bootstrap: async (owner) => {
+          await bootstrapGate
+          return {
+            identity: {
+              id: owner.id,
+              tabId: owner.tabId,
+              taskId: owner.taskId,
+              mode: owner.mode,
+              epoch: owner.epoch
+            },
+            projectId: null,
+            cwd: root,
+            revision: 1,
+            providerConfig: {},
+            defaultFlags: null,
+            env: {
+              FIXTURE_MODE: mode,
+              FIXTURE_SENT: join(root, 'sent-a'),
+              FIXTURE_ACK: join(root, 'ack-a'),
+              FIXTURE_GATE: join(root, owner.id === 'c' ? 'burst-a' : 'disabled'),
+              ELECTRON_RUN_AS_NODE: '1'
+            }
+          }
+        },
+        migrate: async () => {
+          throw new Error('unexpected migration')
+        },
+        onSessionsChanged: () => {
+          // No renderer exists in this isolated public caller.
+        }
+      })
+      setChatDeps(relay)
+      const caller = chatRouter.createCaller({
+        db,
+        dataRoot: root,
+        principal: { userId: 'native-public', role: 'admin', scopes: ['full'] }
+      })
+      const opts = { tabId: 'tab', taskId: 't', mode, cwd: root }
+      // Real public submission and durable queue, before the writer's next FULL.
+      await caller.send({
+        tabId: 'tab',
+        message: { id: 'public-user', content: [{ type: 'text', text: 'restore this prompt' }] }
+      })
+      await caller.queue.push({
+        tabId: 'tab',
+        id: 'before-stop',
+        send: 'queued before stop',
+        original: 'queued before stop'
+      })
+      assert.equal((await caller.queue.list({ tabId: 'tab' })).length, 1)
+      control('SELECT block_sync(1) n')
+      const fence = a.request(
+        M.chatRequest,
+        {
+          kind: 'invoke',
+          value: {
+            route: { id: 'c', epoch: 1 },
+            target: 'ops',
+            method: 'saveTabDraft',
+            operationId: 'public-fence',
+            args: ['tab', { text: 'public fence', attachments: [] }]
+          }
+        },
+        true,
+        8000
+      )
+      pending.push(fence)
+      void fence.catch(() => undefined)
+      await until(() => !!control('SELECT sync_blocked() n'))
+      const beforeAck = readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1
+      let publicDone = false
+      const publicAt = Date.now(),
+        publicBeats = [a.beats(), b.beats()]
+      phase = 'abort'
+      const stopping = caller.abortAndPop(opts).then((result) => {
+        publicDone = true
+        return result
+      })
+      pending.push(stopping)
+      void stopping.catch(() => undefined)
+      await until(() => wires.some((w) => w.kind === 'ACK'))
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1, beforeAck + 1)
+      assert.equal(publicDone, false)
+      publicControlMs = Date.now() - publicAt
+      // Later public push stays behind the public stop's existing entry fence.
+      const later = caller.queue.push({
+        tabId: 'tab',
+        id: 'after-stop',
+        send: 'survive stop',
+        original: 'survive stop'
+      })
+      pending.push(later)
+      void later.catch(() => undefined)
+      await a.request(M.ping, {})
+      await b.request(M.ping, {})
+      await until(() => a.beats() >= publicBeats[0] + 4 && b.beats() >= publicBeats[1] + 4)
+      publicHeartbeats = [a.beats() - publicBeats[0], b.beats() - publicBeats[1]]
+      assert.equal(publicDone, false)
+      control('SELECT block_sync(0) n')
+      await fence
+      const result = await stopping
+      assert.equal(result.popped, true)
+      assert.equal(result.text, 'restore this prompt')
+      await later
+      assert.equal(
+        readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1,
+        beforeAck + 1,
+        'durable continuation must reuse the provider ACK'
+      )
+      const commit = wires.find((w) => w.kind === 'invoke' && w.value?.method === 'abortAndPop')!
+      const prep = wires.find((w) => w.kind === 'control.prepare')!
+      assert.equal(commit.value?.operationId, prep.value?.operationId)
+      assert.equal(commit.value?.controlToken, wires.find((w) => w.kind === 'ACK')!.token)
+      // A successful receipt survives a normal replay, without sending another interrupt.
+      phase = 'receipt'
+      await a.request(M.chatRequest, commit)
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1, beforeAck + 1)
+      const queued = await caller.queue.list({ tabId: 'tab' })
+      assert(!queued.some((x) => x.id === 'before-stop'))
+      const page = await caller.getBufferSince({
+        tabId: 'tab',
+        afterSeq: -1,
+        page: { maxBytes: 4 * 1024 * 1024, maxEvents: 2000 }
+      })
+      assert(
+        JSON.stringify(page).includes('survive stop') || queued.some((x) => x.id === 'after-stop')
+      )
+      await assert.rejects(
+        a.request(M.chatRequest, {
+          ...commit,
+          value: { ...commit.value, controlToken: 'stale-token', operationId: 'stale-new' }
+        }),
+        /stale|mismatch/i
+      )
+      // A public interrupt already ACKed for gen1 must never stop gen2 later.
+      phase = 'replacement'
+      const resume = holdBootstrap(),
+        cut = wires.length
+      const replacing = caller.interrupt(opts)
+      void replacing.catch(() => undefined)
+      await until(() => wires.slice(cut).some((w) => w.kind === 'ACK'))
+      infos[0] = (await a.request(M.chatRequest, {
+        kind: 'invoke',
+        value: {
+          route: { id: 'c', epoch: 1 },
+          target: 'ops',
+          method: 'restart',
+          operationId: 'replacement',
+          args: [opts]
+        }
+      })) as (typeof infos)[number]
+      const replacementAcks = readFileSync(join(root, 'ack-a'), 'utf8')
+      resume()
+      await assert.rejects(replacing, /stale|generation|mismatch|unconfirmed/i)
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), replacementAcks)
+      await assert.rejects(a.request(M.chatRequest, controlRequest), /generation/i)
+      // The existing public interrupt, while a real provider burst shares its
+      // stdout ACK pipe and the actual canonical FULL writer is blocked.
+      phase = 'public-burst'
+      const sentCount = () =>
+        existsSync(join(root, 'sent-a'))
+          ? readFileSync(join(root, 'sent-a'), 'utf8').split('sent').length - 1
+          : 0
+      const sentBefore = sentCount()
+      await caller.send({
+        tabId: 'tab',
+        message: { id: 'public-burst-user', content: [{ type: 'text', text: 'burst turn' }] }
+      })
+      await until(() => sentCount() > sentBefore)
+      const beforeBurst = await caller.getBufferSince({
+        tabId: 'tab',
+        afterSeq: -1,
+        page: { maxBytes: 4 * 1024 * 1024, maxEvents: 2000 }
+      })
+      assert(!Array.isArray(beforeBurst) && !beforeBurst.hasMore)
+      const afterBurstSeq = beforeBurst.events.at(-1)?.seq ?? -1
+      control('SELECT block_sync(1) n')
+      const burstFence = a.request(
+        M.chatRequest,
+        {
+          kind: 'invoke',
+          value: {
+            route: { id: 'c', epoch: 1 },
+            target: 'ops',
+            method: 'saveTabDraft',
+            operationId: 'burst-fence',
+            args: ['tab', { text: 'public burst', attachments: [] }]
+          }
+        },
+        true,
+        8000
+      )
+      pending.push(burstFence)
+      void burstFence.catch(() => undefined)
+      await until(() => !!control('SELECT sync_blocked() n'))
+      const burstCut = wires.length,
+        burstAcks = readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1
+      writeFileSync(join(root, 'burst-a'), 'go')
+      let burstDone = false
+      const bursting = caller.interrupt(opts).then((value) => {
+        burstDone = true
+        return value
+      })
+      pending.push(bursting)
+      void bursting.catch(() => undefined)
+      await until(() => wires.slice(burstCut).some((w) => w.kind === 'ACK'))
+      assert.equal(burstDone, false)
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1, burstAcks + 1)
+      await b.request(M.ping, {})
+      control('SELECT block_sync(0) n')
+      await burstFence
+      await bursting
+      const burstPage = await caller.getBufferSince({
+        tabId: 'tab',
+        afterSeq: afterBurstSeq,
+        page: { maxBytes: 4 * 1024 * 1024, maxEvents: 2000 }
+      })
+      assert(!Array.isArray(burstPage) && !burstPage.hasMore)
+      const burstTexts = burstPage.events.flatMap(({ event: e }) =>
+        e.kind === 'assistant-text' || (e.kind === 'stream-block-delta' && e.deltaType === 'text')
+          ? [e.text]
+          : []
+      )
+      assert.equal(burstTexts.length, 1200)
+      assert.equal(
+        digest(burstTexts),
+        digest(Array.from({ length: 1200 }, (_, i) => i + ':' + 'é'.repeat(1024)))
+      )
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1, burstAcks + 1)
+      publicLosslessEvents = burstTexts.length
+      // Disconnect cancels only the uncommitted preparation; a new authenticated
+      // connection cannot inherit its control token or replay it on a later turn.
+      phase = 'reconnect'
+      const reconnectResume = holdBootstrap(),
+        reconnectCut = wires.length
+      const reconnecting = caller.interrupt(opts)
+      void reconnecting.catch(() => undefined)
+      await until(() => wires.slice(reconnectCut).some((w) => w.kind === 'ACK'))
+      await a.dialer.stop()
+      const ready = a.dialer.events.once('connected')
+      a.dialer.start()
+      await ready
+      const reconnectedAcks = readFileSync(join(root, 'ack-a'), 'utf8')
+      reconnectResume()
+      await assert.rejects(reconnecting, /stale|mismatch|unconfirmed/i)
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), reconnectedAcks)
+      await caller.interrupt(opts)
+      // Actual public kill/remove stop the captured process before FULL unblocks;
+      // their public result still waits for the ordinary durable invocation.
+      const killed = { ...identity, id: 'killed-c', tabId: 'killed-tab' }
+      hubDb
+        .prepare("INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('killed-tab','t',?,2)")
+        .run(mode)
+      await ownership.register({ ...killed, computerId: a.computerId })
+      const killedOpts = { ...opts, tabId: killed.tabId }
+      let killingInfo = await caller.start(killedOpts)
+      for (const method of ['kill', 'remove'] as const) {
+        phase = 'public-' + method
+        control('SELECT block_sync(1) n')
+        const fence = a.request(
+          M.chatRequest,
+          {
+            kind: 'invoke',
+            value: {
+              route: { id: 'c', epoch: 1 },
+              target: 'ops',
+              method: 'saveTabDraft',
+              operationId: 'fence-' + method,
+              args: ['tab', { text: method, attachments: [] }]
+            }
+          },
+          true,
+          8000
+        )
+        pending.push(fence)
+        void fence.catch(() => undefined)
+        await until(() => !!control('SELECT sync_blocked() n'))
+        let done = false
+        const stopping = caller[method]({ tabId: killed.tabId }).then((value) => {
+          done = true
+          return value
+        })
+        pending.push(stopping)
+        void stopping.catch(() => undefined)
+        const stoppingPid = killingInfo.pid
+        assert(stoppingPid !== null)
+        await until(() => {
+          try {
+            process.kill(stoppingPid, 0)
+            return false
+          } catch {
+            return true
+          }
+        })
+        assert.equal(done, false)
+        await a.request(M.ping, {})
+        control('SELECT block_sync(0) n')
+        await fence
+        await stopping
+        if (method === 'kill') killingInfo = await caller.restart(killedOpts)
+      }
+      // Conversation deletion revokes a prepared public call before bootstrap.
+      phase = 'deletion'
+      const deleted = { ...identity, id: 'deleted-c', tabId: 'deleted-tab' }
+      hubDb
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('deleted-tab','t',?,1)"
+        )
+        .run(mode)
+      await ownership.register({ ...deleted, computerId: a.computerId })
+      const deleteOpts = { ...opts, tabId: deleted.tabId }
+      await caller.start(deleteOpts)
+      const deleteResume = holdBootstrap(),
+        deleteCut = wires.length
+      const deleting = caller.interrupt(deleteOpts)
+      void deleting.catch(() => undefined)
+      await until(() => wires.slice(deleteCut).some((w) => w.kind === 'ACK'))
+      await a.request(M.chatRequest, { kind: 'conversation.delete', identity: deleted })
+      await ownership.deleteConversation(deleted.id)
+      const deletedAcks = readFileSync(join(root, 'ack-a'), 'utf8')
+      deleteResume()
+      await assert.rejects(deleting, /deleted|stale|ownership|mismatch/i)
+      assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), deletedAcks)
+    }
     control('SELECT block_sync(1) n')
     pending.push(
       a.request(
@@ -379,10 +785,33 @@ async function run() {
         actorChecked: true,
         scopedPingAndPhysicalStopWhileNativeSyncBlocked: true,
         freshFilesystemWaited: true,
-        mainConstructorsRefused: true,
-        mainNativeCalls: 0,
+        ...(publicControls
+          ? {
+              isolatedHubMetadataOnMain: true,
+              computerNativeConstructorsRefused: true,
+              computerMainNativeCalls: 0
+            }
+          : { mainConstructorsRefused: true, mainNativeCalls: 0 }),
         mainSyncs: 0,
         providerCancelAcknowledged: true,
+        ...(publicControls
+          ? {
+              actualPublicCaller: true,
+              pendingDurability: true,
+              promptRestored: true,
+              queueFencePreserved: true,
+              singleProviderInterrupt: true,
+              durableReceiptReplay: true,
+              publicKillRemove: true,
+              publicLosslessEvents,
+              publicControlMs,
+              publicHeartbeats,
+              isolatedBootstrapConstructors: 2,
+              replacementFenced: true,
+              reconnectFenced: true,
+              deletionFenced: true
+            }
+          : {}),
         unrelatedHubWrite: true,
         closeStoppedBeforeNativeFence: true,
         closeAcknowledgementWaited: true,
@@ -393,13 +822,15 @@ async function run() {
       })
     )
   } finally {
+    for (const resume of publicGates) resume()
     control('SELECT block_sync(0) n')
     await Promise.allSettled(pending)
     await Promise.all([a.close(), b.close()])
     counter.close()
+    hubDb?.close()
   }
 }
 void run().catch((error) => {
-  console.error(error)
+  console.error(phase, error)
   process.exitCode = 1
 })

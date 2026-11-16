@@ -42,3 +42,9 @@ Optional `chatProcessControls` belongs to the implementing host identity, never
 the replacing connector's release. It advertises transient generation-scoped
 provider/physical control ACKs independently of durable chat command receipts.
 Older retained hosts omit it; enroll/hello explicitly propagate false.
+
+The computer connector admits hub requests only after the session host ACKs that
+connection's authenticated `connected` identity. Dispatch captures that barrier;
+disconnect, host loss, stop or a newer connection rejects the old barrier. Pings
+and transport heartbeats remain live. No previous computer ID can substitute for
+an undelivered identity, including a busy retained host or reconnect.
