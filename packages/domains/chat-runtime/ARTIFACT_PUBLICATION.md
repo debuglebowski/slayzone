@@ -124,6 +124,19 @@ No new global hub transaction registration, public RPC, writer or job ledger exi
 
 ## Worker sequence and file inventory
 
+Protocol v9 `artifact.invoke/readBytesRange` also runs through this canonical owner.
+The peer `artifacts.readBytesChunk` response stays `{data,size,version}` with the shared
+8MiB raw-byte chunk cap; disk reads use at most256KiB. Blob verification and range reads
+retain the same descriptor. The verification cache keys its device/inode/size/mtime/
+ctime identity, never a later pathname's stamp; wire generation tokens retain their
+existing format. Working-file, legacy-file and current-blob fallback/error semantics
+remain unchanged. Runtime close drains accepted range reads before owner shutdown.
+
+The host's shared prefix fence drains all captured RPC settlements before the real
+FULL commit. Each caller retains its own validation/write error; a refused sibling
+does not turn another committed operation into a failed acknowledgement. Failure of
+the actual durability fence still rejects and retains the online store's failure latch.
+
 The canonical worker independently derives owned paths:
 `uploads/owned/D(taskId)/D(route.id)/uploadId/data.part`, where D is SHA-256 of
 JSON.stringify, and uploadId is D([taskId,{id,epoch},operationId,revision]). Adjacent
@@ -185,6 +198,8 @@ of a blocked OS filesystem syscall on Windows.
 
 FU1 final public-invoke/staging adapters and manager revocation/erasure wiring remain
 required. Also pending: final migrated4GB/contention/caller proof, real heartbeat/chat
-cancel and all-provider bounded/lossless/control ACK with stdout paused, S7 every
-unclean start/swap failure, S8 whole archive/temp/privacy serialization, independent
+cancel and all-provider bounded/lossless/control ACK with stdout paused, S8 whole
+archive/temp/privacy serialization (separately owned), independent
 review/fix loop and current-main integration. This checkpoint is not whole H1/H2 DONE.
+Reviewed S7 unclean-start/swap recovery is integrated; it does not close those remaining
+acceptance requirements.

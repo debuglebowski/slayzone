@@ -14,6 +14,7 @@ for (const mode of [
   'large',
   'faults',
   'relay',
+  'range',
   'cache-count',
   'cache-budget',
   'cache-negative'
@@ -169,6 +170,17 @@ for (const mode of [
             lostReplyMatchedSettlement: true,
             replayWithoutConsumedSource: true,
             noDuplicateMetadata: true
+          })
+        else if (mode === 'range')
+          expect(result).toMatchObject({
+            actualV9Dispatch: true,
+            workingAndLegacyAndBlobRanges: true,
+            exactGeneration: true,
+            errorCodePreserved: true,
+            closeWaitedForDescriptor: true,
+            maxRead: 256 * 1024,
+            mainBodyIo: 0,
+            wholeWorkerBodyReads: 0
           })
         else {
           expect(result).toMatchObject({

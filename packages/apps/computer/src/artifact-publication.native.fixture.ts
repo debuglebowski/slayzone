@@ -3,10 +3,21 @@ import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, existsSync } from 'node:fs'
-import { copyFile, lstat, mkdir, open, readdir, rm, utimes, writeFile } from 'node:fs/promises'
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  rename,
+  rm,
+  utimes,
+  writeFile
+} from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createHubRequestHandler } from './main'
 import { HubToComputerMethods as M } from '@slayzone/computer-transport/shared'
+import { ARTIFACT_CHUNK_MAX_BYTES } from '@slayzone/task-artifacts/download-plan'
 import {
   openComputerChatRuntime,
   type OnlineComputerChatRuntime,
@@ -170,6 +181,131 @@ async function residue(r: OnlineComputerChatRuntime) {
   }
 }
 const live: OnlineComputerChatRuntime[] = []
+async function rangeReads() {
+  const scope = 'publication-range'
+  const handler = createHubRequestHandler({
+    stateDir: root,
+    hubScope: scope,
+    getComputerId: () => 'pc',
+    shutdown() {
+      /* No live-computer shutdown requested by this fixture. */
+    },
+    dialer: { notify: () => true },
+    config: {
+      hubUrl: 'ws://range/computers',
+      name: scope,
+      allowedRoots: [root],
+      capabilities: ['fs', 'proc']
+    }
+  })
+  try {
+    await handler.handle(
+      M.chatRequest,
+      {
+        kind: 'taskPaths',
+        value: { op: 'set', taskId: 't', projectId: null, baseDir: root, at: 1 }
+      },
+      actor
+    )
+    await handler.handle(M.chatRequest, { kind: 'bootstrap', value: bootstrap }, actor)
+    const r = observed.get(scope)!
+    const source = await stage(r, 'range-seed', ARTIFACT_CHUNK_MAX_BYTES + 1024 * 1024 + 17)
+    const settled = await r.artifactPublication.start(source.request, source.uploads).result
+    if (
+      settled.outcome.kind !== 'committed' ||
+      settled.outcome.value.method !== 'uploadArtifactBlob'
+    )
+      throw new Error('range seed failed')
+    const artifact = settled.outcome.value.result!
+    const working = join(r.storage.dir, 'artifacts', 't', `${artifact.id}.bin`)
+    const invoke = (offset: number, length: number, epoch = 1) =>
+      handler.handle(
+        M.chatRequest,
+        {
+          kind: 'artifact.invoke',
+          value: {
+            route: { id: route.id, epoch },
+            method: 'readBytesRange',
+            args: [artifact.id, offset, length]
+          }
+        },
+        actor
+      ) as Promise<{ data: string; size: number; version: string }>
+    arm(0)
+    const first = await invoke(0, ARTIFACT_CHUNK_MAX_BYTES)
+    assert.equal(first.size, source.grant.ref.size)
+    assert.deepEqual(
+      Buffer.from(first.data, 'base64'),
+      Buffer.alloc(ARTIFACT_CHUNK_MAX_BYTES, 0xa7)
+    )
+    assert(first.version.startsWith('file:'))
+    const tail = await invoke(ARTIFACT_CHUNK_MAX_BYTES, ARTIFACT_CHUNK_MAX_BYTES)
+    assert.equal(tail.version, first.version)
+    assert.deepEqual(Buffer.from(tail.data, 'base64'), Buffer.alloc(1024 * 1024 + 17, 0xa7))
+    assert.equal((await invoke(first.size, 1)).data, '')
+    await assert.rejects(invoke(0, ARTIFACT_CHUNK_MAX_BYTES + 1))
+    await assert.rejects(invoke(0, 1, 2), /ownership|deleted/)
+
+    // Fixture moves/removals only: production reads remain under main-body guards.
+    probe[8] = 0
+    const legacy = join(r.storage.dir, 'assets', 't', `${artifact.id}.bin`)
+    await mkdir(dirname(legacy), { recursive: true })
+    await rename(working, legacy)
+    probe[8] = 1
+    assert.equal((await invoke(1, 3)).data, Buffer.alloc(3, 0xa7).toString('base64'))
+    probe[8] = 0
+    await rm(legacy)
+    probe[8] = 1
+    const blob = await invoke(0, ARTIFACT_CHUNK_MAX_BYTES)
+    assert(blob.version.startsWith(`blob:${source.grant.ref.sha256}:`))
+    assert.deepEqual(Buffer.from(blob.data, 'base64'), Buffer.alloc(ARTIFACT_CHUNK_MAX_BYTES, 0xa7))
+    assert.equal((await invoke(1, 3)).version, blob.version)
+    const maxRead = probe[3]
+    assert.equal(maxRead, 256 * 1024)
+    assert.equal(probe[4], 0)
+    assert.equal(probe[11], 0)
+    arm(11)
+    await assert.rejects(
+      invoke(1, 4),
+      (error: unknown) =>
+        !!error && typeof error === 'object' && Reflect.get(error, 'code') === 'EIO'
+    )
+    assert.equal(probe[12], 0)
+    arm(10)
+    const pending = invoke(0, 4)
+    await until(() => !!probe[1])
+    assert(probe[12] > 0, 'actual range descriptor stays live')
+    await handler.handle(M.ping, {}, scoped)
+    let closed = false
+    const closing = handler.dispose().then(() => {
+      closed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.equal(closed, false, 'close must drain accepted range reads')
+    release()
+    assert.equal((await pending).version, blob.version)
+    await closing
+    assert.equal(probe[12], 0)
+    console.log(
+      JSON.stringify({
+        mode,
+        actualPackagedWorker: true,
+        actualV9Dispatch: true,
+        workingAndLegacyAndBlobRanges: true,
+        exactGeneration: true,
+        errorCodePreserved: true,
+        closeWaitedForDescriptor: true,
+        maxRead,
+        mainBodyIo: probe[11],
+        wholeWorkerBodyReads: probe[4],
+        mainSyncs: control('SELECT sync_count() n') - mainSyncs
+      })
+    )
+  } finally {
+    release()
+    await handler.dispose()
+  }
+}
 async function cachePressure() {
   const r = await direct(`publication-${mode}`)
   live.push(r)
@@ -933,6 +1069,7 @@ void (async () => {
     else if (mode === 'large') await large()
     else if (mode === 'faults') await faults()
     else if (mode === 'relay') await relay()
+    else if (mode === 'range') await rangeReads()
     else if (mode.startsWith('cache-')) await cachePressure()
     else await native()
     assert.equal(control('SELECT sync_count() n') - mainSyncs, 0)

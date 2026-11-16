@@ -130,6 +130,12 @@ if (threads.isMainThread) {
       sync = file.sync.bind(file),
       close = file.close.bind(file)
     file.read = async (...input) => {
+      if (String(path).includes('blobs') && Atomics.compareExchange(probe, 0, 10, 0) === 10) {
+        Atomics.store(probe, 1, 1)
+        while (!Atomics.load(probe, 2)) await new Promise((resolve) => setTimeout(resolve, 1))
+      }
+      if (String(path).includes('blobs') && Atomics.compareExchange(probe, 0, 11, 0) === 11)
+        throw Object.assign(new Error('range descriptor read failure'), { code: 'EIO' })
       if (String(path).includes('uploads') && Atomics.compareExchange(probe, 0, 6, 0) === 6)
         throw Object.assign(new Error('portable source read failure'), { code: 'EIO' })
       const length = typeof input[2] === 'number' ? input[2] : (input[0]?.length ?? 0)

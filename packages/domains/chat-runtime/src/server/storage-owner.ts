@@ -313,7 +313,11 @@ async function openStorageOwner(
     // A flush is not a new mutation: concurrent callers of the same prefix share it.
     // Named operations may yield between bounded native slices. A fence covers
     // their completed commits, not merely the worker's receipt of their message.
-    const promise = Promise.all([...pending]).then(() => raw.namedTxn('chatStorage.flush', {}))
+    // Each RPC retains its own error. A refused sibling is not a failed durability
+    // fence for commits that did succeed; drain every captured call, then sync them.
+    const promise = Promise.allSettled([...pending]).then(() =>
+      raw.namedTxn('chatStorage.flush', {})
+    )
     fences.add(promise)
     const current = { through, promise }
     flushing = current

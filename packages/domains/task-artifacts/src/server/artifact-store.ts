@@ -8,7 +8,7 @@ import {
   writeFileSync,
   mkdirSync
 } from 'node:fs'
-import { open, stat } from 'node:fs/promises'
+import { open, type FileHandle } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateArtifactInput,
@@ -41,38 +41,35 @@ import type {} from './artifact-store-txns'
 
 /**
  * Blobs whose whole-file hash check passed, by path → the file's stamp then
- * (inode:size:mtime). A download's first piece checks the blob; asking for that first
+ * (device:inode:size:mtime:ctime). A download's first piece checks the blob; asking for that first
  * piece again must not re-hash a multi-GB blob every time. A changed file (damaged,
  * replaced) has a new stamp and is checked again. Bounded: oldest forgotten first.
  */
 const verifiedBlobs = new Map<string, string>()
 const VERIFIED_BLOBS_MAX = 1024
 
-async function blobStamp(file: string): Promise<string | null> {
-  const st = await stat(file, { bigint: true }).catch(() => null)
-  return st ? `${st.ino}:${st.size}:${st.mtimeNs}` : null
+/** The blob's content matches its hash: checked once per unchanged file. */
+async function blobIntact(
+  blobs: BlobStore,
+  hash: string,
+  handle: FileHandle,
+  identity: string
+): Promise<boolean> {
+  const file = blobs.blobPath(hash)
+  if (verifiedBlobs.get(file) === identity) return true
+  verifiedBlobs.delete(file)
+  return blobs.verifyAsync(hash, handle)
 }
 
-/** The blob's content matches its hash: checked once per unchanged file. */
-async function blobIntact(blobs: BlobStore, hash: string): Promise<boolean> {
-  const file = blobs.blobPath(hash)
-  const before = await blobStamp(file)
-  if (before && verifiedBlobs.get(file) === before) return true
-  if (!(await blobs.verifyAsync(hash))) {
-    verifiedBlobs.delete(file)
-    return false
+/** Publish only after hashing, reading and the final descriptor identity check succeed. */
+function cacheVerifiedBlob(file: string, identity: string): void {
+  if (verifiedBlobs.get(file) === identity) return
+  verifiedBlobs.delete(file)
+  verifiedBlobs.set(file, identity)
+  if (verifiedBlobs.size > VERIFIED_BLOBS_MAX) {
+    const oldest = verifiedBlobs.keys().next().value
+    if (oldest !== undefined) verifiedBlobs.delete(oldest)
   }
-  // The stamp after the check: what was hashed (the check may restore a deleted blob).
-  const after = await blobStamp(file)
-  if (after) {
-    verifiedBlobs.delete(file)
-    verifiedBlobs.set(file, after)
-    if (verifiedBlobs.size > VERIFIED_BLOBS_MAX) {
-      const oldest = verifiedBlobs.keys().next().value
-      if (oldest !== undefined) verifiedBlobs.delete(oldest)
-    }
-  }
-  return true
 }
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
@@ -545,6 +542,7 @@ export function createArtifactStore(dataDir: string) {
         getLegacyArtifactFilePath(taskId, id, title)
       ].find((p) => existsSync(p))
       let blobVersion: string | null = null
+      let blob: { store: BlobStore; hash: string } | undefined
       if (!file) {
         if (row.current_version_id == null) return null
         const version = (await db.namedTxn('task-artifacts:versions:resolve', {
@@ -552,40 +550,52 @@ export function createArtifactStore(dataDir: string) {
           versionRef: 'current'
         })) as ArtifactVersion
         const blobs = new BlobStore(dataDir)
-        if (offset === 0 && !(await blobIntact(blobs, version.content_hash)))
-          throw new VersionError(
-            'BLOB_HASH_MISMATCH',
-            'Artifact version hash integrity check failed'
-          )
+        if (offset === 0) blobs.restoreDeleted(version.content_hash)
         file = blobs.blobPath(version.content_hash)
         blobVersion = `blob:${version.content_hash}`
+        blob = { store: blobs, hash: version.content_hash }
       }
       const handle = await open(file, 'r')
-      const stamp = async (): Promise<{ size: number; version: string }> => {
+      const stamp = async () => {
         const st = await handle.stat({ bigint: true })
+        const identity = `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`
         return {
           size: Number(st.size),
+          identity,
           // A blob is named by its hash, but its FILE can still be replaced (hub-disk
           // tampering, restore): the stamp makes that a different version, so a
           // download spanning the change is refused instead of spliced.
-          version:
-            blobVersion !== null
-              ? `${blobVersion}:${st.ino}:${st.size}:${st.mtimeNs}`
-              : `file:${st.ino}:${st.size}:${st.mtimeNs}`
+          version: `${blobVersion ?? 'file'}:${identity}`
         }
       }
       return stamp()
         .then(async (before) => {
+          if (
+            offset === 0 &&
+            blob &&
+            !(await blobIntact(blob.store, blob.hash, handle, before.identity))
+          )
+            throw new VersionError(
+              'BLOB_HASH_MISMATCH',
+              'Artifact version hash integrity check failed'
+            )
           const want = Math.max(0, Math.min(length, before.size - offset))
           const bytes = Buffer.alloc(want)
           let read = 0
           while (read < want) {
-            const { bytesRead } = await handle.read(bytes, read, want - read, offset + read)
+            const { bytesRead } = await handle.read(
+              bytes,
+              read,
+              Math.min(256 * 1024, want - read),
+              offset + read
+            )
             if (bytesRead === 0) break
             read += bytesRead
           }
-          if ((await stamp()).version !== before.version)
+          if ((await stamp()).identity !== before.identity)
             throw new Error('The artifact changed while it was being read')
+          if (offset === 0 && blob)
+            cacheVerifiedBlob(blob.store.blobPath(blob.hash), before.identity)
           return {
             bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, read),
             size: before.size,

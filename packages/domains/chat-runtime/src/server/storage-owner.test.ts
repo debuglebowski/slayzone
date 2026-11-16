@@ -59,6 +59,23 @@ test('the packaged worker opens/migrates the actual store and returns committed 
   expect(await owner.nextSeq('c')).toBe(1)
 })
 
+test('a rejected caller does not poison the durable fence for a concurrent committed write', async () => {
+  const owner = await open()
+  await owner.createConversation(identity)
+  const before = await owner.maintenanceCursor('storage-durable-prefix-v1')
+  const kept = owner.append('c', 1, event('committed'))
+  const refused = owner.append('c', 2, event('wrong epoch'))
+  const results = await Promise.allSettled([kept, refused, owner.flush()])
+  expect(results[0]).toMatchObject({ status: 'fulfilled', value: { seq: 0 } })
+  expect(results[1]).toMatchObject({
+    status: 'rejected',
+    reason: { message: expect.stringMatching(/epoch/i) }
+  })
+  expect(results[2]).toMatchObject({ status: 'fulfilled' })
+  expect(await owner.maintenanceCursor('storage-durable-prefix-v1')).not.toEqual(before)
+  expect((await owner.read('c', -1)).map((row) => row.event)).toEqual([event('committed')])
+})
+
 test('durable prefixes are real fences before and after shared checkpointer death; racing flushes do not acknowledge newer writes early', async () => {
   const owner = await open()
   await owner.createConversation(identity)

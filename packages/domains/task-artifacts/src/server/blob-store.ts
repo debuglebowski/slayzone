@@ -16,6 +16,7 @@ import {
   createReadStream
 } from 'node:fs'
 import path from 'node:path'
+import type { FileHandle } from 'node:fs/promises'
 import { containedPath } from '@slayzone/platform/safe-path'
 import type { ContentHash } from '../shared/types'
 import { VersionError } from './errors'
@@ -244,8 +245,20 @@ export class BlobStore {
     return actual === hash
   }
 
-  /** Path/stream consumers can verify large historical files without buffering them. */
-  async verifyAsync(hash: ContentHash | string): Promise<boolean> {
+  /** A caller-owned descriptor pins verification to the exact file it will read. */
+  async verifyAsync(hash: ContentHash | string, handle?: FileHandle): Promise<boolean> {
+    if (handle) {
+      const digest = createHash('sha256'),
+        bytes = Buffer.alloc(64 * 1024)
+      let position = 0
+      for (;;) {
+        const { bytesRead } = await handle.read(bytes, 0, bytes.length, position)
+        if (!bytesRead) break
+        digest.update(bytes.subarray(0, bytesRead))
+        position += bytesRead
+      }
+      return digest.digest('hex') === hash
+    }
     this.restoreDeleted(hash)
     const file = this.blobPath(hash)
     if (!existsSync(file)) return false

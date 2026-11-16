@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -102,6 +102,46 @@ test("a blob's version changes when its file is replaced between pieces", async 
   expect(later.version).not.toBe(first.version)
 })
 
+test.each(['working', 'blob'] as const)(
+  '%s chunks detect a same-inode rewrite with preserved size and mtime',
+  async (kind) => {
+    const { store, db } = setup()
+    const a = (await store.createArtifact(db, {
+      taskId: 't',
+      title: 'generation.txt',
+      content: 'AAAABBBB'
+    }))!
+    let file = (await store.getArtifactPath(db, a.id))!
+    const version = (await store.getCurrentArtifactVersion(db, { artifactId: a.id }))!
+    if (kind === 'blob') {
+      unlinkSync(file)
+      file = new BlobStore(roots[roots.length - 1]).blobPath(version.content_hash)
+    }
+    utimesSync(file, 1700000000, 1700000000)
+    const before = statSync(file, { bigint: true })
+    const first = (await store.readArtifactBytesRange(db, a.id, 0, 4))!
+    expect(Buffer.from(first.bytes).toString()).toBe('AAAA')
+    expect(
+      first.version.startsWith(kind === 'blob' ? `blob:${version.content_hash}:` : 'file:')
+    ).toBe(true)
+    expect((await store.readArtifactBytesRange(db, a.id, 4, 4))!.version).toBe(first.version)
+    writeFileSync(file, 'CCCCDDDD')
+    utimesSync(file, 1700000000, 1700000000)
+    const after = statSync(file, { bigint: true })
+    expect(after.ino).toBe(before.ino)
+    expect(after.dev).toBe(before.dev)
+    expect(after.size).toBe(before.size)
+    expect(after.mtimeNs).toBe(before.mtimeNs)
+    expect(after.ctimeNs).not.toBe(before.ctimeNs)
+    const second = (await store.readArtifactBytesRange(db, a.id, 4, 4))!
+    expect(Buffer.from(second.bytes).toString()).toBe('DDDD')
+    expect(second.version).not.toBe(first.version)
+    expect((await store.readArtifactBytesRange(db, a.id, 4, 4))!.version).toBe(second.version)
+    if (kind === 'blob')
+      await expect(store.readArtifactBytesRange(db, a.id, 0, 4)).rejects.toThrow(/integrity/)
+  }
+)
+
 // Review 8, L8: a download's first piece checks the whole blob's hash. Asking for
 // `{offset: 0, length: 1}` again and again must not re-hash a multi-GB blob each time:
 // a blob verified once is trusted until its file changes.
@@ -126,4 +166,36 @@ test('the whole-blob hash check runs once per unchanged blob, again after it cha
   } finally {
     verify.mockRestore()
   }
+})
+
+test('verification never blesses a replacement blob that was not hashed', async () => {
+  const { store, db } = setup()
+  const a = (await store.createArtifact(db, {
+    taskId: 't',
+    title: 'verify-race.txt',
+    content: 'verified body'
+  }))!
+  unlinkSync((await store.getArtifactPath(db, a.id))!)
+  const version = (await store.getCurrentArtifactVersion(db, { artifactId: a.id }))!
+  const file = new BlobStore(roots[roots.length - 1]).blobPath(version.content_hash)
+  const original = BlobStore.prototype.verifyAsync
+  const verify = vi.spyOn(BlobStore.prototype, 'verifyAsync').mockImplementation(async function (
+    this: BlobStore,
+    ...args
+  ) {
+    const intact = await original.apply(this, args)
+    unlinkSync(file)
+    writeFileSync(file, 'unhashed body')
+    return intact
+  })
+  const cache = vi.spyOn(Map.prototype, 'set')
+  try {
+    await expect(store.readArtifactBytesRange(db, a.id, 0, 4)).rejects.toThrow(/changed|integrity/)
+    expect(cache.mock.calls.filter(([key]) => key === file)).toEqual([])
+  } finally {
+    verify.mockRestore()
+    cache.mockRestore()
+  }
+  // In particular, the failed read must not cache the replacement's pathname stamp.
+  await expect(store.readArtifactBytesRange(db, a.id, 0, 4)).rejects.toThrow(/integrity/)
 })
