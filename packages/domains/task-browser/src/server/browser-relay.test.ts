@@ -33,34 +33,34 @@ test('attach greets the host with its id', () => {
 
 test('no host → no tab; sync registers tabs and the active one', () => {
   const relay = new BrowserRelay()
-  expect(relay.hasTab('t1')).toBe(false)
+  expect(relay.hasTab(null, 't1')).toBe(false)
   const a = host(relay, 't1')
-  expect(relay.hasTab('t1')).toBe(false)
+  expect(relay.hasTab(null, 't1')).toBe(false)
   relay.sync(null, { hostId: a.hostId, tabIds: ['x', 'y'], activeTabId: 'y' })
-  expect(relay.hasTab('t1')).toBe(true)
-  expect(relay.hasTab('t1', 'x')).toBe(true)
-  expect(relay.hasTab('t1', 'z')).toBe(false)
-  expect(relay.getResolvedTabId('t1')).toBe('y')
-  expect(relay.getResolvedTabId('t1', 'x')).toBe('x')
-  expect(relay.listTabs('t1')).toEqual([
+  expect(relay.hasTab(null, 't1')).toBe(true)
+  expect(relay.hasTab(null, 't1', 'x')).toBe(true)
+  expect(relay.hasTab(null, 't1', 'z')).toBe(false)
+  expect(relay.getResolvedTabId(null, 't1')).toBe('y')
+  expect(relay.getResolvedTabId(null, 't1', 'x')).toBe('x')
+  expect(relay.listTabs(null, 't1')).toEqual([
     { tabId: 'x', active: false },
     { tabId: 'y', active: true }
   ])
-  expect(relay.hasTab('t2')).toBe(false)
+  expect(relay.hasTab(null, 't2')).toBe(false)
 })
 
 test('active tab that is not registered does not count as an open panel', () => {
   const relay = new BrowserRelay()
   const a = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: [], activeTabId: 'y' })
-  expect(relay.hasTab('t1')).toBe(false)
+  expect(relay.hasTab(null, 't1')).toBe(false)
 })
 
 test('run sends the op to the owning host and resolves with its reply', async () => {
   const relay = new BrowserRelay()
   const a = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  const p = relay.run('t1', null, { op: 'execJs', code: '1+1' }, 'elsewhere')
+  const p = relay.run(null, 't1', null, { op: 'execJs', code: '1+1' }, 'elsewhere')
   const [req] = a.requests()
   expect(req).toMatchObject({
     type: 'request',
@@ -77,7 +77,7 @@ test('error replies reject with the client message', async () => {
   const relay = new BrowserRelay()
   const a = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  const p = relay.run('t1', 'x', { op: 'getUrl' }, 'elsewhere')
+  const p = relay.run(null, 't1', 'x', { op: 'getUrl' }, 'elsewhere')
   const [req] = a.requests()
   relay.reply(null, { hostId: a.hostId, requestId: req.requestId, ok: false, error: 'boom' })
   await expect(p).rejects.toThrow('boom')
@@ -90,16 +90,16 @@ test('two clients on one task: the first to serve owns it until another is used'
   relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
   relay.sync(null, { hostId: b.hostId, tabIds: ['x'], activeTabId: 'x' })
   // Mounting / syncing is not use: A (first) still owns it.
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(a.requests()).toHaveLength(1)
   expect(b.requests()).toHaveLength(0)
   // B is used → B owns it.
   relay.noteUse(null, 'desk-b', 't1')
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(b.requests()).toHaveLength(1)
   // A is used again → A owns it.
   relay.noteUse(null, 'desk-a', 't1')
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(a.requests()).toHaveLength(2)
 })
 
@@ -115,7 +115,7 @@ test('a reconnect (new host, same client) re-syncing does not steal ownership', 
   const b2 = host(relay, 't1', null, 'desk-b')
   relay.sync(null, { hostId: b2.hostId, tabIds: ['x'], activeTabId: 'x' })
   relay.sync(null, { hostId: b2.hostId, tabIds: ['x', 'y'], activeTabId: 'y' })
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(a.requests()).toHaveLength(1)
   expect(b2.requests()).toHaveLength(0)
 })
@@ -130,7 +130,7 @@ test('use earlier than a reconnect still counts for that client', () => {
   b1.detach()
   const b2 = host(relay, 't1', null, 'desk-b')
   relay.sync(null, { hostId: b2.hostId, tabIds: ['x'], activeTabId: 'x' })
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(b2.requests()).toHaveLength(1)
   expect(a.requests()).toHaveLength(0)
 })
@@ -142,7 +142,7 @@ test('use is per principal: another user using the same client key wins nothing'
   relay.sync('alice', { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
   relay.sync('alice', { hostId: b.hostId, tabIds: ['x'], activeTabId: 'x' })
   relay.noteUse('bob', 'desk-b', 't1')
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run('alice', 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(a.requests()).toHaveLength(1)
 })
 
@@ -150,8 +150,8 @@ test('the request carries the hub-side origin of the caller', () => {
   const relay = new BrowserRelay()
   const a = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  void relay.run('t1', null, { op: 'getUrl' }, 'hub-machine')
-  void relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'hub-machine')
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   expect(a.requests().map((r) => r.origin)).toEqual(['hub-machine', 'elsewhere'])
 })
 
@@ -159,7 +159,7 @@ test('a reply over the size cap fails the request, not the hub', async () => {
   const relay = new BrowserRelay({ maxResultBytes: 1000 })
   const a = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  const p = relay.run('t1', null, { op: 'execJs', code: 'big' }, 'elsewhere')
+  const p = relay.run(null, 't1', null, { op: 'execJs', code: 'big' }, 'elsewhere')
   const [req] = a.requests()
   expect(() =>
     relay.reply(null, {
@@ -178,14 +178,14 @@ test('an explicit tab goes to the host that has it, even if another was used lat
   const b = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: ['only-a'], activeTabId: 'only-a' })
   relay.sync(null, { hostId: b.hostId, tabIds: ['only-b'], activeTabId: 'only-b' })
-  void relay.run('t1', 'only-a', { op: 'getUrl' }, 'elsewhere')
+  void relay.run(null, 't1', 'only-a', { op: 'getUrl' }, 'elsewhere')
   expect(a.requests()).toHaveLength(1)
   expect(b.requests()).toHaveLength(0)
 })
 
 test('run with no owner rejects', async () => {
   const relay = new BrowserRelay()
-  await expect(relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')).rejects.toThrow(
+  await expect(relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')).rejects.toThrow(
     /not available/
   )
 })
@@ -194,10 +194,10 @@ test('detach drops the host tabs and rejects its in-flight requests', async () =
   const relay = new BrowserRelay()
   const a = host(relay, 't1')
   relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  const p = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  const p = relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
   a.detach()
   await expect(p).rejects.toThrow(/closed/)
-  expect(relay.hasTab('t1')).toBe(false)
+  expect(relay.hasTab(null, 't1')).toBe(false)
 })
 
 test('a request the client never answers times out', async () => {
@@ -206,7 +206,7 @@ test('a request the client never answers times out', async () => {
     const relay = new BrowserRelay({ requestTimeoutMs: 1000 })
     const a = host(relay, 't1')
     relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-    const p = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+    const p = relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
     const assertion = expect(p).rejects.toThrow(/did not answer/)
     await vi.advanceTimersByTimeAsync(1001)
     await assertion
@@ -220,15 +220,15 @@ test('waitForRegistration resolves when a matching tab syncs, rejects on timeout
   try {
     const relay = new BrowserRelay()
     const a = host(relay, 't1')
-    const waitAny = relay.waitForRegistration('t1', { timeoutMs: 5000 })
-    const waitTab = relay.waitForRegistration('t1', { tabId: 'later', timeoutMs: 5000 })
+    const waitAny = relay.waitForRegistration(null, 't1', { timeoutMs: 5000 })
+    const waitTab = relay.waitForRegistration(null, 't1', { tabId: 'later', timeoutMs: 5000 })
     relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
     await expect(waitAny).resolves.toBeUndefined()
     const tabAssertion = expect(waitTab).rejects.toThrow(/did not open/)
     await vi.advanceTimersByTimeAsync(5001)
     await tabAssertion
     // Already registered → resolves at once.
-    await expect(relay.waitForRegistration('t1', { tabId: 'x' })).resolves.toBeUndefined()
+    await expect(relay.waitForRegistration(null, 't1', { tabId: 'x' })).resolves.toBeUndefined()
   } finally {
     vi.useRealTimers()
   }
@@ -244,14 +244,14 @@ test('a host is bound to the principal that opened it', () => {
     /Unknown browser host/
   )
   relay.sync('alice', { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  expect(relay.hasTab('t1')).toBe(true)
+  expect(relay.hasTab('alice', 't1')).toBe(true)
 })
 
 test('a reply from another principal cannot settle the request', async () => {
   const relay = new BrowserRelay()
   const a = host(relay, 't1', 'alice')
   relay.sync('alice', { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-  const p = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+  const p = relay.run('alice', 't1', null, { op: 'getUrl' }, 'elsewhere')
   const [req] = a.requests()
   expect(() =>
     relay.reply('bob', { hostId: a.hostId, requestId: req.requestId, ok: true, result: 'evil' })
@@ -274,7 +274,7 @@ test('a request that keeps reporting progress is not cut off by the timeout', as
     const relay = new BrowserRelay({ requestTimeoutMs: 1000 })
     const a = host(relay, 't1')
     relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-    const p = relay.run('t1', null, { op: 'loadUrl', url: 'https://slow.test/' }, 'elsewhere')
+    const p = relay.run(null, 't1', null, { op: 'loadUrl', url: 'https://slow.test/' }, 'elsewhere')
     const [req] = a.requests()
     for (let i = 0; i < 5; i++) {
       await vi.advanceTimersByTimeAsync(800)
@@ -283,7 +283,7 @@ test('a request that keeps reporting progress is not cut off by the timeout', as
     relay.reply(null, { hostId: a.hostId, requestId: req.requestId, ok: true, result: null })
     await expect(p).resolves.toBeNull()
     // Silence still times out.
-    const q = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+    const q = relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
     const assertion = expect(q).rejects.toThrow(/did not answer/)
     await vi.advanceTimersByTimeAsync(1001)
     await assertion
@@ -320,7 +320,13 @@ test('progress cannot keep a request alive past its op deadline; the host is tol
     const a = host(relay, 't1')
     relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
     // An abandoned eval (`new Promise(() => {})`): the client keeps reporting progress.
-    const p = relay.run('t1', null, { op: 'execJs', code: 'new Promise(() => {})' }, 'elsewhere')
+    const p = relay.run(
+      null,
+      't1',
+      null,
+      { op: 'execJs', code: 'new Promise(() => {})' },
+      'elsewhere'
+    )
     const [req] = a.requests()
     const assertion = expect(p).rejects.toThrow(/did not finish/)
     for (let i = 0; i < 40; i++) {
@@ -344,7 +350,7 @@ test('a silence timeout also tells the host to stop', async () => {
     const relay = new BrowserRelay({ requestTimeoutMs: 1000 })
     const a = host(relay, 't1')
     relay.sync(null, { hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
-    const p = relay.run('t1', null, { op: 'getUrl' }, 'elsewhere')
+    const p = relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')
     const [req] = a.requests()
     const assertion = expect(p).rejects.toThrow(/did not answer/)
     await vi.advanceTimersByTimeAsync(1001)
@@ -358,4 +364,38 @@ test('a silence timeout also tells the host to stop', async () => {
 test('each op has an absolute deadline; a slow page load gets minutes', () => {
   expect(BROWSER_RELAY_OP_DEADLINE_MS.execJs).toBeLessThanOrEqual(30_000)
   expect(BROWSER_RELAY_OP_DEADLINE_MS.loadUrl).toBeGreaterThanOrEqual(120_000)
+})
+
+test('a request only ever reaches the REQUESTER’s own hosts (review 4: task sharing)', async () => {
+  const relay = new BrowserRelay()
+  const alice = host(relay, 't1', 'alice', 'desk-a')
+  const bob = host(relay, 't1', 'bob', 'desk-b')
+  relay.sync('alice', { hostId: alice.hostId, tabIds: ['x'], activeTabId: 'x' })
+  relay.sync('bob', { hostId: bob.hostId, tabIds: ['x', 'y'], activeTabId: 'y' })
+  relay.noteUse('bob', 'desk-b', 't1') // bob used it last
+  void relay.run('alice', 't1', null, { op: 'getUrl' }, 'elsewhere')
+  expect(alice.requests()).toHaveLength(1)
+  expect(bob.requests()).toHaveLength(0)
+  expect(relay.hasTab('alice', 't1', 'y')).toBe(false)
+  expect(relay.listTabs('alice', 't1')).toEqual([{ tabId: 'x', active: true }])
+  expect(relay.getResolvedTabId('alice', 't1')).toBe('x')
+  expect(relay.hasTab('carol', 't1')).toBe(false)
+  await expect(relay.run('carol', 't1', null, { op: 'getUrl' }, 'elsewhere')).rejects.toThrow(
+    /not available/
+  )
+})
+
+test('waiting for a tab only counts the requester’s own hosts', async () => {
+  vi.useFakeTimers()
+  try {
+    const relay = new BrowserRelay()
+    const bob = host(relay, 't1', 'bob')
+    const wait = relay.waitForRegistration('alice', 't1', { timeoutMs: 1000 })
+    relay.sync('bob', { hostId: bob.hostId, tabIds: ['x'], activeTabId: 'x' })
+    const assertion = expect(wait).rejects.toThrow(/did not open/)
+    await vi.advanceTimersByTimeAsync(1001)
+    await assertion
+  } finally {
+    vi.useRealTimers()
+  }
 })

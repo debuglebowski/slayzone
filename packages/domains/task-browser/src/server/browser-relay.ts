@@ -66,6 +66,7 @@ interface PendingRequest {
 }
 
 interface Waiter {
+  principalKey: string | null
   tabId?: string
   resolve: () => void
   reject: (err: Error) => void
@@ -196,31 +197,38 @@ export class BrowserRelay {
     pending.resolve(reply.result)
   }
 
+  // Every query below is for ONE requester (`principalKey`: the user the request acts
+  // for, null on a hub without login) and only ever sees that principal's hosts: once
+  // a task can be shared, one user's `slay browser` must never run in another user's
+  // desktop browser.
+
   /** Explicit tab when given, else the owner's active tab. */
-  getResolvedTabId(taskId: string, tabId?: string): string | null {
+  getResolvedTabId(principalKey: string | null, taskId: string, tabId?: string): string | null {
     if (tabId) return tabId
-    return this.ownerForActive(taskId)?.activeTabId ?? null
+    return this.ownerForActive(principalKey, taskId)?.activeTabId ?? null
   }
 
   /** The owner's tabs (the most recently used host that has any). */
-  listTabs(taskId: string): BrowserRelayTabInfo[] {
-    const owner = this.hostsFor(taskId).find((h) => h.tabIds.size > 0)
+  listTabs(principalKey: string | null, taskId: string): BrowserRelayTabInfo[] {
+    const owner = this.hostsFor(principalKey, taskId).find((h) => h.tabIds.size > 0)
     if (!owner) return []
     return [...owner.tabIds].map((id) => ({ tabId: id, active: owner.activeTabId === id }))
   }
 
   /** True when a live tab is registered — the "is the panel open?" probe. */
-  hasTab(taskId: string, tabId?: string): boolean {
-    return this.resolveHost(taskId, tabId) !== null
+  hasTab(principalKey: string | null, taskId: string, tabId?: string): boolean {
+    return this.resolveHost(principalKey, taskId, tabId) !== null
   }
 
   waitForRegistration(
+    principalKey: string | null,
     taskId: string,
     opts: { tabId?: string; timeoutMs?: number } = {}
   ): Promise<void> {
-    if (this.hasTab(taskId, opts.tabId)) return Promise.resolve()
+    if (this.hasTab(principalKey, taskId, opts.tabId)) return Promise.resolve()
     return new Promise<void>((resolve, reject) => {
       const waiter: Waiter = {
+        principalKey,
         tabId: opts.tabId,
         resolve,
         reject,
@@ -237,12 +245,13 @@ export class BrowserRelay {
 
   /** Run one operation on the client that owns the tab; resolves with its reply. */
   run(
+    principalKey: string | null,
     taskId: string,
     tabId: string | null,
     op: BrowserRelayOp,
     origin: BrowserRequestOrigin
   ): Promise<unknown> {
-    const host = this.resolveHost(taskId, tabId ?? undefined)
+    const host = this.resolveHost(principalKey, taskId, tabId ?? undefined)
     if (!host) {
       return Promise.reject(
         new Error(
@@ -329,25 +338,30 @@ export class BrowserRelay {
     return host
   }
 
-  /** Hosts serving `taskId`: most recently used client first, then first online. */
-  private hostsFor(taskId: string): Host[] {
+  /** `principalKey`'s hosts serving `taskId`: most recently used client first, then first online. */
+  private hostsFor(principalKey: string | null, taskId: string): Host[] {
     const used = (h: Host): number =>
       this.lastUse.get(lastUseKey(h.principalKey, h.clientKey, h.taskId)) ?? 0
     return [...this.hosts.values()]
-      .filter((h) => h.taskId === taskId)
+      .filter((h) => h.taskId === taskId && h.principalKey === principalKey)
       .sort((a, b) => used(b) - used(a) || a.attachedSeq - b.attachedSeq)
   }
 
-  private ownerForActive(taskId: string): Host | null {
+  private ownerForActive(principalKey: string | null, taskId: string): Host | null {
     return (
-      this.hostsFor(taskId).find((h) => h.activeTabId !== null && h.tabIds.has(h.activeTabId)) ??
-      null
+      this.hostsFor(principalKey, taskId).find(
+        (h) => h.activeTabId !== null && h.tabIds.has(h.activeTabId)
+      ) ?? null
     )
   }
 
-  private resolveHost(taskId: string, tabId: string | undefined): Host | null {
-    if (!tabId) return this.ownerForActive(taskId)
-    return this.hostsFor(taskId).find((h) => h.tabIds.has(tabId)) ?? null
+  private resolveHost(
+    principalKey: string | null,
+    taskId: string,
+    tabId: string | undefined
+  ): Host | null {
+    if (!tabId) return this.ownerForActive(principalKey, taskId)
+    return this.hostsFor(principalKey, taskId).find((h) => h.tabIds.has(tabId)) ?? null
   }
 
   private settleWaiters(taskId: string): void {
@@ -355,7 +369,7 @@ export class BrowserRelay {
     if (!list) return
     const remaining: Waiter[] = []
     for (const w of list) {
-      if (this.hasTab(taskId, w.tabId)) {
+      if (this.hasTab(w.principalKey, taskId, w.tabId)) {
         clearTimeout(w.timer)
         w.resolve()
       } else {

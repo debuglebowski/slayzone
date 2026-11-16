@@ -9,14 +9,19 @@
  *    every panel-page request with {@link BROWSER_PANEL_REQUEST_HEADER}; it is
  *    refused here outright.
  *  - DNS rebinding / drive-by pages: any browser tab on the machine reaching the hub
- *    under an attacker hostname, or from another origin. `Host` must name this machine
- *    or the hub's public address; a request that looks like a browser page
- *    (`Origin` or `Sec-Fetch-Site`) must be the hub's own page.
+ *    under an attacker hostname, or from another origin. `Host` must name this hub —
+ *    a loopback name, an IP literal, or a name it is published under — on EVERY
+ *    request: a rebound page's same-origin GET over http carries no `Origin` and no
+ *    fetch metadata (browsers send `Sec-Fetch-*` only to https and localhost), so the
+ *    absence of browser headers proves nothing. A request that looks like a browser
+ *    page (`Origin` or `Sec-Fetch-Site`) must also be the hub's own page.
  *
- * Native clients send neither `Origin` nor `Sec-Fetch-Site` — Node's fetch (desktop
- * main, `slay`, the computer) sends only `sec-fetch-mode`, React Native sends none —
- * and the desktop renderer's hub sockets have their `Origin` removed by Electron main
- * (app `hub-socket-origin.ts`). So they are admitted, then gated by auth as before.
+ * Under any OTHER name only a provable native client gets through, and only on a hub
+ * that requires login: one presenting a bearer (auth verifies it next — a page has
+ * none of the user's), or signing in for one. A login-off hub (the desktop's) verifies
+ * nothing, so nothing can be proved there: it answers to its own names only. Native
+ * clients dial those anyway — desktop main, `slay`, the computer, the renderer's hub
+ * sockets (whose `Origin` Electron main removes, app `hub-socket-origin.ts`).
  *
  * Pure: `server.ts` wires it in front of `/api/*`, `/mcp` (incl. CLI-relayed
  * requests) and the `/trpc` upgrade.
@@ -25,7 +30,7 @@
  */
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
 import { wsOriginDecision } from './ws-origin.js'
-import { routePathKey } from './rest-auth.js'
+import { isSignInPath, routePathKey } from './rest-auth.js'
 
 export type GuardDecision = 'accept' | 'reject'
 
@@ -115,7 +120,7 @@ const PANEL_REFUSAL: GuardRefusal = {
 function hostRefusal(host: string | undefined): GuardRefusal {
   return {
     reason: 'host',
-    message: `Refused: a browser page asked for this hub under the name "${host ?? ''}", which it is not published under (DNS rebinding protection). To open the hub in a browser under that name, add its origin to SLAYZONE_HUB_ALLOWED_WEB_ORIGINS.`
+    message: `Refused: this hub is not published under the name "${host ?? ''}" (DNS rebinding protection). Reach it as localhost, by IP address or by its public address; to open the hub in a browser under that name, add its origin to SLAYZONE_HUB_ALLOWED_WEB_ORIGINS.`
   }
 }
 
@@ -137,13 +142,13 @@ function isBrowserPage(req: RequestLike): boolean {
   )
 }
 
+/** Proves a native client on a login hub: a bearer (verified by auth next). */
+const hasBearer = (req: RequestLike): boolean =>
+  /^bearer\s+\S/i.test((header(req, 'authorization') ?? '').trim())
+
 /**
  * Any HTTP request to the hub (not `/trpc` upgrades — {@link trpcUpgradeRefusal}).
  * Null = admitted (auth gates it next).
- *
- * The `Host` check applies to browser pages only: rebinding needs a browser, and a
- * native client must keep reaching the hub under any name — a tailnet or LAN name, or
- * a proxy that rewrites Host.
  */
 export function httpRequestRefusal(
   req: RequestLike & { url?: string },
@@ -151,9 +156,14 @@ export function httpRequestRefusal(
 ): GuardRefusal | null {
   if (isPublicPath(req.url)) return null
   if (header(req, BROWSER_PANEL_REQUEST_HEADER) !== undefined) return PANEL_REFUSAL
-  if (!isBrowserPage(req)) return null
   const host = header(req, 'host')
-  if (hostDecision(host, opts) === 'reject') return hostRefusal(host)
+  if (hostDecision(host, opts) === 'reject') {
+    // Another name: only a provable native client, on a hub that can verify one.
+    const native =
+      opts.requireLogin && !isBrowserPage(req) && (hasBearer(req) || isSignInPath(req.url))
+    return native ? null : hostRefusal(host)
+  }
+  if (!isBrowserPage(req)) return null
   const origin = header(req, 'origin')
   const site = header(req, 'sec-fetch-site')
   if (origin !== undefined && opts.allowedOrigins.includes(origin)) return null
@@ -179,17 +189,22 @@ export function httpRequestRefusal(
   return originRefusal(origin)
 }
 
-/** A `/trpc` WebSocket upgrade. Null = admitted. A browser always sends `Origin` on a
- *  WebSocket handshake, so no `Origin` means a native client: no Host check. */
+/**
+ * A `/trpc` WebSocket upgrade. Null = admitted. A login-off hub answers to its own
+ * names only. On a login hub a socket with no `Origin` is positively not a browser's
+ * (a browser always sends it on a WebSocket handshake; a page cannot remove it) and
+ * signs in over the socket next, so it may use any name.
+ */
 export function trpcUpgradeRefusal(
   req: RequestLike,
   opts: BrowserGuardOptions
 ): GuardRefusal | null {
   if (header(req, BROWSER_PANEL_REQUEST_HEADER) !== undefined) return PANEL_REFUSAL
   const origin = header(req, 'origin')
-  if (origin === undefined) return null
   const host = header(req, 'host')
-  if (hostDecision(host, opts) === 'reject') return hostRefusal(host)
+  const ownHost = hostDecision(host, opts) === 'accept'
+  if (origin === undefined) return ownHost || opts.requireLogin ? null : hostRefusal(host)
+  if (!ownHost) return hostRefusal(host)
   if (opts.allowedOrigins.includes(origin)) return null
   // The desktop app's hub: a loopback page is admitted only as the hub's own page.
   // Any other local port is just another website on this machine (its renderer's

@@ -290,6 +290,7 @@ run_harness packages/apps/api/src/routers/hub-local-paths.test.ts
 run_harness packages/apps/hub/src/ws-origin.test.ts
 run_harness packages/apps/hub/src/browser-request-guard.test.ts
 run_harness packages/apps/hub/src/browser-request-guard-server.test.ts
+run_harness packages/apps/hub/src/browser-request-guard-login-hub.test.ts
 # Wave-2 hub/computer split — OS-level exec routed behind injectable spawn-backend seams.
 run_harness packages/domains/terminal/src/server/runtime/pty-backend.test.ts
 # Agent-start tracker behind the sidebar's startup card (queued / booting per agent).
@@ -509,6 +510,8 @@ run_harness packages/shared/platform/src/client-settings.test.ts
 run_harness packages/apps/app/src/main/client-settings-migration.test.ts
 # Browser-panel session policy: what an untrusted caller's tab may request; local files only for local docs
 run_harness packages/apps/app/src/main/browser-panel-policy.test.ts
+# The panel page link bridge acts only on a real user act; system browser only from own tabs
+run_harness packages/apps/app/src/main/panel-link-bridge.test.ts
 run_harness packages/apps/app/src/main/browser-host-routing.test.ts
 # Criterion 4: the same migration against a COPY of a real store. Opt-in — no-ops
 # unless SLAYZONE_REAL_STORE_FIXTURE points at a real slayzone.sqlite. Asserts the
@@ -770,6 +773,8 @@ run_harness packages/domains/task-browser/src/server/relay-router.test.ts
 # slay browser screenshot: PNG bytes to the requester, nothing written on the hub
 run_harness packages/apps/api/src/http/rest-api/browser/screenshot.test.ts
 run_harness packages/apps/api/src/http/rest-api/browser/browser-routes.test.ts
+# slay browser open-panel / new-tab events reach only the requesting user's clients
+run_harness packages/shared/host-capabilities/src/server/menu-router.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts

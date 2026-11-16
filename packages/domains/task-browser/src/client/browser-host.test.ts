@@ -21,9 +21,9 @@ vi.mock('@slayzone/transport/client', () => ({
 vi.mock('./trpc', () => ({ useTRPC: () => ({}), useTRPCClient: () => ({}) }))
 
 const { getBrowserHost } = await import('./browser-host')
-const { runRelayRequest, hubMayNavigateTo, hubSuppliedUrlAllowed } = await import(
-  './useBrowserRelayHost'
-)
+const { runRelayRequest, hubMayNavigateTo, hubSuppliedUrlAllowed, planHubSuppliedUrl } =
+  await import('./useBrowserRelayHost')
+const { queueUntrustedLoad, takeUntrustedLoad } = await import('./hub-supplied-loads')
 
 const emit = (event: string, payload: unknown): void => {
   for (const l of listeners) l(event, payload)
@@ -404,5 +404,50 @@ describe('hubSuppliedUrlAllowed (open-panel / new-tab / auto-open, with the call
     expect(
       hubSuppliedUrlAllowed('file:///tmp/x.html', { hubIsLocal: true, origin: undefined })
     ).toBe(false)
+  })
+})
+
+describe("planHubSuppliedUrl: an untrusted caller's URL is never loaded on a name check alone (review 4)", () => {
+  const remote = { hubIsLocal: false, origin: 'elsewhere' as const }
+  const localAgent = { hubIsLocal: true, origin: 'hub-machine' as const }
+  const elsewhereOnLocal = { hubIsLocal: true, origin: 'elsewhere' as const }
+  it('a name that passes the textual check still loads through the DNS-checked untrusted path', () => {
+    // `10.0.0.1.nip.io` resolves to a private address: only the host's resolver sees it.
+    for (const ctx of [remote, elsewhereOnLocal]) {
+      expect(planHubSuppliedUrl('http://10.0.0.1.nip.io/', ctx)).toEqual({
+        url: 'http://10.0.0.1.nip.io/',
+        untrusted: true
+      })
+      expect(planHubSuppliedUrl('https://a.test/', ctx)).toEqual({
+        url: 'https://a.test/',
+        untrusted: true
+      })
+    }
+  })
+  it("the user's own local agent on its own hub loads directly, as before", () => {
+    expect(planHubSuppliedUrl('http://10.0.0.1.nip.io/', localAgent)).toEqual({
+      url: 'http://10.0.0.1.nip.io/',
+      untrusted: false
+    })
+    expect(planHubSuppliedUrl('file:///tmp/x.html', localAgent)).toEqual({
+      url: 'file:///tmp/x.html',
+      untrusted: false
+    })
+  })
+  it('what the textual check refuses is not loaded at all', () => {
+    expect(planHubSuppliedUrl('file:///tmp/x.html', remote)).toBeNull()
+    expect(planHubSuppliedUrl('http://127.0.0.1:51100/', remote)).toBeNull()
+    expect(planHubSuppliedUrl('javascript:alert(1)', localAgent)).toBeNull()
+    expect(planHubSuppliedUrl(undefined, localAgent)).toBeNull()
+  })
+})
+
+describe('queued untrusted loads run once, for that tab only', () => {
+  it('take returns the queued URL once', () => {
+    queueUntrustedLoad('t1', 'tab-a', 'https://a.test/')
+    expect(takeUntrustedLoad('t1', 'tab-b')).toBeNull()
+    expect(takeUntrustedLoad('t2', 'tab-a')).toBeNull()
+    expect(takeUntrustedLoad('t1', 'tab-a')).toBe('https://a.test/')
+    expect(takeUntrustedLoad('t1', 'tab-a')).toBeNull()
   })
 })

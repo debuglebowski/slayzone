@@ -36,9 +36,17 @@ export type MenuEventMap = {
   'zoom-factor-changed': [factor: number]
   'update-status': [status: UpdateStatus]
   /** `origin`: where the `slay browser` caller runs as the hub sees it (task-browser
-   *  `BrowserRequestOrigin`); the client decides what a URL from it may load. */
+   *  `BrowserRequestOrigin`); the client decides what a URL from it may load.
+   *  `principal`: the requesting user (null on a login-off hub) — only that user's
+   *  clients receive it (`menuRouter`). Absent = not a user's request: everyone. */
   'browser-ensure-panel-open': [
-    payload: { taskId: string; url?: string; tabId?: string; origin?: 'hub-machine' | 'elsewhere' }
+    payload: {
+      taskId: string
+      url?: string
+      tabId?: string
+      origin?: 'hub-machine' | 'elsewhere'
+      principal?: string | null
+    }
   ]
   'browser-create-tab': [
     payload: {
@@ -47,6 +55,7 @@ export type MenuEventMap = {
       url?: string
       background?: boolean
       origin?: 'hub-machine' | 'elsewhere'
+      principal?: string | null
     }
   ]
   'browser-agent-touched': [payload: { taskId: string; tabId: string }]

@@ -16,9 +16,9 @@ export function registerBrowserUrlRoute(app: Express, deps: RestApiDeps): void {
     if (!result) return
     res.json({
       url: await deps.browser!.getUrl(
+        deps.browser!.callerOf(req),
         req.query.taskId as string,
-        result.tabId,
-        deps.browser!.originOf(req)
+        result.tabId
       )
     })
   })

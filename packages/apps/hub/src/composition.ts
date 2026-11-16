@@ -2011,42 +2011,69 @@ export function composeServer(opts: {
     // lives; each operation on a live tab is relayed to the client that owns it.
     browser: {
       isDesktopLocalHub: supervised,
-      hasCapableClient: (req) => browserRelay.hasClient(restPrincipalOf(req)?.userId ?? null),
+      hasCapableClient: (caller) => browserRelay.hasClient(caller.principal),
       // The caller is on THIS machine when it reached the hub over loopback directly
       // (no proxy in between), or through the hub's own co-located computer. A client
       // trusts the claim only from its own local hub (task-browser `runRelayRequest`).
-      originOf: (req) => {
+      // Every op reaches only the caller's OWN clients (the relay keys hosts by user).
+      callerOf: (req) => {
+        const principal = restPrincipalOf(req)?.userId ?? null
         const computerId = restComputerOf(req)
         if (computerId !== null) {
-          return supervised &&
-            computerId === deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
-            ? 'hub-machine'
-            : 'elsewhere'
+          return {
+            principal,
+            origin:
+              supervised && computerId === deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+                ? 'hub-machine'
+                : 'elsewhere'
+          }
         }
-        return isLoopbackPeer(req.socket?.remoteAddress) && !req.headers['x-forwarded-for']
-          ? 'hub-machine'
-          : 'elsewhere'
+        return {
+          principal,
+          origin:
+            isLoopbackPeer(req.socket?.remoteAddress) && !req.headers['x-forwarded-for']
+              ? 'hub-machine'
+              : 'elsewhere'
+        }
       },
-      getResolvedBrowserTabId: async (taskId, tabId) =>
-        browserRelay.getResolvedTabId(taskId, tabId),
-      listBrowserTabs: async (taskId) => browserRelay.listTabs(taskId),
-      hasBrowserTab: async (taskId, tabId) => browserRelay.hasTab(taskId, tabId),
-      waitForBrowserRegistration: (taskId, opts) => browserRelay.waitForRegistration(taskId, opts),
-      execJs: (taskId, tabId, code, origin) =>
-        browserRelay.run(taskId, tabId, { op: 'execJs', code }, origin),
-      loadUrl: async (taskId, tabId, url, origin) => {
-        await browserRelay.run(taskId, tabId, { op: 'loadUrl', url }, origin)
+      getResolvedBrowserTabId: async (caller, taskId, tabId) =>
+        browserRelay.getResolvedTabId(caller.principal, taskId, tabId),
+      listBrowserTabs: async (caller, taskId) => browserRelay.listTabs(caller.principal, taskId),
+      hasBrowserTab: async (caller, taskId, tabId) =>
+        browserRelay.hasTab(caller.principal, taskId, tabId),
+      waitForBrowserRegistration: (caller, taskId, opts) =>
+        browserRelay.waitForRegistration(caller.principal, taskId, opts),
+      execJs: (caller, taskId, tabId, code) =>
+        browserRelay.run(caller.principal, taskId, tabId, { op: 'execJs', code }, caller.origin),
+      loadUrl: async (caller, taskId, tabId, url) => {
+        await browserRelay.run(
+          caller.principal,
+          taskId,
+          tabId,
+          { op: 'loadUrl', url },
+          caller.origin
+        )
       },
-      getUrl: async (taskId, tabId, origin) => {
-        const url = await browserRelay.run(taskId, tabId, { op: 'getUrl' }, origin)
+      getUrl: async (caller, taskId, tabId) => {
+        const url = await browserRelay.run(
+          caller.principal,
+          taskId,
+          tabId,
+          { op: 'getUrl' },
+          caller.origin
+        )
         return typeof url === 'string' ? url : null
       },
       // The client sends the PNG bytes; they go straight back to the requester — the
       // hub never writes a screenshot to its own disk.
-      capturePng: async (taskId, tabId, origin) => {
-        const reply = (await browserRelay.run(taskId, tabId, { op: 'capturePng' }, origin)) as {
-          pngBase64?: unknown
-        } | null
+      capturePng: async (caller, taskId, tabId) => {
+        const reply = (await browserRelay.run(
+          caller.principal,
+          taskId,
+          tabId,
+          { op: 'capturePng' },
+          caller.origin
+        )) as { pngBase64?: unknown } | null
         const b64 = typeof reply?.pngBase64 === 'string' ? reply.pngBase64 : ''
         return b64 ? new Uint8Array(Buffer.from(b64, 'base64')) : null
       }

@@ -121,6 +121,15 @@ export class PanelNetworkPolicy {
     return 'allow'
   }
 
+  /**
+   * RESIDUAL (known, accepted): this judges the answers of a resolve made HERE, not the
+   * address the connection then uses. Both go through the tab session's own Chromium
+   * host cache, so they agree unless the cache entry expires and the name re-resolves
+   * in between — a rebinding server with a ~0 s TTL can win that race. Electron exposes
+   * no hook on the connected IP before the response (only `onBeforeRedirect`), so this
+   * cannot be closed here; it is why an untrusted caller only reads documents loaded
+   * under this policy and never gets the app's own files, schemes or hub credentials.
+   */
   private async isNonPublicHost(hostname: string, webContentsId: number | null): Promise<boolean> {
     if (isNonPublicHostname(hostname)) return true
     const bare = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname

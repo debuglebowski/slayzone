@@ -32,7 +32,7 @@ test('engaged makes that client the one slay browser reaches', async () => {
   await caller.sync({ hostId: a.hostId, tabIds: ['x'], activeTabId: 'x' })
   await caller.sync({ hostId: b.hostId, tabIds: ['x'], activeTabId: 'x' })
   await caller.engaged({ taskId: 't1', clientKey: 'desk-b' })
-  relay.run('t1', null, { op: 'getUrl' }, 'elsewhere').catch(() => {
+  relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere').catch(() => {
     /* settled by the stop() below */
   })
   expect(b.frames.filter((f) => f.type === 'request')).toHaveLength(1)

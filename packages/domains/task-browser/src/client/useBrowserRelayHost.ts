@@ -328,6 +328,24 @@ export function hubSuppliedUrlAllowed(
   return !!parsed && !(WEB_SCHEMES.has(parsed.protocol) && isNonPublicHostname(parsed.hostname))
 }
 
+/**
+ * How to open a URL a hub sent outside the relay. A name passing the textual check
+ * says nothing about where it points (`10.0.0.1.nip.io` is a private address), so
+ * only the user's own local agent's URL loads directly; anyone else's tab opens at
+ * about:blank and the URL then loads as an UNTRUSTED host load
+ * (`tabs.loadUrl(…, { untrusted: true })`): the host resolves the name with the tab's
+ * own resolver and refuses non-public answers, and the tab stays under the untrusted
+ * policy. Null = not loaded at all.
+ */
+export function planHubSuppliedUrl(
+  url: string | null | undefined,
+  ctx: { hubIsLocal: boolean; origin: 'hub-machine' | 'elsewhere' | undefined }
+): { url: string; untrusted: boolean } | null {
+  if (!hubSuppliedUrlAllowed(url, ctx)) return null
+  const trustedLocal = ctx.hubIsLocal && ctx.origin === 'hub-machine'
+  return { url, untrusted: !trustedLocal && url !== 'about:blank' }
+}
+
 /** A page a remote caller may read: a public web page, or a blank/empty tab. */
 function isRemoteReadable(current: string | null): boolean {
   if (!current || current === 'about:blank') return true

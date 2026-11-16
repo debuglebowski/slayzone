@@ -1,7 +1,7 @@
 import { observable } from '@trpc/server/observable'
 import { z } from 'zod'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getMenuEvents, type UpdateStatus } from './menu-events'
+import { getMenuEvents, type MenuEventMap, type UpdateStatus } from './menu-events'
 
 /**
  * Menu / app-shortcut signals. Mirrors (and in slice 5 replaces) the one-way
@@ -14,6 +14,15 @@ import { getMenuEvents, type UpdateStatus } from './menu-events'
  * standalone `@slayzone/hub` host (which never calls `setMenuEvents()`) doesn't
  * throw at import.
  */
+/** An event for `principal` (undefined = not a user's request: everyone) reaches this
+ *  subscriber. Same key as the browser relay's hosts: the user id, null when login-off. */
+function forCaller(
+  principal: string | null | undefined,
+  ctx: { principal?: { userId?: string | null } | null }
+): boolean {
+  return principal === undefined || principal === (ctx.principal?.userId ?? null)
+}
+
 export const menuRouter = router({
   testEmit: publicProcedure
     .input(z.object({ event: z.enum(['close-current-focus', 'close-active-task']) }))
@@ -157,23 +166,23 @@ export const menuRouter = router({
       return () => ev.off('update-status', h)
     })
   ),
-  onBrowserEnsurePanelOpen: publicProcedure.subscription(() =>
-    observable<{ taskId: string; url?: string; tabId?: string }>((emit) => {
-      const h = (payload: { taskId: string; url?: string; tabId?: string }): void =>
-        emit.next(payload)
+  // A user's `slay browser` request opens tabs only in THAT user's own panel: on a
+  // hub where tasks are shared, another user's agent never reaches yours.
+  onBrowserEnsurePanelOpen: publicProcedure.subscription(({ ctx }) =>
+    observable<MenuEventMap['browser-ensure-panel-open'][0]>((emit) => {
+      const h = (payload: MenuEventMap['browser-ensure-panel-open'][0]): void => {
+        if (forCaller(payload.principal, ctx)) emit.next(payload)
+      }
       const ev = getMenuEvents()
       ev.on('browser-ensure-panel-open', h)
       return () => ev.off('browser-ensure-panel-open', h)
     })
   ),
-  onBrowserCreateTab: publicProcedure.subscription(() =>
-    observable<{ taskId: string; tabId: string; url?: string; background?: boolean }>((emit) => {
-      const h = (payload: {
-        taskId: string
-        tabId: string
-        url?: string
-        background?: boolean
-      }): void => emit.next(payload)
+  onBrowserCreateTab: publicProcedure.subscription(({ ctx }) =>
+    observable<MenuEventMap['browser-create-tab'][0]>((emit) => {
+      const h = (payload: MenuEventMap['browser-create-tab'][0]): void => {
+        if (forCaller(payload.principal, ctx)) emit.next(payload)
+      }
       const ev = getMenuEvents()
       ev.on('browser-create-tab', h)
       return () => ev.off('browser-create-tab', h)

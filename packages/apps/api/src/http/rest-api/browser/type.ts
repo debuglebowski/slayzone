@@ -15,6 +15,7 @@ export function registerBrowserTypeRoute(app: Express, deps: RestApiDeps): void 
     try {
       const result = await execJs<{ ok: boolean; error?: string }>(
         deps.browser!,
+        deps.browser!.callerOf(req),
         taskId,
         bwc.tabId,
         `(() => {
@@ -29,8 +30,7 @@ export function registerBrowserTypeRoute(app: Express, deps: RestApiDeps): void 
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return { ok: true };
-      })()`,
-        deps.browser!.originOf(req)
+      })()`
       )
       if (!result.ok) {
         res.status(404).json(result)

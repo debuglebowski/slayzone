@@ -112,10 +112,41 @@ describe('apiRequestDecision (/api, /mcp)', () => {
       )
     ).toBe('reject')
   })
-  test('a native client under an unlisted name is admitted (rebinding needs a browser)', () => {
-    for (const host of ['mymac.local:51100', 'hub.tailnet.ts.net', 'localhost.:51100', 'proxy']) {
+  test('a login-off hub answers only to its own names: no header absence admits another (review 4)', () => {
+    // A rebound page's same-origin GET over http sends Host and nothing else — no
+    // Origin, no fetch metadata (browsers send Sec-Fetch-* only to https/localhost).
+    for (const host of ['attacker.test:51100', 'mymac.local:51100', 'hub.tailnet.ts.net']) {
+      expect(apiRequestDecision(req({ host }), local)).toBe('reject')
+      expect(apiRequestDecision(req({ host, 'sec-fetch-mode': 'cors' }, 'POST'), local)).toBe(
+        'reject'
+      )
+      // A bearer proves nothing on a hub that verifies none.
+      expect(apiRequestDecision(req({ host, authorization: 'Bearer x' }), local)).toBe('reject')
+    }
+    // Its own names, in any spelling.
+    for (const host of ['localhost.:51100', '127.0.0.1:51100', '[::1]:51100', 'LOCALHOST:51100']) {
       expect(apiRequestDecision(req({ host }), local)).toBe('accept')
     }
+  })
+  test('a login hub admits another name only with a native credential or to sign in', () => {
+    const tailnet = 'hub.tailnet.ts.net'
+    expect(apiRequestDecision(req({ host: tailnet }), remote)).toBe('reject')
+    expect(apiRequestDecision(req({ host: tailnet, authorization: 'Bearer t' }), remote)).toBe(
+      'accept'
+    )
+    expect(
+      apiRequestDecision(
+        { url: '/api/auth/device/code', method: 'POST', headers: { host: tailnet } },
+        remote
+      )
+    ).toBe('accept')
+    // Not a browser page, even with a bearer.
+    expect(
+      apiRequestDecision(
+        req({ host: tailnet, authorization: 'Bearer t', 'sec-fetch-site': 'same-origin' }),
+        remote
+      )
+    ).toBe('reject')
   })
   test('a browser page under an unlisted name is refused, saying which name and how to allow it', () => {
     const r = httpRequestRefusal(
@@ -231,6 +262,12 @@ describe('trpcUpgradeDecision (/trpc WebSocket)', () => {
   const host = { host: '127.0.0.1:51100' }
   test('desktop renderer (Origin stripped by main), native clients', () => {
     expect(trpcUpgradeDecision(req({ ...host }), local)).toBe('accept')
+  })
+  test('a login-off hub answers only to its own names, Origin or not (review 4)', () => {
+    expect(trpcUpgradeDecision(req({ host: 'attacker.test:51100' }), local)).toBe('reject')
+    expect(trpcUpgradeDecision(req({ host: 'localhost:51100' }), local)).toBe('accept')
+    // A login hub: a socket with no Origin is never a browser's; it signs in next.
+    expect(trpcUpgradeDecision(req({ host: 'hub.tailnet.ts.net' }), remote)).toBe('accept')
   })
   test('a panel page or a rebound host is refused', () => {
     expect(

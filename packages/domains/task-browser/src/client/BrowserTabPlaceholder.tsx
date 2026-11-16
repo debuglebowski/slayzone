@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
 import { callBrowserHost, getBrowserHost } from './browser-host'
+import { takeUntrustedLoad } from './hub-supplied-loads'
 import { useBrowserRelayHostHandle } from './useBrowserRelayHost'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 import type { BrowserTabTheme } from '../shared'
@@ -119,6 +120,16 @@ export const BrowserTabPlaceholder = forwardRef<
         if (cancelled || wcId == null) return
         await host.call('tabs.register', taskId, tabId, wcId)
         if (cancelled) return
+        // A hub-supplied URL from anyone but the user's own local agent: the tab was
+        // created blank; load it now as an untrusted load (name resolved, then the
+        // tab stays under the untrusted policy). Not awaited: registration is not
+        // held up by a page load.
+        const untrustedUrl = takeUntrustedLoad(taskId, tabId)
+        if (untrustedUrl) {
+          host
+            .call('tabs.loadUrl', taskId, tabId, untrustedUrl, { untrusted: true })
+            .catch((err: unknown) => console.warn('[browser] hub-supplied URL refused:', err))
+        }
         live = true
         relayHost?.tabLive(tabId)
       })

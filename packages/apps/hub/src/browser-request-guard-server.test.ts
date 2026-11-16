@@ -2,10 +2,16 @@
  * The browser-page guard as wired into a REAL hub (review 3 HIGH 1): it covers every
  * path express can route — upper-case, mixed-case, trailing slash, doubled slashes,
  * encoded separators — because it classifies with the same key express routes by and
- * FAILS CLOSED (every path except an explicit public allow-list). And native clients
- * reach the hub under any name (MEDIUM 4).
+ * FAILS CLOSED (every path except an explicit public allow-list).
  *
- * In-process, desktop shape (login off, supervised), isolated SLAYZONE_ROOT.
+ * DNS rebinding as a browser really sends it (review 4 MEDIUM 4): a same-origin GET
+ * over http carries Host and nothing else — no Origin, no Sec-Fetch-* (browsers send
+ * those only to https / localhost) — and a POST adds only Origin. A login-off hub
+ * answers only to its own names; a login hub admits another name only with a native
+ * credential (a bearer it then verifies) or to sign in.
+ *
+ * In-process, desktop shape (login off, supervised), isolated SLAYZONE_ROOT. The login
+ * hub's half: browser-request-guard-login-hub.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { request } from 'node:http'
@@ -20,13 +26,14 @@ afterAll(() => hub?.stop())
 function send(
   path: string,
   headers: Record<string, string>,
-  method = 'POST'
+  method = 'POST',
+  port = hub.port
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const r = request(
       {
         host: '127.0.0.1',
-        port: hub.port,
+        port,
         path,
         method,
         headers: { 'content-type': 'application/json', ...headers }
@@ -43,11 +50,9 @@ function send(
 }
 
 const panel = { 'x-slayzone-browser-panel': '1', 'sec-fetch-site': 'same-origin' }
-const rebound = {
-  host: 'attacker.test:51100',
-  origin: 'http://attacker.test:51100',
-  'sec-fetch-site': 'same-origin'
-}
+/** A rebound page's request, as a browser sends it over http. */
+const reboundGet = { host: 'attacker.test:51100' }
+const reboundPost = { host: 'attacker.test:51100', origin: 'http://attacker.test:51100' }
 
 describe('every routable spelling of the API is guarded', () => {
   for (const path of [
@@ -67,24 +72,34 @@ describe('every routable spelling of the API is guarded', () => {
       expect(r.status, r.body).toBe(403)
       expect(r.body).toMatch(/browser panel/)
     })
-    test(`${path}: a rebound hostname from a browser is refused`, async () => {
-      const r = await send(path, rebound)
-      expect(r.status, r.body).toBe(403)
-      expect(r.body).toMatch(/attacker\.test/)
+    test(`${path}: a rebound hostname is refused (GET: Host only; POST: + Origin)`, async () => {
+      const get = await send(path, reboundGet, 'GET')
+      expect(get.status, get.body).toBe(403)
+      expect(get.body).toMatch(/attacker\.test/)
+      const post = await send(path, reboundPost)
+      expect(post.status, post.body).toBe(403)
     })
   }
 })
 
-describe('native clients under any name keep working (no fetch metadata, no Origin)', () => {
-  for (const host of [
-    'mymac.local:51100',
-    'hub.tailnet.ts.net',
-    'localhost.:51100',
-    'proxy-rewritten'
-  ]) {
-    test(`Host: ${host}`, async () => {
-      const r = await send('/api/projects', { host }, 'GET')
-      expect(r.status, r.body).not.toBe(403)
+describe('login-off hub: its own names only', () => {
+  for (const path of ['/api/tasks', '/api/pty', '/api/projects', '/mcp']) {
+    test(`${path} under a rebound name: 403, whatever else it sends`, async () => {
+      const extras: Array<Record<string, string>> = [
+        {},
+        { authorization: 'Bearer x' },
+        { 'sec-fetch-mode': 'cors' }
+      ]
+      for (const extra of extras) {
+        const r = await send(path, { ...reboundGet, ...extra }, 'GET')
+        expect(r.status, r.body).toBe(403)
+      }
+    })
+  }
+  for (const host of ['127.0.0.1', 'localhost', 'localhost.', '[::1]']) {
+    test(`native client as Host ${host}: admitted`, async () => {
+      const r = await send('/api/projects', { host: `${host}:${hub.port}` }, 'GET')
+      expect(r.status, r.body).toBe(200)
     })
   }
 })

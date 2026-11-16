@@ -15,6 +15,7 @@ export function registerBrowserClickRoute(app: Express, deps: RestApiDeps): void
     try {
       const result = await execJs<{ ok: boolean; error?: string; tag?: string; text?: string }>(
         deps.browser!,
+        deps.browser!.callerOf(req),
         taskId,
         bwc.tabId,
         `(() => {
@@ -23,8 +24,7 @@ export function registerBrowserClickRoute(app: Express, deps: RestApiDeps): void
         el.scrollIntoView({ block: 'center' });
         el.click();
         return { ok: true, tag: el.tagName.toLowerCase(), text: (el.textContent || '').trim().slice(0, 100) };
-      })()`,
-        deps.browser!.originOf(req)
+      })()`
       )
       if (!result.ok) {
         res.status(404).json(result)

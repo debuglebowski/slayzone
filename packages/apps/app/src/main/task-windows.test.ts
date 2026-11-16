@@ -17,7 +17,8 @@ vi.mock('@slayzone/terminal/electron', () => ({
 vi.mock('./document-link-bridge', () => ({ attachDocumentLinkBridges: vi.fn() }))
 vi.mock('./app-window-navigation-guard', () => ({ attachAppWindowNavigationGuard: vi.fn() }))
 
-const { attachTaskWindows, taskWindowsOps, taskWindowsEvents } = await import('./task-windows')
+const { attachTaskWindows, isAppWindowWebContents, taskWindowsOps, taskWindowsEvents } =
+  await import('./task-windows')
 
 function windowWithId(id: number) {
   const win = Object.assign(new EventEmitter(), {
@@ -65,5 +66,17 @@ describe('primary panel ownership lifecycle', () => {
     taskWindowsOps.releaseAllForTask('t1', 2)
     taskWindowsOps.releaseAllForTask('t1', 9)
     next.win.emit('closed')
+  })
+})
+
+describe('isAppWindowWebContents (who may drive the browser host)', () => {
+  it('the primary window is; a popup a page opened (its own window) is not (review 4)', () => {
+    const primary = windowWithId(41)
+    attachTaskWindows(primary.browserWindow)
+    expect(isAppWindowWebContents(primary.win.webContents)).toBe(true)
+    const popup = windowWithId(42)
+    expect(isAppWindowWebContents(popup.win.webContents)).toBe(false)
+    primary.win.emit('closed')
+    expect(isAppWindowWebContents(primary.win.webContents)).toBe(false)
   })
 })

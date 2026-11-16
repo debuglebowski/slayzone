@@ -72,6 +72,7 @@ import {
   browserCapturePng
 } from './browser-registry'
 import { registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
+import { linkBridgeAllowed, UserGestureTracker, type LinkBridgeKind } from './panel-link-bridge'
 import { PanelNetworkPolicy, panelMarkerNeeded } from './browser-panel-policy'
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
 import {
@@ -800,6 +801,9 @@ const browserViewManager = new BrowserViewManager()
 /** Set once the panel sessions are configured (whenReady); validates + sets up a partition. */
 let ensurePanelPartition: ((partition: string) => Electron.Session) | null = null
 let browserNetworkPolicyRef: PanelNetworkPolicy | null = null
+/** User acts (input events main received) per web contents: the panel page's link
+ *  bridge acts only on one (panel-link-bridge.ts). */
+const panelGestures = new UserGestureTracker()
 /** Hostnames of every registered remote hub (for the panel marker), re-read at most every 10 s. */
 let hubHostsCache: { at: number; hosts: Set<string> } | null = null
 function registeredHubHosts(): Set<string> {
@@ -4205,11 +4209,20 @@ app
           browserViewManager.sendInputEvent(viewId, input)
       )
     }
+    // The page's modified-link bridge: only on the user's own act in that tab, and the
+    // system browser only from a tab that is the user's own (panel-link-bridge.ts).
+    const linkBridgeCall = (kind: LinkBridgeKind, sender: Electron.WebContents): boolean =>
+      linkBridgeAllowed(kind, sender.id, {
+        gestures: panelGestures,
+        untrusted:
+          browserNetworkPolicy.isUntrusted(sender.id) || untrustedPanelSessions.has(sender.session)
+      })
     ipcMain.on(
       'browser:request-create-task-from-link',
       (event, payload: { url?: unknown; linkText?: unknown }) => {
         const url = typeof payload?.url === 'string' ? payload.url : ''
         if (!/^https?:\/\//i.test(url)) return
+        if (!linkBridgeCall('create-task', event.sender)) return
         const linkText = typeof payload?.linkText === 'string' ? payload.linkText : undefined
         browserViewManager.emitCreateTaskFromLinkForWebContents(event.sender.id, {
           url,
@@ -4218,9 +4231,10 @@ app
         })
       }
     )
-    ipcMain.on('browser:request-open-link-externally', (_event, payload: { url?: unknown }) => {
+    ipcMain.on('browser:request-open-link-externally', (event, payload: { url?: unknown }) => {
       const url = typeof payload?.url === 'string' ? payload.url : ''
       if (!/^https?:\/\//i.test(url)) return
+      if (!linkBridgeCall('open-external', event.sender)) return
       void shell.openExternal(url)
     })
 
@@ -4831,6 +4845,9 @@ const webviewOps = {
 const WEBVIEW_INIT_SCRIPT = WEBVIEW_DESKTOP_HANDOFF_SCRIPT
 
 app.on('web-contents-created', (_, wc) => {
+  // Input main itself receives — no page can forge it (panel-link-bridge.ts).
+  wc.on('input-event', (_event, input) => panelGestures.noteInput(wc.id, input.type))
+  wc.once('destroyed', () => panelGestures.forget(wc.id))
   // A DOM <webview> (multi-device emulation) only on a browser-panel partition, set up
   // like the panel's own views (marker header, network guard).
   wc.on('will-attach-webview', (event, _prefs, params) => {

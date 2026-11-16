@@ -19,18 +19,24 @@ import { registerBrowserNewTabRoute } from './new-tab.js'
 import { registerBrowserEvalRoute } from './eval.js'
 
 let origin: 'hub-machine' | 'elsewhere' = 'elsewhere'
+let principal: string | null = null
 let capable = true
 let hasTab = false
+const loaded: Array<{ caller: unknown; taskId: string; tabId: string | null; url: string }> = []
+let loadError: Error | null = null
 const browser: BrowserAccess = {
-  originOf: () => origin,
+  callerOf: () => ({ origin, principal }),
   isDesktopLocalHub: true,
   hasCapableClient: () => capable,
-  getResolvedBrowserTabId: async (_t, tabId) => tabId ?? 'tab-a',
+  getResolvedBrowserTabId: async (_c, _t, tabId) => tabId ?? 'tab-a',
   listBrowserTabs: async () => [],
   hasBrowserTab: async () => hasTab,
   waitForBrowserRegistration: async () => {},
   execJs: async () => 'ran',
-  loadUrl: async () => {},
+  loadUrl: async (caller, taskId, tabId, url) => {
+    loaded.push({ caller, taskId, tabId, url })
+    if (loadError) throw loadError
+  },
   getUrl: async () => 'https://a.test/',
   capturePng: async () => null
 }
@@ -54,10 +60,13 @@ afterAll(() => h.close())
 
 const reset = () => {
   origin = 'elsewhere'
+  principal = null
   capable = true
   hasTab = false
   opened.length = 0
   created.length = 0
+  loaded.length = 0
+  loadError = null
 }
 
 describe('targets the desktop refuses are refused with a clear message', () => {
@@ -97,7 +106,13 @@ describe('targets the desktop refuses are refused with a clear message', () => {
     })
     expect(res.status).toBe(200)
     expect(opened).toEqual([
-      { taskId: 't1', url: 'file:///tmp/fixture.html', tabId: undefined, origin: 'hub-machine' }
+      {
+        taskId: 't1',
+        url: 'file:///tmp/fixture.html',
+        tabId: undefined,
+        origin: 'hub-machine',
+        principal: null
+      }
     ])
   })
 })
@@ -105,9 +120,9 @@ describe('targets the desktop refuses are refused with a clear message', () => {
 test('open-panel and new-tab events carry the caller’s origin', async () => {
   reset()
   await h.request('POST', '/api/browser/navigate', { taskId: 't1', url: 'https://a.test/' })
-  expect(opened.at(-1)).toMatchObject({ url: 'https://a.test/', origin: 'elsewhere' })
+  expect(opened.at(-1)).toMatchObject({ origin: 'elsewhere' })
   await h.request('POST', '/api/browser/tabs', { taskId: 't1', url: 'https://a.test/' })
-  expect(created.at(-1)).toMatchObject({ url: 'https://a.test/', origin: 'elsewhere' })
+  expect(created.at(-1)).toMatchObject({ origin: 'elsewhere' })
 })
 
 test('no desktop app connected for the owner → a clear error, not "is the panel open?"', async () => {
@@ -125,4 +140,63 @@ test('no desktop app connected for the owner → a clear error, not "is the pane
   })
   expect(nav.status).toBe(503)
   expect(opened).toEqual([])
+})
+
+test('open-panel and new-tab events name the requesting user, so only their clients act', async () => {
+  reset()
+  principal = 'bob'
+  await h.request('POST', '/api/browser/navigate', { taskId: 't1', url: 'https://a.test/' })
+  expect(opened.at(-1)).toMatchObject({ principal: 'bob' })
+  await h.request('POST', '/api/browser/tabs', { taskId: 't1', url: 'https://a.test/' })
+  expect(opened.at(-1)).toMatchObject({ principal: 'bob' })
+  expect(created.at(-1)).toMatchObject({ principal: 'bob' })
+})
+
+describe("an untrusted caller's URL reaches the desktop only through the DNS-checked load (review 4)", () => {
+  test('new tab: created blank, then loaded through the relay; a refusal is reported', async () => {
+    reset()
+    const res = await h.request<{ ok?: boolean; tabId?: string }>('POST', '/api/browser/tabs', {
+      taskId: 't1',
+      url: 'http://10.0.0.1.nip.io/'
+    })
+    expect(res.status).toBe(200)
+    expect(created.at(-1)).toMatchObject({ url: undefined })
+    expect(loaded).toEqual([
+      {
+        caller: { origin: 'elsewhere', principal: null },
+        taskId: 't1',
+        tabId: res.body.tabId,
+        url: 'http://10.0.0.1.nip.io/'
+      }
+    ])
+    loadError = new Error('That address is on this computer or its private network')
+    const refused = await h.request<{ error?: string }>('POST', '/api/browser/tabs', {
+      taskId: 't1',
+      url: 'http://10.0.0.1.nip.io/'
+    })
+    expect(refused.status).toBe(500)
+    expect(refused.body.error).toMatch(/private network/)
+  })
+  test('navigate that opens the panel: opened without the URL, then loaded through the relay', async () => {
+    reset()
+    const res = await h.request('POST', '/api/browser/navigate', {
+      taskId: 't1',
+      url: 'http://10.0.0.1.nip.io/'
+    })
+    expect(res.status).toBe(200)
+    expect(opened.at(-1)).toMatchObject({ url: undefined })
+    expect(loaded.map((l) => l.url)).toEqual(['http://10.0.0.1.nip.io/'])
+  })
+  test("the desktop's own local agent keeps the direct open (no second load)", async () => {
+    reset()
+    origin = 'hub-machine'
+    await h.request('POST', '/api/browser/tabs', { taskId: 't1', url: 'http://localhost:3000/' })
+    expect(created.at(-1)).toMatchObject({ url: 'http://localhost:3000/' })
+    await h.request('POST', '/api/browser/navigate', {
+      taskId: 't1',
+      url: 'http://localhost:3000/'
+    })
+    expect(opened.at(-1)).toMatchObject({ url: 'http://localhost:3000/' })
+    expect(loaded).toEqual([])
+  })
 })

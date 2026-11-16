@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
 import { isNonPublicHostname } from '@slayzone/platform/browser-network'
-import type { BrowserAccess, RestApiDeps } from '../types'
+import type { BrowserAccess, BrowserCaller, RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 
 export const BROWSER_JS_TIMEOUT = 10_000
@@ -35,8 +35,7 @@ export function refuseTarget(
   } catch {
     return false
   }
-  const trustedLocal = browser.isDesktopLocalHub && browser.originOf(req) === 'hub-machine'
-  if (trustedLocal) return false
+  if (isTrustedLocal(browser, browser.callerOf(req))) return false
   if (parsed.protocol === 'file:') {
     res.status(403).json({
       error:
@@ -52,6 +51,17 @@ export function refuseTarget(
     return true
   }
   return false
+}
+
+/**
+ * The caller is an agent on the desktop's own machine, through that desktop's own
+ * local hub — the one caller whose URL the desktop opens as the user's own (it decides
+ * too; this only predicts it). Anyone else's URL is never handed to the desktop to open
+ * directly: the tab opens blank and the URL loads through the relay, where the desktop
+ * resolves the name first (`10.0.0.1.nip.io` is a private address) and reports a refusal.
+ */
+export function isTrustedLocal(browser: BrowserAccess, caller: BrowserCaller): boolean {
+  return browser.isDesktopLocalHub && caller.origin === 'hub-machine'
 }
 
 /** 501s + returns null when the host has no WCV browser (standalone server). */
@@ -87,23 +97,35 @@ export async function ensureBrowserTab(
     return null
   }
   if (url && refuseTarget(browser, req, url, res)) return null
-  if (await browser.hasBrowserTab(taskId, tabId)) {
-    return { tabId: await browser.getResolvedBrowserTabId(taskId, tabId), autoOpened: false }
+  const caller = browser.callerOf(req)
+  if (await browser.hasBrowserTab(caller, taskId, tabId)) {
+    return {
+      tabId: await browser.getResolvedBrowserTabId(caller, taskId, tabId),
+      autoOpened: false
+    }
   }
-  if (!browser.hasCapableClient(req)) {
+  if (!browser.hasCapableClient(caller)) {
     res.status(503).json({ error: NO_DESKTOP })
     return null
   }
 
   if (panel === 'visible') {
-    const origin = browser.originOf(req)
-    deps.menu?.emit('browser-ensure-panel-open', { taskId, url, tabId, origin })
-    deps.legacyBroadcast?.('browser:ensure-panel-open', taskId, url, tabId) // slice 5: drop legacy send
+    // Only the trusted local agent's URL opens with the panel; anyone else's loads
+    // through the relay once the tab is live (`autoOpened: false` → the caller loads it).
+    const openWith = url && isTrustedLocal(browser, caller) ? url : undefined
+    deps.menu?.emit('browser-ensure-panel-open', {
+      taskId,
+      url: openWith,
+      tabId,
+      origin: caller.origin,
+      principal: caller.principal
+    })
+    deps.legacyBroadcast?.('browser:ensure-panel-open', taskId, openWith, tabId) // slice 5: drop legacy send
     try {
-      await browser.waitForBrowserRegistration(taskId, { tabId })
+      await browser.waitForBrowserRegistration(caller, taskId, { tabId })
       return {
-        tabId: await browser.getResolvedBrowserTabId(taskId, tabId),
-        autoOpened: !!url
+        tabId: await browser.getResolvedBrowserTabId(caller, taskId, tabId),
+        autoOpened: !!openWith
       }
     } catch (err) {
       res.status(408).json({ error: err instanceof Error ? err.message : String(err) })
@@ -111,7 +133,7 @@ export async function ensureBrowserTab(
     }
   }
 
-  const tabs = await browser.listBrowserTabs(taskId)
+  const tabs = await browser.listBrowserTabs(caller, taskId)
   res.status(404).json({
     error: tabId
       ? `Browser tab '${tabId}' not found for task ${taskId}.`
@@ -130,13 +152,13 @@ export async function ensureBrowserTab(
  */
 export function execJs<T>(
   browser: BrowserAccess,
+  caller: BrowserCaller,
   taskId: string,
   tabId: string | null,
-  code: string,
-  origin: 'hub-machine' | 'elsewhere'
+  code: string
 ): Promise<T> {
   return Promise.race([
-    browser.execJs(taskId, tabId, code, origin) as Promise<T>,
+    browser.execJs(caller, taskId, tabId, code) as Promise<T>,
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Browser script timed out (10s)')), BROWSER_JS_TIMEOUT)
     )

@@ -225,6 +225,17 @@ const SSO_BOOTSTRAP_PATHS = keySet([
 ])
 
 /**
+ * A route a client with no token yet signs in through ({@link AUTH_BOOTSTRAP_PATHS},
+ * {@link SSO_BOOTSTRAP_PATHS}; whether it is open on THIS hub is still
+ * {@link restAuthAction}'s call). The browser-page guard lets a native client reach
+ * these under a name the hub is not published under (a tailnet name, say).
+ */
+export function isSignInPath(url: string | undefined): boolean {
+  const key = routePathKey(url ?? '/')
+  return key !== null && (AUTH_BOOTSTRAP_PATHS.has(key) || SSO_BOOTSTRAP_PATHS.has(key))
+}
+
+/**
  * Routes that carry their OWN stronger guard and must not additionally require a
  * bearer.
  *

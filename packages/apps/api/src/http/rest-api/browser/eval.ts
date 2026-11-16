@@ -15,10 +15,10 @@ export function registerBrowserEvalRoute(app: Express, deps: RestApiDeps): void 
     try {
       const result = await execJs(
         deps.browser!,
+        deps.browser!.callerOf(req),
         taskId,
         bwc.tabId,
-        code,
-        deps.browser!.originOf(req)
+        code
       )
       await markTabAgentTouched(
         deps.db,

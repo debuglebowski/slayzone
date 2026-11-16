@@ -64,6 +64,15 @@ export function attachTaskWindows(win: BrowserWindow): void {
   })
 }
 
+/**
+ * `wc` is the renderer of one of the app's own windows — the primary window or a task
+ * window — and nothing else: not a panel web view, nor a popup a page opened (its own
+ * BrowserWindow), nor any other window.
+ */
+export function isAppWindowWebContents(wc: { id: number }): boolean {
+  return allWindows().some((w) => w.webContents === wc)
+}
+
 function allWindows(): BrowserWindow[] {
   const out: BrowserWindow[] = []
   if (primaryWindow && !primaryWindow.isDestroyed()) out.push(primaryWindow)

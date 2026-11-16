@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain, type WebContents } from 'electron'
+import { ipcMain, type WebContents } from 'electron'
+import { isAppWindowWebContents } from './task-windows'
 import type { EventEmitter } from 'node:events'
 import { recipientsFor } from './browser-host-routing'
 import {
@@ -44,10 +45,10 @@ export interface BrowserHostIpcDeps {
 const ALLOWED = new Set<string>(BROWSER_HOST_METHODS)
 const VIEW_EVENTS = ['event', 'shortcut', 'focused', 'engaged', 'create-task-from-link'] as const
 
-/** An app window's own renderer — not a panel web view, popup or extension page. */
+/** One of the app's own windows' renderer (task-windows registry) — not a panel web
+ *  view, a popup a page opened, nor an extension page. */
 export function isAppRenderer(sender: WebContents): boolean {
-  const win = BrowserWindow.fromWebContents(sender)
-  if (!win || win.isDestroyed() || win.webContents !== sender) return false
+  if (sender.isDestroyed() || !isAppWindowWebContents(sender)) return false
   return !sender.getURL().startsWith('chrome-extension:')
 }
 

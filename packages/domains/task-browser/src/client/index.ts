@@ -14,5 +14,6 @@ export {
   type BrowserHostClient
 } from './browser-host'
 export { useBrowserEngagementForwarder } from './useBrowserEngagementForwarder'
-export { hubMayNavigateTo, hubSuppliedUrlAllowed } from './useBrowserRelayHost'
+export { hubMayNavigateTo, hubSuppliedUrlAllowed, planHubSuppliedUrl } from './useBrowserRelayHost'
+export { queueUntrustedLoad } from './hub-supplied-loads'
 export { useHubIsLocal, useBrowserPartition } from './useHubIsLocal'

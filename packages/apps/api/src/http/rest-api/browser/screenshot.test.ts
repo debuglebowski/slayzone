@@ -19,17 +19,17 @@ let nextCapture: Uint8Array | null = PNG
 const captured: Array<[string, string | null]> = []
 
 const browser: BrowserAccess = {
-  originOf: () => 'elsewhere',
+  callerOf: () => ({ origin: 'elsewhere', principal: null }),
   isDesktopLocalHub: false,
   hasCapableClient: () => true,
-  getResolvedBrowserTabId: async (_taskId, tabId) => tabId ?? 'tab-a',
+  getResolvedBrowserTabId: async (_caller, _taskId, tabId) => tabId ?? 'tab-a',
   listBrowserTabs: async () => [{ tabId: 'tab-a', active: true }],
   hasBrowserTab: async () => true,
   waitForBrowserRegistration: async () => {},
   execJs: async () => null,
   loadUrl: async () => {},
   getUrl: async () => null,
-  capturePng: async (taskId, tabId, _origin) => {
+  capturePng: async (_caller, taskId, tabId) => {
     captured.push([taskId, tabId])
     return nextCapture
   }

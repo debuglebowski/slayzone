@@ -184,6 +184,22 @@ export type ProcessStartResult =
         | 'old-run-unreachable'
     }
 
+type BrowserOrigin = 'hub-machine' | 'elsewhere'
+
+/**
+ * Who asks for a browser op: where they run, as THIS hub sees it (see the relay's
+ * `BrowserRequestOrigin`), and which user they are. Every op — queries included —
+ * reaches only that user's own desktop clients: a task shared with another user never
+ * lets one drive (or even see) the other's panel.
+ */
+export interface BrowserCaller {
+  /** The client honours `hub-machine` only from its own local hub; it is how a local
+   *  agent keeps file:// navigation and nothing more. */
+  origin: BrowserOrigin
+  /** The authenticated user; null on a login-off hub (one implicit user). */
+  principal: string | null
+}
+
 /**
  * The browser panel's live tabs, as the REST browser routes (`slay browser`) reach
  * them. The web views live on a CLIENT; the hub relays each operation to the client
@@ -195,48 +211,49 @@ export type ProcessStartResult =
  * machine's disk: the requester (a CLI) may run on another machine than the hub and
  * the client.
  */
-type BrowserOrigin = 'hub-machine' | 'elsewhere'
-
 export interface BrowserAccess {
-  /**
-   * Where this request's caller runs, as THIS hub sees it (see the relay's
-   * `BrowserRequestOrigin`). The client honours `hub-machine` only from its own
-   * local hub; it is how a local agent keeps file:// navigation and nothing more.
-   */
-  originOf: (req: IncomingMessage) => 'hub-machine' | 'elsewhere'
+  callerOf: (req: IncomingMessage) => BrowserCaller
   /** This hub is a desktop app's own local hub: the only hub whose `hub-machine`
    *  callers a desktop lets load local files (the client decides; this only reports). */
   isDesktopLocalHub: boolean
-  /** A desktop app that can host the browser panel is connected for this request's
-   *  user (any task). False → the routes say a desktop app is needed. */
-  hasCapableClient: (req: IncomingMessage) => boolean
-  getResolvedBrowserTabId: (taskId: string, tabId?: string) => Promise<string | null>
-  listBrowserTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
+  /** A desktop app that can host the browser panel is connected for the caller
+   *  (any task). False → the routes say a desktop app is needed. */
+  hasCapableClient: (caller: BrowserCaller) => boolean
+  getResolvedBrowserTabId: (
+    caller: BrowserCaller,
+    taskId: string,
+    tabId?: string
+  ) => Promise<string | null>
+  listBrowserTabs: (
+    caller: BrowserCaller,
+    taskId: string
+  ) => Promise<Array<{ tabId: string; active?: boolean }>>
   /** True when a live tab is registered — the "is the panel open?" probe. */
-  hasBrowserTab: (taskId: string, tabId?: string) => Promise<boolean>
+  hasBrowserTab: (caller: BrowserCaller, taskId: string, tabId?: string) => Promise<boolean>
   /** Resolves once a tab registers; rejects on timeout. */
   waitForBrowserRegistration: (
+    caller: BrowserCaller,
     taskId: string,
     opts: { tabId?: string; timeoutMs?: number }
   ) => Promise<void>
   execJs: (
+    caller: BrowserCaller,
     taskId: string,
     tabId: string | null,
-    code: string,
-    origin: BrowserOrigin
+    code: string
   ) => Promise<unknown>
   loadUrl: (
+    caller: BrowserCaller,
     taskId: string,
     tabId: string | null,
-    url: string,
-    origin: BrowserOrigin
+    url: string
   ) => Promise<void>
-  getUrl: (taskId: string, tabId: string | null, origin: BrowserOrigin) => Promise<string | null>
+  getUrl: (caller: BrowserCaller, taskId: string, tabId: string | null) => Promise<string | null>
   /** PNG bytes of the visible page; null when the captured image was empty. */
   capturePng: (
+    caller: BrowserCaller,
     taskId: string,
-    tabId: string | null,
-    origin: BrowserOrigin
+    tabId: string | null
   ) => Promise<Uint8Array | null>
 }
 

@@ -175,7 +175,7 @@ import {
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
-import { getBrowserHost, hubSuppliedUrlAllowed } from '@slayzone/task-browser'
+import { getBrowserHost, planHubSuppliedUrl, queueUntrustedLoad } from '@slayzone/task-browser'
 import type { LinkOpenTarget } from '@slayzone/editor'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
@@ -1706,9 +1706,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Open a dev server URL in the browser panel (used by both auto-open and toast)
   const openDevServerInBrowser = useCallback(
-    (url: string) => {
+    (url: string, tabId?: string) => {
       handlePanelToggle('browser', true)
-      const newTab = { id: `tab-${safeRandomUUID().slice(0, 8)}`, url, title: url }
+      const id = tabId ?? `tab-${safeRandomUUID().slice(0, 8)}`
+      const newTab = { id, url, title: url === 'about:blank' ? 'New Tab' : url }
       if (browserOpenRef.current) {
         handleBrowserTabsChange({ tabs: [...browserTabs.tabs, newTab], activeTabId: newTab.id })
       } else {
@@ -1731,13 +1732,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // A URL the HUB sends (slay browser new / --panel visible / auto-open) is loaded on
   // THIS device, by the same rule as a relayed navigation: web pages only — no local
   // file, no address on this computer or its private network — except for an agent on
-  // this very machine through this device's own local hub (main's behaviour). Anything
-  // else opens the panel without loading it.
-  const hubUrlAllowed = (
+  // this very machine through this device's own local hub (main's behaviour). Anyone
+  // else's URL opens a blank tab, then loads as an untrusted host load: the name is
+  // resolved first, and the tab stays under the untrusted policy (`planHubSuppliedUrl`).
+  const planHubUrl = (
     url: string | null | undefined,
     origin: 'hub-machine' | 'elsewhere' | undefined
-  ): url is string =>
-    hubSuppliedUrlAllowed(url, {
+  ): { url: string; untrusted: boolean } | null =>
+    planHubSuppliedUrl(url, {
       hubIsLocal: hubs.some((h) => h.id === (hubId ?? defaultHubId) && h.kind === 'local'),
       origin
     })
@@ -1756,7 +1758,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       origin?: 'hub-machine' | 'elsewhere'
     }) => {
       if (!task || taskId !== task.id) return
-      const url = hubUrlAllowed(rawUrl, origin) ? rawUrl : null
+      const load = planHubUrl(rawUrl, origin)
       if (tabId) {
         // CLI targeted an existing tab — open panel and switch to that tab.
         // The navigate route will load `url` into the targeted tab's webContents.
@@ -1765,8 +1767,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
           handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
         }
-      } else if (url) {
-        openDevServerInBrowser(url)
+      } else if (load?.untrusted) {
+        const newTabId = `tab-${safeRandomUUID().slice(0, 8)}`
+        queueUntrustedLoad(task.id, newTabId, load.url)
+        openDevServerInBrowser('about:blank', newTabId)
+      } else if (load) {
+        openDevServerInBrowser(load.url)
       } else {
         handlePanelToggle('browser', true)
       }
@@ -1796,7 +1802,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }) => {
       if (!task || taskId !== task.id) return
       handlePanelToggle('browser', true)
-      const tabUrl = hubUrlAllowed(url, origin) ? url : 'about:blank'
+      const load = planHubUrl(url, origin)
+      const tabUrl = load && !load.untrusted ? load.url : 'about:blank'
       const newTab = {
         id: tabId,
         url: tabUrl,
@@ -1804,6 +1811,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       const current = browserTabsRef.current
       if (current.tabs.some((t) => t.id === tabId)) return
+      if (load?.untrusted) queueUntrustedLoad(task.id, tabId, load.url)
       const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
       handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
     }

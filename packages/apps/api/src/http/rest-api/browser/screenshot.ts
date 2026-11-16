@@ -25,7 +25,7 @@ export function registerBrowserScreenshotRoute(app: Express, deps: RestApiDeps):
     const bwc = await ensureBrowserTab(deps, req, taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
-      const png = await deps.browser!.capturePng(taskId, bwc.tabId, deps.browser!.originOf(req))
+      const png = await deps.browser!.capturePng(deps.browser!.callerOf(req), taskId, bwc.tabId)
       if (!png || png.length === 0) {
         res.status(500).json({ error: 'Captured image is empty' })
         return
