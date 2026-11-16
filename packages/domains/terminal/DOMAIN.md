@@ -171,6 +171,13 @@ computer store): most main-thread CPU in one loop iteration, rebuild 5.0 s → 5
 restore 2.7 s → 28 ms, reset 4.1 s → 62 ms
 (`chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts`).
 
+Computer storage now schedules its own bounded deletion/write/metadata turns. The
+projection releases its encoding/checkpoint-read turn before awaiting these calls,
+so compatibility stores sharing the scheduler cannot deadlock. Worker stores can
+provide optional metadata callbacks; custom/older record stores keep a paced raw-page
+fallback. Encoded page bodies and metadata are still produced on the projection's
+thread; captured owner/epoch checks stay in the database owner for every step.
+
 ### Chat side questions (`/btw`)
 
 `chat.sideQuestion.ask` answers a question from the tab's conversation without

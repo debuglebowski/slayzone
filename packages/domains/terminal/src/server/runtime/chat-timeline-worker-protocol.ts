@@ -15,7 +15,7 @@ export type StoreMethod =
   | 'save'
   | 'searchPages'
   | 'discard'
-export type RecordMethod = 'load' | 'pageIds' | 'save' | 'discard'
+export type RecordMethod = 'load' | 'pageIds' | 'loadSummaries' | 'searchPages' | 'save' | 'discard'
 export type WorkerCall = {
   type: 'call'
   id: number

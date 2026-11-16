@@ -26,7 +26,7 @@ const encodedPage = (page: number) => ({
   value: JSON.stringify({ page, rows: '[]', summary: '{}', searchText: 'hello' })
 })
 
-test('timeline commits touch only requested records, without decoding saved page bodies', () => {
+test('timeline commits touch only requested records, without decoding saved page bodies', async () => {
   const store = fixture()
   // An unreadable derived page must be removable, without parsing it first.
   store.compose((db) =>
@@ -35,7 +35,7 @@ test('timeline commits touch only requested records, without decoding saved page
       .run('chat', 'timeline', 'page:9', 'corrupt derived cache', 1)
   )
   store.putRecord('chat', 1, { kind: 'draft', id: 'state', value: { text: 'keep me' }, at: 1 })
-  store.writeTimeline('chat', 1, {
+  await store.writeTimeline('chat', 1, {
     dropPagesFrom: 2,
     pages: [encodedPage(0), encodedPage(1)],
     checkpoint: '{"seq":3}'
@@ -43,29 +43,33 @@ test('timeline commits touch only requested records, without decoding saved page
   expect(store.timelinePageIds('chat')).toEqual([0, 1])
   expect(store.timelineRecord('chat', 'checkpoint')).toBe('{"seq":3}')
   expect(store.getRecord('chat', 'draft', 'state')).toEqual({ text: 'keep me' })
-  store.writeTimeline('chat', 1, { dropPagesFrom: 1, pages: [encodedPage(2)], checkpoint: null })
+  await store.writeTimeline('chat', 1, {
+    dropPagesFrom: 1,
+    pages: [encodedPage(2)],
+    checkpoint: null
+  })
   expect(store.timelinePageIds('chat')).toEqual([0, 2])
   expect(store.timelineRecord('chat', 'checkpoint')).toBeNull()
   expect(store.dropTimelineStep('chat', 1, TIMELINE_DROP_STEP_BYTES)).toBe(true)
   expect(store.timelinePageIds('chat')).toEqual([])
 })
 
-test('timeline writes atomically reject stale owners, frozen and deleted conversations', () => {
+test('timeline writes atomically reject stale owners, frozen and deleted conversations', async () => {
   const store = fixture()
   const write = { dropPagesFrom: null, pages: [encodedPage(0)], checkpoint: '{"seq":0}' }
-  store.writeTimeline('chat', 1, write)
-  expect(() =>
+  await store.writeTimeline('chat', 1, write)
+  await expect(
     store.writeTimeline('chat', 2, { ...write, dropPagesFrom: 0, checkpoint: null })
-  ).toThrow(/ownership/i)
+  ).rejects.toThrow(/ownership/i)
   store.freeze('chat', 1, 'move')
-  expect(() =>
+  await expect(
     store.writeTimeline('chat', 1, { ...write, dropPagesFrom: 0, checkpoint: null })
-  ).toThrow(/frozen/i)
+  ).rejects.toThrow(/frozen/i)
   expect(store.timelineRecord('chat', 'checkpoint')).toBe('{"seq":0}')
   expect(store.timelinePageIds('chat')).toEqual([0])
   store.unfreeze('chat', 1, 'move')
   store.deleteConversation('chat', 2)
-  expect(() => store.writeTimeline('chat', 1, write)).toThrow(/deleted/i)
+  await expect(store.writeTimeline('chat', 1, write)).rejects.toThrow(/deleted/i)
   expect(store.timelinePageIds('chat')).toEqual([])
 })
 
@@ -77,6 +81,8 @@ test('a queued worker commit remains fenced to the owner captured when opened', 
     records.save({ dropPagesFrom: null, pages: [encodedPage(0)], checkpoint: null })
   ).rejects.toThrow(/ownership/i)
   await expect(records.load('checkpoint')).rejects.toThrow(/ownership/i)
+  await expect(records.loadSummaries!()).rejects.toThrow(/ownership/i)
+  await expect(records.searchPages!('hello')).rejects.toThrow(/ownership/i)
   expect(store.timelinePageIds('chat')).toEqual([])
 })
 
@@ -87,8 +93,8 @@ test('a queued worker commit remains fenced to the owner captured when opened', 
  * Regression (2026-11-14 restore of ~60 chats, 1–11 s computer stalls): dropping
  * pages, listing page summaries (every projection restore) and searching loaded and
  * parsed EVERY stored page of the chat; discarding a projection deleted all its pages
- * in one synchronous step. Each is now a query on ids / JSON paths, and a drop goes in
- * byte-bounded steps that let the event loop run between them.
+ * in one synchronous step. Drops query ids; metadata reads migrate/index legacy
+ * pages in bounded steps that let the event loop run between them.
  */
 const dirs: string[] = []
 const runtimes: Array<ReturnType<typeof createComputerChatRuntime>> = []

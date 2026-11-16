@@ -27,13 +27,27 @@ function storeCall(
     port.postMessage({ type: 'store', id, projectionId, raw, method, args } satisfies StoreCall)
   })
 }
-function storeProxy(projectionId: number, raw: boolean): TimelineProjectionStore {
+function storeProxy(
+  projectionId: number,
+  raw: boolean,
+  metadata: boolean
+): TimelineProjectionStore {
   if (raw) {
     const records: TimelineRecordStore = {
       load: (key) =>
         storeCall(projectionId, true, 'load', [key]) as ReturnType<TimelineRecordStore['load']>,
       pageIds: () =>
         storeCall(projectionId, true, 'pageIds', []) as ReturnType<TimelineRecordStore['pageIds']>,
+      ...(metadata
+        ? {
+            loadSummaries: () =>
+              storeCall(projectionId, true, 'loadSummaries', []) as Promise<
+                Array<{ page: number; summary: string }>
+              >,
+            searchPages: (needle: string) =>
+              storeCall(projectionId, true, 'searchPages', [needle]) as Promise<number[]>
+          }
+        : {}),
       save: async (write) => {
         await storeCall(projectionId, true, 'save', [write])
       },
@@ -59,10 +73,11 @@ async function invoke(msg: WorkerCall): Promise<unknown> {
       agentStartedTurns: boolean
       pageBudgetBytes?: number
       raw: boolean
+      metadata: boolean
     }
     const { projection, from } = await TimelineProjection.begin({
       ...opts,
-      store: storeProxy(msg.projectionId, opts.raw),
+      store: storeProxy(msg.projectionId, opts.raw, opts.metadata),
       onError: (what, err) =>
         port.postMessage({
           type: 'notice',

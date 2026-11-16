@@ -151,6 +151,14 @@ export function createLocalChatData(
         readable()
         return store.timelinePageIds(identity.id)
       },
+      loadSummaries: async () => {
+        readable()
+        return store.timelineSummaries(identity.id, identity.epoch)
+      },
+      searchPages: async (needle) => {
+        readable()
+        return store.searchTimelinePages(identity.id, identity.epoch, needle)
+      },
       save: async (write) => store.writeTimeline(identity.id, identity.epoch, write),
       discard: async () => {
         await dropTimelineInSteps(store, identity.id, identity.epoch)
@@ -1187,11 +1195,11 @@ export function createLocalChatData(
       timelineStoreFromRecords(timelineRecords(tabId)).loadCheckpoint(),
     loadTimelinePages: async (tabId, pages) =>
       timelineStoreFromRecords(timelineRecords(tabId)).loadPages(pages),
-    // Compatibility reads use SQL paths; worker reads use the raw records above.
-    loadTimelineSummaries: async (tabId) => store.timelineSummaries(owner(tabId).id),
+    // Both paths use paced metadata, with the same captured ownership fence.
+    loadTimelineSummaries: async (tabId) => timelineRecords(tabId).loadSummaries!(),
     saveTimeline: async (tabId, write: TimelineWrite) =>
       timelineStoreFromRecords(timelineRecords(tabId)).save(write),
-    searchTimelinePages: async (tabId, needle) => store.searchTimelinePages(owner(tabId).id, needle),
+    searchTimelinePages: async (tabId, needle) => timelineRecords(tabId).searchPages!(needle),
     clearTimeline: async (tabId) => timelineRecords(tabId).discard(),
     clearChatQueue: (tabId) => queue.clear(tabId),
     buildMcpEnv: async (taskId) =>

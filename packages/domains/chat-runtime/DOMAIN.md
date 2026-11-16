@@ -90,13 +90,24 @@ renewal starts only after construction succeeds. Each reader owns a unique lease
 so closing an overlapping export cannot release another snapshot's blob protection.
 
 Timeline projection records (`kind='timeline'`, derived from the events) are never
-decoded to drop a page range: drops are SQL on ids. Compatibility summary and search
-APIs use JSON paths without loading whole pages; worker reads stay encoded as above.
-A stored projection goes in byte-bounded steps (`dropTimelineStep`,
-`TIMELINE_DROP_STEP_BYTES` 4 MiB,
-checkpoint first; `dropTimelineInSteps` runs one step per turn of the process's
-history work): its pages can be hundreds of MB and `secure_delete` zero-fills every
-freed byte — the backfill's reset of 63 chats at once froze the computer 12.7 s.
+decoded to drop a page range: drops are SQL on ids. `writeTimeline` and discards
+share a per-conversation async queue. A replacement whose affected old/new bytes
+and records fit one turn remains atomic, including rollback on failure. Larger
+replacements delete the checkpoint, then old pages in scheduled 4 MiB steps,
+before publishing replacements. Deletion budgets include cached metadata; write
+budgets include overwritten bytes. The new
+checkpoint is committed only after every preceding slice succeeds. Each step checks
+the captured owner/epoch; interruption leaves the events authoritative and the
+projection rebuildable. `secure_delete` still zero-fills freed bytes.
+
+`timeline_page_metadata` holds summaries/search text apart from page bodies. New
+encoded writes carry these fields from the projection thread; body+metadata commit
+atomically. Triggers invalidate metadata on page insert/update/delete, including
+older writers. No version bump: existing projection bodies/checkpoints stay valid.
+Missing metadata migrates lazily in 4 MiB / 2,000-page scheduled reads; frozen and
+prepared sources read the bounded fallback without writing an index. Hot summaries
+never parse page bodies; search scans metadata in byte-bounded turns as well. Worker
+metadata callbacks retain the same owner fence, and actual page reads stay encoded.
 
 ## Decisions
 

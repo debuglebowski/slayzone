@@ -35,6 +35,7 @@ import type {
 } from '../shared'
 import { CHAT_RECORD_KINDS } from '../shared'
 import type { EncodedTimelineWrite } from '@slayzone/terminal/timeline-records'
+import { historyReadTurns } from '@slayzone/terminal/history-turns'
 
 function digest(value: unknown): string {
   return createHash('sha256')
@@ -194,6 +195,30 @@ export const EVENT_MARKERS_DDL = `
   CREATE TRIGGER IF NOT EXISTS event_marker_coverage_delete AFTER DELETE ON conversations
   BEGIN
     DELETE FROM event_marker_coverage WHERE conversation_id=OLD.id;
+  END;
+`
+
+/** Derived metadata: old writers invalidate it without decoding page bodies. */
+const TIMELINE_METADATA_DDL = `
+  CREATE TABLE IF NOT EXISTS timeline_page_metadata (
+    conversation_id TEXT NOT NULL, page_id TEXT NOT NULL,
+    summary TEXT NOT NULL, search_text TEXT NOT NULL,
+    PRIMARY KEY(conversation_id,page_id)
+  ) WITHOUT ROWID;
+  CREATE TRIGGER IF NOT EXISTS timeline_page_metadata_insert AFTER INSERT ON records
+  WHEN NEW.kind='timeline' AND NEW.id GLOB 'page:*' BEGIN
+    DELETE FROM timeline_page_metadata WHERE conversation_id=NEW.conversation_id AND page_id=NEW.id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS timeline_page_metadata_update AFTER UPDATE OF conversation_id,kind,id,value ON records
+  BEGIN
+    DELETE FROM timeline_page_metadata WHERE OLD.kind='timeline'
+      AND conversation_id=OLD.conversation_id AND page_id=OLD.id;
+    DELETE FROM timeline_page_metadata WHERE NEW.kind='timeline'
+      AND conversation_id=NEW.conversation_id AND page_id=NEW.id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS timeline_page_metadata_delete AFTER DELETE ON records
+  WHEN OLD.kind='timeline' AND OLD.id GLOB 'page:*' BEGIN
+    DELETE FROM timeline_page_metadata WHERE conversation_id=OLD.conversation_id AND page_id=OLD.id;
   END;
 `
 
@@ -389,6 +414,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     db.exec(TASK_PATHS_DDL)
     // FU5: the event-marker index of `prompts.summaries` (derived; see the DDL).
     db.exec(EVENT_MARKERS_DDL)
+    db.exec(TIMELINE_METADATA_DDL)
     // Version of the hub-facing metadata state, per task. Triggers are the one
     // choke point, so every writer (bootstrap, retention, migration, future code)
     // bumps it. Fail safe: a record kind counts unless it is known to stay local.
@@ -746,6 +772,88 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       WHERE ${where} AND id<=? ORDER BY id`)
       .all(...params, through.id) as ReceiptRow[]
     return { receipts: found.map(decodeReceipt), more }
+  }
+  const timelineMetadataFrom = `records r LEFT JOIN timeline_page_metadata m
+    ON m.conversation_id=r.conversation_id AND m.page_id=r.id`
+  /** Migrate/read only a bounded page of metadata in each process history turn. */
+  async function readTimelineMetadata<T extends { page: number }>(
+    id: string,
+    epoch: number,
+    field: 'summary' | 'search_text',
+    read: (where: string, params: string[]) => T[]
+  ): Promise<T[]> {
+    const job = historyReadTurns.job({ yieldFirst: true })
+    const budget = clampChatHistoryPageBudget()
+    const out: T[] = []
+    let after = ''
+    for (let done = false; !done; ) {
+      const part = await job.step(() =>
+        api.transaction(() => {
+          const owner = row(id)
+          if (!owner || owner.state === 'deleted' || owner.epoch !== epoch)
+            throw new Error('Timeline ownership changed')
+          const where = `r.conversation_id=? AND r.kind='timeline' AND r.id>? AND r.id GLOB 'page:*'
+              AND CAST(substr(r.id,6) AS INTEGER) BETWEEN 0 AND 9007199254740991
+              AND r.id='page:' || CAST(CAST(substr(r.id,6) AS INTEGER) AS TEXT)`
+          const headers = db
+            .prepare(`SELECT r.id,
+          CASE WHEN m.page_id IS NULL THEN octet_length(r.value)
+            ELSE octet_length(m.${field}) END + octet_length(r.id) AS bytes
+          FROM ${timelineMetadataFrom} WHERE ${where} ORDER BY r.id LIMIT ?`)
+            .iterate(id, after, budget.maxEvents + 1) as Iterable<{ id: string; bytes: number }>
+          const { through, more } = exportThrough(headers, budget)
+          if (!through) return { rows: [] as T[], after, done: true }
+          const range = where + ' AND r.id<=?'
+          const params = [id, after, through.id]
+          // Frozen/prepared sources remain readable without acquiring new writes.
+          // Their missing metadata is read directly within this same bounded range.
+          if (owner.state === 'active')
+            db.prepare(`INSERT INTO timeline_page_metadata
+            SELECT r.conversation_id,r.id,json_extract(r.value,'$.summary'),json_extract(r.value,'$.searchText')
+            FROM ${timelineMetadataFrom} WHERE ${range} AND m.page_id IS NULL`).run(...params)
+          return { rows: read(range, params), after: through.id, done: !more }
+        })
+      )
+      out.push(...part.rows)
+      after = part.after
+      done = part.done
+    }
+    return out.sort((a, b) => a.page - b.page)
+  }
+  /** Serialize a conversation's derived operations across scheduled loop turns. */
+  const timelineWork = new Map<string, Promise<unknown>>()
+  function queueTimeline<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const run = (timelineWork.get(id) ?? Promise.resolve()).then(work, work)
+    timelineWork.set(id, run)
+    const clean = () => {
+      if (timelineWork.get(id) === run) timelineWork.delete(id)
+    }
+    void run.then(clean, clean)
+    return run
+  }
+  async function dropTimeline(id: string, epoch: number, from?: number): Promise<void> {
+    const job = historyReadTurns.job({ yieldFirst: true })
+    while (
+      !(await job.step(() => api.dropTimelineStep(id, epoch, TIMELINE_DROP_STEP_BYTES, from)))
+    );
+  }
+  /** Caller holds an owner-checked transaction and has already invalidated its checkpoint. */
+  function putTimeline(
+    id: string,
+    pages: EncodedTimelineWrite['pages'],
+    checkpoint: string | null
+  ) {
+    const put = db.prepare(`INSERT INTO records VALUES(?,'timeline',?,?,?)
+      ON CONFLICT(conversation_id,kind,id) DO UPDATE SET value=excluded.value,saved_at=excluded.saved_at`)
+    const metadata = db.prepare(`INSERT INTO timeline_page_metadata VALUES(?,?,?,?)
+      ON CONFLICT(conversation_id,page_id) DO UPDATE SET summary=excluded.summary,search_text=excluded.search_text`)
+    const at = Date.now()
+    for (const page of pages) {
+      put.run(id, `page:${page.page}`, page.value, at)
+      if (page.summary !== undefined && page.searchText !== undefined)
+        metadata.run(id, `page:${page.page}`, page.summary, page.searchText)
+    }
+    if (checkpoint !== null) put.run(id, 'checkpoint', checkpoint, at)
   }
   /** Open export read snapshots (`openExportReader`), closed with the store. */
   const exportReaders = new Set<ChatExportReader>()
@@ -1345,22 +1453,108 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         )
       })
     },
-    /** Timeline bodies are already encoded off-thread. No history scan or JSON decoding. */
-    writeTimeline(id: string, epoch: number, write: EncodedTimelineWrite): void {
-      api.transaction(() => {
-        requireOwner(id, epoch)
-        if (write.dropPagesFrom !== null)
-          db.prepare(`DELETE FROM records WHERE conversation_id=? AND kind='timeline'
-            AND id GLOB 'page:*' AND CAST(substr(id,6) AS INTEGER)>=?`).run(id, write.dropPagesFrom)
-        const put = db.prepare(`INSERT INTO records VALUES(?,'timeline',?,?,?)
-          ON CONFLICT(conversation_id,kind,id) DO UPDATE SET value=excluded.value,saved_at=excluded.saved_at`)
-        const at = Date.now()
-        for (const page of write.pages) put.run(id, `page:${page.page}`, page.value, at)
-        if (write.checkpoint === null)
-          db.prepare(
-            "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
-          ).run(id)
-        else put.run(id, 'checkpoint', write.checkpoint, at)
+    /** Pre-encoded bytes only. Large replacements drop old bodies in paced steps first. */
+    writeTimeline(id: string, epoch: number, write: EncodedTimelineWrite): Promise<void> {
+      return queueTimeline(id, async () => {
+        const job = historyReadTurns.job({ yieldFirst: true })
+        if (write.dropPagesFrom !== null) {
+          const atomic = await job.step(() =>
+            api.transaction(() => {
+              requireOwner(id, epoch)
+              if (write.pages.length > 2000) return false
+              const checkpoint = db
+                .prepare(
+                  "SELECT octet_length(value) AS bytes FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+                )
+                .get(id) as { bytes: number } | undefined
+              let bytes = (checkpoint?.bytes ?? 0) + Buffer.byteLength(write.checkpoint ?? '')
+              if (bytes > TIMELINE_DROP_STEP_BYTES) return false
+              for (const page of write.pages) {
+                bytes +=
+                  Buffer.byteLength(page.value) +
+                  Buffer.byteLength(page.summary ?? '') +
+                  Buffer.byteLength(page.searchText ?? '')
+                if (page.page < write.dropPagesFrom!) {
+                  const old = db
+                    .prepare(`SELECT octet_length(r.value)
+                    +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+                  FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline' AND r.id=?`)
+                    .get(id, `page:${page.page}`) as { bytes: number } | undefined
+                  bytes += old?.bytes ?? 0
+                }
+                if (bytes > TIMELINE_DROP_STEP_BYTES) return false
+              }
+              const old = db
+                .prepare(`SELECT octet_length(r.value)
+                +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+              FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline'
+                AND r.id GLOB 'page:*' AND CAST(substr(r.id,6) AS INTEGER)>=? LIMIT 2001`)
+                .iterate(id, write.dropPagesFrom) as Iterable<{ bytes: number }>
+              let count = 0
+              for (const page of old) {
+                bytes += page.bytes
+                if (++count + write.pages.length > 2000 || bytes > TIMELINE_DROP_STEP_BYTES)
+                  return false
+              }
+              // The entire affected range fits one turn: retain the old all-or-
+              // nothing rollback contract. The immediate transaction pins this plan.
+              db.prepare(
+                "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+              ).run(id)
+              db.prepare(
+                "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*' AND CAST(substr(id,6) AS INTEGER)>=?"
+              ).run(id, write.dropPagesFrom)
+              putTimeline(id, write.pages, write.checkpoint)
+              return true
+            })
+          )
+          if (atomic) return
+          await dropTimeline(id, epoch, write.dropPagesFrom)
+        }
+        let next = 0
+        for (let done = false; !done; )
+          done = await job.step(() =>
+            api.transaction(() => {
+              requireOwner(id, epoch)
+              const pages: EncodedTimelineWrite['pages'] = []
+              const oldCheckpoint = db
+                .prepare(
+                  "SELECT octet_length(value) AS bytes FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+                )
+                .get(id) as { bytes: number } | undefined
+              let bytes = oldCheckpoint?.bytes ?? 0
+              db.prepare(
+                "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+              ).run(id)
+              while (next < write.pages.length && pages.length < 2000) {
+                const page = write.pages[next]
+                const old = db
+                  .prepare(`SELECT octet_length(r.value)
+                  +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+                FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline' AND r.id=?`)
+                  .get(id, `page:${page.page}`) as { bytes: number } | undefined
+                const size =
+                  (old?.bytes ?? 0) +
+                  Buffer.byteLength(page.value) +
+                  Buffer.byteLength(page.summary ?? '') +
+                  Buffer.byteLength(page.searchText ?? '')
+                if ((pages.length > 0 || bytes > 0) && bytes + size > TIMELINE_DROP_STEP_BYTES)
+                  break
+                pages.push(page)
+                bytes += size
+                next++
+                if (bytes >= TIMELINE_DROP_STEP_BYTES) break
+              }
+              // A large checkpoint gets its own last turn; ordinary last-page and
+              // checkpoint writes remain atomic. Intermediate writes invalidate it.
+              const last =
+                next === write.pages.length &&
+                ((pages.length === 0 && !oldCheckpoint) ||
+                  bytes + Buffer.byteLength(write.checkpoint ?? '') <= TIMELINE_DROP_STEP_BYTES)
+              putTimeline(id, pages, last ? write.checkpoint : null)
+              return last
+            })
+          )
       })
     },
     timelineRecord(id: string, key: string): string | null {
@@ -1394,26 +1588,33 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
      * every freed byte is zeroed (`secure_delete`): the caller lets the event loop run
      * between steps (`dropTimelineInSteps`). True once nothing of it is left.
      */
-    dropTimelineStep(id: string, epoch: number, budget: number): boolean {
+    dropTimelineStep(id: string, epoch: number, budget: number, from?: number): boolean {
       return api.transaction(() => {
         requireOwner(id, epoch)
+        const checkpoint = db
+          .prepare(
+            "SELECT octet_length(value) AS bytes FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+          )
+          .get(id) as { bytes: number } | undefined
         db.prepare(
-          "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id NOT GLOB 'page:*'"
+          "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
         ).run(id)
         const pages = db
           .prepare(
-            `SELECT id, octet_length(value) AS bytes FROM records
-              WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
-              ORDER BY CAST(substr(id, 6) AS INTEGER)`
+            `SELECT r.id, octet_length(r.value)
+                +COALESCE(octet_length(m.summary)+octet_length(m.search_text),0) AS bytes
+              FROM ${timelineMetadataFrom} WHERE r.conversation_id=? AND r.kind='timeline'
+                AND ${from === undefined ? "r.id<>'checkpoint'" : "r.id GLOB 'page:*' AND CAST(substr(r.id,6) AS INTEGER)>=?"}
+              ORDER BY CAST(substr(r.id,6) AS INTEGER),r.id LIMIT 2001`
           )
-          .all(id) as Array<{ id: string; bytes: number }>
+          .all(id, ...(from === undefined ? [] : [from])) as Array<{ id: string; bytes: number }>
         const remove = db.prepare(
           "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id=?"
         )
-        let bytes = 0,
+        let bytes = checkpoint?.bytes ?? 0,
           removed = 0
         for (const p of pages) {
-          if (removed > 0 && bytes + p.bytes > budget) break
+          if (removed >= 2000 || ((removed > 0 || bytes > 0) && bytes + p.bytes > budget)) break
           remove.run(id, p.id)
           bytes += p.bytes
           removed++
@@ -1469,37 +1670,44 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
      * Timeline pages `from` and later go (a projection whose rows moved writes them
      * again): by id, no page loaded.
      */
-    dropTimelinePagesFrom(id: string, epoch: number, from: number): void {
-      api.transaction(() => {
-        requireOwner(id, epoch)
-        db.prepare(
-          `DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
-            AND CAST(substr(id, 6) AS INTEGER) >= ?`
-        ).run(id, from)
-      })
+    dropTimelinePagesFrom(id: string, epoch: number, from?: number): Promise<void> {
+      return queueTimeline(id, () => dropTimeline(id, epoch, from))
     },
-    /** Every stored timeline page's summary (page order), read from the JSON — no page parsed. */
-    timelineSummaries(id: string): Array<{ page: number; summary: string }> {
-      return db
-        .prepare(
-          `SELECT CAST(substr(id, 6) AS INTEGER) AS page, json_extract(value, '$.summary') AS summary
-            FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
-            ORDER BY page`
+    /** Page-ordered indexed summaries, with paced migration of legacy page bodies. */
+    timelineSummaries(
+      id: string,
+      epoch: number
+    ): Promise<Array<{ page: number; summary: string }>> {
+      return queueTimeline(id, () =>
+        readTimelineMetadata(
+          id,
+          epoch,
+          'summary',
+          (where, params) =>
+            db
+              .prepare(`SELECT CAST(substr(r.id,6) AS INTEGER) AS page,
+          COALESCE(m.summary,json_extract(r.value,'$.summary')) AS summary
+          FROM ${timelineMetadataFrom} WHERE ${where}`)
+              .all(...params) as Array<{ page: number; summary: string }>
         )
-        .all(id) as Array<{ page: number; summary: string }>
+      )
     },
     /** Stored timeline pages whose (lowercased) search text holds `needle`, ascending. */
-    searchTimelinePages(id: string, needle: string): number[] {
-      return (
-        db
-          .prepare(
-            `SELECT CAST(substr(id, 6) AS INTEGER) AS page FROM records
-              WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
-                AND instr(json_extract(value, '$.searchText'), ?) > 0
-              ORDER BY page`
+    async searchTimelinePages(id: string, epoch: number, needle: string): Promise<number[]> {
+      return queueTimeline(id, async () =>
+        (
+          await readTimelineMetadata(
+            id,
+            epoch,
+            'search_text',
+            (where, params) =>
+              db
+                .prepare(`SELECT CAST(substr(r.id,6) AS INTEGER) AS page FROM ${timelineMetadataFrom}
+          WHERE ${where} AND instr(COALESCE(m.search_text,json_extract(r.value,'$.searchText')),?)>0`)
+                .all(...params, needle) as Array<{ page: number }>
           )
-          .all(id, needle) as Array<{ page: number }>
-      ).map((r) => r.page)
+        ).map((r) => r.page)
+      )
     },
     hasTimeline(id: string): boolean {
       return !!db

@@ -32,7 +32,8 @@ export function createTimelineWorkerPool(createWorker: () => Worker): {
             lastSeq: opts.lastSeq,
             agentStartedTurns: opts.agentStartedTurns,
             pageBudgetBytes: opts.pageBudgetBytes,
-            raw: !!opts.store.records
+            raw: !!opts.store.records,
+            metadata: !!opts.store.records?.loadSummaries && !!opts.store.records?.searchPages
           }
         ])
         let ended = false

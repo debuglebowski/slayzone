@@ -240,12 +240,9 @@ export class TimelineProjection {
       opts.pageBudgetBytes ?? CHAT_HISTORY_PAGE_MAX_BYTES,
       opts.flushSliceBytes ?? TIMELINE_FLUSH_SLICE_BYTES
     )
-    // Its checkpoint read and decoded (the tail's rows) in one turn of the process's
-    // history work: dozens of chats restoring at once take turns. One unit, so a
-    // `take` (a loop turn only while others wait): a lone open adds none before
-    // its agent spawns.
-    if (await historyReadTurns.take(() => p.restore(opts.lastSeq)))
-      return { projection: p, from: p.seq }
+    // Storage metadata can itself take bounded history turns. Do not hold a
+    // scheduler slot across those awaits (the compatibility path shares it).
+    if (await p.restore(opts.lastSeq)) return { projection: p, from: p.seq }
     // Rebuild: every event, every page written again.
     p.rebuilding = true
     p.state = initialState({ agentStartedTurns: p.agentStartedTurns })
@@ -309,7 +306,7 @@ export class TimelineProjection {
   /** From the stored checkpoint, when it fits these events. */
   private async restore(lastSeq: number): Promise<boolean> {
     try {
-      const cp = await this.store.loadCheckpoint()
+      const cp = await historyReadTurns.take(() => this.store.loadCheckpoint())
       if (!cp || cp.version !== TIMELINE_PROJECTION_VERSION || cp.seq > lastSeq) return false
       const data = JSON.parse(cp.data) as CheckpointData
       const state = decodeTimelineState(data.state)
@@ -701,7 +698,7 @@ export class TimelineProjection {
     const job = historyReadTurns.job()
     try {
       do {
-        await job.step(async () => {
+        const write = await job.step(() => {
           const pages: TimelineWrite['pages'] = []
           let bytes = 0
           while (next < dirty.length && (pages.length === 0 || bytes < this.flushSliceBytes)) {
@@ -732,9 +729,12 @@ export class TimelineProjection {
                   } satisfies CheckpointData)
                 }
               : null
-          await this.store.save({ dropPagesFrom, pages, checkpoint })
-          dropPagesFrom = null
+          return { dropPagesFrom, pages, checkpoint }
         })
+        // The database owner schedules deletion/persistence independently. It
+        // must not wait for a slot still held by this encoding turn.
+        await this.store.save(write)
+        dropPagesFrom = null
       } while (next < dirty.length)
     } catch (err) {
       this.onError('saving the timeline projection failed; it is rebuilt on the next open', err)
