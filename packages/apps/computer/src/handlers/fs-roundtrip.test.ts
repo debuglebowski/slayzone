@@ -207,10 +207,15 @@ describe('fs.* hub⇄computer round trip — watch', () => {
     stop = fs.watch(COMPUTER_ID, dir, (e) => seen.push(`${e.type}:${e.relPath}`))
     try {
       let n = 0
+      const probes = new Set<string>()
       await vi.waitFor(
         () => {
-          if (seen.includes('changed:watch-probe.txt')) return
-          writeFileSync(join(dir, 'watch-probe.txt'), String(n++))
+          if (seen.some((event) => probes.has(event))) return
+          // A fresh path per attempt gives native creation events and a finite
+          // debounce per probe, rather than continuously rewriting one inode.
+          const probe = `watch-probe-${n++}.txt`
+          probes.add(`changed:${probe}`)
+          writeFileSync(join(dir, probe), 'native readiness')
           throw new Error('waiting for this watch probe to reach the routed listener')
         },
         { timeout: 9000, interval: 200 }

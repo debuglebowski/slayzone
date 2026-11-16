@@ -1,3 +1,4 @@
+import * as nativeFs from 'node:fs'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +13,11 @@ import type { ComputerConfig } from '../config'
 import { createFsHandlers } from './fs'
 import { runInScopeJail } from '../path-jail'
 import type { ComputerDialer } from './types'
+
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>()
+  return { ...fs, watch: vi.fn(fs.watch) }
+})
 
 // Method names come from the SHARED frame contract, never a local copy. This
 // module used to declare its own `FsMethods` + zod schemas that only "MIRRORED"
@@ -325,10 +331,12 @@ describe('createFsHandlers — watch lifecycle', () => {
   /**
    * FSEvents starts asynchronously. Only this watch's dedicated probe event proves
    * readiness; an initial root-directory notification can arrive before file writes
-   * are observed. Stop touching the probe once acknowledged, then drain debounce.
+   * are observed. Fresh names avoid coalescing repeated writes to one inode and
+   * let each probe's debounce settle while startup is still being probed.
    */
-  async function untilWatching(notify: Notify, watchId: string): Promise<void> {
+  async function untilWatching(notify: Notify, watchId: string, root = dir): Promise<void> {
     let n = 0
+    const probes = new Set<string>()
     const probeDelivered = () =>
       notify.mock.calls.some(([method, raw]) => {
         const event = raw as { watchId?: string; type?: string; relPath?: string } | undefined
@@ -336,12 +344,17 @@ describe('createFsHandlers — watch lifecycle', () => {
           method === ComputerNotificationMethods.fsChange &&
           event?.watchId === watchId &&
           event.type === 'changed' &&
-          event.relPath === 'watch-probe.txt'
+          event.relPath !== undefined &&
+          probes.has(event.relPath)
         )
       })
     await vi.waitFor(
       () => {
-        if (!probeDelivered()) writeFileSync(join(dir, 'watch-probe.txt'), String(n++))
+        if (!probeDelivered()) {
+          const probe = `watch-probe-${n++}.txt`
+          probes.add(probe)
+          writeFileSync(join(root, probe), 'native readiness')
+        }
         expect(probeDelivered()).toBe(true)
       },
       { timeout: 10_000, interval: 200 }
@@ -404,6 +417,93 @@ describe('createFsHandlers — watch lifecycle', () => {
       disposeAll()
     }
   }, 20_000)
+
+  it('a same-root watch retry preserves an already observed native change pending delivery', async () => {
+    const notify = vi.fn<ComputerDialer['notify']>(() => true)
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    const actualWatch = (await vi.importActual<typeof import('node:fs')>('node:fs')).watch
+    const observedRoot = realpathSync(dir)
+    let retried = false
+    const watching = vi.spyOn(nativeFs, 'watch').mockImplementation((...args) => {
+      if (String(args[0]) !== observedRoot)
+        return Reflect.apply(actualWatch, nativeFs, args) as nativeFs.FSWatcher
+      const forwarded: unknown[] = [...args]
+      const listener = forwarded.at(-1) as (...event: unknown[]) => void
+      forwarded[forwarded.length - 1] = (...event: unknown[]) => {
+        // Delegate the real native callback first: its change is now waiting in
+        // the production 100ms debounce, not a synthetic test notification.
+        listener(...event)
+        if (!retried && String(event[1]) === 'pending.txt') {
+          retried = true
+          handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+        }
+      }
+      return Reflect.apply(actualWatch, nativeFs, forwarded) as nativeFs.FSWatcher
+    })
+    try {
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      await untilWatching(notify, 'w1')
+      writeFileSync(join(dir, 'pending.txt'), 'one real change before retry')
+      try {
+        await vi.waitFor(() => expect(changesFor(notify, 'pending.txt')).toHaveLength(1), {
+          timeout: 5000
+        })
+      } catch (error) {
+        expect(retried, 'the actual native change reached debounce before the retry').toBe(true)
+        throw error
+      }
+      expect(retried).toBe(true)
+    } finally {
+      disposeAll()
+      watching.mockRestore()
+    }
+  }, 20_000)
+
+  it('rebinds the same watchId to a different authorized root', async () => {
+    const other = join(dir, 'other')
+    mkdirSync(other)
+    const notify = vi.fn<ComputerDialer['notify']>(() => true)
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    try {
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: other })
+      await untilWatching(notify, 'w1', other)
+      writeFileSync(join(other, 'new-root.txt'), 'only the replacement root')
+      await vi.waitFor(() => expect(changesFor(notify, 'new-root.txt')).toHaveLength(1), {
+        timeout: 5000
+      })
+      expect(changesFor(notify, 'new-root.txt')[0][1]).toMatchObject({ watchId: 'w1' })
+    } finally {
+      disposeAll()
+    }
+  }, 20_000)
+
+  it('rejudges an identical retry after live roots change and physically closes the revoked watch', async () => {
+    const other = join(dir, 'other')
+    mkdirSync(other)
+    const ctx = ctxWithRoots([realpathSync(dir)])
+    const { handlers, disposeAll } = createFsHandlers(ctx)
+    const actualWatch = (await vi.importActual<typeof import('node:fs')>('node:fs')).watch
+    let closed = false
+    const watching = vi.spyOn(nativeFs, 'watch').mockImplementation((...args) => {
+      const watcher = Reflect.apply(actualWatch, nativeFs, args) as nativeFs.FSWatcher
+      watcher.on('close', () => {
+        closed = true
+      })
+      return watcher
+    })
+    try {
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      ctx.config.allowedRoots = [realpathSync(other)]
+      expect(() => handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toThrow(
+        /allowedRoots/
+      )
+      await vi.waitFor(() => expect(closed).toBe(true), { timeout: 2000 })
+    } finally {
+      disposeAll()
+      watching.mockRestore()
+    }
+  })
 
   // Shutdown path: the hub never sends watchStop for a computer that is stopping, and
   // an open watch is a handle that keeps the stopped process alive.

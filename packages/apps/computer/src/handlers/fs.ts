@@ -415,12 +415,24 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
   function watchStart(rawParams: unknown): { ok: true } {
     const { watchId, rootPath } = fsWatchStartParamsSchema.parse(rawParams)
-    watches.get(watchId)?.()
-    const abs = allow(rootPath)
+    const previous = watches.get(watchId)
+    let abs: string
+    try {
+      // Rejudge even identical retries: the computer's allowed roots change live.
+      abs = allow(rootPath)
+    } catch (error) {
+      previous?.()
+      watches.delete(watchId)
+      throw error
+    }
+    // Acquire before releasing: same-root retries retain the shared native stream
+    // and its pending debounce instead of closing/restarting it. Still subscribe
+    // on every retry so a previously failed native watch can recover.
     const dispose = subscribeFileWatcher(abs, (e) => {
       const params: FsChangeParams = { watchId, type: e.type, relPath: e.relPath }
       ctx.dialer.notify(ComputerNotificationMethods.fsChange, params)
     })
+    previous?.()
     watches.set(watchId, dispose)
     return { ok: true }
   }
