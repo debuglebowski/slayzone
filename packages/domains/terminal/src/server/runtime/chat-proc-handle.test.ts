@@ -47,6 +47,43 @@ test('a write resolves once the bytes reached the process', async () => {
   handle.kill('SIGKILL')
 })
 
+test('paused output retains the final pipe tail after physical process exit', async () => {
+  const child = spawn(
+    process.execPath,
+    [
+      '-e',
+      "process.stdout.write('first\\n'); setTimeout(() => process.stdout.write('tail\\n'), 30)"
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }
+  )
+  const handle = childProcessToHandle(child)
+  const output: string[] = []
+  let paused = false
+  handle.onStdout((chunk) => {
+    output.push(chunk)
+    if (!paused) {
+      paused = true
+      handle.setOutputPaused?.(true)
+    }
+  })
+  let drained = false
+  const end = new Promise<void>((resolve) =>
+    handle.onExit(() => {
+      drained = true
+      resolve()
+    })
+  )
+  try {
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    expect(paused).toBe(true)
+    expect(drained).toBe(false)
+  } finally {
+    handle.setOutputPaused?.(false)
+  }
+  await end
+  expect(output.join('')).toBe('first\ntail\n')
+})
+
 test('a write to a process that closed stdin rejects instead of crashing the hub', async () => {
   const child = spawn('sh', ['-c', 'exec 0<&-; sleep 2'], { stdio: ['pipe', 'pipe', 'pipe'] })
   const handle = childProcessToHandle(child)

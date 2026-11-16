@@ -1089,7 +1089,7 @@ export function createLocalChatData(
     prepareChatEvent: (_tabId, event) => store.extractEventBlobs(event),
     readChatEventBlob: (tabId, sha256, offset) =>
       store.readEventBlob(owner(tabId).id, sha256, offset),
-    persistChatEventSync: (tabId, seq, event, at) =>
+    persistChatEvent: async (tabId, seq, event, at = Date.now()) =>
       store.transaction(() => {
         const i = owner(tabId)
         const outcome = store.appendAt(i.id, i.epoch, seq, event, at)
@@ -1154,8 +1154,6 @@ export function createLocalChatData(
         }
         return outcome
       }),
-    persistChatEvent: async (tabId, seq, event, at) =>
-      data.persistChatEventSync!(tabId, seq, event, at ?? Date.now()),
     loadChatEventsPage: async (tabId, after, before, budget) =>
       store.readPage(owner(tabId).id, after, before, budget),
     chatEventsTailStart: async (tabId, count) => store.tailStart(owner(tabId).id, count),

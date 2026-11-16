@@ -3911,3 +3911,35 @@ describe('the work gate: a computer works only for the work it was admitted for'
     expect(gateway.calls).toEqual([])
   })
 })
+
+it('chat in-process bridge forwards output holds and physical exit under the exact spawn generation', async () => {
+  const gateway = new FakeGateway()
+  gateway.onMethod('proc.spawn', () => ({ pid: 555 }))
+  const outputFlow = vi.fn()
+  const physical = vi.fn(() => ({ dispose() {} }))
+  const backend = createRoutingChatBackend({
+    gateway,
+    resolveComputerId: () => 'computer-1',
+    outputFlow,
+    onPhysicalExit: physical
+  })
+  const handle = await backend.spawn({
+    sessionId: 'flow',
+    taskId: 'task',
+    computerId: 'computer-1',
+    binaryName: 'claude',
+    args: [],
+    cwd: '/tmp',
+    env: {}
+  })
+  const { spawnId } = requireCall(gateway, 'proc.spawn').params as { spawnId: string }
+  const stopped = () => undefined
+  handle.setOutputPaused?.(true)
+  handle.setOutputPaused?.(false)
+  handle.onPhysicalExit?.(stopped)
+  expect(outputFlow.mock.calls).toEqual([
+    ['flow', spawnId, true],
+    ['flow', spawnId, false]
+  ])
+  expect(physical).toHaveBeenCalledWith('flow', spawnId, stopped)
+})

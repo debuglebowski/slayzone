@@ -91,7 +91,7 @@ test.each([
       bootstrap(from)
       await push('stable', 'accepted-ack-lost')
       if (handedOff)
-        r.local.data.persistChatEventSync!(
+        await r.local.data.persistChatEvent(
           'tab',
           0,
           {

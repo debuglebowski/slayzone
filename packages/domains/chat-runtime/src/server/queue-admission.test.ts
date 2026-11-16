@@ -166,10 +166,10 @@ test('an abandoned hub lease wakes the drainer after expiry without another requ
   const sent: string[] = []
   let ready = true
   const runtime = createChatQueueRuntime({
-    dispatchUserMessage: (tabId, message) => {
+    dispatchUserMessage: async (tabId, message) => {
       sent.push(message.id)
       ready = false
-      void f.r.local.queue.remove(message.id)
+      await f.r.local.queue.remove(message.id)
       return { id: message.id, state: 'queued' }
     },
     ensureSpawned: async () => {

@@ -76,10 +76,8 @@ export interface ChatEventPersistence {
    * `chat-blobs`). Called once per append, before the write: the log caches,
    * returns and writes what it returns, so memory, broadcasts and disk agree.
    */
-  prepare?(tabId: string, event: AgentEvent): AgentEvent
+  prepare?(tabId: string, event: AgentEvent): AgentEvent | Promise<AgentEvent>
   insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
-  /** Local SQLite can commit before an event becomes visible. */
-  insertSync?(tabId: string, seq: number, event: AgentEvent, at: number): 'inserted' | 'clash'
   /**
    * Saved events with `afterSeq < seq < beforeSeq`, oldest first, ONE page at most:
    * it stops before the event that would take it past `budget.maxBytes` (the first
@@ -146,17 +144,17 @@ export interface ChatEventLogOptions {
   cap?: number
   /** A row already existed at this seq — another writer. Logged, never overwritten. */
   onClash?: (seq: number, event: AgentEvent) => void
-  /** The write itself failed (the event stays in memory; later writes continue). */
+  /** The first failed write: the log stops accepting writes and every fence rejects. */
   onWriteError?: (seq: number, err: unknown) => void
 }
 
 /**
  * The saved history of ONE chat tab, and the sole owner of its sequence numbers.
  *
- * Every saved event gets the next seq HERE (never from a process), lands in the
- * in-memory ring at once (replay, broadcast) and is written through one serial
- * chain, so rows reach the DB in seq order and `flush()` means "everything
- * appended so far is on disk". A tab keeps one log across every process it runs,
+ * Every saved event gets the next seq HERE (never from a process). Its insert
+ * commits before it enters the ring or resolves to a publisher. One serial chain
+ * preserves append order; a failed insert poisons the prefix, so `flush()` cannot
+ * acknowledge history absent from storage. A tab keeps one log across every process it runs,
  * which is what makes a respawn unable to re-use a seq.
  *
  * The ring is a cache of the newest `cap` events (`since`). Older history is read
@@ -239,48 +237,38 @@ export class ChatEventLog {
     return this.ring
   }
 
-  /**
-   * Assign the next seq and the time it is saved, keep it in memory, and queue its
-   * write. The entry holds the event as stored (`persistence.prepare`).
-   */
-  append(raw: AgentEvent): BufferedEvent & { at: number } {
-    let event = raw
-    if (this.persistence.prepare) {
+  /** Commit one event in append order before exposing its sequence or stored form. */
+  append(raw: AgentEvent): Promise<BufferedEvent & { at: number }> {
+    const at = Date.now()
+    const written = this.chain.then(async () => {
+      const seq = this.nextSeq
+      let event = raw
       try {
-        event = this.persistence.prepare(this.tabId, raw)
-      } catch (err) {
-        this.opts.onWriteError?.(this.nextSeq, err)
-        throw err
-      }
-    }
-    const entry = { seq: this.nextSeq, event, at: Date.now() }
-    if (this.persistence.insertSync) {
-      try {
-        if (this.persistence.insertSync(this.tabId, entry.seq, event, entry.at) === 'clash') {
-          this.opts.onClash?.(entry.seq, event)
-          throw new Error(`Chat event sequence ${entry.seq} already exists`)
+        event = (await this.persistence.prepare?.(this.tabId, raw)) ?? raw
+        if ((await this.persistence.insert(this.tabId, seq, event, at)) === 'clash') {
+          this.opts.onClash?.(seq, event)
+          throw new Error(`Chat event sequence ${seq} already exists`)
         }
-      } catch (err) {
-        this.opts.onWriteError?.(entry.seq, err)
-        throw err
+      } catch (error) {
+        // Notify only for the failed insert; queued successors inherit this error.
+        this.opts.onWriteError?.(seq, error)
+        throw error
       }
-    }
-    this.nextSeq++
-    this.ring.push(entry)
-    if (this.ring.length > this.cap) {
-      const evicted = this.ring.splice(0, this.ring.length - this.cap)
-      this.evictedThrough = evicted[evicted.length - 1].seq
-    }
-    if (!this.persistence.insertSync)
-      this.chain = this.chain.then(async () => {
-        try {
-          const outcome = await this.persistence.insert(this.tabId, entry.seq, event, entry.at)
-          if (outcome === 'clash') this.opts.onClash?.(entry.seq, event)
-        } catch (err) {
-          this.opts.onWriteError?.(entry.seq, err)
-        }
-      })
-    return entry
+      const entry = { seq, event, at }
+      this.nextSeq++
+      this.ring.push(entry)
+      if (this.ring.length > this.cap) {
+        const evicted = this.ring.splice(0, this.ring.length - this.cap)
+        this.evictedThrough = evicted[evicted.length - 1].seq
+      }
+      return entry
+    })
+    this.chain = written.then(() => undefined)
+    // A publisher may be event-driven. Keep failures observed without converting
+    // either the append result or a later flush into successful acknowledgements.
+    void written.catch(() => undefined)
+    void this.chain.catch(() => undefined)
+    return written
   }
 
   /** Cached saved events after `afterSeq` — the newest `cap` at most. */
@@ -300,7 +288,11 @@ export class ChatEventLog {
     beforeSeq: number = Number.MAX_SAFE_INTEGER
   ): Promise<ChatLogPage> {
     // One page per turn across every log of the process (`historyReadTurns`).
-    return historyReadTurns.take(() => this.readPageNow(afterSeq, budget, beforeSeq))
+    const prefix = this.chain
+    // Await writes before acquiring a history turn (projection work may need one).
+    return prefix.then(() =>
+      historyReadTurns.take(() => this.readPageNow(afterSeq, budget, beforeSeq))
+    )
   }
 
   private async readPageNow(
@@ -312,8 +304,8 @@ export class ChatEventLog {
     let from = afterSeq
     while (from < this.evictedThrough && from < beforeSeq - 1) {
       const through = this.evictedThrough
-      // Evicted events were appended earlier: once flushed, they are on disk.
-      await this.flush()
+      // Evicted rows committed before entering the cache. Never await a later
+      // writer prefix while holding this history turn: its work may need one.
       const page = await this.persistence.readPage(
         this.tabId,
         from,
@@ -367,7 +359,7 @@ export class ChatEventLog {
     return out
   }
 
-  /** Resolves once every event appended before this call is written (or failed). */
+  /** Resolves after the captured append prefix commits; rejects on any failed write. */
   flush(): Promise<void> {
     return this.chain
   }

@@ -150,13 +150,13 @@ test.each([true, false])(
     a.bootstrap(bootstrap)
     await a.ops.hydrate(createOpts)
     // A conflicting seq makes the transport emit a diagnostic without losing the saved event.
-    a.local.data.persistChatEventSync!(
+    await a.local.data.persistChatEvent(
       'tab-a',
       0,
       { kind: 'assistant-text', messageId: 'old', text: 'saved' },
       1
     )
-    await a.transport.ensureSpawned('tab-a')
+    await expect(a.transport.ensureSpawned('tab-a')).rejects.toThrow(/already exists/)
     if (enabled)
       await until(() =>
         a.storage.findRecords('settings').some((row) => row.id.startsWith('diagnostic:'))
@@ -175,15 +175,21 @@ test.each([true, false])(
       b.storage.findRecords('settings').filter((row) => row.id.startsWith('diagnostic:'))
     ).toEqual([])
     expect(JSON.stringify(metadata)).not.toContain('kept the existing row')
+    const closing = a.close()
+    await expect(closing).rejects.toThrow(/already exists/)
+    expect(a.close()).toBe(closing)
+    expect(() => a.storage.inventory()).toThrow(/not open|closed/)
+    runtimes.splice(runtimes.indexOf(a), 1)
   }
 )
 
-test('chat prompt recall keeps the latest 500 entries without truncating conversation history', () => {
+test('chat prompt recall keeps the latest 500 entries without truncating conversation history', async () => {
   const { r } = runtime()
   r.bootstrap(bootstrap)
-  r.storage.transaction(() => {
+  // Seed through awaited writes; a transaction never spans host awaits.
+  await (async () => {
     for (let i = 0; i < 501; i++)
-      r.local.data.persistChatEventSync!(
+      await r.local.data.persistChatEvent(
         'tab-a',
         i,
         {
@@ -193,7 +199,7 @@ test('chat prompt recall keeps the latest 500 entries without truncating convers
         },
         1000 + i
       )
-  })
+  })()
   const prompts = r.prompts('task-a', 'claude-chat')
   expect(prompts).toHaveLength(500)
   expect(prompts[0].text).toBe('prompt 1')
@@ -204,7 +210,7 @@ test('chat prompt recall keeps the latest 500 entries without truncating convers
 test('delivery binds a prompt accepted before provider initialization to its actual conversation', async () => {
   const { r } = runtime()
   r.bootstrap(bootstrap)
-  r.local.data.persistChatEventSync!(
+  await r.local.data.persistChatEvent(
     'tab-a',
     0,
     { kind: 'user-message', id: 'first', text: 'first question' },
@@ -218,7 +224,7 @@ test('delivery binds a prompt accepted before provider initialization to its act
     origin: 'slay-spawned-fresh',
     legacyJsonField: 'chatConversationId'
   })
-  r.local.data.persistChatEventSync!(
+  await r.local.data.persistChatEvent(
     'tab-a',
     1,
     { kind: 'user-message-delivery', id: 'first', state: 'delivered' },
@@ -317,7 +323,7 @@ test('queue handoff survives a crash until its user-message event commits', asyn
   const next = runtime(stateDir).r
   next.bootstrap(bootstrap)
   expect((await next.local.queue.list('tab-a')).map((m) => m.id)).toEqual(['queued-message'])
-  next.local.data.persistChatEventSync!(
+  await next.local.data.persistChatEvent(
     'tab-a',
     0,
     {
@@ -418,10 +424,10 @@ test('session summaries retain old labels and full event counts beyond capped pr
   const { r } = runtime()
   r.bootstrap(bootstrap)
   let seq = 0
-  const save = (event: Parameters<typeof r.storage.append>[2]) =>
-    r.local.data.persistChatEventSync!('tab-a', seq++, event, seq)
-  save({ kind: 'user-message', id: 'first', text: 'original session label' })
-  save({ kind: 'turn-init', sessionId: 'native', model: 'test', cwd: '/tmp', tools: [] })
+  const save = async (event: Parameters<typeof r.storage.append>[2]) =>
+    await r.local.data.persistChatEvent('tab-a', seq++, event, seq)
+  await save({ kind: 'user-message', id: 'first', text: 'original session label' })
+  await save({ kind: 'turn-init', sessionId: 'native', model: 'test', cwd: '/tmp', tools: [] })
   await r.local.data.recordConversation({
     taskId: 'task-a',
     mode: 'claude-chat',
@@ -429,12 +435,12 @@ test('session summaries retain old labels and full event counts beyond capped pr
     origin: 'slay-spawned-fresh',
     legacyJsonField: 'chatConversationId'
   })
-  save({ kind: 'user-message-delivery', id: 'first', state: 'delivered' })
+  await save({ kind: 'user-message-delivery', id: 'first', state: 'delivered' })
   for (let n = 0; n < 600; n++)
-    save({ kind: 'user-message', id: `later-${n}`, text: `later prompt ${n}` })
+    await save({ kind: 'user-message', id: `later-${n}`, text: `later prompt ${n}` })
   // Replayed history and synthetic control prompts must not inflate session counts.
-  save({ kind: 'user-message', id: 'first', text: 'original session label', history: true })
-  save({ kind: 'user-message', id: 'control', text: '__slay_control__' })
+  await save({ kind: 'user-message', id: 'first', text: 'original session label', history: true })
+  await save({ kind: 'user-message', id: 'control', text: '__slay_control__' })
   expect(r.prompts('task-a')).toHaveLength(500)
   expect(r.promptSummaries('task-a', ['native'])).toEqual([
     { conversationId: 'native', count: 601, firstPrompt: 'original session label', firstAt: 1 }
@@ -591,10 +597,10 @@ test('side questions and live-setting guards use the injected transport', async 
 test('user message lookup (Codex history import) reads only the wanted messages, a window at a time', async () => {
   const { r } = runtime()
   r.bootstrap(bootstrap)
-  const save = r.local.data.persistChatEventSync!
+  const save = r.local.data.persistChatEvent
   // ~24 MB of screenshot-sized output around two messages.
   let seq = 0
-  save(
+  await save(
     'tab-a',
     seq++,
     {
@@ -606,8 +612,8 @@ test('user message lookup (Codex history import) reads only the wanted messages,
     1
   )
   for (let i = 0; i < 24; i++)
-    save('tab-a', seq++, { kind: 'stderr', text: `${i}:${'x'.repeat(1_000_000)}` }, 1)
-  save(
+    await save('tab-a', seq++, { kind: 'stderr', text: `${i}:${'x'.repeat(1_000_000)}` }, 1)
+  await save(
     'tab-a',
     seq++,
     {

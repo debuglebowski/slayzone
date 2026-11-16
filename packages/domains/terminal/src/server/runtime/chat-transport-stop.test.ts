@@ -46,7 +46,7 @@ test('interrupt cancels a message still waiting for its workspace baseline', asy
   })
   await startTab()
   const f = h.fakes[0]
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
     id: 'held',
     content: [{ type: 'text', text: 'first' }]
   })
@@ -230,7 +230,10 @@ test('messages the CLI holds queued are withdrawn before the interrupt', async (
   await sendAndStart(f, 'u1')
   emitLine(f, sj.text('busy'))
   // A second message went straight to the CLI mid-turn: received, not started.
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'u2', content: [{ type: 'text', text: 'next' }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'u2',
+    content: [{ type: 'text', text: 'next' }]
+  })
   await until(() => f.stdin.some((m) => m.type === 'user' && m.uuid === 'u2'))
   emitLine(f, sj.lifecycle('u2', 'queued'))
   await wait(10)
@@ -253,7 +256,10 @@ test('ids the interrupt still reports queued are withdrawn too', async () => {
   })
   await sendAndStart(f, 'u1')
   emitLine(f, sj.text('busy'))
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'u2', content: [{ type: 'text', text: 'next' }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'u2',
+    content: [{ type: 'text', text: 'next' }]
+  })
   await until(() => f.stdin.some((m) => m.type === 'user' && m.uuid === 'u2'))
 
   await stop(false)
@@ -276,6 +282,7 @@ test('a popped message the CLI cannot rewind leaves a visible notice', async () 
   const result = await stop(true)
 
   expect(result.popped).toBe(true)
+  await mgr.readEventsSince(TAB_OPTS.tabId, -1)
   expect(h.saved().find((e) => e.kind === 'notice')).toMatchObject({ code: 'stop-rewind-failed' })
 })
 
@@ -439,7 +446,10 @@ test('Stop while the next message waits for its baseline gives it back (the last
   const f = h.fakes[0]
   await finishedTurn(f, 'u1')
 
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'u2', content: [{ type: 'text', text: 'second' }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'u2',
+    content: [{ type: 'text', text: 'second' }]
+  })
   await until(() => release !== null)
   const result = await stop(true)
   release!()
@@ -473,7 +483,10 @@ test('Stop after the message is written but before the CLI starts it: given back
   })
 
   // Written to the CLI; it has not read it yet (no lifecycle).
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'u2', content: [{ type: 'text', text: 'second' }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'u2',
+    content: [{ type: 'text', text: 'second' }]
+  })
   await until(() => f.stdin.some((m) => m.type === 'user' && m.uuid === 'u2'))
 
   const result = await stop(true)

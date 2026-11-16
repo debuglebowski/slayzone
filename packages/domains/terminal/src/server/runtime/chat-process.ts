@@ -33,7 +33,7 @@ const STDERR_MAX_TOTAL = 1024 * 1024
 
 export interface ChatProcessHooks {
   /** The OS confirmed the process runs (before its driver starts). */
-  onSpawned(proc: ChatProcess): void
+  onSpawned(proc: ChatProcess): void | Promise<void>
   /** An event from the driver or the stderr buffer — current generation only. */
   onEvent(proc: ChatProcess, event: AgentEvent): void
   /** The process ended (or was given up on: `unconfirmed`). Fires once. */
@@ -78,6 +78,8 @@ export class ChatProcess implements OutboxProcess {
   ended = false
   /** Being replaced by a newer generation: nothing it says counts any more. */
   replaced = false
+  /** Draining an old generation: retain its final output without driving a new turn. */
+  retiring = false
   /**
    * The user interrupted a turn of this process (its 0-turn error is not a failed
    * resume). For the process's lifetime: the resume guard reads it, never reset.
@@ -125,6 +127,10 @@ export class ChatProcess implements OutboxProcess {
   /** Resolves when started (spawned + driver started); rejects when it never will be. */
   readonly readyPromise: Promise<void>
   readonly exited: Promise<{ code: number | null; signal: string | null }>
+  /** Physical process stop is independent of storage/pipe drain. */
+  readonly physicalExit: Promise<void>
+  private physicalEnded = false
+  private resolvePhysical!: () => void
 
   private readonly hooks: ChatProcessHooks
   private resolveReady!: () => void
@@ -137,6 +143,7 @@ export class ChatProcess implements OutboxProcess {
   private stderrTimer: ReturnType<typeof setTimeout> | null = null
   private stderrEmitted = 0
   private stderrDropped = 0
+  private readonly outputHolds = new Set<Promise<unknown>>()
 
   constructor(opts: ChatProcessOptions) {
     this.gen = opts.gen
@@ -155,6 +162,10 @@ export class ChatProcess implements OutboxProcess {
     this.exited = new Promise((resolve) => {
       this.resolveExited = resolve
     })
+    this.physicalExit = new Promise((resolve) => {
+      this.resolvePhysical = resolve
+    })
+    this.handle.onPhysicalExit?.(() => this.markPhysicalExit())
 
     const ctx: ChatDriverContext = {
       ...opts.ctx,
@@ -176,31 +187,42 @@ export class ChatProcess implements OutboxProcess {
       }
     }
 
+    let spawnScheduled = false
     this.handle.onSpawn(() => {
       // Once per process, however often the signal repeats.
-      if (this.ended || this.spawned) return
-      this.spawned = true
-      this.hooks.onSpawned(this)
-      // Synchronously: the driver has its IO context before any stdout line.
-      let starting: void | Promise<void>
-      try {
-        starting = this.driver.start(ctx)
-      } catch (err) {
-        starting = Promise.reject(err)
-      }
-      this.driverHasContext = true
-      for (const line of this.earlyLines.splice(0)) this.handleLine(line)
-      Promise.resolve(starting).then(
-        () => {
-          this.started = true
-          this.resolveReady()
-        },
-        (err: unknown) => {
-          const error = err instanceof Error ? err : new Error(String(err))
-          this.emit({ kind: 'error', message: error.message, detail: { phase: 'driver-start' } })
-          this.rejectReady(error)
+      if (this.ended || this.spawned || spawnScheduled) return
+      spawnScheduled = true
+      queueMicrotask(() => {
+        if (this.ended) return
+        this.spawned = true
+        let committed: void | Promise<void>
+        try {
+          committed = this.hooks.onSpawned(this)
+        } catch (error) {
+          committed = Promise.reject(error)
         }
-      )
+        // Synchronously: the driver has its IO context before any stdout line.
+        let starting: void | Promise<void>
+        try {
+          starting = this.driver.start(ctx)
+        } catch (err) {
+          starting = Promise.reject(err)
+        }
+        this.driverHasContext = true
+        for (const line of this.earlyLines.splice(0)) this.handleLine(line)
+        Promise.all([starting, committed]).then(
+          () => {
+            if (this.ended) return
+            this.started = true
+            this.resolveReady()
+          },
+          (err: unknown) => {
+            const error = err instanceof Error ? err : new Error(String(err))
+            this.emit({ kind: 'error', message: error.message, detail: { phase: 'driver-start' } })
+            this.rejectReady(error)
+          }
+        )
+      })
     })
 
     // Framing stays hub-side; the driver owns parsing. A line that arrives
@@ -241,6 +263,7 @@ export class ChatProcess implements OutboxProcess {
         this.ended = true
         this.clearStderrTimer()
         this.rejectReady(err)
+        this.markPhysicalExit()
         this.resolveExited({ code: null, signal: null })
         this.hooks.onStartError(this, err)
         return
@@ -251,6 +274,22 @@ export class ChatProcess implements OutboxProcess {
 
   get pid(): number {
     return this.handle.pid
+  }
+
+  /** Bound accepted output to the current pipe chunk (or one complete protocol atom). */
+  get waitingForStorage(): boolean {
+    return this.outputHolds.size > 0
+  }
+
+  holdOutputUntil(work: Promise<unknown>): void {
+    if (this.outputHolds.has(work)) return
+    this.outputHolds.add(work)
+    this.handle.setOutputPaused?.(true)
+    const release = () => {
+      this.outputHolds.delete(work)
+      if (!this.outputHolds.size) this.handle.setOutputPaused?.(false)
+    }
+    void work.then(release, release)
   }
 
   /** Started and able to take a write. */
@@ -295,7 +334,7 @@ export class ChatProcess implements OutboxProcess {
    * way it is ended afterwards and nothing it still sends is accepted.
    */
   async stop(termGraceMs = 2000, killGraceMs = 2000): Promise<StopOutcome> {
-    if (this.ended) return 'exited'
+    if (this.ended) return this.physicalEnded ? 'exited' : 'abandoned'
     this.kill('SIGTERM')
     if (await this.waitExit(termGraceMs)) return 'exited'
     this.kill('SIGKILL')
@@ -310,11 +349,11 @@ export class ChatProcess implements OutboxProcess {
   }
 
   private waitExit(ms: number): Promise<boolean> {
-    if (this.ended) return Promise.resolve(true)
+    if (this.physicalEnded) return Promise.resolve(true)
     return new Promise((resolve) => {
       const timer = setTimeout(() => resolve(false), ms)
       timer.unref?.()
-      void this.exited.then(() => {
+      void this.physicalExit.then(() => {
         clearTimeout(timer)
         resolve(true)
       })
@@ -340,10 +379,12 @@ export class ChatProcess implements OutboxProcess {
 
   private finish(code: number | null, signal: string | null, unconfirmed: boolean): void {
     if (this.ended) return
+    if (!unconfirmed) this.markPhysicalExit()
     // Last words first, while it still counts.
     this.clearStderrTimer()
     this.flushStderr(true)
     this.ended = true
+    this.replaced ||= this.retiring
     if (!this.spawned) this.rejectReady(new Error(`exited before it started (code ${code})`))
     else if (!this.started) this.rejectReady(new Error('exited before its driver started'))
     // Ended BEFORE dispose: whatever the driver emits while tearing down (Codex
@@ -355,6 +396,11 @@ export class ChatProcess implements OutboxProcess {
     }
     this.resolveExited({ code, signal })
     this.hooks.onExit(this, code, signal, unconfirmed)
+  }
+
+  private markPhysicalExit(): void {
+    this.physicalEnded = true
+    this.resolvePhysical()
   }
 
   private bufferStderr(chunk: string): void {

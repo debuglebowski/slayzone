@@ -136,6 +136,13 @@ interface QueuedProcSpawn {
 }
 
 export interface ProcHandlers {
+  /** Internal chat bridge only. An old generation cannot resume its replacement's pipes. */
+  setOutputPaused(sessionId: string, spawnId: string | undefined, paused: boolean): void
+  onPhysicalExit(
+    sessionId: string,
+    spawnId: string | undefined,
+    cb: () => void
+  ): { dispose(): void }
   hasFolderWork(contains: (cwd: string) => boolean): boolean
   hasTaskWork(taskId: string): boolean
   stopTask(taskId: string): Promise<void>
@@ -659,6 +666,36 @@ export function createProcHandlers(
   }
 
   return {
+    onPhysicalExit(sessionId, spawnId, cb) {
+      const session = procs.get(sessionId)
+      if (!session || session.spawnId !== spawnId)
+        return {
+          dispose() {
+            // No listener was installed for an absent or superseded generation.
+          }
+        }
+      const child = session.child
+      let active = true
+      const notify = () => {
+        if (active) cb()
+      }
+      if (child.exitCode != null || child.signalCode != null) queueMicrotask(notify)
+      else child.once('exit', notify)
+      return {
+        dispose() {
+          active = false
+          child.off('exit', notify)
+        }
+      }
+    },
+    setOutputPaused(sessionId, spawnId, paused) {
+      const session = procs.get(sessionId)
+      if (!session || session.spawnId !== spawnId) return
+      for (const stream of [session.child.stdout, session.child.stderr]) {
+        if (paused) stream?.pause?.()
+        else stream?.resume?.()
+      }
+    },
     async stopTask(taskId: string) {
       for (const [id, item] of queued)
         if (item.taskId === taskId) {

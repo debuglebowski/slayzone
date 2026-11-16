@@ -72,6 +72,7 @@ import {
 } from '../chat-events-store'
 import { ChatBackgroundWork } from './chat-background-work'
 import { ChatLifecycleShadow } from './chat-lifecycle-shadow'
+import type { ChatLifecycleSignal } from '../../shared/chat-lifecycle'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
 // typed `string`. `shared/chat-mode-catalog.ts` owns the per-mode vocabulary.
@@ -249,7 +250,7 @@ class HydrateScan {
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
 export interface TransportDeps {
   /** Recheck durable lifecycle/identity fences at the actual spawn boundary. */
-  beforeSpawn?: (tabId: string) => void
+  beforeSpawn?: (tabId: string) => void | Promise<void>
   userInputTracker: {
     mark(sessionId: string): void
     clear(sessionId: string): void
@@ -564,6 +565,7 @@ interface ChatTab {
   /** Removed (tab closed / reset): nothing may touch it any more. */
   storageFailed?: boolean
   closed: boolean
+  closing: boolean
 }
 
 // ---- liveness watchdog ----
@@ -1051,6 +1053,13 @@ export function createChatTransport(
       clearWatchdog(tab)
       return
     }
+    if (proc.waitingForStorage && tab.watchdogKillStage === 'none') {
+      // We paused this pipe deliberately. Silence here says nothing about the
+      // provider; heartbeats and explicit stop/cancel remain on the host path.
+      tab.watchdogLastProgress = Date.now()
+      armWatchdog(tab)
+      return
+    }
     // Liveness probe is LOCAL-ONLY. `deps.isProcessAlive` is `process.kill(pid, 0)`
     // on THIS machine, so probing a routed session's pid would interrogate whatever
     // hub-local process happens to share that number — a false "alive" (or a false
@@ -1303,7 +1312,15 @@ export function createChatTransport(
 
   function isReadyForQueuedMessage(tabId: string): boolean {
     const tab = tabs.get(tabId)
-    if (!tab || tab.closed || tab.ended || tab.respawning || permissionChanges.has(tabId))
+    if (
+      !tab ||
+      tab.closed ||
+      tab.ended ||
+      tab.storageFailed ||
+      publicationBusy.has(tab) ||
+      tab.respawning ||
+      permissionChanges.has(tabId)
+    )
       return false
     return (
       tab.terminalState === 'idle' && tab.pendingPrompts.size === 0 && tab.outbox.inFlight() === 0
@@ -1419,18 +1436,21 @@ export function createChatTransport(
    * follows it to its answer. A CLI that held it past the turn's end starts a
    * turn with it (Claude, when no tool call came): running again.
    */
-  function pickUpSteer(tab: ChatTab, proc: ChatProcess, id: string): void {
+  async function pickUpSteer(tab: ChatTab, proc: ChatProcess, id: string): Promise<void> {
     const steer = tab.steers.get(id)
     if (!steer || steer.gen !== proc.gen) return
     const joinsTurn = tab.terminalState === 'running'
-    if (!joinsTurn) markTurnStarted(tab, id)
-    routeHostEvent(tab, {
+    const message: AgentEvent = {
       kind: 'user-message',
       id,
       text: userMessageText(steer.message.content),
       content: steer.message.content,
       ...(joinsTurn ? { joinsTurn: true as const } : {})
-    })
+    }
+    await commitEventNow(tab, message)
+    if (!joinsTurn) markTurnStarted(tab, id)
+    // Same observer order as a routed host event: the turn starts, then its message.
+    shadowEvent(tab, tab.gen, message)
     tab.outbox.join(steer.message, proc.gen)
     settleSteer(tab, id, 'picked-up')
   }
@@ -1452,23 +1472,105 @@ export function createChatTransport(
     deps.broadcastEvent(tab.tabId, event, tab.log.lastSeq, tab.liveSeq)
   }
 
-  /** An event the transport itself produces (user message, marker, notice, error…). */
-  function routeHostEvent(tab: ChatTab, event: AgentEvent): void {
+  function failEventPipeline(tab: ChatTab, error: unknown): void {
     if (tab.storageFailed) return
-    tab.shadow?.event(tab.gen, event)
-    const split = tab.splitter.route(event)
-    for (const live of split.live) broadcastLive(tab, live)
-    for (const saved of split.saved) commitEvent(tab, saved)
+    tab.storageFailed = true
+    try {
+      broadcastLive(tab, {
+        kind: 'error',
+        message: 'Chat storage is unavailable. Fix storage and restart chat.',
+        detail: { code: 'storage-unavailable' }
+      })
+      transitionState(tab, 'error')
+    } catch (reportError) {
+      console.error('[chat-transport] reporting event failure:', reportError)
+    }
+    kill(tab.tabId)
+    console.error('[chat-transport] event pipeline unavailable:', error)
   }
 
-  function commitEvent(tab: ChatTab, raw: AgentEvent): void {
-    if (tab.closed) return
-    const entry = tab.log.append(raw)
+  const publicationTail = new WeakMap<ChatTab, Promise<void>>()
+  const publicationBusy = new WeakSet<ChatTab>()
+  /**
+   * The lifecycle shadow compares itself with production state; while a publication
+   * is in flight that state is mid-commit. Its signals wait, in order, until the
+   * publication settles (main's synchronous pipeline gave it the same consistency).
+   */
+  const shadowBacklog = new WeakMap<ChatTab, Array<(shadow: ChatLifecycleShadow) => void>>()
+  function observeLifecycle(tab: ChatTab, observe: (shadow: ChatLifecycleShadow) => void): void {
+    if (!tab.shadow) return
+    if (!publicationBusy.has(tab)) {
+      observe(tab.shadow)
+      return
+    }
+    const backlog = shadowBacklog.get(tab)
+    if (backlog) backlog.push(observe)
+    else shadowBacklog.set(tab, [observe])
+  }
+  function flushLifecycle(tab: ChatTab): void {
+    const backlog = shadowBacklog.get(tab)
+    if (!backlog) return
+    shadowBacklog.delete(tab)
+    for (const observe of backlog) if (tab.shadow) observe(tab.shadow)
+  }
+  function shadowFeed(tab: ChatTab, generation: number, signal: ChatLifecycleSignal): void {
+    observeLifecycle(tab, (shadow) => shadow.feed(generation, signal))
+  }
+  function shadowEvent(tab: ChatTab, generation: number, event: AgentEvent): void {
+    observeLifecycle(tab, (shadow) => shadow.event(generation, event))
+  }
+  /** One accepted producer order for saved events, live fragments and their effects. */
+  function enqueueEvent(tab: ChatTab, work: () => Promise<void>): Promise<void> {
+    if (tab.closed) return Promise.resolve()
+    if (tab.storageFailed) return publicationTail.get(tab) ?? tab.log.flush()
+    const result = (publicationTail.get(tab) ?? Promise.resolve()).then(work)
+    publicationTail.set(tab, result)
+    publicationBusy.add(tab)
+    tab.proc?.holdOutputUntil(result)
+    const settled = () => {
+      if (publicationTail.get(tab) !== result) return
+      publicationBusy.delete(tab)
+      flushLifecycle(tab)
+      kickQueueDrainer(tab)
+    }
+    void result.then(settled, (error) => {
+      failEventPipeline(tab, error)
+      settled()
+    })
+    return result
+  }
+  async function flushEvents(tab: ChatTab): Promise<void> {
+    for (;;) {
+      const prefix = publicationTail.get(tab)
+      await prefix
+      await tab.log.flush()
+      // An accepted action may produce a notice/delivery event. Drain those too.
+      if (prefix === publicationTail.get(tab)) return
+    }
+  }
+
+  /** An event the transport itself produces (user message, marker, notice, error…). */
+  function routeHostEvent(tab: ChatTab, event: AgentEvent): Promise<void> {
+    const gen = tab.gen
+    return enqueueEvent(tab, async () => {
+      // Observed in publication order, with process events (`handleProcessEventNow`).
+      shadowEvent(tab, gen, event)
+      const split = tab.splitter.route(event)
+      for (const live of split.live) broadcastLive(tab, live)
+      for (const saved of split.saved) await commitEventNow(tab, saved)
+    })
+  }
+
+  /** `current`: false for a stale turn's background event — it cannot open a turn. */
+  async function commitEventNow(tab: ChatTab, raw: AgentEvent, current = true): Promise<void> {
+    const process = tab.proc
+    const entry = await tab.log.append(raw)
     // As saved (binary payloads out-of-line): what memory, clients and replays all see.
     const { seq, at, event } = entry
     // Folded into the projection before any client can ask for rows after it.
     void tab.projection.then((p) => p?.apply(entry))
     tab.lastOutputTime = Date.now()
+    if (current) observeAgentTurn(tab, process, event)
     // Before the state machine below: a turn's end with a background sub-agent
     // still running is ONE move, running → background, never through idle.
     tab.work.apply(event)
@@ -1539,6 +1641,7 @@ export function createChatTransport(
       ) {
         transitionState(tab, 'running')
       } else if (event.kind === 'result') {
+        if (process) tab.outbox.onResult(process.gen)
         // A completed turn: the agent is responsive, its watchdog restarts start over.
         tab.watchdogRestarts = 0
         // A turn the user stopped ends with the CLI's aborted result: an end, not
@@ -1571,7 +1674,7 @@ export function createChatTransport(
     // matches what slay actually spawned. A foreign id (e.g. user manually typed
     // `claude --resume X` in the PTY) is recorded as `foreign-observed` — audit
     // trail only, never the resume target. See conversation-id-robustness plan.
-    const extracted = tab.proc?.driver.extractSessionId(event) ?? null
+    const extracted = process?.driver.extractSessionId(event) ?? null
     // A CLI that mints the id (Codex): the first one a fresh or forked spawn
     // reports IS the conversation slay started — there was nothing to match.
     if (
@@ -1583,7 +1686,7 @@ export function createChatTransport(
     ) {
       tab.sessionId = extracted
     }
-    const forked = Boolean(tab.proc?.fork) && extracted === tab.sessionId
+    const forked = Boolean(process?.fork) && extracted === tab.sessionId
     if (extracted && extracted === tab.sessionId) {
       tab.sessionConfirmed = true
       tab.pendingFork = null
@@ -1640,6 +1743,52 @@ export function createChatTransport(
   /** An event from a process — already through the generation gate. */
   function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent): void {
     if (tab.closed || tab.storageFailed || tab.proc !== proc) return
+    if (event.kind === 'heartbeat') {
+      noteAlive(tab)
+      return
+    }
+    // Liveness does not wait for storage; an attributed stale turn's event is not
+    // the current turn's progress (checked again, in order, when it is published).
+    if (isProgressEventKind(event.kind) && !staleExecution(proc, event.execution)) noteProgress(tab)
+    void enqueueEvent(tab, () => handleProcessEventNow(tab, proc, event))
+  }
+
+  /** An attributed root event of a turn this process ended, or of another turn than expected. */
+  function staleExecution(proc: ChatProcess, execution: AgentEvent['execution']): boolean {
+    return Boolean(
+      execution &&
+        (execution.turnId === proc.lastEndedExecution ||
+          (proc.execution && execution.turnId !== proc.execution.turnId) ||
+          (execution.messageId &&
+            proc.expectedMessageId &&
+            execution.messageId !== proc.expectedMessageId))
+    )
+  }
+
+  async function handleProcessEventNow(
+    tab: ChatTab,
+    proc: ChatProcess,
+    event: AgentEvent
+  ): Promise<void> {
+    if (proc.resumeFailed || proc.forkFailed) return
+    if (tab.closing || proc.retiring) {
+      if (proc.resumeFailed || proc.forkFailed) return
+      // The old pipe still owns this tail. Save it before the lifecycle boundary;
+      // it cannot drive the replacement's state machine or outbox.
+      if (
+        event.kind === 'command-lifecycle' ||
+        event.kind === 'user-replay' ||
+        event.kind === 'heartbeat'
+      )
+        return
+      const split = tab.splitter.route(event)
+      for (const live of split.live) {
+        observeAgentTurn(tab, proc, live)
+        broadcastLive(tab, live)
+      }
+      for (const saved of split.saved) await commitHistoryNow(tab, saved)
+      return
+    }
 
     const execution = event.execution
     const child = 'parentToolUseId' in event && event.parentToolUseId != null
@@ -1659,19 +1808,12 @@ export function createChatTransport(
         return
       if (proc.execution && proc.execution.turnId !== event.execution.turnId) return
       proc.execution = { ...event.execution }
-      tab.shadow?.event(proc.gen, event)
+      shadowEvent(tab, proc.gen, event)
       return
     }
     // Attributed old root events cannot touch the stream, outbox, prompts,
     // watchdog or state machine. Background work retains its original owner.
-    const stale = Boolean(
-      execution &&
-        (execution.turnId === proc.lastEndedExecution ||
-          (proc.execution && execution.turnId !== proc.execution.turnId) ||
-          (execution.messageId &&
-            proc.expectedMessageId &&
-            execution.messageId !== proc.expectedMessageId))
-    )
+    const stale = staleExecution(proc, execution)
     if (
       (stale && !background) ||
       (child && (event.kind === 'result' || event.kind === 'interrupted'))
@@ -1685,7 +1827,7 @@ export function createChatTransport(
         if (tab.steers.has(event.commandUuid)) {
           // `started` (or `completed` of one it had already): picked up; `cancelled`: dropped.
           if (event.state === 'cancelled') settleSteer(tab, event.commandUuid, 'returned')
-          else if (event.state !== 'queued') pickUpSteer(tab, proc, event.commandUuid)
+          else if (event.state !== 'queued') await pickUpSteer(tab, proc, event.commandUuid)
         }
         tab.outbox.onLifecycle(proc.gen, event.commandUuid, event.state)
         if (proc.lateTurnOf === event.commandUuid) onLateTurnLifecycle(tab, proc, event.state)
@@ -1693,7 +1835,7 @@ export function createChatTransport(
         return
       case 'user-replay':
         // The agent echoes a message as it takes it: a steered one is picked up.
-        if (tab.steers.has(event.uuid)) pickUpSteer(tab, proc, event.uuid)
+        if (tab.steers.has(event.uuid)) await pickUpSteer(tab, proc, event.uuid)
         tab.outbox.onReplay(proc.gen, event.uuid)
         return
       case 'heartbeat':
@@ -1777,7 +1919,7 @@ export function createChatTransport(
         proc.openTools.clear()
         tab.outbox.onResult(proc.gen)
         tab.pendingPrompts.clear()
-        tab.shadow?.feed(proc.gen, { type: 'turn-cancel' })
+        shadowFeed(tab, proc.gen, { type: 'turn-cancel' })
         transitionState(tab, 'idle')
       } else if (proc.lateTurnOf !== null) {
         interruptLateTurn(tab, proc)
@@ -1792,34 +1934,26 @@ export function createChatTransport(
       else if (isStreamFragment(shown.kind)) return
     }
 
-    tab.shadow?.event(proc.gen, shown)
+    shadowEvent(tab, proc.gen, shown)
 
-    if (currentProgress && opensAgentTurn(tab, shown)) {
-      tab.workspaceTracker?.observeAgentTurn({
-        tabId: tab.tabId,
-        gen: proc.gen,
-        rootPath: tab.cwd,
-        computerId: tab.respawnOpts.computerId ?? null,
-        projectId: tab.respawnOpts.projectId
-      })
-      markAgentTurnStarted(tab)
-    }
     if (shown.kind === 'result' || shown.kind === 'interrupted')
       void tab.workspaceTracker?.finish(proc.gen)
     trackTools(proc, shown)
-    if (currentProgress && isProgressEventKind(shown.kind)) noteProgress(tab)
-    if (shown.kind === 'result') tab.outbox.onResult(proc.gen)
-    else if (currentProgress && !child && isTurnProgress(shown.kind))
-      tab.outbox.onProgress(proc.gen)
-
-    const split = tab.splitter.route(shown)
-    for (const live of split.live) broadcastLive(tab, live)
-    for (const saved of split.saved) commitEvent(tab, saved)
+    if (currentProgress && !child && isTurnProgress(shown.kind)) tab.outbox.onProgress(proc.gen)
+    // Before the commit's awaits: a queued message the result releases owns the
+    // next expectation, and this turn's end must not clear it afterwards.
     if (shown.kind === 'result' && execution) {
       proc.lastEndedExecution = execution.turnId
       proc.execution = null
       proc.expectedMessageId = null
     }
+
+    const split = tab.splitter.route(shown)
+    for (const live of split.live) {
+      if (currentProgress) observeAgentTurn(tab, proc, live)
+      broadcastLive(tab, live)
+    }
+    for (const saved of split.saved) await commitEventNow(tab, saved, currentProgress)
   }
 
   /** What a popped turn may still say: its output and its end. */
@@ -1866,7 +2000,7 @@ export function createChatTransport(
     proc.lateTurnOf = null
     proc.discardTurn = false
     if (!tab.closed && tab.proc === proc && tab.outbox.inFlight() === 0) {
-      tab.shadow?.feed(proc.gen, { type: 'turn-cancel' })
+      shadowFeed(tab, proc.gen, { type: 'turn-cancel' })
       transitionState(tab, 'idle')
     }
   }
@@ -1942,6 +2076,18 @@ export function createChatTransport(
     return !('parentToolUseId' in event) || event.parentToolUseId == null
   }
 
+  function observeAgentTurn(tab: ChatTab, proc: ChatProcess | null, event: AgentEvent): void {
+    if (!proc || proc.retiring || !opensAgentTurn(tab, event)) return
+    tab.workspaceTracker?.observeAgentTurn({
+      tabId: tab.tabId,
+      gen: proc.gen,
+      rootPath: tab.cwd,
+      computerId: tab.respawnOpts.computerId ?? null,
+      projectId: tab.respawnOpts.projectId
+    })
+    markAgentTurnStarted(tab)
+  }
+
   /** A turn the agent opened (`opensAgentTurn`): running until its result. */
   function markAgentTurnStarted(tab: ChatTab): void {
     tab.turnInterrupted = false
@@ -1960,7 +2106,7 @@ export function createChatTransport(
       tab.proc.expectedMessageId = messageId
       tab.proc.execution = null
     }
-    tab.shadow?.feed(tab.gen, { type: 'turn-start', turnId: messageId, origin: 'user' })
+    shadowFeed(tab, tab.gen, { type: 'turn-start', turnId: messageId, origin: 'user' })
     tab.turnProgress = false
     tab.turnInterrupted = false
     if (tab.proc) {
@@ -2019,6 +2165,16 @@ export function createChatTransport(
     signal: string | null,
     unconfirmed = false
   ): void {
+    void enqueueEvent(tab, async () => handleProcessExitNow(tab, proc, code, signal, unconfirmed))
+  }
+
+  function handleProcessExitNow(
+    tab: ChatTab,
+    proc: ChatProcess,
+    code: number | null,
+    signal: string | null,
+    unconfirmed = false
+  ): void {
     const current = !tab.closed && tabs.get(tab.tabId) === tab && tab.proc === proc
     if (current)
       void tab.workspaceTracker?.finish(
@@ -2046,14 +2202,14 @@ export function createChatTransport(
     const resend = proc.replaced || proc.resumeFailed || proc.forkFailed
     // Steered messages it never picked up are the queue's again.
     returnSteers(tab, proc.gen)
-    if (!tab.closed) {
+    if (!tab.closed && !tab.closing) {
       // A failed resume never had a conversation: even what it confirmed is re-sent.
       tab.outbox.onProcessEnded(proc.gen, {
         resend,
         resendDelivered: proc.resumeFailed || proc.forkFailed
       })
     }
-    if (proc.forkFailed) {
+    if (proc.forkFailed && !tab.closing) {
       onForkFailure(tab, proc)
       return
     }
@@ -2141,7 +2297,7 @@ export function createChatTransport(
   /** The agent could not be started: visible error, `dead`, waiting messages failed. */
   function failStart(tab: ChatTab, err: unknown): void {
     if (tab.closed) return
-    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
+    shadowFeed(tab, tab.gen, { type: 'process-ended' })
     const error = err instanceof Error ? err : new Error(String(err))
     const code = isChatSpawnError(error) ? error.code : 'spawn-failed'
     routeHostEvent(tab, {
@@ -2303,7 +2459,8 @@ export function createChatTransport(
       sessionConfirmed: Boolean(opts.conversationId),
       pendingHistoryImport: false,
       pendingFork: opts.initialFork ?? null,
-      closed: false
+      closed: false,
+      closing: false
     } as Omit<ChatTab, 'log' | 'outbox'> as ChatTab
     const logOptions: ConstructorParameters<typeof ChatEventLog>[3] = {
       onClash: (seq, event) =>
@@ -2319,16 +2476,7 @@ export function createChatTransport(
         ),
       onWriteError: (seq, err) => {
         console.error(`[chat-transport] saving event ${seq} of ${opts.tabId} failed:`, err)
-        if (deps.eventStore.insertSync && !tab.storageFailed) {
-          tab.storageFailed = true
-          broadcastLive(tab, {
-            kind: 'error',
-            message: 'Chat storage is unavailable. Fix storage and restart chat.',
-            detail: { code: 'storage-unavailable' }
-          })
-          transitionState(tab, 'error')
-          kill(tab.tabId)
-        }
+        failEventPipeline(tab, err)
       }
     }
     // The cache holds the newest events only: seeded from the store's tail, a page
@@ -2411,9 +2559,9 @@ export function createChatTransport(
     // time (was: at spawn time) so the marker shows even before the user
     // triggers a spawn — critical for lazy mode where a buffer with an
     // unfinished turn may sit unspawned indefinitely.
-    if (scan.unfinishedTurn) routeHostEvent(tab, { kind: 'interrupted' })
+    if (scan.unfinishedTurn) await routeHostEvent(tab, { kind: 'interrupted' })
     for (const event of (await deps.workspaceStore?.recover?.(tab.tabId)) ?? [])
-      routeHostEvent(tab, event)
+      await routeHostEvent(tab, event)
 
     return toInfo(tab)
   }
@@ -2451,7 +2599,7 @@ export function createChatTransport(
         return proc
       },
       onChange: ({ id, state, error }) => {
-        tab.shadow?.feed(tab.gen, { type: 'outbox', inFlight: tab.outbox.inFlight() })
+        shadowFeed(tab, tab.gen, { type: 'outbox', inFlight: tab.outbox.inFlight() })
         const event: AgentEvent = {
           kind: 'user-message-delivery',
           id,
@@ -2515,7 +2663,7 @@ export function createChatTransport(
         `ensureSpawned: no hydrated session for tabId=${tabId} — call hydrateSession first`
       )
     }
-    deps.beforeSpawn?.(tabId)
+    await deps.beforeSpawn?.(tabId)
     if (tab.storageFailed)
       throw new ChatTransportError(
         'Chat storage is unavailable. Restart chat after fixing storage.'
@@ -2524,6 +2672,7 @@ export function createChatTransport(
     const proc = tab.proc
     if (proc && !proc.ended && !proc.replaced) {
       await proc.readyPromise
+      await flushEvents(tab)
       return toInfo(tab)
     }
     const pending = inFlightSpawns.get(tabId)
@@ -2563,8 +2712,9 @@ export function createChatTransport(
     const resume = Boolean(opts.conversationId)
     tab.usedResume = resume
     const sessionId = tab.sessionId
+    await flushEvents(tab)
     const gen = ++tab.gen
-    tab.shadow?.feed(gen, {
+    shadowFeed(tab, gen, {
       type: 'process-start',
       conversationId: tab.sessionConfirmed ? tab.sessionId : null
     })
@@ -2605,7 +2755,7 @@ export function createChatTransport(
     let rawChild: ChildProcess | null = null
     try {
       if (deps.backend) {
-        deps.beforeSpawn?.(tab.tabId)
+        await deps.beforeSpawn?.(tab.tabId)
         // Routed (or routing-capable) spawn. Binary resolution is NOT done here:
         // `whichBinary` runs a LOCAL login shell, so a hub-resolved absolute path is
         // meaningless on a computer's filesystem. The spec carries the binary NAME and
@@ -2647,7 +2797,7 @@ export function createChatTransport(
             backend.binaryName
           )
         }
-        deps.beforeSpawn?.(tab.tabId)
+        await deps.beforeSpawn?.(tab.tabId)
         rawChild = deps.spawn(binary, args, {
           cwd: opts.cwd,
           // Sanitized base (user env survives; SlayZone infra/secret/identity
@@ -2701,21 +2851,19 @@ export function createChatTransport(
       hooks: {
         onHistory: (p, events) => {
           if (tab.proc !== p || tab.closed) return
-          for (const event of events) commitHistory(tab, event)
+          // One provider response owns one queue entry; append its rows in turn.
+          void enqueueEvent(tab, async () => {
+            for (const event of events) await commitHistoryNow(tab, event)
+          })
         },
-        onSpawned: (p) => {
+        onSpawned: async (p) => {
           if (tab.proc !== p || tab.closed) return
-          tab.shadow?.feed(p.gen, { type: 'process-ready' })
-          // The FIRST event of this process's contribution: lets the renderer
-          // invalidate process-children resources (bg shells) of the previous one.
-          try {
-            routeHostEvent(tab, { kind: 'session-spawn', spawnId: p.spawnId })
-          } catch {
-            // The log's write-error handler already fenced/stopped this process.
-            // Never let a storage failure escape the native spawn callback.
-            return
-          }
-          if (tab.terminalState === 'starting') transitionState(tab, 'idle')
+          await routeHostEvent(tab, { kind: 'session-spawn', spawnId: p.spawnId })
+          if (tab.proc !== p || tab.closed) return
+          // Production leaves `starting` once the spawn row is published; the
+          // lifecycle observer hears it at that same point.
+          shadowFeed(tab, p.gen, { type: 'process-ready' })
+          if (!tab.storageFailed && tab.terminalState === 'starting') transitionState(tab, 'idle')
         },
         onEvent: (p, event) => handleProcessEvent(tab, p, event),
         onExit: (p, code, signal, unconfirmed) =>
@@ -2780,7 +2928,7 @@ export function createChatTransport(
     }: {
       fresh?: boolean
       /** Runs once the old process is gone, before the next one starts. */
-      between?: () => void
+      between?: () => void | Promise<void>
     } = {}
   ): Promise<void> {
     while (tab.respawning) await tab.respawning.catch(() => undefined)
@@ -2788,9 +2936,10 @@ export function createChatTransport(
       const old = tab.proc
       if (old && !old.ended) {
         // From here on nothing it says counts; its exit is swallowed.
-        old.replaced = true
+        old.retiring = true
         clearWatchdog(tab)
         const outcome = await old.stop(2000, 2000)
+        await old.exited
         if (outcome === 'abandoned') {
           diagnostic(
             tab,
@@ -2804,7 +2953,8 @@ export function createChatTransport(
         }
       }
       if (tab.closed) return
-      between?.()
+      await flushEvents(tab)
+      await between?.()
       applyRespawnOpts(tab, nextOpts, fresh)
       tab.proc = null
       await startProcess(tab)
@@ -2823,7 +2973,6 @@ export function createChatTransport(
 
   /** Take a respawn's spawn settings; the tab's identity and history stay. */
   function applyRespawnOpts(tab: ChatTab, next: CreateChatOpts, fresh: boolean): void {
-    tab.storageFailed = false
     // Which conversation the next process runs:
     //   - `fresh` (a failed resume): a new one, new id;
     //   - the caller's stored id, when it has one;
@@ -2870,45 +3019,66 @@ export function createChatTransport(
    * confirmed and answered it — or says why it failed. Idempotent by id: a known
    * id is retried if it failed, never sent twice.
    */
+  const dispatching = new WeakMap<
+    ChatTab,
+    Map<string, Promise<{ id: string; state: OutboxState }>>
+  >()
   function dispatchUserMessage(
     tabId: string,
     message: OutgoingUserMessage
-  ): { id: string; state: OutboxState } {
+  ): Promise<{ id: string; state: OutboxState }> {
     const tab = tabs.get(tabId)
-    if (!tab || tab.closed) {
-      throw new ChatTransportError(`No chat session for tab ${tabId}`)
-    }
-    const known = tab.outbox.state(message.id)
-    if (known) {
-      if (known === 'failed') tab.outbox.retry(message.id)
-      return { id: message.id, state: tab.outbox.state(message.id) ?? known }
-    }
-    if (tab.outbox.inFlight() === 0 && tab.terminalState !== 'running') tab.turnProgress = false
-    routeHostEvent(tab, {
-      kind: 'user-message',
-      id: message.id,
-      text: userMessageText(message.content),
-      content: message.content
-    })
-    const state = tab.outbox.accept(message)
-    return { id: message.id, state }
+    if (!tab || tab.closed)
+      return Promise.reject(new ChatTransportError(`No chat session for tab ${tabId}`))
+    if (tab.storageFailed)
+      return Promise.reject(new ChatTransportError('Chat storage is unavailable.'))
+    let pending = dispatching.get(tab)
+    if (!pending) dispatching.set(tab, (pending = new Map()))
+    const same = pending.get(message.id)
+    if (same) return same
+    const result = (async () => {
+      const known = tab.outbox.state(message.id)
+      if (known) {
+        if (known === 'failed') tab.outbox.retry(message.id)
+        await flushEvents(tab)
+        return { id: message.id, state: tab.outbox.state(message.id) ?? known }
+      }
+      if (tab.outbox.inFlight() === 0 && tab.terminalState !== 'running') tab.turnProgress = false
+      await routeHostEvent(tab, {
+        kind: 'user-message',
+        id: message.id,
+        text: userMessageText(message.content),
+        content: message.content
+      })
+      if (tab.closed || tab.storageFailed || tabs.get(tabId) !== tab)
+        throw new ChatTransportError('Chat changed while saving the message.')
+      const state = tab.outbox.accept(message)
+      await flushEvents(tab)
+      return { id: message.id, state }
+    })()
+    pending.set(message.id, result)
+    void result.then(
+      () => pending.delete(message.id),
+      () => pending.delete(message.id)
+    )
+    return result
   }
 
   /** Persist a host-owned Codex plan review decision in the chat event log. */
   function recordCodexPlanDecision(
     tabId: string,
     event: Extract<AgentEvent, { kind: 'codex-plan-decision' }>
-  ): void {
+  ): Promise<void> {
     const tab = tabs.get(tabId)
     if (!tab || tab.closed) throw new ChatTransportError(`No chat session for tab ${tabId}`)
-    routeHostEvent(tab, event)
+    return routeHostEvent(tab, event)
   }
 
   /** Legacy text send (queue drain, tests): a message with a fresh id. False: no tab. */
-  function sendUserMessage(tabId: string, text: string): boolean {
+  async function sendUserMessage(tabId: string, text: string): Promise<boolean> {
     const tab = tabs.get(tabId)
     if (!tab || tab.closed) return false
-    dispatchUserMessage(tabId, { id: randomUUID(), content: [{ type: 'text', text }] })
+    await dispatchUserMessage(tabId, { id: randomUUID(), content: [{ type: 'text', text }] })
     return true
   }
 
@@ -3024,7 +3194,7 @@ export function createChatTransport(
       // Accept before releasing the queue. The outbox waits on the same gate,
       // so the continuation cannot start until persistence has succeeded.
       if (shouldResume) {
-        const delivery = dispatchUserMessage(tabId, {
+        const delivery = await dispatchUserMessage(tabId, {
           id: randomUUID(),
           content: [
             { type: 'text', text: 'Continue the interrupted task with the updated permissions.' }
@@ -3434,9 +3604,12 @@ export function createChatTransport(
    * saved and shown like any other, but it is history — it drives no state, no
    * watchdog, no outbox, and claims no conversation id.
    */
-  function commitHistory(tab: ChatTab, raw: AgentEvent): void {
-    if (tab.closed) return
-    const entry = tab.log.append(raw)
+  function commitHistory(tab: ChatTab, raw: AgentEvent): Promise<void> {
+    return enqueueEvent(tab, () => commitHistoryNow(tab, raw))
+  }
+
+  async function commitHistoryNow(tab: ChatTab, raw: AgentEvent): Promise<void> {
+    const entry = await tab.log.append(raw)
     // As saved (binary payloads out-of-line), the same as `commitEvent`.
     const { seq, at, event } = entry
     void tab.projection.then((p) => p?.apply(entry))
@@ -3470,10 +3643,10 @@ export function createChatTransport(
     }
   ): Promise<void> {
     const tab = requireTab(tabId)
-    const record = (): void => {
-      routeHostEvent(tab, opts.branch)
-      for (const event of opts.history) commitHistory(tab, event)
-      for (const notice of opts.notices) routeHostEvent(tab, notice)
+    const record = async (): Promise<void> => {
+      await routeHostEvent(tab, opts.branch)
+      for (const event of opts.history) await commitHistory(tab, event)
+      for (const notice of opts.notices) await routeHostEvent(tab, notice)
       tab.pendingHistoryImport = opts.historyFromAgent === true
       tab.pendingFork = null
       tab.sessionId = opts.conversationId
@@ -3492,7 +3665,7 @@ export function createChatTransport(
       if (!opts.respawnOpts) await ensureSpawned(tabId)
       return
     }
-    record()
+    await record()
   }
 
   /** This side of the never-two-processes guard (`live-conversations.ts`). */
@@ -3678,6 +3851,7 @@ export function createChatTransport(
     opts: { messageId: string; respawnOpts: () => Promise<CreateChatOpts> }
   ): Promise<{ conversationId: string; fromConversationId: string }> {
     const tab = requireTab(tabId)
+    await flushEvents(tab)
     if (!activeUserMessages(tab).some((m) => m.id === opts.messageId)) {
       throw new ChatTransportError('That message is not in the conversation any more.')
     }
@@ -3795,6 +3969,7 @@ export function createChatTransport(
     }
   ): Promise<RewindResult> {
     const tab = requireTab(tabId)
+    await flushEvents(tab)
     const target = rewindTarget(tab, opts.messageId, opts.scope)
     if (turnInFlight(tab)) {
       await stopTurn(tabId, { restorePrompt: false, respawnOpts: opts.respawnOpts })
@@ -3847,11 +4022,15 @@ export function createChatTransport(
       }
       if (opts.scope === 'before' && typeof done.prefillText === 'string')
         prefillText = done.prefillText
-      routeHostEvent(tab, { kind: 'conversation-branch', reason: 'rewound', messageId: target })
+      await routeHostEvent(tab, {
+        kind: 'conversation-branch',
+        reason: 'rewound',
+        messageId: target
+      })
     }
     if (files?.restored) {
       const n = files.filesChanged.length
-      routeHostEvent(tab, {
+      await routeHostEvent(tab, {
         kind: 'notice',
         id: randomUUID(),
         level: 'info',
@@ -3911,7 +4090,7 @@ export function createChatTransport(
     const tab = tabs.get(tabId)
     if (!tab) return
     if (tab.ended) return
-    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
+    shadowFeed(tab, tab.gen, { type: 'process-ended' })
     const proc = tab.proc
     // Pre-spawn skeleton (no process): mark ended so subsequent operations short-
     // circuit, but no process to signal.
@@ -3943,27 +4122,29 @@ export function createChatTransport(
     transitionState(tab, 'dead')
     deps.userInputTracker.clear(stateKey(tab))
     tabs.delete(tabId)
-    tab.closed = true
+    tab.closing = true
     clearWatchdog(tab)
     tab.outbox.dispose()
     const proc = tab.proc
-    if (proc && !proc.ended) {
-      proc.replaced = true
-      proc.kill('SIGTERM')
-      const t = setTimeout(() => {
-        if (!proc.ended) proc.kill('SIGKILL')
-      }, 2000)
-      t.unref?.()
-    }
-    const flushed = Promise.all([
-      tab.log.flush(),
-      tab.projection.then((p) => p?.close()).catch(() => undefined)
-    ])
-      .then(() => undefined)
+    if (proc) proc.retiring = true
+    const flushed = (async () => {
+      if (proc && !proc.ended) {
+        const outcome = await proc.stop(2000, 2000)
+        await proc.exited
+        if (outcome === 'abandoned')
+          throw new ChatTransportError(
+            'Process exit is unconfirmed; chat history cannot close safely.'
+          )
+      }
+      tab.closed = true
+      await flushEvents(tab)
+    })()
+      .finally(() => tab.projection.then((p) => p?.close()).catch(() => undefined))
       .finally(() => {
         if (closing.get(tabId) === flushed) closing.delete(tabId)
       })
     closing.set(tabId, flushed)
+    void flushed.catch(() => undefined)
     return flushed
   }
   /** Provider identity changes wait for the old process (including an admitted
@@ -4044,6 +4225,7 @@ export function createChatTransport(
   ): Promise<ChatTimelineOpenResult> {
     const tab = tabs.get(tabId)
     if (!tab || clientVersion !== TIMELINE_PROJECTION_VERSION) return { kind: 'full' }
+    await flushEvents(tab)
     const projection = await tab.projection
     if (!projection?.usable) return { kind: 'full' }
     // The snapshot waits for every projection step queued before it; the events
@@ -4058,6 +4240,8 @@ export function createChatTransport(
       } catch {
         return { kind: 'full' }
       }
+      // Drain the accepted tail outside the history turn that reads its page.
+      await flushEvents(tab)
       const tail = await tab.log.readPage(snapshot.seq)
       if (tail.hasMore) continue
       // Taken in the same turn the saved events end (only microtasks between), so
@@ -4108,6 +4292,7 @@ export function createChatTransport(
   async function readEventsSince(tabId: string, afterSeq: number): Promise<BufferedEvent[]> {
     const tab = tabs.get(tabId)
     if (!tab) return []
+    await flushEvents(tab)
     return tab.log.readSince(afterSeq)
   }
 
@@ -4119,6 +4304,7 @@ export function createChatTransport(
   ): Promise<ChatEventPage> {
     const tab = tabs.get(tabId)
     if (!tab) return { events: [], hasMore: false }
+    await flushEvents(tab)
     return tab.log.readPage(afterSeq, budget)
   }
 
@@ -4134,6 +4320,7 @@ export function createChatTransport(
   ): Promise<ChatReplayPage> {
     const tab = tabs.get(tabId)
     if (!tab) return { events: [], hasMore: false, live: { afterSeq: -1, liveSeq: 0, events: [] } }
+    await flushEvents(tab)
     const page = await tab.log.readPage(afterSeq, budget)
     if (page.hasMore) return { events: page.events, hasMore: true }
     return {
@@ -4153,6 +4340,7 @@ export function createChatTransport(
   async function getReplay(tabId: string, afterSeq: number): Promise<ChatReplay> {
     const tab = tabs.get(tabId)
     if (!tab) return { events: [], live: { afterSeq: -1, liveSeq: 0, events: [] } }
+    await flushEvents(tab)
     const events = await tab.log.readSince(afterSeq)
     return {
       events,
@@ -4194,7 +4382,7 @@ export function createChatTransport(
   }
 
   function forceFinalizeForShutdown(tab: ChatTab): void {
-    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
+    shadowFeed(tab, tab.gen, { type: 'process-ended' })
     clearWatchdog(tab)
     tab.ended = true
     const proc = tab.proc
@@ -4245,7 +4433,7 @@ export function createChatTransport(
       const recordError = (phase: string, err: unknown): void => {
         errors.push({ id, phase, message: toErrorMessage(err) })
       }
-      void proc.exited.then(() => settle(false))
+      void proc.physicalExit.then(() => settle(false))
       clearWatchdog(tab)
       try {
         proc.handle.kill('SIGTERM')
@@ -4280,12 +4468,14 @@ export function createChatTransport(
         tab.workspaceTracker?.finish(tab.gen, 'Computer shut down before the turn completed.')
       )
     )
-    await Promise.all(
-      Array.from(tabs.values()).map((tab) => tab.projection.then((p) => p?.close()))
-    )
-    // Everything said before quitting is on disk before the process goes.
+    // Drain accepted commits/publications before closing their derived projections.
     await Promise.all([
-      ...Array.from(tabs.values()).map((tab) => tab.log.flush()),
+      ...Array.from(tabs.values()).map((tab) =>
+        (async () => {
+          await tab.proc?.exited
+          await flushEvents(tab)
+        })().finally(() => tab.projection.then((p) => p?.close()))
+      ),
       ...closing.values()
     ])
     return {

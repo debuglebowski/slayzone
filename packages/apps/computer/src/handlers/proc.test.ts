@@ -110,6 +110,46 @@ it('task erasure stops its processes and clears buffers while preserving another
   }
 })
 
+it('chat bridge fences output holds by generation and keeps physical stop independent of pipe drain', async () => {
+  const { notifies, until, ctx } = makeCtx(roots)
+  const proc = createProcHandlers(ctx)
+  const id = 'flow-control',
+    attempt = 'current-attempt'
+  try {
+    await proc.handlers[ProcMethods.procSpawn]({
+      sessionId: id,
+      spawnId: attempt,
+      command: process.execPath,
+      args: [
+        '-e',
+        "process.stdout.write('one'); setTimeout(() => process.stdout.write('two'), 50); setInterval(() => {}, 1000)"
+      ],
+      cwd: dir,
+      env: { ELECTRON_RUN_AS_NODE: '1' }
+    })
+    await until(() => dataFor(notifies, id, 'stdout') === 'one')
+    proc.setOutputPaused(id, attempt, true)
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    proc.setOutputPaused(id, 'stale-attempt', false)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(dataFor(notifies, id, 'stdout')).toBe('one')
+    const stopped = new Promise<void>((resolve) => proc.onPhysicalExit(id, attempt, resolve))
+    expect(
+      await proc.handlers[ProcMethods.procKill]({ sessionId: id, spawnId: attempt })
+    ).toMatchObject({ clean: true })
+    await stopped
+    // Node may auto-drain stdio after native exit. When the exit notification
+    // arrives, every tail byte must already have reached the bridge.
+    if (exitFor(notifies, id)) expect(dataFor(notifies, id, 'stdout')).toBe('onetwo')
+    proc.setOutputPaused(id, attempt, false)
+    await until(() => exitFor(notifies, id) !== undefined)
+    expect(dataFor(notifies, id, 'stdout')).toBe('onetwo')
+  } finally {
+    proc.setOutputPaused(id, attempt, false)
+    proc.disposeAll()
+  }
+})
+
 describe('createProcHandlers — proc.spawn streaming', () => {
   it('streams stdout then emits proc.exit(0) for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx(roots)

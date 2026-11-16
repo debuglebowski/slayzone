@@ -101,10 +101,21 @@ class FakeCli implements ChatProcHandle {
           type: 'assistant',
           message: {
             id: `late_${this.gen}`,
-            content: [{ type: 'text', text: `late from gen ${this.gen}` }]
+            content: [{ type: 'text', text: `final before exit gen ${this.gen}` }]
           }
         })
       this.exit(null, signal ?? 'SIGTERM')
+      // A misbehaving bridge still delivers after terminal exit: generation fencing
+      // must reject this, while retaining the legitimate pre-EOF tail above.
+      const late =
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            id: `stale_${this.gen}`,
+            content: [{ type: 'text', text: `late from gen ${this.gen}` }]
+          }
+        }) + '\n'
+      for (const cb of this.stdoutCbs) cb(late)
     }, 1)
   }
 
@@ -242,7 +253,10 @@ test('chaos × 200: no lost message, none answered twice, no overwritten or stal
     if (roll < 0.45) {
       const id = `m${run}`
       accepted.push(id)
-      mgr.dispatchUserMessage(TAB, { id, content: [{ type: 'text', text: `message ${run}` }] })
+      await mgr.dispatchUserMessage(TAB, {
+        id,
+        content: [{ type: 'text', text: `message ${run}` }]
+      })
     } else if (roll < 0.6) {
       current()?.crash()
     } else if (roll < 0.72) {

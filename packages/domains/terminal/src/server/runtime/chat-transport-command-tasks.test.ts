@@ -25,6 +25,18 @@ function fake(args: string[]): { fake: Fake; child: ChildProcess } {
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
+  emitter.once('exit', (code, signal) => {
+    const drained = Promise.all(
+      [stdout, stderr].map((stream) =>
+        stream.readableEnded
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => stream.once('end', resolve))
+      )
+    )
+    stdout.end()
+    stderr.end()
+    void drained.then(() => emitter.emit('close', code, signal))
+  })
   const stdin: Array<Record<string, unknown>> = []
   let buf = ''
   const child = Object.assign(emitter, {

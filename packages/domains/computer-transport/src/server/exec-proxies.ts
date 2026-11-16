@@ -2441,6 +2441,9 @@ export interface RoutingChatBackendOptions {
   resolveComputerId: (spec: ChatSpawnSpec) => string | null
   /** Asked before a spawn, for its task. */
   gate?: ComputerWorkGate
+  /** In-process computer/host bridge: generation-scoped pipe backpressure, no RPC wait. */
+  outputFlow?(sessionId: string, spawnId: string | undefined, paused: boolean): void
+  onPhysicalExit?(sessionId: string, spawnId: string | undefined, cb: () => void): ExecDisposable
 }
 
 /**
@@ -2563,6 +2566,18 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
         onWritesUnconfirmed: (cb) => procHandle.onWritesUnconfirmed(cb),
         onExit: (cb) => procHandle.onExit((e) => cb({ code: e.code, signal: e.signal })),
         onError: (cb) => failed.on(cb),
+        ...(options.outputFlow
+          ? {
+              setOutputPaused: (paused: boolean) =>
+                options.outputFlow!(spec.sessionId, procHandle.entry.spawnId, paused)
+            }
+          : {}),
+        ...(options.onPhysicalExit
+          ? {
+              onPhysicalExit: (cb: () => void) =>
+                options.onPhysicalExit!(spec.sessionId, procHandle.entry.spawnId, cb)
+            }
+          : {}),
         write: (data, opts) => procHandle.write(data, opts),
         kill: (signal) => procHandle.kill(signal)
       }

@@ -47,6 +47,18 @@ export function fakeChild(opts: { exitOnKill?: boolean } = {}): FakeChild {
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
+  emitter.once('exit', (code, signal) => {
+    const drained = Promise.all(
+      [stdout, stderr].map((stream) =>
+        stream.readableEnded
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => stream.once('end', resolve))
+      )
+    )
+    stdout.end()
+    stderr.end()
+    void drained.then(() => emitter.emit('close', code, signal))
+  })
   const stdin: Array<Record<string, unknown>> = []
   const kills: string[] = []
   const answers = new Map<string, (request: Record<string, unknown>) => ControlAnswer>()
@@ -309,7 +321,7 @@ export async function startTab(over: Partial<typeof TAB_OPTS> = {}): Promise<voi
 
 /** Send a user message through the outbox and let the fake take it (lifecycle queued + started). */
 export async function sendAndStart(f: FakeChild, id: string, text = 'hello'): Promise<void> {
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id, content: [{ type: 'text', text }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, { id, content: [{ type: 'text', text }] })
   // On the write itself, not a poll window: the outbox writes only after the turn's
   // workspace baseline, which is real git in the integration suite.
   await f.written((m) => m.type === 'user' && m.uuid === id)

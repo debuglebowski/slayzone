@@ -575,7 +575,12 @@ export function createChatRuntimeHandlers(opts: {
         return (await handler(params)) as T
       }
     }
-    const backend = createRoutingChatBackend({ gateway, resolveComputerId: () => computerId })
+    const backend = createRoutingChatBackend({
+      gateway,
+      resolveComputerId: () => computerId,
+      outputFlow: (sessionId, spawnId, paused) => procs.setOutputPaused(sessionId, spawnId, paused),
+      onPhysicalExit: (sessionId, spawnId, cb) => procs.onPhysicalExit(sessionId, spawnId, cb)
+    })
     const session = createClaudeSessionHandlers(opts.ctx, opts.getProjectPaths)
     const workspace = createWorkspaceChangesHandlers(opts.ctx, opts.getProjectPaths)
     function publish(type: string, data: Record<string, unknown>) {

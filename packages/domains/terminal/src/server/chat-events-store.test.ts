@@ -52,14 +52,72 @@ const range = (from: number, to: number) =>
 
 const text = (t: string): AgentEvent => ({ kind: 'stderr', text: t })
 
+test('an async append exposes no sequence or cached row before the insert commits', async () => {
+  let commit!: () => void
+  const gate = new Promise<void>((resolve) => {
+    commit = resolve
+  })
+  const log = new ChatEventLog(
+    'tab',
+    {
+      ...noReads,
+      insert: async () => {
+        await gate
+        return 'inserted'
+      }
+    },
+    { events: [], nextSeq: 0 }
+  )
+  let done = false
+  const append = Promise.resolve(log.append(text('pending'))).then((entry) => {
+    done = true
+    return entry
+  })
+  try {
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(done).toBe(false)
+    expect(log.lastSeq).toBe(-1)
+    expect(log.events).toEqual([])
+    expect(log.since(-1)).toEqual([])
+  } finally {
+    commit()
+  }
+  expect(await append).toMatchObject({ seq: 0, event: text('pending') })
+  expect(log.lastSeq).toBe(0)
+})
+
+test('a failed async insert poisons its prefix and later appends instead of fabricating saved history', async () => {
+  const error = new Error('disk full')
+  const onWriteError = vi.fn()
+  const insert = vi.fn(async () => {
+    throw error
+  })
+  const log = new ChatEventLog(
+    'tab',
+    { ...noReads, insert },
+    { events: [], nextSeq: 0 },
+    { onWriteError }
+  )
+  const first = Promise.resolve(log.append(text('lost')))
+  const later = Promise.resolve(log.append(text('must not skip a sequence')))
+  await expect(first).rejects.toBe(error)
+  await expect(later).rejects.toBe(error)
+  await expect(log.flush()).rejects.toBe(error)
+  await expect(Promise.resolve(log.append(text('still unavailable')))).rejects.toBe(error)
+  expect(insert).toHaveBeenCalledTimes(1)
+  expect(onWriteError).toHaveBeenCalledTimes(1)
+  expect(log.lastSeq).toBe(-1)
+  expect(log.events).toEqual([])
+})
+
 test('assigns consecutive seqs from the seed, not from the caller', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, {
     events: [{ seq: 4, event: text('old') }],
     nextSeq: 5
   })
-  expect(log.append(text('a')).seq).toBe(5)
-  expect(log.append(text('b')).seq).toBe(6)
+  expect((await log.append(text('a'))).seq).toBe(5)
+  expect((await log.append(text('b'))).seq).toBe(6)
   expect(log.lastSeq).toBe(6)
   await log.flush()
   expect([...store.rows.values()].map((r) => r.seq)).toEqual([5, 6])
@@ -68,7 +126,7 @@ test('assigns consecutive seqs from the seed, not from the caller', async () => 
 test('writes land in append order even when the store answers out of order', async () => {
   const store = memoryStore({ delayMs: 5 })
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 })
-  for (let i = 0; i < 30; i++) log.append(text(String(i)))
+  await Promise.all(Array.from({ length: 30 }, (_, i) => log.append(text(String(i)))))
   await log.flush()
   expect(store.order).toEqual(Array.from({ length: 30 }, (_, i) => i))
 })
@@ -83,13 +141,13 @@ test('a clash is reported and never overwrites the existing row', async () => {
     { events: [], nextSeq: 0 },
     { onClash: (seq) => clashes.push(seq) }
   )
-  log.append(text('second writer'))
-  await log.flush()
+  await expect(log.append(text('second writer'))).rejects.toThrow(/already exists/)
+  await expect(log.flush()).rejects.toThrow(/already exists/)
   expect(clashes).toEqual([0])
   expect(store.rows.get('tab:0')?.event).toEqual(text('first writer'))
 })
 
-test('a failed write is reported and does not stop later writes', async () => {
+test('a failed write is reported once and fences later writes', async () => {
   let fail = true
   const written: number[] = []
   const errors: number[] = []
@@ -109,35 +167,35 @@ test('a failed write is reported and does not stop later writes', async () => {
     { events: [], nextSeq: 0 },
     { onWriteError: (seq) => errors.push(seq) }
   )
-  log.append(text('a'))
-  log.append(text('b'))
-  await log.flush()
+  await expect(log.append(text('a'))).rejects.toThrow('disk full')
+  await expect(log.append(text('b'))).rejects.toThrow('disk full')
+  await expect(log.flush()).rejects.toThrow('disk full')
   expect(errors).toEqual([0])
-  expect(written).toEqual([1])
+  expect(written).toEqual([])
 })
 
-test('keeps at most `cap` events in memory (a cache), newest last', () => {
+test('keeps at most `cap` events in memory (a cache), newest last', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 3 })
-  for (let i = 0; i < 5; i++) log.append(text(String(i)))
+  for (let i = 0; i < 5; i++) await log.append(text(String(i)))
   expect(log.since(-1).map((e) => e.seq)).toEqual([2, 3, 4])
   expect(log.since(3).map((e) => e.seq)).toEqual([4])
 })
 
-test('a seed longer than the cap keeps its newest events in memory', () => {
+test('a seed longer than the cap keeps its newest events in memory', async () => {
   const store = memoryStore()
   const events = Array.from({ length: 5 }, (_, seq) => ({ seq, event: text(String(seq)) }))
   const log = new ChatEventLog('tab', store.persistence, { events, nextSeq: 5 }, { cap: 2 })
   expect(log.since(-1).map((e) => e.seq)).toEqual([3, 4])
-  expect(log.append(text('x')).seq).toBe(5)
+  expect((await log.append(text('x'))).seq).toBe(5)
 })
 
 test('flush waits for every write appended before it', async () => {
   const store = memoryStore({ delayMs: 10 })
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 })
-  log.append(text('a'))
-  log.append(text('b'))
+  const writes = [log.append(text('a')), log.append(text('b'))]
   await log.flush()
+  await Promise.all(writes)
   expect(store.rows.size).toBe(2)
 })
 
@@ -146,7 +204,7 @@ test('flush waits for every write appended before it', async () => {
 test('readSince returns the WHOLE history: what left the cache is read back from the store', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 3 })
-  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  for (let i = 0; i < 10; i++) await log.append(text(String(i)))
   expect(seqs(log.since(-1))).toEqual([7, 8, 9])
   expect(seqs(await log.readSince(-1))).toEqual(range(0, 9))
   expect(seqs(await log.readSince(4))).toEqual(range(5, 9))
@@ -162,14 +220,14 @@ test('a seed longer than the cache: its older events are still read back', async
   for (const e of events) store.rows.set(`tab:${e.seq}`, e)
   const log = new ChatEventLog('tab', store.persistence, { events, nextSeq: 6 }, { cap: 2 })
   expect(seqs(log.since(-1))).toEqual([4, 5])
-  log.append(text('new'))
+  await log.append(text('new'))
   expect(seqs(await log.readSince(-1))).toEqual(range(0, 6))
 })
 
 test('a whole history in memory is served from memory', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 50 })
-  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  for (let i = 0; i < 10; i++) await log.append(text(String(i)))
   expect(seqs(await log.readSince(-1))).toEqual(range(0, 9))
   expect(store.reads).toEqual([])
 })
@@ -177,10 +235,10 @@ test('a whole history in memory is served from memory', async () => {
 test('events appended while the store is read are neither lost nor doubled', async () => {
   const store = memoryStore({ readDelayMs: 20, delayMs: 3 })
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 4 })
-  for (let i = 0; i < 20; i++) log.append(text(String(i)))
+  for (let i = 0; i < 20; i++) await log.append(text(String(i)))
   const reading = log.readSince(-1)
   // More arrive during the read: the cache moves on past what was read.
-  for (let i = 20; i < 40; i++) log.append(text(String(i)))
+  for (let i = 20; i < 40; i++) await log.append(text(String(i)))
   const got = seqs(await reading)
   expect(got[0]).toBe(0)
   expect(got).toEqual(range(0, got.at(-1)!))
@@ -192,10 +250,10 @@ test('every appended event is stamped with the time it was saved: kept, written,
   try {
     const store = memoryStore()
     const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })
-    expect(log.append(text('a')).at).toBe(1_793_376_000_000)
+    expect((await log.append(text('a'))).at).toBe(1_793_376_000_000)
     vi.setSystemTime(1_793_376_000_500)
-    log.append(text('b'))
-    log.append(text('c'))
+    await log.append(text('b'))
+    await log.append(text('c'))
     await log.flush()
     expect([...store.rows.values()].map((r) => r.at)).toEqual([
       1_793_376_000_000, 1_793_376_000_500, 1_793_376_000_500
@@ -209,48 +267,21 @@ test('every appended event is stamped with the time it was saved: kept, written,
   }
 })
 
-test('synchronous persistence finishes before an event enters the visible log', () => {
-  const writes: number[] = []
+test('a synchronous storage error rejects the append without publishing or consuming its seq', async () => {
   const log = new ChatEventLog(
     'local-tab',
     {
-      insert: async () => {
-        throw new Error('async path must not run')
-      },
-      insertSync: (_tab, seq) => {
-        writes.push(seq)
-        return 'inserted'
-      },
-      ...noReads
+      ...noReads,
+      insert: () => {
+        throw new Error('disk full')
+      }
     },
     { events: [], nextSeq: 0 }
   )
-  log.append({ kind: 'assistant-text', messageId: 'm', text: 'saved' })
-  expect(writes).toEqual([0])
-  expect(log.events).toHaveLength(1)
-})
-
-test('a failed synchronous save does not publish or consume an event sequence', () => {
-  let full = true
-  const log = new ChatEventLog(
-    'local-tab',
-    {
-      insert: async () => 'inserted',
-      insertSync: () => {
-        if (full) throw new Error('disk full')
-        return 'inserted'
-      },
-      ...noReads
-    },
-    { events: [], nextSeq: 0 }
-  )
-  expect(() => log.append({ kind: 'assistant-text', messageId: 'm', text: 'not saved' })).toThrow(
-    'disk full'
-  )
+  await expect(log.append(text('not saved'))).rejects.toThrow('disk full')
   expect(log.events).toEqual([])
   expect(log.lastSeq).toBe(-1)
-  full = false
-  expect(log.append({ kind: 'assistant-text', messageId: 'm', text: 'saved' }).seq).toBe(0)
+  await expect(log.flush()).rejects.toThrow('disk full')
 })
 
 // --- Bounded pages (crash 2026-11-14: one whole-history read = a 202 MB frame) ----
@@ -263,7 +294,7 @@ const blob = (seq: number, kb: number): BufferedEvent => ({
 test('readPage stops at the byte budget, never splits or drops an event, and pages add up to the history', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 5 })
-  for (let i = 0; i < 40; i++) log.append(blob(i, 100).event)
+  for (let i = 0; i < 40; i++) await log.append(blob(i, 100).event)
   await log.flush()
   const budget = { maxBytes: 350 * 1024 }
   const all: BufferedEvent[] = []
@@ -284,8 +315,8 @@ test('readPage stops at the byte budget, never splits or drops an event, and pag
 test('one event larger than the budget is a page of its own', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 1 })
-  log.append(blob(0, 64).event)
-  log.append(blob(1, 64).event)
+  await log.append(blob(0, 64).event)
+  await log.append(blob(1, 64).event)
   await log.flush()
   const first = await log.readPage(-1, { maxBytes: 1024 })
   expect(seqs(first.events)).toEqual([0])
@@ -298,7 +329,7 @@ test('one event larger than the budget is a page of its own', async () => {
 test('a page never asks for more than the caller budget allows, nor above the maximum', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })
-  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  for (let i = 0; i < 10; i++) await log.append(text(String(i)))
   await log.flush()
   expect(seqs((await log.readPage(-1, { maxEvents: 3 })).events)).toEqual([0, 1, 2])
   const huge = await log.readPage(-1, { maxBytes: CHAT_HISTORY_PAGE_MAX_BYTES * 100 })
@@ -311,7 +342,7 @@ test('open() seeds the cache from the store tail only: older rows are never read
   const log = await ChatEventLog.open('tab', store.persistence, 50, { cap: 10 })
   expect(seqs(log.events)).toEqual(range(40, 49))
   expect(store.reads.every(([after]) => after >= 39)).toBe(true)
-  expect(log.append(text('next')).seq).toBe(50)
+  expect((await log.append(text('next'))).seq).toBe(50)
   // The rest is still reachable, page by page.
   expect(seqs(await log.readSince(-1))).toEqual(range(0, 50))
 })
@@ -328,7 +359,7 @@ test('open() of a short or empty history keeps all of it, and honours the sequen
 test('pages() lets the event loop run between pages', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })
-  for (let i = 0; i < 6; i++) log.append(text(String(i)))
+  for (let i = 0; i < 6; i++) await log.append(text(String(i)))
   await log.flush()
   // Another task on the loop: it runs whenever the read gives the loop back.
   let ticks = 0
@@ -354,7 +385,7 @@ test('pages() lets the event loop run between pages', async () => {
 test('pages() stops before `beforeSeq`', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 3 })
-  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  for (let i = 0; i < 10; i++) await log.append(text(String(i)))
   await log.flush()
   const got: number[] = []
   for await (const page of log.pages(-1, { beforeSeq: 6, budget: { maxEvents: 2 } }))
@@ -367,7 +398,7 @@ test('prepare: the log keeps, returns and writes the event as the store will sav
   const stored = text('stored form')
   const prepare = vi.fn((_tabId: string, _event: AgentEvent) => stored)
   const log = new ChatEventLog('tab', { ...store.persistence, prepare }, { events: [], nextSeq: 0 })
-  const entry = log.append(text('raw form'))
+  const entry = await log.append(text('raw form'))
   expect(prepare).toHaveBeenCalledWith('tab', text('raw form'))
   expect(entry.event).toBe(stored)
   expect(log.since(-1).map((b) => b.event)).toEqual([stored])
@@ -375,7 +406,7 @@ test('prepare: the log keeps, returns and writes the event as the store will sav
   expect(store.rows.get('tab:0')?.event).toBe(stored)
 })
 
-test('prepare: a failure is a write error, and the seq is not used', () => {
+test('prepare: a failure is a write error, and the seq is not used', async () => {
   const store = memoryStore()
   const onWriteError = vi.fn()
   const log = new ChatEventLog(
@@ -389,7 +420,7 @@ test('prepare: a failure is a write error, and the seq is not used', () => {
     { events: [], nextSeq: 0 },
     { onWriteError }
   )
-  expect(() => log.append(text('a'))).toThrow(/blob store full/)
+  await expect(log.append(text('a'))).rejects.toThrow(/blob store full/)
   expect(onWriteError).toHaveBeenCalledWith(0, expect.any(Error))
   expect(log.lastSeq).toBe(-1)
   expect(log.events).toEqual([])

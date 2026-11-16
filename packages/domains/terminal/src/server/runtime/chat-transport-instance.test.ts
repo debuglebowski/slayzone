@@ -3,7 +3,8 @@ import { createChatTransport, memoryChatEventReads } from './chat-transport-mana
 
 const runtimes: Array<ReturnType<typeof createChatTransport>> = []
 afterEach(async () => {
-  for (const r of runtimes.splice(0)) await r.shutdownAll({ termGraceMs: 1, hardTimeoutMs: 10 })
+  for (const r of runtimes.splice(0))
+    await r.shutdownAll({ termGraceMs: 1, hardTimeoutMs: 10 }).catch(() => undefined)
 })
 test('independent runtime instances do not share tabs, event logs or emitters', async () => {
   function runtime(text: string) {
@@ -54,8 +55,7 @@ test('a failed durable event save stops the process and reports a live storage e
     broadcastEvent: (_tab, event, _seq, live) => broadcast.push({ event, live }),
     eventStore: {
       ...memoryChatEventReads(() => []),
-      insert: async () => 'inserted',
-      insertSync: (_tab, _seq, event) => {
+      insert: async (_tab, _seq, event) => {
         if (event.kind === 'assistant-text') throw new Error('disk full')
         return 'inserted'
       }
@@ -81,4 +81,276 @@ test('a failed durable event save stops the process and reports a live storage e
   expect(
     broadcast.find((x) => x.event.kind === 'error' && /storage/i.test(x.event.message))?.live
   ).toBeDefined()
+  await expect(r.readEventsSince('tab', -1)).rejects.toThrow('disk full')
+})
+
+test('a delayed insert cannot reach replay, projection or broadcast before its commit', async () => {
+  const { fakeChild, sj, emitLine, until } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let commit!: () => void
+  const gate = new Promise<void>((resolve) => {
+    commit = resolve
+  })
+  let writing = false
+  const broadcast: import('@slayzone/terminal-contracts').AgentEvent[] = []
+  const r = createChatTransport({
+    spawn: () => {
+      setImmediate(() => f.child.emit('spawn'))
+      return f.child
+    },
+    whichBinary: async () => '/fake/claude',
+    broadcastEvent: (_tab, event) => {
+      broadcast.push(event)
+    },
+    eventStore: {
+      ...memoryChatEventReads(() => []),
+      insert: async (_tab, _seq, event) => {
+        if (event.kind === 'assistant-text') {
+          writing = true
+          await gate
+        }
+        return 'inserted'
+      }
+    }
+  })
+  runtimes.push(r)
+  await r.hydrateSession({
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  })
+  await r.ensureSpawned('tab')
+  emitLine(f, sj.init('session'))
+  // One OS chunk can contain several protocol lines: a later live fragment
+  // must not overtake an earlier saved event whose insert is still blocked.
+  f.stdout.write(
+    [
+      sj.text('pending'),
+      {
+        type: 'stream_event',
+        event: { type: 'message_start', message: { id: 'next-message' } }
+      }
+    ]
+      .map((line) => JSON.stringify(line))
+      .join('\n') + '\n'
+  )
+  try {
+    await until(() => writing)
+    expect(f.stdout.isPaused()).toBe(true)
+    expect(r.getSessionTerminalState('tab')).toBe('idle')
+    expect(broadcast.some((event) => event.kind === 'assistant-text')).toBe(false)
+    expect(broadcast.some((event) => event.kind === 'stream-message-start')).toBe(false)
+    expect(
+      r.getEventBufferSince('tab', -1).some((entry) => entry.event.kind === 'assistant-text')
+    ).toBe(false)
+  } finally {
+    commit()
+  }
+  await until(() => broadcast.some((event) => event.kind === 'assistant-text'))
+  await until(() => broadcast.some((event) => event.kind === 'stream-message-start'))
+  expect(broadcast.findIndex((event) => event.kind === 'assistant-text')).toBeLessThan(
+    broadcast.findIndex((event) => event.kind === 'stream-message-start')
+  )
+  expect(r.getSessionTerminalState('tab')).toBe('running')
+  expect(
+    (await r.getReplay('tab', -1)).events.some((entry) => entry.event.kind === 'assistant-text')
+  ).toBe(true)
+})
+
+test('spawn waits for an asynchronous ownership guard before creating a provider', async () => {
+  const { fakeChild } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let allow!: () => void
+  const guard = new Promise<void>((resolve) => {
+    allow = resolve
+  })
+  let spawned = false
+  const r = createChatTransport({
+    beforeSpawn: () => guard,
+    spawn: () => {
+      spawned = true
+      setImmediate(() => f.child.emit('spawn'))
+      return f.child
+    },
+    whichBinary: async () => '/fake/claude'
+  })
+  runtimes.push(r)
+  await r.hydrateSession({
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  })
+  const pending = r.ensureSpawned('tab')
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(spawned).toBe(false)
+  } finally {
+    allow()
+  }
+  await pending
+  expect(spawned).toBe(true)
+})
+
+test('dispatch commits the user row before provider delivery and deduplicates concurrent admissions', async () => {
+  const { fakeChild, until } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let commit!: () => void
+  const gate = new Promise<void>((resolve) => {
+    commit = resolve
+  })
+  let writing = false
+  let userRows = 0
+  const r = createChatTransport({
+    spawn: () => {
+      setImmediate(() => f.child.emit('spawn'))
+      return f.child
+    },
+    whichBinary: async () => '/fake/claude',
+    eventStore: {
+      ...memoryChatEventReads(() => []),
+      insert: async (_tab, _seq, event) => {
+        if (event.kind === 'user-message') {
+          userRows++
+          writing = true
+          await gate
+        }
+        return 'inserted'
+      }
+    }
+  })
+  runtimes.push(r)
+  await r.hydrateSession({
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  })
+  await r.ensureSpawned('tab')
+  const message = { id: 'same-admission', content: [{ type: 'text' as const, text: 'hello' }] }
+  const first = Promise.resolve(r.dispatchUserMessage('tab', message))
+  const same = Promise.resolve(r.dispatchUserMessage('tab', message))
+  try {
+    await until(() => writing)
+    expect(f.stdin.some((value) => value.type === 'user')).toBe(false)
+  } finally {
+    commit()
+  }
+  expect(await first).toEqual(await same)
+  await until(() => f.stdin.some((value) => value.type === 'user'))
+  expect(userRows).toBe(1)
+  expect(f.stdin.filter((value) => value.type === 'user')).toHaveLength(1)
+})
+
+test('closing drains buffered provider output after a delayed commit before releasing the tab', async () => {
+  const { fakeChild, sj, emitLine, until } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let commit!: () => void
+  const gate = new Promise<void>((resolve) => {
+    commit = resolve
+  })
+  let writing = false
+  const saved: import('@slayzone/terminal-contracts').AgentEvent[] = []
+  const r = createChatTransport({
+    spawn: () => {
+      setImmediate(() => f.child.emit('spawn'))
+      return f.child
+    },
+    whichBinary: async () => '/fake/claude',
+    eventStore: {
+      ...memoryChatEventReads(() => []),
+      insert: async (_tab, _seq, event) => {
+        if (event.kind === 'assistant-text') {
+          writing = true
+          await gate
+        }
+        saved.push(event)
+        return 'inserted'
+      }
+    }
+  })
+  runtimes.push(r)
+  await r.hydrateSession({
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  })
+  await r.ensureSpawned('tab')
+  emitLine(f, sj.text('first'))
+  await until(() => writing)
+  emitLine(f, sj.text('buffered tail'))
+  let closed = false
+  const closing = r.removeSession('tab').then(() => {
+    closed = true
+  })
+  try {
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(closed).toBe(false)
+  } finally {
+    commit()
+  }
+  await closing
+  expect(
+    saved.filter((event) => event.kind === 'assistant-text').map((event) => event.text)
+  ).toEqual(['first', 'buffered tail'])
+  expect(f.kills).toEqual(['SIGTERM'])
+})
+
+test('storage backpressure does not count as a stalled provider turn', async () => {
+  const { fakeChild, sj, emitLine, until } = await import('./chat-transport-testkit')
+  const f = fakeChild({ exitOnKill: true })
+  let commit!: () => void
+  const gate = new Promise<void>((resolve) => {
+    commit = resolve
+  })
+  let writing = false
+  const r = createChatTransport({
+    spawn: () => {
+      setImmediate(() => f.child.emit('spawn'))
+      return f.child
+    },
+    whichBinary: async () => '/fake/claude',
+    isProcessAlive: () => true,
+    watchdogTimings: { startingBoundMs: 2000, runningStallMs: 20, killGraceMs: 20 },
+    eventStore: {
+      ...memoryChatEventReads(() => []),
+      insert: async (_tab, _seq, event) => {
+        if (event.kind === 'assistant-text') {
+          writing = true
+          await gate
+        }
+        return 'inserted'
+      }
+    }
+  })
+  runtimes.push(r)
+  await r.hydrateSession({
+    tabId: 'tab',
+    taskId: 'task',
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlags: [],
+    conversationId: null
+  })
+  await r.ensureSpawned('tab')
+  await r.dispatchUserMessage('tab', { id: 'user', content: [{ type: 'text', text: 'hello' }] })
+  emitLine(f, sj.text('waiting for storage'))
+  try {
+    await until(() => writing)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(f.kills).toEqual([])
+  } finally {
+    commit()
+  }
+  await r.getReplay('tab', -1)
 })

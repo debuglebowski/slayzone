@@ -33,7 +33,7 @@ const flag = (args: string[], name: string): string | undefined => {
 
 test('a side-thread fork point never stops or changes its parent', async () => {
   const s = await twoTurns()
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
     id: 'm3',
     content: [{ type: 'text', text: 'Keep working' }]
   })
@@ -107,7 +107,7 @@ async function twoTurns(opts: { onFake?: (f: FakeChild, i: number) => void } = {
 }
 
 async function turn(f: FakeChild, id: string, lines: unknown[], sessionId: string): Promise<void> {
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id, content: [{ type: 'text', text: id }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, { id, content: [{ type: 'text', text: id }] })
   await until(() => f.stdin.some((m) => m.type === 'user' && m.uuid === id))
   emitLine(f, sj.lifecycle(id, 'queued'))
   emitLine(f, sj.lifecycle(id, 'started'))
@@ -173,7 +173,10 @@ test('a running turn is stopped first', async () => {
     setImmediate(() => emitLine(f, sj.aborted()))
     return { success: { still_queued: [] } }
   })
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'm3', content: [{ type: 'text', text: 'm3' }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'm3',
+    content: [{ type: 'text', text: 'm3' }]
+  })
   await until(() => f.stdin.some((m) => m.uuid === 'm3'))
   emitLine(f, sj.lifecycle('m3', 'queued'))
   emitLine(f, sj.lifecycle('m3', 'started'))

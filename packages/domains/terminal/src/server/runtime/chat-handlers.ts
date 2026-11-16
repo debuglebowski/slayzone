@@ -814,7 +814,6 @@ export function createChatOps(opts: ChatHandlerOpts) {
     // any previous instance of the tab finished writing) and writes it insert-only.
     eventStore: {
       nextSeq: data.getNextSeqForTab?.bind(data),
-      insertSync: data.persistChatEventSync?.bind(data),
       prepare: data.prepareChatEvent?.bind(data),
       insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
       readPage: (tabId, afterSeq, beforeSeq, budget) =>
@@ -1271,7 +1270,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       await hydrateSession(
         await buildHydrateOpts(data, { ...o, tabId: thread.id }, { fresh: false })
       )
-      dispatchUserMessage(thread.id, {
+      await dispatchUserMessage(thread.id, {
         id: randomUUID(),
         content: [{ type: 'text', text: o.text }]
       })
@@ -1857,7 +1856,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
         }
 
         if (o.decision === 'keep-planning') {
-          recordCodexPlanDecision(o.tabId, {
+          await recordCodexPlanDecision(o.tabId, {
             kind: 'codex-plan-decision',
             planId: o.planId,
             decision: 'keep-planning',
@@ -1870,7 +1869,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
         if (existing?.messageId && o.messageId && existing.messageId !== o.messageId)
           throw new Error('Plan approval already uses another message ID')
         if (!existing)
-          recordCodexPlanDecision(o.tabId, {
+          await recordCodexPlanDecision(o.tabId, {
             kind: 'codex-plan-decision',
             planId: o.planId,
             decision: 'implement',
@@ -1884,7 +1883,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
           content: [{ type: 'text', text: 'Implement the plan.' }]
         })
         if (delivery.state === 'failed') throw new Error('Implementation message failed to queue')
-        recordCodexPlanDecision(o.tabId, {
+        await recordCodexPlanDecision(o.tabId, {
           kind: 'codex-plan-decision',
           planId: o.planId,
           decision: 'implement',

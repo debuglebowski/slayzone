@@ -148,12 +148,6 @@ export interface ChatDataOps {
     event: AgentEvent,
     at?: number
   ): Promise<'inserted' | 'clash'>
-  persistChatEventSync?(
-    tabId: string,
-    seq: number,
-    event: AgentEvent,
-    at: number
-  ): 'inserted' | 'clash'
   /** One bounded page of the saved events with `afterSeq < seq < beforeSeq` (`ChatEventPersistence.readPage`). */
   loadChatEventsPage(
     tabId: string,
@@ -164,10 +158,10 @@ export interface ChatDataOps {
   /** Seq of the `count`-th newest saved event; null when there are fewer (`ChatEventPersistence.tailStart`). */
   chatEventsTailStart(tabId: string, count: number): Promise<number | null>
   /**
-   * RAW event → the form `persistChatEventSync` / `persistChatEvent` take (binary
+   * RAW event → the form `persistChatEvent` takes (binary
    * payloads moved to the blob store, references in place). Absent: saved as is.
    */
-  prepareChatEvent?(tabId: string, event: AgentEvent): AgentEvent
+  prepareChatEvent?(tabId: string, event: AgentEvent): AgentEvent | Promise<AgentEvent>
   /**
    * One bounded chunk of an out-of-line payload the tab's conversation pins (a blob
    * of another conversation is refused). Absent: no blob store here.

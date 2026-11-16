@@ -19,7 +19,7 @@ import { createChatOps, registerChatHandlers, setClaudeSessionReader } from './c
 import { createDbChatDataOps } from './chat-data-ops'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import * as mgr from './chat-transport-manager'
-import { persistChatEvent } from '../chat-events-store'
+import { getNextSeqForTab, persistChatEvent } from '../chat-events-store'
 import { emitLine, fakeChild, type FakeChild, until } from './chat-transport-testkit'
 import { registerConversationHolder } from './live-conversations'
 import {
@@ -38,6 +38,18 @@ function makeFakeChild(
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
+  emitter.once('exit', (code, signal) => {
+    const drained = Promise.all(
+      [stdout, stderr].map((stream) =>
+        stream.readableEnded
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => stream.once('end', resolve))
+      )
+    )
+    stdout.end()
+    stderr.end()
+    void drained.then(() => emitter.emit('close', code, signal))
+  })
   // Like a real pipe: the callback reports the chunk reached the process.
   const stdin = {
     write: (s: string, cb?: (err?: Error | null) => void) => {
@@ -282,7 +294,7 @@ test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversa
     whichBinary: async () => '/fake/claude',
     spawn: (_cmd, args) => {
       spawnArgsLog.push(args)
-      return makeFakeChild()
+      return makeFakeChild({ exitOnKill: true })
     },
     broadcastEvent: () => {},
     broadcastExit: () => {},
@@ -310,14 +322,15 @@ test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversa
   expect(spawnArgsLog[0].includes('--resume')).toBeTruthy()
 
   // Persist some chat events for this tab.
-  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 0, {
+  const nextSeq = await getNextSeqForTab(createSlayzoneDbAdapter(db), tabId)
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, nextSeq, {
     kind: 'turn-init',
     sessionId: 'old-stored-sid',
     model: 'opus',
     cwd: '/tmp',
     tools: []
   })
-  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, 1, {
+  await persistChatEvent(createSlayzoneDbAdapter(db), tabId, nextSeq + 1, {
     kind: 'assistant-text',
     messageId: 'm',
     text: 'hi'
@@ -325,7 +338,7 @@ test('chat:reset spawns fresh (no --resume) even when DB has stored chatConversa
   const evCountBefore = db
     .prepare('SELECT COUNT(*) AS c FROM chat_events WHERE tab_id = ?')
     .get(tabId) as { c: number }
-  expect(evCountBefore.c).toBe(2)
+  expect(evCountBefore.c).toBe(nextSeq + 2)
 
   // Now reset. Reset is lazy — wipes DB + skeleton-only; does NOT spawn.
   const resetInfo = (await ipc.invoke('chat:reset', {
@@ -1182,7 +1195,7 @@ test('onChatEvent receives the task, mode and conversation of the event', async 
     providerFlagsOverride: null
   })
   ;(child as unknown as EventEmitter).emit('spawn')
-  ops.send('tab-ctx-1', { id: 'msg-ctx-1', content: [{ type: 'text', text: 'hello there' }] })
+  await ops.send('tab-ctx-1', { id: 'msg-ctx-1', content: [{ type: 'text', text: 'hello there' }] })
   const sent = seen.find((s) => s.kind === 'user-message')
   expect(sent?.ctx).toEqual({
     taskId: 'task-ctx-1',

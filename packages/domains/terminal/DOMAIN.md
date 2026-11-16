@@ -232,6 +232,24 @@ provide optional metadata callbacks; custom/older record stores keep a paced raw
 fallback. Encoded page bodies and metadata are still produced on the projection's
 thread; captured owner/epoch checks stay in the database owner for every step.
 
+Saved-event publication awaits the actual insert. `ChatEventLog.append` returns a
+Promise of the committed entry; only then does the ring/sequence advance. A failed
+insert poisons the log and later flushes reject. Each tab orders provider events,
+live fragments, host markers and their effects through one producer chain; a live
+fragment cannot overtake an earlier pending save. Readers and lifecycle drains
+wait for the accepted prefix, including generated delivery events/notices. User
+dispatch commits its event/queue-handoff/prompt transaction before provider delivery.
+
+The local computer/host process bridge pauses provider pipes while that prefix is
+pending, scoped to the exact spawn generation. A current pipe chunk (or one whole
+protocol record) finishes; later chunks wait in the pipe. Imported history drains
+as one batch, not one queued promise per row. Physical process exit and stdio drain
+are separate: replacement/close retains the final tail and the watchdog excludes
+deliberate storage backpressure. Cleanup attempts every owned resource and preserves
+the original failure. The SQLite owner cutover, legacy external routed flow, and
+actual computer control responsiveness under blocked native sync still await the
+full FU2 S6 production caller migration; this event-pipeline slice does not close H1/H2.
+
 ### Chat side questions (`/btw`)
 
 `chat.sideQuestion.ask` answers a question from the tab's conversation without

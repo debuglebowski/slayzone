@@ -177,15 +177,16 @@ test('new: retained messages keep full session summaries when their old session 
     { kind: 'turn-init', sessionId: native, model: 'test', cwd: '/tmp', tools: [] },
     old
   )
-  r.storage.transaction(() => {
+  // Seed through awaited writes; a transaction never spans host awaits.
+  await (async () => {
     for (let n = 0; n < 601; n++)
-      r.local.data.persistChatEventSync!(
+      await r.local.data.persistChatEvent(
         'codex',
         n + 1,
         { kind: 'user-message', id: `recent-${n}`, text: `recent question ${n}` },
         clock + n
       )
-  })
+  })()
   expect(r.prompts('task')).toHaveLength(500)
   expect(r.promptSummaries('task', [native])[0].count).toBe(601)
   r.retention.configure(1)

@@ -274,7 +274,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
     const content: UserContentBlock[] = head.content ?? [{ type: 'text', text: head.send }]
     try {
       // The row id becomes the message id: the outbox tracks it from here on.
-      dispatchUserMessage(tabId, { id: head.id, content })
+      await dispatchUserMessage(tabId, { id: head.id, content })
     } catch (err) {
       // The tab went away between check and dispatch: put it back for the next run.
       console.error('[chat-queue] dispatch failed, requeueing:', err)

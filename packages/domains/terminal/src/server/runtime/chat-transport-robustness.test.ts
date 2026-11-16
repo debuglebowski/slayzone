@@ -27,6 +27,18 @@ function fake(opts: { exitOnKill?: boolean } = {}): Fake {
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
+  emitter.once('exit', (code, signal) => {
+    const drained = Promise.all(
+      [stdout, stderr].map((stream) =>
+        stream.readableEnded
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => stream.once('end', resolve))
+      )
+    )
+    stdout.end()
+    stderr.end()
+    void drained.then(() => emitter.emit('close', code, signal))
+  })
   const stdin: Array<Record<string, unknown>> = []
   const kills: string[] = []
   let buf = ''
@@ -218,12 +230,12 @@ test('a respawn waits for the old process to exit (SIGKILL after the grace) befo
 test('seqs are the tab’s: a respawn never re-uses one, nothing is overwritten', async () => {
   const h = harness({ exitOnKill: true })
   await start()
-  mgr.sendUserMessage(OPTS.tabId, 'one')
+  await mgr.sendUserMessage(OPTS.tabId, 'one')
   line(h.fakes[0], init('s1'))
   line(h.fakes[0], text('reply one'))
   await wait(30)
   await mgr.respawn(OPTS.tabId, { ...OPTS })
-  mgr.sendUserMessage(OPTS.tabId, 'two')
+  await mgr.sendUserMessage(OPTS.tabId, 'two')
   line(h.fakes[1], init('s1'))
   line(h.fakes[1], text('reply two', 'msg_2'))
   await wait(30)
@@ -251,7 +263,7 @@ test('Codex-style late result after exit is dropped (the session stays dead, not
 test('the message that lazily starts the agent reaches it (ready before the write)', async () => {
   const h = harness()
   await mgr.hydrateSession({ ...OPTS })
-  const sent = mgr.dispatchUserMessage(OPTS.tabId, {
+  const sent = await mgr.dispatchUserMessage(OPTS.tabId, {
     id: 'm-first',
     content: [{ type: 'text', text: 'first message' }]
   })
@@ -265,7 +277,7 @@ test('the message that lazily starts the agent reaches it (ready before the writ
 test('delivery states come from the CLI: queued → delivered, completed → answered (saved)', async () => {
   const h = harness()
   await start()
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
   const f = h.fakes[0]
   line(f, lifecycle('m1', 'queued'))
   line(f, lifecycle('m1', 'started'))
@@ -288,7 +300,7 @@ test('delivery states come from the CLI: queued → delivered, completed → ans
 test('a process that dies before confirming fails the message, visibly', async () => {
   const h = harness()
   await start()
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
   h.fakes[0].exit(1)
   await wait(30)
   const failed = saved(h).find((e) => e.kind === 'user-message-delivery' && e.state === 'failed')
@@ -306,7 +318,7 @@ test('a start failure is a typed error in the chat and fails the message', async
   const errors: AgentEvent[] = []
   mgr.configureTransport({ broadcastEvent: (_t, e) => errors.push(e) })
   await mgr.hydrateSession({ ...OPTS })
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
   await wait(50)
   expect(errors.find((e) => e.kind === 'error')).toMatchObject({
     detail: { code: 'cli-not-installed', binary: 'claude' }
@@ -324,7 +336,7 @@ test('failed resume: the fresh start receives the user’s message (same id), hi
   const h = harness({ exitOnKill: true })
   let invalid = 0
   await mgr.hydrateSession({ ...OPTS, conversationId: 'gone', onInvalidResume: () => invalid++ })
-  mgr.dispatchUserMessage(OPTS.tabId, {
+  await mgr.dispatchUserMessage(OPTS.tabId, {
     id: 'm1',
     content: [{ type: 'text', text: 'hello again' }]
   })
@@ -357,7 +369,7 @@ test('failed resume: the fresh start receives the user’s message (same id), hi
 test('a resumed first turn that fails for another reason shows the error', async () => {
   const h = harness()
   await mgr.hydrateSession({ ...OPTS, conversationId: 'exists' })
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
   await wait(30)
   const f = h.fakes[0]
   line(f, init('exists'))
@@ -412,7 +424,10 @@ test('a silent tool call within its own timeout is not killed; a silent turn wit
   })
   await start()
   const f = h.fakes[0]
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'build' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, {
+    id: 'm1',
+    content: [{ type: 'text', text: 'build' }]
+  })
   line(f, toolUse('toolu_1', { command: 'sleep 600', timeout: 600_000 }))
   await wait(600)
   expect(f.kills).toEqual([])
@@ -436,7 +451,10 @@ test('a turn frozen by host sleep is not judged on wake: it gets a fresh silence
   })
   await start()
   const f = h.fakes[0]
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'build' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, {
+    id: 'm1',
+    content: [{ type: 'text', text: 'build' }]
+  })
   await wait(200)
   // The host slept through most of the window and just woke: the silence before
   // now was never observed, so it is not the agent's.
@@ -460,7 +478,10 @@ test('a watchdog-killed agent restarts by itself, resuming its conversation', as
   const sessionId = h.spawnArgs[0][h.spawnArgs[0].indexOf('--session-id') + 1]
   line(h.fakes[0], init(sessionId))
   await wait(30)
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'build' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, {
+    id: 'm1',
+    content: [{ type: 'text', text: 'build' }]
+  })
   await wait(450)
   expect(h.fakes[0].kills[0]).toBe('SIGTERM')
   expect(h.fakes).toHaveLength(2)
@@ -482,7 +503,7 @@ test('an agent that keeps stalling is restarted at most twice in a row, then sta
   for (let i = 0; i < 3; i++) {
     line(h.fakes[i], init('s1'))
     await wait(30)
-    mgr.dispatchUserMessage(OPTS.tabId, {
+    await mgr.dispatchUserMessage(OPTS.tabId, {
       id: `m${i}`,
       content: [{ type: 'text', text: 'build' }]
     })
@@ -519,7 +540,7 @@ test('routed process that never confirms its kill still reaches dead (no endless
     watchdogTimings: { startingBoundMs: 5000, runningStallMs: 100, killGraceMs: 50 }
   })
   await start()
-  mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
+  await mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
   await wait(600)
   expect(kills).toEqual(['SIGTERM', 'SIGKILL'])
   expect(mgr.getSessionTerminalState(OPTS.tabId)).toBe('dead')
@@ -552,7 +573,7 @@ test('a respawn resumes the conversation the tab already confirmed, even before 
   })
   await start()
   const sessionId = spawned[0][spawned[0].indexOf('--session-id') + 1]
-  mgr.sendUserMessage(OPTS.tabId, 'hi')
+  await mgr.sendUserMessage(OPTS.tabId, 'hi')
   line(h.fakes[0], init(sessionId))
   await wait(30)
   // A model change rebuilt the opts from a DB that has no conversation id yet.
@@ -701,6 +722,7 @@ test('a user start joining a queued restore asks its computer to start it next',
   const again = mgr.ensureSpawned(TAB_OPTS.tabId)
   expect(prioritized).toEqual([])
   const user = mgr.ensureSpawned(TAB_OPTS.tabId, { prioritize: true })
+  await waitUntil(() => prioritized.length === 1)
   expect(prioritized).toHaveLength(1)
   release()
   await Promise.all([restore, again, user])

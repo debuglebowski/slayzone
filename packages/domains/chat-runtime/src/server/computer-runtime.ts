@@ -166,7 +166,7 @@ export function createComputerChatRuntime(opts: {
           throw new Error(
             'Chat provider transition or lifecycle change prevents starting this writer'
           )
-        opts.transport?.beforeSpawn?.(tabId)
+        return opts.transport?.beforeSpawn?.(tabId)
       },
       userInputTracker: {
         mark: (id) => {
@@ -252,7 +252,7 @@ export function createComputerChatRuntime(opts: {
     local.queue,
     local.data.attachments
   )
-  let closed = false
+  let closing: Promise<void> | null = null
   const invoke = createChatInvoker({ storage, local, ops, queueOps })
   const tabTransitions = new Map<string, Promise<ChatTabTransition['to']>>()
   retention = createChatRetention({
@@ -501,20 +501,32 @@ export function createComputerChatRuntime(opts: {
       storage.deleteTaskFaults(taskId)
       return { taskId, revision: applied.revision, erased: true as const }
     },
-    async close() {
-      if (closed) return
-      closed = true
-      await compaction.close()
-      await blobBackfill.close()
-      await markerBackfill.close()
-      await retentionService.close()
-      await backups.close()
-      await queueRuntime.close()
-      await transport.shutdownAll()
-      transfers.close()
-      await artifacts.close()
-      // Clean stop: WAL checkpointed off the main thread, nothing lost.
-      await storage.shutdown()
+    close(): Promise<void> {
+      if (closing) return closing
+      closing = (async () => {
+        const errors: unknown[] = []
+        const attempt = async (action: () => unknown) => {
+          try {
+            await action()
+          } catch (error) {
+            errors.push(error)
+          }
+        }
+        await attempt(() => compaction.close())
+        await attempt(() => blobBackfill.close())
+        await attempt(() => markerBackfill.close())
+        await attempt(() => retentionService.close())
+        await attempt(() => backups.close())
+        await attempt(() => queueRuntime.close())
+        await attempt(() => transport.shutdownAll())
+        await attempt(() => transfers.close())
+        await attempt(() => artifacts.close())
+        await attempt(() => storage.shutdown())
+        if (errors.length === 1) throw errors[0]
+        if (errors.length)
+          throw new AggregateError(errors, 'Chat runtime cleanup failed', { cause: errors[0] })
+      })()
+      return closing
     }
   }
 }

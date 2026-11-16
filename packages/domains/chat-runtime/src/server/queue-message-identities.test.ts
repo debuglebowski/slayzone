@@ -124,7 +124,7 @@ test('handed-off attachment acceptance replays after its events and pins expire 
     content: NonNullable<ChatQueuePushOptions['content']>
   }
   expect(accepted.content[0]).toMatchObject({ attachment: { contentHash: sealed.contentHash } })
-  f.r.local.data.persistChatEventSync!(
+  await f.r.local.data.persistChatEvent(
     'tab',
     0,
     {
@@ -156,7 +156,7 @@ test('handed-off attachment acceptance replays after its events and pins expire 
 test('legacy receipt/history repair removes only proven duplicate rows and preserves later undelivered messages', async () => {
   const f = fixture(),
     accepted = await f.push('first')
-  f.r.local.data.persistChatEventSync!(
+  await f.r.local.data.persistChatEvent(
     'tab',
     0,
     { kind: 'user-message', id: 'stable', text: 'private text' },
@@ -201,7 +201,7 @@ test('legacy receipt proves a bare attachment retry without selecting newer byte
   const accepted = (await f.push('first', '', '', opts)) as {
     content: NonNullable<ChatQueuePushOptions['content']>
   }
-  f.r.local.data.persistChatEventSync!(
+  await f.r.local.data.persistChatEvent(
     'tab',
     0,
     { kind: 'user-message', id: 'stable', text: '', content: accepted.content },
@@ -253,7 +253,7 @@ test('legacy unversioned receipt/duplicate rows reconcile only against their act
   const accepted = (await f.push('first', '', '', opts)) as {
     content: NonNullable<ChatQueuePushOptions['content']>
   }
-  f.r.local.data.persistChatEventSync!(
+  await f.r.local.data.persistChatEvent(
     'tab',
     0,
     { kind: 'user-message', id: 'stable', text: '', content: accepted.content },
@@ -307,7 +307,7 @@ test('an acknowledged identity remains replayable after its reservation expires'
 test('imported initialized ledgers retain their task identity after the archived owner is deleted and backed up', async () => {
   const source = fixture()
   await source.push('first')
-  source.r.local.data.persistChatEventSync!(
+  await source.r.local.data.persistChatEvent(
     'tab',
     0,
     {

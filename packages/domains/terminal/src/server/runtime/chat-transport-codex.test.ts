@@ -39,6 +39,18 @@ function codexChild(answer: (method: string, params: Json) => Reply | undefined)
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
+  emitter.once('exit', (code, signal) => {
+    const drained = Promise.all(
+      [stdout, stderr].map((stream) =>
+        stream.readableEnded
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => stream.once('end', resolve))
+      )
+    )
+    stdout.end()
+    stderr.end()
+    void drained.then(() => emitter.emit('close', code, signal))
+  })
   const stdin: Json[] = []
   let buf = ''
   const send = (msg: Json): void => {
@@ -593,7 +605,7 @@ test.each(['task-events', 'status-adapter', 'explicit-stop'])(
     const server = turnServer()
     const c = await openWithServer(server, 'tab-done')
     setTaskAgentsStopper(stopRuntimeTaskAgents)
-    mgr.dispatchUserMessage('tab-done', {
+    await mgr.dispatchUserMessage('tab-done', {
       id: 'go-ahead',
       content: [{ type: 'text', text: 'Go ahead' }]
     })
@@ -632,7 +644,7 @@ test('a message queued during a Codex turn waits for completion; both turns fini
   }
   const queue = runtime.createChatQueueOps({} as SlayzoneDb, data)
   try {
-    mgr.dispatchUserMessage('tab-queued', {
+    await mgr.dispatchUserMessage('tab-queued', {
       id: 'first',
       content: [{ type: 'text', text: 'work' }]
     })
@@ -684,7 +696,7 @@ const until = async (pred: () => boolean, timeoutMs = 2000): Promise<void> => {
 test('Stop mid-turn: turn/interrupt in place, the process stays, the turn ends interrupted', async () => {
   const server = turnServer()
   const c = await openWithServer(server, 'tab-stop')
-  mgr.dispatchUserMessage('tab-stop', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
+  await mgr.dispatchUserMessage('tab-stop', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
   await until(() => server.turns.length === 1)
   c.send({ method: 'item/agentMessage/delta', params: { itemId: 'a', delta: 'working' } })
   await until(() => h.events.some((e) => e.kind === 'stream-block-delta'))
@@ -703,7 +715,7 @@ test('Stop mid-turn: turn/interrupt in place, the process stays, the turn ends i
 test('after a Stop, the next turn takes "Send now" (turn/steer) again; while the stop is in flight it does not', async () => {
   const server = turnServer()
   const c = await openWithServer(server, 'tab-steer')
-  mgr.dispatchUserMessage('tab-steer', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
+  await mgr.dispatchUserMessage('tab-steer', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
   await until(() => server.turns.length === 1)
   c.send({ method: 'item/agentMessage/delta', params: { itemId: 'a', delta: 'working' } })
   await until(() => h.events.some((e) => e.kind === 'stream-block-delta'))
@@ -718,7 +730,10 @@ test('after a Stop, the next turn takes "Send now" (turn/steer) again; while the
   await until(() => mgr.getSessionTerminalState('tab-steer') === 'idle')
   expect(h.children).toHaveLength(1)
 
-  mgr.dispatchUserMessage('tab-steer', { id: 'm2', content: [{ type: 'text', text: 'next' }] })
+  await mgr.dispatchUserMessage('tab-steer', {
+    id: 'm2',
+    content: [{ type: 'text', text: 'next' }]
+  })
   await until(() => server.turns.length === 2)
   await wait(30)
   expect(mgr.getSessionTerminalState('tab-steer')).toBe('running')
@@ -737,7 +752,7 @@ test('after a Stop, the next turn takes "Send now" (turn/steer) again; while the
 test('permission change stops the turn before continuing with the new sandbox and holds the queue', async () => {
   const server = turnServer()
   const c = await openWithServer(server, 'tab-permissions')
-  mgr.dispatchUserMessage('tab-permissions', {
+  await mgr.dispatchUserMessage('tab-permissions', {
     id: 'm1',
     content: [{ type: 'text', text: 'work' }]
   })
@@ -769,7 +784,7 @@ test('permission change after a turn finishes does not invent a continuation', a
 test('a refused interrupt keeps permissions and never sends a continuation', async () => {
   const server = turnServer({ refuseInterrupt: true })
   await openWithServer(server, 'tab-permissions-refused')
-  mgr.dispatchUserMessage('tab-permissions-refused', {
+  await mgr.dispatchUserMessage('tab-permissions-refused', {
     id: 'm1',
     content: [{ type: 'text', text: 'work' }]
   })
@@ -800,7 +815,7 @@ test('failure to save permissions restores the previous sandbox and releases the
   ).rejects.toThrow('Save failed')
   expect(server.turns).toHaveLength(0)
   expect(mgr.isReadyForQueuedMessage('tab-permissions-save')).toBe(true)
-  mgr.dispatchUserMessage('tab-permissions-save', {
+  await mgr.dispatchUserMessage('tab-permissions-save', {
     id: 'm1',
     content: [{ type: 'text', text: 'work' }]
   })
@@ -811,7 +826,7 @@ test('failure to save permissions restores the previous sandbox and releases the
 test('Stop before any output: the message comes back and its turn leaves the thread (as Claude chat)', async () => {
   const server = turnServer()
   const c = await openWithServer(server, 'tab-pop')
-  mgr.dispatchUserMessage('tab-pop', { id: 'm1', content: [{ type: 'text', text: 'hello' }] })
+  await mgr.dispatchUserMessage('tab-pop', { id: 'm1', content: [{ type: 'text', text: 'hello' }] })
   await until(() => server.turns.length === 1)
   await wait(20)
 
@@ -835,7 +850,7 @@ test('Stop before any output: the message comes back and its turn leaves the thr
 test('Stop before the turn has an id: the interrupt goes once the id arrives', async () => {
   const server = turnServer({ replyDelayMs: 150 })
   const c = await openWithServer(server, 'tab-early')
-  mgr.dispatchUserMessage('tab-early', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
+  await mgr.dispatchUserMessage('tab-early', { id: 'm1', content: [{ type: 'text', text: 'go' }] })
   await until(() => c.requests('turn/start').length === 1)
 
   const result = await mgr.stopTurn('tab-early', stopOpts('tab-early'))
@@ -849,7 +864,10 @@ test('Stop before the turn has an id: the interrupt goes once the id arrives', a
 test('fork from an answered message: thread/fork through its turn; the new thread is the tab’s (slay-spawned-fork)', async () => {
   const server = turnServer()
   const c = await openWithServer(server, 'tab-fork')
-  mgr.dispatchUserMessage('tab-fork', { id: 'm1', content: [{ type: 'text', text: 'first' }] })
+  await mgr.dispatchUserMessage('tab-fork', {
+    id: 'm1',
+    content: [{ type: 'text', text: 'first' }]
+  })
   await until(() => server.turns.length === 1)
   c.send({ method: 'item/agentMessage/delta', params: { itemId: 'a1', delta: 'answer' } })
   c.send({
@@ -885,7 +903,10 @@ test('a fork Codex refuses takes the tab back to the original conversation', asy
   await open('tab-nofork', null)
   server.bind(h.children[0])
   const c = h.children[0]
-  mgr.dispatchUserMessage('tab-nofork', { id: 'm1', content: [{ type: 'text', text: 'first' }] })
+  await mgr.dispatchUserMessage('tab-nofork', {
+    id: 'm1',
+    content: [{ type: 'text', text: 'first' }]
+  })
   await until(() => server.turns.length === 1)
   c.send({ method: 'item/agentMessage/delta', params: { itemId: 'a1', delta: 'answer' } })
   c.send({
@@ -1074,7 +1095,7 @@ test('watchdog preserves a silent resumed Codex turn when its server answers a r
   await open('tab-quiet', 'thr-audit')
   const c = h.children[0]
   server.bind(c)
-  mgr.dispatchUserMessage('tab-quiet', {
+  await mgr.dispatchUserMessage('tab-quiet', {
     id: 'resume',
     content: [{ type: 'text', text: 'Resume' }]
   })
@@ -1108,7 +1129,7 @@ test('failed watchdog probe records its cause and restarts with the original con
   })
   await open('tab-probe-failed', 'thr-audit')
   server.bind(h.children[0])
-  mgr.dispatchUserMessage('tab-probe-failed', {
+  await mgr.dispatchUserMessage('tab-probe-failed', {
     id: 'resume',
     content: [{ type: 'text', text: 'Resume' }]
   })
@@ -1149,7 +1170,7 @@ test.each(['completion', 'Stop'] as const)(
     await open('tab-probe-race', 'thr-audit')
     const c = h.children[0]
     server.bind(c)
-    mgr.dispatchUserMessage('tab-probe-race', {
+    await mgr.dispatchUserMessage('tab-probe-race', {
       id: 'resume',
       content: [{ type: 'text', text: 'Resume' }]
     })

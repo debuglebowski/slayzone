@@ -24,6 +24,18 @@ function makeFakeChild(): FakeChild {
   const emitter = new EventEmitter()
   const stdout = new PassThrough()
   const stderr = new PassThrough()
+  emitter.once('exit', (code, signal) => {
+    const drained = Promise.all(
+      [stdout, stderr].map((stream) =>
+        stream.readableEnded
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => stream.once('end', resolve))
+      )
+    )
+    stdout.end()
+    stderr.end()
+    void drained.then(() => emitter.emit('close', code, signal))
+  })
   const stdinRef = { value: '' }
   const stdin = {
     // Like a real pipe: the callback reports the chunk was handed to the process.
@@ -250,7 +262,7 @@ test('sendUserMessage: writes NDJSON line to stdin', async () => {
     conversationId: null,
     providerFlags: []
   })
-  const ok = mgr.sendUserMessage('tab-msg', 'hello')
+  const ok = await mgr.sendUserMessage('tab-msg', 'hello')
   expect(ok).toBe(true)
   const line = hostStdin(fake).trim()
   const parsed = JSON.parse(line)
@@ -611,7 +623,8 @@ test('valid --resume: events are shown as they arrive, in order — no holding p
   )
 
   ;(fake as unknown as EventEmitter).emit('spawn')
-  // Shown at once, even though the resume is not confirmed yet.
+  // Shown after its insert commits, before the resume is confirmed.
+  await mgr.readEventsSince('tab-resume-ok', -1)
   expect(broadcastEvents.map((e) => e.kind)).toEqual(['session-spawn'])
 
   fake._stdout.write(
@@ -691,7 +704,7 @@ test('exit event: chat:exit broadcast carries dying session sessionId', async ()
   expect(exits[0].sessionId).toBe(info.sessionId)
 })
 
-test('reset race: old session exit fires after removeSession — broadcast swallowed', async () => {
+test('reset waits old output drain, then ignores a duplicate exit after replacement', async () => {
   await setup()
   let spawnCount = 0
   const children: FakeChild[] = []
@@ -723,8 +736,8 @@ test('reset race: old session exit fires after removeSession — broadcast swall
 
   // 2. Reset flow: kill + remove + create.
   mgr.kill('tab-reset')
-  mgr.removeSession('tab-reset')
-  await createChat({
+  const draining = mgr.removeSession('tab-reset')
+  const next = createChat({
     tabId: 'tab-reset',
     taskId: 'task-test',
     mode: 'claude-chat',
@@ -732,12 +745,17 @@ test('reset race: old session exit fires after removeSession — broadcast swall
     conversationId: null,
     providerFlags: []
   })
+  await new Promise((resolve) => setImmediate(resolve))
+  expect(spawnCount).toBe(1)
+  ;(children[0] as unknown as EventEmitter).emit('exit', 0, null)
+  await draining
+  await next
   expect(spawnCount).toBe(2)
 
   const beforeExitCount = exits.length
 
-  // 3. Old session A's exit fires LATE — after new session already spawned.
-  ;(children[0] as unknown as EventEmitter).emit('exit', 0, null)
+  // 3. A duplicate old terminal notification arrives after the new spawn.
+  ;(children[0] as unknown as EventEmitter).emit('close', 0, null)
   await new Promise((r) => setTimeout(r, 10))
 
   // Identity guard must have swallowed it — no new exit broadcast.
@@ -782,6 +800,7 @@ test('createChat: same tabId with different (taskId,cwd) → tears down zombie +
   let oldKilled = false
   fakeOld.kill = (_sig?: NodeJS.Signals | number) => {
     oldKilled = true
+    setImmediate(() => (fakeOld as unknown as EventEmitter).emit('exit', null, 'SIGTERM'))
     return true
   }
   const events: Array<{ tabId: string; kind: string }> = []
@@ -1081,7 +1100,7 @@ async function parkOnPrompt(tabId: string) {
     conversationId: null,
     providerFlags: []
   })
-  mgr.sendUserMessage(tabId, 'build it')
+  await mgr.sendUserMessage(tabId, 'build it')
   fake._stdout.write(
     JSON.stringify({
       type: 'control_request',
@@ -1193,7 +1212,7 @@ test('permission-request → flips terminal state to idle + holds the gate until
   })
   // A user message opens the turn → running. (`turn-init` is session
   // metadata, not a turn-open signal — see commitEvent.)
-  mgr.sendUserMessage('tab-ask-state', 'hi')
+  await mgr.sendUserMessage('tab-ask-state', 'hi')
   await new Promise((r) => setImmediate(r))
   expect(mgr.getSessionTerminalState('tab-ask-state')).toBe('running')
 
@@ -1231,6 +1250,7 @@ test('permission-request → flips terminal state to idle + holds the gate until
       decision: { behavior: 'allow', updatedInput: { answers: {} } }
     })
   ).toBe(true)
+  await mgr.readEventsSince('tab-ask-state', -1)
   expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(false)
 })
 
@@ -1652,7 +1672,7 @@ async function driveCodexToRunning(child: ReturnType<typeof makeFakeChild>): Pro
     JSON.stringify({ id: 2, result: { thread: { id: 't' }, model: 'gpt', cwd: '/tmp' } }) + '\n'
   )
   await wait(40)
-  mgr.sendUserMessage('tab-wd', 'go')
+  await mgr.sendUserMessage('tab-wd', 'go')
   await wait(20)
 }
 
@@ -1768,7 +1788,7 @@ test('kill: the tab reads `dead` at once, before the CLI finishes its own shutdo
     conversationId: null,
     providerFlags: []
   })
-  mgr.sendUserMessage('tab-kill-now', 'hi')
+  await mgr.sendUserMessage('tab-kill-now', 'hi')
   await new Promise((r) => setImmediate(r))
   expect(mgr.getSessionTerminalState('tab-kill-now')).toBe('running')
 

@@ -136,6 +136,8 @@ export interface ChatProcHandle {
   onWritesUnconfirmed?(cb: (info: { computerId: string }) => void): ChatDisposable
   /** Fires once with the process's terminal status. */
   onExit(cb: (e: { code: number | null; signal: string | null }) => void): ChatDisposable
+  /** OS exit, before a paused stdout/stderr tail drains. Local/host bridges provide this. */
+  onPhysicalExit?(cb: () => void): ChatDisposable
   /**
    * Fires when the process could not be started at all — a {@link ChatSpawnError}
    * when the cause is known. `onExit` may or may not follow; `onSpawn` never does.
@@ -147,6 +149,8 @@ export interface ChatProcHandle {
    * did not — never silently drops.
    */
   write(data: string, opts?: ChatWriteOptions): Promise<void>
+  /** Stop reading provider pipes while accepted events await persistence. Control stays live. */
+  setOutputPaused?(paused: boolean): void
   kill(signal?: string): void
 }
 
@@ -297,11 +301,24 @@ export function childProcessToHandle(child: ChildProcess): ChatProcHandle {
     },
     onStdout: (cb) => attach(child.stdout as never, cb),
     onStderr: (cb) => attach(child.stderr as never, cb),
+    setOutputPaused: (paused) => {
+      for (const stream of [child.stdout, child.stderr]) {
+        if (paused) stream?.pause?.()
+        else stream?.resume?.()
+      }
+    },
+    onPhysicalExit: (cb) => {
+      if (exited) queueMicrotask(cb)
+      else child.once('exit', cb)
+      return { dispose: () => void child.off?.('exit', cb) }
+    },
     onExit: (cb) => {
       const listener = (code: number | null, signal: NodeJS.Signals | null): void =>
         cb({ code, signal: signal != null ? String(signal) : null })
-      child.on('exit', listener)
-      return { dispose: () => void child.off?.('exit', listener) }
+      // Physical exit can precede a paused pipe's final bytes. A generation ends
+      // only after stdio closes, so its retained tail cannot become stale output.
+      child.on('close', listener)
+      return { dispose: () => void child.off?.('close', listener) }
     },
     onError: (cb) => {
       // ENOENT/EACCES on exec: the binary is not there (or not runnable).

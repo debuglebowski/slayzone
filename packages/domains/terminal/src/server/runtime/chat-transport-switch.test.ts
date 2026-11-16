@@ -78,7 +78,10 @@ test('a tab with no process stays lazy; the first message resumes the conversati
   })
   expect(h.fakes).toHaveLength(0)
 
-  mgr.dispatchUserMessage(TAB_OPTS.tabId, { id: 'n1', content: [{ type: 'text', text: 'next' }] })
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'n1',
+    content: [{ type: 'text', text: 'next' }]
+  })
   await until(() => h.fakes.length === 1)
   await until(() => h.fakes[0].stdin.some((m) => m.uuid === 'n1'))
   // The past is not sent again.
