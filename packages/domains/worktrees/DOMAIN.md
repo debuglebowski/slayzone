@@ -54,6 +54,31 @@ worktree_parent_branch TEXT DEFAULT NULL
 
 ## Decision Log
 
+**2026-11-16: Paged preview loaders follow active effects and scoped clients (FU1 S15)**
+`useDiffTexts`, `useIgnoredTree` and `usePagedStashDiff` acquire a fresh loader in
+layout-effect setup and dispose/abort that generation in cleanup. React Activity
+hide/show and StrictMode replay retain hook state but restart effects, so a
+permanently disposed loader must never be retained as the active loader. A small
+external store (`loader-lifetime.ts`) exposes the current loader and its snapshot;
+rendering alone starts no I/O. Late batch/page/error/expiry completions cannot
+publish, follow more pages or restart after disposal. Cleanup aborts only its
+captured scoped client's requests.
+
+Loader identity includes the scoped tRPC client (hub, task/project and computer),
+path and read options/open state. Unchanged identity keeps its cache; same paths
+on a different scope refetch. Stash identity additionally includes the selected
+SHA, even when its numeric index is reused. Each stash remainder has its own
+state identity, fenced across every await and expiry restart, preserving current
+failure retries and all UTF-8 pages. Stale successes and errors cannot change the
+current first page, loading/error flags or controls.
+
+The actual large-preview Activity regression also exposed the shared diff viewer
+choosing an expanding horizontal-overflow wrapper as its vertical viewport. The
+scroll-parent picker now prefers an ancestor that actually overflows vertically;
+otherwise it retains the nearest declared viewport fallback. Existing absolute
+outer-virtualizer boundaries still apply. This keeps large split previews
+virtualized during task-tab cleanup without dropping rows or changing diff data.
+
 **2026-11-15: Copy dialog's ignored-file tree is lazy and paged (FU1 S6)**
 `getIgnoredFileTree` sent one node per ignored file (all of `node_modules`) in one
 computer reply, which could exceed the 100 MiB frame limit and stall the computer

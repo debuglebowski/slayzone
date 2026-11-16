@@ -21,15 +21,15 @@ vi.mock('./git-diff-store', () => ({
 const untrackedQuery = vi.fn()
 const filesPageQuery = vi.fn()
 const textQuery = vi.fn()
-vi.mock('./trpc', () => ({
-  useTRPCClient: () => ({
-    worktrees: {
-      getUntrackedFileDiffs: { query: untrackedQuery },
-      getFileDiffsPage: { query: filesPageQuery },
-      readGitText: { query: textQuery }
-    }
-  })
-}))
+// The real scoped client is memoized until hub/workspace identity changes.
+const client = {
+  worktrees: {
+    getUntrackedFileDiffs: { query: untrackedQuery },
+    getFileDiffsPage: { query: filesPageQuery },
+    readGitText: { query: textQuery }
+  }
+}
+vi.mock('./trpc', () => ({ useTRPCClient: () => client }))
 
 const { useGitDiffData } = await import('./useGitDiffData')
 

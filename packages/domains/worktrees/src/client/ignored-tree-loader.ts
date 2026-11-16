@@ -52,6 +52,7 @@ export class IgnoredTreeLoader {
   constructor(private readonly source: IgnoredTreeSource) {}
 
   readonly subscribe = (listener: () => void): (() => void) => {
+    if (this.disposed) return () => undefined
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
@@ -72,6 +73,7 @@ export class IgnoredTreeLoader {
 
   /** Open the index (or reopen it, resetting every loaded directory). */
   private reopen(): Promise<void> {
+    if (this.disposed) return Promise.resolve()
     if (!this.opening) {
       this.opening = this.source
         .open()
@@ -119,20 +121,36 @@ export class IgnoredTreeLoader {
   dispose(): void {
     this.disposed = true
     this.listeners.clear()
+    this.treeId = null
+    this.snap = LOADING
+    this.inflight.clear()
+    this.loaded.clear()
   }
 
   /** `read` against the current index; an expired one is reopened once and retried. */
+  private assertActive(): void {
+    if (this.disposed) throw new DOMException('Ignored-tree read superseded', 'AbortError')
+  }
+
   private async withTree<T>(read: (treeId: string) => Promise<T>): Promise<T> {
+    this.assertActive()
     if (!this.treeId) await this.reopen()
+    this.assertActive()
     const first = this.treeId
     if (!first) throw new Error('ignored-file listing unavailable')
     try {
-      return await read(first)
+      const value = await read(first)
+      this.assertActive()
+      return value
     } catch (err) {
+      this.assertActive()
       if (!isIgnoredTreeExpired(err)) throw err
       if (this.treeId === first) await this.reopen()
+      this.assertActive()
       if (!this.treeId) throw err
-      return read(this.treeId)
+      const value = await read(this.treeId)
+      this.assertActive()
+      return value
     }
   }
 
@@ -149,6 +167,7 @@ export class IgnoredTreeLoader {
 
   /** Load `dir`'s next page (its first when none is loaded). One request per directory at a time. */
   loadMore(dir: string): Promise<void> {
+    if (this.disposed) return Promise.resolve()
     const running = this.inflight.get(dir)
     if (running) return running
     const run = this.withTree(async (treeId) => {
@@ -202,7 +221,12 @@ export class IgnoredTreeLoader {
   /** A preset's selection roots, every page. */
   match(globs: string[]): Promise<IgnoredMatch[]> {
     return this.withTree((treeId) =>
-      collectPages((cursor) => this.source.match(treeId, globs, cursor))
+      collectPages(async (cursor) => {
+        this.assertActive()
+        const page = await this.source.match(treeId, globs, cursor)
+        this.assertActive()
+        return page
+      })
     )
   }
 }

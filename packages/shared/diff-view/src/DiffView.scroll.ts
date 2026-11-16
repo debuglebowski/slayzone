@@ -11,16 +11,22 @@ import { useCallback, useEffect, useRef } from 'react'
 export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   let cur = el?.parentElement ?? null
   let sawAbsolute = false
+  let nearest: { element: HTMLElement; nested: boolean } | null = null
   while (cur) {
     const style = window.getComputedStyle(cur)
     if (style.position === 'absolute') sawAbsolute = true
     const overflowY = style.overflowY
     if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
-      return sawAbsolute ? null : cur
+      nearest ??= { element: cur, nested: sawAbsolute }
+      // overflow-x:auto also computes overflow-y:auto. Such a wrapper can grow
+      // to the entire diff's height: using it mounts every row and makes Activity
+      // ref cleanup quadratic. Prefer the ancestor with a real vertical viewport.
+      if (cur.scrollHeight > cur.clientHeight) return sawAbsolute ? null : cur
     }
     cur = cur.parentElement
   }
-  return null
+  // Keep the previous nearest-declared behavior when nothing overflows yet.
+  return nearest && !nearest.nested ? nearest.element : null
 }
 
 // ---- Horizontal scroll sync (side-by-side, !wrap) ----

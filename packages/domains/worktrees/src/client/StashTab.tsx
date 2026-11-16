@@ -99,7 +99,7 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     loading: diffLoading,
     rest: diffRest,
     loadRest: loadDiffRest
-  } = usePagedStashDiff(repoPath ?? null, selected?.index ?? null)
+  } = usePagedStashDiff(repoPath ?? null, selected?.index ?? null, selected?.sha)
 
   if (!repoPath) {
     return (

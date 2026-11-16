@@ -23,6 +23,8 @@ const body = (tag: string) =>
 
 test.describe('Git diff panel: a diff over one page', () => {
   let gitDir: string
+  let taskId: string
+  let otherTaskId: string
 
   test.beforeAll(async ({ mainWindow }) => {
     test.setTimeout(90_000)
@@ -39,6 +41,22 @@ test.describe('Git diff panel: a diff over one page', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Diff Large', color: '#f97316', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Large diff', status: 'todo' })
+    taskId = t.id
+    otherTaskId = (await s.createTask({ projectId: p.id, title: 'Activity away', status: 'todo' }))
+      .id
+    // Make the away task's layout explicit, as in the task-tab Activity regressions.
+    await s.updateTask({
+      id: otherTaskId,
+      panelVisibility: {
+        terminal: true,
+        browser: false,
+        diff: false,
+        settings: false,
+        editor: false,
+        artifacts: false,
+        processes: false
+      }
+    })
     await s.refreshData()
     await openTaskById(mainWindow, t.id)
     await mainWindow.keyboard.press('Meta+g')
@@ -69,7 +87,36 @@ test.describe('Git diff panel: a diff over one page', () => {
     await row('big.txt').click()
     const more = p.getByRole('button', { name: /^Load rest of diff \(\d+\.\d (KB|MB)\)$/ })
     await expect(more).toBeVisible({ timeout: 30_000 })
+    await expect(p.getByText('old line 0 ', { exact: false }).first()).toBeVisible()
+    // Unified diff puts all deletions before additions. Reach the additions by
+    // scrolling the real viewport; virtual rows outside it stay unmounted.
+    await more.evaluate((button, deletedLines) => {
+      const viewport = button.closest<HTMLElement>('.overflow-auto')
+      const firstRow = viewport?.querySelector<HTMLElement>('[data-index]')
+      if (!viewport || !firstRow) throw new Error('large diff viewport missing')
+      viewport.scrollTop = deletedLines * firstRow.getBoundingClientRect().height
+    }, LINES)
     await expect(p.getByText('new line 0 ', { exact: false }).first()).toBeVisible()
+    await more.evaluate((button) => {
+      const viewport = button.closest<HTMLElement>('.overflow-auto')
+      if (!viewport) throw new Error('large diff viewport missing')
+      viewport.scrollTop = 0
+    })
+    await expect(p.getByText('old line 0 ', { exact: false }).first()).toBeVisible()
+
+    // Task tabs retain state in React Activity. Hide this completed preview, then add a
+    // fresh untracked file: reactivation must reacquire a live loader, not the disposed one.
+    await openTaskById(mainWindow, otherTaskId)
+    await expect(mainWindow.locator('[data-testid="task-git-panel"]:visible')).toHaveCount(0)
+    writeFileSync(path.join(gitDir, 'after-activity.txt'), 'Activity resumed diff preview\n')
+    await openTaskById(mainWindow, taskId)
+    await expect(p).toBeVisible()
+    await row('after-activity.txt').click()
+    await expect(
+      p.getByText('Activity resumed diff preview', { exact: false }).first()
+    ).toBeVisible({ timeout: 15_000 })
+    await row('big.txt').click()
+    await expect(more).toBeVisible({ timeout: 30_000 })
     await more.click()
     await expect(more).toHaveCount(0, { timeout: 30_000 })
   })

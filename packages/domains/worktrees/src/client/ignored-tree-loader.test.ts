@@ -4,7 +4,7 @@
  * selected folder, "Select all"), runs a preset's match over all its pages, and —
  * when the index expired on its host — reopens once and carries on.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Page } from '@slayzone/platform/bounded-reads'
 import { IGNORED_TREE_EXPIRED } from '../shared/ignored-tree'
 import type { IgnoredEntry, IgnoredMatch, IgnoredTreeOpen } from '../shared/types'
@@ -143,4 +143,43 @@ describe('IgnoredTreeLoader', () => {
     await started
     expect(loader.getSnapshot().status).toBe('loading')
   })
+})
+
+it('disposed match cannot follow another page', async () => {
+  const h = host()
+  let finish!: (page: Page<IgnoredMatch>) => void
+  const late = new Promise<Page<IgnoredMatch>>((resolve) => {
+    finish = resolve
+  })
+  const match = vi.fn((_id: string, _globs: string[], cursor: string | null) =>
+    cursor === null ? late : Promise.resolve({ items: [], nextCursor: null })
+  )
+  const loader = new IgnoredTreeLoader({ ...h.source, match })
+  await loader.start()
+  const reading = loader.match(['**']).then(
+    () => null,
+    (error) => error
+  )
+  await Promise.resolve()
+  loader.dispose()
+  finish({ items: [], nextCursor: 'never-read' })
+  expect(await reading).toBeInstanceOf(Error)
+  expect(match).toHaveBeenCalledTimes(1)
+})
+
+it('disposed expired page cannot reopen an index or retry a scoped call', async () => {
+  const h = host()
+  let fail!: (error: Error) => void
+  const late = new Promise<Page<IgnoredEntry>>((_resolve, reject) => {
+    fail = reject
+  })
+  const list = vi.fn(() => late)
+  const loader = new IgnoredTreeLoader({ ...h.source, list })
+  await loader.start()
+  const reading = loader.loadMore('docs')
+  loader.dispose()
+  fail(new Error(IGNORED_TREE_EXPIRED))
+  await reading
+  expect(h.calls).toEqual(['open'])
+  expect(list).toHaveBeenCalledTimes(1)
 })

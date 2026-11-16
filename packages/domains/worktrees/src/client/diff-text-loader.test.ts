@@ -319,3 +319,24 @@ describe('DiffTextLoader', () => {
     expect(f.calls).toEqual(['page range big.txt', 'text rangeFileDiff big.txt null'])
   })
 })
+
+it('disposed batch completion cannot start a large-file read or another batch', async () => {
+  let finish!: (page: GitFileDiffsPage) => void
+  const answer = new Promise<GitFileDiffsPage>((resolve) => {
+    finish = resolve
+  })
+  const text = vi.fn(async () => ({ text: 'late', cursor: null, totalBytes: 4 }))
+  const filesPage = vi.fn(() => answer)
+  const loader = new DiffTextLoader(
+    { filesPage, untrackedPage: async () => ({ $paged: true, ...(await answer) }), text },
+    { opts: {} }
+  )
+  loader.sync(
+    snap({ deferred: { unstaged: ['a', 'b'], staged: [], renamedFrom: {}, fingerprint: 'old' } })
+  )
+  loader.dispose()
+  finish({ diffs: {}, large: ['a'], deferred: ['b'] })
+  await idle(loader)
+  expect(text).not.toHaveBeenCalled()
+  expect(filesPage).toHaveBeenCalledTimes(1)
+})

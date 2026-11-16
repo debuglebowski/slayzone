@@ -78,6 +78,7 @@ export class DiffTextLoader {
   ) {}
 
   readonly subscribe = (listener: () => void): (() => void) => {
+    if (this.disposed) return () => undefined
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
@@ -92,6 +93,9 @@ export class DiffTextLoader {
   dispose(): void {
     this.disposed = true
     this.listeners.clear()
+    this.texts = NO_TEXTS
+    this.sources.clear()
+    this.pending.clear()
   }
 
   private update(edit: (texts: Map<string, DiffText>) => void): void {
@@ -131,6 +135,7 @@ export class DiffTextLoader {
 
   /** Bring the loaded patches in line with `snapshot`. */
   sync(snapshot: GitDiffSnapshot): void {
+    if (this.disposed) return
     const d = snapshot.deferred
     const wanted = new Map<string, string | undefined>()
     for (const p of d?.unstaged ?? []) wanted.set(`u:${p}`, d?.renamedFrom[p])
@@ -179,7 +184,7 @@ export class DiffTextLoader {
     const queue = [...keys]
     const step = async (): Promise<void> => {
       while (queue.length && !this.disposed) {
-        if (kind !== 'untracked' && gen !== this.generation) return
+        if (this.disposed || (kind !== 'untracked' && gen !== this.generation)) return
         const batch = queue.splice(0, BATCH_FILES)
         const paths = batch.map((k) => k.slice(2))
         let page: GitFileDiffsPage
@@ -193,7 +198,7 @@ export class DiffTextLoader {
           const from = batch.map((k) => fromPaths.get(k) ?? '')
           page = await this.source.filesPage(kind, paths, from.some(Boolean) ? from : undefined)
         }
-        if (kind !== 'untracked' && gen !== this.generation) return
+        if (this.disposed || (kind !== 'untracked' && gen !== this.generation)) return
         const prefix = batch[0].slice(0, 2)
         this.update((texts) => {
           for (const [p, text] of Object.entries(page.diffs))
@@ -221,10 +226,11 @@ export class DiffTextLoader {
 
   /** A large file: its first page now, the rest on request. */
   private async readFirst(key: string, fromPath: string | undefined, gen: number): Promise<void> {
+    if (this.disposed || (!key.startsWith('?:') && gen !== this.generation)) return
     const src = this.textSource(key, fromPath)
     const page = await this.source.text(src, null).catch(() => null)
     this.pending.delete(key)
-    if (!key.startsWith('?:') && gen !== this.generation) return
+    if (this.disposed || (!key.startsWith('?:') && gen !== this.generation)) return
     this.sources.set(key, src)
     this.update((texts) =>
       texts.set(
@@ -248,6 +254,7 @@ export class DiffTextLoader {
 
   /** Load the rest of a large file (every remaining page). */
   async loadRest(key: string): Promise<void> {
+    if (this.disposed) return
     const start = this.texts.get(key)
     const src = this.sources.get(key)
     if (!start?.rest || !src || start.loading) return

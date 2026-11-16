@@ -1572,6 +1572,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/files-changed/files-changed.test.tsx \
   packages/domains/task-terminals/src/client/chat/files-changed/WorkspaceChangesRow.test.tsx \
   packages/shared/diff-view/src/DiffView.line-action.test.tsx \
+  packages/shared/diff-view/src/DiffView.scroll.test.ts \
   packages/domains/task-terminals/src/client/chat/diff-comments/diff-comments.test.tsx \
   packages/domains/task-terminals/src/client/chat/RewindPicker.test.tsx \
   packages/domains/task-terminals/src/client/chat/ComposerSubAgents.test.tsx \
@@ -1672,6 +1673,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
   packages/domains/worktrees/src/client/DiffRestButton.test.tsx \
   packages/domains/worktrees/src/client/usePagedStashDiff.test.tsx \
+  packages/domains/worktrees/src/client/loader-lifecycle.test.tsx \
   packages/domains/worktrees/src/client/WorktreesTab.test.tsx \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
