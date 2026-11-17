@@ -137,7 +137,11 @@ test('Stop saves complete streamed blocks before the provider result without bro
     for (let i = 0; i < 3; i++) {
       stream({ type: 'message_start', message: { id: `tail-${i}` } })
       stream({ type: 'content_block_start', index: 0, content_block: { type: 'text' } })
-      stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `tail-${i}` } })
+      stream({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: `tail-${i}` }
+      })
       stream({ type: 'content_block_stop', index: 0 })
       stream({ type: 'message_stop' })
     }

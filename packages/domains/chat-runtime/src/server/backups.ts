@@ -811,6 +811,16 @@ export function createChatBackups(
       if (restorePins.has(id)) throw new Error('Backup restore is in progress')
       rmSync(folder(dir, id), { recursive: true, force: true })
     },
+    /** Owner-local fault cleanup; the callback never crosses the store wire. */
+    discardArchive(id: string, discarded: () => void): Promise<void> {
+      if (closed) return Promise.reject(new Error('Backup service is closed'))
+      folder(archiveDir, id)
+      return inArchive(id, async () => {
+        rmSync(folder(archiveDir, id), { recursive: true, force: true })
+        await syncDir(archiveDir)
+        discarded()
+      })
+    },
     settings: () => ({ ...policy }),
     configure(value: Policy) {
       if (closed) throw new Error('Backup service is closed')

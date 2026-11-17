@@ -25,7 +25,8 @@ export type StoreModels = {
   transfers: ChatStoreServices['transfers']
   sessionMoves: ChatStoreServices['sessionMoves']
   attachments: ChatStoreServices['attachments']
-  backups: ChatStoreServices['backups']
+  // Archive fault cleanup owns a local callback, never a serialized store call.
+  backups: Omit<ChatStoreServices['backups'], 'discardArchive'>
   artifacts: Omit<ChatStoreServices['artifacts'], 'store' | 'db' | 'publication'>
   artifactPublication: Pick<
     ChatStoreServices['artifacts']['publication'],

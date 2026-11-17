@@ -1,12 +1,13 @@
 /** Store quarantine and native fault ledger stay with their owner. */
-import { rmSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { listQuarantine, restoreQuarantine, discardQuarantine } from '@slayzone/platform/quarantine'
 import type { ItemFaultRef, ComputerFaultSnapshot } from '@slayzone/computers/shared'
 import type { ChatStoreServices } from './computer-chat-stores'
 import type { ChatStoreJobs } from './computer-chat-store-jobs'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-export function createChatStoreFaults(r: ChatStoreServices & ChatStoreJobs) {
+export function createChatStoreFaults(
+  r: Pick<ChatStoreServices, 'storage' | 'backups' | 'artifacts'> & Pick<ChatStoreJobs, 'retention'>
+) {
   const root = (key: string) => {
     const [tag, id] = key.split(':', 2)
     const entry =
@@ -58,7 +59,7 @@ export function createChatStoreFaults(r: ChatStoreServices & ChatStoreJobs) {
           .runNow()
           .catch((error) => console.error('[chat-retention] retry failed:', error))
     },
-    discard(ref: Pick<ItemFaultRef, 'source' | 'pass' | 'key'>) {
+    async discard(ref: Pick<ItemFaultRef, 'source' | 'pass' | 'key'>) {
       if (ref.source === 'quarantine') {
         const entry = root(ref.key)
         discardQuarantine(r.storage.dir, entry.pass, entry.id)
@@ -66,8 +67,9 @@ export function createChatStoreFaults(r: ChatStoreServices & ChatStoreJobs) {
       }
       if (!['chat-archive-index', 'chat-archive-erasure'].includes(ref.pass) || !UUID.test(ref.key))
         throw new Error('This item cannot be discarded; use Retry')
-      rmSync(join(r.backups.archiveDir, ref.key), { recursive: true, force: true })
-      r.storage.deleteFault(ref.pass, ref.key)
+      await r.backups.discardArchive(ref.key, () => {
+        r.storage.deleteFault(ref.pass, ref.key)
+      })
     }
   }
 }

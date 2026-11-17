@@ -20,6 +20,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { startCompactionWorker, type CompactionWorkerFactory } from './compaction-worker-host'
 import { openComputerChatRuntime } from './computer-online-runtime'
+import { createChatStoreFaults } from './computer-store-faults'
 
 const roots: string[] = []
 const runtimes: ReturnType<typeof createComputerChatRuntime>[] = []
@@ -133,10 +134,11 @@ test.each([false, true])(
     const failure = new Error('injected archive native close')
     const close = Database.prototype.close
     let connection: Database.Database | undefined
+    let refuseClose = true
     const spy = vi.spyOn(Database.prototype, 'close').mockImplementation(function (
       this: Database.Database
     ) {
-      if (this.name === path && !connection) {
+      if (this.name === path && refuseClose) {
         connection = this
         if (closed) close.call(this)
         throw failure
@@ -150,6 +152,28 @@ test.each([false, true])(
       expect(
         r.storage.maintenance.secondaryConnections().includes(`chat archive ${archive.id}`)
       ).toBe(!closed)
+      if (!closed) {
+        r.storage.faults.record(
+          {
+            pass: 'chat-archive-index',
+            itemKey: archive.id,
+            kind: 'transient',
+            error: failure
+          },
+          Date.now()
+        )
+        const faults = createChatStoreFaults(r)
+        const discard = await faults
+          .discard({ source: 'ledger', pass: 'chat-archive-index', key: archive.id })
+          .catch((error) => error)
+        expect(discard.cause).toBe(failure)
+        expect(connection?.open).toBe(true)
+        expect(existsSync(path)).toBe(true)
+        expect(faults.list().faults).toContainEqual(
+          expect.objectContaining({ pass: 'chat-archive-index', key: archive.id })
+        )
+      }
+      refuseClose = false
       await r.backups.eraseTask('alice')
       expect(connection?.open).toBe(false)
       expect(r.storage.maintenance.secondaryConnections()).toEqual([])
@@ -288,6 +312,103 @@ test('concurrent different-task archive erasures, queued reads and close own the
     release()
   }
 })
+
+test.each(['chat-archive-index', 'chat-archive-erasure'])(
+  '%s fault discard waits for accepted archive work and physical native exit',
+  async (pass) => {
+    let entered!: () => void, release!: () => void
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let workerExited = false
+    const r = runtime((spec) => {
+      const worker = startCompactionWorker({
+        ...spec,
+        exit: () => {
+          workerExited = true
+          spec.exit()
+        }
+      })
+      if (spec.mode !== 'file') return worker
+      return {
+        ...worker,
+        ready: worker.ready.then(async (value) => {
+          entered()
+          await hold
+          return value
+        })
+      }
+    })
+    const work: Promise<unknown>[] = []
+    try {
+      const backup = await r.backups.create()
+      const archive = await r.backups.restore(backup.id)
+      const path = join(r.backups.archiveDir, archive.id)
+      const faults = createChatStoreFaults(r)
+      for (const faultPass of [pass, 'computer.task-file-cleanup'])
+        r.storage.faults.record(
+          {
+            pass: faultPass,
+            itemKey: archive.id,
+            kind: 'transient',
+            error: new Error('retained archive retry fault')
+          },
+          Date.now()
+        )
+      const erasing = r.backups.eraseTask('alice')
+      work.push(erasing)
+      void erasing.catch(() => undefined)
+      await started
+      const reading = r.backups.read(archive.id, 'bob')
+      work.push(reading)
+      void reading.catch(() => undefined)
+      let acknowledged = false
+      const discarding = Promise.resolve(
+        faults.discard({ source: 'ledger', pass, key: archive.id })
+      ).then(() => {
+        acknowledged = true
+        expect(workerExited).toBe(true)
+        expect(r.storage.maintenance.secondaryConnections()).toEqual([])
+        expect(existsSync(path)).toBe(false)
+        expect(faults.list().faults.some((f) => f.pass === pass && f.key === archive.id)).toBe(
+          false
+        )
+      })
+      work.push(discarding)
+      void discarding.catch(() => undefined)
+      const closing = r.backups.close()
+      work.push(closing)
+      void closing.catch(() => undefined)
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(acknowledged).toBe(false)
+      expect(workerExited).toBe(false)
+      expect(existsSync(path)).toBe(true)
+      expect(r.storage.maintenance.secondaryConnections()).toContain(`chat archive ${archive.id}`)
+      expect(faults.list().faults.some((f) => f.pass === pass && f.key === archive.id)).toBe(true)
+      release()
+      await erasing
+      expect((await reading).events).toMatchObject([{ event: { text: 'bob secret' } }])
+      await discarding
+      await closing
+      expect(acknowledged).toBe(true)
+      expect(faults.list().faults).toMatchObject([
+        { pass: 'computer.task-file-cleanup', key: archive.id }
+      ])
+      expect(
+        readFileSync(join(r.backups.dir, backup.id, 'chat.sqlite')).includes(
+          Buffer.from('alice secret')
+        )
+      ).toBe(true)
+      expect(r.storage.read('bob', -1, 10)).toMatchObject([{ event: { text: 'bob secret' } }])
+    } finally {
+      release()
+      await Promise.allSettled(work)
+    }
+  }
+)
 
 test('unknown/corrupt archive attribution fails erasure closed while other archives and live task remain usable', async () => {
   const r = runtime()
