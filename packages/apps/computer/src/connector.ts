@@ -187,10 +187,23 @@ export async function startConnector(
     if (!stopped) authenticated = identityBarrier()
     void host.rpc.request('disconnected', event).catch(() => undefined)
   })
+  // The host link is this connector's only reason to exist: without it, nothing the
+  // hub asks can be served and no identity can be admitted. It never comes back on
+  // its own, so a close this connector did not ask for is reported (hostLost) for the
+  // process to exit and be relaunched — never left as a live, idle, disconnected one.
+  let reportHostLost!: (reason: string) => void
+  const hostLost = new Promise<string>((resolve) => {
+    reportHostLost = resolve
+  })
   host.socket.once('close', () => {
+    const unasked = !stopped
     stopped = true
     authenticated.reject(new Error('Computer host connection closed'))
     void dialer.stop()
+    if (!unasked) return
+    const reason = host.closeReason() ?? 'closed'
+    process.stdout.write(`[connector] session host link lost ${JSON.stringify({ reason })}\n`)
+    reportHostLost(reason)
   })
   if (!paused) await host.rpc.request('hooks', { directory: hookDirectory })
   dialer.start()
@@ -201,6 +214,7 @@ export async function startConnector(
     drainForUpgrade: () => true,
     isIdle: () => true,
     setHookDirectory: () => undefined,
+    hostLost,
     stop: async () => {
       stopped = true
       authenticated.reject(new Error('Computer connector stopped'))
