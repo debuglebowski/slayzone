@@ -21,6 +21,8 @@ export interface SidebarViewContext {
   onTaskClick?: (taskId: string) => void
   /** Close a task tab by id (handles temporary task DB cleanup). */
   onCloseTab?: (taskId: string) => void
+  /** Close the tab AND shut down the task's agent (Cmd+Click on the close X). */
+  onCloseTabAndShutdownAgent?: (taskId: string) => void
   /** Open a task as a background tab without changing focus. */
   onOpenTaskInBackground?: (taskId: string) => void
   /** Create a temporary "scratch" task in the given project. */

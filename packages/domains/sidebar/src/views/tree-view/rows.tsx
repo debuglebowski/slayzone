@@ -158,6 +158,11 @@ function TaskRowView({
   const cols = ctx.columnsByProjectId?.get(task.project_id) ?? null
   const statusStyle = getColumnStatusStyle(task.status, cols)
   const StatusIcon = statusStyle?.icon
+  // ⌘ held + a shutdown handler wired → close the tab AND shut down its agent.
+  const closeTab = (withShutdown: boolean): void => {
+    if (withShutdown && ctx.onCloseTabAndShutdownAgent) ctx.onCloseTabAndShutdownAgent(task.id)
+    else ctx.onCloseTab?.(task.id)
+  }
 
   const button = (
     <button
@@ -322,20 +327,28 @@ function TaskRowView({
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  ctx.onCloseTab?.(task.id)
+                  closeTab(e.metaKey)
                 }}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter' && e.key !== ' ') return
                   e.preventDefault()
                   e.stopPropagation()
-                  ctx.onCloseTab?.(task.id)
+                  closeTab(e.metaKey)
                 }}
                 className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
               >
                 <X className="size-3.5" />
               </span>
             </TooltipTrigger>
-            <TooltipContent side="right">Close tab (middle-click)</TooltipContent>
+            <TooltipContent side="right">
+              Close tab (middle-click)
+              {ctx.onCloseTabAndShutdownAgent && (
+                <>
+                  <br />
+                  ⌘+Click: close + shut down agent
+                </>
+              )}
+            </TooltipContent>
           </Tooltip>
         ) : !isOpenTab && ctx.onOpenTaskInBackground ? (
           <Tooltip delayDuration={500}>

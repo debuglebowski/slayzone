@@ -39,6 +39,8 @@ interface AppSidebarProps {
   // but nothing opens) — how the web shell once shipped with dead task rows.
   onTaskClick: (taskId: string) => void
   onCloseTab: (taskId: string) => void
+  /** Cmd+Click on a tab's close X: close the tab AND shut down its agent. Omitted = plain close. */
+  onCloseTabAndShutdownAgent?: (taskId: string) => void
   onOpenTaskInBackground: (taskId: string) => void
   onCreateTemporaryTask: (projectId: string) => void
   zenMode?: boolean
@@ -172,6 +174,7 @@ export function AppSidebar({
   onLeaderboard,
   onTaskClick,
   onCloseTab,
+  onCloseTabAndShutdownAgent,
   onOpenTaskInBackground,
   onCreateTemporaryTask,
   zenMode,
@@ -288,6 +291,7 @@ export function AppSidebar({
               onProjectSettings,
               onTaskClick,
               onCloseTab,
+              onCloseTabAndShutdownAgent,
               onOpenTaskInBackground,
               onCreateTemporaryTask,
               onReorderProjects,

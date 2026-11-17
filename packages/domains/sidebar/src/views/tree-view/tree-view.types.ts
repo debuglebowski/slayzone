@@ -62,6 +62,7 @@ export interface TaskBranchCtx {
   onTaskClick?: (taskId: string) => void
   onRowSelectClick: (event: ReactMouseEvent<HTMLButtonElement>, taskId: string) => void
   onCloseTab?: (taskId: string) => void
+  onCloseTabAndShutdownAgent?: (taskId: string) => void
   onOpenTaskInBackground?: (taskId: string) => void
   taskContextMenuRender?: SidebarViewContext['taskContextMenuRender']
   taskBulkContextMenuRender?: SidebarViewContext['taskBulkContextMenuRender']

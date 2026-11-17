@@ -1417,6 +1417,10 @@ function App(): React.JSX.Element {
             }}
             onTaskClick={openTask}
             onCloseTab={closeTabByTaskId}
+            onCloseTabAndShutdownAgent={(id) => {
+              closeTabByTaskId(id)
+              void shutdownAgentForTask(id)
+            }}
             onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)}
             onCreateTemporaryTask={(projectId) => {
               void handleCreateScratchTerminal(projectId)
