@@ -731,11 +731,14 @@ test('control: reset clears events, queue and timeline, fences late old-child ou
   await r.ops.start(opts)
   emitLine(child, sj.init(native))
   await until(() => r.storage.read('root', -1).some((row) => row.event.kind === 'turn-init'))
-  r.storage.append('root', 1, {
-    kind: 'assistant-text',
-    messageId: 'old',
-    text: 'cleared old text'
-  })
+  // A turn in flight, so the queued row below stays queued until reset clears it: an
+  // idle tab would drain it, racing reset. The child, not a direct store write, emits
+  // the old text, so the transport records it at its own next sequence.
+  await r.ops.send('root', { id: 'old-turn', content: [{ type: 'text', text: 'old turn' }] })
+  await until(() => child.stdin.some((row) => row.type === 'user' && row.uuid === 'old-turn'))
+  expect(r.transport.getSessionTerminalState('root')).toBe('running')
+  emitLine(child, sj.text('cleared old text', { id: 'old' }))
+  await until(() => r.storage.read('root', -1).some((row) => row.event.kind === 'assistant-text'))
   await r.local.queue.push('root', 'cleared queued text', 'cleared queued text', {
     id: 'old-queue'
   })
@@ -753,6 +756,7 @@ test('control: reset clears events, queue and timeline, fences late old-child ou
       }
     ]
   })
+  expect((await r.local.queue.list('root')).map((row) => row.id)).toEqual(['old-queue'])
   const info = await r.invoke({
     route: { id: 'root', epoch: 1 },
     target: 'ops',
