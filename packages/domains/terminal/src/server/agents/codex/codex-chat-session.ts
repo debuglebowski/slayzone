@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto'
 import {
   userMessageText,
   type AgentEvent,
+  type AgentExecution,
   type ChatModelInfo,
   type CommandTaskOutput,
   type CommandTaskStatus,
@@ -37,6 +38,7 @@ import type {
   PermissionDecision
 } from '../types'
 import { getChatAttachmentReader } from '../chat-attachment-reader'
+import { withExecution } from '../event-execution'
 import { buildCodexContent } from './codex-content'
 import { CodexAppServerClient, CodexRpcError, type JsonRpcId } from './codex-app-server-client'
 import { CodexSubAgents, type CodexToolMapper } from './codex-sub-agents'
@@ -95,6 +97,8 @@ interface PendingRequest {
   id: JsonRpcId
   method: string
   params: Record<string, unknown>
+  execution?: AgentExecution
+  parentToolUseId?: string
 }
 
 /** A message waiting for the handshake. */
@@ -266,6 +270,7 @@ const COMMAND_OUTPUT_TAIL = 8192
 const PATCH_OUTPUT_TAIL = 64 * 1024
 
 interface CommandOutput {
+  execution?: AgentExecution
   output: string
   totalBytes: number
   ended: boolean
@@ -456,6 +461,7 @@ class CodexChatSession implements ChatSessionDriver {
   private client: CodexAppServerClient | null = null
   private threadId: string | null = null
   private currentTurnId: string | null = null
+  private currentTurnMessageId: string | undefined
   private handshakeDone = false
   /** The running handshake (`start`); a side question asked during it waits for it. */
   private handshaking: Promise<void> | null = null
@@ -472,6 +478,9 @@ class CodexChatSession implements ChatSessionDriver {
   private pendingInterrupt: Deferred<unknown> | null = null
   /** Outbox message id → the turn it started and its text (this process's turns). */
   private readonly turnByMessage = new Map<string, { turnId: string; text: string }>()
+  private readonly messageByTurn = new Map<string, string>()
+  private startSerial = 0
+  private completedStartSerial = 0
   /** Messages sent with `turn/steer` whose `userMessage` item has not come yet. */
   private readonly steered = new Set<string>()
   /** A `/compact` the user asked for is running (its compaction is `manual`). */
@@ -489,6 +498,7 @@ class CodexChatSession implements ChatSessionDriver {
   /** Open streaming block: the Codex item id whose deltas we are bridging. */
   private streamItemId: string | null = null
   private streamBlockType: 'text' | 'thinking' | null = null
+  private streamContext: ChatDriverContext | null = null
 
   /** requestId (string) → a server request waiting for the user's answer. */
   private readonly pendingRequests = new Map<string, PendingRequest>()
@@ -1035,6 +1045,11 @@ class CodexChatSession implements ChatSessionDriver {
     const effort = this.turnEffort()
     const model = this.turnModel()
     const collaborationMode = this.buildCollaborationMode()
+    const serial = ++this.startSerial
+    const requestCtx = withExecution(
+      ctx,
+      messageId ? { turnId: messageId, source: 'ordered', messageId } : undefined
+    )
     this.turnStartsInFlight++
     client
       .request<CodexTurnStartResponse>(
@@ -1054,19 +1069,30 @@ class CodexChatSession implements ChatSessionDriver {
       )
       .then((res) => {
         this.turnStartsInFlight--
-        if (messageId) this.turnByMessage.set(messageId, { turnId: res.turn.id, text })
+        if (messageId) {
+          this.turnByMessage.set(messageId, { turnId: res.turn.id, text })
+          this.messageByTurn.set(res.turn.id, messageId)
+        }
         // `turn/completed` may already have come (a fast turn): don't revive it.
-        if (!this.endedTurns.has(res.turn.id)) this.onTurnId(res.turn.id)
+        if (serial === this.startSerial && !this.endedTurns.has(res.turn.id))
+          this.onTurnId(res.turn.id)
       })
       .catch((err) => {
         this.turnStartsInFlight--
+        if (serial !== this.startSerial || serial <= this.completedStartSerial) return
+        const failureCtx = this.currentTurnId
+          ? withExecution(ctx, {
+              ...this.executionFor(this.currentTurnId),
+              ...(messageId ? { messageId } : {})
+            })
+          : requestCtx
         this.settlePendingInterrupt(undefined)
         this.emit(
-          ctx,
+          failureCtx,
           this.errorEvent(err instanceof Error ? err.message : String(err), 'Codex turn failed: ')
         )
         // Balance the in-flight counter so the typing indicator clears.
-        this.emitTurnResult(ctx, 'failed', 0)
+        this.emitTurnResult(failureCtx, 'failed', 0)
       })
   }
 
@@ -1149,8 +1175,9 @@ class CodexChatSession implements ChatSessionDriver {
     // Recorded like Claude's answers: the card closes now (a cancel brings no
     // tool result) and a reload shows what was picked.
     if (this.ctx) {
-      this.emit(this.ctx, {
+      this.emit(withExecution(this.ctx, req.execution), {
         kind: 'permission-resolved',
+        ...(req.parentToolUseId ? { parentToolUseId: req.parentToolUseId } : {}),
         requestId: args.requestId,
         decision: args.decision,
         ...(args.optionId ? { optionId: args.optionId } : {})
@@ -1239,7 +1266,13 @@ class CodexChatSession implements ChatSessionDriver {
 
   /** The running turn's id is known: remember it, and send a Stop that waited for it. */
   private onTurnId(turnId: string): void {
+    if (this.endedTurns.has(turnId) || (this.currentTurnId && this.currentTurnId !== turnId)) return
+    const execution = this.executionFor(turnId)
+    const changed =
+      this.currentTurnId !== turnId || this.currentTurnMessageId !== execution.messageId
     this.currentTurnId = turnId
+    this.currentTurnMessageId = execution.messageId
+    if (this.ctx && changed) this.emit(this.ctx, { kind: 'turn-started', execution })
     const waiting = this.pendingInterrupt
     if (!waiting || !this.client || !this.threadId) return
     this.pendingInterrupt = null
@@ -1572,8 +1605,21 @@ class CodexChatSession implements ChatSessionDriver {
   // ---- notification handling ----
 
   private onNotification(method: string, params: unknown): void {
-    const ctx = this.ctx
-    if (!ctx || this.disposed) return
+    const base = this.ctx
+    if (!base || this.disposed) return
+    const data = params as
+      | {
+          turnId?: unknown
+          turn?: { id?: unknown }
+          itemId?: string
+          item?: { id?: string; type?: string }
+        }
+      | undefined
+    const nativeId = data?.turnId ?? data?.turn?.id
+    const ctx = withExecution(
+      base,
+      typeof nativeId === 'string' && nativeId ? this.executionFor(nativeId) : undefined
+    )
     const thread = (params as { threadId?: unknown } | undefined)?.threadId
     // A side question's fork: its own thread id, never the main timeline.
     if (typeof thread === 'string' && this.sideThreads.has(thread)) {
@@ -1599,6 +1645,20 @@ class CodexChatSession implements ChatSessionDriver {
           .catch((err: unknown) => console.warn('[codex-chat] sub-agent stop failed:', err))
       }
       return
+    }
+    // Keep background job finalization and helper lifecycle notifications, but
+    // never let a previous turn's main output close or replace the current stream.
+    if (
+      typeof nativeId === 'string' &&
+      method !== 'turn/completed' &&
+      method !== 'turn/started' &&
+      (this.endedTurns.has(nativeId) || (this.currentTurnId && nativeId !== this.currentTurnId))
+    ) {
+      const item = data?.item
+      const itemId = item?.id ?? data?.itemId
+      const background = itemId && this.commands.get(itemId)?.backgroundProcessId
+      const helper = item?.type === 'subAgentActivity' || item?.type === 'collabAgentToolCall'
+      if (!background && !helper && method !== 'serverRequest/resolved') return
     }
     switch (method) {
       case 'turn/started': {
@@ -1647,7 +1707,16 @@ class CodexChatSession implements ChatSessionDriver {
       }
       case 'turn/completed': {
         const p = params as CodexTurnNotification
-        if (p.turn?.id) this.endedTurns.add(p.turn.id)
+        const id = p.turn?.id
+        // A duplicate completion, or a delayed completion for an older turn,
+        // must not settle the current turn, close its stream, or clear prompts.
+        // A fast turn can complete before turn/start answers with its id: accept
+        // that end while no current id is known, then fence its late start reply.
+        if (id) {
+          if (this.endedTurns.has(id) || (this.currentTurnId && this.currentTurnId !== id)) return
+          if (!this.currentTurnId) this.onTurnId(id)
+          this.endedTurns.add(id)
+        }
         this.closeStream(ctx)
         this.emitTurnResult(ctx, p.turn?.status ?? 'completed', p.turn?.durationMs ?? 0)
         this.patchOutput.clear()
@@ -1659,8 +1728,14 @@ class CodexChatSession implements ChatSessionDriver {
         const id = (params as { requestId?: unknown } | undefined)?.requestId
         if (id === undefined || id === null) return
         const requestId = String(id)
+        const execution = this.pendingRequests.get(requestId)?.execution
+        const parentToolUseId = this.pendingRequests.get(requestId)?.parentToolUseId
         if (this.pendingRequests.delete(requestId)) {
-          this.emit(ctx, { kind: 'permission-cancelled', requestId })
+          this.emit(withExecution(ctx, execution), {
+            kind: 'permission-cancelled',
+            requestId,
+            ...(parentToolUseId ? { parentToolUseId } : {})
+          })
         }
         return
       }
@@ -1726,7 +1801,12 @@ class CodexChatSession implements ChatSessionDriver {
     }
     if (item.type === 'commandExecution' && !this.commands.has(item.id)) {
       // Live output (plan 3.9's command-task path): its card polls `commandTaskOutput`.
-      this.commands.set(item.id, { output: '', totalBytes: 0, ended: false })
+      this.commands.set(item.id, {
+        output: '',
+        totalBytes: 0,
+        ended: false,
+        ...(ctx.execution ? { execution: ctx.execution } : {})
+      })
       this.emit(ctx, {
         kind: 'command-task',
         taskId: item.id,
@@ -1794,6 +1874,7 @@ class CodexChatSession implements ChatSessionDriver {
   ): void {
     const out = this.commands.get(id)
     if (!out || out.ended) return
+    ctx = withExecution(ctx, out.execution)
     out.ended = true
     this.emit(ctx, {
       kind: 'command-task',
@@ -2002,16 +2083,19 @@ class CodexChatSession implements ChatSessionDriver {
     if (this.streamItemId) this.closeStream(ctx)
     this.streamItemId = itemId
     this.streamBlockType = blockType
+    this.streamContext = ctx
     this.emit(ctx, { kind: 'stream-message-start', messageId: itemId })
     this.emit(ctx, { kind: 'stream-block-start', blockIndex: 0, blockType })
   }
 
   private closeStream(ctx: ChatDriverContext): void {
     if (!this.streamItemId) return
+    ctx = this.streamContext ?? ctx
     this.emit(ctx, { kind: 'stream-block-stop', blockIndex: 0 })
     this.emit(ctx, { kind: 'stream-message-stop' })
     this.streamItemId = null
     this.streamBlockType = null
+    this.streamContext = null
   }
 
   private onDelta(
@@ -2090,11 +2174,14 @@ class CodexChatSession implements ChatSessionDriver {
     status: 'completed' | 'interrupted' | 'failed' | 'inProgress',
     durationMs: number
   ): void {
+    this.completedStartSerial = this.startSerial
+    if (this.currentTurnId) this.endedTurns.add(this.currentTurnId)
     // 0.159.2 sends no item/completed for a command a Stop cut off.
     for (const [id, out] of this.commands) {
       if (!out.ended && !out.backgroundProcessId) this.endCommand(ctx, id, 'killed')
     }
     this.currentTurnId = null
+    this.currentTurnMessageId = undefined
     if (this.turnStartsInFlight === 0) {
       this.settlePendingInterrupt(undefined)
       for (const wake of this.turnEndWaiters.splice(0)) wake()
@@ -2145,9 +2232,22 @@ class CodexChatSession implements ChatSessionDriver {
     }
     const p = (params ?? {}) as Record<string, unknown>
     const requestId = String(id)
-    this.pendingRequests.set(requestId, { id, method, params: p })
-    this.emit(ctx, {
+    const execution =
+      typeof p.turnId === 'string' && p.turnId ? this.executionFor(p.turnId) : undefined
+    const parentToolUseId =
+      typeof p.threadId === 'string' && p.threadId !== this.threadId
+        ? (this.subAgents.parentToolUseId(p.threadId) ?? p.threadId)
+        : undefined
+    this.pendingRequests.set(requestId, {
+      id,
+      method,
+      params: p,
+      ...(execution ? { execution } : {}),
+      ...(parentToolUseId ? { parentToolUseId } : {})
+    })
+    this.emit(withExecution(ctx, execution), {
       kind: 'permission-request',
+      ...(parentToolUseId ? { parentToolUseId } : {}),
       requestId,
       toolName: method,
       toolUseId: promptToolUseId(p),
@@ -2158,6 +2258,11 @@ class CodexChatSession implements ChatSessionDriver {
 
   private emit(ctx: ChatDriverContext, event: AgentEvent): void {
     ctx.emit(event)
+  }
+
+  private executionFor(turnId: string): AgentExecution {
+    const messageId = this.messageByTurn.get(turnId)
+    return { turnId, source: 'provider', ...(messageId ? { messageId } : {}) }
   }
 }
 

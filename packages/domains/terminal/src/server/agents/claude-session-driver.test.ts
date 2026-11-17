@@ -82,6 +82,49 @@ function controlResponse(requestId: string, response: Record<string, unknown>): 
   }
 }
 
+test('Claude ordered ownership survives steering and rejects a duplicate old result after a new request', async () => {
+  const { driver, emitted } = setup()
+  const send = (id: string) => driver.sendUserTurn!({ id, content: [{ type: 'text', text: id }] })
+  const output = (uuid: string) =>
+    driver.handleLine(
+      JSON.stringify({
+        type: 'assistant',
+        uuid,
+        message: { id: uuid, content: [{ type: 'text', text: uuid }] }
+      })
+    )
+  const finish = (uuid: string) =>
+    driver.handleLine(
+      JSON.stringify({
+        type: 'result',
+        uuid,
+        subtype: 'success',
+        is_error: false
+      })
+    )
+  await send('request-A')
+  output('assistant-A')
+  await driver.steerUserTurn!({ id: 'steer-A', content: [{ type: 'text', text: 'extra' }] })
+  finish('result-A')
+  const first = emitted.find((e) => e.kind === 'result')!
+  expect(first.execution).toEqual({
+    turnId: 'request-A',
+    source: 'ordered',
+    messageId: 'request-A'
+  })
+  await send('request-B')
+  output('assistant-B')
+  const count = emitted.filter((e) => e.kind === 'result').length
+  finish('result-A')
+  expect(emitted.filter((e) => e.kind === 'result')).toHaveLength(count)
+  expect(
+    emitted.find((e) => e.kind === 'assistant-text' && e.messageId === 'assistant-B')?.execution
+  ).toEqual({ turnId: 'request-B', source: 'ordered', messageId: 'request-B' })
+  finish('result-B')
+  expect(emitted.at(-1)?.execution?.turnId).toBe('request-B')
+  driver.dispose()
+})
+
 describe('ClaudeSessionDriver — prompts', () => {
   test('ExitPlanMode reaches the timeline like any request (no automatic deny)', () => {
     const { driver, written, emitted } = setup()
@@ -391,17 +434,18 @@ describe('ClaudeSessionDriver — command tasks (plan 3.9)', () => {
       })
     )
     driver.handleLine(taskLine('task_updated', { task_id: 'ta', patch: { status: 'completed' } }))
-    const kinds = emitted.map((e) => e.kind)
+    const events = emitted.filter((e) => e.kind !== 'turn-started')
+    const kinds = events.map((e) => e.kind)
     expect(kinds).toEqual(['tool-call', 'command-task', 'sub-agent'])
-    expect(emitted[1]).toMatchObject({
+    expect(events[1]).toMatchObject({
       kind: 'command-task',
       taskId: 'tb',
       toolUseId: 'toolu_b',
       status: 'running',
       backgrounded: false
     })
-    expect(typeof (emitted[1] as { startedAt?: number }).startedAt).toBe('number')
-    expect(emitted[2]).toMatchObject({
+    expect(typeof (events[1] as { startedAt?: number }).startedAt).toBe('number')
+    expect(events[2]).toMatchObject({
       kind: 'sub-agent',
       toolUseId: 'toolu_a',
       phase: 'in-flight'

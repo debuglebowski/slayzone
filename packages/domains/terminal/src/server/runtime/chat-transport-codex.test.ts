@@ -330,6 +330,260 @@ async function openWithServer(
   return h.children[0]
 }
 
+test('native request ownership reaches live, saved and shadow events; stale text cannot replace the current stream', async () => {
+  const tab = 'tab-native-ownership'
+  const c = await openWithServer(turnServer(), tab)
+  mgr.dispatchUserMessage(tab, { id: 'first', content: [{ type: 'text', text: 'first' }] })
+  await until(() => c.requests('turn/start').length === 1)
+  c.send({
+    method: 'turn/completed',
+    params: { threadId: 'thr-stop', turn: { id: 'turn-1', status: 'completed' } }
+  })
+  await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+  mgr.dispatchUserMessage(tab, { id: 'second', content: [{ type: 'text', text: 'second' }] })
+  await until(() => c.requests('turn/start').length === 2)
+  c.send({ method: 'turn/started', params: { threadId: 'thr-stop', turn: { id: 'turn-2' } } })
+  const delta = (turnId: string, itemId: string, text: string) =>
+    c.send({
+      method: 'item/agentMessage/delta',
+      params: { threadId: 'thr-stop', turnId, itemId, delta: text }
+    })
+  delta('turn-2', 'current-item', 'new ')
+  delta('turn-1', 'old-item', 'stale')
+  delta('turn-2', 'current-item', 'reply')
+  c.send({
+    method: 'item/completed',
+    params: {
+      threadId: 'thr-stop',
+      turnId: 'turn-2',
+      item: { type: 'agentMessage', id: 'current-item', text: 'new reply' }
+    }
+  })
+  await until(() => h.events.some((e) => e.kind === 'assistant-text' && e.text === 'new reply'))
+  expect(h.events.some((e) => e.kind === 'stream-block-delta' && e.text === 'stale')).toBe(false)
+  const reply = h.events.find((e) => e.kind === 'assistant-text' && e.text === 'new reply')!
+  expect(reply.execution).toMatchObject({ turnId: 'turn-2', source: 'provider' })
+  expect(mgr.__getLifecycleShadowForTests(tab)?.snapshot.main).toMatchObject({
+    id: 'second',
+    execution: { turnId: 'turn-2' }
+  })
+  c.send({
+    method: 'turn/completed',
+    params: { threadId: 'thr-stop', turn: { id: 'turn-2', status: 'completed' } }
+  })
+  await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+  expect(h.events.filter((e) => e.kind === 'result').map((e) => e.execution?.turnId)).toEqual([
+    'turn-1',
+    'turn-2'
+  ])
+})
+
+test.each([
+  ['turn-1', false],
+  ['turn-1', true],
+  ['unknown-old-turn', false],
+  ['unknown-old-turn', true]
+] as const)(
+  'late completion %s cannot settle the current turn (approval pending %s)',
+  async (oldTurn, parked) => {
+    const tab = 'tab-late-completion'
+    const server = turnServer()
+    const c = await openWithServer(server, tab)
+    mgr.dispatchUserMessage(tab, { id: 'first', content: [{ type: 'text', text: 'first' }] })
+    await until(() => c.requests('turn/start').length === 1)
+    c.send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } })
+    await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+
+    mgr.dispatchUserMessage(tab, { id: 'second', content: [{ type: 'text', text: 'second' }] })
+    await until(() => c.requests('turn/start').length === 2)
+    c.send({ method: 'turn/started', params: { threadId: 'thr-stop', turn: { id: 'turn-2' } } })
+    if (parked) {
+      c.send({
+        id: 400,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 'thr-stop',
+          turnId: 'turn-2',
+          itemId: 'approval-2',
+          command: 'echo synthetic',
+          cwd: '/tmp'
+        }
+      })
+      await until(() => mgr.isSessionAwaitingUserInput(tab))
+    }
+    c.send({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thr-stop',
+        turn: { id: oldTurn, status: 'completed' }
+      }
+    })
+    // A subsequent packet proves the stale completion passed through the driver.
+    c.send({
+      method: 'item/agentMessage/delta',
+      params: {
+        threadId: 'thr-stop',
+        turnId: 'turn-2',
+        itemId: 'second-progress',
+        delta: 'after stale packet'
+      }
+    })
+    c.send({
+      method: 'item/completed',
+      params: {
+        threadId: 'thr-stop',
+        turnId: 'turn-2',
+        item: {
+          type: 'agentMessage',
+          id: 'second-progress',
+          text: 'after stale packet'
+        }
+      }
+    })
+    await until(() =>
+      h.events.some((e) => e.kind === 'assistant-text' && e.text === 'after stale packet')
+    )
+    expect(h.events.filter((e) => e.kind === 'result')).toHaveLength(1)
+    expect(mgr.getTurnStatus(tab)).toMatchObject({
+      state: parked ? 'idle' : 'running',
+      turnOpen: true,
+      pendingRequestIds: parked ? ['400'] : []
+    })
+    expect(mgr.__getOutboxStateForTests(tab, 'second')).toBe('delivered')
+    expect(mgr.isReadyForQueuedMessage(tab)).toBe(false)
+
+    await mgr.stopTurn(tab, stopOpts(tab))
+    expect(c.requests('turn/interrupt').at(-1)).toMatchObject({ turnId: 'turn-2' })
+    await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+  }
+)
+
+test('a fast completion before the start reply settles once and its late start cannot revive it', async () => {
+  setup([handshake('fast-thread', (method) => (method === 'turn/start' ? 'hang' : undefined))])
+  await open('tab-fast-completion', null)
+  const c = h.children[0]
+  mgr.dispatchUserMessage('tab-fast-completion', {
+    id: 'fast-message',
+    content: [{ type: 'text', text: 'synthetic fast request' }]
+  })
+  await until(() => c.requests('turn/start').length === 1)
+  const request = c.stdin.find((message) => message.method === 'turn/start')!
+  c.send({
+    method: 'turn/completed',
+    params: {
+      threadId: 'fast-thread',
+      turn: { id: 'fast-turn', status: 'completed' }
+    }
+  })
+  await until(() => mgr.getTurnStatus('tab-fast-completion')?.turnOpen === false)
+  c.send({ id: request.id, result: { turn: { id: 'fast-turn', status: 'inProgress', items: [] } } })
+  c.send({ method: 'turn/started', params: { threadId: 'fast-thread', turn: { id: 'fast-turn' } } })
+  c.send({
+    method: 'turn/completed',
+    params: {
+      threadId: 'fast-thread',
+      turn: { id: 'fast-turn', status: 'completed' }
+    }
+  })
+  // The following request is a protocol barrier after all the packets above.
+  mgr.dispatchUserMessage('tab-fast-completion', {
+    id: 'following-message',
+    content: [{ type: 'text', text: 'next request' }]
+  })
+  await until(() => c.requests('turn/start').length === 2)
+  expect(h.events.filter((event) => event.kind === 'result')).toHaveLength(1)
+  expect(mgr.__getOutboxStateForTests('tab-fast-completion', 'fast-message')).toBe('answered')
+  expect(mgr.getTurnStatus('tab-fast-completion')).toMatchObject({
+    state: 'running',
+    turnOpen: true
+  })
+})
+
+test('a failed old start reply cannot end a newer native execution', async () => {
+  setup([handshake('late-start-error', (method) => (method === 'turn/start' ? 'hang' : undefined))])
+  await open('tab-late-start-error', null)
+  const c = h.children[0]
+  mgr.dispatchUserMessage('tab-late-start-error', {
+    id: 'first',
+    content: [{ type: 'text', text: 'first' }]
+  })
+  await until(() => c.requests('turn/start').length === 1)
+  const first = c.stdin.find((m) => m.method === 'turn/start')!
+  c.send({
+    method: 'turn/completed',
+    params: { turn: { id: 'native-first', status: 'completed' } }
+  })
+  await until(() => mgr.getTurnStatus('tab-late-start-error')?.turnOpen === false)
+  mgr.dispatchUserMessage('tab-late-start-error', {
+    id: 'second',
+    content: [{ type: 'text', text: 'second' }]
+  })
+  await until(() => c.requests('turn/start').length === 2)
+  c.send({ method: 'turn/started', params: { turn: { id: 'native-second' } } })
+  c.send({ id: first.id, error: { code: -32000, message: 'late first-request refusal' } })
+  c.send({
+    method: 'item/agentMessage/delta',
+    params: { turnId: 'native-second', itemId: 'new-item', delta: 'still current' }
+  })
+  c.send({
+    method: 'item/completed',
+    params: { turnId: 'native-second', item: { type: 'agentMessage', id: 'new-item' } }
+  })
+  await until(() => h.events.some((e) => e.kind === 'assistant-text' && e.text === 'still current'))
+  expect(mgr.getTurnStatus('tab-late-start-error')).toMatchObject({
+    state: 'running',
+    turnOpen: true
+  })
+  expect(h.events.filter((e) => e.kind === 'result')).toHaveLength(1)
+})
+
+test.each([false, true])(
+  'a start failure after native start settles only a still-running request (already finished %s)',
+  async (finished) => {
+    const tab = 'tab-start-error-owner'
+    setup([
+      handshake('start-error-owner', (method) => (method === 'turn/start' ? 'hang' : undefined))
+    ])
+    await open(tab, null)
+    const c = h.children[0]
+    mgr.dispatchUserMessage(tab, { id: 'request', content: [{ type: 'text', text: 'request' }] })
+    await until(() => c.requests('turn/start').length === 1)
+    const request = c.stdin.find((m) => m.method === 'turn/start')!
+    c.send({ method: 'turn/started', params: { turn: { id: 'native-request' } } })
+    if (finished) {
+      c.send({
+        method: 'turn/completed',
+        params: { turn: { id: 'native-request', status: 'completed' } }
+      })
+      await until(() => mgr.getTurnStatus(tab)?.turnOpen === false)
+    }
+    c.send({ id: request.id, error: { code: -32000, message: 'request refused' } })
+    // A handled RPC is a deterministic barrier after the late response.
+    c.send({ id: 9002, method: 'currentTime/read', params: {} })
+    await until(() => c.stdin.some((m) => m.id === 9002 && m.result !== undefined))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(mgr.getTurnStatus(tab)).toMatchObject({
+      state: finished ? 'idle' : 'error',
+      turnOpen: false
+    })
+    expect(h.events.filter((e) => e.kind === 'result')).toHaveLength(1)
+    expect(h.events.filter((e) => e.kind === 'error')).toHaveLength(finished ? 0 : 1)
+    mgr.dispatchUserMessage(tab, { id: 'next', content: [{ type: 'text', text: 'next' }] })
+    await until(() => c.requests('turn/start').length === 2)
+    c.send({ method: 'turn/started', params: { turn: { id: 'native-request' } } })
+    c.send({ method: 'turn/started', params: { turn: { id: 'native-next' } } })
+    c.send({
+      method: 'item/agentMessage/delta',
+      params: { turnId: 'native-next', itemId: 'next', delta: 'next answer' }
+    })
+    c.send({
+      method: 'item/completed',
+      params: { turnId: 'native-next', item: { type: 'agentMessage', id: 'next' } }
+    })
+    await until(() => h.events.some((e) => e.kind === 'assistant-text' && e.text === 'next answer'))
+  }
+)
+
 // A done task keeps no agent: completion stops chats too, even mid-turn. The CLI
 // refuses `slay tasks done` on a task whose agent is mid-reply unless `--force`
 // (REST done/update routes), so reaching this teardown mid-turn is deliberate.

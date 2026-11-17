@@ -346,6 +346,93 @@ describe('hub → direct link switch', () => {
   })
 })
 
+describe('lifecycle replay and delivery boundaries', () => {
+  const trace = (): Buffered => [
+    { seq: 0, event: { ...userMsg('synthetic request'), id: 'request-1' } },
+    { seq: 1, event: permReq('approval-main') },
+    {
+      seq: 2,
+      event: {
+        kind: 'tool-call',
+        id: 'child-tool',
+        name: 'Bash',
+        input: {},
+        parentToolUseId: 'helper-1'
+      }
+    },
+    {
+      seq: 3,
+      event: {
+        kind: 'permission-resolved',
+        requestId: 'req-approval-main',
+        decision: { behavior: 'allow', updatedInput: {} }
+      }
+    },
+    { seq: 4, event: { kind: 'assistant-text', messageId: 'answer-1', text: 'synthetic answer' } },
+    result(5)
+  ]
+
+  it.each(Array.from({ length: 7 }, (_, i) => i))(
+    'replay prefix %i plus overlapping queued deliveries converges to one finished turn',
+    async (cut) => {
+      const events = trace()
+      const { result: r } = setup()
+      for (const entry of events.slice(cut)) {
+        live(entry.seq, entry.event)
+        live(entry.seq, entry.event) // relay / direct overlap of the same saved event
+      }
+      await finishLoad(0, events.slice(0, cut))
+      const settled = () => {
+        expect(texts(r)).toEqual(['synthetic request'])
+        expect(replies(r)).toEqual(['synthetic answer'])
+        expect(pendingToolIds(r)).toEqual([])
+        expect(r.current.inFlight).toBe(false)
+        expect(r.current.state.resultCount).toBe(1)
+        expect(r.current.state.userMessagesSent).toBe(1)
+      }
+      settled()
+      // Old packets must not reopen the approval or count completion twice.
+      for (const entry of events) live(entry.seq, entry.event)
+      settled()
+
+      await act(() => r.current.reload())
+      live(5, events[5].event)
+      await finishLoad(1, events)
+      settled()
+      expect(sent).toEqual([]) // Replay and reconnect never invent a provider send.
+    }
+  )
+
+  it('a lost acknowledgement reconciles the accepted answer without resending the request', async () => {
+    const { result: r } = setup()
+    await finishLoad(0, [])
+    sendFails = new Error('acknowledgement lost')
+    await act(async () => {
+      await r.current.sendMessage('accepted remotely').catch(() => undefined)
+    })
+    expect(sent).toHaveLength(1)
+    const id = sent[0].message.id
+    await act(() => r.current.reload())
+    await finishLoad(1, [
+      { seq: 0, event: { kind: 'user-message', id, text: 'accepted remotely' } },
+      { seq: 1, event: { kind: 'user-message-delivery', id, state: 'answered' } },
+      {
+        seq: 2,
+        event: { kind: 'assistant-text', messageId: 'remote-answer', text: 'completed remotely' }
+      },
+      result(3)
+    ])
+    expect(sent).toHaveLength(1)
+    expect(texts(r)).toEqual(['accepted remotely'])
+    expect(replies(r)).toEqual(['completed remotely'])
+    expect(r.current.inFlight).toBe(false)
+    expect(r.current.timeline.find((row) => row?.kind === 'user-text')).toMatchObject({
+      id,
+      delivery: 'answered'
+    })
+  })
+})
+
 describe('live CLI model lists', () => {
   it('keeps newer queued model metadata over an older replay snapshot', async () => {
     setup()

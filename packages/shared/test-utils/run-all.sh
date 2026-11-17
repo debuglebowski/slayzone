@@ -1059,6 +1059,9 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.t
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-agent-turn.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-lifecycle-contract.test.ts
+run_harness packages/domains/terminal/src/shared/chat-lifecycle.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-lifecycle-shadow.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-background-work.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-history.test.ts
 run_harness packages/domains/terminal/src/server/runtime/cli-version.test.ts
@@ -1351,6 +1354,7 @@ run_harness packages/domains/terminal/src/server/agents/claude-command-tasks.tes
 # Session-file <task-notification> records → what opened an agent-started turn (Monitor events, …).
 run_harness packages/domains/terminal/src/server/agents/claude-task-notifications.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
+run_harness packages/domains/terminal/src/server/agents/claude-turn-attribution.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-import.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-content.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.

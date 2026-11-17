@@ -7,6 +7,24 @@ import { expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { ChatEventSplitter } from './chat-event-splitter'
 
+test('request ownership survives synthesized saved blocks and reconnect snapshots', () => {
+  const s = new ChatEventSplitter()
+  const execution = { turnId: 'native-A', source: 'provider' as const, messageId: 'request-A' }
+  s.route({ kind: 'stream-message-start', messageId: 'item-A', execution })
+  s.route({ kind: 'stream-block-start', blockIndex: 0, blockType: 'text', execution })
+  s.route({
+    kind: 'stream-block-delta',
+    blockIndex: 0,
+    deltaType: 'text',
+    text: 'saved',
+    execution
+  })
+  expect(s.snapshot().every((e) => e.execution?.turnId === 'native-A')).toBe(true)
+  expect(s.route({ kind: 'stream-message-stop', execution }).saved).toEqual([
+    { kind: 'assistant-text', messageId: 'item-A', text: 'saved', execution }
+  ])
+})
+
 test('Codex plan deltas stay live; completed plan alone persists', () => {
   const s = new ChatEventSplitter()
   const draft = {

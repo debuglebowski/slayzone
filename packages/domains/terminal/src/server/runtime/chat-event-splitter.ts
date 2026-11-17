@@ -21,7 +21,7 @@
  *
  * @module terminal/server/runtime/chat-event-splitter
  */
-import type { AgentEvent, StreamBlockType } from '@slayzone/terminal-contracts'
+import type { AgentEvent, AgentExecution, StreamBlockType } from '@slayzone/terminal-contracts'
 
 export interface SplitResult {
   /** Broadcast only. */
@@ -46,6 +46,7 @@ interface OpenBlock {
 interface OpenMessage {
   messageId: string
   parentToolUseId?: string
+  execution?: AgentExecution
   blocks: Map<number, OpenBlock>
 }
 
@@ -74,6 +75,7 @@ export class ChatEventSplitter {
         const saved = this.closeOpen()
         this.open = {
           messageId: event.messageId,
+          ...(event.execution ? { execution: { ...event.execution } } : {}),
           ...(event.parentToolUseId ? { parentToolUseId: event.parentToolUseId } : {}),
           blocks: new Map()
         }
@@ -166,7 +168,10 @@ export class ChatEventSplitter {
     const out = [...this.cliMetadata.values()]
     const open = this.open
     if (!open) return out
-    const parent = open.parentToolUseId ? { parentToolUseId: open.parentToolUseId } : {}
+    const parent = {
+      ...(open.parentToolUseId ? { parentToolUseId: open.parentToolUseId } : {}),
+      ...(open.execution ? { execution: { ...open.execution } } : {})
+    }
     out.push({ kind: 'stream-message-start', messageId: open.messageId, ...parent })
     for (const block of [...open.blocks.values()].sort((a, b) => a.index - b.index)) {
       if (block.consolidated) continue
@@ -211,7 +216,10 @@ export class ChatEventSplitter {
 
   private build(message: OpenMessage, block: OpenBlock): AgentEvent | null {
     if (block.consolidated || !block.text) return null
-    const parent = message.parentToolUseId ? { parentToolUseId: message.parentToolUseId } : {}
+    const parent = {
+      ...(message.parentToolUseId ? { parentToolUseId: message.parentToolUseId } : {}),
+      ...(message.execution ? { execution: { ...message.execution } } : {})
+    }
     if (block.type === 'text') {
       return { kind: 'assistant-text', messageId: message.messageId, text: block.text, ...parent }
     }

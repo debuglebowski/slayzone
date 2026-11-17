@@ -10,7 +10,25 @@ import type { ChatAttachment } from './chat-attachments'
 import type { ChatModelInfo } from './chat-model-catalog'
 import type { WorkspaceChangesEvent } from './workspace-changes'
 
-export type AgentEvent =
+/** Identity of one execution, scoped to its owning process generation.
+ * `provider` preserves a native turn id; `ordered` is inferred from a serial
+ * stream and cannot prove the origin of an unseen, unlabelled late packet.
+ * `messageId` links an execution to the host's original outbox request; steering
+ * adds messages to that execution without replacing its identity.
+ */
+export interface AgentExecution {
+  readonly turnId: string
+  readonly source: 'provider' | 'ordered'
+  readonly messageId?: string
+}
+
+export type AgentEvent = AgentEventPayload & {
+  execution?: AgentExecution
+  parentToolUseId?: string
+}
+
+type AgentEventPayload =
+  | TurnStartedEvent
   | WorkspaceChangesEvent
   | TurnInitEvent
   | UserMessageEvent
@@ -60,6 +78,12 @@ export type AgentEvent =
   | CliCommandDetailsEvent
   | ContextUsageEvent
   | CliModelsEvent
+
+/** TRANSPORT-INTERNAL: binds a provider execution to a host request. Not history. */
+export interface TurnStartedEvent {
+  kind: 'turn-started'
+  execution: AgentExecution
+}
 
 /**
  * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
@@ -377,6 +401,11 @@ export interface ToolResultEvent {
 
 export interface ResultEvent {
   kind: 'result'
+  /** Claude result-record identity and optional process-local ordered index. */
+  uuid?: string
+  resultIndex?: number
+  /** A child's result never finishes the main execution. */
+  parentToolUseId?: string
   subtype: string
   isError: boolean
   durationMs: number

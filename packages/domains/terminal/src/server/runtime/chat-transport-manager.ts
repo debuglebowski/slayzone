@@ -71,6 +71,7 @@ import {
   type ChatEventPersistence
 } from '../chat-events-store'
 import { ChatBackgroundWork } from './chat-background-work'
+import { ChatLifecycleShadow } from './chat-lifecycle-shadow'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
 // typed `string`. `shared/chat-mode-catalog.ts` owns the per-mode vocabulary.
@@ -474,6 +475,8 @@ interface ChatTab {
   reportedState: ChatTerminalState
   /** What the current process runs in the background (sub-agents, commands). */
   work: ChatBackgroundWork
+  /** Candidate lifecycle observer; never owns production state or controls. */
+  shadow: ChatLifecycleShadow | null
   /** The background-job count clients were last told. */
   reportedJobs: number
   /** The current process was spawned with --resume. */
@@ -576,6 +579,8 @@ interface ChatTab {
 type WatchdogVector = 'stuck-starting' | 'running-stall' | 'fatal-kill'
 
 export interface CreateChatOpts {
+  /** Chosen once for the whole session. Legacy disables observation as well. */
+  lifecycleMode?: 'legacy' | 'shadow'
   /** A side discussion must never fall back to resuming its parent's session. */
   isolatedConversation?: boolean
   initialFork?: { fromSessionId: string; atMessageUuid: string }
@@ -1418,7 +1423,7 @@ export function createChatTransport(
     const steer = tab.steers.get(id)
     if (!steer || steer.gen !== proc.gen) return
     const joinsTurn = tab.terminalState === 'running'
-    if (!joinsTurn) markTurnStarted(tab)
+    if (!joinsTurn) markTurnStarted(tab, id)
     routeHostEvent(tab, {
       kind: 'user-message',
       id,
@@ -1450,6 +1455,7 @@ export function createChatTransport(
   /** An event the transport itself produces (user message, marker, notice, error…). */
   function routeHostEvent(tab: ChatTab, event: AgentEvent): void {
     if (tab.storageFailed) return
+    tab.shadow?.event(tab.gen, event)
     const split = tab.splitter.route(event)
     for (const live of split.live) broadcastLive(tab, live)
     for (const saved of split.saved) commitEvent(tab, saved)
@@ -1635,6 +1641,44 @@ export function createChatTransport(
   function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent): void {
     if (tab.closed || tab.storageFailed || tab.proc !== proc) return
 
+    const execution = event.execution
+    const child = 'parentToolUseId' in event && event.parentToolUseId != null
+    const background =
+      child ||
+      event.kind === 'sub-agent' ||
+      event.kind === 'command-task' ||
+      event.kind === 'command-task-output' ||
+      event.kind === 'tool-result'
+    if (event.kind === 'turn-started') {
+      if (proc.lastEndedExecution === event.execution.turnId) return
+      if (
+        proc.expectedMessageId &&
+        event.execution.messageId &&
+        proc.expectedMessageId !== event.execution.messageId
+      )
+        return
+      if (proc.execution && proc.execution.turnId !== event.execution.turnId) return
+      proc.execution = { ...event.execution }
+      tab.shadow?.event(proc.gen, event)
+      return
+    }
+    // Attributed old root events cannot touch the stream, outbox, prompts,
+    // watchdog or state machine. Background work retains its original owner.
+    const stale = Boolean(
+      execution &&
+        (execution.turnId === proc.lastEndedExecution ||
+          (proc.execution && execution.turnId !== proc.execution.turnId) ||
+          (execution.messageId &&
+            proc.expectedMessageId &&
+            execution.messageId !== proc.expectedMessageId))
+    )
+    if (
+      (stale && !background) ||
+      (child && (event.kind === 'result' || event.kind === 'interrupted'))
+    )
+      return
+    const currentProgress = !stale
+
     // Transport-internal: they move the outbox / watchdog, never the timeline.
     switch (event.kind) {
       case 'command-lifecycle':
@@ -1733,6 +1777,7 @@ export function createChatTransport(
         proc.openTools.clear()
         tab.outbox.onResult(proc.gen)
         tab.pendingPrompts.clear()
+        tab.shadow?.feed(proc.gen, { type: 'turn-cancel' })
         transitionState(tab, 'idle')
       } else if (proc.lateTurnOf !== null) {
         interruptLateTurn(tab, proc)
@@ -1747,7 +1792,9 @@ export function createChatTransport(
       else if (isStreamFragment(shown.kind)) return
     }
 
-    if (opensAgentTurn(tab, shown)) {
+    tab.shadow?.event(proc.gen, shown)
+
+    if (currentProgress && opensAgentTurn(tab, shown)) {
       tab.workspaceTracker?.observeAgentTurn({
         tabId: tab.tabId,
         gen: proc.gen,
@@ -1760,13 +1807,19 @@ export function createChatTransport(
     if (shown.kind === 'result' || shown.kind === 'interrupted')
       void tab.workspaceTracker?.finish(proc.gen)
     trackTools(proc, shown)
-    if (isProgressEventKind(shown.kind)) noteProgress(tab)
+    if (currentProgress && isProgressEventKind(shown.kind)) noteProgress(tab)
     if (shown.kind === 'result') tab.outbox.onResult(proc.gen)
-    else if (isTurnProgress(shown.kind)) tab.outbox.onProgress(proc.gen)
+    else if (currentProgress && !child && isTurnProgress(shown.kind))
+      tab.outbox.onProgress(proc.gen)
 
     const split = tab.splitter.route(shown)
     for (const live of split.live) broadcastLive(tab, live)
     for (const saved of split.saved) commitEvent(tab, saved)
+    if (shown.kind === 'result' && execution) {
+      proc.lastEndedExecution = execution.turnId
+      proc.execution = null
+      proc.expectedMessageId = null
+    }
   }
 
   /** What a popped turn may still say: its output and its end. */
@@ -1812,8 +1865,10 @@ export function createChatTransport(
   function settleLateTurn(tab: ChatTab, proc: ChatProcess): void {
     proc.lateTurnOf = null
     proc.discardTurn = false
-    if (!tab.closed && tab.proc === proc && tab.outbox.inFlight() === 0)
+    if (!tab.closed && tab.proc === proc && tab.outbox.inFlight() === 0) {
+      tab.shadow?.feed(proc.gen, { type: 'turn-cancel' })
       transitionState(tab, 'idle')
+    }
   }
 
   const DISCARDED_TURN_KINDS: ReadonlySet<AgentEvent['kind']> = new Set<AgentEvent['kind']>([
@@ -1900,7 +1955,12 @@ export function createChatTransport(
   }
 
   /** The outbox is writing a user message: the turn starts now. */
-  function markTurnStarted(tab: ChatTab): void {
+  function markTurnStarted(tab: ChatTab, messageId: string): void {
+    if (tab.proc) {
+      tab.proc.expectedMessageId = messageId
+      tab.proc.execution = null
+    }
+    tab.shadow?.feed(tab.gen, { type: 'turn-start', turnId: messageId, origin: 'user' })
     tab.turnProgress = false
     tab.turnInterrupted = false
     if (tab.proc) {
@@ -2081,6 +2141,7 @@ export function createChatTransport(
   /** The agent could not be started: visible error, `dead`, waiting messages failed. */
   function failStart(tab: ChatTab, err: unknown): void {
     if (tab.closed) return
+    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
     const error = err instanceof Error ? err : new Error(String(err))
     const code = isChatSpawnError(error) ? error.code : 'spawn-failed'
     routeHostEvent(tab, {
@@ -2213,6 +2274,7 @@ export function createChatTransport(
       terminalState: 'not-spawned',
       reportedState: 'not-spawned',
       work: new ChatBackgroundWork(),
+      shadow: null,
       reportedJobs: 0,
       usedResume: Boolean(opts.conversationId),
       retryScheduled: false,
@@ -2303,6 +2365,39 @@ export function createChatTransport(
       })
     }
     tab.outbox = createOutbox(tab)
+    tab.shadow =
+      opts.lifecycleMode === 'legacy'
+        ? null
+        : new ChatLifecycleShadow(opts.tabId, {
+            autonomous: chatCapabilitiesForMode(opts.mode).agentStartedTurns,
+            observe: () => {
+              const work = tab.work.counts()
+              return {
+                generation: tab.gen,
+                conversationId: tab.sessionConfirmed ? tab.sessionId : null,
+                state: tab.terminalState,
+                reportedState: reportedStateOf(tab),
+                turnOpen: turnOpen(tab),
+                pendingRequestIds: [...tab.pendingPrompts],
+                outboxInFlight: tab.outbox.inFlight(),
+                backgroundHelpers: work.subAgents,
+                backgroundJobs: work.jobs,
+                readyForMessage: isReadyForQueuedMessage(tab.tabId),
+                seq: tab.log.lastSeq,
+                live: tab.liveSeq
+              }
+            },
+            report: (record) =>
+              diagnostic(
+                tab,
+                'warn',
+                `chat.lifecycle_shadow_${record.kind}`,
+                record.kind === 'mismatch'
+                  ? 'candidate lifecycle differs from current runtime'
+                  : 'candidate lifecycle observer disabled',
+                { ...record }
+              )
+          })
     tab.projection = Promise.resolve(projection)
     tabs.set(opts.tabId, tab)
 
@@ -2356,6 +2451,7 @@ export function createChatTransport(
         return proc
       },
       onChange: ({ id, state, error }) => {
+        tab.shadow?.feed(tab.gen, { type: 'outbox', inFlight: tab.outbox.inFlight() })
         const event: AgentEvent = {
           kind: 'user-message-delivery',
           id,
@@ -2369,7 +2465,7 @@ export function createChatTransport(
           kickQueueDrainer(tab)
         }
       },
-      onWriting: () => markTurnStarted(tab),
+      onWriting: (id) => markTurnStarted(tab, id),
       onAlreadyInConversation: (id) => onAlreadyInConversation(tab, id),
       ...(deps.outboxRetry
         ? { retryWindowMs: deps.outboxRetry.windowMs, retryBaseMs: deps.outboxRetry.baseMs }
@@ -2468,6 +2564,10 @@ export function createChatTransport(
     tab.usedResume = resume
     const sessionId = tab.sessionId
     const gen = ++tab.gen
+    tab.shadow?.feed(gen, {
+      type: 'process-start',
+      conversationId: tab.sessionConfirmed ? tab.sessionId : null
+    })
     const spawnId = randomUUID()
     const cliVersion = tab.optionalFlagsRefused ? null : (tab.cliVersion ?? opts.cliVersion ?? null)
     // A new process has no prompt pending (the old one's expired with it), nor
@@ -2605,6 +2705,7 @@ export function createChatTransport(
         },
         onSpawned: (p) => {
           if (tab.proc !== p || tab.closed) return
+          tab.shadow?.feed(p.gen, { type: 'process-ready' })
           // The FIRST event of this process's contribution: lets the renderer
           // invalidate process-children resources (bg shells) of the previous one.
           try {
@@ -3810,6 +3911,7 @@ export function createChatTransport(
     const tab = tabs.get(tabId)
     if (!tab) return
     if (tab.ended) return
+    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
     const proc = tab.proc
     // Pre-spawn skeleton (no process): mark ended so subsequent operations short-
     // circuit, but no process to signal.
@@ -3836,6 +3938,7 @@ export function createChatTransport(
   function removeSession(tabId: string): Promise<void> {
     const tab = tabs.get(tabId)
     if (!tab) return closing.get(tabId) ?? Promise.resolve()
+    tab.shadow?.close()
     tab.work.clear()
     transitionState(tab, 'dead')
     deps.userInputTracker.clear(stateKey(tab))
@@ -4091,6 +4194,7 @@ export function createChatTransport(
   }
 
   function forceFinalizeForShutdown(tab: ChatTab): void {
+    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
     clearWatchdog(tab)
     tab.ended = true
     const proc = tab.proc
@@ -4243,6 +4347,7 @@ export function createChatTransport(
     for (const tab of tabs.values()) {
       clearWatchdog(tab)
       tab.outbox.dispose()
+      tab.shadow?.close()
       tab.closed = true
     }
     tabs.clear()
@@ -4270,6 +4375,9 @@ export function createChatTransport(
   function __getGenerationForTests(tabId: string): number {
     return tabs.get(tabId)?.gen ?? 0
   }
+  function __getLifecycleShadowForTests(tabId: string) {
+    return tabs.get(tabId)?.shadow?.read() ?? null
+  }
   return {
     chatEvents,
     recordConversationInUse: (tabId: string) => {
@@ -4296,6 +4404,7 @@ export function createChatTransport(
     isSessionAwaitingUserInput,
     isTurnOpen,
     getTurnStatus,
+    __getLifecycleShadowForTests,
     isReadyForQueuedMessage,
     hydrateSession,
     ensureSpawned,
@@ -4424,7 +4533,8 @@ export const {
   __resetForTests,
   __getSessionChildForTests,
   __getOutboxStateForTests,
-  __getGenerationForTests
+  __getGenerationForTests,
+  __getLifecycleShadowForTests
 } = defaultChatTransport
 
 // This process runs chat agents: the pty side and the terminal lifecycle reach

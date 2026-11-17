@@ -240,7 +240,8 @@ describe('Plan mode proposal', () => {
       planId: 'plan-1',
       turnId: 'turn-1',
       text: 'final plan',
-      phase: 'completed'
+      phase: 'completed',
+      execution: { turnId: 'turn-1', source: 'provider' }
     })
   })
 })
@@ -374,8 +375,8 @@ describe('live command output (command-task path)', () => {
       method: 'turn/completed',
       params: { turn: { id: 't', status: 'interrupted', durationMs: 5 } }
     })
-    expect(out.map((e) => e.kind)).toEqual(['command-task', 'result'])
-    expect(out[0]).toMatchObject({ status: 'killed', taskId: 'exec-1' })
+    expect(out.map((e) => e.kind)).toEqual(['turn-started', 'command-task', 'result'])
+    expect(out[1]).toMatchObject({ status: 'killed', taskId: 'exec-1' })
   })
 
   it('the output kept is the last 8 KiB', async () => {
@@ -421,11 +422,21 @@ describe('context meter data', () => {
   it('thread/tokenUsage/updated → context-usage (last call’s tokens, the window); unchanged → nothing', async () => {
     const h = await harness()
     expect(await h.feed(usage(4684, 258_400))).toEqual([
-      { kind: 'context-usage', contextTokens: 4684, contextWindow: 258_400 }
+      {
+        kind: 'context-usage',
+        contextTokens: 4684,
+        contextWindow: 258_400,
+        execution: { turnId: 't', source: 'provider' }
+      }
     ])
     expect(await h.feed(usage(4684, 258_400))).toEqual([])
     expect(await h.feed(usage(5000, null))).toEqual([
-      { kind: 'context-usage', contextTokens: 5000, contextWindow: null }
+      {
+        kind: 'context-usage',
+        contextTokens: 5000,
+        contextWindow: null,
+        execution: { turnId: 't', source: 'provider' }
+      }
     ])
   })
 })
@@ -486,7 +497,7 @@ describe('Codex background terminals', () => {
     expect(ofKind(ended, 'command-task')).toEqual([])
     await h.feed({
       method: 'item/commandExecution/outputDelta',
-      params: { itemId: 'watch', delta: 'changed' }
+      params: { turnId: 't', itemId: 'watch', delta: 'changed' }
     })
     expect(await h.driver.commandTaskOutput('watch')).toMatchObject({
       state: 'running',

@@ -15,7 +15,7 @@
  *
  * @module terminal/server/runtime/chat-process
  */
-import type { AgentEvent, OutgoingUserMessage } from '@slayzone/terminal-contracts'
+import type { AgentEvent, AgentExecution, OutgoingUserMessage } from '@slayzone/terminal-contracts'
 import { userMessageText } from '@slayzone/terminal-contracts'
 import type { ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from '../agents/types'
 import { randomUUID } from 'node:crypto'
@@ -61,6 +61,10 @@ export interface ChatProcessOptions {
 export type StopOutcome = 'exited' | 'killed' | 'abandoned'
 
 export class ChatProcess implements OutboxProcess {
+  /** Execution identity is per process, distinct from its conversation id. */
+  execution: AgentExecution | null = null
+  expectedMessageId: string | null = null
+  lastEndedExecution: string | null = null
   readonly gen: number
   readonly spawnId: string
   readonly handle: ChatProcHandle
