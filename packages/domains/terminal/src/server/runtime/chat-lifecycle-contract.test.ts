@@ -31,7 +31,12 @@ afterEach(() => {
 })
 
 const SESSION = `${TAB_OPTS.taskId}:${TAB_OPTS.tabId}`
-const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+// Saved events publish after their storage commit, and output a pending publication
+// holds is spooled: settle both, then the turn the drainer/observer schedules.
+const flush = async (): Promise<void> => {
+  await mgr.__flushEventsForTests(TAB_OPTS.tabId)
+  await new Promise((resolve) => setImmediate(resolve))
+}
 const sorted = (values: Iterable<string>): string[] => [...values].sort()
 const helperStart = (id: string) => ({
   type: 'system',

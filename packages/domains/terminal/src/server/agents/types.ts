@@ -179,6 +179,9 @@ export interface ChatDriverContext {
   /** Await bounded async spill acceptance before another autonomous producer
    * read/poll. Does not await SQLite or pause protocol control responses. */
   waitForOutput?(): Promise<void>
+  /** Run `fn` after every output line received before this call is handled (at
+   * once when none waits): a write registers after the output preceding it. */
+  afterReceivedOutput?(fn: () => void): void
   /** Working directory the subprocess was spawned in. */
   cwd: string
   /** Resume id when `resume` is true, otherwise a fresh uuid. */

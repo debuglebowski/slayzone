@@ -145,6 +145,8 @@ export class ChatProcess implements OutboxProcess {
   /** `driver.start` was called: lines can be handed to it. */
   private driverHasContext = false
   private readonly output: ChatOutputSpool
+  /** `afterAcceptedOutput` callbacks, by their marker in the output order. */
+  private readonly afterOutput = new Map<string, () => void>()
   private readonly boundaries = new Map<
     string,
     { enter(): void; release(): void; resume(): void; gate: Promise<void> }
@@ -172,9 +174,11 @@ export class ChatProcess implements OutboxProcess {
           | ['event', AgentEvent]
           | ['history', AgentEvent[]]
           | ['boundary', string]
+          | ['after', string]
         if (kind === 'line') this.handleLine(value)
         else if (kind === 'event') this.deliverEvent(value)
         else if (kind === 'history') this.hooks.onHistory?.(this, value)
+        else if (kind === 'after') this.runAfterOutput(value)
         else {
           const boundary = this.boundaries.get(value)
           if (boundary) {
@@ -225,6 +229,7 @@ export class ChatProcess implements OutboxProcess {
       },
       emit: (event) => this.emit(event),
       waitForOutput: () => this.output.acceptInput(),
+      afterReceivedOutput: (fn) => this.afterAcceptedOutput(fn),
       addHistory: (events) => {
         if (this.ended || this.replaced) return
         if (!this.handlingLine && (this.waitingForStorage || this.output.busy))
@@ -380,6 +385,37 @@ export class ChatProcess implements OutboxProcess {
     return { ready, release, resume }
   }
 
+  /**
+   * Run `fn` once every output record accepted before this call has been handled
+   * (at once when none waits). A write registers after the output that preceded
+   * it, as it did when output was handled the moment it arrived.
+   */
+  afterAcceptedOutput(fn: () => void): void {
+    if (this.ended || this.replaced) return
+    if (this.handlingLine || !(this.waitingForStorage || this.output.busy)) {
+      fn()
+      return
+    }
+    const id = randomUUID()
+    this.afterOutput.set(id, fn)
+    this.output.push(JSON.stringify(['after', id]))
+  }
+
+  private runAfterOutput(id: string): void {
+    const fn = this.afterOutput.get(id)
+    this.afterOutput.delete(id)
+    if (!fn || this.ended || this.replaced) return
+    // Handled in line order: what it emits is delivered in place, like a line's.
+    this.handlingLine = true
+    try {
+      fn()
+    } catch (err) {
+      console.error('[chat-process] after-output callback threw:', err)
+    } finally {
+      this.handlingLine = false
+    }
+  }
+
   holdOutputUntil(work: Promise<unknown>): void {
     if (this.outputHolds.has(work)) return
     this.outputHolds.add(work)
@@ -522,6 +558,8 @@ export class ChatProcess implements OutboxProcess {
   private finish(code: number | null, signal: string | null, unconfirmed: boolean): void {
     if (this.ended) return
     for (const boundary of this.boundaries.values()) boundary.release()
+    // An ended process registers no more writes.
+    this.afterOutput.clear()
     if (!unconfirmed) this.markPhysicalExit()
     // Last words first, while it still counts.
     this.clearStderrTimer()

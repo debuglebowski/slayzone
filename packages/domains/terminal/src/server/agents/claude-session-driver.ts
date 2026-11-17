@@ -346,8 +346,12 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
       // Attached files are read by `prepareUserTurn`; never send them as nothing.
       return Promise.reject(new Error('attachments were not prepared for this message'))
     }
+    // Ownership follows arrival order: output received before this write (a
+    // previous turn's late result) is attributed before the write's turn begins.
+    const begin = () => this.ownership.begin(message.id, joinsTurn)
+    if (this.ctx.afterReceivedOutput) this.ctx.afterReceivedOutput(begin)
+    else begin()
     // The id doubles as the write's idempotency key: a retried write lands once.
-    this.ownership.begin(message.id, joinsTurn)
     return this.sendLine(line, { writeId: message.id })
   }
 

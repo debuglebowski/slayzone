@@ -6,7 +6,7 @@ import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { getBackend } from '../agents/registry'
 import { ChatProcess } from './chat-process'
 import { childProcessToHandle } from './chat-proc-handle'
-import { fakeChild } from './chat-transport-testkit'
+import { emitLine, fakeChild, sj } from './chat-transport-testkit'
 
 // Local protocol implementations, never external CLIs/accounts. The child obeys
 // stdout backpressure and writes real control responses on that SAME pipe.
@@ -233,5 +233,67 @@ test('failed startup retains its anonymous output file through physical close', 
     syncBuiltinESMExports()
     f.stdout.destroy()
     f.stderr.destroy()
+  }
+})
+
+test('a write registers its turn after the output that arrived before it, while storage holds output', async () => {
+  const f = fakeChild()
+  const events: AgentEvent[] = []
+  const proc = new ChatProcess({
+    gen: 1,
+    spawnId: 'write-order',
+    handle: childProcessToHandle(f.child),
+    driver: getBackend('claude-chat')!.createDriver(),
+    probeable: true,
+    ctx: {
+      cwd: process.cwd(),
+      sessionId: 'fixture',
+      resume: false,
+      providerFlags: [],
+      chatModel: null,
+      chatEffort: null,
+      chatMode: null,
+      chatCollaboration: null,
+      chatFastMode: false
+    },
+    hooks: {
+      onSpawned: () => {},
+      onEvent: (_p, e) => events.push(e),
+      onExit: () => {},
+      onStartError: (_p, e) => {
+        throw e
+      }
+    }
+  })
+  let release!: () => void
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  try {
+    setImmediate(() => f.emitter.emit('spawn'))
+    await proc.readyPromise
+    await proc.send({ id: 'u1', content: [{ type: 'text', text: 'one' }] })
+    proc.holdOutputUntil(held)
+    // u1's late end arrives before u2 is written; storage still holds it.
+    emitLine(f, sj.aborted())
+    await new Promise((r) => setImmediate(r))
+    await proc.send({ id: 'u2', content: [{ type: 'text', text: 'two' }] })
+    emitLine(f, sj.text('second answer'))
+    await new Promise((r) => setImmediate(r))
+    release()
+    await proc.flushOutput()
+    const ended = events.find((e) => e.kind === 'result')
+    const answer = events.find((e) => e.kind === 'assistant-text')
+    expect(ended?.execution?.messageId).toBe('u1')
+    expect(answer?.execution?.messageId).toBe('u2')
+    const started = events.flatMap((e, i) =>
+      e.kind === 'turn-started' ? [[e.execution.messageId, i] as const] : []
+    )
+    expect(started.map(([id]) => id)).toEqual(['u1', 'u2'])
+    expect(started[1][1]).toBeGreaterThan(events.indexOf(ended!))
+  } finally {
+    release()
+    f.exit(0)
+    await proc.exited.catch(() => undefined)
   }
 })

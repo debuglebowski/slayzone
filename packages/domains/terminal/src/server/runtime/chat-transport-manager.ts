@@ -2147,6 +2147,27 @@ export function createChatTransport(
     armWatchdog(tab)
   }
 
+  /**
+   * A write's turn starts after everything the agent said before it: output the
+   * process still holds, then publications already queued. A previous turn's
+   * late end therefore settles that turn, never the new one.
+   */
+  function markTurnStartedInOrder(tab: ChatTab, messageId: string): void {
+    const proc = tab.proc
+    const start = () => {
+      if (tab.closed || tab.proc !== proc) return
+      if (!publicationBusy.has(tab)) {
+        markTurnStarted(tab, messageId)
+        return
+      }
+      void enqueueEvent(tab, async () => {
+        if (!tab.closed && tab.proc === proc) markTurnStarted(tab, messageId)
+      })
+    }
+    if (proc) proc.afterAcceptedOutput(start)
+    else start()
+  }
+
   /** The outbox is writing a user message: the turn starts now. */
   function markTurnStarted(tab: ChatTab, messageId: string): void {
     if (tab.proc) {
@@ -2661,7 +2682,7 @@ export function createChatTransport(
           kickQueueDrainer(tab)
         }
       },
-      onWriting: (id) => markTurnStarted(tab, id),
+      onWriting: (id) => markTurnStartedInOrder(tab, id),
       onAlreadyInConversation: (id) => onAlreadyInConversation(tab, id),
       ...(deps.outboxRetry
         ? { retryWindowMs: deps.outboxRetry.windowMs, retryBaseMs: deps.outboxRetry.baseMs }
@@ -4871,6 +4892,11 @@ export function createChatTransport(
   function __getLifecycleShadowForTests(tabId: string) {
     return tabs.get(tabId)?.shadow?.read() ?? null
   }
+  /** Test seam: the tab's accepted process output and publications have all settled. */
+  async function __flushEventsForTests(tabId: string): Promise<void> {
+    const tab = tabs.get(tabId)
+    if (tab) await flushEvents(tab)
+  }
   return {
     chatEvents,
     recordConversationInUse: (tabId: string) => {
@@ -4898,6 +4924,7 @@ export function createChatTransport(
     isTurnOpen,
     getTurnStatus,
     __getLifecycleShadowForTests,
+    __flushEventsForTests,
     isReadyForQueuedMessage,
     hydrateSession,
     ensureSpawned,
@@ -5029,7 +5056,8 @@ export const {
   __getSessionChildForTests,
   __getOutboxStateForTests,
   __getGenerationForTests,
-  __getLifecycleShadowForTests
+  __getLifecycleShadowForTests,
+  __flushEventsForTests
 } = defaultChatTransport
 
 // This process runs chat agents: the pty side and the terminal lifecycle reach
