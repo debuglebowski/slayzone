@@ -40,7 +40,9 @@ const emit: EventListener = (method, params, sessionId) => {
   for (const l of [...listeners]) l(method, params, sessionId)
 }
 
-vi.mock('./cdp', () => ({
+// The real module (`openPage` drives this fake like any browser), its launch faked.
+vi.mock('./cdp', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./cdp')>()),
   launchBrowser: async (): Promise<Browser> => {
     const send = async <T>(
       method: string,
@@ -65,6 +67,8 @@ vi.mock('./cdp', () => ({
         for (const reject of failWaiters) reject(err)
         failWaiters.clear()
       },
+      // No OS process behind this page to watch.
+      watchProcess: async () => undefined,
       close: (opts?: { kill?: boolean }) => {
         closes.push(opts ?? {})
         return script.close()
@@ -404,5 +408,45 @@ describe('what the page may do (review 9, F1 / F2 / L1)', () => {
     }
     const pdf = await renderPdf('/fake', '<p>x</p>', { waitReady: false })
     expect(pdf.toString('latin1')).toBe('%PDF-1.7')
+  })
+})
+
+// CI round 2: a cross-site child frame loads in a process of its own; the document's
+// readyState turns complete without it. The export waits for it, as desktop's
+// did-finish-load does.
+describe('child frames', () => {
+  test('the export prints only once every child frame has stopped loading', {
+    timeout: 5_000
+  }, async () => {
+    let printedWhileLoading: boolean | null = null
+    let loading = true
+    script = {
+      close: async () => undefined,
+      answer: page({
+        'Page.setDocumentContent': (_m, _p, sid) => {
+          emit('Page.frameStartedLoading', { frameId: 'child' }, sid)
+          emit('Page.frameStartedLoading', { frameId: 'gone' }, sid)
+          // The main frame's own loading state is not what the wait is about.
+          emit('Page.frameStartedLoading', { frameId: 'f1' }, sid)
+          // Another page's frames are not this one's.
+          emit('Page.frameStartedLoading', { frameId: 'other-child' }, 'other')
+          setTimeout(() => {
+            emit('Page.frameDetached', { frameId: 'gone', reason: 'remove' }, sid)
+            loading = false
+            emit('Page.frameStoppedLoading', { frameId: 'child' }, sid)
+          }, 300)
+          return {}
+        },
+        'Page.printToPDF': () => {
+          printedWhileLoading = loading
+          return { stream: 'h1' }
+        }
+      })
+    }
+    const pdf = await renderPdf('/fake', '<iframe src="https://a.example/"></iframe>', {
+      waitReady: false
+    })
+    expect(pdf.toString('latin1')).toBe('%PDF-1.7')
+    expect(printedWhileLoading).toBe(false)
   })
 })

@@ -34,7 +34,7 @@ import {
   EXPORT_READY_EXPRESSION,
   PNG_MEASURE_EXPRESSION
 } from '@slayzone/task-artifacts/export-html'
-import { type Browser, type LaunchOptions, launchBrowser } from './cdp'
+import { type Browser, type LaunchOptions, launchBrowser, openPage } from './cdp'
 
 export interface RenderOptions {
   /** The document flags itself ready asynchronously (mermaid): wait for it. */
@@ -74,18 +74,45 @@ async function evaluate<T>(
   return r.exceptionDetails ? undefined : r.result.value
 }
 
+/**
+ * Until `expression` is true in the page and `also()` holds, for at most `timeoutMs`.
+ * The page is asked every round even while `also()` is false: a page gone meanwhile
+ * fails the wait instead of letting it run out.
+ */
 async function poll(
   b: Browser,
   sessionId: string,
   expression: string,
-  timeoutMs: number
+  timeoutMs: number,
+  also: () => boolean = () => true
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    if ((await evaluate<boolean>(b, sessionId, expression)) === true) return true
+    if ((await evaluate<boolean>(b, sessionId, expression)) === true && also()) return true
     if (Date.now() >= deadline) return false
     await new Promise((r) => setTimeout(r, 50))
   }
+}
+
+/**
+ * The child frames of page `sessionId` (any but `frameId`, its main frame) that are
+ * loading now, from the page's frame events. A cross-site child frame loads in a
+ * process of its own, and the document's `readyState` turns complete without waiting
+ * for it: the export would print before the frame had loaded (on a busy machine,
+ * before it was even requested). Desktop's export waits for the load event
+ * (did-finish-load), which waits for every child frame; so does this, through these.
+ */
+function trackChildFrames(b: Browser, sessionId: string, frameId: string): () => boolean {
+  const loading = new Set<string>()
+  b.onEvent((method, params, sid) => {
+    const id = params.frameId
+    if (sid !== sessionId || typeof id !== 'string' || id === frameId) return
+    if (method === 'Page.frameStartedLoading') loading.add(id)
+    else if (method === 'Page.frameStoppedLoading' || method === 'Page.frameDetached') {
+      loading.delete(id)
+    }
+  })
+  return () => loading.size === 0
 }
 
 /** The export document tried to load another document in its place. */
@@ -241,18 +268,9 @@ async function withPage<T>(
     // Before any page exists: nothing an artifact does saves a file (`<a download>`, a
     // navigation to an attachment). The page lives in the default context this covers.
     await b.send('Browser.setDownloadBehavior', { behavior: 'deny' })
-    // Crash/destroy events for every target: a page that dies mid-print fails the
-    // print at once instead of leaving it waiting (see cdp.ts).
-    await b.send('Target.setDiscoverTargets', { discover: true })
-    const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
-      url: 'about:blank'
-    })
-    const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
-      targetId,
-      flatten: true
-    })
-    // Inspector.targetCrashed / Inspector.detached on the page's own session.
-    await b.send('Inspector.enable', {}, sessionId)
+    // Crash/destroy events and the renderer's process watched: a page that dies
+    // mid-print fails the print at once instead of leaving it waiting (see cdp.ts).
+    const { sessionId } = await openPage(b)
     // Page events on, so a dialog announces itself (Page.javascriptDialogOpening) and
     // is answered at once, wherever it opens: while the document loads, during the
     // ready wait, or from a timer mid-print. The listener goes with the browser.
@@ -272,12 +290,13 @@ async function withPage<T>(
     )
     const frameId = frameTree.frame.id
     guard = await guardDocument(b, sessionId, frameId)
+    const childFramesLoaded = trackChildFrames(b, sessionId, frameId)
     await b.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_SCRIPT }, sessionId)
     await evaluate(b, sessionId, PAGE_SCRIPT)
     await b.send('Page.setDocumentContent', { frameId, html }, sessionId)
     guard.committed()
-    // Subresources (images in markdown) loaded, then web fonts settled.
-    await poll(b, sessionId, "document.readyState === 'complete'", 30_000)
+    // Subresources (images in markdown) and child frames loaded, then web fonts settled.
+    await poll(b, sessionId, "document.readyState === 'complete'", 30_000, childFramesLoaded)
     await evaluate(b, sessionId, 'document.fonts.ready.then(() => true)', true)
     if (opts.waitReady) {
       const ok = await poll(b, sessionId, EXPORT_READY_EXPRESSION, opts.readyTimeoutMs ?? 10_000)

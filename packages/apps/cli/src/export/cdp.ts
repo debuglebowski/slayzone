@@ -23,6 +23,15 @@
  * keeps answering then, so a long page command also probes the page itself (the
  * desktop export's stall watchdog): a trivial `Runtime.evaluate` every second, and one
  * left unanswered for `stallMs` fails the command.
+ *
+ * And a renderer can crash without the browser hearing of it: on Linux, a crashed
+ * process does not exit until the kernel has handed its core to the system's dump
+ * handler (`core_pattern` piped to systemd-coredump or apport, which also dump
+ * Chrome's non-dumpable renderers: `fs.suid_dumpable=2`, Ubuntu's default). Until then
+ * the browser sees a renderer that merely does not answer — for as long as the handler
+ * takes, forever for one that stalls. So the page's own process is watched too
+ * ({@link Browser.watchProcess}): while a long command runs there, a process that is
+ * dumping core, a zombie or gone fails the page as crashed.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -102,6 +111,14 @@ export interface Browser {
    * to what the page is held on (a paused request, a dialog) are still delivered.
    */
   failPage(sessionId: string, err: Error): void
+  /**
+   * Learn which OS process renders page `sessionId` (a one-shot trace names it), so a
+   * long command there also fails when that process has crashed while the browser says
+   * nothing. Call while the page is idle (right after attaching): the trace needs the
+   * renderer's answer. Never fails: a process it cannot name (or that is not this
+   * browser's) just goes unwatched.
+   */
+  watchProcess(sessionId: string): Promise<void>
   /**
    * Shut the browser down and remove its profile. `kill`: end it at once instead of
    * asking it to shut down — an orderly shutdown first lets go of the pages, and a
@@ -201,16 +218,84 @@ export function browserArgs(userDataDir: string, platform = process.platform): s
   if (platform === 'darwin') args.push('--use-mock-keychain')
   // Chromium refuses to start as root with its sandbox on (containers, CI).
   if (platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
-  // No crash handler: a renderer that crashes (out of memory on a huge document) must
+  // No crash handler: a renderer that crashes (out of memory on a huge document) should
   // die at once, so the browser reports it and the export fails fast. On Linux,
-  // crashpad holds a crashing sandboxed renderer until its handler has dumped it, and
-  // where the handler can't (Yama ptrace_scope 1 with the setuid sandbox's PID
-  // namespace: Ubuntu, GitHub's runners) the renderer never exits and no crash event
-  // ever comes. A throwaway export has no use for the dump either (it would land in the
-  // person's own browser crash reports).
+  // crashpad holds a crashing renderer until its handler has dumped it (a stalled
+  // handler delays the crash event by as long). A throwaway export has no use for the
+  // dump either (it would land in the person's own browser crash reports). The kernel
+  // can still hold the renderer while the system's dump handler takes its core: that
+  // one is caught by watching the page's process (see the top of this file).
   if (platform === 'linux') args.push('--disable-crashpad-for-testing')
   args.push('about:blank')
   return args
+}
+
+/** What the OS says about a process: still running, crashed (dumping core), or gone. */
+export type ProcessFate = 'running' | 'crashed' | 'gone'
+
+type ReadText = (file: string) => string
+const readText: ReadText = (file) => fs.readFileSync(file, 'utf8')
+const errCode = (err: unknown): unknown => (err as NodeJS.ErrnoException | null)?.code
+
+/**
+ * The fate of process `pid`. Linux reads /proc: `CoreDumping: 1` (status) is a process
+ * that crashed and is being dumped, a zombie (stat state Z/X) has exited. Elsewhere only
+ * "gone" is known (signal 0). Anything it cannot read is no verdict: "running".
+ */
+export function processFate(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  read: ReadText = readText
+): ProcessFate {
+  if (platform !== 'linux') {
+    try {
+      process.kill(pid, 0)
+      return 'running'
+    } catch (err) {
+      return errCode(err) === 'ESRCH' ? 'gone' : 'running'
+    }
+  }
+  try {
+    const stat = read(`/proc/${pid}/stat`)
+    // `pid (comm) state …`: comm may hold spaces and parentheses, the last ')' ends it.
+    const state = stat.slice(stat.lastIndexOf(')') + 2).charAt(0)
+    if (state === 'Z' || state === 'X' || state === 'x') return 'gone'
+    return /^CoreDumping:\s*1\s*$/m.test(read(`/proc/${pid}/status`)) ? 'crashed' : 'running'
+  } catch (err) {
+    return errCode(err) === 'ENOENT' || errCode(err) === 'ESRCH' ? 'gone' : 'running'
+  }
+}
+
+/**
+ * `pid` is one of this browser's processes. On Linux its command line carries the
+ * profile flag every Chrome child process is started with — a pid seen from another PID
+ * namespace (a browser in a Flatpak sandbox) names some other process here, which must
+ * never be taken for the page's. Elsewhere a browser's pids are the system's.
+ */
+function ownProcess(pid: number, userDataDir: string): boolean {
+  if (process.platform !== 'linux') return true
+  try {
+    return readText(`/proc/${pid}/cmdline`).split('\0').includes(`--user-data-dir=${userDataDir}`)
+  } catch {
+    return false
+  }
+}
+
+/** The renderer process of `targetId` in a trace's `TracingStartedInBrowser` event. */
+function tracedProcess(events: unknown, targetId: string): number | undefined {
+  if (!Array.isArray(events)) return undefined
+  for (const e of events as Array<{ name?: unknown; args?: { data?: { frames?: unknown } } }>) {
+    if (e?.name !== 'TracingStartedInBrowser') continue
+    const frames = e.args?.data?.frames
+    if (!Array.isArray(frames)) continue
+    for (const f of frames as Array<{ frame?: unknown; processId?: unknown }>) {
+      // A page target's id is its main frame's id.
+      if (f?.frame === targetId && typeof f.processId === 'number' && f.processId > 0) {
+        return f.processId
+      }
+    }
+  }
+  return undefined
 }
 
 function launchFailure(executable: string, stderr: string, cause: string): BrowserLaunchError {
@@ -283,6 +368,8 @@ export async function launchBrowser(
   const sessionTargets = new Map<string, string>()
   /** Sessions whose page died, and why: later commands there fail at once. */
   const deadSessions = new Map<string, Error>()
+  /** Page session → the OS process rendering it ({@link Browser.watchProcess}). */
+  const sessionProcesses = new Map<string, number>()
   let exited: Error | null = null
   const failAll = (err: Error) => {
     exited ??= err
@@ -297,6 +384,7 @@ export async function launchBrowser(
   const failSession = (sessionId: string, err: Error): void => {
     if (!deadSessions.has(sessionId)) deadSessions.set(sessionId, err)
     sessionTargets.delete(sessionId)
+    sessionProcesses.delete(sessionId)
     for (const [id, p] of pending) {
       if (p.sessionId !== sessionId) continue
       pending.delete(id)
@@ -309,6 +397,12 @@ export async function launchBrowser(
   }
 
   const listeners = new Set<CdpEventListener>()
+  const onEventListener = (listener: CdpEventListener): (() => void) => {
+    listeners.add(listener)
+    return () => {
+      listeners.delete(listener)
+    }
+  }
   const onEvent = (msg: CdpMessage): void => {
     const params = msg.params ?? {}
     switch (msg.method) {
@@ -470,6 +564,22 @@ export async function launchBrowser(
     let stopped = false
     let next: NodeJS.Timeout | undefined
     let stall: NodeJS.Timeout | undefined
+    // The page's process, checked on its own clock: a probe stays unanswered while the
+    // renderer works, so the probe loop cannot be the one to look. Gone counts only on a
+    // second look: a renderer that exits normally is reported by the browser first.
+    const pid = sessionProcesses.get(sessionId)
+    let goneBefore = false
+    const fate =
+      pid === undefined
+        ? undefined
+        : setInterval(() => {
+            const now = processFate(pid)
+            if (now === 'crashed' || (now === 'gone' && goneBefore)) {
+              failSession(sessionId, pageCrashed())
+            }
+            goneBefore = now === 'gone'
+          }, stallProbeIntervalMs)
+    fate?.unref()
     const probe = (): void => {
       next = setTimeout(() => {
         if (stopped) return
@@ -496,6 +606,49 @@ export async function launchBrowser(
       stopped = true
       clearTimeout(next)
       clearTimeout(stall)
+      clearInterval(fate)
+    }
+  }
+
+  async function watchProcess(sessionId: string): Promise<void> {
+    const targetId = sessionTargets.get(sessionId)
+    if (!targetId) return
+    let pid: number | undefined
+    let complete: () => void = ignore
+    const completed = new Promise<void>((resolve) => {
+      complete = resolve
+    })
+    const stopListening = onEventListener((method, params, sid) => {
+      if (sid !== sessionId) return
+      if (method === 'Tracing.dataCollected') pid ??= tracedProcess(params.value, targetId)
+      else if (method === 'Tracing.tracingComplete') complete()
+    })
+    let deadline: NodeJS.Timeout | undefined
+    try {
+      // The category of `TracingStartedInBrowser`, which lists each frame's process.
+      await send(
+        'Tracing.start',
+        {
+          traceConfig: { includedCategories: ['disabled-by-default-devtools.timeline'] },
+          transferMode: 'ReportEvents'
+        },
+        sessionId
+      )
+      await send('Tracing.end', {}, sessionId)
+      await Promise.race([
+        completed,
+        new Promise<void>((resolve) => {
+          deadline = setTimeout(resolve, commandTimeoutMs)
+        })
+      ])
+    } catch {
+      // Unnamed: the page goes unwatched (its crash events and stall probe still apply).
+    } finally {
+      clearTimeout(deadline)
+      stopListening()
+    }
+    if (pid !== undefined && sessionTargets.has(sessionId) && ownProcess(pid, userDataDir)) {
+      sessionProcesses.set(sessionId, pid)
     }
   }
 
@@ -578,17 +731,32 @@ export async function launchBrowser(
       ? err
       : launchFailure(executable, stderr, (err as Error).message)
   }
-  const onEventListener = (listener: CdpEventListener): (() => void) => {
-    listeners.add(listener)
-    return () => {
-      listeners.delete(listener)
-    }
-  }
   return {
     send: (m, p, sid) => send(m, p, sid),
     sendLong,
     onEvent: onEventListener,
     failPage: failSession,
+    watchProcess,
     close
   }
+}
+
+/**
+ * A new blank page to render in, attached (flattened session) and watched: crash and
+ * close events on for every target and on the page's own session, and its renderer
+ * process named ({@link Browser.watchProcess}) while it is still idle.
+ */
+export async function openPage(b: Browser): Promise<{ targetId: string; sessionId: string }> {
+  await b.send('Target.setDiscoverTargets', { discover: true })
+  const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
+    url: 'about:blank'
+  })
+  const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
+    targetId,
+    flatten: true
+  })
+  // Inspector.targetCrashed / Inspector.detached on the page's own session.
+  await b.send('Inspector.enable', {}, sessionId)
+  await b.watchProcess(sessionId)
+  return { targetId, sessionId }
 }

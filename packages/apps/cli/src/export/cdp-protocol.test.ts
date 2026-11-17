@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
-import { CdpFrameReader, browserArgs, launchBrowser } from './cdp'
+import { CdpFrameReader, browserArgs, launchBrowser, processFate } from './cdp'
 import { renderPdf } from './render'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cdp-proto-'))
@@ -30,6 +30,10 @@ afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
  * `PAGE_SPINS_ON_PRINT`: once a print starts the page's own commands (Runtime.evaluate)
  * go unanswered and the print never finishes, while the browser keeps answering (a
  * script looping in the renderer). `EVAL_DELAY_MS` delays every Runtime.evaluate.
+ * `FAKE_RENDERER`: the page runs in a real child process (its args carry the profile's
+ * `--user-data-dir`, as Chrome's renderers do), reported by the one-shot trace's
+ * `TracingStartedInBrowser`; `ON_PRINT=renderer-dies` kills it mid-print and the browser
+ * says nothing (a renderer the OS holds while it dumps core: no exit, no crash event).
  */
 const FAKE = `#!/usr/bin/env node
 const fs = require('fs')
@@ -43,6 +47,10 @@ const targetsDelay = Number(process.env.TARGETS_DELAY_MS || 0)
 const log = process.env.LOG_FILE
 const spinOnPrint = process.env.PAGE_SPINS_ON_PRINT === '1'
 const evalDelay = Number(process.env.EVAL_DELAY_MS || 0)
+const userDataDir = process.argv.find((a) => a.startsWith('--user-data-dir='))
+const renderer = process.env.FAKE_RENDERER === '1'
+  ? require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', '--', userDataDir], { stdio: 'ignore' })
+  : null
 let spinning = false
 let targetGone = false
 let hung = false
@@ -69,6 +77,14 @@ fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
       case 'Target.createTarget': reply(m.id, { targetId: 't1' }); break
       case 'Target.attachToTarget': reply(m.id, { sessionId: 's1' }); break
       case 'Page.getFrameTree': reply(m.id, { frameTree: { frame: { id: 'f1' } } }); break
+      case 'Tracing.end':
+        reply(m.id, {})
+        if (renderer) {
+          const frames = [{ frame: 't1', processId: renderer.pid }]
+          emit('Tracing.dataCollected', { value: [{ name: 'TracingStartedInBrowser', args: { data: { frames } } }] }, m.sessionId)
+        }
+        emit('Tracing.tracingComplete', {}, m.sessionId)
+        break
       case 'Runtime.evaluate':
         if (!spinning) setTimeout(() => reply(m.id, { result: { value: true } }), evalDelay)
         break
@@ -79,6 +95,7 @@ fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
         if (onPrint === 'target-crash') { emit('Target.targetCrashed', { targetId: 't1', status: 'crashed', errorCode: 9 }); break }
         if (onPrint === 'detach') { emit('Target.detachedFromTarget', { sessionId: m.sessionId, targetId: 't1' }); break }
         if (onPrint === 'vanish') { targetGone = true; break }
+        if (onPrint === 'renderer-dies') { renderer.kill('SIGKILL'); spinning = true; break }
         setTimeout(() => {
           if (m.params.transferMode === 'ReturnAsStream') reply(m.id, { stream: 'h1' })
           else reply(m.id, { data: Buffer.from('%PDF-inline').toString('base64') })
@@ -192,6 +209,64 @@ describe.skipIf(process.platform === 'win32')('#2: a page crash fails a long ren
       expect(Date.now() - started).toBeLessThan(10_000)
     }, 30_000)
   }
+})
+
+/**
+ * CI round 2: on Linux a crashed renderer can stay alive while the kernel pipes its core
+ * to the system's dump handler (systemd-coredump, apport: `fs.suid_dumpable=2`). The
+ * browser sees nothing until the dump is done (forever, for a handler that never
+ * finishes), so no crash event comes. The page's own process says it: watched directly.
+ */
+describe.skipIf(process.platform === 'win32')('a page whose renderer dies unannounced', () => {
+  test('the print fails promptly although no event and no liveness check says so', async () => {
+    const exe = fake('renderer-dies')
+    const started = Date.now()
+    await expect(
+      withEnv({ FAKE_RENDERER: '1', ON_PRINT: 'renderer-dies' }, () =>
+        renderPdf(exe, '<p>x</p>', {
+          waitReady: false,
+          // Far beyond the test: only the page's process can end the print.
+          browser: {
+            commandTimeoutMs: 5_000,
+            livenessIntervalMs: 120_000,
+            stallMs: 120_000,
+            stallProbeIntervalMs: 100
+          }
+        })
+      )
+    ).rejects.toThrow(/page crashed while rendering/)
+    expect(Date.now() - started).toBeLessThan(10_000)
+  }, 30_000)
+})
+
+describe('processFate (Linux: /proc)', () => {
+  const proc =
+    (files: Record<string, string>) =>
+    (p: string): string => {
+      if (p in files) return files[p] as string
+      throw Object.assign(new Error(`ENOENT: ${p}`), { code: 'ENOENT' })
+    }
+  const stat = (state: string) => `42 (chrome (x)) ${state} 1 42 42 0 -1`
+  test('running, dumping core, a zombie, gone', () => {
+    const running = proc({
+      '/proc/42/stat': stat('S'),
+      '/proc/42/status': 'Name:\tchrome\nCoreDumping:\t0\n'
+    })
+    expect(processFate(42, 'linux', running)).toBe('running')
+    const dumping = proc({
+      '/proc/42/stat': stat('D'),
+      '/proc/42/status': 'Name:\tchrome\nCoreDumping:\t1\n'
+    })
+    expect(processFate(42, 'linux', dumping)).toBe('crashed')
+    expect(processFate(42, 'linux', proc({ '/proc/42/stat': stat('Z') }))).toBe('gone')
+    expect(processFate(42, 'linux', proc({}))).toBe('gone')
+  })
+  test('a /proc it cannot read is no verdict', () => {
+    const denied = (): string => {
+      throw Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    }
+    expect(processFate(42, 'linux', denied)).toBe('running')
+  })
 })
 
 /** Review 5, #7: a liveness probe answered after the long command settled. */
@@ -378,10 +453,9 @@ describe.skipIf(process.platform === 'win32')('N5: the liveness deadline is its 
   }, 30_000)
 })
 
-// A crashed page must end its renderer at once. On Linux, Chrome's crashpad holds a
-// crashing sandboxed renderer until its handler has dumped it; where the handler can't
-// (GitHub's Ubuntu runners: Yama ptrace_scope 1, the setuid sandbox's PID namespace)
-// the renderer never exits, no crash event comes, and a long command waits forever.
+// A crashed page should end its renderer at once. On Linux, Chrome's crashpad holds a
+// crashing renderer until its handler has dumped it; a stalled handler delays the crash
+// event, and with it the failed export, by as long.
 describe('browser flags', () => {
   test('Linux runs the export browser without crashpad; other platforms keep it', () => {
     expect(browserArgs('/p', 'linux')).toContain('--disable-crashpad-for-testing')

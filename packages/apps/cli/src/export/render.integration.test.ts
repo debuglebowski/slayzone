@@ -10,7 +10,7 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { defaultBrowserEnv, findBrowser } from './browser'
 import { buildDocumentHtml } from '@slayzone/task-artifacts/export-html'
-import { type Browser, launchBrowser } from './cdp'
+import { type Browser, launchBrowser, openPage } from './cdp'
 import { defaultExportDeps, exportArtifact, type ExportDeps } from './export-artifact'
 import { renderPdf, renderPng } from './render'
 
@@ -124,19 +124,15 @@ describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () =>
   })
 
   // The renderer dies while a long command runs; the browser process keeps answering
-  // its liveness check. The command must fail at once, not wait forever.
+  // its liveness check. The command must fail at once, not wait forever — also where the
+  // OS holds the crashed renderer while the system's dump handler takes its core and the
+  // browser hears nothing (GitHub's Ubuntu runners: systemd-coredump), the page's own
+  // process says it.
   test('a long command on a crashed page rejects within seconds', { timeout: 60_000 }, async () => {
     // A liveness interval far beyond the test: only the crash itself can end it.
     b = await launchBrowser(BROWSER as string, { livenessIntervalMs: 120_000 })
-    await b.send('Target.setDiscoverTargets', { discover: true })
-    const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
-      url: 'about:blank'
-    })
-    const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
-      targetId,
-      flatten: true
-    })
-    await b.send('Inspector.enable', {}, sessionId)
+    // The page as an export opens it.
+    const { sessionId } = await openPage(b)
     const long = b.sendLong(
       'Runtime.evaluate',
       { expression: 'new Promise(() => {})', awaitPromise: true },
@@ -213,7 +209,8 @@ describe.skipIf(!BROWSER)('a script that loops once printing starts (review 7, #
 /**
  * A local http server that records every request, so a test can assert the export
  * reached it — or that it never did. `/slow.png` answers after `SLOW_MS` (keeps the
- * document loading meanwhile); `/frame` is a page for a child frame.
+ * document loading meanwhile); `/frame` is a page for a child frame, `/slow-frame` one
+ * served after 2 s (logged as `served /slow-frame` once sent).
  */
 function localServer(): {
   origin: () => string
@@ -228,6 +225,13 @@ function localServer(): {
   )
   const server = http.createServer((req, res) => {
     hits.push(req.url ?? '')
+    if (req.url?.startsWith('/slow-frame')) {
+      setTimeout(() => {
+        hits.push(`served ${req.url}`)
+        res.writeHead(200, { 'content-type': 'text/html' }).end('<p>slow frame</p>')
+      }, 2_000)
+      return
+    }
     if (req.url?.startsWith('/slow.png')) {
       setTimeout(() => res.writeHead(200, { 'content-type': 'image/png' }).end(png), 2_000)
       return
@@ -419,6 +423,23 @@ describe.skipIf(!BROWSER)('the export document cannot navigate itself (review 9,
     expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
     expect(server.hits).toContain('/frame')
     expect(server.hits).toContain('/frame2')
+  })
+
+  // CI round 2: a cross-site child frame loads in a process of its own, and
+  // `document.readyState` turns complete without waiting for it — the export printed
+  // before such a frame had loaded (on a busy machine, before it was even requested).
+  // Desktop's export waits for the load event (did-finish-load), which does wait.
+  test('a child frame that loads slowly has loaded before the export prints', {
+    timeout: 90_000
+  }, async () => {
+    server.hits.length = 0
+    const html = `<!DOCTYPE html><p>x</p><iframe src="${server.origin()}/slow-frame"></iframe>`
+    const pdf = await renderPdf(BROWSER as string, html, {
+      waitReady: false,
+      browser: { commandTimeoutMs: 30_000 }
+    })
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    expect(server.hits).toContain('served /slow-frame')
   })
 })
 
