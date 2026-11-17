@@ -272,13 +272,17 @@ it('late generation verification cannot replace a newer connector', async () => 
   }
 })
 
-it('carried request abort cancels exactly the delivered computer request id', async () => {
+it('a passed caller signal cancels exactly the delivered computer request id', async () => {
   const { gateway, ws } = setup()
   try {
     const { computerId } = await enroll(ws)
     const abort = new AbortController()
-    const pending = runWithRequestAbort(abort.signal, () =>
-      gateway.request(computerId, 'chat.request', { kind: 'inventory' }, 0)
+    const pending = gateway.request(
+      computerId,
+      'chat.request',
+      { kind: 'inventory' },
+      0,
+      abort.signal
     )
     void pending.catch(() => undefined)
     await flush()
@@ -287,6 +291,37 @@ it('carried request abort cancels exactly the delivered computer request id', as
     abort.abort()
     expect(ws.requestOf('$/cancelRequest')?.params).toEqual({ id: sent.id })
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  } finally {
+    gateway.close()
+  }
+})
+
+it('an ambient caller abort never cancels a request that was not given the signal', async () => {
+  // Hub work a caller only started (a REST composite mutation, a shared pty relay or
+  // fs watch begun inside one subscriber) outlives that caller.
+  const { gateway, ws } = setup()
+  try {
+    const { computerId } = await enroll(ws)
+    const abort = new AbortController()
+    const first = runWithRequestAbort(abort.signal, () =>
+      gateway.request(computerId, 'chat.request', { kind: 'inventory' }, 0)
+    )
+    await flush()
+    const sentFirst = ws.requestOf('chat.request')!
+    abort.abort()
+    await flush()
+    expect(ws.requestOf('$/cancelRequest')).toBeUndefined()
+    // The same caller context, after its abort: the next step still goes out.
+    const second = runWithRequestAbort(abort.signal, () =>
+      gateway.request(computerId, 'chat.request', { kind: 'inventory', step: 2 }, 0)
+    )
+    await flush()
+    const sentSecond = ws.sent.filter((f) => f.method === 'chat.request').at(-1)!
+    expect(sentSecond.id).not.toBe(sentFirst.id)
+    ws.frame({ id: sentFirst.id, result: 'one' })
+    ws.frame({ id: sentSecond.id, result: 'two' })
+    await expect(first).resolves.toBe('one')
+    await expect(second).resolves.toBe('two')
   } finally {
     gateway.close()
   }

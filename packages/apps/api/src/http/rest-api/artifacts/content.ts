@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Express, Response } from 'express'
+import { retryByteSourceChanges } from '@slayzone/platform/bounded-reads'
 import { getArtifactStorage, openArtifactReaderOf } from '@slayzone/task-artifacts/server'
 import type { RenderMode } from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
@@ -266,26 +267,31 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
         // The reader covers the whole source for integrity; select the HTTP range without
         // assembling it. Older computers retain their whole read and the same range headers.
         const open = openArtifactReaderOf(storage)
-        const reader = open ? await open(deps.db, artifact.id, { kind: 'bytes' }) : null
-        try {
-          const bytes = reader ? null : await storage.readArtifactBytes(deps.db, artifact.id)
-          const range = startBody(
-            res,
-            ask,
-            reader ? reader.size : bytes!.byteLength,
-            artifact.title
-          )
-          if (!range) return
-          if (reader)
-            await streamChunks(res, selectedChunks(res, reader.chunks, range, reader.size))
-          else
-            res.end(
-              Buffer.from(bytes!.buffer, bytes!.byteOffset + range.start, range.end - range.start)
+        // A working copy written while it is read, before any byte went out: read it
+        // again from its start (bounded). Once the headers are sent, a change ends the
+        // response instead (streamChunks).
+        await retryByteSourceChanges(async () => {
+          const reader = open ? await open(deps.db, artifact.id, { kind: 'bytes' }) : null
+          try {
+            const bytes = reader ? null : await storage.readArtifactBytes(deps.db, artifact.id)
+            const range = startBody(
+              res,
+              ask,
+              reader ? reader.size : bytes!.byteLength,
+              artifact.title
             )
-        } finally {
-          // Includes 416, header errors and an interrupted selection, before any body iteration.
-          if (reader) await reader.chunks.return(undefined)
-        }
+            if (!range) return
+            if (reader)
+              await streamChunks(res, selectedChunks(res, reader.chunks, range, reader.size))
+            else
+              res.end(
+                Buffer.from(bytes!.buffer, bytes!.byteOffset + range.start, range.end - range.start)
+              )
+          } finally {
+            // Includes 416, header errors and an interrupted selection, before any body iteration.
+            if (reader) await reader.chunks.return(undefined)
+          }
+        })
         return
       }
       const filePath = resolveArtifactFilePath(artifact.task_id, artifact.id, artifact.title)

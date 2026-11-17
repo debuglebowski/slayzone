@@ -13,11 +13,13 @@ import {
   BYTE_RANGE_MAX_CHUNK,
   type ByteRangePage,
   collectByteRanges,
-  readByteRanges
+  readByteRanges,
+  retryByteSourceChanges
 } from '@slayzone/platform/bounded-reads'
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/hub'
 import type { createComputerChatServices } from './computer-chat'
+import { currentRequestAbort } from '@slayzone/platform/request-abort'
 import { withUploadedBytes } from './computer-uploads'
 
 const reads = new Set([
@@ -113,11 +115,14 @@ export function createComputerArtifactStorage(opts: {
     if (!owner) throw new Error('Artifact owner is unavailable')
     return owner
   }
+  /** `signal`: the caller's own cancellation, for its range reads, upload and
+   *  publication only; hub work (folders, listings, moves) never takes it. */
   async function call(
     owner: HubChatOwnership,
     method: string,
     args: unknown[],
-    operationId?: string
+    operationId?: string,
+    signal?: AbortSignal
   ) {
     const current = await chat.relay.ensureTab(owner.tabId)
     if (current.taskId !== owner.taskId || current.computerId !== owner.computerId)
@@ -127,15 +132,19 @@ export function createComputerArtifactStorage(opts: {
       (args[0] as { parentId?: string | null } | undefined)?.parentId
     if (folderId && method !== 'importFolder') await ensureFolder(current, folderId)
     const read = reads.has(method)
-    const result = await chat.lifecycle.request(current.computerId!, {
-      kind: 'artifact.invoke',
-      value: {
-        route: { id: current.id, epoch: current.epoch },
-        method,
-        args,
-        ...(!read ? { operationId: operationId ?? randomUUID() } : {})
-      }
-    })
+    const result = await chat.lifecycle.request(
+      current.computerId!,
+      {
+        kind: 'artifact.invoke',
+        value: {
+          route: { id: current.id, epoch: current.epoch },
+          method,
+          args,
+          ...(!read ? { operationId: operationId ?? randomUUID() } : {})
+        }
+      },
+      signal
+    )
     if (!read)
       await chat.relay.drainMetadata(current.computerId!, false, undefined, undefined, current.id)
     return result
@@ -148,10 +157,17 @@ export function createComputerArtifactStorage(opts: {
   async function openRanges(
     owner: HubChatOwnership,
     artifactId: string,
-    spec: ArtifactReadSpec
+    spec: ArtifactReadSpec,
+    signal?: AbortSignal
   ): Promise<ArtifactRangeReader> {
     const read = (offset: number, length: number) =>
-      call(owner, 'readRange', [artifactId, spec, offset, length]) as Promise<ArtifactRangePage>
+      call(
+        owner,
+        'readRange',
+        [artifactId, spec, offset, length],
+        undefined,
+        signal
+      ) as Promise<ArtifactRangePage>
     const first = await read(0, BYTE_RANGE_MAX_CHUNK)
     let firstServed = false
     const fetch = (offset: number, length: number) => {
@@ -171,12 +187,16 @@ export function createComputerArtifactStorage(opts: {
   async function collectRanges(
     owner: HubChatOwnership,
     artifactId: string,
-    spec: ArtifactReadSpec
+    spec: ArtifactReadSpec,
+    signal?: AbortSignal
   ) {
-    const reader = await openRanges(owner, artifactId, spec)
-    const parts: Uint8Array[] = []
-    for await (const part of reader.chunks) parts.push(part)
-    return { ...reader, bytes: Buffer.concat(parts) }
+    // A working copy written while it is read: read it again from its start.
+    return retryByteSourceChanges(async () => {
+      const reader = await openRanges(owner, artifactId, spec, signal)
+      const parts: Uint8Array[] = []
+      for await (const part of reader.chunks) parts.push(part)
+      return { ...reader, bytes: Buffer.concat(parts) }
+    })
   }
   /** The same reader, its first range already read (the diff peeks at both version rows). */
   async function collectRest(reader: ArtifactRangeReader) {
@@ -194,54 +214,69 @@ export function createComputerArtifactStorage(opts: {
     key: string,
     id: string,
     // biome-ignore lint/suspicious/noExplicitAny: the store method's own arguments.
-    args: any[]
+    args: any[],
+    signal?: AbortSignal
   ): Promise<{ result: unknown } | null> {
     if (!opts.boundedReads?.(owner.computerId!)) return null
     const first = args[0]
     switch (key) {
       case 'readArtifactBytes':
-        return { result: (await collectRanges(owner, id, specOfRef(args[1]))).bytes }
+        return { result: (await collectRanges(owner, id, specOfRef(args[1]), signal)).bytes }
       case 'getArtifactPath': {
         const [a, read] = await Promise.all([
           call(owner, 'getArtifact', [id]) as Promise<TaskArtifact>,
-          collectRanges(owner, id, { kind: 'bytes' })
+          collectRanges(owner, id, { kind: 'bytes' }, signal)
         ])
         return {
           result: `data:${mimeOf(a.title)};name=${encodeURIComponent(a.title)};base64,${read.bytes.toString('base64')}`
         }
       }
       case 'resolveArtifactVersion': {
-        const read = await collectRanges(owner, id, { kind: 'version', ref: first.versionRef })
+        const read = await collectRanges(
+          owner,
+          id,
+          { kind: 'version', ref: first.versionRef },
+          signal
+        )
         return { result: { version: read.version, blobPath: null, bytes: read.bytes } }
       }
       case 'readArtifactContent': {
-        const read = await collectRanges(owner, id, { kind: 'content' })
+        const read = await collectRanges(owner, id, { kind: 'content' }, signal)
         return { result: read.missing ? null : read.bytes.toString('utf-8') }
       }
       case 'readArtifactVersion': {
-        const read = await collectRanges(owner, id, { kind: 'version', ref: first.versionRef })
+        const read = await collectRanges(
+          owner,
+          id,
+          { kind: 'version', ref: first.versionRef },
+          signal
+        )
         return { result: read.bytes.toString('utf-8') }
       }
       case 'diffArtifactVersions': {
         // As the computer's diff: side a, then b (or the current version); equal
         // contents are an empty diff without reading either.
-        const a = await openRanges(owner, id, { kind: 'version', ref: first.a })
-        const b = await openRanges(
-          owner,
-          id,
-          first.b !== undefined ? { kind: 'version', ref: first.b } : { kind: 'currentVersion' }
-        )
-        if (!a.version || !b.version) throw new Error('Artifact version row missing from its range')
-        if (a.version.content_hash === b.version.content_hash)
-          return { result: { kind: 'text', hunks: [] } }
-        return {
-          result: diffVersionContents(
-            a.version,
-            b.version,
-            await collectRest(a),
-            await collectRest(b)
+        return retryByteSourceChanges(async () => {
+          const a = await openRanges(owner, id, { kind: 'version', ref: first.a }, signal)
+          const b = await openRanges(
+            owner,
+            id,
+            first.b !== undefined ? { kind: 'version', ref: first.b } : { kind: 'currentVersion' },
+            signal
           )
-        }
+          if (!a.version || !b.version)
+            throw new Error('Artifact version row missing from its range')
+          if (a.version.content_hash === b.version.content_hash)
+            return { result: { kind: 'text', hunks: [] } }
+          return {
+            result: diffVersionContents(
+              a.version,
+              b.version,
+              await collectRest(a),
+              await collectRest(b)
+            )
+          }
+        })
       }
       default:
         return null
@@ -379,11 +414,13 @@ export function createComputerArtifactStorage(opts: {
       folderId = folder.id
     }
     const pc = owner.computerId!
+    // The uploader's own staging and publication: cancelled with its request.
+    const signal = currentRequestAbort()
     return withUploadedBytes(
       {
         computerId: pc,
         bounded: opts.boundedReads?.(pc) === true,
-        send: (body) => chat.lifecycle.request(pc, body as never),
+        send: (body) => chat.lifecycle.request(pc, body as never, signal),
         source: data.bytes,
         owner: { route: { id: owner.id, epoch: owner.epoch }, operationId }
       },
@@ -400,7 +437,8 @@ export function createComputerArtifactStorage(opts: {
               ...bytes
             }
           ],
-          operationId
+          operationId,
+          signal
         )
     ) as Promise<TaskArtifact | null>
   }
@@ -473,7 +511,8 @@ export function createComputerArtifactStorage(opts: {
           const owner = await location(artifactId)
           if (!owner || (await isUnavailable(artifactId, false))) return null
           if (!opts.boundedReads?.(owner.computerId!)) return null
-          return openRanges(owner, artifactId, spec)
+          // The REST reader's own stream: cancelled when its response is.
+          return openRanges(owner, artifactId, spec, currentRequestAbort())
         }
         return open
       }
@@ -714,10 +753,13 @@ export function createComputerArtifactStorage(opts: {
           if (key === 'deleteArtifact') return base.apply(target, [db, ...args])
           throw unavailableError(isFolder)
         }
+        // The caller's own reads and write (range reads, staged upload, publication)
+        // are cancelled with its request; everything else here is not.
+        const signal = currentRequestAbort()
         if (key === 'readArtifactBytesRange') {
           // The computer reads only this window (computer protocol v9: every computer
           // this hub accepts has `readBytesRange`). Its errors surface as they are.
-          const r = (await call(owner, 'readBytesRange', args)) as {
+          const r = (await call(owner, 'readBytesRange', args, undefined, signal)) as {
             data: string
             size: number
             version: string
@@ -726,7 +768,7 @@ export function createComputerArtifactStorage(opts: {
             ? { bytes: Buffer.from(r.data, 'base64'), size: r.size, version: r.version }
             : null
         }
-        const ranged = await rangedRead(owner, key, id, args)
+        const ranged = await rangedRead(owner, key, id, args, signal)
         if (ranged) return ranged.result
         if (key === 'readArtifactBytes') {
           const result = (await call(owner, 'readBytes', args)) as { data: string }
@@ -757,7 +799,7 @@ export function createComputerArtifactStorage(opts: {
             {
               computerId: pc,
               bounded: opts.boundedReads?.(pc) === true,
-              send: (body) => chat.lifecycle.request(pc, body as never),
+              send: (body) => chat.lifecycle.request(pc, body as never, signal),
               source: first.bytes ?? { path: first.sourcePath },
               owner: { route: { id: owner.id, epoch: owner.epoch }, operationId }
             },
@@ -772,7 +814,8 @@ export function createComputerArtifactStorage(opts: {
                     ...bytes
                   }
                 ],
-                operationId
+                operationId,
+                signal
               )
           )
         }

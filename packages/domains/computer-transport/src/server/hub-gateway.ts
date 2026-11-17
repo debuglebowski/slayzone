@@ -1,4 +1,3 @@
-import { currentRequestAbort } from '@slayzone/platform/request-abort'
 /**
  * Hub-side computer gateway. Owns every computer WebSocket that dialed in, speaks
  * the duplex JSON-RPC computer protocol over each, and exposes an addressable
@@ -1275,7 +1274,9 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       method: string,
       params?: unknown,
       timeoutMs?: number,
-      signal = currentRequestAbort()
+      // Only the caller's own work passes its signal (an upload, a range read). Never an
+      // ambient default: hub work a caller merely started must outlive it.
+      signal?: AbortSignal
     ): Promise<T> {
       // The privileged ones are audited here, the single door (see hub-audit.ts). Actor,
       // ip and route come from the caller's request context, captured by the promise

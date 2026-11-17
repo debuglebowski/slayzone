@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   BYTE_RANGE_MAX_CHUNK,
+  BYTE_SOURCE_RESTARTS,
   ByteSourceChangedError,
   type ByteRangePage,
   collectByteRanges,
@@ -16,6 +17,7 @@ import {
   type Page,
   pageCut,
   readByteRanges,
+  retryByteSourceChanges,
   utf8ByteLength
 } from './bounded-reads'
 
@@ -249,5 +251,33 @@ describe('readByteRanges', () => {
       sha256: { expect: 'etag', create: sha256 }
     })
     await expect(iterator.next()).rejects.toThrow(/sha256/)
+  })
+})
+
+describe('retryByteSourceChanges', () => {
+  it('reads again from the start after a source change, at most the bounded times', async () => {
+    let calls = 0
+    const flaky = async () => {
+      if (++calls < 2) throw new ByteSourceChangedError('changed')
+      return 'read'
+    }
+    await expect(retryByteSourceChanges(flaky)).resolves.toBe('read')
+    expect(calls).toBe(2)
+    calls = 0
+    const always = async () => {
+      calls++
+      throw new ByteSourceChangedError('changed')
+    }
+    await expect(retryByteSourceChanges(always)).rejects.toBeInstanceOf(ByteSourceChangedError)
+    expect(calls).toBe(BYTE_SOURCE_RESTARTS + 1)
+    calls = 0
+    // Other errors are not retried.
+    await expect(
+      retryByteSourceChanges(async () => {
+        calls++
+        throw new Error('sha256 mismatch')
+      })
+    ).rejects.toThrow('sha256 mismatch')
+    expect(calls).toBe(1)
   })
 })

@@ -1112,7 +1112,7 @@ export function composeServer(opts: {
       computerDataHandoff.flushTask(taskId, computerId, kinds),
     legacyData: createDbChatDataOps(db, sessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
-    request: async (computerId, request) => {
+    request: async (computerId, request, signal) => {
       if (!execGateway) throw new Error('Chat computer gateway is starting')
       return execGateway.request(
         computerId,
@@ -1133,7 +1133,8 @@ export function composeServer(opts: {
               'method' in request.value &&
               request.value.method === 'askSideQuestion'
             ? SIDE_QUESTION_TIMEOUT_MS + 5_000
-            : undefined
+            : undefined,
+        signal
       )
     },
     admitComputer: async (computerId) => {

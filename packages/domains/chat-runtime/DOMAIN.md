@@ -485,11 +485,11 @@ dropped, or restored when it is the only copy).
 
   `controlCleanupRequest` is an authorized owner-lifetime integration seam: it
   must escape only caller request-abort context while retaining actor and path
-  scope. `controlSignal` can expose caller cancellation for the relay's waits.
-  The future FU1 requestAbort ALS integration must wire those seams and verify
-  an already-aborted default gateway request in combined R6. The controls-source
-  tests prove the configured seam with isolated abort ALS; that future FU1
-  composition is absent here and is not claimed measured. Host expiry remains
+  scope. `controlSignal` exposes caller cancellation for the relay's waits.
+  The hub gateway never applies a caller's abort on its own: a `ChatComputerRequest`
+  is cancelled only when its caller passes `signal` (its range reads, staged upload
+  and publication); the lifecycle barrier's sync and all other hub work do not take
+  it, so they outlive the caller that started them. Host expiry remains
   independent of a lost cleanup frame. These controls do not release unknown
   physical/FD/durable ownership or fabricate public completion.
 
@@ -498,8 +498,7 @@ public-control wiring, caller-known leases/concurrent-stop escalation and the B5
 canonical-worker publication protocol. Their scoped native evidence does not
 replace final composed control, close, readiness and publication acceptance.
 Metadata review follow-ups, final composed validation of current-main S514
-peer-browser integration and the FU1 request-abort ALS cleanup seam remain separate
-composition work. The verified
+peer-browser integration remain separate composition work. The verified
 filesystem runtime-error recovery does not close the historical parallel FS
 deadline RED2 gate or attribute it to a product defect. Final composed gates and
 fresh whole-FU2 review remain required.

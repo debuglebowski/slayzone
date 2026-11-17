@@ -15,6 +15,7 @@ import { setImmediate as turn } from 'node:timers/promises'
 import { open } from 'node:fs/promises'
 import {
   BYTE_RANGE_MAX_CHUNK,
+  ByteSourceChangedError,
   readByteRanges,
   type ByteRangePage
 } from '@slayzone/platform/bounded-reads'
@@ -151,6 +152,38 @@ describe('computer-held artifact bytes over REST', () => {
     expect(r.status).toBe(200)
     expect(r.body.equals(WHOLE)).toBe(true)
     expect(opened).toEqual([{ id: artifactId, spec: { kind: 'version', ref: '1' } }])
+  })
+
+  test('a working copy written before any byte is sent is read again from its start (bounded)', async () => {
+    const changing = (changes: { left: number }) => (): ArtifactRangeReader => {
+      const changed = changes.left-- > 0
+      return {
+        size: WHOLE.length,
+        missing: false,
+        chunks: (async function* () {
+          yield new Uint8Array(CHUNKS[0])
+          if (changed) throw new ByteSourceChangedError('byte read: the source changed')
+          for (const c of CHUNKS.slice(1)) yield new Uint8Array(c)
+        })()
+      } as unknown as ArtifactRangeReader
+    }
+    opened.length = 0
+    customOpen = changing({ left: 1 })
+    const once = await raw(`/api/artifacts/${artifactId}/content`)
+    expect(once.status).toBe(200)
+    expect(once.body.equals(WHOLE)).toBe(true)
+    expect(opened.length).toBe(2)
+    // A range request still skipping earlier ranges is read again too.
+    customOpen = changing({ left: 1 })
+    const tail = await raw(`/api/artifacts/${artifactId}/content`, 'bytes=6-')
+    expect(tail.status).toBe(206)
+    expect(tail.body.equals(WHOLE.subarray(6))).toBe(true)
+    // A source that keeps changing: the change surfaces after the bounded restarts.
+    opened.length = 0
+    customOpen = changing({ left: 100 })
+    const never = await raw(`/api/artifacts/${artifactId}/content`)
+    expect(never.status).toBe(500)
+    expect(opened.length).toBe(3)
   })
 
   test('an older computer (no ranged reader): the whole read, as before', async () => {

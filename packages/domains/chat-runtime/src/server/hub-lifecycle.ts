@@ -311,7 +311,8 @@ export function createChatLifecycle(opts: { db: SlayzoneDb; request: ChatCompute
      * pause/delete and folder deletions did. A task whose delivery failed has
      * its own commands refused; other tasks' commands proceed.
      */
-    async request(computerId: string, request: unknown) {
+    async request(computerId: string, request: unknown, signal?: AbortSignal) {
+      // The barrier's sync is shared hub work: never under the caller's signal.
       await sync(computerId)
       const failed = failures.get(computerId)
       if (failed?.size) {
@@ -323,7 +324,7 @@ export function createChatLifecycle(opts: { db: SlayzoneDb; request: ChatCompute
             { cause: failure }
           )
       }
-      return opts.request(computerId, request)
+      return opts.request(computerId, request, signal)
     }
   }
 }

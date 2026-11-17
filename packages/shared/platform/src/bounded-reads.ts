@@ -125,6 +125,28 @@ export class ByteSourceChangedError extends Error {
   override name = 'ByteSourceChangedError'
 }
 
+/** Restarts a whole read gets when its source changes under it (a file being written). */
+export const BYTE_SOURCE_RESTARTS = 2
+
+/**
+ * `read()` again from its start when its source changed while it was read
+ * ({@link ByteSourceChangedError}), at most `restarts` times; then the change
+ * surfaces. Only for reads that have handed out no bytes yet (a collected read, a
+ * response whose headers are not sent).
+ */
+export async function retryByteSourceChanges<T>(
+  read: () => Promise<T>,
+  restarts = BYTE_SOURCE_RESTARTS
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await read()
+    } catch (err) {
+      if (!(err instanceof ByteSourceChangedError) || attempt >= restarts) throw err
+    }
+  }
+}
+
 export interface Sha256Hasher {
   update(bytes: Uint8Array): void
   /** Lower-case hex. */

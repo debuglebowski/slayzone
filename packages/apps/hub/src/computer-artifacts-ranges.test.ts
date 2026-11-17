@@ -22,6 +22,7 @@ import {
   createArtifactStore
 } from '@slayzone/task-artifacts/server'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
+import { runWithRequestAbort } from '@slayzone/platform/request-abort'
 import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
@@ -36,6 +37,10 @@ let h: Awaited<ReturnType<typeof createTestHarness>>
 let dir: string
 let pc: ReturnType<typeof createFixtureChatRuntime>
 const seen: Array<{ method: string; bytes: number; length?: number }> = []
+/** Makes the next `readRange` answers report a changed source (an agent writing it). */
+let changeSourceOnRanges = 0
+/** Every request to the computer, with the caller signal it was sent with. */
+const sent: Array<{ kind: string; method?: string; signal?: AbortSignal }> = []
 let bounded: boolean | undefined = true
 let stores: {
   ranged: ReturnType<typeof createComputerArtifactStorage>
@@ -70,9 +75,18 @@ beforeAll(async () => {
       "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"
     )
     .run()
-  const request = async (_pc: string, p: unknown) => {
-    const result = await pc.request(p)
+  const request = async (_pc: string, p: unknown, signal?: AbortSignal) => {
+    sent.push({
+      kind: String((p as { kind?: string }).kind),
+      method: (p as { value?: { method?: string } }).value?.method,
+      signal
+    })
+    let result = await pc.request(p)
     const v = (p as { kind?: string; value?: { method?: string; args?: unknown[] } }).value
+    if (v?.method === 'readRange' && Number(v.args?.[2]) > 0 && changeSourceOnRanges > 0) {
+      changeSourceOnRanges--
+      result = { ...(result as object), etag: `changed-${changeSourceOnRanges}` }
+    }
     if ((p as { kind?: string }).kind === 'artifact.invoke' && v?.method)
       seen.push({
         method: v.method,
@@ -135,6 +149,47 @@ async function both<T>(read: (s: typeof stores.ranged) => Promise<T>) {
 
 const bounded256k = (calls: Array<{ method: string; bytes: number }>) =>
   calls.every((c) => c.bytes <= Math.ceil(BYTE_RANGE_MAX_CHUNK / 3) * 4 + 4096)
+
+describe('caller cancellation reaches only the requests that are the caller’s own', () => {
+  it('range reads and staged upload chunks carry the caller signal; shared work never does', async () => {
+    const caller = new AbortController()
+    sent.length = 0
+    await runWithRequestAbort(caller.signal, async () => {
+      await stores.ranged.writeArtifactContent(h.slayDb, { artifactId, bytes: BIG })
+      await stores.ranged.readArtifactBytes(h.slayDb, artifactId)
+    })
+    const own = sent.filter(
+      (r) => r.method === 'readRange' || r.kind === 'upload.begin' || r.kind === 'upload.chunk'
+    )
+    expect(own.filter((r) => r.method === 'readRange').length).toBeGreaterThanOrEqual(2)
+    expect(own.filter((r) => r.kind === 'upload.chunk').length).toBeGreaterThanOrEqual(1)
+    for (const r of own) expect(r.signal, `${r.kind} ${r.method ?? ''}`).toBe(caller.signal)
+    // The final write is the caller's too (its publication is cancelled with it).
+    expect(sent.find((r) => r.method === 'writeArtifactContent')?.signal).toBe(caller.signal)
+    // Everything else (lifecycle sync, ownership, metadata drain) is hub work.
+    for (const r of sent.filter((r) => !own.includes(r) && r.method !== 'writeArtifactContent'))
+      expect(r.signal, `${r.kind} ${r.method ?? ''}`).toBeUndefined()
+  })
+})
+
+describe('a working copy written while it is read in ranges', () => {
+  it('is read again from its start (bounded), then the change surfaces', async () => {
+    await stores.whole.updateArtifact(h.slayDb, { id: artifactId, content: BIG.toString('latin1') })
+    const whole = await stores.whole.readArtifactBytes(h.slayDb, artifactId)
+    changeSourceOnRanges = 1
+    const once = await stores.ranged.readArtifactBytes(h.slayDb, artifactId)
+    expect(Buffer.from(once).equals(Buffer.from(whole))).toBe(true)
+    changeSourceOnRanges = 1
+    expect(await stores.ranged.readArtifactContent(h.slayDb, artifactId)).toBe(
+      BIG.toString('latin1')
+    )
+    changeSourceOnRanges = 100
+    await expect(stores.ranged.readArtifactBytes(h.slayDb, artifactId)).rejects.toMatchObject({
+      name: 'ByteSourceChangedError'
+    })
+    changeSourceOnRanges = 0
+  })
+})
 
 describe('a bounded computer: every byte read in ranges', () => {
   it('readArtifactBytes and getArtifactPath', async () => {

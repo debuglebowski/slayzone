@@ -25,7 +25,14 @@ export interface ChatMigrationSource {
   /** Idempotent; only source content is removed, never destination or routing metadata. */
   cleanup(owner: HubChatOwnership): Promise<void>
 }
-export type ChatComputerRequest = (computerId: string, request: unknown) => Promise<unknown>
+/** A `chat.request` to a computer. `signal`: the caller's own cancellation, passed only
+ *  by work that is the caller's (an upload, a range read, its publication); hub work a
+ *  caller merely started never takes it. */
+export type ChatComputerRequest = (
+  computerId: string,
+  request: unknown,
+  signal?: AbortSignal
+) => Promise<unknown>
 
 /** Ownership commits once. Recovery after that point always moves forward. */
 export function createChatMigration(opts: {
