@@ -1869,6 +1869,18 @@ export function createChatTransport(
       if (proc.execution && proc.execution.turnId !== event.execution.turnId) return
       proc.execution = { ...event.execution }
       shadowEvent(tab, proc.gen, event)
+      // The CLI started the written message after an earlier turn ended ahead of
+      // it (a self-started one): the message's turn runs from here.
+      if (
+        event.execution.source === 'lifecycle' &&
+        event.execution.messageId === proc.expectedMessageId &&
+        tab.terminalState !== 'running' &&
+        tab.pendingPrompts.size === 0
+      ) {
+        transitionState(tab, 'running')
+        tab.watchdogLastProgress = Date.now()
+        armWatchdog(tab)
+      }
       return
     }
     // Attributed old root events cannot touch the stream, outbox, prompts,
@@ -2012,7 +2024,9 @@ export function createChatTransport(
     if (shown.kind === 'result' && execution) {
       proc.lastEndedExecution = execution.turnId
       proc.execution = null
-      proc.expectedMessageId = null
+      // A turn the CLI started by itself (proven by its lifecycle records) ended
+      // ahead of the written message: that message is still the one expected.
+      if (execution.messageId || execution.source !== 'lifecycle') proc.expectedMessageId = null
     }
 
     const split = tab.splitter.route(shown)

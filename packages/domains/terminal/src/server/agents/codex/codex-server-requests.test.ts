@@ -294,7 +294,14 @@ describe('a request the server withdrew (serverRequest/resolved)', () => {
       method: 'serverRequest/resolved',
       params: { threadId: 'th', requestId: 0 }
     })
-    expect(out).toEqual([{ kind: 'permission-cancelled', requestId: '0' }])
+    // The withdrawal keeps the request's own turn: a later turn cannot be closed by it.
+    expect(out).toEqual([
+      {
+        kind: 'permission-cancelled',
+        requestId: '0',
+        execution: { turnId: 't1', source: 'provider' }
+      }
+    ])
     expect(h.driver.respondPermission({ requestId: '0', decision: ALLOW })).toBe(false)
   })
   it('the echo after our own answer closes nothing', async () => {

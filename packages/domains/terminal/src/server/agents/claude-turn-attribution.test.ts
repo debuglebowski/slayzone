@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { ClaudeTurnAttribution } from './claude-turn-attribution'
 import { claudeCodeAdapter } from './claude-code-adapter'
@@ -143,3 +143,81 @@ test.each([false, true])(
     ).toBe(backgrounded ? 'A' : undefined)
   }
 )
+
+// Orderings measured on Claude Code 2.1.326: `command_lifecycle started` precedes
+// every output of its message; a turn's result precedes the next message's
+// `started`; a message taken mid-turn (steering) starts inside the running turn.
+describe('command_lifecycle boundaries', () => {
+  const lifecycle = (
+    commandUuid: string,
+    state: 'queued' | 'started' | 'completed' | 'cancelled'
+  ): AgentEvent => ({
+    kind: 'command-lifecycle',
+    commandUuid,
+    state
+  })
+  const text = (t: string): AgentEvent => ({ kind: 'assistant-text', messageId: t, text: t })
+  const owner = (s: ClaudeTurnAttribution, e: AgentEvent) => s.attribute(e)?.execution
+
+  test('a stopped request keeps its late output after the next write', () => {
+    const starts: AgentEvent[] = []
+    const s = new ClaudeTurnAttribution((e) => starts.push(e))
+    s.begin('A')
+    s.attribute(lifecycle('A', 'queued'))
+    s.attribute(lifecycle('A', 'started'))
+    expect(owner(s, text('a1'))?.messageId).toBe('A')
+    s.begin('B') // written after Stop, before A's aborted result arrived
+    s.attribute(lifecycle('B', 'queued'))
+    expect(owner(s, text('a-late'))?.messageId).toBe('A')
+    expect(owner(s, result('result-A', 0))?.messageId).toBe('A')
+    s.attribute(lifecycle('A', 'cancelled'))
+    expect(starts.filter((e) => e.kind === 'turn-started')).toHaveLength(1)
+    s.attribute(lifecycle('B', 'started'))
+    expect(starts.at(-1)).toMatchObject({
+      kind: 'turn-started',
+      execution: { turnId: 'B', messageId: 'B', source: 'lifecycle' }
+    })
+    expect(owner(s, text('b1'))).toMatchObject({ turnId: 'B', messageId: 'B', source: 'lifecycle' })
+    expect(owner(s, result('result-B', 1))?.messageId).toBe('B')
+  })
+
+  test('a self-started turn before the written message starts owns its output', () => {
+    const s = new ClaudeTurnAttribution(() => {})
+    s.begin('A')
+    s.attribute(lifecycle('A', 'started'))
+    s.attribute(result('result-A', 0))
+    s.attribute(lifecycle('A', 'completed'))
+    s.begin('B')
+    s.attribute(lifecycle('B', 'queued'))
+    const self = owner(s, text('task finished'))
+    expect(self?.messageId).toBeUndefined()
+    expect(self?.turnId).not.toBe('B')
+    expect(owner(s, result('result-self', 1))?.turnId).toBe(self?.turnId)
+    s.attribute(lifecycle('B', 'started'))
+    expect(owner(s, text('b1'))).toMatchObject({ turnId: 'B', messageId: 'B' })
+  })
+
+  test('a steered message started mid-turn joins the running execution', () => {
+    const s = new ClaudeTurnAttribution(() => {})
+    s.begin('A')
+    s.attribute(lifecycle('A', 'started'))
+    s.begin('S', true)
+    s.attribute(lifecycle('S', 'queued'))
+    s.attribute(lifecycle('S', 'started'))
+    expect(owner(s, text('after steer'))?.messageId).toBe('A')
+    s.attribute(lifecycle('S', 'completed')) // before the turn's result
+    expect(owner(s, result('result-A', 0))?.messageId).toBe('A')
+    s.attribute(lifecycle('A', 'completed'))
+  })
+
+  test('a steer the CLI starts after the turn ended gets its own execution', () => {
+    const s = new ClaudeTurnAttribution(() => {})
+    s.begin('A')
+    s.attribute(lifecycle('A', 'started'))
+    s.begin('S', true) // the turn's result was already on its way
+    s.attribute(result('result-A', 0))
+    s.attribute(lifecycle('A', 'completed'))
+    s.attribute(lifecycle('S', 'started'))
+    expect(owner(s, text('s1'))).toMatchObject({ turnId: 'S', messageId: 'S' })
+  })
+})

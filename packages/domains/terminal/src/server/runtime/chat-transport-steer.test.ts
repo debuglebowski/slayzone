@@ -86,7 +86,12 @@ test('a steered message is written at once and shown only when the agent picks i
   emitLine(f, sj.lifecycle('s1', 'completed'))
   emitLine(f, sj.success())
   emitLine(f, sj.lifecycle('u1', 'completed'))
-  await until(() => mgr.getSessionTerminalState(TAB) === 'idle')
+  // `completed` follows the result: the turn reads idle before its message is answered.
+  await until(
+    () =>
+      mgr.getSessionTerminalState(TAB) === 'idle' &&
+      mgr.__getOutboxStateForTests(TAB, 'u1') === 'answered'
+  )
   expect(mgr.__getOutboxStateForTests(TAB, 's1')).toBe('answered')
   expect(mgr.__getOutboxStateForTests(TAB, 'u1')).toBe('answered')
   expect(mgr.isReadyForQueuedMessage(TAB)).toBe(true)

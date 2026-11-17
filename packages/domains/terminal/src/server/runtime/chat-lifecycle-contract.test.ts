@@ -570,3 +570,42 @@ test.each(Array.from({ length: 64 }, (_, i) => 0x51a700 + i))(
     await c.check(`seed ${seed} fully settled`)
   }
 )
+
+// Measured on Claude Code 2.1.326 (`command_lifecycle` + `--replay-user-messages`):
+// a turn the CLI starts by itself after a background task has no `started`, and its
+// result precedes `started` of a message written meanwhile.
+test('a self-started turn racing a written message keeps its own ownership', async () => {
+  const c = await contract()
+
+  await c.start()
+  await c.finish()
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'next',
+    content: [{ type: 'text', text: 'next' }]
+  })
+  await c.child.written((m) => m.type === 'user' && m.uuid === 'next')
+  emitLine(c.child, sj.lifecycle('next', 'queued'))
+  emitLine(c.child, sj.init('contract-session'))
+  emitLine(c.child, sj.text('background task finished', { id: 'self-started' }))
+  emitLine(c.child, sj.success())
+  await flush()
+  const ownerOf = (text: string) =>
+    c.h.broadcasts.find(
+      (b) => b.event.kind === 'assistant-text' && b.event.text === text && b.live === undefined
+    )?.event.execution
+  expect(ownerOf('background task finished')?.messageId).toBeUndefined()
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ turnOpen: true, outboxInFlight: 1 })
+  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(false)
+  emitLine(c.child, sj.lifecycle('next', 'started'))
+  emitLine(c.child, { type: 'user', isReplay: true, uuid: 'next', message: { content: 'next' } })
+  emitLine(c.child, sj.text('reply to next', { id: 'reply-next' }))
+  await flush()
+  expect(ownerOf('reply to next')).toMatchObject({ messageId: 'next', turnId: 'next' })
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'running', turnOpen: true })
+  emitLine(c.child, sj.success())
+  emitLine(c.child, sj.lifecycle('next', 'completed'))
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+  const shadow = mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)!
+  expect(shadow.mismatches).toBe(0)
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+})

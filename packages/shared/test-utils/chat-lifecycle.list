@@ -19,3 +19,7 @@ packages/domains/terminal/src/server/agents/codex/codex-chat-session.fake.test.t
 packages/domains/terminal/src/server/agents/codex/codex-driver-turns.test.ts
 packages/domains/terminal/src/shared/chat-timeline-replay.test.ts
 packages/domains/terminal/src/client/useChatSession.test.tsx
+packages/domains/terminal/src/server/agents/codex/codex-chat-session.test.ts
+packages/domains/terminal/src/server/agents/codex/codex-protocol-drift.test.ts
+packages/domains/terminal/src/server/agents/codex/codex-server-requests.test.ts
+packages/domains/terminal/src/shared/chat-timeline-checkpoint.test.ts

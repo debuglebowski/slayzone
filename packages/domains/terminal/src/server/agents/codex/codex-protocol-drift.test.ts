@@ -595,6 +595,10 @@ describe('codex protocol drift: recorded runs through the driver', () => {
         const sent = h.sent.filter((m) => m.method === rec.method && m.id !== undefined)
         return sent[rec.n]?.id
       }
+      // Recordings store every turn id as `{{turnId}}`; live ids are unique per turn
+      // (the driver fences a repeated id as a duplicate), so each recorded
+      // `turn/start` opens its own id, as the fake CLI does.
+      let turnSerial = 0
       // Which processes resumed a thread (their first request after initialize).
       const resumed = new Set<number>()
       let proc = -1
@@ -620,6 +624,7 @@ describe('codex protocol drift: recorded runs through the driver', () => {
             recordedMethods.set(msg.id, { method: msg.method, n })
           }
           if (msg.method === 'turn/start') {
+            turnSerial += 1
             const input = ((msg.params as Json).input as Array<{ text: string }>)[0]?.text ?? ''
             h.driver.sendUserMessage(input)
             await flush()
@@ -649,11 +654,14 @@ describe('codex protocol drift: recorded runs through the driver', () => {
         const thread = (msg.params as Json | undefined)?.threadId
         if (method === 'turn/completed' && (thread === undefined || thread === '{{threadId}}'))
           turnsCompleted += 1
-        let line = r.line
+        let line =
+          thread === undefined || thread === '{{threadId}}'
+            ? r.line.replaceAll('{{turnId}}', `turn-${turnSerial}`)
+            : r.line
         if (method === undefined && msg.id !== undefined) {
           const id = driverIdFor(msg.id)
           if (id === undefined) continue
-          line = JSON.stringify({ ...msg, id })
+          line = JSON.stringify({ ...(JSON.parse(line) as Json), id })
         }
         const warn = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => {
           problems.push(`parse error: ${a.map(String).join(' ').slice(0, 200)}`)

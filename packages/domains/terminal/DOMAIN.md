@@ -120,7 +120,8 @@ distinct reports per process. Observer or diagnostics failure never controls cha
 Unchanged token fragments cause no extra comparison.
 
 `AgentEvent.execution` carries a process-local execution identity and its source:
-`provider` for Codex's native turn IDs, `ordered` for Claude's serial stream. An
+`provider` for Codex's native turn IDs, `lifecycle` for Claude executions bounded
+by its `command_lifecycle` records, `ordered` for a Claude CLI without them. An
 optional `messageId` links that execution to its original outbox request; steering
 joins it without replacing the identity. `turn-started` is an internal binding
 event, not a timeline row. Stream snapshots and synthesized saved blocks retain
@@ -136,12 +137,22 @@ Native IDs can precede their host correlation. A fast completion with neither a
 known active ID nor a correlated host ID retains the existing ordered fallback;
 that unproven association also remains a cutover gate.
 
-Claude assigns ordered IDs from the host request (or a fresh autonomous ID),
-retains live helper/job ancestry, and deduplicates result UUIDs and optional
-process-local result indices. Recent UUIDs and ended jobs are capped at 256;
-active work is retained. This is inferred attribution: an unseen late result with
-no native request identity, known UUID, or usable ordered index cannot be proven
-to belong to an older request. That protocol limitation remains a cutover gate.
+Claude bounds executions with `command_lifecycle` (orderings measured on 2.1.326):
+`started X` precedes every output of message X; a turn's result precedes the next
+message's `started`; a message taken mid-turn (steering) gets `started` inside the
+running turn and joins it; a turn the CLI starts by itself has no `started`. So
+from the first lifecycle record of a process on, an execution begins at `started`
+(or at self-started output), never at the host's write: output still in the pipe
+when the host writes (a stopped request's tail, a self-started turn) keeps its own
+owner. A self-started turn's end does not consume the written message's
+expectation, and that message's `started` resumes its turn. A stopped request's
+late tail is fenced, not saved: the timeline reads a saved result as the end of
+the turn it follows. A CLI without lifecycle records keeps `ordered` attribution
+from the host write, an unprovable inference. Live helper/job ancestry is retained;
+result UUIDs and process-local result indices are deduplicated. Recent UUIDs and
+ended jobs are capped at 256; active work is retained. Delivery acknowledgements
+(`command-lifecycle`, `user-replay`, `heartbeat`) carry no execution for either
+provider.
 
 Authoritative cutover still requires migration of all status consumers together.
 Answering a prompt resumes the main turn only when that prompt parked it (it

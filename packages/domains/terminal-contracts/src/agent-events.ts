@@ -11,14 +11,17 @@ import type { ChatModelInfo } from './chat-model-catalog'
 import type { WorkspaceChangesEvent } from './workspace-changes'
 
 /** Identity of one execution, scoped to its owning process generation.
- * `provider` preserves a native turn id; `ordered` is inferred from a serial
- * stream and cannot prove the origin of an unseen, unlabelled late packet.
+ * `provider` preserves a native turn id; `lifecycle` is bounded by the provider's
+ * own per-message records (Claude `command_lifecycle`): a message's execution
+ * starts at its `started`, a self-started one at output no `started` preceded;
+ * `ordered` is inferred from a serial stream and cannot prove the origin of an
+ * unseen, unlabelled late packet.
  * `messageId` links an execution to the host's original outbox request; steering
  * adds messages to that execution without replacing its identity.
  */
 export interface AgentExecution {
   readonly turnId: string
-  readonly source: 'provider' | 'ordered'
+  readonly source: 'provider' | 'lifecycle' | 'ordered'
   readonly messageId?: string
 }
 

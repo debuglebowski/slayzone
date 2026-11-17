@@ -6,12 +6,20 @@ import {
   normalizeSubAgentPhase
 } from '../../shared/sub-agent-lifecycle'
 
-/** Claude's stream has no universal native turn id. Keep ordered attribution
- * explicit, retain ownership of live tools/helpers/jobs across root turns, and
- * suppress identifiable duplicate results. An unseen result with neither a
- * turn id nor a previously observed uuid/index remains a protocol limitation. */
+/** Claude's stream has no universal native turn id. A CLI that reports
+ * `command_lifecycle` bounds each execution itself (measured on 2.1.326):
+ * `started` precedes every output of its message, a turn's result precedes the
+ * next message's `started`, a message taken mid-turn starts inside the running
+ * turn, and a turn the CLI starts by itself has no `started`. From the first
+ * lifecycle record on, executions begin at `started` (or at self-started output),
+ * never at the host's write — output still in the pipe when the host writes
+ * keeps its own owner. Without lifecycle records ownership stays `ordered`
+ * (inferred from the write). Ownership of live tools/helpers/jobs is retained
+ * across root turns, and identifiable duplicate results are suppressed. */
 export class ClaudeTurnAttribution {
   private current: AgentExecution | undefined
+  /** The CLI reports `command_lifecycle`: it, not the host's write, starts executions. */
+  private lifecycle = false
   private readonly tools = new Map<string, AgentExecution>()
   private readonly parents = new Map<string, string>()
   private readonly helpers = new Map<string, boolean>()
@@ -22,13 +30,34 @@ export class ClaudeTurnAttribution {
 
   constructor(private readonly emitStart: (event: AgentEvent) => void) {}
 
+  /** The host wrote message `messageId` (`joinCurrent`: added to the running turn). */
   begin(messageId?: string, joinCurrent = false): void {
+    // Its `started` begins (or joins) the execution; nothing is known before.
+    if (this.lifecycle && messageId) return
     if (this.current && (!messageId || joinCurrent || this.current.messageId === messageId)) return
     this.current = {
       turnId: messageId ?? randomUUID(),
       source: 'ordered',
       ...(messageId ? { messageId } : {})
     }
+    this.emitStart({ kind: 'turn-started', execution: { ...this.current } })
+  }
+
+  /** `command_lifecycle started`: a message taken while a turn runs joins it. */
+  private started(messageId: string): void {
+    if (this.current) {
+      // The process's first write began it before the CLI showed it reports lifecycle.
+      if (this.current.messageId === messageId)
+        this.current = { ...this.current, source: 'lifecycle' }
+      return
+    }
+    this.current = { turnId: messageId, source: 'lifecycle', messageId }
+    this.emitStart({ kind: 'turn-started', execution: { ...this.current } })
+  }
+
+  /** A turn the CLI started by itself: output with no `started` before it. */
+  private selfStarted(): void {
+    this.current = { turnId: randomUUID(), source: this.lifecycle ? 'lifecycle' : 'ordered' }
     this.emitStart({ kind: 'turn-started', execution: { ...this.current } })
   }
 
@@ -40,13 +69,13 @@ export class ClaudeTurnAttribution {
       event.kind === 'user-replay' ||
       event.kind === 'heartbeat'
     ) {
-      if (
-        event.kind === 'command-lifecycle' &&
-        event.state === 'cancelled' &&
-        this.current?.messageId === event.commandUuid
-      ) {
-        this.current = undefined
-        this.clearFinishedTools()
+      if (event.kind === 'command-lifecycle') {
+        this.lifecycle = true
+        if (event.state === 'started') this.started(event.commandUuid)
+        if (event.state === 'cancelled' && this.current?.messageId === event.commandUuid) {
+          this.current = undefined
+          this.clearFinishedTools()
+        }
       }
       return event
     }
@@ -81,7 +110,13 @@ export class ClaudeTurnAttribution {
         'stream-block-start',
         'stream-block-delta'
       ].includes(event.kind)
-    if (!execution && !parent && mainProgress) this.begin()
+    if (
+      !execution &&
+      !parent &&
+      !this.current &&
+      (mainProgress || (this.lifecycle && event.kind === 'result'))
+    )
+      this.selfStarted()
     if (!execution && !parent) execution = this.current
     const owned = {
       ...event,
@@ -160,6 +195,7 @@ export class ClaudeTurnAttribution {
 
   dispose(): void {
     this.current = undefined
+    this.lifecycle = false
     this.tools.clear()
     this.parents.clear()
     this.helpers.clear()
