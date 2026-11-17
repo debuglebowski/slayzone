@@ -191,6 +191,29 @@ describe('a working copy written while it is read in ranges', () => {
   })
 })
 
+describe('a moving version ref read in ranges', () => {
+  it('stays on the version its first range resolved, though a newer one lands mid-read', async () => {
+    const A = Buffer.alloc(BYTE_RANGE_MAX_CHUNK * 2 + 99, 0x61)
+    const B = Buffer.alloc(BYTE_RANGE_MAX_CHUNK * 2 + 99, 0x62)
+    await stores.whole.updateArtifact(h.slayDb, { id: artifactId, content: A.toString('latin1') })
+    await stores.whole.createArtifactVersion(h.slayDb, { artifactId })
+    const open = openArtifactReaderOf(stores.ranged)!
+    for (const ref of ['current', 'latest'] as const) {
+      const reader = (await open(h.slayDb, artifactId, { kind: 'version', ref }))!
+      // A newer version lands after the first range was read.
+      const next = ref === 'current' ? B : A
+      await stores.whole.updateArtifact(h.slayDb, {
+        id: artifactId,
+        content: next.toString('latin1')
+      })
+      await stores.whole.createArtifactVersion(h.slayDb, { artifactId })
+      const parts: Uint8Array[] = []
+      for await (const part of reader.chunks) parts.push(part)
+      expect(Buffer.concat(parts).equals(ref === 'current' ? A : B)).toBe(true)
+    }
+  })
+})
+
 describe('a bounded computer: every byte read in ranges', () => {
   it('readArtifactBytes and getArtifactPath', async () => {
     await stores.whole.updateArtifact(h.slayDb, { id: artifactId, content: BIG.toString('latin1') })

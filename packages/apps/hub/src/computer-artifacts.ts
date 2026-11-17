@@ -160,15 +160,21 @@ export function createComputerArtifactStorage(opts: {
     spec: ArtifactReadSpec,
     signal?: AbortSignal
   ): Promise<ArtifactRangeReader> {
+    let asked = spec
     const read = (offset: number, length: number) =>
       call(
         owner,
         'readRange',
-        [artifactId, spec, offset, length],
+        [artifactId, asked, offset, length],
         undefined,
         signal
       ) as Promise<ArtifactRangePage>
     const first = await read(0, BYTE_RANGE_MAX_CHUNK)
+    // A version ref can move (`current`, `latest`, `HEAD~1`, `0`…): the later ranges
+    // name the version number the first one resolved, so a version landing mid-read
+    // never mixes in (version numbers do not move).
+    if ((spec.kind === 'version' || spec.kind === 'currentVersion') && first.version)
+      asked = { kind: 'version', ref: first.version.version_num }
     let firstServed = false
     const fetch = (offset: number, length: number) => {
       if (offset === 0 && !firstServed) {
