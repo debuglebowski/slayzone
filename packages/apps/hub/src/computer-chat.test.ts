@@ -8,6 +8,143 @@ import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
+import { HubDialer, createMemoryCredentialStore } from '@slayzone/computer-transport/client'
+import { HubToComputerMethods as M } from '@slayzone/computer-transport/shared'
+import { currentRequestAbort, runWithRequestAbort } from '@slayzone/platform/request-abort'
+import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
+import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
+import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
+
+test.each(['before', 'during'])(
+  'default gateway owner cleanup escapes %s caller abort, retaining actor and task scope',
+  async (when) => {
+    const h = await createTestHarness()
+    const hub = await startLoopbackHub()
+    const controller = new AbortController()
+    const fault = new Error('fixture caller aborted')
+    const scope = { kind: 'task' as const, taskId: 'task', projectId: null }
+    const identity = { id: 'c', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 1 }
+    const actor = {
+      userId: 'authorized-user',
+      route: 'test default abort cleanup',
+      pathScope: scope
+    }
+    const requests: Array<{ kind: string; token?: string; identity?: unknown }> = []
+    let entered!: () => void, reply: ((value: unknown) => void) | undefined
+    const preparing = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const dialer = new HubDialer({
+      url: hub.url,
+      identity: {
+        name: 'abort-cleanup',
+        platform: `${process.platform}-${process.arch}`,
+        version: 'test',
+        capabilities: [],
+        chatControlInvocations: true,
+        chatControlLeases: true
+      },
+      credentialStore: createMemoryCredentialStore(),
+      joinToken: 'jt-valid',
+      onHubRequest: async (method, raw, receivedActor) => {
+        expect(receivedActor).toEqual(actor)
+        expect(method).toBe(M.chatRequest)
+        const request = raw as (typeof requests)[number]
+        requests.push(request)
+        expect(request.identity).toEqual(identity)
+        if (request.kind === 'control.prepare') {
+          entered()
+          return new Promise((resolve) => {
+            reply = resolve
+          })
+        }
+        if (request.kind === 'control.cancel') return { ok: true }
+        throw new Error('No durable invocation is allowed after caller abort')
+      }
+    })
+    let result: Promise<unknown> | undefined
+    try {
+      dialer.start()
+      const { computerId } = await dialer.events.once('connected')
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      const services = createComputerChatServices({
+        db: h.slayDb,
+        legacyData: createDbChatDataOps(h.slayDb, taskSessionStore),
+        attachments: { read: async () => new Uint8Array() },
+        request: (pc, request) => hub.gateway.request(pc, M.chatRequest, request),
+        chatControlInvocations: (id) =>
+          hub.gateway.listComputers().find((c) => c.computerId === id)?.chatControlInvocations ===
+          true,
+        chatControlLeases: (id) =>
+          hub.gateway.listComputers().find((c) => c.computerId === id)?.chatControlLeases === true,
+        resolveComputer: async () => computerId,
+        defaultComputer: async () => computerId,
+        hasLiveTask: async () => false,
+        gate: async (_pc, taskId) => {
+          expect(taskId).toBe('task')
+          expect(currentSecurityContext()?.actor).toBe(actor.userId)
+          expect(currentPathScope()).toEqual(scope)
+        }
+      })
+      await services.ownership.register({ ...identity, computerId })
+      const authorized = <T>(work: () => T) =>
+        runWithSecurityContext({ actor: actor.userId, ip: null, route: actor.route }, () =>
+          runInPathScope(scope, work)
+        )
+      if (when === 'before') controller.abort(fault)
+      result = authorized(() =>
+        runWithRequestAbort(controller.signal, async () => {
+          try {
+            return await services.relay.ops.interrupt({
+              taskId: 'task',
+              tabId: 'tab',
+              mode: 'claude-chat',
+              cwd: '/tmp'
+            })
+          } finally {
+            expect(currentRequestAbort()).toBe(controller.signal)
+            expect(currentSecurityContext()?.actor).toBe(actor.userId)
+            expect(currentPathScope()).toEqual(scope)
+          }
+        })
+      )
+      void result.catch(() => undefined)
+      if (when === 'during') {
+        await preparing
+        controller.abort(fault)
+      }
+      const failure = await result.catch((error) => error)
+      const cancellations = requests.filter((r) => r.kind === 'control.cancel')
+      expect(cancellations).toHaveLength(1)
+      expect(failure).toBe(fault)
+      expect(requests.filter((r) => r.kind === 'control.prepare')).toHaveLength(
+        when === 'during' ? 1 : 0
+      )
+      if (when === 'during') {
+        expect(cancellations[0].token).toBe(requests[0].token)
+        reply!({
+          available: true,
+          token: requests[0].token,
+          spawnId: 'old',
+          acknowledged: true,
+          pendingDurability: true
+        })
+      }
+      expect(requests.some((r) => r.kind === 'invoke')).toBe(false)
+      expect(await authorized(() => hub.gateway.request(computerId, M.ping, {}))).toEqual({
+        ts: expect.any(Number)
+      })
+    } finally {
+      reply?.({ available: false })
+      await result?.catch(() => undefined)
+      await dialer.stop()
+      await hub.close()
+      h.cleanup()
+    }
+  }
+)
 
 test('first chat read migrates legacy history then all writes stay on its computer', async () => {
   const h = await createTestHarness(),

@@ -1,4 +1,5 @@
 import { type ByteRangePage, collectByteRanges } from '@slayzone/platform/bounded-reads'
+import { currentRequestAbort, runWithRequestAbort } from '@slayzone/platform/request-abort'
 import { withUploadedBytes } from './computer-uploads'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
 import type { ChatDeps } from '@slayzone/terminal/server'
@@ -950,6 +951,14 @@ export function createComputerChatServices(opts: {
   }
   const relay = createHubChatRelay({
     ...opts,
+    controlSignal: opts.controlSignal ?? currentRequestAbort,
+    // Owner cleanup takes the stop-control route its prepare/renew took
+    // (`stopRequest`), only outside the caller's abort ALS: an aborted caller
+    // must not refuse its own cancel locally. Security/path scope is kept.
+    controlCleanupRequest:
+      opts.controlCleanupRequest ??
+      ((computerId, request) =>
+        runWithRequestAbort(undefined, () => opts.request(computerId, request))),
     gate,
     onConversationFailure: fence,
     conversationFence,
