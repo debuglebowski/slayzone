@@ -226,7 +226,8 @@ class HydrateScan {
         this.decide(event.history ? 'imported' : 'user')
         break
       case 'tool-call':
-        this.toolCall = true
+        // A background child's tools can outlive a completed main turn.
+        if (event.parentToolUseId == null) this.toolCall = true
         break
     }
   }
@@ -1522,8 +1523,14 @@ export function createChatTransport(
       // Treating it as turn-open left Codex sessions stuck `running` post-spawn/
       // -resume. A turn opens when the outbox WRITES a user message
       // (`markTurnStarted`) — not when one is accepted, which may be before the
-      // process even runs; `tool-call` stays as a mid-turn safety net.
-      if (event.kind === 'tool-call') {
+      // process even runs; main-thread `tool-call` stays as a mid-turn safety
+      // net. Child activity cannot reopen the parent, and parallel tool activity
+      // cannot unpark a turn while another prompt still needs the user.
+      if (
+        event.kind === 'tool-call' &&
+        event.parentToolUseId == null &&
+        tab.pendingPrompts.size === 0
+      ) {
         transitionState(tab, 'running')
       } else if (event.kind === 'result') {
         // A completed turn: the agent is responsive, its watchdog restarts start over.

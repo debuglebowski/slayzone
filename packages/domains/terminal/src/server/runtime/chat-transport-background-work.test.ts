@@ -118,6 +118,71 @@ test('a foreground sub-agent ends with its tool result: no background state', as
   expect(h.states).not.toContain('background')
 })
 
+test('child tools after the main result keep the parent idle and its queue ready', async () => {
+  const h = transportHarness()
+  await startTab()
+  const f = h.fakes[0]
+  await sendAndStart(f, 'u1')
+  emitLine(f, sj.toolUse('toolu_a', 'Agent', { prompt: 'x', run_in_background: true }))
+  emitLine(f, agentStarted('a1', 'toolu_a'))
+  emitLine(f, asyncLaunched('toolu_a', 'a1'))
+  emitLine(f, sj.success('launched'))
+  emitLine(f, sj.lifecycle('u1', 'completed'))
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+
+  emitLine(f, { ...sj.toolUse('child_tool'), parent_tool_use_id: 'toolu_a' })
+  await h.savedWhen((e) => e.kind === 'tool-call' && e.id === 'child_tool')
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+  expect(mgr.getChatSessionState(SESSION)).toBe('background')
+  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
+
+  emitLine(f, { ...toolResult('child_tool'), parent_tool_use_id: 'toolu_a' })
+  emitLine(f, taskNotification('a1', 'toolu_a', 'completed'))
+  await until(() => mgr.getChatSessionState(SESSION) === 'idle')
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+  expect(h.states).toEqual(['starting', 'idle', 'running', 'background', 'idle'])
+})
+
+test.each([null, 'toolu_a'])(
+  'tool activity cannot unpark a pending prompt (parent %s)',
+  async (parent) => {
+    const h = transportHarness()
+    await startTab()
+    const f = h.fakes[0]
+    await sendAndStart(f, 'u1')
+    emitLine(f, sj.canUseTool('r1', 'waiting_tool'))
+    await until(() => mgr.isSessionAwaitingUserInput(TAB_OPTS.tabId))
+
+    emitLine(f, { ...sj.toolUse('parallel_tool'), parent_tool_use_id: parent })
+    await h.savedWhen((e) => e.kind === 'tool-call' && e.id === 'parallel_tool')
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({
+      state: 'idle',
+      turnOpen: true,
+      pendingRequestIds: ['r1']
+    })
+    expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(false)
+  }
+)
+
+test('a child finishing cannot close a newer main turn', async () => {
+  const h = transportHarness()
+  await startTab()
+  const f = h.fakes[0]
+  await sendAndStart(f, 'u1')
+  emitLine(f, sj.toolUse('toolu_a', 'Agent', { prompt: 'x', run_in_background: true }))
+  emitLine(f, agentStarted('a1', 'toolu_a'))
+  emitLine(f, asyncLaunched('toolu_a', 'a1'))
+  emitLine(f, sj.success('launched'))
+  emitLine(f, sj.lifecycle('u1', 'completed'))
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+
+  await sendAndStart(f, 'u2')
+  emitLine(f, taskNotification('a1', 'toolu_a', 'completed'))
+  await h.savedWhen((e) => e.kind === 'sub-agent' && e.status === 'completed')
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'running', turnOpen: true })
+  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(false)
+})
+
 test('a prompt waiting while a background sub-agent runs reads idle (needs you)', async () => {
   const h = transportHarness()
   await startTab()
