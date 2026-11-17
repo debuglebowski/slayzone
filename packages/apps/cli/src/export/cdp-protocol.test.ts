@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
-import { CdpFrameReader, launchBrowser } from './cdp'
+import { CdpFrameReader, browserArgs, launchBrowser } from './cdp'
 import { renderPdf } from './render'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cdp-proto-'))
@@ -376,4 +376,18 @@ describe.skipIf(process.platform === 'win32')('N5: the liveness deadline is its 
       )
     ).rejects.toThrow(/stopped responding/)
   }, 30_000)
+})
+
+// A crashed page must end its renderer at once. On Linux, Chrome's crashpad holds a
+// crashing sandboxed renderer until its handler has dumped it; where the handler can't
+// (GitHub's Ubuntu runners: Yama ptrace_scope 1, the setuid sandbox's PID namespace)
+// the renderer never exits, no crash event comes, and a long command waits forever.
+describe('browser flags', () => {
+  test('Linux runs the export browser without crashpad; other platforms keep it', () => {
+    expect(browserArgs('/p', 'linux')).toContain('--disable-crashpad-for-testing')
+    expect(browserArgs('/p', 'darwin')).not.toContain('--disable-crashpad-for-testing')
+    expect(browserArgs('/p', 'win32')).not.toContain('--disable-crashpad-for-testing')
+    // The page to open stays last.
+    expect(browserArgs('/p', 'linux').at(-1)).toBe('about:blank')
+  })
 })

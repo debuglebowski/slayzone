@@ -201,6 +201,14 @@ export function browserArgs(userDataDir: string, platform = process.platform): s
   if (platform === 'darwin') args.push('--use-mock-keychain')
   // Chromium refuses to start as root with its sandbox on (containers, CI).
   if (platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
+  // No crash handler: a renderer that crashes (out of memory on a huge document) must
+  // die at once, so the browser reports it and the export fails fast. On Linux,
+  // crashpad holds a crashing sandboxed renderer until its handler has dumped it, and
+  // where the handler can't (Yama ptrace_scope 1 with the setuid sandbox's PID
+  // namespace: Ubuntu, GitHub's runners) the renderer never exits and no crash event
+  // ever comes. A throwaway export has no use for the dump either (it would land in the
+  // person's own browser crash reports).
+  if (platform === 'linux') args.push('--disable-crashpad-for-testing')
   args.push('about:blank')
   return args
 }

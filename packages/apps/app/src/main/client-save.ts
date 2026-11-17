@@ -184,6 +184,48 @@ function removeIfOursNow(c: Created): void {
 }
 
 /**
+ * A file this download committed, HELD OPEN until the download settles. `dev`+`ino`
+ * alone can't tell a committed file from the person's replacement once the partial is
+ * gone: a filesystem recycles a freed inode for the next file created (ext4 hands it
+ * straight back), so a placed file they deleted and wrote anew can carry its exact
+ * identity. A held file is never freed, so its inode can't be recycled: a path with
+ * that `dev`+`ino` IS this file. `size`/`mtimeNs` are as committed — a file written to
+ * since (edited in place) holds the person's bytes and is theirs too.
+ */
+interface Placed {
+  path: string
+  handle: FileHandle
+  dev: bigint
+  ino: bigint
+  size: bigint
+  mtimeNs: bigint
+}
+
+/** Record `handle` (open on the file just committed at `path`) as placed. */
+async function placedAt(path: string, handle: FileHandle): Promise<Placed> {
+  const st = await handle.stat({ bigint: true }).catch(async (err: unknown) => {
+    await handle.close().catch(ignore)
+    throw err
+  })
+  return { path, handle, dev: st.dev, ino: st.ino, size: st.size, mtimeNs: st.mtimeNs }
+}
+
+/**
+ * Remove `p` only if the path still holds that very file, unchanged since it was
+ * committed; then let it go. Synchronous up to the close (a quit can't wait).
+ */
+function removePlacedNow(p: Placed): void {
+  try {
+    const st = lstatSync(p.path, { bigint: true })
+    if (st.dev === p.dev && st.ino === p.ino && st.size === p.size && st.mtimeNs === p.mtimeNs)
+      unlinkSync(p.path)
+  } catch {
+    // Gone already.
+  }
+  p.handle.close().catch(ignore)
+}
+
+/**
  * Commit a finished partial (created by this download) at `dest` without replacing
  * anything there, taking `name (n).ext` when the name is taken.
  *  - A hard link shares the partial's identity, so the candidate is recorded with that
@@ -192,14 +234,15 @@ function removeIfOursNow(c: Created): void {
  *  - Any link error but EEXIST (no hard links: FAT/exFAT gives EPERM/EISDIR/ENOTSUP,
  *    SMB, another volume) falls back to an exclusive create (`wx`: an existing name is
  *    never opened) and a copy into it, recorded once the file exists.
- * `track` receives each candidate while it is in play; the committed one is returned.
+ * `track` receives each candidate while it is in play; the committed one is returned,
+ * held open (see `Placed`) from before the partial goes: its inode is never free.
  */
 async function commitNoClobber(
   partial: Created,
   dest: string,
   fsOps: CommitFs,
   track: (candidate: Created | null) => void
-): Promise<Created> {
+): Promise<Placed> {
   const dir = dirname(dest)
   const name = basename(dest)
   for (let n = 1; ; n++) {
@@ -211,8 +254,10 @@ async function commitNoClobber(
       (err: unknown) => err as NodeJS.ErrnoException
     )
     if (!linkErr) {
+      // Opened while the partial still holds the inode: it is ours, never recycled.
+      const held = await open(partial.path, 'r')
       await unlink(partial.path).catch(ignore)
-      return linked
+      return placedAt(candidate, held)
     }
     track(null)
     if (linkErr.code === 'EEXIST') continue
@@ -224,15 +269,14 @@ async function commitNoClobber(
     const st = await handle.stat({ bigint: true })
     const copy: Created = { path: candidate, dev: st.dev, ino: st.ino }
     track(copy)
-    await fsOps
-      .copyTo(partial.path, handle)
-      .finally(() => handle.close())
-      .catch((err: unknown) => {
-        removeIfOursNow(copy)
-        throw err
-      })
+    // The handle stays open on success: it is what holds the copy (see `Placed`).
+    await fsOps.copyTo(partial.path, handle).catch(async (err: unknown) => {
+      await handle.close().catch(ignore)
+      removeIfOursNow(copy)
+      throw err
+    })
     await unlink(partial.path).catch(ignore)
-    return copy
+    return placedAt(candidate, handle)
   }
 }
 
@@ -333,8 +377,8 @@ function mkdirTracked(dir: string): string[] {
  * download created: its files and the folders it made, never anything that existed.
  */
 function directoryTarget(root: string, fsOps: CommitFs): Target {
-  /** Committed files of this download, by identity. Cleared once it finished. */
-  const placed: Created[] = []
+  /** Committed files of this download, held open. Released once it settled. */
+  const placed: Placed[] = []
   const madeDirs: string[] = []
   const startPath = newPathGuard()
   let current: { path: string; dest: string; partial: Created; handle: FileHandle } | null = null
@@ -375,14 +419,14 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
     if (committing === commit) committing = null
     if (dead) {
       // Aborted while committing: this file belongs to a download that failed.
-      removeIfOursNow(committed)
+      removePlacedNow(committed)
       throw cancelled()
     }
     placed.push(committed)
   }
   const removeCreated = (): void => {
     if (finished) return
-    for (const f of placed) removeIfOursNow(f)
+    for (const f of placed) removePlacedNow(f)
     placed.length = 0
     // Deepest first; only folders this download made, and only while empty.
     for (const d of [...madeDirs].reverse()) {
@@ -431,7 +475,8 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
       await commitCurrent()
       // Finished: every file is the person's now.
       finished = true
-      placed.length = 0
+      const held = placed.splice(0)
+      await Promise.all(held.map((f) => f.handle.close().catch(ignore)))
       madeDirs.length = 0
     },
     // Single-flight: two aborts at once (a failed close and a window going away) must

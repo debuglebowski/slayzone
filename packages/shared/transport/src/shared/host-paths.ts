@@ -21,23 +21,25 @@ export const HOST_ROOT_ROUTERS: readonly string[] = ['menu']
 /** `app.<router>`s served by the desktop host (capability bridge). */
 export const HOST_APP_ROUTERS: readonly string[] = [
   'auth',
-  'browser',
   'clipboard',
   'dialog',
   'files',
   'floatingAgent',
   'meta',
-  'screenshot',
   'shell',
   'shortcuts',
   'taskWindows',
-  'webview',
   'window'
 ]
 
-/** `app.<router>`s served from the hub's own data — stay on the scoped hub. */
+/**
+ * `app.<router>`s served from the hub's own data — stay on the scoped hub.
+ * `browserRelay` is the hub's own relay: a task's browser panel serves its tabs to
+ * the hub that owns the task, so it must reach that hub, never the local one.
+ */
 export const HUB_APP_ROUTERS: readonly string[] = [
   'backup',
+  'browserRelay',
   'exportImport',
   'feedback',
   'leaderboard',

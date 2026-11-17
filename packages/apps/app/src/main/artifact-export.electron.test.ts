@@ -80,6 +80,25 @@ app.whenReady().then(async () => {
 
 const SHORT = { loadWaitMs: 2_000, unresponsiveMs: 2_000, stallMs: 3_000, readyWaitMs: 5_000 }
 
+/**
+ * Linux needs two launch flags a CI runner can't do without (test-only: the export
+ * window keeps `sandbox: true`, and macOS keeps the full sandbox):
+ *  - `--no-sandbox` when the SUID sandbox helper can't work. npm installs
+ *    `chrome-sandbox` unprivileged, not root-owned with mode 4755, and where user
+ *    namespaces are restricted (Ubuntu 24.04's AppArmor default, GitHub's runners)
+ *    Chromium falls back to it and aborts rather than run unsandboxed.
+ *  - `--ozone-platform=headless` without a display: the runner has no X or Wayland.
+ */
+function linuxLaunchArgs(): string[] {
+  if (process.platform !== 'linux') return []
+  const args: string[] = []
+  const helper = path.join(path.dirname(ELECTRON_BIN), 'chrome-sandbox')
+  const st = fs.statSync(helper, { throwIfNoEntry: false })
+  if (!st || st.uid !== 0 || (st.mode & 0o4000) === 0) args.push('--no-sandbox')
+  if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) args.push('--ozone-platform=headless')
+  return args
+}
+
 let child: ChildProcess | null = null
 
 /** Render each `[name, html, format]` in one Electron run. */
@@ -91,10 +110,14 @@ function run(cases: Array<[string, string, 'pdf' | 'png']>, budgetMs = 90_000): 
       SLZ_TEST_TIMINGS: JSON.stringify(SHORT)
     }
     delete env.ELECTRON_RUN_AS_NODE
-    const p = spawn(ELECTRON_BIN, [driver, `--user-data-dir=${path.join(tmp, 'profile')}`], {
-      env,
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
+    const p = spawn(
+      ELECTRON_BIN,
+      [...linuxLaunchArgs(), driver, `--user-data-dir=${path.join(tmp, 'profile')}`],
+      {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
     child = p
     let out = ''
     let err = ''

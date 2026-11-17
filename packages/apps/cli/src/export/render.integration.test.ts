@@ -10,7 +10,7 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { defaultBrowserEnv, findBrowser } from './browser'
 import { buildDocumentHtml } from '@slayzone/task-artifacts/export-html'
-import { launchBrowser } from './cdp'
+import { type Browser, launchBrowser } from './cdp'
 import { defaultExportDeps, exportArtifact, type ExportDeps } from './export-artifact'
 import { renderPdf, renderPng } from './render'
 
@@ -116,38 +116,47 @@ describe.skipIf(!BROWSER)('render in a local browser', () => {
 })
 
 describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () => {
+  let b: Browser | null = null
+  // A test that times out never reaches its own cleanup: the browser goes here, always.
+  afterEach(async () => {
+    await b?.close({ kill: true })
+    b = null
+  })
+
   // The renderer dies while a long command runs; the browser process keeps answering
   // its liveness check. The command must fail at once, not wait forever.
   test('a long command on a crashed page rejects within seconds', { timeout: 60_000 }, async () => {
     // A liveness interval far beyond the test: only the crash itself can end it.
-    const b = await launchBrowser(BROWSER as string, { livenessIntervalMs: 120_000 })
-    try {
-      await b.send('Target.setDiscoverTargets', { discover: true })
-      const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
-        url: 'about:blank'
-      })
-      const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
-        targetId,
-        flatten: true
-      })
-      await b.send('Inspector.enable', {}, sessionId)
-      const long = b.sendLong(
-        'Runtime.evaluate',
-        { expression: 'new Promise(() => {})', awaitPromise: true },
-        sessionId
-      )
-      const outcome = long.then(
-        () => 'resolved',
-        (err: Error) => err.message
-      )
-      const started = Date.now()
-      // Page.crash itself is never answered: the renderer is gone.
-      b.send('Page.crash', {}, sessionId).catch(() => undefined)
-      expect(await outcome).toMatch(/page (crashed|closed) while rendering/)
-      expect(Date.now() - started).toBeLessThan(10_000)
-    } finally {
-      await b.close()
-    }
+    b = await launchBrowser(BROWSER as string, { livenessIntervalMs: 120_000 })
+    await b.send('Target.setDiscoverTargets', { discover: true })
+    const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
+      url: 'about:blank'
+    })
+    const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
+      targetId,
+      flatten: true
+    })
+    await b.send('Inspector.enable', {}, sessionId)
+    const long = b.sendLong(
+      'Runtime.evaluate',
+      { expression: 'new Promise(() => {})', awaitPromise: true },
+      sessionId
+    )
+    const outcome = long.then(
+      () => 'resolved',
+      (err: Error) => err.message
+    )
+    const started = Date.now()
+    // Page.crash itself is never answered: the renderer is gone.
+    b.send('Page.crash', {}, sessionId).catch(() => undefined)
+    // Bounded well inside the test's timeout: a miss fails here, as an assertion.
+    let bound: NodeJS.Timeout | undefined
+    const missed = new Promise<string>((resolve) => {
+      bound = setTimeout(() => resolve('still pending after 20 s'), 20_000)
+    })
+    expect(await Promise.race([outcome, missed])).toMatch(/page (crashed|closed) while rendering/)
+    clearTimeout(bound)
+    expect(Date.now() - started).toBeLessThan(10_000)
   })
 })
 

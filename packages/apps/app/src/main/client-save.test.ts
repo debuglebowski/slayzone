@@ -689,6 +689,19 @@ describe('commits beside a file the person already has', () => {
     await targets.abort(SENDER, id)
     expect(fs.readFileSync(placedA, 'utf8')).toBe('THEIRS NOW')
   })
+
+  // Same file, new content: what they wrote is theirs, an abort never removes it.
+  test('a placed file the person edited in place is never removed by abort', async () => {
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.md', bytes('NEW'))
+    await targets.write(SENDER, id, 'docs/b.md', bytes('B'))
+    const placedA = path.join(picked.dir, 'docs', 'a.md')
+    const ino = fs.statSync(placedA).ino
+    fs.writeFileSync(placedA, 'EDITED BY THEM')
+    expect(fs.statSync(placedA).ino).toBe(ino)
+    await targets.abort(SENDER, id)
+    expect(fs.readFileSync(placedA, 'utf8')).toBe('EDITED BY THEM')
+  })
 })
 
 // #6: a finished download is never removed — not by a window that reloads, closes or
