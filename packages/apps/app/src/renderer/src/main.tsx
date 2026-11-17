@@ -42,6 +42,7 @@ import {
   recordClientError,
   recordRendererEvent
 } from './lib/diagnosticsClient'
+import { isBenignWindowError } from './lib/benignWindowError'
 import { startBootTimingsReport } from './lib/bootTimings'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
@@ -107,6 +108,7 @@ setDirectLinkProbe(
 setDirectRtcPeerFactory((config) => new RTCPeerConnection(config))
 
 window.addEventListener('error', (event) => {
+  if (isBenignWindowError(event)) return
   recordClientError({
     type: 'window.error',
     message: event.message || 'Unknown window error',
