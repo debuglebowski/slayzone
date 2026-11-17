@@ -537,3 +537,72 @@ test('Stop pressed after a write whose turn start still waits on held output kee
     await r.removeSession('tab')
   }
 })
+
+test("an undecided durable control after a stopped turn leaves the next write's turn unstopped", async () => {
+  const { runtime: r, fakes, hold, release, releaseAll } = heldStorage()
+  let control: ReturnType<typeof r.prepareDurableControl> | undefined
+  try {
+    await r.hydrateSession(opts)
+    await r.ensureSpawned('tab')
+    const f = fakes[0]
+    await r.dispatchUserMessage('tab', { id: 'u1', content: [{ type: 'text', text: 'one' }] })
+    await f.written((m) => m.type === 'user' && m.uuid === 'u1')
+    emitLine(f, sj.lifecycle('u1', 'started'))
+    await r.readEventsSince('tab', -1)
+    // u1 is stopped: its stop flags stay until the next turn starts.
+    await r.sendControlRequest('tab', { subtype: 'interrupt' })
+    hold('user-message:u2')
+    hold('result')
+    const sending = r.dispatchUserMessage('tab', {
+      id: 'u2',
+      content: [{ type: 'text', text: 'two' }]
+    })
+    emitLine(f, sj.lifecycle('u1', 'completed'))
+    emitLine(f, sj.aborted())
+    await until(() => f.stdout.readableLength === 0)
+    release('user-message:u2')
+    await f.written((m) => m.type === 'user' && m.uuid === 'u2')
+    // A durable control is prepared (its ACK interrupt sent), then released undecided.
+    control = r.prepareDurableControl('tab', 'abortAndPop')!
+    await control.acknowledged
+    control.close()
+    release('result')
+    await sending
+    await r.readEventsSince('tab', -1)
+    expect(r.getSessionTerminalState('tab')).toBe('running')
+    expect(r.canSteer('tab')).toBe(true)
+  } finally {
+    control?.close()
+    releaseAll()
+    await r.removeSession('tab')
+  }
+})
+
+test("Stop issued after an agent-opened turn's first output was received keeps that turn stopping", async () => {
+  const { runtime: r, fakes, hold, release, releaseAll } = heldStorage()
+  try {
+    await r.hydrateSession(opts)
+    await r.ensureSpawned('tab')
+    const f = fakes[0]
+    await r.dispatchUserMessage('tab', { id: 'u1', content: [{ type: 'text', text: 'one' }] })
+    await f.written((m) => m.type === 'user' && m.uuid === 'u1')
+    emitLine(f, sj.lifecycle('u1', 'started'))
+    emitLine(f, sj.lifecycle('u1', 'completed'))
+    emitLine(f, sj.success('u1 done'))
+    await r.readEventsSince('tab', -1)
+    expect(r.getSessionTerminalState('tab')).toBe('idle')
+    // The agent opens a turn by itself; saving its first output is slow.
+    hold('assistant-text')
+    emitLine(f, sj.text('agent turn'))
+    await until(() => f.stdout.readableLength === 0)
+    await new Promise((resolve) => setImmediate(resolve))
+    await r.sendControlRequest('tab', { subtype: 'interrupt' })
+    release('assistant-text')
+    await r.readEventsSince('tab', -1)
+    expect(r.getSessionTerminalState('tab')).toBe('running')
+    expect(r.canSteer('tab')).toBe(false)
+  } finally {
+    releaseAll()
+    await r.removeSession('tab')
+  }
+})

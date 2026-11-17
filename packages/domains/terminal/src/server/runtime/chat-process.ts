@@ -93,9 +93,10 @@ export class ChatProcess implements OutboxProcess {
    */
   stoppingTurn = false
   /**
-   * Interrupts issued to this process so far. A write's turn start, which may run
-   * after output that preceded the write, keeps the stop of an interrupt issued
-   * after that write.
+   * Decided interrupts issued to this process so far (`stopTurn`, `recordInterrupted`,
+   * an explicit control interrupt; never a durable control's provisional ACK, which is
+   * rolled back unless decided). A turn start that runs after output preceding it
+   * keeps the stop of an interrupt decided since.
    */
   interruptSeq = 0
   /**
@@ -151,6 +152,8 @@ export class ChatProcess implements OutboxProcess {
   /** `driver.start` was called: lines can be handed to it. */
   private driverHasContext = false
   private readonly output: ChatOutputSpool
+  /** `interruptSeq` at receipt of the spooled record being handled (`interruptsAtReceipt`). */
+  private receivedInterrupts: number | null = null
   /** `afterAcceptedOutput` callbacks, by their marker in the output order. */
   private readonly afterOutput = new Map<string, () => void>()
   private readonly boundaries = new Map<
@@ -175,14 +178,14 @@ export class ChatProcess implements OutboxProcess {
       flow: (paused) => this.handle.setOutputPaused?.(paused),
       available: () => this.driverHasContext && !this.waitingForStorage,
       consume: (record) => {
-        const [kind, value] = JSON.parse(record) as
-          | ['line', string]
-          | ['event', AgentEvent]
+        const [kind, value, interrupts] = JSON.parse(record) as
+          | ['line', string, number]
+          | ['event', AgentEvent, number]
           | ['history', AgentEvent[]]
           | ['boundary', string]
           | ['after', string]
-        if (kind === 'line') this.handleLine(value)
-        else if (kind === 'event') this.deliverEvent(value)
+        if (kind === 'line') this.whileReceivedAt(interrupts, () => this.handleLine(value))
+        else if (kind === 'event') this.whileReceivedAt(interrupts, () => this.deliverEvent(value))
         else if (kind === 'history') this.hooks.onHistory?.(this, value)
         else if (kind === 'after') this.runAfterOutput(value)
         else {
@@ -288,7 +291,7 @@ export class ChatProcess implements OutboxProcess {
       if (this.ended || this.replaced || this.inputEnded) return
       if (this.driverHasContext && this.driver.handleControlLine?.(line)) return
       if (!this.driverHasContext || this.waitingForStorage || this.output.busy) {
-        this.output.push(JSON.stringify(['line', line]))
+        this.output.push(JSON.stringify(['line', line, this.interruptSeq]))
       } else this.handleLine(line)
     })
     this.handle.onStdout(lines)
@@ -528,6 +531,25 @@ export class ChatProcess implements OutboxProcess {
     })
   }
 
+  /**
+   * `interruptSeq` when the record being handled was received (the current one for
+   * output handled the moment it arrives). A turn start it causes keeps the stop of
+   * an interrupt decided after it arrived.
+   */
+  get interruptsAtReceipt(): number {
+    return this.receivedInterrupts ?? this.interruptSeq
+  }
+
+  private whileReceivedAt(interrupts: number | undefined, handle: () => void): void {
+    const outer = this.receivedInterrupts
+    this.receivedInterrupts = interrupts ?? null
+    try {
+      handle()
+    } finally {
+      this.receivedInterrupts = outer
+    }
+  }
+
   private handleLine(line: string): void {
     if (this.ended || this.replaced) return
     this.handlingLine = true
@@ -547,7 +569,7 @@ export class ChatProcess implements OutboxProcess {
       !this.handlingLine &&
       (this.waitingForStorage || this.output.busy)
     ) {
-      this.output.push(JSON.stringify(['event', event]))
+      this.output.push(JSON.stringify(['event', event, this.interruptSeq]))
       return
     }
     this.deliverEvent(event)

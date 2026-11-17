@@ -1603,7 +1603,12 @@ export function createChatTransport(
   }
 
   /** `current`: false for a stale turn's background event — it cannot open a turn. */
-  async function commitEventNow(tab: ChatTab, raw: AgentEvent, current = true): Promise<void> {
+  async function commitEventNow(
+    tab: ChatTab,
+    raw: AgentEvent,
+    current = true,
+    interruptsAtReceipt?: number
+  ): Promise<void> {
     const process = tab.proc
     const entry = await tab.log.append(raw)
     // As saved (binary payloads out-of-line): what memory, clients and replays all see.
@@ -1611,7 +1616,7 @@ export function createChatTransport(
     // Folded into the projection before any client can ask for rows after it.
     void tab.projection.then((p) => p?.apply(entry))
     tab.lastOutputTime = Date.now()
-    if (current) observeAgentTurn(tab, process, event)
+    if (current) observeAgentTurn(tab, process, event, interruptsAtReceipt)
     // Before the state machine below: a turn's end with a background sub-agent
     // still running is ONE move, running → background, never through idle.
     tab.work.apply(event)
@@ -1791,7 +1796,9 @@ export function createChatTransport(
     // Liveness does not wait for storage; an attributed stale turn's event is not
     // the current turn's progress (checked again, in order, when it is published).
     if (isProgressEventKind(event.kind) && !staleExecution(proc, event.execution)) noteProgress(tab)
-    void enqueueEvent(tab, () => handleProcessEventNow(tab, proc, event))
+    // Decided interrupts when this event arrived: a turn it opens keeps a later Stop.
+    const interrupts = proc.interruptsAtReceipt
+    void enqueueEvent(tab, () => handleProcessEventNow(tab, proc, event, interrupts))
   }
 
   /** An attributed root event of a turn this process ended, or of another turn than expected. */
@@ -1809,7 +1816,8 @@ export function createChatTransport(
   async function handleProcessEventNow(
     tab: ChatTab,
     proc: ChatProcess,
-    event: AgentEvent
+    event: AgentEvent,
+    interruptsAtReceipt?: number
   ): Promise<void> {
     if (proc.resumeFailed || proc.forkFailed) return
     if (tab.closing || proc.retiring) {
@@ -1997,10 +2005,11 @@ export function createChatTransport(
 
     const split = tab.splitter.route(shown)
     for (const live of split.live) {
-      if (currentProgress) observeAgentTurn(tab, proc, live)
+      if (currentProgress) observeAgentTurn(tab, proc, live, interruptsAtReceipt)
       broadcastLive(tab, live)
     }
-    for (const saved of split.saved) await commitEventNow(tab, saved, currentProgress)
+    for (const saved of split.saved)
+      await commitEventNow(tab, saved, currentProgress, interruptsAtReceipt)
   }
 
   /** What a popped turn may still say: its output and its end. */
@@ -2123,7 +2132,12 @@ export function createChatTransport(
     return !('parentToolUseId' in event) || event.parentToolUseId == null
   }
 
-  function observeAgentTurn(tab: ChatTab, proc: ChatProcess | null, event: AgentEvent): void {
+  function observeAgentTurn(
+    tab: ChatTab,
+    proc: ChatProcess | null,
+    event: AgentEvent,
+    interruptsAtReceipt?: number
+  ): void {
     if (!proc || proc.retiring || !opensAgentTurn(tab, event)) return
     tab.workspaceTracker?.observeAgentTurn({
       tabId: tab.tabId,
@@ -2132,15 +2146,21 @@ export function createChatTransport(
       computerId: tab.respawnOpts.computerId ?? null,
       projectId: tab.respawnOpts.projectId
     })
-    markAgentTurnStarted(tab)
+    markAgentTurnStarted(tab, interruptsAtReceipt)
   }
 
-  /** A turn the agent opened (`opensAgentTurn`): running until its result. */
-  function markAgentTurnStarted(tab: ChatTab): void {
-    tab.turnInterrupted = false
-    if (tab.proc) {
-      tab.proc.stoppedTurn = false
-      tab.proc.stoppingTurn = false
+  /**
+   * A turn the agent opened (`opensAgentTurn`): running until its result. Its stop
+   * flags reset unless an interrupt was decided after its first output arrived
+   * (`interruptsAtReceipt`): that Stop targeted this turn.
+   */
+  function markAgentTurnStarted(tab: ChatTab, interruptsAtReceipt?: number): void {
+    if (!stoppedSince(tab, interruptsAtReceipt)) {
+      tab.turnInterrupted = false
+      if (tab.proc) {
+        tab.proc.stoppedTurn = false
+        tab.proc.stoppingTurn = false
+      }
     }
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
@@ -2164,7 +2184,12 @@ export function createChatTransport(
     afterEarlierOutput(tab, proc, () => markTurnStarted(tab, messageId, interrupts))
   }
 
-  /** An interrupt went to `proc`'s turn: it is being stopped (see `interruptSeq`). */
+  /** An interrupt was decided for the tab's process since it had `interrupts` decided. */
+  function stoppedSince(tab: ChatTab, interrupts: number | undefined): boolean {
+    return interrupts !== undefined && !!tab.proc && tab.proc.interruptSeq !== interrupts
+  }
+
+  /** A decided interrupt went to `proc`'s turn: it is being stopped (see `interruptSeq`). */
   function noteStopping(proc: ChatProcess): void {
     proc.stoppingTurn = true
     proc.interruptSeq++
@@ -2202,9 +2227,7 @@ export function createChatTransport(
     }
     shadowFeed(tab, tab.gen, { type: 'turn-start', turnId: messageId, origin: 'user' })
     tab.turnProgress = false
-    const stoppedSinceWrite =
-      interruptsAtWrite !== undefined && !!tab.proc && tab.proc.interruptSeq !== interruptsAtWrite
-    if (!stoppedSinceWrite) {
+    if (!stoppedSince(tab, interruptsAtWrite)) {
       tab.turnInterrupted = false
       if (tab.proc) {
         tab.proc.stoppedTurn = false
@@ -3219,6 +3242,19 @@ export function createChatTransport(
     request: Record<string, unknown>,
     timeoutMs = 30_000
   ): Promise<unknown> {
+    return controlRequest(tabId, request, timeoutMs, 'decided')
+  }
+
+  /**
+   * `provisional`: a durable control's early ACK interrupt. It is undone unless its
+   * Stop is decided, so it does not count as a decided stop (`interruptSeq`).
+   */
+  function controlRequest(
+    tabId: string,
+    request: Record<string, unknown>,
+    timeoutMs: number,
+    stop: 'decided' | 'provisional'
+  ): Promise<unknown> {
     const proc = liveProcess(tabId)
     if (!proc) return Promise.reject(new Error('no live session'))
     if (!proc.driver.applyControl) {
@@ -3227,7 +3263,8 @@ export function createChatTransport(
     // A 0-turn error after an interrupt is the interrupt, not a failed resume.
     if (request.subtype === 'interrupt' || request.subtype === 'interrupt_and_wait') {
       proc.interruptIssued = true
-      noteStopping(proc)
+      if (stop === 'decided') noteStopping(proc)
+      else proc.stoppingTurn = true
     }
     return applyProcessControl(proc, request, timeoutMs)
   }
@@ -3294,11 +3331,18 @@ export function createChatTransport(
     const captured = group,
       stoppingProcess = method === 'kill' || method === 'remove'
     captured.refs++
-    noteStopping(proc)
+    // Provisional until decided: `finishControlGroup` rolls it back, so it is not a
+    // decided stop and leaves `interruptSeq` alone (the decision, if any, counts).
+    proc.stoppingTurn = true
     if (stoppingProcess && !captured.stop)
       captured.stop = controlSession(tabId, proc.spawnId, 'kill')
     if (!stoppingProcess && !captured.ack && !captured.stop) {
-      captured.ack = sendControlRequest(tabId, { subtype: 'interrupt' }, STOP_INTERRUPT_TIMEOUT_MS)
+      captured.ack = controlRequest(
+        tabId,
+        { subtype: 'interrupt' },
+        STOP_INTERRUPT_TIMEOUT_MS,
+        'provisional'
+      )
       void captured.ack.then(
         () => {
           captured.ackSettled = true
