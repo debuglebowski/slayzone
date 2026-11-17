@@ -1,7 +1,7 @@
 /** Isolated real WS/enrollment/actor/scope dispatch + packaged canonical writer. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { startLoopbackHub } from '@slayzone/computer-transport/testing'
@@ -65,19 +65,27 @@ const fs=require('node:fs'), readline=require('node:readline');
 const out=x=>process.stdout.write(JSON.stringify(x)+'\\n');
 const codex=process.env.FIXTURE_MODE==='codex-chat';
 let started=false;
-const timer=setInterval(async()=>{
+// Codex mints a fresh id per turn; an ended turn id never carries new output.
+let turn='turn',turns=0;
+// Like Codex, an interrupted turn completes only after its streaming stops.
+let bursting=null;
+const timer=setInterval(()=>{
  if(started||!fs.existsSync(process.env.FIXTURE_GATE))return;
  started=true;clearInterval(timer);fs.unlinkSync(process.env.FIXTURE_GATE);
+ bursting=burst().finally(()=>{bursting=null;});
+},5);
+async function burst(){
+ fs.writeFileSync(process.env.FIXTURE_GATE+'.started','');
  for(let i=0;i<1200;i++){
   const text=i+':'+'é'.repeat(1024);
-  const record=codex?{method:'item/agentMessage/delta',params:{threadId:'thread',turnId:'turn',itemId:'item'+i,delta:text}}
+  const record=codex?{method:'item/agentMessage/delta',params:{threadId:'thread',turnId:turn,itemId:'item'+i,delta:text}}
    :{type:'assistant',message:{id:'m'+i,role:'assistant',content:[{type:'text',text}]}};
   const ready=out(record);
-  const complete=codex?out({method:'item/completed',params:{threadId:'thread',turnId:'turn',item:{type:'agentMessage',id:'item'+i,text}}}):true;
+  const complete=codex?out({method:'item/completed',params:{threadId:'thread',turnId:turn,item:{type:'agentMessage',id:'item'+i,text}}}):true;
   if(!ready||!complete)
    await new Promise(r=>process.stdout.once('drain',r));
  }
-},5);
+}
 readline.createInterface({input:process.stdin}).on('line',line=>{
  const m=JSON.parse(line);
  if(m.type==='control_request'){
@@ -94,11 +102,14 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
   if(m.method==='thread/read')result={thread:{id:'thread',turns:[]}};
   if(m.method==='thread/backgroundTerminals/list'||m.method==='model/list')result={data:[],nextCursor:null};
   if(m.method==='turn/start')fs.appendFileSync(process.env.FIXTURE_SENT,'sent\\n');
-  if(m.method==='turn/start')result={turn:{id:'turn',status:'inProgress',items:[]}};
+  if(m.method==='turn/start'){turn='turn-'+(++turns);result={turn:{id:turn,status:'inProgress',items:[]}};}
   if(m.method==='turn/interrupt')fs.appendFileSync(process.env.FIXTURE_ACK,'ack\\n');
   out({id:m.id,result});
-  if(m.method==='turn/start')out({method:'turn/started',params:{threadId:'thread',turn:{id:'turn',status:'inProgress'}}});
-  if(m.method==='turn/interrupt')out({method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'interrupted',items:[]}}});
+  if(m.method==='turn/start')out({method:'turn/started',params:{threadId:'thread',turn:{id:turn,status:'inProgress'}}});
+  if(m.method==='turn/interrupt'){
+   const done=()=>out({method:'turn/completed',params:{threadId:'thread',turn:{id:m.params?.turnId??turn,status:'interrupted',items:[]}}});
+   if(bursting)bursting.then(done);else done();
+  }
   if(m.method==='thread/start')out({method:'turn/started',params:{threadId:'thread',turn:{id:'turn',status:'inProgress'}}});
  }
 });
@@ -851,7 +862,10 @@ async function run() {
       const burstCut = wires.length,
         burstAcks = readFileSync(join(root, 'ack-a'), 'utf8').split('ack').length - 1
       const publicBurst = a.completedBursts()
+      // Interrupt while the provider is really bursting (it polls its gate).
+      rmSync(join(root, 'burst-a.started'), { force: true })
       writeFileSync(join(root, 'burst-a'), 'go')
+      await until(() => existsSync(join(root, 'burst-a.started')))
       let burstDone = false
       const bursting = caller.interrupt(opts).then((value) => {
         burstDone = true
