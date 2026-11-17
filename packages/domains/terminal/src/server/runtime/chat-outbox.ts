@@ -71,6 +71,12 @@ export interface OutboxDeps {
   onChange(change: OutboxStateChange): void
   /** A message is being written to the agent: its turn starts now. */
   onWriting(id: string): void
+  /**
+   * Run `fn` once the agent output that arrived before this write has been
+   * handled (at once when none waits). Until then the write cannot be confirmed
+   * or answered by turn progress/results: those belong to what came before it.
+   */
+  afterEarlierOutput?(proc: OutboxProcess, fn: () => void): void
   /** The CLI acks natively but sent no lifecycle event for a written message. */
   onLifecycleMissing?(gen: number): void
   /**
@@ -90,7 +96,7 @@ interface Entry {
   state: OutboxState
   /** Process generation it was (last) written to. */
   gen: number | null
-  /** The write to `gen` resolved. */
+  /** The write to `gen` resolved, and the output that preceded it was handled. */
   written: boolean
   /** Where the CLI says the message is (lifecycle of `gen`): received, or its turn started. */
   cli: 'none' | 'queued' | 'started'
@@ -485,6 +491,18 @@ export class ChatOutbox {
     entry.cli = 'none'
     this.set(entry, 'sending')
     this.deps.onWriting(id)
+    // Progress/results may only stand in for this write's delivery once the write
+    // resolved AND everything the agent said before it was handled.
+    let resolved = false,
+      ordered = !this.deps.afterEarlierOutput
+    const markWritten = () => {
+      if (resolved && ordered && entry.gen === proc.gen && entry.state === 'sending')
+        entry.written = true
+    }
+    this.deps.afterEarlierOutput?.(proc, () => {
+      ordered = true
+      markWritten()
+    })
     let sent: Promise<void>
     try {
       sent = proc.send(entry.message, prepared)
@@ -494,7 +512,8 @@ export class ChatOutbox {
     sent.then(
       () => {
         if (entry.gen !== proc.gen || entry.state !== 'sending') return this.finishWrite(id)
-        entry.written = true
+        resolved = true
+        markWritten()
         entry.linkDownSince = null
         if (!proc.confirmsDelivery) this.deliver(entry)
         this.finishWrite(id)

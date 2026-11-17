@@ -2153,19 +2153,27 @@ export function createChatTransport(
    * late end therefore settles that turn, never the new one.
    */
   function markTurnStartedInOrder(tab: ChatTab, messageId: string): void {
-    const proc = tab.proc
-    const start = () => {
+    afterEarlierOutput(tab, tab.proc, () => markTurnStarted(tab, messageId))
+  }
+
+  /**
+   * Run `fn` after everything `proc` said before now: output it still holds, then
+   * publications already queued (at once when nothing waits). Skipped when the
+   * tab closed or moved on to another process meanwhile.
+   */
+  function afterEarlierOutput(tab: ChatTab, proc: ChatProcess | null, fn: () => void): void {
+    const run = () => {
       if (tab.closed || tab.proc !== proc) return
       if (!publicationBusy.has(tab)) {
-        markTurnStarted(tab, messageId)
+        fn()
         return
       }
       void enqueueEvent(tab, async () => {
-        if (!tab.closed && tab.proc === proc) markTurnStarted(tab, messageId)
+        if (!tab.closed && tab.proc === proc) fn()
       })
     }
-    if (proc) proc.afterAcceptedOutput(start)
-    else start()
+    if (proc) proc.afterAcceptedOutput(run)
+    else run()
   }
 
   /** The outbox is writing a user message: the turn starts now. */
@@ -2683,6 +2691,7 @@ export function createChatTransport(
         }
       },
       onWriting: (id) => markTurnStartedInOrder(tab, id),
+      afterEarlierOutput: (p, fn) => afterEarlierOutput(tab, p as ChatProcess, fn),
       onAlreadyInConversation: (id) => onAlreadyInConversation(tab, id),
       ...(deps.outboxRetry
         ? { retryWindowMs: deps.outboxRetry.windowMs, retryBaseMs: deps.outboxRetry.baseMs }

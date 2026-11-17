@@ -582,3 +582,44 @@ test('join: a process that ends before answering leaves it interrupted, like any
   h.outbox.onProcessEnded(1, { resend: false })
   expect(h.outbox.state('s1')).toBe('cancelled')
 })
+
+test('output the agent sent before a write never confirms or answers that write', async () => {
+  const p = proc(1)
+  const ordered: Array<() => void> = []
+  const changes: OutboxStateChange[] = []
+  const outbox = new ChatOutbox({
+    current: () => p,
+    ensureReady: () => Promise.resolve(p),
+    onChange: (c) => changes.push(c),
+    onWriting: () => {},
+    afterEarlierOutput: (_proc, fn) => ordered.push(fn)
+  })
+  outbox.accept(msg('m1'))
+  await flush()
+  // Still handling what arrived before the write (e.g. the spawn's init line).
+  outbox.onProgress(1)
+  outbox.onResult(1)
+  expect(changes.map((c) => c.state)).toEqual(['sending'])
+  for (const fn of ordered.splice(0)) fn()
+  outbox.onProgress(1)
+  expect(changes.map((c) => c.state)).toEqual(['sending', 'delivered'])
+  outbox.onProcessEnded(1, { resend: false })
+  expect(changes.map((c) => c.state)).toEqual(['sending', 'delivered'])
+})
+
+test('a process that ends before its earlier output was handled fails the write', async () => {
+  const p = proc(1)
+  const changes: OutboxStateChange[] = []
+  const outbox = new ChatOutbox({
+    current: () => p,
+    ensureReady: () => Promise.resolve(p),
+    onChange: (c) => changes.push(c),
+    onWriting: () => {},
+    afterEarlierOutput: () => {}
+  })
+  outbox.accept(msg('m1'))
+  await flush()
+  outbox.onProgress(1)
+  outbox.onProcessEnded(1, { resend: false })
+  expect(changes.map((c) => c.state)).toEqual(['sending', 'failed'])
+})
