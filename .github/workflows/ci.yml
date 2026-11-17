@@ -137,8 +137,9 @@ jobs:
           restore-keys: |
             vitest-modules-${{ runner.os }}-${{ matrix.lane }}-${{ hashFiles('pnpm-lock.yaml') }}-
 
+      # Uncapped workers: the runner runs nothing else (pnpm test:unit caps at half the cores).
       - name: Unit tests
-        run: pnpm test:unit
+        run: pnpm test:unit:fast
         env:
           SLZ_UNIT_LANES: ${{ matrix.lane }}
 

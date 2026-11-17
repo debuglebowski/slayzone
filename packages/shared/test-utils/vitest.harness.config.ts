@@ -70,7 +70,9 @@ export default defineConfig({
     // 10-core Mac to load ~230 for minutes. Multi-process suites with real wall-clock
     // windows then missed them: historical-supervisor passes at load ~100 and fails at
     // ~215 (reproduced with CPU burners alone). One per core: peak load ~95, the same
-    // wall time (296 s vs 307 s).
+    // wall time (296 s vs 307 s). This is the uncapped count (`pnpm test:unit:fast`,
+    // CI); plain `pnpm test:unit` overrides it with --maxWorkers (SLZ_UNIT_WORKERS,
+    // runners.sh lane_workers).
     maxWorkers: Math.max(2, availableParallelism()),
     // Many suites boot a real hub/computer bin, git, or a fresh migrated DB.
     testTimeout: 120_000,

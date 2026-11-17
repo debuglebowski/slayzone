@@ -272,8 +272,10 @@ write_list() {
 }
 
 # Usage: package_test <workspace-name> [<file relative to the package>...]
+# Every package `test` script ends in `vitest run` or `jest`, so the worker cap
+# (LANE_WORKER_ARGS, see lane_workers) is appended to that command; both take --maxWorkers=<n>.
 package_test() {
-  (set -o pipefail; pnpm --filter "$1" test "${@:2}" 2>&1 | grep -v 'npm warn\|ExperimentalWarning')
+  (set -o pipefail; pnpm --filter "$1" test ${LANE_WORKER_ARGS[@]+"${LANE_WORKER_ARGS[@]}"} "${@:2}" 2>&1 | grep -v 'npm warn\|ExperimentalWarning')
 }
 
 integration_test() {
@@ -287,12 +289,12 @@ lane_harness() {
   if [ "${#HARNESS_FILES[@]}" -gt 0 ]; then
     vitest_suite "vitest (node harness suites, Electron's node)" "$WORK/harness.list" "" "$HARNESS_JSON" \
       env ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/vitest/vitest.mjs run \
-      --config "$TEST_UTILS/vitest.harness.config.ts"
+      --config "$TEST_UTILS/vitest.harness.config.ts" ${LANE_WORKER_ARGS[@]+"${LANE_WORKER_ARGS[@]}"}
   fi
   if [ "${#HARNESS_NODE_FILES[@]}" -gt 0 ]; then
     vitest_suite "vitest (node harness suites, plain node)" "$WORK/harness-node.list" "" "$WORK/harness-node.json" \
       env -u ELECTRON_RUN_AS_NODE node ./node_modules/vitest/vitest.mjs run \
-      --config "$TEST_UTILS/vitest.harness.config.ts"
+      --config "$TEST_UTILS/vitest.harness.config.ts" ${LANE_WORKER_ARGS[@]+"${LANE_WORKER_ARGS[@]}"}
   fi
 }
 
@@ -302,7 +304,8 @@ lane_app_and_packages() {
   local i file
   if [ "${#APP_VITEST_FILES[@]}" -gt 0 ]; then
     vitest_suite "vitest (app config)" "$WORK/app.list" "$WORK/app.labels" "$WORK/app.json" \
-      ./node_modules/.bin/vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**'
+      ./node_modules/.bin/vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**' \
+      ${LANE_WORKER_ARGS[@]+"${LANE_WORKER_ARGS[@]}"}
   fi
   for i in "${!PACKAGE_NAMES[@]}"; do
     # With SLZ_UNIT_ONLY: only its listed files (space-separated, package-relative).
@@ -343,6 +346,55 @@ selected_lanes() {
     fi
     echo "lane_$want"
   done
+}
+
+# SLZ_UNIT_WORKERS: how many test workers the run may keep busy at once, summed over
+# every lane that runs concurrently (vitest forks / jest workers; a harness worker's
+# hub and computer children come on top).
+#   unset   half the cores (min 2): `pnpm test:unit`. The machine stays usable; at one
+#           worker per core per lane, a 10-core Mac sat at load ~100-200 with its fans
+#           maxed for the whole run.
+#   <n>     n workers.
+#   all     no cap: every run keeps its own config's count, one per core per lane
+#           (`pnpm test:unit:fast`, CI — one lane per runner there).
+# Split over the concurrent lanes by lane_weight, each lane at least 1. The cap reaches
+# each run as --maxWorkers=<n> (LANE_WORKER_ARGS), never as VITEST_MAX_WORKERS: vitest
+# applies that env var after --no-file-parallelism, so it would parallelise the solo
+# suites, which must run one at a time.
+# Prints one count per given lane, in order ("" = no cap).
+# Usage: lane_workers <lane>...
+lane_workers() {
+  local budget="${SLZ_UNIT_WORKERS:-}" cores lane total=0 n
+  if [ "$budget" = all ]; then
+    for lane in "$@"; do echo ""; done
+    return 0
+  fi
+  if [ -z "$budget" ]; then
+    cores=$(node -p 'require("os").availableParallelism()')
+    budget=$((cores / 2))
+    [ "$budget" -ge 2 ] || budget=2
+  elif ! [[ "$budget" =~ ^[1-9][0-9]*$ ]]; then
+    echo "SLZ_UNIT_WORKERS: '$budget' is not a positive integer or 'all'" >&2
+    return 1
+  fi
+  for lane in "$@"; do total=$((total + $(lane_weight "$lane"))); done
+  for lane in "$@"; do
+    # Rounded share of the budget.
+    n=$(((2 * budget * $(lane_weight "$lane") + total) / (2 * total)))
+    [ "$n" -ge 1 ] || n=1
+    echo "$n"
+  done
+}
+
+# A lane's share of the worker budget: its worker-seconds with few workers (measured on
+# a 10-core Mac, 2 workers per lane: harness ~2100, app config + packages ~1400). Equal
+# shares starved the harness: its workers mostly wait on the hubs, computers and git
+# they spawn, so its wall time follows its worker count (1070 s at 2 vs 380 s at 10).
+lane_weight() {
+  case "$1" in
+    lane_harness) echo 3 ;;
+    *) echo 2 ;;
+  esac
 }
 
 # SLZ_UNIT_ONLY=<file>: run only the test files listed in <file> (repo-relative, one per
@@ -418,10 +470,13 @@ apply_only() {
 # FAILED. SLZ_UNIT_JSON=<path> keeps the Electron harness run's JSON report (per-file
 # test counts and durations). Usage: run_suites
 run_suites() {
-  local i j lane status verdict label file selected started=$SECONDS
+  local i j lane status verdict label file selected workers started=$SECONDS
   local list_pids=() list_files=() list_dirs=() lane_pids=() lanes=()
   selected=$(selected_lanes) || exit 2
   while IFS= read -r lane; do lanes+=("$lane"); done <<<"$selected"
+  local lane_counts=()
+  workers=$(lane_workers "${lanes[@]}") || exit 2
+  while IFS= read -r lane; do lane_counts+=("$lane"); done <<<"$workers"
   WORK=$(mktemp -d "${TMPDIR:-/tmp}/slz-unit.XXXXXX")
   HARNESS_JSON="${SLZ_UNIT_JSON:-$WORK/harness.json}"
 
@@ -456,11 +511,16 @@ run_suites() {
     echo ""
     echo "=== running ${#lanes[@]} lanes concurrently: ${lanes[*]} ==="
     for i in "${!lanes[@]}"; do
+      echo "    ${lanes[$i]}: ${lane_counts[$i]:-uncapped} workers (SLZ_UNIT_WORKERS=${SLZ_UNIT_WORKERS:-default})"
+    done
+    for i in "${!lanes[@]}"; do
       lane="${lanes[$i]}"
       : >"$WORK/$lane.results"
       (
         set +e
         LANE_RESULTS="$WORK/$lane.results"
+        LANE_WORKER_ARGS=()
+        [ -z "${lane_counts[$i]}" ] || LANE_WORKER_ARGS=("--maxWorkers=${lane_counts[$i]}")
         "$lane"
       ) >"$WORK/$lane.log" 2>&1 &
       lane_pids+=($!)
