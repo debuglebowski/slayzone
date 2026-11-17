@@ -750,6 +750,9 @@ export function createComputerArtifactStorage(opts: {
         if (key === 'writeArtifactContent') {
           const pc = owner.computerId!
           const operationId = randomUUID()
+          // Omit the hub-local source keys: the computer's write schema is strict. The JSON
+          // wire drops `undefined` values, but an in-process request passes them through.
+          const { sourcePath: _sourcePath, bytes: _bytes, ...rest } = first
           return withUploadedBytes(
             {
               computerId: pc,
@@ -764,9 +767,7 @@ export function createComputerArtifactStorage(opts: {
                 'writeArtifactContent',
                 [
                   {
-                    ...first,
-                    sourcePath: undefined,
-                    bytes: undefined,
+                    ...rest,
                     // A file is staged range by range, never read whole (FU1 S3).
                     ...bytes
                   }
