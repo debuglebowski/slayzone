@@ -203,3 +203,9 @@ export const publicationSourceSchema = z
     ])
   })
   .strict()
+
+/** A publication refused before the owner admitted it (closed, an id reused, a changed
+ *  owner): no work started, so the caller still owns its source and releases it. */
+export class PublicationNotAdmittedError extends Error {
+  override name = 'PublicationNotAdmittedError'
+}

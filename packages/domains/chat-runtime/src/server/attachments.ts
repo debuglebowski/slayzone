@@ -182,7 +182,10 @@ export function createLocalAttachments(
       length: number
     ): ByteRangePage {
       checkHeld(route, ref)
-      const hash = storedHashOf(ref)
+      // A ref naming its hash is proven by this conversation's own record (checkHeld);
+      // only a ref without one is resolved over every stored record. A hub names the
+      // first range's etag on the later ranges, so a read resolves it once.
+      const hash = ref.contentHash ?? storedHashOf(ref)
       return readFileRangePage(blobPath(hash), offset, length, hash)
     },
     putPrepared(id: string, epoch: number, ref: ChatAttachment, bytes: Uint8Array): void {

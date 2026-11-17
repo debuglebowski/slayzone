@@ -222,6 +222,47 @@ describe('archived files and attachments, live attachments', () => {
   })
 })
 
+describe('a live attachment read in ranges', () => {
+  it('resolves its stored hash once per read, not by scanning every record per range', async () => {
+    const r = runtime()
+    const big = Buffer.concat([
+      Buffer.from('%PDF-1.4\n'),
+      randomBytes(BYTE_RANGE_MAX_CHUNK * 3 + 500)
+    ])
+    const ref = r.attachments.put(
+      'tab',
+      {
+        artifactId: 'file',
+        name: 'n.pdf',
+        kind: 'pdf',
+        mediaType: 'application/pdf',
+        size: big.length
+      },
+      big
+    )
+    await r.ops.saveTabDraft('tab', { text: 'draft', attachments: [ref] })
+    const scans = vi.spyOn(r.storage, 'findRecords')
+    // A ref that names its hash: the conversation's own record proves it; no global scan.
+    const pinned = await collectByteRanges(async (offset, length) =>
+      r.attachments.range(route, ref, offset, length)
+    )
+    expect(Buffer.from(pinned).equals(big)).toBe(true)
+    expect(scans.mock.calls.filter(([kind]) => kind === 'attachment')).toHaveLength(0)
+    scans.mockClear()
+    // A ref without one resolves it on the first range; later ranges name the etag.
+    const { contentHash: _hash, ...unpinned } = ref
+    let current: typeof ref = unpinned as typeof ref
+    const read = await collectByteRanges(async (offset, length) => {
+      const page = r.attachments.range(route, current, offset, length)
+      current = { ...current, contentHash: page.etag }
+      return page
+    })
+    expect(Buffer.from(read).equals(big)).toBe(true)
+    expect(scans.mock.calls.filter(([kind]) => kind === 'attachment')).toHaveLength(1)
+    scans.mockRestore()
+  })
+})
+
 /** Every file under `dir`. */
 function walk(dir: string): string[] {
   const out: string[] = []

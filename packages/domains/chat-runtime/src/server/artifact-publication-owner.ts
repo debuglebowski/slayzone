@@ -29,6 +29,7 @@ import type { createLocalChatData, ChatMetadataUpdate } from './local-data'
 import type { ConversationIdentity } from '../shared'
 import { chatStorageDigest } from './storage-digest'
 import {
+  PublicationNotAdmittedError,
   inspectPublicationSchema,
   publicationSourceSchema,
   type InspectPublication,
@@ -324,30 +325,33 @@ export function createArtifactPublicationOwner(
     return { ...(await job.promise), executionId: input.executionId }
   }
   function publish(raw: PublishPublication): Promise<PublicationSettlement> {
-    if (closed) return Promise.reject(new Error('Artifact publication admission is closed'))
-    const parsed = inspectPublicationSchema.parse({
+    // Refusals before admission: no work started, the caller keeps its source.
+    const refuse = (message: string, cause?: unknown) =>
+      Promise.reject(new PublicationNotAdmittedError(message, { cause }))
+    if (closed) return refuse('Artifact publication admission is closed')
+    const parsed = inspectPublicationSchema.safeParse({
       route: raw.context.route,
       operationId: raw.context.operationId,
       intent: raw.intent
     })
-    const request = { ...raw, intent: parsed.intent },
+    if (!parsed.success) return refuse(parsed.error.message, parsed.error)
+    const request = { ...raw, intent: parsed.data.intent },
       key = keyOf(request.context)
     if (
       typeof request.executionId !== 'string' ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(request.executionId)
     )
-      return Promise.reject(new Error('Invalid publication execution id'))
+      return refuse('Invalid publication execution id')
     const existing = jobs.get(key)
     if (existing) {
-      if (existing.context.intentHash !== chatStorageDigest(parsed.intent))
-        return Promise.reject(new Error('Operation id reused with different input'))
-      if (!same(context(parsed), request.context))
-        return Promise.reject(new Error('Artifact publication owner or lifecycle changed'))
+      if (existing.context.intentHash !== chatStorageDigest(parsed.data.intent))
+        return refuse('Operation id reused with different input')
+      if (!same(context(parsed.data), request.context))
+        return refuse('Artifact publication owner or lifecycle changed')
       executions.set(request.executionId, existing)
       return existing.promise.then((settled) => ({ ...settled, executionId: request.executionId }))
     }
-    if (executions.has(request.executionId))
-      return Promise.reject(new Error('Publication execution id was reused'))
+    if (executions.has(request.executionId)) return refuse('Publication execution id was reused')
     // All pins/admission exist before source/stat/queue/preparation can yield.
     const secondary = storage.maintenance.registerSecondary('artifact publication')
     const releaseBlobs = registerArtifactBlobLifetime(db),

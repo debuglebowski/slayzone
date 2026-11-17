@@ -1,6 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createArtifactPublicationOwner } from './artifact-publication-owner'
-import { publicationIntentSchema } from './artifact-publication-protocol'
+import {
+  PublicationNotAdmittedError,
+  publicationIntentSchema
+} from './artifact-publication-protocol'
 import { deserializeError } from '@slayzone/platform/sqlite-worker'
 import { randomUUID } from 'node:crypto'
 import type { PublicationUploadLease } from './artifact-publication-client'
@@ -816,12 +819,18 @@ export function createLocalArtifacts(
           if (signal.aborted) throw new Error('Publication source revoked')
         }
         posted = true
-        const settled = await publication.publish({
-          executionId,
-          context: inspection.context,
-          intent,
-          ...(lease ? { source: lease.grant } : {})
-        })
+        const settled = await publication
+          .publish({
+            executionId,
+            context: inspection.context,
+            intent,
+            ...(lease ? { source: lease.grant } : {})
+          })
+          .catch((error: unknown) => {
+            // Refused before admission: nothing started, the source is ours to release.
+            if (error instanceof PublicationNotAdmittedError) quiet = true
+            throw error
+          })
         quiet = settled.quiescent
         consumed = settled.outcome.kind === 'committed'
         if (settled.outcome.kind !== 'committed') throw deserializeError(settled.outcome.error)

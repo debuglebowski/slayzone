@@ -15,6 +15,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { createComputerChatRuntime } from './computer-runtime'
 import { createUploadStaging } from './upload-staging'
+import { PublicationNotAdmittedError } from './artifact-publication-protocol'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { eraseContent } from '@slayzone/content-erasure/server'
 
@@ -328,6 +329,39 @@ test('erasure drains an actual asynchronous staged artifact writer before confir
     await writing
     mock.mockRestore()
   }
+})
+
+test('a publication refused before admission releases its staged source lease', async () => {
+  const r = runtime()
+  bootstrap(r, 'alice')
+  const artifact = (await r.artifacts.invoke({
+    route: alice,
+    method: 'uploadArtifactBlob',
+    operationId: 'original',
+    args: [{ taskId: 'alice', title: 'file.txt', data: Buffer.from('original').toString('base64') }]
+  })) as { id: string }
+  const staged = await stage(r, alice, 'refused', Buffer.from('refused staged write'))
+  const refuse = vi
+    .spyOn(r.artifacts.publication, 'publish')
+    .mockRejectedValueOnce(
+      new PublicationNotAdmittedError('Artifact publication admission is closed')
+    )
+  await expect(
+    r.artifacts.invoke({
+      route: alice,
+      method: 'writeArtifactContent',
+      operationId: 'refused',
+      args: [{ artifactId: artifact.id, staged }]
+    })
+  ).rejects.toThrow('admission is closed')
+  expect(refuse).toHaveBeenCalledTimes(1)
+  refuse.mockRestore()
+  // Nothing holds the source: staging closes (a retained lease would hang it).
+  const closed = await Promise.race([
+    r.uploads.close().then(() => 'closed'),
+    new Promise((resolve) => setTimeout(() => resolve('held'), 2_000))
+  ])
+  expect(closed).toBe('closed')
 })
 
 test('live expiry removes idle uploads, pins active consumers, closes without losing resumability', async () => {
