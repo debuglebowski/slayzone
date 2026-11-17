@@ -130,11 +130,25 @@ test('child tools after the main result keep the parent idle and its queue ready
   emitLine(f, sj.lifecycle('u1', 'completed'))
   await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
 
-  emitLine(f, { ...sj.toolUse('child_tool'), parent_tool_use_id: 'toolu_a' })
-  await h.savedWhen((e) => e.kind === 'tool-call' && e.id === 'child_tool')
-  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
-  expect(mgr.getChatSessionState(SESSION)).toBe('background')
-  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
+  // A saved child event is published inside the tab's event publication; the queue
+  // gate reopens when that publication settles, and the settle kicks the drainer.
+  const readyKicks: string[] = []
+  mgr.registerChatQueueDrainer((tabId) => {
+    if (mgr.isReadyForQueuedMessage(tabId)) readyKicks.push(tabId)
+  })
+  try {
+    emitLine(f, { ...sj.toolUse('child_tool'), parent_tool_use_id: 'toolu_a' })
+    await h.savedWhen((e) => e.kind === 'tool-call' && e.id === 'child_tool')
+    readyKicks.length = 0 // only a kick after this publication settles counts
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+    expect(mgr.getChatSessionState(SESSION)).toBe('background')
+    await until(() => readyKicks.includes(TAB_OPTS.tabId))
+    expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+    expect(mgr.getChatSessionState(SESSION)).toBe('background')
+  } finally {
+    mgr.registerChatQueueDrainer(() => {})
+  }
 
   emitLine(f, { ...toolResult('child_tool'), parent_tool_use_id: 'toolu_a' })
   emitLine(f, taskNotification('a1', 'toolu_a', 'completed'))
