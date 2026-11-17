@@ -16,9 +16,11 @@ const opts = {
 }
 function fixture(beforeSend?: () => Promise<{ status: 'ready' }>, holdEvent?: () => Promise<void>) {
   const fakes: ReturnType<typeof fakeChild>[] = [],
-    rows: BufferedEvent[] = []
+    rows: BufferedEvent[] = [],
+    live: string[] = []
   const runtime = createChatTransport({
     whichBinary: async () => '/fixture/claude',
+    broadcastEvent: (_tab, event) => live.push(event.kind),
     spawn: () => {
       const f = fakeChild({ exitOnKill: true })
       fakes.push(f)
@@ -44,7 +46,7 @@ function fixture(beforeSend?: () => Promise<{ status: 'ready' }>, holdEvent?: ()
         }
       : {})
   })
-  return { runtime, fakes, rows }
+  return { runtime, fakes, rows, live }
 }
 
 test('captured ACK survives durable continuation once, then next user turn stays untouched', async () => {
@@ -102,6 +104,53 @@ test('refused early ACK uses original durable fallback without retrying interrup
     expect(result.via).toBe('respawn')
     expect(f.controlRequests('interrupt')).toHaveLength(1)
     expect(fakes).toHaveLength(2)
+  } finally {
+    control?.close()
+    await r.removeSession('tab')
+  }
+})
+
+test('Stop saves complete streamed blocks before the provider result without broadcasting their fragments', async () => {
+  const { runtime: r, fakes, rows, live } = fixture()
+  let control: ReturnType<typeof r.prepareDurableControl> | undefined
+  try {
+    await r.hydrateSession(opts)
+    await r.ensureSpawned('tab')
+    const f = fakes[0]
+    await r.dispatchUserMessage('tab', { id: 'u1', content: [{ type: 'text', text: 'work' }] })
+    await f.written((m) => m.type === 'user')
+    emitLine(f, sj.lifecycle('u1', 'started'))
+    emitLine(f, sj.text('already working'))
+    await r.readEventsSince('tab', -1)
+    control = r.prepareDurableControl('tab', 'interrupt')!
+    await control.acknowledged
+    await control.run(() =>
+      r.stopTurn('tab', { restorePrompt: false, respawnOpts: async () => opts })
+    )
+    control.close()
+    await r.readEventsSince('tab', -1)
+    const cut = live.length
+    // Codex supplies only these fragments: no later consolidated assistant event
+    // can repair a block dropped while the acknowledged Stop awaits its result.
+    const stream = (event: unknown) =>
+      emitLine(f, { type: 'stream_event', event, parent_tool_use_id: null })
+    for (let i = 0; i < 3; i++) {
+      stream({ type: 'message_start', message: { id: `tail-${i}` } })
+      stream({ type: 'content_block_start', index: 0, content_block: { type: 'text' } })
+      stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `tail-${i}` } })
+      stream({ type: 'content_block_stop', index: 0 })
+      stream({ type: 'message_stop' })
+    }
+    emitLine(f, sj.aborted())
+    await r.readEventsSince('tab', -1)
+    expect(
+      rows.flatMap(({ event }) =>
+        event.kind === 'assistant-text' && event.messageId.startsWith('tail-') ? [event.text] : []
+      )
+    ).toEqual(['tail-0', 'tail-1', 'tail-2'])
+    expect(live.slice(cut).filter((kind) => kind.startsWith('stream-'))).toEqual([])
+    expect(f.controlRequests('interrupt')).toHaveLength(1)
+    expect(r.getSessionTerminalState('tab')).toBe('idle')
   } finally {
     control?.close()
     await r.removeSession('tab')

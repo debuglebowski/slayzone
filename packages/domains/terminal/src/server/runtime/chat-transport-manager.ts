@@ -1972,7 +1972,13 @@ export function createChatTransport(
     // saved events and its end still land.
     if (proc.stoppedTurn) {
       if (shown.kind === 'result') proc.stoppedTurn = false
-      else if (isStreamFragment(shown.kind)) return
+      else if (isStreamFragment(shown.kind)) {
+        // Codex has no consolidated assistant event: these fragments are also
+        // the source of its saved blocks. Suppress their live preview only.
+        const split = tab.splitter.route(shown)
+        for (const saved of split.saved) await commitEventNow(tab, saved)
+        return
+      }
     }
 
     shadowEvent(tab, proc.gen, shown)

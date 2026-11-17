@@ -199,13 +199,16 @@ async function nativeProof(proof: string, lifetimeCase?: string) {
       '-o',
       extension
     ]
+    const compileStarted = performance.now()
     execFileSync('cc', ccArgv)
+    const nativeCompileMs = performance.now() - compileStarted
     const fixture = join(root, 'dispatch.cjs')
     symlinkSync(
       new URL('../../../../node_modules', import.meta.url),
       join(root, 'node_modules'),
       'dir'
     )
+    const bundleStarted = performance.now()
     await build({
       entryPoints: [
         fileURLToPath(
@@ -243,6 +246,7 @@ async function nativeProof(proof: string, lifetimeCase?: string) {
         }
       ]
     })
+    const fixtureBundleMs = performance.now() - bundleStarted
     const nativeArgv = [
       '--require',
       proof.startsWith('dispatch-network-controls')
@@ -258,6 +262,7 @@ async function nativeProof(proof: string, lifetimeCase?: string) {
       extension,
       proof.endsWith('-codex') ? 'codex-chat' : 'claude-chat'
     ]
+    const childStarted = performance.now()
     const output = execFileSync(process.execPath, nativeArgv, {
       encoding: 'utf8',
       env: {
@@ -269,6 +274,7 @@ async function nativeProof(proof: string, lifetimeCase?: string) {
       },
       timeout: lifetimeCase ? 45000 : 25000
     })
+    const nativeChildMs = performance.now() - childStarted
     const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
     const evidence = {
       ...JSON.parse(output),
@@ -276,6 +282,7 @@ async function nativeProof(proof: string, lifetimeCase?: string) {
       arch: process.arch,
       node: process.versions.node,
       electron: process.versions.electron,
+      timings: { nativeCompileMs, fixtureBundleMs, nativeChildMs },
       ccArgv: ['cc', ...ccArgv],
       nativeArgv: [process.execPath, ...nativeArgv],
       sha256: {
