@@ -67,3 +67,30 @@ test('provider change remounts composer authority while the logical tab stays th
   )
   expect(screen.getByRole('textbox')).not.toBe(previous)
 })
+
+test('splitting and unsplitting keep the existing chat pane mounted', () => {
+  const tab = {
+    id: 'main',
+    taskId: 'task',
+    groupId: 'group',
+    label: null,
+    mode: 'claude-chat',
+    isMain: true,
+    position: 0,
+    createdAt: '2026-11-03',
+    agentState: 'new'
+  } as TerminalTab
+  const chat = { tab, taskId: 'task', sessionId: 'task:main', cwd: '/repo' }
+  const terminal = {
+    tab: { ...tab, id: 'split', mode: 'terminal', isMain: false } as TerminalTab,
+    taskId: 'task',
+    sessionId: 'task:split',
+    cwd: '/repo'
+  }
+  const view = render(<TerminalSplitGroup isActive panes={[chat]} />)
+  const before = screen.getByRole('textbox', { name: 'Composer main' })
+  view.rerender(<TerminalSplitGroup isActive panes={[chat, terminal]} />)
+  expect(screen.getByRole('textbox', { name: 'Composer main' })).toBe(before)
+  view.rerender(<TerminalSplitGroup isActive panes={[chat]} />)
+  expect(screen.getByRole('textbox', { name: 'Composer main' })).toBe(before)
+})

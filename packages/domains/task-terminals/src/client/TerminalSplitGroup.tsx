@@ -236,15 +236,9 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       )
     }
 
-    if (panes.length === 1) {
-      const pane = panes[0]
-      return (
-        <div className="h-full" data-session-id={pane.sessionId}>
-          {renderPane(pane)}
-        </div>
-      )
-    }
-
+    // One tree shape for every pane count: a pane keeps its position (keyed
+    // wrapper → same parent) when the group splits or unsplits, so React keeps
+    // it mounted — a chat doesn't re-hydrate, a terminal doesn't reattach.
     return (
       <div ref={containerRef} className="h-full flex">
         {panes.map((pane, i) => (
