@@ -133,9 +133,12 @@ and failed start replies cannot settle or replace a newer execution. The transpo
 fences attributed old root events before outbox, prompt, stream or lifecycle
 changes. Helpers and background commands retain their owner across root turns.
 Delivery acknowledgements keep their own message IDs and remain independent.
-Native IDs can precede their host correlation. A fast completion with neither a
-known active ID nor a correlated host ID retains the existing ordered fallback;
-that unproven association also remains a cutover gate.
+Native IDs can precede their host correlation: the app-server answers `turn/start`
+only after submitting the turn, and the turn's notifications travel another path,
+so a fast turn can run and end before its id reply. Its `userMessage` item carries
+our `clientUserMessageId` as `clientId` and precedes the turn's output and end, so
+it correlates the turn to its request first (a steered message's item is its
+pickup instead). Only a Codex that echoes no `clientId` keeps the ordered fallback.
 
 Claude bounds executions with `command_lifecycle` (orderings measured on 2.1.326):
 `started X` precedes every output of message X; a turn's result precedes the next

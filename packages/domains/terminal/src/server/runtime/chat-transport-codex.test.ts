@@ -511,6 +511,44 @@ test('a fast completion before the start reply settles once and its late start c
   })
 })
 
+// Codex answers `turn/start` only after the turn was submitted, while `turn/started`
+// and the turn's items come from another path (app-server `turn_processor.rs`):
+// a fast turn can run and end before its id reply. Its `userMessage` item carries
+// our `clientUserMessageId` as `clientId`, which proves the turn's request.
+test('a turn that runs before its start reply is owned through its userMessage clientId', async () => {
+  setup([handshake('corr-thread', (method) => (method === 'turn/start' ? 'hang' : undefined))])
+  await open('tab-corr', null)
+  const c = h.children[0]
+  mgr.dispatchUserMessage('tab-corr', { id: 'corr-message', content: [{ type: 'text', text: 'hi' }] })
+  await until(() => c.requests('turn/start').length === 1)
+  expect(c.requests('turn/start')[0]).toMatchObject({ clientUserMessageId: 'corr-message' })
+  c.send({ method: 'turn/started', params: { threadId: 'corr-thread', turn: { id: 'corr-turn' } } })
+  c.send({
+    method: 'item/started',
+    params: {
+      threadId: 'corr-thread',
+      turnId: 'corr-turn',
+      item: { type: 'userMessage', id: 'u-item', clientId: 'corr-message', content: [] }
+    }
+  })
+  c.send({
+    method: 'item/completed',
+    params: {
+      threadId: 'corr-thread',
+      turnId: 'corr-turn',
+      item: { type: 'agentMessage', id: 'reply', text: 'fast reply' }
+    }
+  })
+  c.send({
+    method: 'turn/completed',
+    params: { threadId: 'corr-thread', turn: { id: 'corr-turn', status: 'completed' } }
+  })
+  await until(() => h.events.some((e) => e.kind === 'result'))
+  const owned = { turnId: 'corr-turn', source: 'provider', messageId: 'corr-message' }
+  expect(h.events.find((e) => e.kind === 'result')?.execution).toEqual(owned)
+  await until(() => mgr.getTurnStatus('tab-corr')?.turnOpen === false)
+})
+
 test('a failed old start reply cannot end a newer native execution', async () => {
   setup([handshake('late-start-error', (method) => (method === 'turn/start' ? 'hang' : undefined))])
   await open('tab-late-start-error', null)

@@ -1297,6 +1297,19 @@ class CodexChatSession implements ChatSessionDriver {
     }
   }
 
+  /**
+   * A turn's `userMessage` item names the request that started it (`clientId` =
+   * our `clientUserMessageId`). Codex answers `turn/start` only after submitting
+   * the turn, and the turn's notifications travel another path: a fast turn can
+   * run, and end, before its id reply. Its first item still precedes its end on
+   * the ordered stream, so its request is known before its output and completion.
+   */
+  private correlateTurn(turnId: string, messageId: string): void {
+    if (this.messageByTurn.has(turnId) || this.endedTurns.has(turnId)) return
+    this.messageByTurn.set(turnId, messageId)
+    if (turnId === this.currentTurnId) this.onTurnId(turnId)
+  }
+
   /** The running turn's id is known: remember it, and send a Stop that waited for it. */
   private onTurnId(turnId: string): void {
     if (this.endedTurns.has(turnId) || (this.currentTurnId && this.currentTurnId !== turnId)) return
@@ -1821,6 +1834,8 @@ class CodexChatSession implements ChatSessionDriver {
       const clientId = typeof item.clientId === 'string' ? item.clientId : null
       if (clientId && this.steered.delete(clientId)) {
         this.emit(ctx, { kind: 'user-replay', uuid: clientId })
+      } else if (clientId && params.turnId && (!params.threadId || params.threadId === this.threadId)) {
+        this.correlateTurn(params.turnId, clientId)
       }
       return
     }
