@@ -415,3 +415,125 @@ test.each(['kill', 'remove'] as const)(
     }
   }
 )
+
+/** A transport whose event store can hold chosen inserts (slow storage on demand). */
+function heldStorage() {
+  const fakes: ReturnType<typeof fakeChild>[] = [],
+    rows: BufferedEvent[] = [],
+    holds = new Map<string, Promise<void>>(),
+    releases = new Map<string, () => void>()
+  const key = (event: BufferedEvent['event']) =>
+    event.kind === 'user-message' ? `user-message:${event.id}` : event.kind
+  const hold = (k: string) =>
+    holds.set(
+      k,
+      new Promise<void>((r) => {
+        releases.set(k, r)
+      })
+    )
+  const release = (k: string) => {
+    holds.delete(k)
+    releases.get(k)?.()
+  }
+  const runtime = createChatTransport({
+    whichBinary: async () => '/fixture/claude',
+    broadcastEvent: () => {},
+    spawn: () => {
+      const f = fakeChild({ exitOnKill: true })
+      fakes.push(f)
+      setImmediate(() => f.emitter.emit('spawn'))
+      return f.child
+    },
+    eventStore: {
+      ...memoryChatEventReads(() => rows),
+      insert: async (_tab, seq, event, at) => {
+        const held = holds.get(key(event))
+        if (held) await held
+        rows.push({ seq, event, at })
+        return 'inserted'
+      }
+    }
+  })
+  return {
+    runtime,
+    fakes,
+    rows,
+    hold,
+    release,
+    releaseAll: () => [...releases.keys()].map(release)
+  }
+}
+
+test("a previous turn's late result spooled before a write settles that turn; the write's turn runs", async () => {
+  const { runtime: r, fakes, rows, hold, release, releaseAll } = heldStorage()
+  try {
+    await r.hydrateSession(opts)
+    await r.ensureSpawned('tab')
+    const f = fakes[0]
+    await r.dispatchUserMessage('tab', { id: 'u1', content: [{ type: 'text', text: 'one' }] })
+    await f.written((m) => m.type === 'user' && m.uuid === 'u1')
+    emitLine(f, sj.lifecycle('u1', 'started'))
+    await r.readEventsSince('tab', -1)
+    // u2's own row is slow to save; meanwhile u1's end arrives and is held back.
+    hold('user-message:u2')
+    const sending = r.dispatchUserMessage('tab', {
+      id: 'u2',
+      content: [{ type: 'text', text: 'two' }]
+    })
+    emitLine(f, sj.lifecycle('u1', 'completed'))
+    emitLine(f, sj.success('u1 done'))
+    // Received (out of the pipe) before u2 is written.
+    await until(() => f.stdout.readableLength === 0)
+    release('user-message:u2')
+    await sending
+    await f.written((m) => m.type === 'user' && m.uuid === 'u2')
+    emitLine(f, sj.lifecycle('u2', 'started'))
+    emitLine(f, sj.text('u2 answer'))
+    await r.readEventsSince('tab', -1)
+    expect(rows.filter((x) => x.event.kind === 'result')).toHaveLength(1)
+    expect(r.__getOutboxStateForTests('tab', 'u1')).toBe('answered')
+    expect(r.getSessionTerminalState('tab')).toBe('running')
+    expect(
+      rows.some((x) => x.event.kind === 'assistant-text' && x.event.text === 'u2 answer')
+    ).toBe(true)
+  } finally {
+    releaseAll()
+    await r.removeSession('tab')
+  }
+})
+
+test('Stop pressed after a write whose turn start still waits on held output keeps the turn stopping', async () => {
+  const { runtime: r, fakes, hold, release, releaseAll } = heldStorage()
+  try {
+    await r.hydrateSession(opts)
+    await r.ensureSpawned('tab')
+    const f = fakes[0]
+    await r.dispatchUserMessage('tab', { id: 'u1', content: [{ type: 'text', text: 'one' }] })
+    await f.written((m) => m.type === 'user' && m.uuid === 'u1')
+    emitLine(f, sj.lifecycle('u1', 'started'))
+    await r.readEventsSince('tab', -1)
+    hold('user-message:u2')
+    hold('result')
+    const sending = r.dispatchUserMessage('tab', {
+      id: 'u2',
+      content: [{ type: 'text', text: 'two' }]
+    })
+    emitLine(f, sj.lifecycle('u1', 'completed'))
+    emitLine(f, sj.success('u1 done'))
+    // Received (out of the pipe) before u2 is written.
+    await until(() => f.stdout.readableLength === 0)
+    release('user-message:u2')
+    // u2 is written; its turn start waits behind u1's held result.
+    await f.written((m) => m.type === 'user' && m.uuid === 'u2')
+    await r.sendControlRequest('tab', { subtype: 'interrupt' })
+    release('result')
+    await sending
+    await r.readEventsSince('tab', -1)
+    expect(r.getSessionTerminalState('tab')).toBe('running')
+    // The Stop came after the write: the turn it stopped stays stopping.
+    expect(r.canSteer('tab')).toBe(false)
+  } finally {
+    releaseAll()
+    await r.removeSession('tab')
+  }
+})

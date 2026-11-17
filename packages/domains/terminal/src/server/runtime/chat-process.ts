@@ -93,6 +93,12 @@ export class ChatProcess implements OutboxProcess {
    */
   stoppingTurn = false
   /**
+   * Interrupts issued to this process so far. A write's turn start, which may run
+   * after output that preceded the write, keeps the stop of an interrupt issued
+   * after that write.
+   */
+  interruptSeq = 0
+  /**
    * The current turn's message was taken back (Stop before any output): the rest
    * of the turn is dropped at the door, up to and including its end.
    */

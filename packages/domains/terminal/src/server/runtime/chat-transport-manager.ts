@@ -2151,9 +2151,23 @@ export function createChatTransport(
    * A write's turn starts after everything the agent said before it: output the
    * process still holds, then publications already queued. A previous turn's
    * late end therefore settles that turn, never the new one.
+   *
+   * Intended consequence: while that earlier tail is still being published (slow
+   * storage), the tab keeps reading idle — `running`, the user-input mark and the
+   * watchdog wait — although the agent already has the message. Bounded by that
+   * publication; no double send (`isReadyForQueuedMessage` counts the in-flight
+   * write). An interrupt issued after the write keeps its stop flags (`interruptSeq`).
    */
   function markTurnStartedInOrder(tab: ChatTab, messageId: string): void {
-    afterEarlierOutput(tab, tab.proc, () => markTurnStarted(tab, messageId))
+    const proc = tab.proc,
+      interrupts = proc?.interruptSeq ?? 0
+    afterEarlierOutput(tab, proc, () => markTurnStarted(tab, messageId, interrupts))
+  }
+
+  /** An interrupt went to `proc`'s turn: it is being stopped (see `interruptSeq`). */
+  function noteStopping(proc: ChatProcess): void {
+    proc.stoppingTurn = true
+    proc.interruptSeq++
   }
 
   /**
@@ -2176,18 +2190,26 @@ export function createChatTransport(
     else run()
   }
 
-  /** The outbox is writing a user message: the turn starts now. */
-  function markTurnStarted(tab: ChatTab, messageId: string): void {
+  /**
+   * A user message's turn starts. `interruptsAtWrite`: the process's interrupt count
+   * when the message was written; a Stop issued since then targeted this turn, and
+   * its stop flags stay.
+   */
+  function markTurnStarted(tab: ChatTab, messageId: string, interruptsAtWrite?: number): void {
     if (tab.proc) {
       tab.proc.expectedMessageId = messageId
       tab.proc.execution = null
     }
     shadowFeed(tab, tab.gen, { type: 'turn-start', turnId: messageId, origin: 'user' })
     tab.turnProgress = false
-    tab.turnInterrupted = false
-    if (tab.proc) {
-      tab.proc.stoppedTurn = false
-      tab.proc.stoppingTurn = false
+    const stoppedSinceWrite =
+      interruptsAtWrite !== undefined && !!tab.proc && tab.proc.interruptSeq !== interruptsAtWrite
+    if (!stoppedSinceWrite) {
+      tab.turnInterrupted = false
+      if (tab.proc) {
+        tab.proc.stoppedTurn = false
+        tab.proc.stoppingTurn = false
+      }
     }
     deps.userInputTracker.mark(stateKey(tab))
     transitionState(tab, 'running')
@@ -3205,7 +3227,7 @@ export function createChatTransport(
     // A 0-turn error after an interrupt is the interrupt, not a failed resume.
     if (request.subtype === 'interrupt' || request.subtype === 'interrupt_and_wait') {
       proc.interruptIssued = true
-      proc.stoppingTurn = true
+      noteStopping(proc)
     }
     return applyProcessControl(proc, request, timeoutMs)
   }
@@ -3272,7 +3294,7 @@ export function createChatTransport(
     const captured = group,
       stoppingProcess = method === 'kill' || method === 'remove'
     captured.refs++
-    proc.stoppingTurn = true
+    noteStopping(proc)
     if (stoppingProcess && !captured.stop)
       captured.stop = controlSession(tabId, proc.spawnId, 'kill')
     if (!stoppingProcess && !captured.ack && !captured.stop) {
@@ -3608,7 +3630,7 @@ export function createChatTransport(
     if (!tab.proc) return
     if (tab.proc && !tab.proc.ended) {
       tab.proc.interruptIssued = true
-      tab.proc.stoppingTurn = true
+      noteStopping(tab.proc)
     }
     routeHostEvent(tab, { kind: 'interrupted', reason: 'stop-request' })
   }
@@ -3776,7 +3798,7 @@ export function createChatTransport(
     }
 
     proc.interruptIssued = true
-    proc.stoppingTurn = true
+    noteStopping(proc)
     if (popped) {
       if (reach?.sent !== false) proc.discardTurn = true
       if (popped.id && reach?.sent && !reach.started) proc.lateTurnOf = popped.id
