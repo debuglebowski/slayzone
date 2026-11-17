@@ -10,6 +10,7 @@ import {
   existsSync,
   renameSync,
   rmSync,
+  unlinkSync,
   openSync,
   closeSync,
   readSync,
@@ -814,9 +815,13 @@ export function createChatBackups(
     /** Owner-local fault cleanup; the callback never crosses the store wire. */
     discardArchive(id: string, discarded: () => void): Promise<void> {
       if (closed) return Promise.reject(new Error('Backup service is closed'))
-      folder(archiveDir, id)
+      if (!UUID.test(id)) return Promise.reject(new Error('Invalid backup id'))
       return inArchive(id, async () => {
-        rmSync(folder(archiveDir, id), { recursive: true, force: true })
+        const path = join(archiveDir, id)
+        // A symlinked entry is never followed, but Discard must still clear it:
+        // unlink the link itself (erasure refuses it via folder() every retry).
+        if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(path)
+        else rmSync(folder(archiveDir, id), { recursive: true, force: true })
         await syncDir(archiveDir)
         discarded()
       })

@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
@@ -409,6 +411,25 @@ test.each(['chat-archive-index', 'chat-archive-erasure'])(
     }
   }
 )
+
+test('erasure fault discard unlinks a symlinked archive entry without following it', async () => {
+  const r = runtime()
+  const id = randomUUID()
+  const target = mkdtempSync(join(tmpdir(), 's8-archive-link-target-'))
+  roots.push(target)
+  writeFileSync(join(target, 'keep.txt'), 'outside')
+  const link = join(r.backups.archiveDir, id)
+  symlinkSync(target, link, 'dir')
+  r.storage.faults.record(
+    { pass: 'chat-archive-erasure', itemKey: id, kind: 'transient', error: new Error('link') },
+    Date.now()
+  )
+  const faults = createChatStoreFaults(r)
+  await faults.discard({ source: 'ledger', pass: 'chat-archive-erasure', key: id })
+  expect(lstatSync(link, { throwIfNoEntry: false })).toBeUndefined()
+  expect(readFileSync(join(target, 'keep.txt'), 'utf8')).toBe('outside')
+  expect(faults.list().faults.some((f) => f.key === id)).toBe(false)
+})
 
 test('unknown/corrupt archive attribution fails erasure closed while other archives and live task remain usable', async () => {
   const r = runtime()
