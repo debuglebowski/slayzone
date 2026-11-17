@@ -229,8 +229,9 @@ class Contract {
     emitLine(this.child, sj.cancel(id))
     this.prompts.delete(id)
     // A withdrawn last request can be followed by the provider resuming output.
-    // Withdrawal alone does not promise that the provider resumed its turn.
-    if (!this.prompts.size)
+    // Withdrawal alone does not promise that the provider resumed its turn. A
+    // background helper's withdrawn prompt resumes no main turn.
+    if (!this.prompts.size && this.open)
       emitLine(this.child, sj.text('continuing', { id: `resume-${++this.serial}` }))
     await this.check(`withdraw ${id}`)
   }
@@ -375,40 +376,19 @@ test('legacy mode disables the observer for the whole session without changing b
   expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)).toBeNull()
 })
 
-test('an intentional shadow disagreement cannot change approval handling or production state', async () => {
-  const records: Array<{ event: string; payload?: unknown }> = []
-  const h = transportHarness({ deps: { diagnostic: (_tab, record) => records.push(record) } })
-  await startTab()
-  const c = new Contract(h, h.fakes[0])
+test('answering a background-only prompt leaves the closed main turn idle', async () => {
+  const c = await contract()
   await c.metadata()
   await c.start()
   await c.launch()
   await c.finish()
-  const requestId = 'PRIVATE-request-id'
-  const request = sj.canUseTool(requestId, 'PRIVATE-tool-id')
-  request.request.input.command = 'PRIVATE-command-content'
-  emitLine(c.child, request)
-  await until(() => mgr.isSessionAwaitingUserInput(TAB_OPTS.tabId))
-  expect(
-    mgr.respondToPermissionRequest(TAB_OPTS.tabId, {
-      requestId,
-      decision: { behavior: 'allow', updatedInput: {} }
-    })
-  ).toBe(true)
-  await flush()
-  // Known legacy difference: resolving a background-only prompt unconditionally
-  // starts the parent's spinner. The candidate preserves its idle main turn.
-  // Shadow mode reports this discrepancy, and has no authority to change it.
-  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({
-    state: 'running',
-    pendingRequestIds: []
-  })
-  const shadow = mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)!
-  expect(shadow.snapshot).toMatchObject({ state: 'idle', main: null, reportedState: 'background' })
-  expect(shadow.mismatches).toBeGreaterThan(0)
-  const differences = records.filter((record) => record.event === 'chat.lifecycle_shadow_mismatch')
-  expect(differences).toHaveLength(1)
-  expect(JSON.stringify(differences)).not.toContain('PRIVATE')
+  const [helper] = c.helpers
+  await c.ask()
+  await c.answer([...c.prompts][0])
+  await c.childProgress(helper)
+  await c.finishHelper(helper)
+  await c.start()
+  await c.finish()
 })
 
 test('a delayed native acknowledgement updates shadow delivery without another provider event', async () => {
@@ -550,8 +530,11 @@ test.each(Array.from({ length: 64 }, (_, i) => 0x51a700 + i))(
         () => c.metadata(),
         () => c.check('reload replay')
       ]
-      if (!c.open) choices.push(() => c.start())
-      else {
+      // A queued message cannot start while a prompt waits (the drainer is gated).
+      if (!c.open && !c.prompts.size) choices.push(() => c.start())
+      // A background helper may ask while the main turn is closed.
+      if (!c.open && c.helpers.size) choices.push(() => c.ask())
+      if (c.open) {
         choices.push(
           () => c.progress(),
           () => c.ask()

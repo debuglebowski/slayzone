@@ -538,6 +538,12 @@ interface ChatTab {
    */
   pendingPrompts: Set<string>
   /**
+   * A pending prompt parked the main turn: one arrived while it ran. Answering
+   * the last prompt resumes only that turn; a background helper's prompt answered
+   * between turns leaves the tab idle. Cleared when no prompt waits.
+   */
+  promptParkedTurn: boolean
+  /**
    * Queued messages added to the running turn ("Send now") that the
    * agent has not picked up yet, by id, with the process they were written to.
    * Still the queue's: no timeline row, no outbox entry until the pickup.
@@ -1640,6 +1646,7 @@ export function createChatTransport(
       // see the same "waiting on user" state PTY adapters signal via completion
       // stamp / approval modal. The pending set gates the queue drainer so a
       // queued user-message doesn't interleave with the SDK's pending tool_result.
+      if (tab.terminalState === 'running') tab.promptParkedTurn = true
       tab.pendingPrompts.add(event.requestId)
       transitionState(tab, 'idle')
     } else {
@@ -1660,9 +1667,13 @@ export function createChatTransport(
       // An answer resumes the parked turn once nothing else waits: back to
       // running, so the tab stops reading "needs you" while the approved tool
       // runs. The TUI's plain "No" (deny + interrupt) ends the turn instead — its
-      // `result` settles the state.
+      // `result` settles the state. A background helper's prompt answered between
+      // turns parked nothing: the tab stays idle (its helper reads `background`).
+      const parkedTurn = tab.promptParkedTurn
+      if (tab.pendingPrompts.size === 0) tab.promptParkedTurn = false
       if (
         event.kind === 'permission-resolved' &&
+        parkedTurn &&
         tab.pendingPrompts.size === 0 &&
         !(event.decision.behavior === 'deny' && event.decision.interrupt)
       ) {
@@ -1968,6 +1979,7 @@ export function createChatTransport(
         proc.openTools.clear()
         tab.outbox.onResult(proc.gen)
         tab.pendingPrompts.clear()
+        tab.promptParkedTurn = false
         shadowFeed(tab, proc.gen, { type: 'turn-cancel' })
         transitionState(tab, 'idle')
       } else if (proc.lateTurnOf !== null) {
@@ -2569,6 +2581,7 @@ export function createChatTransport(
       watchdogArmedAt: Date.now(),
       watchdogRestarts: 0,
       pendingPrompts: new Set<string>(),
+      promptParkedTurn: false,
       steers: new Map(),
       turnInterrupted: false,
       turnProgress: false,
@@ -2846,6 +2859,7 @@ export function createChatTransport(
     // A new process has no prompt pending (the old one's expired with it), nor
     // the old one's background work.
     tab.pendingPrompts.clear()
+    tab.promptParkedTurn = false
     clearBackgroundWork(tab)
     const fork = tab.pendingFork
     // One spawn reads a switched-to conversation's past from the CLI (Codex).

@@ -144,9 +144,9 @@ no native request identity, known UUID, or usable ordered index cannot be proven
 to belong to an older request. That protocol limitation remains a cutover gate.
 
 Authoritative cutover still requires migration of all status consumers together.
-Known disagreement:
-legacy approval resolution can reopen an idle parent after a background-only
-prompt; the candidate preserves its idle main turn and reports the difference.
+Answering a prompt resumes the main turn only when that prompt parked it (it
+arrived while the turn ran); a background helper's prompt answered between turns
+leaves the parent idle, in both the runtime and the candidate.
 
 `pnpm test:chat:lifecycle` runs the shared contracts, generated/exhaustive orderings,
 provider races, live/replay parity, observer failure/privacy/bounds, and renderer
