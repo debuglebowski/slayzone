@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { test as base, expect, type ElectronApplication, type Page } from '@playwright/test'
 import {
@@ -22,6 +21,7 @@ import {
   type SecondHub
 } from '../fixtures/second-hub'
 import { readChatEvents, seedChatEvents } from '../fixtures/chat-seed'
+import { homeTempDir, removeHomeTempDirs } from '../fixtures/home-temp-dirs'
 import { chatDb, openChatTaskCore } from '../fixtures/chat-task-core'
 import { closeAllTaskTabs } from '../fixtures/terminal'
 import { createFakeClaude, echoTurn, sessionFilePath } from '@slayzone/test-utils/fake-claude'
@@ -57,7 +57,7 @@ async function setUp(name: string, store: string, env: Record<string, string> = 
     await authorizeHubInApp(page, 'remote-b', hub.token)
 
     // Hub B needs a computer for a project: the app's own joins it once signed in.
-    const folderB = fs.mkdtempSync(path.join(os.homedir(), '.slz-e2e-move-b-'))
+    const folderB = homeTempDir('move-b')
     let targetProjectId = ''
     await expect
       .poll(
@@ -81,7 +81,7 @@ async function setUp(name: string, store: string, env: Record<string, string> = 
 
 /** A project on the app's own hub. */
 async function projectOnA(page: Page, name: string) {
-  const folder = fs.mkdtempSync(path.join(os.homedir(), '.slz-e2e-move-a-'))
+  const folder = homeTempDir('move-a')
   return page.evaluate(
     async ({ name, folder }) =>
       (
@@ -248,6 +248,8 @@ function editTitle(page: Page, id: string, title: string) {
  * runs it to the end, and the task — with its subtask, same ids — is on hub B and no
  * longer on the app's own hub.
  */
+base.afterAll(removeHomeTempDirs)
+
 base.describe('move a task to another hub', () => {
   base('board menu → dialog → progress → the task lives on hub B', async () => {
     base.setTimeout(240_000)

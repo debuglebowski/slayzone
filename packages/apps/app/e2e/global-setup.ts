@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { ensureComputerBuilt } from './fixtures/computer-build'
 import { assertInstallHealthy } from './fixtures/install-health'
 import { parsePgrepOutput, readProcessEnviron, selectTestRunPids } from './fixtures/stale-processes'
+import { HOME_TEMP_ROOT } from './fixtures/home-temp-dirs'
 import { pruneStaleRuntimeDirs } from './fixtures/stale-runtime-dirs'
 
 /**
@@ -91,6 +92,11 @@ export default function globalSetup(): void {
   const pruned = pruneStaleRuntimeDirs(path.join(appDir, '.e2e-runtime'))
   if (pruned.length > 0) {
     console.log(`[global-setup] Removed ${pruned.length} stale .e2e-runtime dir(s)`)
+  }
+  // Same for the $HOME project folders of a crashed run (home-temp-dirs.ts).
+  const prunedHome = pruneStaleRuntimeDirs(HOME_TEMP_ROOT)
+  if (prunedHome.length > 0) {
+    console.log(`[global-setup] Removed ${prunedHome.length} stale ~/.slz-e2e dir(s)`)
   }
   const linkPath = path.join(appDir, 'out', 'hub')
   if (!fs.existsSync(linkPath)) {

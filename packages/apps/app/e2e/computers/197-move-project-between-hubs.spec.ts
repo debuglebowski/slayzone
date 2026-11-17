@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { test as base, expect } from '@playwright/test'
 import {
@@ -17,6 +16,7 @@ import {
   type SecondHub
 } from '../fixtures/second-hub'
 import { readChatEvents, seedChatEvents } from '../fixtures/chat-seed'
+import { homeTempDir, removeHomeTempDirs } from '../fixtures/home-temp-dirs'
 
 type Launched = Awaited<ReturnType<typeof launchIsolatedElectron>>
 
@@ -27,6 +27,8 @@ type Launched = Awaited<ReturnType<typeof launchIsolatedElectron>>
  * app's own hub. A task's chat goes with it ("Keep agent sessions", on by default): hub B
  * reads the conversation the app's own hub held. The rail still shows it (from hub B).
  */
+base.afterAll(removeHomeTempDirs)
+
 base.describe('move a project to another hub', () => {
   base('rail menu → dialog → progress → the project lives on hub B', async () => {
     base.setTimeout(240_000)
@@ -58,7 +60,7 @@ base.describe('move a project to another hub', () => {
       expect(await waitForUsableComputer(page), 'local computer up').toBe(true)
       await authorizeHubInApp(page, 'remote-b', hub.token)
       // Hub B gets a computer once the app's own joins it (a project there needs one).
-      const folderB = fs.mkdtempSync(path.join(os.homedir(), '.slz-e2e-move-project-b-'))
+      const folderB = homeTempDir('move-project-b')
       await expect
         .poll(
           async () =>
@@ -70,7 +72,7 @@ base.describe('move a project to another hub', () => {
         .toBe(true)
 
       // A project on the app's own hub, with a task and a subtask.
-      const folderA = fs.mkdtempSync(path.join(os.homedir(), '.slz-e2e-move-project-a-'))
+      const folderA = homeTempDir('move-project-a')
       const ids = await page.evaluate(async (folder) => {
         const c = window.getTrpcVanillaClient()
         const project = await c.projects.create.mutate({
