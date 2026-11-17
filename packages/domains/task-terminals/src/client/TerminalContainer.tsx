@@ -24,7 +24,7 @@ import {
   useAppearance
 } from '@slayzone/ui'
 import { useTheme } from '@slayzone/ui'
-import type { TerminalTab } from '../shared/types'
+import type { TerminalGroup, TerminalTab } from '../shared/types'
 import { isChatSupported } from '../shared/chat-modes'
 import { getTabLabel } from './get-tab-label'
 import { useTaskTerminals } from './useTaskTerminals'
@@ -118,6 +118,14 @@ function isSecondaryAgentTab(tab: TerminalTab): boolean {
   return !tab.isMain && tab.mode !== 'terminal' && !isChatSupported(tab.mode)
 }
 
+/**
+ * A tab group not shown: hidden like an inactive task tab (PaneFrame in the
+ * app shell) — same box, so xterm sees no resize; inert; transitions killed
+ * and animations paused so nothing hidden keeps painting.
+ */
+const HIDDEN_GROUP_CLASS =
+  'absolute inset-0 invisible [&_*]:transition-none! [&_*]:[animation-play-state:paused]!'
+
 export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalContainerProps>(
   function TerminalContainer(
     {
@@ -208,6 +216,15 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
 
     // Get active group
     const activeGroup = groups.find((g) => g.id === activeGroupId)
+    // Groups stay mounted once shown, so switching back to one doesn't remount
+    // its panes (a chat re-hydrating, a terminal reattaching). A group mounts on
+    // its first visit, so its terminals start when the user opens it, as before.
+    const [mountedGroupIds, setMountedGroupIds] = useState<ReadonlySet<string>>(
+      () => new Set([activeGroupId])
+    )
+    if (!mountedGroupIds.has(activeGroupId)) {
+      setMountedGroupIds(new Set([...mountedGroupIds, activeGroupId]))
+    }
     const mainGroupId = groups.find((group) => group.tabs.some((tab) => tab.isMain))?.id ?? null
 
     // Chat font size: the header control sizes the active group's chat(s). A group
@@ -401,6 +418,17 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       activateFocus(() => splitGroupRef.current?.focus())
     }, [shortcutActive, activateFocus])
 
+    // Group switch: a revisited group is already mounted, so no pane attaches to
+    // complete the switch's focus claim — focus the shown group here. (A group
+    // on its first visit isn't attached yet: focus no-ops, the claim stays for
+    // its attach.)
+    const shownGroupIdRef = useRef(activeGroupId)
+    useEffect(() => {
+      if (shownGroupIdRef.current === activeGroupId) return
+      shownGroupIdRef.current = activeGroupId
+      if (shortcutActive) activateFocus(() => splitGroupRef.current?.focus())
+    }, [activeGroupId, shortcutActive, activateFocus])
+
     const handlePaneAttached = useCallback(
       (api: { sessionId: string; focus: () => void }) => {
         focusPaneAttached(api)
@@ -520,62 +548,63 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       [tabs, taskId, terminalTitles]
     )
 
-    // Build pane props for the active group
-    const paneProps = useMemo(() => {
-      if (!activeGroup) return []
-      return activeGroup.tabs.map((tab) => {
-        const canClose = !tab.isMain
-        return {
-          tab,
-          taskId,
-          sessionId: getSessionId(tab.id),
-          cwd,
-          conversationId: tab.isMain ? conversationId : undefined,
-          existingConversationId: tab.isMain ? existingConversationId : undefined,
-          supportsSessionId: tab.isMain ? supportsSessionId : undefined,
-          providerFlags: tab.isMain ? providerFlags : undefined,
-          executionContext,
-          isTemporary,
-          onStartFresh: tab.isMain
-            ? onStartFresh
-            : isSecondaryAgentTab(tab) && onTabSessionReset
-              ? () => void resetTabSession(tab)
-              : undefined,
-          remountKey: paneEpochs[tab.id] ?? 0,
-          onReady: tab.isMain ? handleTerminalReady : undefined,
-          onFirstInput: tab.isMain ? onFirstInput : undefined,
-          onRetry: tab.isMain ? onRetry : undefined,
-          onRemount: () => {
-            markSkipCache(getSessionId(tab.id))
-            remountPane(tab.id)
-          },
-          // Context menu callbacks
-          onSplit: () => handleSplitGroup(activeGroup.id),
-          onNewGroup: () => {
-            claimFocus(true)
-            createTab()
-          },
-          onClose: canClose
-            ? () => {
-                if (activeGroup.tabs.length === 1) {
-                  void closeGroup(activeGroup.id)
-                } else {
-                  void closeTab(tab.id)
+    // Pane props per group (every mounted group renders, not just the active one).
+    const panesByGroup = useMemo(() => {
+      const build = (group: TerminalGroup) =>
+        group.tabs.map((tab) => {
+          const canClose = !tab.isMain
+          return {
+            tab,
+            taskId,
+            sessionId: getSessionId(tab.id),
+            cwd,
+            conversationId: tab.isMain ? conversationId : undefined,
+            existingConversationId: tab.isMain ? existingConversationId : undefined,
+            supportsSessionId: tab.isMain ? supportsSessionId : undefined,
+            providerFlags: tab.isMain ? providerFlags : undefined,
+            executionContext,
+            isTemporary,
+            onStartFresh: tab.isMain
+              ? onStartFresh
+              : isSecondaryAgentTab(tab) && onTabSessionReset
+                ? () => void resetTabSession(tab)
+                : undefined,
+            remountKey: paneEpochs[tab.id] ?? 0,
+            onReady: tab.isMain ? handleTerminalReady : undefined,
+            onFirstInput: tab.isMain ? onFirstInput : undefined,
+            onRetry: tab.isMain ? onRetry : undefined,
+            onRemount: () => {
+              markSkipCache(getSessionId(tab.id))
+              remountPane(tab.id)
+            },
+            // Context menu callbacks
+            onSplit: () => handleSplitGroup(group.id),
+            onNewGroup: () => {
+              claimFocus(true)
+              createTab()
+            },
+            onClose: canClose
+              ? () => {
+                  if (group.tabs.length === 1) {
+                    void closeGroup(group.id)
+                  } else {
+                    void closeTab(tab.id)
+                  }
                 }
-              }
-            : null,
-          onRename: tab.isMain ? null : () => startTabRename(tab.id),
-          onResetSession: tab.isMain
-            ? (onMainReset ?? null)
-            : isSecondaryAgentTab(tab) && onTabSessionReset
-              ? () => void resetTabSession(tab)
               : null,
-          onHandoff: tab.isMain && onMainHandoff ? onMainHandoff : null,
-          onShowSessions: showSessions
-        }
-      })
+            onRename: tab.isMain ? null : () => startTabRename(tab.id),
+            onResetSession: tab.isMain
+              ? (onMainReset ?? null)
+              : isSecondaryAgentTab(tab) && onTabSessionReset
+                ? () => void resetTabSession(tab)
+                : null,
+            onHandoff: tab.isMain && onMainHandoff ? onMainHandoff : null,
+            onShowSessions: showSessions
+          }
+        })
+      return new Map(groups.map((group) => [group.id, build(group)]))
     }, [
-      activeGroup,
+      groups,
       getSessionId,
       cwd,
       taskId,
@@ -655,17 +684,31 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             mainTabContextMenu={mainTabContextMenu}
           />
           <div className="flex-1 min-h-0 relative">
-            <TerminalSplitGroup
-              ref={splitGroupRef}
-              key={activeGroupId}
-              panes={paneProps}
-              isActive={isActive}
-              paused={paused}
-              onAttached={handlePaneAttached}
-              onOpenUrl={onOpenUrl}
-              onOpenFile={onOpenFile}
-              onOpenArtifact={onOpenArtifact}
-            />
+            {groups
+              .filter((group) => mountedGroupIds.has(group.id))
+              .map((group) => {
+                const shown = group.id === activeGroupId
+                return (
+                  <div
+                    key={group.id}
+                    className={shown ? 'absolute inset-0' : HIDDEN_GROUP_CLASS}
+                    inert={shown ? undefined : true}
+                  >
+                    <TerminalSplitGroup
+                      // Focus and attach go to the shown group only: a hidden
+                      // pane must never take focus.
+                      ref={shown ? splitGroupRef : undefined}
+                      panes={panesByGroup.get(group.id) ?? []}
+                      isActive={isActive && shown}
+                      paused={paused}
+                      onAttached={shown ? handlePaneAttached : undefined}
+                      onOpenUrl={onOpenUrl}
+                      onOpenFile={onOpenFile}
+                      onOpenArtifact={onOpenArtifact}
+                    />
+                  </div>
+                )
+              })}
             {overlay}
           </div>
         </div>
