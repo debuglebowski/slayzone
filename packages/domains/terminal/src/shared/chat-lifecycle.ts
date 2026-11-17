@@ -337,6 +337,7 @@ export function chatLifecycleSnapshot(state: ChatLifecycle) {
       ? { ...v.main, ...(v.main.execution ? { execution: { ...v.main.execution } } : {}) }
       : null,
     turnOpen: v.main !== null || v.prompts.size > 0 || v.inFlight > 0,
+    mainTurnOpen: v.main !== null || v.inFlight > 0,
     pendingRequestIds: [...v.prompts],
     outboxInFlight: v.inFlight,
     backgroundHelpers,

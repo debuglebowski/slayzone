@@ -21,7 +21,7 @@ import { beginReducerCall, endReducerCall } from './replay-batch'
  * 19 = rows carry out-of-line references (`chat-blobs`), so pages built before the
  * v13 chat store (inline base64) are rebuilt from the events on next open.
  */
-export const CHAT_TIMELINE_VERSION = '21'
+export const CHAT_TIMELINE_VERSION = '22'
 
 /**
  * Bump when what the hub persists or serves next to the state changes shape

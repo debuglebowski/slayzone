@@ -3846,6 +3846,7 @@ describe('server turn status', () => {
     state: turnOpen ? 'running' : 'idle',
     reportedState: turnOpen ? 'running' : 'idle',
     turnOpen,
+    mainTurnOpen: turnOpen,
     pendingRequestIds: [],
     outboxInFlight: 0
   })

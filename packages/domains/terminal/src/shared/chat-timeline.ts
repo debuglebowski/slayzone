@@ -2955,7 +2955,7 @@ export function isInFlight(state: ChatTimelineState): boolean {
  */
 export function isTurnOpen(state: ChatTimelineState): boolean {
   const status = state.turnStatus
-  if (status?.authoritative) return status.turnOpen && !state.sessionEnded
+  if (status?.authoritative) return status.mainTurnOpen && !state.sessionEnded
   return isInFlight(state) || state.agentTurnOpen
 }
 

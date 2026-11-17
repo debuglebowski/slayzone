@@ -333,7 +333,14 @@ export interface TurnStatusEvent {
   state: ChatTurnState
   /** `background`: the turn is over while a background helper still runs. */
   reportedState: ChatTurnState | 'background'
+  /** Running, parked on a prompt, or a message on its way (`ChatTurnStatus.turnOpen`). */
   turnOpen: boolean
+  /**
+   * The main turn runs or is parked on its prompt, or a message is on its way:
+   * what the composer shows as working (spinner, Stop, send vs queue). Unlike
+   * `turnOpen`, a background helper's prompt after the main turn ended is not.
+   */
+  mainTurnOpen: boolean
   pendingRequestIds: string[]
   outboxInFlight: number
 }

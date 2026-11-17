@@ -11,6 +11,7 @@ const idle = (generation = 1): LifecycleObservation => ({
   state: 'idle',
   reportedState: 'idle',
   turnOpen: false,
+  mainTurnOpen: false,
   pendingRequestIds: [],
   outboxInFlight: 0,
   backgroundHelpers: 0,
@@ -145,6 +146,7 @@ test('steady-state token fragments do not schedule a comparison per token', asyn
     state: 'running' as const,
     reportedState: 'running' as const,
     turnOpen: true,
+    mainTurnOpen: true,
     readyForMessage: false
   }
   const s = new ChatLifecycleShadow('tab', {

@@ -308,6 +308,7 @@ test('turn status is live only, and its latest stays for a viewer attaching late
     state: turnOpen ? 'running' : 'idle',
     reportedState: turnOpen ? 'running' : 'idle',
     turnOpen,
+    mainTurnOpen: turnOpen,
     pendingRequestIds: [],
     outboxInFlight: 0
   })

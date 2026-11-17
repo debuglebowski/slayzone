@@ -268,9 +268,13 @@ class Contract {
   }
 }
 
-async function contract(): Promise<Contract> {
+/** `authoritative`: the lifecycle model is the server's status; the runtime agrees with it. */
+type Mode = 'shadow' | 'authoritative'
+const MODES: Mode[] = ['shadow', 'authoritative']
+
+async function contract(mode: Mode = 'shadow'): Promise<Contract> {
   const h = transportHarness()
-  await startTab()
+  await startTab({ lifecycleMode: mode } as never)
   const c = new Contract(h, h.fakes[0])
   await c.metadata()
   return c
@@ -300,12 +304,13 @@ function interleave<T>(left: T[], right: T[]): T[][] {
 }
 
 test.each(
-  interleave(['main end', 'next start', 'next end'], ['child tool', 'child end']).map((order) => ({
-    name: order.join(' → '),
-    order
-  }))
-)('all parent/child race orderings: $name', async ({ order }) => {
-  const c = await contract()
+  MODES.flatMap((mode) =>
+    interleave(['main end', 'next start', 'next end'], ['child tool', 'child end']).map(
+      (order) => ({ name: `${mode}: ${order.join(' → ')}`, order, mode })
+    )
+  )
+)('all parent/child race orderings: $name', async ({ order, mode }) => {
+  const c = await contract(mode)
   await c.start()
   await c.launch()
   const [helper] = c.helpers
@@ -520,56 +525,52 @@ function seeded(seed: number): () => number {
   }
 }
 
-test.each(Array.from({ length: 64 }, (_, i) => 0x51a700 + i))(
-  'generated lifecycle orderings preserve contract (seed %i)',
-  async (seed) => {
-    const c = await contract()
-    const random = seeded(seed)
-    for (let i = 0; i < 64; i++) {
-      const choices: Array<() => Promise<void>> = [
-        () => c.metadata(),
-        () => c.check('reload replay')
-      ]
-      // A queued message cannot start while a prompt waits (the drainer is gated).
-      if (!c.open && !c.prompts.size) choices.push(() => c.start())
-      // A background helper may ask while the main turn is closed.
-      if (!c.open && c.helpers.size) choices.push(() => c.ask())
-      if (c.open) {
-        choices.push(
-          () => c.progress(),
-          () => c.ask()
-        )
-        if (c.helpers.size < 3) choices.push(() => c.launch())
-        if (!c.prompts.size) choices.push(() => c.finish())
-      }
-      if (c.prompts.size) {
-        const ids = [...c.prompts]
-        const id = ids[Math.floor(random() * ids.length)]
-        choices.push(
-          () => c.answer(id),
-          () => c.withdraw(id)
-        )
-      }
-      if (c.helpers.size) {
-        const ids = [...c.helpers]
-        const id = ids[Math.floor(random() * ids.length)]
-        choices.push(
-          () => c.childProgress(id),
-          () => c.finishHelper(id)
-        )
-      }
-      if (c.completedHelpers.length) {
-        const id = c.completedHelpers[Math.floor(random() * c.completedHelpers.length)]
-        choices.push(() => c.finishHelper(id))
-      }
-      await choices[Math.floor(random() * choices.length)]()
+test.each(
+  MODES.flatMap((mode) => Array.from({ length: 64 }, (_, i) => ({ seed: 0x51a700 + i, mode })))
+)('generated lifecycle orderings preserve contract ($mode, seed $seed)', async ({ seed, mode }) => {
+  const c = await contract(mode)
+  const random = seeded(seed)
+  for (let i = 0; i < 64; i++) {
+    const choices: Array<() => Promise<void>> = [() => c.metadata(), () => c.check('reload replay')]
+    // A queued message cannot start while a prompt waits (the drainer is gated).
+    if (!c.open && !c.prompts.size) choices.push(() => c.start())
+    // A background helper may ask while the main turn is closed.
+    if (!c.open && c.helpers.size) choices.push(() => c.ask())
+    if (c.open) {
+      choices.push(
+        () => c.progress(),
+        () => c.ask()
+      )
+      if (c.helpers.size < 3) choices.push(() => c.launch())
+      if (!c.prompts.size) choices.push(() => c.finish())
     }
-    for (const id of [...c.prompts]) await c.answer(id)
-    if (c.open) await c.finish()
-    for (const id of [...c.helpers]) await c.finishHelper(id)
-    await c.check(`seed ${seed} fully settled`)
+    if (c.prompts.size) {
+      const ids = [...c.prompts]
+      const id = ids[Math.floor(random() * ids.length)]
+      choices.push(
+        () => c.answer(id),
+        () => c.withdraw(id)
+      )
+    }
+    if (c.helpers.size) {
+      const ids = [...c.helpers]
+      const id = ids[Math.floor(random() * ids.length)]
+      choices.push(
+        () => c.childProgress(id),
+        () => c.finishHelper(id)
+      )
+    }
+    if (c.completedHelpers.length) {
+      const id = c.completedHelpers[Math.floor(random() * c.completedHelpers.length)]
+      choices.push(() => c.finishHelper(id))
+    }
+    await choices[Math.floor(random() * choices.length)]()
   }
-)
+  for (const id of [...c.prompts]) await c.answer(id)
+  if (c.open) await c.finish()
+  for (const id of [...c.helpers]) await c.finishHelper(id)
+  await c.check(`seed ${seed} fully settled`)
+})
 
 // Measured on Claude Code 2.1.326 (`command_lifecycle` + `--replay-user-messages`):
 // a turn the CLI starts by itself after a background task has no `started`, and its

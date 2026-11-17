@@ -73,7 +73,11 @@ import {
 } from '../chat-events-store'
 import { ChatBackgroundWork } from './chat-background-work'
 import { ChatLifecycleShadow } from './chat-lifecycle-shadow'
-import type { ChatLifecycleSignal } from '../../shared/chat-lifecycle'
+import type {
+  ChatLifecycleSignal,
+  ChatLifecycleSnapshot,
+  reduceChatLifecycle
+} from '../../shared/chat-lifecycle'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
 // typed `string`. `shared/chat-mode-catalog.ts` owns the per-mode vocabulary.
@@ -1267,7 +1271,26 @@ export function createChatTransport(
    * waiting on the user while a background sub-agent still runs — `background`
    * (the ladder of `agent-tree.ts`: needs you > working > helpers > idle).
    */
+  /**
+   * The lifecycle model's status when the session runs it as the authority
+   * (`authoritative` mode, model healthy); null: the runtime's own state applies.
+   * The runtime's state still drives its internal mechanics (watchdog, steering,
+   * Stop); what the server answers and publishes comes from here.
+   */
+  function authorityOf(tab: ChatTab): ChatLifecycleSnapshot | null {
+    return tab.lifecycleMode === 'authoritative' ? (tab.shadow?.authority() ?? null) : null
+  }
+
+  /** The turn state the server answers and publishes (see `authorityOf`). */
+  function turnStateOf(tab: ChatTab): ChatTurnState {
+    return authorityOf(tab)?.state ?? tab.terminalState
+  }
+
   function reportedStateOf(tab: ChatTab): ChatTerminalState {
+    return authorityOf(tab)?.reportedState ?? runtimeReportedState(tab)
+  }
+
+  function runtimeReportedState(tab: ChatTab): ChatTerminalState {
     if (
       tab.terminalState === 'idle' &&
       tab.pendingPrompts.size === 0 &&
@@ -1279,6 +1302,11 @@ export function createChatTransport(
 
   /** Tell clients the tab's state and background-job count, when they changed. */
   function publishState(tab: ChatTab): void {
+    // The model takes the rows being published in, in order: publish once settled.
+    if (tab.lifecycleMode === 'authoritative' && publicationBusy.has(tab)) {
+      statusDeferred.add(tab)
+      return
+    }
     const sessionId = stateKey(tab)
     const next = reportedStateOf(tab)
     const old = tab.reportedState
@@ -1307,13 +1335,7 @@ export function createChatTransport(
       statusDeferred.add(tab)
       return
     }
-    const status = {
-      state: tab.terminalState,
-      reportedState: reportedStateOf(tab),
-      turnOpen: turnOpen(tab),
-      pendingRequestIds: [...tab.pendingPrompts],
-      outboxInFlight: tab.outbox.inFlight()
-    }
+    const status = statusOf(tab)
     const key = JSON.stringify(status)
     if (key === tab.statusKey) return
     tab.statusKey = key
@@ -1341,7 +1363,7 @@ export function createChatTransport(
    * drain's dispatch path doesn't re-enter the event pipeline in this tick.
    */
   function kickQueueDrainer(tab: ChatTab): void {
-    if (!queueDrainer || tab.closed || tab.terminalState !== 'idle') return
+    if (!queueDrainer || tab.closed || turnStateOf(tab) !== 'idle') return
     const tabId = tab.tabId
     const drain = queueDrainer
     setImmediate(() => drain(tabId))
@@ -1367,7 +1389,7 @@ export function createChatTransport(
    */
   function getSessionTerminalState(tabId: string): ChatTurnState | null {
     const tab = tabs.get(tabId)
-    return tab ? tab.terminalState : null
+    return tab ? turnStateOf(tab) : null
   }
 
   /**
@@ -1378,7 +1400,7 @@ export function createChatTransport(
    */
   function isSessionAwaitingUserInput(tabId: string): boolean {
     const tab = tabs.get(tabId)
-    return tab ? tab.pendingPrompts.size > 0 : false
+    return tab ? statusOf(tab).pendingRequestIds.length > 0 : false
   }
 
   /**
@@ -1397,35 +1419,71 @@ export function createChatTransport(
   }
 
   function turnOpen(tab: ChatTab): boolean {
+    return authorityOf(tab)?.turnOpen ?? runtimeTurnOpen(tab)
+  }
+
+  /** The main turn runs or is parked on its prompt, or a message is on its way. */
+  function runtimeMainTurnOpen(tab: ChatTab): boolean {
+    return tab.terminalState === 'running' || tab.promptParkedTurn || tab.outbox.inFlight() > 0
+  }
+
+  function runtimeTurnOpen(tab: ChatTab): boolean {
     return (
       tab.terminalState === 'running' || tab.pendingPrompts.size > 0 || tab.outbox.inFlight() > 0
     )
+  }
+
+  /** The status the server answers and publishes: the model's or the runtime's (`authorityOf`). */
+  function statusOf(
+    tab: ChatTab
+  ): ChatTurnStatus & { reportedState: ChatTerminalState; mainTurnOpen: boolean } {
+    const model = authorityOf(tab)
+    if (model)
+      return {
+        state: model.state,
+        reportedState: model.reportedState,
+        turnOpen: model.turnOpen,
+        mainTurnOpen: model.mainTurnOpen,
+        pendingRequestIds: [...model.pendingRequestIds],
+        outboxInFlight: model.outboxInFlight
+      }
+    return {
+      state: tab.terminalState,
+      reportedState: runtimeReportedState(tab),
+      turnOpen: runtimeTurnOpen(tab),
+      mainTurnOpen: runtimeMainTurnOpen(tab),
+      pendingRequestIds: [...tab.pendingPrompts],
+      outboxInFlight: tab.outbox.inFlight()
+    }
   }
 
   /** Where the tab's turn stands (see `ChatTurnStatus`); null for an unknown tab. */
   function getTurnStatus(tabId: string): ChatTurnStatus | null {
     const tab = tabs.get(tabId)
     if (!tab) return null
-    return {
-      state: tab.terminalState,
-      turnOpen: turnOpen(tab),
-      pendingRequestIds: [...tab.pendingPrompts],
-      outboxInFlight: tab.outbox.inFlight()
-    }
+    const { reportedState: _reported, mainTurnOpen: _main, ...status } = statusOf(tab)
+    return status
   }
 
   function isReadyForQueuedMessage(tabId: string): boolean {
     const tab = tabs.get(tabId)
-    if (
-      !tab ||
+    if (!tab || !queueGateOpen(tab)) return false
+    return authorityOf(tab)?.readyForMessage ?? runtimeReadyForMessage(tab)
+  }
+
+  /** Nothing outside the turn holds the queue back (closing, storage, a respawn…). */
+  function queueGateOpen(tab: ChatTab): boolean {
+    return !(
       tab.closed ||
       tab.ended ||
       tab.storageFailed ||
       publicationBusy.has(tab) ||
       tab.respawning ||
-      permissionChanges.has(tabId)
+      permissionChanges.has(tab.tabId)
     )
-      return false
+  }
+
+  function runtimeReadyForMessage(tab: ChatTab): boolean {
     return (
       tab.terminalState === 'idle' && tab.pendingPrompts.size === 0 && tab.outbox.inFlight() === 0
     )
@@ -1607,6 +1665,8 @@ export function createChatTransport(
     if (!tab.shadow) return
     if (!publicationBusy.has(tab)) {
       observe(tab.shadow)
+      // The model is the session's status: what it now says is published.
+      if (tab.lifecycleMode === 'authoritative') publishState(tab)
       return
     }
     const backlog = shadowBacklog.get(tab)
@@ -1637,7 +1697,7 @@ export function createChatTransport(
       if (publicationTail.get(tab) !== result) return
       publicationBusy.delete(tab)
       flushLifecycle(tab)
-      if (statusDeferred.delete(tab)) publishStatus(tab)
+      if (statusDeferred.delete(tab) || tab.lifecycleMode === 'authoritative') publishState(tab)
       kickQueueDrainer(tab)
     }
     void result.then(settled, (error) => {
@@ -2731,19 +2791,21 @@ export function createChatTransport(
         ? null
         : new ChatLifecycleShadow(opts.tabId, {
             autonomous: chatCapabilitiesForMode(opts.mode).agentStartedTurns,
+            ...(lifecycleReducerForTests ? { reduce: lifecycleReducerForTests } : {}),
             observe: () => {
               const work = tab.work.counts()
               return {
                 generation: tab.gen,
                 conversationId: tab.sessionConfirmed ? tab.sessionId : null,
                 state: tab.terminalState,
-                reportedState: reportedStateOf(tab),
-                turnOpen: turnOpen(tab),
+                reportedState: runtimeReportedState(tab),
+                turnOpen: runtimeTurnOpen(tab),
+                mainTurnOpen: runtimeMainTurnOpen(tab),
                 pendingRequestIds: [...tab.pendingPrompts],
                 outboxInFlight: tab.outbox.inFlight(),
                 backgroundHelpers: work.subAgents,
                 backgroundJobs: work.jobs,
-                readyForMessage: isReadyForQueuedMessage(tab.tabId),
+                readyForMessage: queueGateOpen(tab) && runtimeReadyForMessage(tab),
                 seq: tab.log.lastSeq,
                 live: tab.liveSeq
               }
@@ -5058,6 +5120,11 @@ export function createChatTransport(
   function __getGenerationForTests(tabId: string): number {
     return tabs.get(tabId)?.gen ?? 0
   }
+  /** Test seam: the lifecycle reducer of sessions hydrated from now on (null: the real one). */
+  let lifecycleReducerForTests: typeof reduceChatLifecycle | null = null
+  function __setLifecycleReducerForTests(reduce: typeof reduceChatLifecycle | null): void {
+    lifecycleReducerForTests = reduce
+  }
   function __getLifecycleShadowForTests(tabId: string) {
     return tabs.get(tabId)?.shadow?.read() ?? null
   }
@@ -5093,6 +5160,7 @@ export function createChatTransport(
     isTurnOpen,
     getTurnStatus,
     __getLifecycleShadowForTests,
+    __setLifecycleReducerForTests,
     __flushEventsForTests,
     isReadyForQueuedMessage,
     hydrateSession,
@@ -5226,6 +5294,7 @@ export const {
   __getOutboxStateForTests,
   __getGenerationForTests,
   __getLifecycleShadowForTests,
+  __setLifecycleReducerForTests,
   __flushEventsForTests
 } = defaultChatTransport
 

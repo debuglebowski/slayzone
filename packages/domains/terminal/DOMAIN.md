@@ -120,8 +120,18 @@ open, pending prompt ids, outbox in flight) live on the chat's event stream on
 every change, with an epoch per tab instance and a rising revision; the splitter
 keeps the latest for a viewer attaching later. In `authoritative` mode the status
 says so, and the shared timeline's `isTurnOpen` (desktop and mobile composer:
-spinner, Stop, send vs queue) follows it instead of the transcript, so the
-composer reads what tab dots, kanban and the CLI read. Comparisons run after synchronous operations
+spinner, Stop, send vs queue) follows its `mainTurnOpen` instead of the
+transcript, so the composer reads what tab dots, kanban and the CLI read.
+`mainTurnOpen` is the main turn running or parked on its prompt, or a message on
+its way; `turnOpen` also counts a background helper's prompt after the main turn.
+
+In `authoritative` mode the lifecycle model is also the source of that status:
+`getTurnStatus`, `isTurnOpen`, `isReadyForQueuedMessage`, `getSessionTerminalState`,
+the reported state (tab dots, kanban, automations) and `turn-status` all come from
+`ChatLifecycleShadow.authority()`. The runtime's own state keeps driving its internal
+mechanics (watchdog, steering, Stop) and is compared against the model as before;
+a model that fails hands the status back to the runtime. Publication waits for
+the event pipeline to settle, so the model has taken in the rows it describes. Comparisons run after synchronous operations
 settle. Diagnostics keep only counts/flags and field names, capped at eight
 distinct reports per process. Observer or diagnostics failure never controls chat.
 Unchanged token fragments cause no extra comparison.
