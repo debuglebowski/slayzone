@@ -8,6 +8,11 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { expect, test } from 'vitest'
 
+// The proof child owns its budget; the vitest timeout covers that budget plus cc/esbuild
+// setup. execFileSync blocks the loop, so a shorter outer timeout fails completed proofs.
+const CHILD_BUDGET_MS = 25000
+const SETUP_HEADROOM_MS = 15000
+
 for (const mode of [
   'portable',
   'native',
@@ -114,7 +119,7 @@ for (const mode of [
           const failed = spawnSync(process.execPath, args, {
             encoding: 'utf8',
             env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-            timeout: 25000
+            timeout: CHILD_BUDGET_MS
           })
           expect(failed.status).toBe(1)
           expect(failed.stderr).toContain('completed Job.request must be retired')
@@ -126,7 +131,7 @@ for (const mode of [
         const output = execFileSync(process.execPath, args, {
           encoding: 'utf8',
           env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-          timeout: 25000
+          timeout: CHILD_BUDGET_MS
         })
         process.stdout.write(`POSIX staged publication ${mode} proof ${output.trim()}\n`)
         const result = JSON.parse(output)
@@ -200,6 +205,7 @@ for (const mode of [
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
-    }
+    },
+    CHILD_BUDGET_MS + SETUP_HEADROOM_MS
   )
 }

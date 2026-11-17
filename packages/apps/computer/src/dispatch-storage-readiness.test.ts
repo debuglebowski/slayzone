@@ -160,7 +160,8 @@ test
     'dispatch-network-controls-public-codex'
   ])(
   '%s: real native sync leaves authorized scoped controls responsive across actual online hubs',
-  (proof) => nativeProof(proof)
+  (proof) => nativeProof(proof),
+  proofTimeoutMs()
 )
 
 test.skipIf(process.platform === 'win32').each([
@@ -175,8 +176,17 @@ test.skipIf(process.platform === 'win32').each([
       'dispatch-network-controls-public' + (mode === 'codex-chat' ? '-codex' : ''),
       scenario
     ),
-  45000
+  proofTimeoutMs('lifetime')
 )
+
+// The proof child owns its budget; the vitest timeout covers that budget plus cc/esbuild
+// setup. execFileSync blocks the loop, so a shorter outer timeout fails completed proofs.
+function childBudgetMs(lifetimeCase?: string) {
+  return lifetimeCase ? 45000 : 25000
+}
+function proofTimeoutMs(lifetimeCase?: string) {
+  return childBudgetMs(lifetimeCase) + 15000
+}
 
 async function nativeProof(proof: string, lifetimeCase?: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'dispatch-native-owner-')))
@@ -272,7 +282,7 @@ async function nativeProof(proof: string, lifetimeCase?: string) {
         ...(proof.includes('-public') ? { SLAYZONE_TEST_PUBLIC_CONTROLS: '1' } : {}),
         ...(lifetimeCase ? { SLAYZONE_TEST_CONTROL_LIFETIME_CASE: lifetimeCase } : {})
       },
-      timeout: lifetimeCase ? 45000 : 25000
+      timeout: childBudgetMs(lifetimeCase)
     })
     const nativeChildMs = performance.now() - childStarted
     const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
