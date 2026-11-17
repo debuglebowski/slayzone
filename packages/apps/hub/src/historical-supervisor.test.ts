@@ -14,6 +14,7 @@ import { createRequire } from 'node:module'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, relative, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, test, vi } from 'vitest'
 import {
   resolveMissingFromRef,
@@ -30,14 +31,22 @@ const root = resolve(import.meta.dirname, '../../../..')
 const computerDir = join(root, 'packages/apps/computer')
 const requireComputer = createRequire(join(computerDir, 'package.json'))
 
+type ComputerBuild = (options: {
+  write?: boolean
+  version?: string
+  plugins?: import('esbuild').Plugin[]
+}) => Promise<import('esbuild').BuildResult<{ write: false }>>
+
 /**
  * The computer bundle at `version`: from `ref` (a historical release) or, without
- * one, from the working tree (the release being rolled out). Both sides are built
- * the same way and get the same timing-only source patches; the version is the
- * real build-time define, never a rewrite of bundler output.
+ * one, from the working tree (the release being rolled out). Both use the
+ * published build (`computer/build.mjs`); only reading a ref and the timing-only
+ * source patches are this test's. The version is the real build-time define.
  */
 async function computerBin(version: string, ref?: string): Promise<string> {
-  const esbuild = requireComputer('esbuild') as typeof import('esbuild')
+  const { buildComputer } = (await import(pathToFileURL(join(computerDir, 'build.mjs')).href)) as {
+    buildComputer: ComputerBuild
+  }
   const read = (path: string): string =>
     ref
       ? execFileSync('git', ['show', `${ref}:${relative(root, path)}`], {
@@ -45,42 +54,30 @@ async function computerBin(version: string, ref?: string): Promise<string> {
           encoding: 'utf8'
         })
       : readFileSync(path, 'utf8')
-  const result = await esbuild.build({
-    entryPoints: [join(computerDir, 'src/bin.ts')],
-    bundle: true,
+  const result = await buildComputer({
     write: false,
-    platform: 'node',
-    format: 'cjs',
-    target: 'node24',
-    define: { __SLAYZONE_COMPUTER_VERSION__: JSON.stringify(version) },
-    // As each release's own build: the current one also keeps node-datachannel external.
-    external: [
-      'node-pty',
-      'better-sqlite3',
-      'bufferutil',
-      'utf-8-validate',
-      ...(ref ? [] : ['node-datachannel'])
-    ],
-    logLevel: 'silent',
+    version,
     plugins: [
       {
         name: 'computer-release',
         setup(build) {
-          build.onResolve({ filter: /\?raw$/ }, (args) => ({
-            path: requireComputer.resolve(args.path.slice(0, -4), { paths: [args.resolveDir] }),
-            namespace: 'snapshot-raw'
-          }))
-          build.onLoad({ filter: /.*/, namespace: 'snapshot-raw' }, (args) => ({
-            contents: read(args.path),
-            loader: 'text'
-          }))
-          // A module the old release imported may be gone from disk since: resolve it
-          // from the ref, so the build depends only on that ref.
-          if (ref)
+          if (ref) {
+            build.onResolve({ filter: /\?raw$/ }, (args) => ({
+              path: requireComputer.resolve(args.path.slice(0, -4), { paths: [args.resolveDir] }),
+              namespace: 'snapshot-raw'
+            }))
+            build.onLoad({ filter: /.*/, namespace: 'snapshot-raw' }, (args) => ({
+              contents: read(args.path),
+              loader: 'text'
+            }))
+            // A module the old release imported may be gone from disk since: resolve
+            // it from the ref, so the build depends only on that ref.
             build.onResolve({ filter: /^\.\.?\// }, (args) =>
               resolveMissingFromRef(root, ref, args)
             )
-          build.onLoad({ filter: /\.(ts|tsx|js|mjs|json)$/ }, (args) => {
+          }
+          // Source files only: `?raw` text keeps its own (build or ref) loader.
+          build.onLoad({ filter: /\.(ts|tsx|js|mjs|json)$/, namespace: 'file' }, (args) => {
             const path = ref ? snapshotPath(args.path, realpathSync) : args.path
             if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
             let source = read(path)
@@ -100,7 +97,9 @@ async function computerBin(version: string, ref?: string): Promise<string> {
       }
     ]
   })
-  return result.outputFiles[0].text
+  const bundle = result.outputFiles.find((file) => file.path.endsWith('.cjs'))
+  if (!bundle) throw new Error('computer build produced no bin.cjs')
+  return bundle.text
 }
 
 // Run the actual historical supervisor: current-code mocks cannot protect users upgrading from this release. Real build/process/socket timing is intentional. A rare watchdog timeout during deliberate machine oversubscription is acceptable only as a capacity signal; rerun isolated and inspect captured stage output. Busy-job preservation, host epoch/PID change and one enrollment remain mandatory.

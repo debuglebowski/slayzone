@@ -6,6 +6,7 @@
  */
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import * as esbuild from 'esbuild'
@@ -14,6 +15,8 @@ import { watchBundleInputs } from '@slayzone/build-guards/watch-inputs'
 
 const require = createRequire(import.meta.url)
 const pkg = require('./package.json')
+// Paths below resolve against this package, whoever imports this module.
+const here = fileURLToPath(new URL('.', import.meta.url))
 
 /**
  * Teach esbuild Vite's `?raw` suffix: `import x from 'pkg/file.sh?raw'` inlines
@@ -47,6 +50,7 @@ const rawImportPlugin = {
 }
 
 const options = {
+  absWorkingDir: here,
   entryPoints: ['src/bin.ts'],
   outfile: 'dist/bin.cjs',
   bundle: true,
@@ -79,10 +83,17 @@ const options = {
   metafile: true
 }
 
-// The worker is pure projection code: it never opens another SQLite connection.
-// Inline its source into the one published executable, and watch its inputs too.
-async function build(write = true) {
+/**
+ * The computer bundle, built exactly as it is published. The worker is pure
+ * projection code (it never opens another SQLite connection): its source is
+ * inlined into the one executable, and its inputs are watched too.
+ *
+ * Tests building a release candidate pass `version` and extra `plugins` (run
+ * before the build's own) instead of re-declaring these options.
+ */
+export async function buildComputer({ write = true, version = pkg.version, plugins = [] } = {}) {
   const worker = await esbuild.build({
+    absWorkingDir: here,
     entryPoints: ['../../domains/terminal/src/server/runtime/chat-timeline-worker-entry.ts'],
     bundle: true,
     platform: 'node',
@@ -94,8 +105,10 @@ async function build(write = true) {
   const result = await esbuild.build({
     ...options,
     write,
+    plugins: [...plugins, ...options.plugins],
     define: {
       ...options.define,
+      __SLAYZONE_COMPUTER_VERSION__: JSON.stringify(version),
       __SLAYZONE_COMPUTER_BUILD_ID__: JSON.stringify(randomUUID()),
       __SLAYZONE_TIMELINE_WORKER_SOURCE__: JSON.stringify(worker.outputFiles[0].text)
     }
@@ -104,47 +117,52 @@ async function build(write = true) {
   return result
 }
 
-const initialMetafile = process.argv.includes('--no-initial') ? null : (await build()).metafile
+// Only when run as the build script (`node build.mjs`), not when imported.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const initialMetafile = process.argv.includes('--no-initial')
+    ? null
+    : (await buildComputer()).metafile
 
-// Dev watch: rebuild when any bundled input changes — computer/src AND the
-// workspace code it inlines. Same shape as hub/build.mjs. A running computer
-// keeps its loaded code; the next spawn picks up the fresh bin.cjs.
-if (process.argv.includes('--watch')) {
-  let building = false
-  let pending = false
-  const watcher = watchBundleInputs({
-    onChange: () => void rebuild(),
-    fallbackDir: fileURLToPath(new URL('./src/', import.meta.url))
-  })
-  async function rebuild() {
-    if (building) {
-      pending = true
-      return
-    }
-    building = true
-    try {
-      watcher.update((await build()).metafile)
-    } catch (err) {
-      process.stderr.write(
-        `[build] computer rebuild failed: ${err instanceof Error ? err.message : err}\n`
-      )
-    } finally {
-      building = false
-      if (pending) {
-        pending = false
-        void rebuild()
+  // Dev watch: rebuild when any bundled input changes — computer/src AND the
+  // workspace code it inlines. Same shape as hub/build.mjs. A running computer
+  // keeps its loaded code; the next spawn picks up the fresh bin.cjs.
+  if (process.argv.includes('--watch')) {
+    let building = false
+    let pending = false
+    const watcher = watchBundleInputs({
+      onChange: () => void rebuild(),
+      fallbackDir: fileURLToPath(new URL('./src/', import.meta.url))
+    })
+    async function rebuild() {
+      if (building) {
+        pending = true
+        return
+      }
+      building = true
+      try {
+        watcher.update((await buildComputer()).metafile)
+      } catch (err) {
+        process.stderr.write(
+          `[build] computer rebuild failed: ${err instanceof Error ? err.message : err}\n`
+        )
+      } finally {
+        building = false
+        if (pending) {
+          pending = false
+          void rebuild()
+        }
       }
     }
+    // With --no-initial the caller just built bin.cjs: learn the inputs from a
+    // write:false analysis build instead of rewriting the bundle. If even that
+    // fails (src is mid-edit), watch src/ until a build succeeds.
+    watcher.update(
+      initialMetafile ??
+        (await buildComputer({ write: false }).then(
+          (r) => r.metafile,
+          () => null
+        ))
+    )
+    process.stdout.write('[build] computer: watching bundle inputs for changes…\n')
   }
-  // With --no-initial the caller just built bin.cjs: learn the inputs from a
-  // write:false analysis build instead of rewriting the bundle. If even that
-  // fails (src is mid-edit), watch src/ until a build succeeds.
-  watcher.update(
-    initialMetafile ??
-      (await build(false).then(
-        (r) => r.metafile,
-        () => null
-      ))
-  )
-  process.stdout.write('[build] computer: watching bundle inputs for changes…\n')
 }
