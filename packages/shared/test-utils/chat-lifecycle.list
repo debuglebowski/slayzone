@@ -1,4 +1,9 @@
 packages/domains/terminal/src/server/runtime/chat-lifecycle-contract.test.ts
+packages/domains/terminal/src/server/agents/claude-code-adapter.test.ts
+packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
+packages/domains/terminal/src/server/agents/claude-turn-attribution.test.ts
+packages/domains/terminal/src/server/agents/codex/codex-sub-agents.test.ts
+packages/domains/terminal/src/server/runtime/chat-event-splitter.test.ts
 packages/domains/terminal/src/shared/chat-lifecycle.test.ts
 packages/domains/terminal/src/server/runtime/chat-lifecycle-shadow.test.ts
 packages/domains/terminal/src/server/runtime/chat-transport-background-work.test.ts

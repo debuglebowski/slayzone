@@ -124,6 +124,39 @@ describe('Codex sub-agents (recorded: sub-agent)', () => {
     )
   })
 
+  test('child approvals and their answers retain the child execution and parent row', async () => {
+    const h = await started()
+    await replay(h, 'sub-agent')
+    h.driver.handleLine(
+      JSON.stringify({
+        id: 9001,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: CHILD,
+          turnId: 'child-approval-turn',
+          itemId: 'child-command',
+          command: 'synthetic'
+        }
+      })
+    )
+    await flush()
+    const request = h.emitted.find(
+      (e) => e.kind === 'permission-request' && e.requestId === '9001'
+    )!
+    expect(request).toMatchObject({
+      parentToolUseId: spawnId('sub-agent'),
+      execution: { turnId: 'child-approval-turn', source: 'provider' }
+    })
+    expect(
+      h.driver.respondPermission?.({ requestId: '9001', decision: { behavior: 'allow' } })
+    ).toBe(true)
+    expect(h.emitted.at(-1)).toMatchObject({
+      kind: 'permission-resolved',
+      parentToolUseId: request.parentToolUseId,
+      execution: request.execution
+    })
+  })
+
   test("the child's text never streams into the parent's message", async () => {
     const h = await started()
     await replay(h, 'sub-agent')
@@ -325,6 +358,9 @@ describe('Codex sub-agents: wire variants', () => {
       return r?.kind === 'text' ? [r.text] : []
     })
     expect(texts).toEqual(['early', 'done: 12'])
+    expect(
+      h.emitted.find((e) => e.kind === 'assistant-text' && e.messageId === 'm-child')?.execution
+    ).toEqual({ turnId: 'ct', source: 'provider' })
     expect(state.timeline.some((r) => r?.kind === 'tool' && r.invocation.id === 'call_spawn')).toBe(
       false
     )

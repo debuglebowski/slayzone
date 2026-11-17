@@ -642,6 +642,13 @@ function parseResult(obj: Record<string, unknown>): ResultEvent {
   }
   return {
     kind: 'result',
+    ...(typeof obj.uuid === 'string' && obj.uuid ? { uuid: obj.uuid } : {}),
+    ...(Number.isSafeInteger(obj.result_index) && Number(obj.result_index) >= 0
+      ? { resultIndex: Number(obj.result_index) }
+      : {}),
+    ...(typeof obj.parent_tool_use_id === 'string'
+      ? { parentToolUseId: obj.parent_tool_use_id }
+      : {}),
     subtype: (obj.subtype as string) ?? 'unknown',
     isError: Boolean(obj.is_error),
     durationMs: toNum(obj.duration_ms),

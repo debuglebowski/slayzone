@@ -1641,6 +1641,44 @@ export function createChatTransport(
   function handleProcessEvent(tab: ChatTab, proc: ChatProcess, event: AgentEvent): void {
     if (tab.closed || tab.storageFailed || tab.proc !== proc) return
 
+    const execution = event.execution
+    const child = 'parentToolUseId' in event && event.parentToolUseId != null
+    const background =
+      child ||
+      event.kind === 'sub-agent' ||
+      event.kind === 'command-task' ||
+      event.kind === 'command-task-output' ||
+      event.kind === 'tool-result'
+    if (event.kind === 'turn-started') {
+      if (proc.lastEndedExecution === event.execution.turnId) return
+      if (
+        proc.expectedMessageId &&
+        event.execution.messageId &&
+        proc.expectedMessageId !== event.execution.messageId
+      )
+        return
+      if (proc.execution && proc.execution.turnId !== event.execution.turnId) return
+      proc.execution = { ...event.execution }
+      tab.shadow?.event(proc.gen, event)
+      return
+    }
+    // Attributed old root events cannot touch the stream, outbox, prompts,
+    // watchdog or state machine. Background work retains its original owner.
+    const stale = Boolean(
+      execution &&
+        (execution.turnId === proc.lastEndedExecution ||
+          (proc.execution && execution.turnId !== proc.execution.turnId) ||
+          (execution.messageId &&
+            proc.expectedMessageId &&
+            execution.messageId !== proc.expectedMessageId))
+    )
+    if (
+      (stale && !background) ||
+      (child && (event.kind === 'result' || event.kind === 'interrupted'))
+    )
+      return
+    const currentProgress = !stale
+
     // Transport-internal: they move the outbox / watchdog, never the timeline.
     switch (event.kind) {
       case 'command-lifecycle':
@@ -1756,7 +1794,7 @@ export function createChatTransport(
 
     tab.shadow?.event(proc.gen, shown)
 
-    if (opensAgentTurn(tab, shown)) {
+    if (currentProgress && opensAgentTurn(tab, shown)) {
       tab.workspaceTracker?.observeAgentTurn({
         tabId: tab.tabId,
         gen: proc.gen,
@@ -1769,13 +1807,19 @@ export function createChatTransport(
     if (shown.kind === 'result' || shown.kind === 'interrupted')
       void tab.workspaceTracker?.finish(proc.gen)
     trackTools(proc, shown)
-    if (isProgressEventKind(shown.kind)) noteProgress(tab)
+    if (currentProgress && isProgressEventKind(shown.kind)) noteProgress(tab)
     if (shown.kind === 'result') tab.outbox.onResult(proc.gen)
-    else if (isTurnProgress(shown.kind)) tab.outbox.onProgress(proc.gen)
+    else if (currentProgress && !child && isTurnProgress(shown.kind))
+      tab.outbox.onProgress(proc.gen)
 
     const split = tab.splitter.route(shown)
     for (const live of split.live) broadcastLive(tab, live)
     for (const saved of split.saved) commitEvent(tab, saved)
+    if (shown.kind === 'result' && execution) {
+      proc.lastEndedExecution = execution.turnId
+      proc.execution = null
+      proc.expectedMessageId = null
+    }
   }
 
   /** What a popped turn may still say: its output and its end. */
@@ -1912,6 +1956,10 @@ export function createChatTransport(
 
   /** The outbox is writing a user message: the turn starts now. */
   function markTurnStarted(tab: ChatTab, messageId: string): void {
+    if (tab.proc) {
+      tab.proc.expectedMessageId = messageId
+      tab.proc.execution = null
+    }
     tab.shadow?.feed(tab.gen, { type: 'turn-start', turnId: messageId, origin: 'user' })
     tab.turnProgress = false
     tab.turnInterrupted = false

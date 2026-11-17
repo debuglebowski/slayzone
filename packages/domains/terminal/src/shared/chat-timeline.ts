@@ -2306,7 +2306,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       return { ...state, timeline: appended(state.timeline, item) }
     }
     case 'workspace-changes': {
-      const item: TimelineItem = { ...event, id: `workspace:${event.captureId}`, timestamp: ts }
+      // A workspace capture belongs to the tab, never to a helper's row.
+      const item: TimelineItem = {
+        ...event,
+        parentToolUseId: undefined,
+        id: `workspace:${event.captureId}`,
+        timestamp: ts
+      }
       const at = state.workspaceIndex.get(event.captureId)
       if (at !== undefined) {
         const previous = rowAt(state.timeline, at)
@@ -2413,6 +2419,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
     case 'host-control-request':
       // Transport-internal (answered by the driver, never emitted).
       return state
+    case 'turn-started':
     case 'heartbeat':
     case 'command-lifecycle':
     case 'user-replay':

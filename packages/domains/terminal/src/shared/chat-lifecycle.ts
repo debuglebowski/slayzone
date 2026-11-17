@@ -7,7 +7,7 @@
  * Initially observed in shadow mode. No consumer uses this model to send,
  * interrupt, approve, restart, or hide existing work until cutover is validated.
  */
-import type { AgentEvent, ChatTurnState } from '@slayzone/terminal-contracts'
+import type { AgentEvent, AgentExecution, ChatTurnState } from '@slayzone/terminal-contracts'
 import {
   endedSubAgentPhase,
   isAsyncAgentLaunch,
@@ -18,6 +18,7 @@ export interface ChatLifecycleTurn {
   readonly id: string
   readonly origin: 'user' | 'agent'
   readonly stopping: boolean
+  readonly execution?: AgentExecution
 }
 
 interface Value {
@@ -71,7 +72,12 @@ export function lifecycleEvent(
     actor:
       child != null
         ? { type: 'child', parentToolUseId: child }
-        : { type: 'main', ...(options.turnId ? { turnId: options.turnId } : {}) }
+        : {
+            type: 'main',
+            ...((event.execution?.turnId ?? options.turnId)
+              ? { turnId: event.execution?.turnId ?? options.turnId }
+              : {})
+          }
   }
 }
 
@@ -132,7 +138,38 @@ function eventValue(
   // revive a stopped process. Process starts and readiness are explicit inputs.
   if (v.phase === 'not-spawned' || v.phase === 'starting' || v.phase === 'dead') return v
 
+  if (
+    actor.type === 'main' &&
+    event.execution &&
+    v.main?.execution &&
+    event.execution.turnId !== v.main.execution.turnId &&
+    event.kind !== 'sub-agent' &&
+    event.kind !== 'command-task' &&
+    event.kind !== 'command-task-output' &&
+    event.kind !== 'tool-result'
+  )
+    return v
+
   switch (event.kind) {
+    case 'turn-started': {
+      if (actor.type === 'child') return v
+      const execution = event.execution
+      if (v.main) {
+        if (execution.messageId && execution.messageId !== v.main.id) return v
+        if (v.main.execution && v.main.execution.turnId !== execution.turnId) return v
+        return { ...v, main: { ...v.main, execution: { ...execution } } }
+      }
+      return {
+        ...v,
+        phase: v.prompts.size ? 'idle' : 'running',
+        main: {
+          id: execution.messageId ?? execution.turnId,
+          origin: 'agent',
+          stopping: false,
+          execution: { ...execution }
+        }
+      }
+    }
     case 'turn-init':
       return v.conversationId === event.sessionId ? v : { ...v, conversationId: event.sessionId }
     case 'permission-request':
@@ -154,7 +191,7 @@ function eventValue(
     }
     case 'result': {
       if (actor.type === 'child') return v
-      if (actor.turnId && actor.turnId !== v.main?.id) return v
+      if (actor.turnId && actor.turnId !== (v.main?.execution?.turnId ?? v.main?.id)) return v
       const aborted = v.main?.stopping || event.terminalReason?.startsWith('aborted')
       return turnEnded(v, event.isError && !aborted)
     }
@@ -255,7 +292,10 @@ export function reduceChatLifecycle(
         value = {
           ...value,
           phase: value.prompts.size ? 'idle' : 'running',
-          main: value.main ?? { id: signal.turnId, origin: signal.origin, stopping: false }
+          main:
+            value.main?.id === signal.turnId
+              ? value.main
+              : { id: signal.turnId, origin: signal.origin, stopping: false }
         }
       }
       break
@@ -293,7 +333,9 @@ export function chatLifecycleSnapshot(state: ChatLifecycle) {
       v.phase === 'idle' && !v.prompts.size && backgroundHelpers
         ? ('background' as const)
         : v.phase,
-    main: v.main ? { ...v.main } : null,
+    main: v.main
+      ? { ...v.main, ...(v.main.execution ? { execution: { ...v.main.execution } } : {}) }
+      : null,
     turnOpen: v.main !== null || v.prompts.size > 0 || v.inFlight > 0,
     pendingRequestIds: [...v.prompts],
     outboxInFlight: v.inFlight,

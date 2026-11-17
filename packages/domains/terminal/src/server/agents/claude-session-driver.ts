@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type {
   AgentEvent,
+  AgentExecution,
   CommandTaskOutput,
   CliCommandDetailsEvent,
   OutgoingUserMessage,
@@ -27,6 +28,7 @@ import type {
 import { claudeCodeAdapter } from './claude-code-adapter'
 import { ClaudeCommandTasks } from './claude-command-tasks'
 import { ClaudeTaskNotifications } from './claude-task-notifications'
+import { ClaudeTurnAttribution } from './claude-turn-attribution'
 import { buildClaudeContent } from './claude-content'
 import { getChatAttachmentReader, type ChatAttachmentReader } from './chat-attachment-reader'
 import type { AgentBackend, ChatDriverContext, ChatSessionDriver, PreparedUserTurn } from './types'
@@ -64,6 +66,8 @@ interface PendingControl {
 
 /** A `can_use_tool` request the CLI is blocked on. */
 interface PendingPrompt {
+  execution?: AgentExecution
+  parentToolUseId?: string
   toolName: string
   toolUseId: string
   input: unknown
@@ -159,6 +163,11 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     this.readAttachment = opts.readAttachment
   }
   private ctx: ChatDriverContext | null = null
+  private readonly ownership = new ClaudeTurnAttribution((event) => this.ctx?.emit(event))
+  private emitOwned(event: AgentEvent): void {
+    const owned = this.ownership.attribute(event)
+    if (owned) this.ctx?.emit(owned)
+  }
   /** In-flight `control_request` promises, keyed by request_id. */
   private readonly pendingControl = new Map<string, PendingControl>()
   private controlReqCounter = 0
@@ -169,7 +178,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
   /** Commands this process runs as tasks (Bash / Monitor): live output, stop, background. */
   private readonly tasks = new ClaudeCommandTasks({
     request: (request, timeoutMs) => this.applyControl(request, timeoutMs),
-    emit: (ev) => this.ctx?.emit(ev),
+    emit: (ev) => this.emitOwned(ev),
     now: () => Date.now()
   })
   /** What opened an agent-started turn (a Monitor event, …): read from the session file. */
@@ -186,7 +195,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     this.ctx = ctx
     this.notifications?.dispose()
     this.notifications = new ClaudeTaskNotifications({
-      emit: (ev) => this.ctx?.emit(ev),
+      emit: (ev) => this.emitOwned(ev),
       startedAt: Date.now()
     })
     this.readAttachment = ctx.attachmentReader ?? this.readAttachment
@@ -208,7 +217,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
   }
 
   handleLine(line: string): void {
-    const ev = claudeCodeAdapter.parseLine(line)
+    let ev = claudeCodeAdapter.parseLine(line)
     if (!ev) return
 
     // Control responses route to the pending sender promise — they are
@@ -241,13 +250,18 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     // A task frame becomes a command task or a sub-agent — or nothing.
     if (ev.kind === 'cli-task') {
       const routed = this.tasks.route(ev)
-      if (routed) this.ctx?.emit(routed)
+      if (routed) this.emitOwned(routed)
       return
     }
     if (ev.kind === 'tool-call') this.tasks.noteToolCall(ev.id)
 
+    ev = this.ownership.attribute(ev)
+    if (!ev) return
+
     if (ev.kind === 'permission-request') {
       this.pendingPrompts.set(ev.requestId, {
+        ...(ev.execution ? { execution: ev.execution } : {}),
+        ...(ev.parentToolUseId ? { parentToolUseId: ev.parentToolUseId } : {}),
         toolName: ev.toolName,
         toolUseId: ev.toolUseId,
         input: ev.input,
@@ -256,7 +270,14 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     } else if (ev.kind === 'permission-cancelled') {
       // The CLI also withdraws requests that were never prompts (its own hook
       // callbacks); only a withdrawn prompt means something to the timeline.
+      const prompt = this.pendingPrompts.get(ev.requestId)
       if (!this.pendingPrompts.delete(ev.requestId)) return
+      if (prompt?.execution)
+        ev = {
+          ...ev,
+          execution: prompt.execution,
+          ...(prompt.parentToolUseId ? { parentToolUseId: prompt.parentToolUseId } : {})
+        }
     } else if (ev.kind === 'turn-init') {
       if (ev.permissionMode) this.permissionMode = ev.permissionMode
       this.notifications?.turnStarted(ev.cwd, ev.sessionId)
@@ -286,6 +307,14 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
   }
 
   sendUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
+    return this.writeUserTurn(message, prepared, false)
+  }
+
+  private writeUserTurn(
+    message: OutgoingUserMessage,
+    prepared: PreparedUserTurn | undefined,
+    joinsTurn: boolean
+  ): Promise<void> {
     // Never a silent no-op: a message written before the driver has its IO
     // context is a lost message (it used to return quietly — P0 N1).
     if (!this.ctx) return Promise.reject(new Error('the agent driver has not started'))
@@ -305,6 +334,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
       return Promise.reject(new Error('attachments were not prepared for this message'))
     }
     // The id doubles as the write's idempotency key: a retried write lands once.
+    this.ownership.begin(message.id, joinsTurn)
     return this.sendLine(line, { writeId: message.id })
   }
 
@@ -314,7 +344,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
    * call, in the same turn (`started` + replay; 2.1.317).
    */
   steerUserTurn(message: OutgoingUserMessage, prepared?: PreparedUserTurn): Promise<void> {
-    return this.sendUserTurn(message, prepared)
+    return this.writeUserTurn(message, prepared, true)
   }
 
   private serializeTurn(
@@ -446,12 +476,19 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     if (decision.behavior === 'allow') this.tasks.noteToolApproved(prompt.toolUseId)
     this.ctx.emit({
       kind: 'permission-resolved',
+      ...(prompt.execution ? { execution: prompt.execution } : {}),
+      ...(prompt.parentToolUseId ? { parentToolUseId: prompt.parentToolUseId } : {}),
       requestId: args.requestId,
       decision,
       ...(args.optionId ? { optionId: args.optionId } : {})
     })
     // The TUI's plain "No": the CLI aborts the turn. Same boundary as Stop.
-    if (decision.behavior === 'deny' && decision.interrupt) this.ctx.emit({ kind: 'interrupted' })
+    if (decision.behavior === 'deny' && decision.interrupt)
+      this.ctx.emit({
+        kind: 'interrupted',
+        ...(prompt.parentToolUseId ? { parentToolUseId: prompt.parentToolUseId } : {}),
+        ...(prompt.execution ? { execution: prompt.execution } : {})
+      })
     return true
   }
 
@@ -476,6 +513,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
   }
 
   dispose(): void {
+    this.ownership.dispose()
     this.tasks.dispose()
     this.notifications?.dispose()
     for (const [id, pending] of this.pendingControl) {

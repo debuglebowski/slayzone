@@ -206,6 +206,7 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
     expect(kinds.indexOf('cli-models')).toBeGreaterThan(kinds.indexOf('turn-init'))
     expect(kinds.filter((k) => k !== 'cli-models')).toEqual([
       'turn-init',
+      'turn-started',
       'stream-message-start',
       'stream-block-start',
       'stream-block-delta',
@@ -308,7 +309,8 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
       kind: 'permission-resolved',
       requestId: '0',
       decision,
-      optionId: 'cancel'
+      optionId: 'cancel',
+      execution: l.events.find((e) => e.kind === 'permission-request')!.execution
     })
     await l.waitFor(isResult)
     expect(fake.current().run(0)!.requestReplies()[0].decision).toBe('cancel')
@@ -534,12 +536,21 @@ describe('CodexChatSession — thread commands', () => {
       .filter((k) => k.startsWith('compact') || k === 'result')
     expect(kinds).toEqual(['compact-status', 'compact-boundary', 'compact-status', 'result'])
     expect(l.events.filter((e) => e.kind === 'compact-status')).toEqual([
-      { kind: 'compact-status', phase: 'started' },
-      { kind: 'compact-status', phase: 'succeeded' }
+      {
+        kind: 'compact-status',
+        phase: 'started',
+        execution: l.events.find((e) => e.kind === 'turn-started')!.execution
+      },
+      {
+        kind: 'compact-status',
+        phase: 'succeeded',
+        execution: l.events.find((e) => e.kind === 'turn-started')!.execution
+      }
     ])
     expect(l.events.find((e) => e.kind === 'compact-boundary')).toEqual({
       kind: 'compact-boundary',
-      trigger: 'manual'
+      trigger: 'manual',
+      execution: l.events.find((e) => e.kind === 'turn-started')!.execution
     })
   })
 

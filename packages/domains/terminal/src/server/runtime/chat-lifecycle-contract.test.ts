@@ -4,7 +4,11 @@
  * live events and a freshly opened replay. Seeds and action histories reproduce
  * failures without recording private conversations or relying on timing luck.
  */
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
+import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { claudeChatBackend } from '../agents/claude-session-driver'
+import { claudeCodeAdapter } from '../agents/claude-code-adapter'
+import type { ChatSessionDriver } from '../agents/types'
 import type { ChatTimelineState } from '../../shared/chat-timeline'
 import { initialState, isTurnOpen, reducer, replayIndexProblems } from '../../shared/chat-timeline'
 import { selectBackgroundSubAgents } from '../../shared/background-sub-agents'
@@ -424,6 +428,100 @@ test('a delayed native acknowledgement updates shadow delivery without another p
     readyForMessage: true
   })
   expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.mismatches).toBe(0)
+})
+
+test('transport ownership independently fences stale normalized root events before prompts, delivery and streaming', async () => {
+  let emit!: (event: AgentEvent) => void
+  const execution = (id: string) => ({
+    turnId: `native-${id}`,
+    messageId: id,
+    source: 'provider' as const
+  })
+  const fake: ChatSessionDriver = {
+    start(ctx) {
+      emit = ctx.emit
+    },
+    handleLine() {},
+    sendUserMessage() {},
+    dispose() {},
+    extractSessionId: () => null,
+    async sendUserTurn(message) {
+      emit({ kind: 'turn-started', execution: execution(message.id) })
+    }
+  }
+  const driver = vi.spyOn(claudeChatBackend, 'createDriver').mockReturnValue(fake)
+  try {
+    const h = transportHarness()
+    await startTab()
+    const send = async (id: string) => {
+      mgr.dispatchUserMessage(TAB_OPTS.tabId, { id, content: [{ type: 'text', text: id }] })
+      await until(() => mgr.__getOutboxStateForTests(TAB_OPTS.tabId, id) === 'delivered')
+    }
+    const end = (id: string) =>
+      emit({
+        ...claudeCodeAdapter.parseLine(JSON.stringify(sj.success()))!,
+        execution: execution(id)
+      })
+    await send('A')
+    end('A')
+    await flush()
+    await send('B')
+    emit({
+      kind: 'permission-request',
+      requestId: 'approval-B',
+      toolUseId: 'tool-B',
+      toolName: 'Bash',
+      input: {},
+      execution: execution('B')
+    })
+    emit({ kind: 'stream-message-start', messageId: 'reply-B', execution: execution('B') })
+    emit({
+      kind: 'stream-block-start',
+      blockIndex: 0,
+      blockType: 'text',
+      execution: execution('B')
+    })
+    emit({
+      kind: 'stream-block-delta',
+      blockIndex: 0,
+      deltaType: 'text',
+      text: 'current reply',
+      execution: execution('B')
+    })
+    end('A')
+    emit({
+      kind: 'permission-request',
+      requestId: 'old-approval-A',
+      toolUseId: 'old-tool',
+      toolName: 'Bash',
+      input: {},
+      execution: execution('A')
+    })
+    emit({ kind: 'tool-call', id: 'old-tool', name: 'Bash', input: {}, execution: execution('A') })
+    emit({ kind: 'stream-message-start', messageId: 'old-reply', execution: execution('A') })
+    emit({
+      kind: 'stream-block-delta',
+      blockIndex: 0,
+      deltaType: 'text',
+      text: 'stale',
+      execution: execution('A')
+    })
+    emit({ kind: 'stream-message-stop', execution: execution('B') })
+    await flush()
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({
+      state: 'idle',
+      turnOpen: true,
+      pendingRequestIds: ['approval-B']
+    })
+    expect(mgr.__getOutboxStateForTests(TAB_OPTS.tabId, 'B')).toBe('delivered')
+    expect(h.saved().filter((e) => e.kind === 'result')).toHaveLength(1)
+    expect(h.saved().find((e) => e.kind === 'assistant-text')).toMatchObject({
+      text: 'current reply',
+      execution: execution('B')
+    })
+  } finally {
+    driver.mockRestore()
+  }
 })
 
 /** Xorshift32: reproducible scheduling, not random wall-clock sleeps. */

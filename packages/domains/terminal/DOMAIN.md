@@ -119,10 +119,32 @@ settle. Diagnostics keep only counts/flags and field names, capped at eight
 distinct reports per process. Observer or diagnostics failure never controls chat.
 Unchanged token fragments cause no extra comparison.
 
-Host message IDs and inferred autonomous IDs currently identify candidate turns.
-Native Codex turn identity remains fenced in its driver; not every normalized
-event carries a provider turn ID yet. Authoritative cutover still requires those
-attributions and migration of all status consumers together. Known disagreement:
+`AgentEvent.execution` carries a process-local execution identity and its source:
+`provider` for Codex's native turn IDs, `ordered` for Claude's serial stream. An
+optional `messageId` links that execution to its original outbox request; steering
+joins it without replacing the identity. `turn-started` is an internal binding
+event, not a timeline row. Stream snapshots and synthesized saved blocks retain
+their captured ownership. Older histories without ownership remain readable.
+
+Codex captures identity at notification/request dispatch, including delayed
+approval answers and stream closure. Recognized older starts, completions, text,
+and failed start replies cannot settle or replace a newer execution. The transport also
+fences attributed old root events before outbox, prompt, stream or lifecycle
+changes. Helpers and background commands retain their owner across root turns.
+Delivery acknowledgements keep their own message IDs and remain independent.
+Native IDs can precede their host correlation. A fast completion with neither a
+known active ID nor a correlated host ID retains the existing ordered fallback;
+that unproven association also remains a cutover gate.
+
+Claude assigns ordered IDs from the host request (or a fresh autonomous ID),
+retains live helper/job ancestry, and deduplicates result UUIDs and optional
+process-local result indices. Recent UUIDs and ended jobs are capped at 256;
+active work is retained. This is inferred attribution: an unseen late result with
+no native request identity, known UUID, or usable ordered index cannot be proven
+to belong to an older request. That protocol limitation remains a cutover gate.
+
+Authoritative cutover still requires migration of all status consumers together.
+Known disagreement:
 legacy approval resolution can reopen an idle parent after a background-only
 prompt; the candidate preserves its idle main turn and reports the difference.
 

@@ -1354,6 +1354,7 @@ run_harness packages/domains/terminal/src/server/agents/claude-command-tasks.tes
 # Session-file <task-notification> records → what opened an agent-started turn (Monitor events, …).
 run_harness packages/domains/terminal/src/server/agents/claude-task-notifications.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-driver.test.ts
+run_harness packages/domains/terminal/src/server/agents/claude-turn-attribution.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-session-import.test.ts
 run_harness packages/domains/terminal/src/server/agents/claude-content.test.ts
 # Stream-format drift check (chat plan 0.5): recorded real-CLI transcripts through the adapter.

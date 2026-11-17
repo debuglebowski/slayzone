@@ -296,3 +296,27 @@ test('snapshots cannot mutate the model through shared turn or prompt references
   snapshot.pendingRequestIds.push('external prompt')
   expect(m.snapshot()).toMatchObject({ main: { id: 'T1' }, pendingRequestIds: ['P1'] })
 })
+
+test('provider event ownership binds to its host request and fences a delayed completion', () => {
+  const m = model()
+  const first = { turnId: 'native-1', source: 'provider' as const, messageId: 'request-1' }
+  const second = { turnId: 'native-2', source: 'provider' as const, messageId: 'request-2' }
+  m.feed({ type: 'turn-start', turnId: 'request-1', origin: 'user' })
+  m.event({ kind: 'turn-started', execution: first })
+  m.event({ ...result(), execution: first })
+  m.feed({ type: 'turn-start', turnId: 'request-2', origin: 'user' })
+  m.event({ kind: 'turn-started', execution: second })
+  expect(m.event({ ...prompt('old-approval'), execution: first }).pendingRequestIds).toEqual([])
+  expect(m.event({ ...result(), execution: first })).toMatchObject({
+    state: 'running',
+    main: { id: 'request-2' }
+  })
+  expect(m.event({ ...result(), execution: second })).toMatchObject({ state: 'idle', main: null })
+})
+
+test('an explicit replacement start retires an abandoned request without waiting for its result', () => {
+  const m = model()
+  m.feed({ type: 'turn-start', turnId: 'A', origin: 'user' })
+  m.feed({ type: 'turn-start', turnId: 'B', origin: 'user' })
+  expect(m.event(result(), 'A')).toMatchObject({ state: 'running', main: { id: 'B' } })
+})

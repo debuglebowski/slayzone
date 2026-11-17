@@ -102,6 +102,11 @@ export class CodexSubAgents {
     return []
   }
 
+  /** The timeline parent of a child thread's output and approvals. */
+  parentToolUseId(threadId: string): string | undefined {
+    return this.threads.get(threadId)?.row.id
+  }
+
   /** The children's running turns: a Stop stops them too. */
   runningTurns(): Array<{ threadId: string; turnId: string }> {
     const out: Array<{ threadId: string; turnId: string }> = []
@@ -315,6 +320,18 @@ export class CodexSubAgents {
   // ---- child side ----
 
   private onChild(child: ChildThread, method: string, params: unknown): AgentEvent[] {
+    const p = (params ?? {}) as Record<string, unknown>
+    // Capture before applying (turn completion clears child.turnId). This also
+    // runs when early child events are replayed after the spawn named them.
+    const turnId =
+      stringOf(p.turnId) ?? stringOf((p.turn as { id?: unknown } | undefined)?.id) ?? child.turnId
+    const events = this.applyChild(child, method, params)
+    return turnId
+      ? events.map((event) => ({ ...event, execution: { turnId, source: 'provider' as const } }))
+      : events
+  }
+
+  private applyChild(child: ChildThread, method: string, params: unknown): AgentEvent[] {
     const p = (params ?? {}) as Record<string, unknown>
     const row = child.row
     switch (method) {

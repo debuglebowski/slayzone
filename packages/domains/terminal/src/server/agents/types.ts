@@ -1,6 +1,7 @@
 import type { ChatAttachmentReader } from './chat-attachment-reader'
 import type {
   AgentEvent,
+  AgentExecution,
   CommandTaskOutput,
   OutgoingUserMessage,
   UserContentBlock,
@@ -161,6 +162,8 @@ export type { PermissionDecision }
  * touches those directly.
  */
 export interface ChatDriverContext {
+  /** Captured execution for a synchronous notification or asynchronous operation. */
+  execution?: AgentExecution
   /** Per-runtime reader; content must never cross hub namespaces. */
   attachmentReader?: ChatAttachmentReader
   /** Write one protocol line to child stdin. The transport appends the newline. */
