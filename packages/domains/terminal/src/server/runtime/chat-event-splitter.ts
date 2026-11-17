@@ -67,7 +67,10 @@ export function isStreamFragment(kind: AgentEvent['kind']): boolean {
 
 export class ChatEventSplitter {
   private open: OpenMessage | null = null
-  private readonly cliMetadata = new Map<'cli-command-details' | 'cli-models', AgentEvent>()
+  private readonly cliMetadata = new Map<
+    'cli-command-details' | 'cli-models' | 'turn-status',
+    AgentEvent
+  >()
 
   route(event: AgentEvent): SplitResult {
     switch (event.kind) {
@@ -134,7 +137,8 @@ export class ChatEventSplitter {
       }
       case 'cli-command-details':
       case 'cli-models':
-        // Describes the CLI, not the conversation (stored per project instead).
+      case 'turn-status':
+        // Describes the CLI or the server's turn status, not the conversation.
         // Keep its latest value for viewers attaching after initialize completed.
         this.cliMetadata.set(event.kind, event)
         return { live: [event], saved: [] }

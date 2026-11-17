@@ -113,8 +113,15 @@ does not infer acknowledgement from a spinner or transcript counter.
 
 The computer's transport observes this model in `ChatLifecycleShadow`; production
 state, queueing, prompts, Stop, and UI still use the existing runtime. A session's
-`CreateChatOpts.lifecycleMode` is chosen at hydration (`shadow` by default;
-`legacy` disables observation). Comparisons run after synchronous operations
+`CreateChatOpts.lifecycleMode` is chosen at hydration (default
+`SLAYZONE_CHAT_LIFECYCLE`, else `shadow`; `legacy` disables observation). The
+transport publishes its turn status (`turn-status`: state, reported state, turn
+open, pending prompt ids, outbox in flight) live on the chat's event stream on
+every change, with an epoch per tab instance and a rising revision; the splitter
+keeps the latest for a viewer attaching later. In `authoritative` mode the status
+says so, and the shared timeline's `isTurnOpen` (desktop and mobile composer:
+spinner, Stop, send vs queue) follows it instead of the transcript, so the
+composer reads what tab dots, kanban and the CLI read. Comparisons run after synchronous operations
 settle. Diagnostics keep only counts/flags and field names, capped at eight
 distinct reports per process. Observer or diagnostics failure never controls chat.
 Unchanged token fragments cause no extra comparison.

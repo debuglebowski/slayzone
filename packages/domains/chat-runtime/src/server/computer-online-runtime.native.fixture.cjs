@@ -75,7 +75,9 @@ const bootstrap = {
     await writing
     const rows = await runtime.storage.read('c', -1)
     assert(events.some((args) => args[1].text === 'committed history'))
-    for (const args of events)
+    // Every saved event a client saw is a committed row (live ones, e.g. the
+    // turn status, carry a live counter and are never rows).
+    for (const args of events.filter((a) => a[3] === undefined))
       assert(rows.some((row) => row.seq === args[2] && row.event.text === args[1].text))
     await runtime.transport.removeSession('tab')
     otherRuntime = await openComputerChatRuntime({

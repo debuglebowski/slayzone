@@ -297,3 +297,21 @@ test('snapshot retains the latest CLI metadata alongside streaming blocks and af
   expect(s.snapshot()).toEqual([details, models])
   expect(new ChatEventSplitter().snapshot()).toEqual([])
 })
+
+test('turn status is live only, and its latest stays for a viewer attaching later', () => {
+  const s = new ChatEventSplitter()
+  const status = (revision: number, turnOpen: boolean): AgentEvent => ({
+    kind: 'turn-status',
+    authoritative: false,
+    epoch: 'e',
+    revision,
+    state: turnOpen ? 'running' : 'idle',
+    reportedState: turnOpen ? 'running' : 'idle',
+    turnOpen,
+    pendingRequestIds: [],
+    outboxInFlight: 0
+  })
+  expect(s.route(status(1, true))).toEqual({ live: [status(1, true)], saved: [] })
+  s.route(status(2, false))
+  expect(s.snapshot().filter((e) => e.kind === 'turn-status')).toEqual([status(2, false)])
+})

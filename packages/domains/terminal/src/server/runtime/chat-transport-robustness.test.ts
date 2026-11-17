@@ -410,7 +410,10 @@ test('streaming fragments are live only; one saved event per block; the replay s
   line(f, se({ type: 'message_stop' }))
   await wait(30)
   expect(h.rows.filter((r) => r.event.kind === 'assistant-text')).toHaveLength(1)
-  expect((await mgr.getReplay(OPTS.tabId, -1)).live.events).toEqual([])
+  // Nothing streaming is left open (the server's turn status stays, by design).
+  expect(
+    (await mgr.getReplay(OPTS.tabId, -1)).live.events.filter((e) => e.kind !== 'turn-status')
+  ).toEqual([])
   const live = h.broadcasts.filter((b) => b.live !== undefined)
   expect(live.every((b, i) => i === 0 || b.live! > live[i - 1].live!)).toBe(true)
 })

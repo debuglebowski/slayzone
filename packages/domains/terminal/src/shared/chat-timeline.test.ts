@@ -3833,3 +3833,49 @@ describe('local messages survive reconnect replay', () => {
     expect(isTurnOpen(restored)).toBe(true)
   })
 })
+
+describe('server turn status', () => {
+  const status = (
+    turnOpen: boolean,
+    opts: { authoritative?: boolean; revision?: number; epoch?: string } = {}
+  ): AgentEvent => ({
+    kind: 'turn-status',
+    authoritative: opts.authoritative ?? true,
+    epoch: opts.epoch ?? 'e1',
+    revision: opts.revision ?? 1,
+    state: turnOpen ? 'running' : 'idle',
+    reportedState: turnOpen ? 'running' : 'idle',
+    turnOpen,
+    pendingRequestIds: [],
+    outboxInFlight: 0
+  })
+  const sent = (): ChatTimelineState =>
+    reducer(initialState(), { type: 'event', event: { kind: 'user-message', text: 'hi' } })
+
+  test('an authoritative status decides whether the turn is open, not the transcript', () => {
+    expect(isTurnOpen(sent())).toBe(true)
+    expect(isTurnOpen(reducer(sent(), { type: 'event', event: status(false) }))).toBe(false)
+    expect(isTurnOpen(reducer(initialState(), { type: 'event', event: status(true) }))).toBe(true)
+  })
+
+  test('a status that is not authoritative leaves the transcript in charge', () => {
+    const base = sent()
+    const s = reducer(base, { type: 'event', event: status(false, { authoritative: false }) })
+    expect(isTurnOpen(s)).toBe(true)
+    expect(s.timeline).toBe(base.timeline)
+  })
+
+  test('an older revision of the same epoch is ignored; a new epoch replaces it', () => {
+    let s = reducer(initialState(), { type: 'event', event: status(true, { revision: 5 }) })
+    s = reducer(s, { type: 'event', event: status(false, { revision: 4 }) })
+    expect(isTurnOpen(s)).toBe(true)
+    s = reducer(s, { type: 'event', event: status(false, { revision: 1, epoch: 'e2' }) })
+    expect(isTurnOpen(s)).toBe(false)
+  })
+
+  test('an ended session never reads as working', () => {
+    let s = reducer(initialState(), { type: 'event', event: status(true) })
+    s = reducer(s, { type: 'event', event: { kind: 'process-exit', code: 1, signal: null } })
+    expect(isTurnOpen(s)).toBe(false)
+  })
+})

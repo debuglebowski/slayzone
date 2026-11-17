@@ -528,6 +528,11 @@ export interface ChatTimelineState {
   model: string | null
   lastResult: Extract<TimelineItem, { kind: 'result' }> | null
   sessionEnded: boolean
+  /**
+   * The server's latest turn status (`turn-status`, live only). When it is
+   * authoritative it, not the transcript, says whether the turn is open.
+   */
+  turnStatus: Extract<AgentEvent, { kind: 'turn-status' }> | null
   exitCode: number | null
   exitSignal: string | null
   /** Monotonic count of user messages sent since session start. Drives inFlight. */
@@ -726,6 +731,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     model: null,
     lastResult: null,
     sessionEnded: false,
+    turnStatus: null,
     exitCode: null,
     exitSignal: null,
     userMessagesSent: 0,
@@ -1304,6 +1310,12 @@ function applyTransportEvent(
 /** `ts`: the time the event's rows show (when it was saved). */
 function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): ChatTimelineState {
   switch (event.kind) {
+    case 'turn-status': {
+      // The highest revision of one server epoch; a restarted server starts a new one.
+      const held = state.turnStatus
+      if (held && held.epoch === event.epoch && held.revision >= event.revision) return state
+      return { ...state, turnStatus: event }
+    }
     case 'user-message': {
       if (event.history) {
         // Imported from the conversation's past: answered long ago, never a turn.
@@ -2942,6 +2954,8 @@ export function isInFlight(state: ChatTimelineState): boolean {
  * what makes a new message queue — TUI parity.
  */
 export function isTurnOpen(state: ChatTimelineState): boolean {
+  const status = state.turnStatus
+  if (status?.authoritative) return status.turnOpen && !state.sessionEnded
   return isInFlight(state) || state.agentTurnOpen
 }
 

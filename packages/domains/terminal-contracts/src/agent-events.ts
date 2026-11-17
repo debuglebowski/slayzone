@@ -8,6 +8,7 @@
 
 import type { ChatAttachment } from './chat-attachments'
 import type { ChatModelInfo } from './chat-model-catalog'
+import type { ChatTurnState } from './chat-turn-status'
 import type { WorkspaceChangesEvent } from './workspace-changes'
 
 /** Identity of one execution, scoped to its owning process generation.
@@ -32,6 +33,7 @@ export type AgentEvent = AgentEventPayload & {
 
 type AgentEventPayload =
   | TurnStartedEvent
+  | TurnStatusEvent
   | WorkspaceChangesEvent
   | TurnInitEvent
   | UserMessageEvent
@@ -313,6 +315,27 @@ export interface UserReplayEvent {
 export interface CliCommandDetailsEvent {
   kind: 'cli-command-details'
   commands: Array<{ name: string; description: string; argumentHint: string }>
+}
+
+/**
+ * The tab's turn status as the server holds it: what tab dots, kanban and the
+ * CLI read. Live only and transport-internal (the server's latest is kept for a
+ * viewer attaching later). `authoritative`: clients take turn state from it,
+ * not from the transcript (`SLAYZONE_CHAT_LIFECYCLE=authoritative`). A client
+ * keeps the highest `revision` of one `epoch`; a new epoch (a restarted server)
+ * replaces it.
+ */
+export interface TurnStatusEvent {
+  kind: 'turn-status'
+  authoritative: boolean
+  epoch: string
+  revision: number
+  state: ChatTurnState
+  /** `background`: the turn is over while a background helper still runs. */
+  reportedState: ChatTurnState | 'background'
+  turnOpen: boolean
+  pendingRequestIds: string[]
+  outboxInFlight: number
 }
 
 /**

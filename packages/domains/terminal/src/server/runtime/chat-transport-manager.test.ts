@@ -606,7 +606,10 @@ test('valid --resume: events are shown as they arrive, in order — no holding p
   mgr.setTransportDepsForTests({
     whichBinary: async () => '/fake/claude',
     spawn: () => fake as unknown as ChildProcess,
-    broadcastEvent: (_tab, event, seq) => broadcastEvents.push({ kind: event.kind, seq }),
+    // Saved events (live ones, like the turn status, carry a live counter).
+    broadcastEvent: (_tab, event, seq, live) => {
+      if (live === undefined) broadcastEvents.push({ kind: event.kind, seq })
+    },
     broadcastExit: () => {},
     broadcastStateChange: () => {}
   })

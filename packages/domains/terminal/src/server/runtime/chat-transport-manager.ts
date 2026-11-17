@@ -490,6 +490,11 @@ interface ChatTab {
   work: ChatBackgroundWork
   /** Candidate lifecycle observer; never owns production state or controls. */
   shadow: ChatLifecycleShadow | null
+  lifecycleMode: ChatLifecycleMode
+  /** The published `turn-status`: this tab instance's epoch, its last revision and value. */
+  statusEpoch: string
+  statusRevision: number
+  statusKey: string
   /** The background-job count clients were last told. */
   reportedJobs: number
   /** The current process was spawned with --resume. */
@@ -598,9 +603,30 @@ interface ChatTab {
 
 type WatchdogVector = 'stuck-starting' | 'running-stall' | 'fatal-kill'
 
+/**
+ * How a session's turn state is kept, chosen once at hydration (default:
+ * `SLAYZONE_CHAT_LIFECYCLE`, else `shadow`). `shadow`: the runtime's own state is
+ * the authority, the candidate model is compared alongside it. `legacy`: no
+ * comparison. `authoritative`: clients take turn state from the server's
+ * published status (`turn-status`), not from their transcript.
+ */
+export type ChatLifecycleMode = 'legacy' | 'shadow' | 'authoritative'
+
+const LIFECYCLE_MODES: readonly ChatLifecycleMode[] = ['legacy', 'shadow', 'authoritative']
+
+function defaultLifecycleMode(): ChatLifecycleMode {
+  const raw = process.env.SLAYZONE_CHAT_LIFECYCLE
+  if (!raw) return 'shadow'
+  if ((LIFECYCLE_MODES as readonly string[]).includes(raw)) return raw as ChatLifecycleMode
+  console.warn(
+    `[chat-transport] SLAYZONE_CHAT_LIFECYCLE=${raw} is not one of ${LIFECYCLE_MODES.join(', ')}: shadow`
+  )
+  return 'shadow'
+}
+
 export interface CreateChatOpts {
-  /** Chosen once for the whole session. Legacy disables observation as well. */
-  lifecycleMode?: 'legacy' | 'shadow'
+  /** Chosen once for the whole session (see `ChatLifecycleMode`). */
+  lifecycleMode?: ChatLifecycleMode
   /** A side discussion must never fall back to resuming its parent's session. */
   isolatedConversation?: boolean
   initialFork?: { fromSessionId: string; atMessageUuid: string }
@@ -1267,6 +1293,38 @@ export function createChatTransport(
       deps.broadcastBackgroundJobs(sessionId, jobs)
       deps.onBackgroundJobsChange?.(sessionId, jobs)
     }
+    publishStatus(tab)
+  }
+
+  /**
+   * Tell clients the turn status, live on the chat's event stream, when it changed
+   * (`turn-status`; the splitter keeps the latest for a viewer attaching later).
+   */
+  function publishStatus(tab: ChatTab): void {
+    if (tab.closed) return
+    // Never ahead of the rows being published: sent once they settled (`enqueueEvent`).
+    if (publicationBusy.has(tab)) {
+      statusDeferred.add(tab)
+      return
+    }
+    const status = {
+      state: tab.terminalState,
+      reportedState: reportedStateOf(tab),
+      turnOpen: turnOpen(tab),
+      pendingRequestIds: [...tab.pendingPrompts],
+      outboxInFlight: tab.outbox.inFlight()
+    }
+    const key = JSON.stringify(status)
+    if (key === tab.statusKey) return
+    tab.statusKey = key
+    const event: AgentEvent = {
+      kind: 'turn-status',
+      authoritative: tab.lifecycleMode === 'authoritative',
+      epoch: tab.statusEpoch,
+      revision: ++tab.statusRevision,
+      ...status
+    }
+    for (const live of tab.splitter.route(event).live) broadcastLive(tab, live)
   }
 
   /** The tab's process is new, replaced or gone: none of the old one's work runs on. */
@@ -1537,6 +1595,8 @@ export function createChatTransport(
 
   const publicationTail = new WeakMap<ChatTab, Promise<void>>()
   const publicationBusy = new WeakSet<ChatTab>()
+  /** A turn-status change held while publication was busy (`publishStatus`). */
+  const statusDeferred = new WeakSet<ChatTab>()
   /**
    * The lifecycle shadow compares itself with production state; while a publication
    * is in flight that state is mid-commit. Its signals wait, in order, until the
@@ -1577,6 +1637,7 @@ export function createChatTransport(
       if (publicationTail.get(tab) !== result) return
       publicationBusy.delete(tab)
       flushLifecycle(tab)
+      if (statusDeferred.delete(tab)) publishStatus(tab)
       kickQueueDrainer(tab)
     }
     void result.then(settled, (error) => {
@@ -2578,6 +2639,10 @@ export function createChatTransport(
       reportedState: 'not-spawned',
       work: new ChatBackgroundWork(),
       shadow: null,
+      lifecycleMode: opts.lifecycleMode ?? defaultLifecycleMode(),
+      statusEpoch: randomUUID(),
+      statusRevision: 0,
+      statusKey: '',
       reportedJobs: 0,
       usedResume: Boolean(opts.conversationId),
       retryScheduled: false,
@@ -2662,7 +2727,7 @@ export function createChatTransport(
     }
     tab.outbox = createOutbox(tab)
     tab.shadow =
-      opts.lifecycleMode === 'legacy'
+      tab.lifecycleMode === 'legacy'
         ? null
         : new ChatLifecycleShadow(opts.tabId, {
             autonomous: chatCapabilitiesForMode(opts.mode).agentStartedTurns,
@@ -2749,6 +2814,7 @@ export function createChatTransport(
       },
       onChange: ({ id, state, error }) => {
         shadowFeed(tab, tab.gen, { type: 'outbox', inFlight: tab.outbox.inFlight() })
+        publishStatus(tab)
         const event: AgentEvent = {
           kind: 'user-message-delivery',
           id,
