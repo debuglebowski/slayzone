@@ -468,7 +468,8 @@ test.each([
       })
       expect(await paused.ownership.bootstrapReservation(reservation.id)).toBeUndefined()
       expect(await paused.ownership.unavailable(reservation.id)).toBeUndefined()
-      expect(() => pc.assertTaskActive('task')).toThrow(/paused/i)
+      // Task admission answers from the store owner, asynchronously.
+      await expect(pc.assertTaskActive('task')).rejects.toThrow(/paused/i)
       const saved = await paused.relay.ops.getTabState('tab')
       if (fault === 'lost-ack')
         expect(saved).toMatchObject({ draft: { text: 'durable before archive' } })
@@ -491,7 +492,7 @@ test.each([
       pc = openComputer()
       const restored = services()
       await expect(restored.recoverComputer('pc')).resolves.toBeUndefined()
-      expect(() => pc.assertTaskActive('task')).not.toThrow()
+      await expect(pc.assertTaskActive('task')).resolves.toBeUndefined()
       expect(await restored.ownership.forTab('tab')).toMatchObject({
         id: reservation.id,
         state: 'active',

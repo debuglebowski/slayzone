@@ -30,8 +30,21 @@ const root = resolve(import.meta.dirname, '../../../..')
 const computerDir = join(root, 'packages/apps/computer')
 const requireComputer = createRequire(join(computerDir, 'package.json'))
 
-async function historicalBin(ref: string): Promise<string> {
+/**
+ * The computer bundle at `version`: from `ref` (a historical release) or, without
+ * one, from the working tree (the release being rolled out). Both sides are built
+ * the same way and get the same timing-only source patches; the version is the
+ * real build-time define, never a rewrite of bundler output.
+ */
+async function computerBin(version: string, ref?: string): Promise<string> {
   const esbuild = requireComputer('esbuild') as typeof import('esbuild')
+  const read = (path: string): string =>
+    ref
+      ? execFileSync('git', ['show', `${ref}:${relative(root, path)}`], {
+          cwd: root,
+          encoding: 'utf8'
+        })
+      : readFileSync(path, 'utf8')
   const result = await esbuild.build({
     entryPoints: [join(computerDir, 'src/bin.ts')],
     bundle: true,
@@ -39,36 +52,40 @@ async function historicalBin(ref: string): Promise<string> {
     platform: 'node',
     format: 'cjs',
     target: 'node24',
-    define: { __SLAYZONE_COMPUTER_VERSION__: '"1.0.0"' },
-    external: ['node-pty', 'better-sqlite3', 'bufferutil', 'utf-8-validate'],
+    define: { __SLAYZONE_COMPUTER_VERSION__: JSON.stringify(version) },
+    // As each release's own build: the current one also keeps node-datachannel external.
+    external: [
+      'node-pty',
+      'better-sqlite3',
+      'bufferutil',
+      'utf-8-validate',
+      ...(ref ? [] : ['node-datachannel'])
+    ],
     logLevel: 'silent',
     plugins: [
       {
-        name: 'actual-historical-supervisor',
+        name: 'computer-release',
         setup(build) {
           build.onResolve({ filter: /\?raw$/ }, (args) => ({
             path: requireComputer.resolve(args.path.slice(0, -4), { paths: [args.resolveDir] }),
             namespace: 'snapshot-raw'
           }))
           build.onLoad({ filter: /.*/, namespace: 'snapshot-raw' }, (args) => ({
-            contents: execFileSync('git', ['show', `${ref}:${relative(root, args.path)}`], {
-              cwd: root,
-              encoding: 'utf8'
-            }),
+            contents: read(args.path),
             loader: 'text'
           }))
           // A module the old release imported may be gone from disk since: resolve it
           // from the ref, so the build depends only on that ref.
-          build.onResolve({ filter: /^\.\.?\// }, (args) => resolveMissingFromRef(root, ref, args))
+          if (ref)
+            build.onResolve({ filter: /^\.\.?\// }, (args) =>
+              resolveMissingFromRef(root, ref, args)
+            )
           build.onLoad({ filter: /\.(ts|tsx|js|mjs|json)$/ }, (args) => {
-            const path = snapshotPath(args.path, realpathSync)
+            const path = ref ? snapshotPath(args.path, realpathSync) : args.path
             if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
-            let source = execFileSync('git', ['show', `${ref}:${relative(root, path)}`], {
-              cwd: root,
-              encoding: 'utf8'
-            })
+            let source = read(path)
             // Timing only: production state machine, launcher, contracts, dispatch,
-            // enrollment and maintenance decisions are the historical source.
+            // enrollment and maintenance decisions are the built source.
             if (path.endsWith('/upgrade-runtime.ts'))
               source = source.replace('const INTERVAL_MS = 30_000', 'const INTERVAL_MS = 100')
             if (path.endsWith('/auto-upgrade.ts'))
@@ -104,14 +121,11 @@ test.each([
       process.platform === 'win32' ? 'junction' : 'dir'
     )
     const oldEntry = join(dir, 'historical.cjs')
-    writeFileSync(oldEntry, await historicalBin(ref))
+    writeFileSync(oldEntry, await computerBin('1.0.0', ref))
     const candidate = releaseEntry(join(dir, 'computer-runtime'), '2.0.0')
     mkdirSync(dirname(candidate), { recursive: true })
-    const newSource = readFileSync(join(computerDir, 'dist/bin.cjs'), 'utf8')
-      .replace(/var COMPUTER_VERSION = [^;]+;/, 'var COMPUTER_VERSION = "2.0.0";')
-      .replace('var INTERVAL_MS = 3e4;', 'var INTERVAL_MS = 100;')
-      .replace(/deps\w*\.probationMs \?\? 6e4/, '50')
-    writeFileSync(candidate, newSource)
+    // The release being rolled out: this tree's computer, as version 2.0.0.
+    writeFileSync(candidate, await computerBin('2.0.0'))
     let release = '1.0.0',
       upgraded = false
     const server = http.createServer((_req, res) =>
