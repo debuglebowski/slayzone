@@ -49,7 +49,7 @@ import { useGitDiffCollapse } from './useGitDiffCollapse'
 import { useGitDiffTurns } from './useGitDiffTurns'
 import { useGitDiffData } from './useGitDiffData'
 import { DiffRestButton } from './DiffRestButton'
-import { DiffFailedFiles, DiffOutdatedBar } from './DiffLoadIssue'
+import { DiffFailedFiles, DiffNoChanges, DiffOutdatedBar } from './DiffLoadIssue'
 import { useGitDiffFolders } from './useGitDiffFolders'
 import { useGitDiffSelection } from './useGitDiffSelection'
 import { useGitDiffFlow } from './useGitDiffFlow'
@@ -110,6 +110,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     isDiffFailed,
     isDiffOutdated,
     retryDiff,
+    retryAllDiffs,
     hasAnyChanges
   } = useGitDiffData(targetPath, {
     visible,
@@ -140,6 +141,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
   // Single-file selection for non-continuous-flow mode.
   const { selectedFile, handleSelectFile, handleKeyDown, selectedItemRef, selectedDiff } =
     useGitDiffSelection({ flatEntries, visibleFlatEntries, diffContinuousFlow, getDiffForEntry })
+
+  // Files whose diff could not be read (no row of their own in the continuous flow).
+  const failedCount = flatEntries.filter(isDiffFailed).length
 
   const selectedEntry = selectedFile
     ? flatEntries.find((f) => f.path === selectedFile.path && f.source === selectedFile.source)
@@ -638,16 +642,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
             {diffContinuousFlow ? (
               <div className="flex-1 min-h-0 flex flex-col pt-2">
                 {/* Files whose diff could not be read have no row of their own here. */}
-                <DiffFailedFiles
-                  count={flatEntries.filter(isDiffFailed).length}
-                  onRetry={() => {
-                    for (const entry of flatEntries) if (isDiffFailed(entry)) retryDiff(entry)
-                  }}
-                />
+                <DiffFailedFiles count={failedCount} onRetry={retryAllDiffs} />
                 {flowEntries.length === 0 ? (
-                  <div className="flex-1 min-h-0 flex items-center justify-center p-6">
-                    <p className="text-xs text-muted-foreground">No changes</p>
-                  </div>
+                  <DiffNoChanges failedCount={failedCount} />
                 ) : (
                   <div
                     ref={flowScrollRef}

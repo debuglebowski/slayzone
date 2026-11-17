@@ -64,8 +64,21 @@ const NO_TEXTS: ReadonlyMap<string, DiffText> = new Map()
 /** A failed batch is asked again after these delays, then its files show `failed`. */
 const RETRY_DELAYS_MS = [1_000, 4_000]
 /** A file that failed past its retries is asked again after this (a computer back
- *  online), on its own and on any sync after it; the failure shows meanwhile. */
+ *  online), on its own and on any sync after it; the failure shows meanwhile. Each
+ *  further failure doubles the wait, up to {@link MAX_RECOVER_MS}. */
 const RECOVER_MS = 15_000
+const MAX_RECOVER_MS = 5 * 60_000
+/** Failures due this close to the timer's are asked for in the same batch. */
+const RECOVERY_BATCH_WINDOW_MS = 250
+
+/** A file that failed past its retries: the fingerprint it failed at, when it is due
+ *  again (on the loader's monotonic clock) and its wait so far (doubled per failure). */
+interface Failure {
+  fingerprint: string
+  /** null: released by the recovery timer (asked again; no longer waiting). */
+  due: number | null
+  waitMs: number
+}
 /** The fingerprint of an untracked file's preview (fetched once while listed). */
 const UNTRACKED = ''
 
@@ -85,18 +98,29 @@ export class DiffTextLoader {
   private disposed = false
   private readonly retryDelaysMs: readonly number[]
   private readonly recoverMs: number
+  private readonly maxRecoverMs: number
+  /** Monotonic: a wall-clock step never delays or skips a recovery. */
+  private readonly now: () => number
   private readonly timers = new Set<ReturnType<typeof setTimeout>>()
-  /** When (and at which fingerprint) each file last failed past its retries: asked
-   *  again {@link RECOVER_MS} later, or at once when its content changes. */
-  private readonly failedAt = new Map<string, { at: number; fingerprint: string }>()
+  /** Files that failed past their retries: asked again when due, or at once when their
+   *  content changes. One timer serves them all, at the earliest due one. */
+  private readonly failedAt = new Map<string, Failure>()
+  private recovery: { timer: ReturnType<typeof setTimeout>; due: number } | null = null
 
   constructor(
     private readonly source: DiffTextSource,
     private readonly ctx: DiffTextContext,
-    options: { retryDelaysMs?: readonly number[]; recoverMs?: number } = {}
+    options: {
+      retryDelaysMs?: readonly number[]
+      recoverMs?: number
+      maxRecoverMs?: number
+      now?: () => number
+    } = {}
   ) {
     this.retryDelaysMs = options.retryDelaysMs ?? RETRY_DELAYS_MS
     this.recoverMs = options.recoverMs ?? RECOVER_MS
+    this.maxRecoverMs = options.maxRecoverMs ?? MAX_RECOVER_MS
+    this.now = options.now ?? (() => performance.now())
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -120,6 +144,8 @@ export class DiffTextLoader {
     this.pending.clear()
     this.loadedAt.clear()
     this.failedAt.clear()
+    if (this.recovery) clearTimeout(this.recovery.timer)
+    this.recovery = null
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
   }
@@ -201,10 +227,22 @@ export class DiffTextLoader {
 
   /** Ask again for a file whose text could not be read. */
   retry(key: string): void {
-    if (this.disposed || !this.texts.get(key)?.failed || this.pending.has(key)) return
-    this.failedAt.delete(key)
-    this.loadedAt.delete(key)
-    this.fetchMissing([key])
+    this.retryFailed([key])
+  }
+
+  /** Ask again for these failed files (default: every failed one), in batches. */
+  retryFailed(keys?: string[]): void {
+    if (this.disposed) return
+    // Failed reads only: a failed "load rest" keeps its first page (DiffRestButton).
+    const failed = (keys ?? [...this.failedAt.keys()]).filter(
+      (k) => this.failedAt.has(k) && !this.pending.has(k)
+    )
+    for (const k of failed) {
+      this.failedAt.delete(k)
+      this.loadedAt.delete(k)
+    }
+    this.scheduleRecovery()
+    this.fetchMissing(failed)
   }
 
   /** Fetch every wanted text not loaded at its fingerprint (and not on its way). */
@@ -215,7 +253,8 @@ export class DiffTextLoader {
       return (
         failed !== undefined &&
         failed.fingerprint === this.wanted.get(k) &&
-        Date.now() - failed.at < this.recoverMs
+        failed.due !== null &&
+        this.now() < failed.due
       )
     }
     const missing = (k: string) =>
@@ -275,10 +314,14 @@ export class DiffTextLoader {
           if (mine(k))
             this.settle(k, asked.get(k)!, { text, rest: null, loading: false, failed: false })
         }
+        // Large files whose first page fails, failed together (one recovery batch).
+        const firstFailed: string[] = []
         for (const p of page.large) {
           answered.add(prefix + p)
-          await this.readFirst(prefix + p, asked.get(prefix + p)!)
+          if (!(await this.readFirst(prefix + p, asked.get(prefix + p)!)))
+            firstFailed.push(prefix + p)
         }
+        this.fail(firstFailed.filter(mine))
         for (const p of page.deferred) answered.add(prefix + p)
         // A file the reply leaves out is gone from disk: nothing to show (the next
         // snapshot drops it).
@@ -323,18 +366,22 @@ export class DiffTextLoader {
 
   /**
    * Out of retries: each file shows its failure and a retry (its old text, if it had
-   * one, stays readable, marked outdated). It is not settled: it is asked again
-   * after {@link RECOVER_MS}, and on any sync after that.
+   * one, stays readable, marked outdated). It is not settled: it is asked again when
+   * due (its wait doubles per failure at one fingerprint, up to {@link MAX_RECOVER_MS}),
+   * and at once when its content changes.
    */
   private fail(keys: string[]): void {
     if (!keys.length || this.disposed) return
-    const at = Date.now()
-    const failures = new Map<string, { at: number; fingerprint: string }>()
+    const now = this.now()
     for (const k of keys) {
       this.pending.delete(k)
-      const failure = { at, fingerprint: this.wanted.get(k)! }
-      failures.set(k, failure)
-      this.failedAt.set(k, failure)
+      const fingerprint = this.wanted.get(k)!
+      const prior = this.failedAt.get(k)
+      const waitMs =
+        prior && prior.fingerprint === fingerprint
+          ? Math.min(prior.waitMs * 2, this.maxRecoverMs)
+          : Math.min(this.recoverMs, this.maxRecoverMs)
+      this.failedAt.set(k, { fingerprint, due: now + waitMs, waitMs })
     }
     this.update((texts) => {
       for (const k of keys) {
@@ -342,24 +389,47 @@ export class DiffTextLoader {
         texts.set(k, { text: old?.text ?? '', rest: null, loading: false, failed: true })
       }
     })
-    const timer = setTimeout(() => {
-      this.timers.delete(timer)
-      if (!this.disposed)
-        this.fetchMissing(keys.filter((k) => this.failedAt.get(k) === failures.get(k)))
-    }, this.recoverMs)
-    this.timers.add(timer)
+    this.scheduleRecovery()
+  }
+
+  /** One timer, at the earliest due failure. When it fires, every failure due by
+   *  then is asked for together (batched by side), compared by stored due times only. */
+  private scheduleRecovery(): void {
+    let earliest = Number.POSITIVE_INFINITY
+    for (const f of this.failedAt.values()) if (f.due !== null) earliest = Math.min(earliest, f.due)
+    if (this.recovery && this.recovery.due <= earliest) return
+    if (this.recovery) {
+      clearTimeout(this.recovery.timer)
+      this.recovery = null
+    }
+    if (earliest === Number.POSITIVE_INFINITY || this.disposed) return
+    const due = earliest
+    const timer = setTimeout(
+      () => {
+        this.recovery = null
+        if (this.disposed) return
+        const keys = [...this.failedAt]
+          .filter(([, f]) => f.due !== null && f.due <= due + RECOVERY_BATCH_WINDOW_MS)
+          .map(([k]) => k)
+        // Released: no longer waiting, whatever the clock now says. The wait is kept,
+        // so a further failure doubles it.
+        for (const k of keys) this.failedAt.set(k, { ...this.failedAt.get(k)!, due: null })
+        this.fetchMissing(keys)
+        this.scheduleRecovery()
+      },
+      Math.max(0, due - this.now())
+    )
+    this.recovery = { timer, due }
   }
 
   /** A large file: its first page now, the rest on request. */
-  private async readFirst(key: string, fingerprint: string): Promise<void> {
-    if (!this.current(key, fingerprint)) return
+  /** False when the read failed and `key` is still the caller's to fail. */
+  private async readFirst(key: string, fingerprint: string): Promise<boolean> {
+    if (!this.current(key, fingerprint)) return true
     const src = this.textSource(key, this.fromPaths.get(key))
     const page = await this.source.text(src, null).catch(() => null)
-    if (!this.current(key, fingerprint) || this.pending.get(key) !== fingerprint) return
-    if (!page) {
-      this.fail([key])
-      return
-    }
+    if (!this.current(key, fingerprint) || this.pending.get(key) !== fingerprint) return true
+    if (!page) return false
     this.sources.set(key, src)
     this.settle(key, fingerprint, {
       text: page.text,
@@ -369,6 +439,7 @@ export class DiffTextLoader {
       loading: false,
       failed: false
     })
+    return true
   }
 
   /** Load the rest of a large file (every remaining page). */

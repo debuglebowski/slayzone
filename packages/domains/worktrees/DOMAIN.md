@@ -111,8 +111,11 @@ exceeded the 100 MiB frame limit and stalled the computer.
   plus one over all of them for older clients; the panel refetches only the files
   whose own fingerprint changed and keeps their old text until the new one arrives.
   A failed batch is retried twice, then shows a retry (single file: in place;
-  continuous flow: a "Could not load N files" row; a kept old diff is marked
-  outdated) and is asked again on its own after 15 s. Renames keep their old path.
+  continuous flow: a "Could not load N files" row that retries them all in batched
+  requests; a kept old diff is marked outdated). It is then asked again on its own:
+  one loader timer at the earliest due failure releases every failure due by then in
+  one batch; each file's wait doubles per failure (15 s up to 5 min, reset on success
+  or a content change), on a monotonic clock. Renames keep their old path.
 - **Deferred files.** They come in budgeted batches (`getFileDiffsPage`, 8
   concurrent gits, rename pathspec paired).
 - **Large files.** A file over budget is read by `readGitText`: git runs once,

@@ -34,3 +34,13 @@ export function DiffFailedFiles({ count, onRetry }: { count: number; onRetry: ()
     </div>
   )
 }
+
+/** The continuous flow's empty state: "No changes", never while files failed to load. */
+export function DiffNoChanges({ failedCount }: { failedCount: number }) {
+  if (failedCount > 0) return null
+  return (
+    <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+      <p className="text-xs text-muted-foreground">No changes</p>
+    </div>
+  )
+}

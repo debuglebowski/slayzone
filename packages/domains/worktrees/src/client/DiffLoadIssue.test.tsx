@@ -4,7 +4,7 @@
 // cannot show. Each offers a retry.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { DiffFailedFiles, DiffOutdatedBar } from './DiffLoadIssue'
+import { DiffFailedFiles, DiffNoChanges, DiffOutdatedBar } from './DiffLoadIssue'
 
 afterEach(cleanup)
 
@@ -26,6 +26,15 @@ describe('DiffFailedFiles', () => {
     rerender(<DiffFailedFiles count={1} onRetry={onRetry} />)
     expect(screen.getByRole('button').textContent).toBe('Could not load 1 file. Retry')
     rerender(<DiffFailedFiles count={0} onRetry={onRetry} />)
+    expect(container.textContent).toBe('')
+  })
+})
+
+describe('DiffNoChanges', () => {
+  it('says "No changes" only when no file failed to load', () => {
+    const { rerender, container } = render(<DiffNoChanges failedCount={0} />)
+    expect(screen.getByText('No changes')).toBeDefined()
+    rerender(<DiffNoChanges failedCount={3} />)
     expect(container.textContent).toBe('')
   })
 })

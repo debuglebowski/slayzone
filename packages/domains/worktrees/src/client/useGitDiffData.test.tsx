@@ -256,6 +256,61 @@ describe('useGitDiffData', () => {
     }
   })
 
+  it('a failed "load rest" is not an outdated diff (its first page is current)', async () => {
+    const head = 'diff --git a/big.ts b/big.ts\n--- a/big.ts\n+++ b/big.ts\n@@ -1,2 +1,2 @@\n-a\n'
+    filesPageQuery.mockResolvedValue({ diffs: {}, deferred: [], large: ['big.ts'] })
+    textQuery.mockImplementation(async (i: { cursor: string | null }) => {
+      if (i.cursor !== null) throw new Error('computer reconnecting')
+      return { text: head, cursor: 'c1', totalBytes: head.length + 3 }
+    })
+    snapshotState.snapshot = {
+      ...snap(['big.ts']),
+      deferred: { unstaged: ['big.ts'], staged: [], renamedFrom: {}, fingerprint: 'f' }
+    }
+    const { result } = renderHook(() => useGitDiffData('/repo', OPTS))
+    const big = { path: 'big.ts', status: 'M' as const, source: 'unstaged' as const }
+    await vi.waitFor(() => expect(result.current.getDiffRest(big)).not.toBeNull())
+    await result.current.loadDiffRest(big)
+    await vi.waitFor(() => expect(result.current.getDiffRest(big)?.failed).toBe(true))
+    expect(result.current.isDiffOutdated(big)).toBe(false)
+  })
+
+  it('retryAllDiffs asks again for every failed file in one batched request', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let fail = true
+      filesPageQuery.mockImplementation(async (i: { filePaths: string[] }) => {
+        if (fail) throw new Error('computer reconnecting')
+        return {
+          diffs: Object.fromEntries(i.filePaths.map((f) => [f, patchOf(f)])),
+          deferred: [],
+          large: []
+        }
+      })
+      snapshotState.snapshot = {
+        ...snap(['a.ts', 'b.ts', 'c.ts']),
+        deferred: {
+          unstaged: ['a.ts', 'b.ts', 'c.ts'],
+          staged: [],
+          renamedFrom: {},
+          fingerprint: 'f'
+        }
+      }
+      const { result } = renderHook(() => useGitDiffData('/repo', OPTS))
+      const entry = (path: string) => ({ path, status: 'M' as const, source: 'unstaged' as const })
+      await vi.advanceTimersByTimeAsync(10_000)
+      await vi.waitFor(() => expect(result.current.isDiffFailed(entry('c.ts'))).toBe(true))
+      fail = false
+      filesPageQuery.mockClear()
+      result.current.retryAllDiffs()
+      await vi.waitFor(() => expect(result.current.getDiffForEntry(entry('c.ts'))).toBeDefined())
+      expect(filesPageQuery).toHaveBeenCalledTimes(1)
+      expect(filesPageQuery.mock.calls[0][0].filePaths).toEqual(['a.ts', 'b.ts', 'c.ts'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a large deferred file shows its first page; loadDiffRest brings the rest', async () => {
     const head = 'diff --git a/big.ts b/big.ts\n--- a/big.ts\n+++ b/big.ts\n@@ -1,2 +1,2 @@\n-a\n'
     const tail = '+b\n'

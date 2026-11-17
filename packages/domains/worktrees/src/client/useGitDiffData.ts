@@ -199,7 +199,8 @@ export function useGitDiffData(
   const isDiffOutdated = useCallback(
     (entry: FileEntry): boolean => {
       const t = texts.get(textKeyOf(entry))
-      return !!t?.failed && t.text.length > 0
+      // A failed "load rest" keeps its current first page (and its rest): not outdated.
+      return !!t?.failed && !t.rest && t.text.length > 0
     },
     [texts]
   )
@@ -208,6 +209,9 @@ export function useGitDiffData(
     (entry: FileEntry): void => diffTexts?.retry(textKeyOf(entry)),
     [diffTexts]
   )
+
+  /** Ask again for every file whose diff could not be read, in batched requests. */
+  const retryAllDiffs = useCallback((): void => diffTexts?.retryFailed(), [diffTexts])
 
   const hasAnyChanges =
     !!snapshot &&
@@ -235,6 +239,7 @@ export function useGitDiffData(
     isDiffFailed,
     isDiffOutdated,
     retryDiff,
+    retryAllDiffs,
     hasAnyChanges
   }
 }

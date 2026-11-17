@@ -419,6 +419,99 @@ describe('DiffTextLoader', () => {
     loader.dispose()
   })
 
+  it('retry-all asks for every failed file in batches, not one request per file', async () => {
+    // A computer that answers up to 1000 files per page (BATCH_FILES).
+    const f = source({ batch: 1000 })
+    let down = true
+    const pages: string[][] = []
+    const filesPage = f.s.filesPage
+    f.s.filesPage = async (kind, filePaths, fromPaths) => {
+      pages.push(filePaths)
+      if (down) throw new Error('computer offline')
+      return filesPage(kind, filePaths, fromPaths)
+    }
+    const files = Array.from({ length: 2500 }, (_, i) => `f${i}.txt`)
+    const loader = new DiffTextLoader(f.s, { opts: {} }, { retryDelaysMs: [], recoverMs: 60_000 })
+    loader.sync(
+      snap({ deferred: { unstaged: files, staged: [], renamedFrom: {}, fingerprint: 'f' } })
+    )
+    await vi.waitFor(() => expect(loader.getSnapshot().get('u:f2499.txt')?.failed).toBe(true))
+    down = false
+    pages.length = 0
+    loader.retryFailed()
+    await vi.waitFor(() => expect(loader.getSnapshot().get('u:f2499.txt')?.failed).toBe(false))
+    expect(pages.length).toBeLessThanOrEqual(Math.ceil(2500 / 1000))
+    loader.dispose()
+  })
+
+  it('recovery is one timer: every due failure (large first pages too) goes in one batch', async () => {
+    const pages: string[][] = []
+    let down = true
+    const files = Array.from({ length: 50 }, (_, i) => `big${i}.txt`)
+    const loader = new DiffTextLoader(
+      {
+        filesPage: async (_kind, filePaths) => {
+          pages.push(filePaths)
+          return { diffs: {}, deferred: [], large: filePaths }
+        },
+        untrackedPage: async () => ({ diffs: {} }) as never,
+        text: async () => {
+          if (down) throw new Error('computer offline')
+          return { text: 'first page', cursor: null, totalBytes: 10 }
+        }
+      },
+      { opts: {} },
+      { retryDelaysMs: [], recoverMs: 20 }
+    )
+    loader.sync(
+      snap({ deferred: { unstaged: files, staged: [], renamedFrom: {}, fingerprint: 'f' } })
+    )
+    await vi.waitFor(() => expect(loader.getSnapshot().get('u:big49.txt')?.failed).toBe(true))
+    pages.length = 0
+    down = false
+    await vi.waitFor(() => expect(loader.getSnapshot().get('u:big49.txt')?.text).toBe('first page'))
+    expect(pages).toHaveLength(1)
+    expect(pages[0]).toHaveLength(50)
+    loader.dispose()
+  })
+
+  it('recovery backs off per file (doubling, capped) and is not fooled by a wall-clock step', async () => {
+    vi.useFakeTimers()
+    try {
+      const asked: number[] = []
+      let clock = 0
+      const loader = new DiffTextLoader(
+        {
+          filesPage: async () => {
+            asked.push(clock)
+            throw new Error('computer offline')
+          },
+          untrackedPage: async () => ({ diffs: {} }) as never,
+          text: async () => ({ text: '', cursor: null, totalBytes: 0 })
+        },
+        { opts: {} },
+        { retryDelaysMs: [], recoverMs: 100, maxRecoverMs: 400, now: () => clock }
+      )
+      loader.sync(
+        snap({ deferred: { unstaged: ['a'], staged: [], renamedFrom: {}, fingerprint: 'f' } })
+      )
+      const advance = async (ms: number) => {
+        for (let i = 0; i < ms; i += 10) {
+          clock += 10
+          await vi.advanceTimersByTimeAsync(10)
+        }
+      }
+      // A wall-clock step backwards changes nothing (the monotonic clock is injected).
+      vi.setSystemTime(Date.now() - 60 * 60_000)
+      await advance(1600)
+      const gaps = asked.slice(1).map((t, i) => t - asked[i])
+      expect(gaps.slice(0, 5)).toEqual([100, 200, 400, 400, 400])
+      loader.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a file the reply leaves out (gone) is answered empty, not left pending', async () => {
     const f = source()
     f.s.filesPage = async (_kind, filePaths) => ({
