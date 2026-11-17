@@ -1675,6 +1675,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/useAgents.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
   packages/domains/worktrees/src/client/DiffRestButton.test.tsx \
+  packages/domains/worktrees/src/client/DiffLoadIssue.test.tsx \
   packages/domains/worktrees/src/client/usePagedStashDiff.test.tsx \
   packages/domains/worktrees/src/client/loader-lifecycle.test.tsx \
   packages/domains/worktrees/src/client/WorktreesTab.test.tsx \

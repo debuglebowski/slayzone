@@ -212,6 +212,50 @@ describe('useGitDiffData', () => {
     }
   })
 
+  it('a changed file whose refetch fails keeps its old diff, marked outdated with a retry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let body = 'old'
+      let fail = false
+      filesPageQuery.mockImplementation(async (i: { filePaths: string[] }) => {
+        if (fail) throw new Error('computer reconnecting')
+        return {
+          diffs: Object.fromEntries(
+            i.filePaths.map((f) => [f, patchOf(f).replace('+x', `+${body}`)])
+          ),
+          deferred: [],
+          large: []
+        }
+      })
+      const deferred = (fp: string) => ({
+        ...snap(['b.ts']),
+        deferred: { unstaged: ['b.ts'], staged: [], renamedFrom: {}, fingerprint: fp }
+      })
+      snapshotState.snapshot = deferred('f1')
+      const { result, rerender } = renderHook(() => useGitDiffData('/repo', OPTS))
+      const b = { path: 'b.ts', status: 'M' as const, source: 'unstaged' as const }
+      await vi.waitFor(() => expect(result.current.getDiffForEntry(b)).toBeDefined())
+      expect(result.current.isDiffOutdated(b)).toBe(false)
+      fail = true
+      snapshotState.snapshot = deferred('f2')
+      rerender()
+      await vi.advanceTimersByTimeAsync(10_000)
+      await vi.waitFor(() => expect(result.current.isDiffOutdated(b)).toBe(true))
+      // Still shown (the last good diff), not reported as missing.
+      expect(result.current.getDiffForEntry(b)).toBeDefined()
+      expect(result.current.isDiffFailed(b)).toBe(false)
+      fail = false
+      body = 'new'
+      result.current.retryDiff(b)
+      await vi.waitFor(() => expect(result.current.isDiffOutdated(b)).toBe(false))
+      expect(
+        result.current.getDiffForEntry(b)?.hunks[0]?.lines.some((l) => l.content === 'new')
+      ).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a large deferred file shows its first page; loadDiffRest brings the rest', async () => {
     const head = 'diff --git a/big.ts b/big.ts\n--- a/big.ts\n+++ b/big.ts\n@@ -1,2 +1,2 @@\n-a\n'
     const tail = '+b\n'

@@ -106,10 +106,13 @@ exceeded the 100 MiB frame limit and stalled the computer.
   `diff --git` / `diff --cc` headers it actually wrote, C-quoted paths decoded, never
   by position: during a merge the unmerged `--cc` section comes first and
   `--name-status` lists that path twice). The patch is forced to `a/` `b/` prefixes.
-  Each deferred file has its own fingerprint (worktree stat / index `--raw` entry),
+  Each deferred file has its own fingerprint (unstaged: worktree stat + its index
+  entry, so a partial stage counts; staged: its `--cached --raw` entry),
   plus one over all of them for older clients; the panel refetches only the files
   whose own fingerprint changed and keeps their old text until the new one arrives.
-  A failed batch is retried twice, then shows a retry. Renames keep their old path.
+  A failed batch is retried twice, then shows a retry (single file: in place;
+  continuous flow: a "Could not load N files" row; a kept old diff is marked
+  outdated) and is asked again on its own after 15 s. Renames keep their old path.
 - **Deferred files.** They come in budgeted batches (`getFileDiffsPage`, 8
   concurrent gits, rename pathspec paired).
 - **Large files.** A file over budget is read by `readGitText`: git runs once,

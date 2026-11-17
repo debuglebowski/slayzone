@@ -1207,8 +1207,32 @@ async function pagedSide(
   return { patch: page.text, deferred }
 }
 
-/** Each deferred file's fingerprint, and one over them all: the worktree file's
- *  size+mtime (unstaged), its index entry (staged). Range diffs are immutable: ''. */
+/** `git diff --raw -z <args>`'s entries by (new) path: `:<modes> <shas> <status>`
+ *  and the path(s). An unstaged entry's src side is the file's index entry. */
+async function rawEntries(repoPath: string, args: string[]): Promise<Map<string, string>> {
+  // `:<modes> <shas> <status>\0<path>\0` (+ `<new path>\0` for a rename/copy).
+  const raw = (await execGit(['diff', ...args, '--raw', '-z'], { cwd: repoPath })).split('\0')
+  const entries = new Map<string, string>()
+  for (let i = 0; i + 1 < raw.length; ) {
+    const meta = raw[i]
+    if (!meta.startsWith(':')) {
+      i++
+      continue
+    }
+    const pair = /\s[RC]\d*$/.test(meta)
+    const target = pair ? raw[i + 2] : raw[i + 1]
+    entries.set(target, `${meta}\0${raw[i + 1]}`)
+    i += pair ? 3 : 2
+  }
+  return entries
+}
+
+/**
+ * Each deferred file's fingerprint, and one over them all. Unstaged: the worktree
+ * file's size+mtime AND its index entry (the unstaged diff is worktree vs index, so
+ * a partial stage changes it too). Staged: its `--cached --raw` entry. Range diffs
+ * are immutable: ''.
+ */
 async function deferredFingerprints(
   repoPath: string,
   unstaged: string[],
@@ -1221,25 +1245,16 @@ async function deferredFingerprints(
     unstaged: {} as Record<string, string>,
     staged: {} as Record<string, string>
   }
-  for (const f of unstaged) {
-    const st = await stat(path.join(repoPath, f)).catch(() => null)
-    fingerprints.unstaged[f] = st ? `${st.size}:${st.mtimeMs}` : 'gone'
+  if (unstaged.length > 0) {
+    const index = await rawEntries(repoPath, [])
+    for (const f of unstaged) {
+      const st = await stat(path.join(repoPath, f)).catch(() => null)
+      fingerprints.unstaged[f] =
+        `${st ? `${st.size}:${st.mtimeMs}` : 'gone'}\0${index.get(f) ?? 'none'}`
+    }
   }
   if (staged.length > 0) {
-    // `:<modes> <shas> <status>\0<path>\0` (+ `<new path>\0` for a rename/copy).
-    const raw = (await execGit(['diff', '--cached', '--raw', '-z'], { cwd: repoPath })).split('\0')
-    const entries = new Map<string, string>()
-    for (let i = 0; i + 1 < raw.length; ) {
-      const meta = raw[i]
-      if (!meta.startsWith(':')) {
-        i++
-        continue
-      }
-      const pair = /\s[RC]\d*$/.test(meta)
-      const target = pair ? raw[i + 2] : raw[i + 1]
-      entries.set(target, `${meta}\0${raw[i + 1]}`)
-      i += pair ? 3 : 2
-    }
+    const entries = await rawEntries(repoPath, ['--cached'])
     for (const f of staged) fingerprints.staged[f] = entries.get(f) ?? 'gone'
   }
   const hash = createHash('sha256')

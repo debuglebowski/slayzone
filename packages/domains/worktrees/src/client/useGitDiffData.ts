@@ -195,6 +195,15 @@ export function useGitDiffData(
     [texts, getDiffForEntry]
   )
 
+  /** A file showing its last good diff because reading the new one failed. */
+  const isDiffOutdated = useCallback(
+    (entry: FileEntry): boolean => {
+      const t = texts.get(textKeyOf(entry))
+      return !!t?.failed && t.text.length > 0
+    },
+    [texts]
+  )
+
   const retryDiff = useCallback(
     (entry: FileEntry): void => diffTexts?.retry(textKeyOf(entry)),
     [diffTexts]
@@ -224,6 +233,7 @@ export function useGitDiffData(
     getDiffRest,
     loadDiffRest,
     isDiffFailed,
+    isDiffOutdated,
     retryDiff,
     hasAnyChanges
   }

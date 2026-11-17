@@ -63,6 +63,9 @@ const BATCH_FILES = 1000
 const NO_TEXTS: ReadonlyMap<string, DiffText> = new Map()
 /** A failed batch is asked again after these delays, then its files show `failed`. */
 const RETRY_DELAYS_MS = [1_000, 4_000]
+/** A file that failed past its retries is asked again after this (a computer back
+ *  online), on its own and on any sync after it; the failure shows meanwhile. */
+const RECOVER_MS = 15_000
 /** The fingerprint of an untracked file's preview (fetched once while listed). */
 const UNTRACKED = ''
 
@@ -81,14 +84,19 @@ export class DiffTextLoader {
   private running = 0
   private disposed = false
   private readonly retryDelaysMs: readonly number[]
+  private readonly recoverMs: number
   private readonly timers = new Set<ReturnType<typeof setTimeout>>()
+  /** When (and at which fingerprint) each file last failed past its retries: asked
+   *  again {@link RECOVER_MS} later, or at once when its content changes. */
+  private readonly failedAt = new Map<string, { at: number; fingerprint: string }>()
 
   constructor(
     private readonly source: DiffTextSource,
     private readonly ctx: DiffTextContext,
-    options: { retryDelaysMs?: readonly number[] } = {}
+    options: { retryDelaysMs?: readonly number[]; recoverMs?: number } = {}
   ) {
     this.retryDelaysMs = options.retryDelaysMs ?? RETRY_DELAYS_MS
+    this.recoverMs = options.recoverMs ?? RECOVER_MS
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -111,6 +119,7 @@ export class DiffTextLoader {
     this.sources.clear()
     this.pending.clear()
     this.loadedAt.clear()
+    this.failedAt.clear()
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
   }
@@ -184,6 +193,7 @@ export class DiffTextLoader {
           texts.delete(k)
           this.sources.delete(k)
           this.loadedAt.delete(k)
+          this.failedAt.delete(k)
         }
     })
     this.fetchMissing()
@@ -192,15 +202,27 @@ export class DiffTextLoader {
   /** Ask again for a file whose text could not be read. */
   retry(key: string): void {
     if (this.disposed || !this.texts.get(key)?.failed || this.pending.has(key)) return
+    this.failedAt.delete(key)
     this.loadedAt.delete(key)
     this.fetchMissing([key])
   }
 
   /** Fetch every wanted text not loaded at its fingerprint (and not on its way). */
   private fetchMissing(only?: string[]): void {
-    // A failed file was settled at its fingerprint: it waits for a retry or a change.
+    // A file that just failed past its retries waits out its recovery delay.
+    const cooling = (k: string) => {
+      const failed = this.failedAt.get(k)
+      return (
+        failed !== undefined &&
+        failed.fingerprint === this.wanted.get(k) &&
+        Date.now() - failed.at < this.recoverMs
+      )
+    }
     const missing = (k: string) =>
-      this.wanted.has(k) && !this.pending.has(k) && this.loadedAt.get(k) !== this.wanted.get(k)
+      this.wanted.has(k) &&
+      !this.pending.has(k) &&
+      this.loadedAt.get(k) !== this.wanted.get(k) &&
+      !cooling(k)
     const keys = (only ?? [...this.wanted.keys()]).filter(missing)
     for (const [side, prefix] of [
       [this.range ? 'range' : 'unstaged', 'u:'],
@@ -215,6 +237,7 @@ export class DiffTextLoader {
   /** Record `key`'s text as read at `fingerprint`. */
   private settle(key: string, fingerprint: string, text: DiffText): void {
     this.pending.delete(key)
+    this.failedAt.delete(key)
     this.loadedAt.set(key, fingerprint)
     this.update((texts) => texts.set(key, text))
   }
@@ -291,20 +314,40 @@ export class DiffTextLoader {
           this.timers.add(timer)
           return
         }
-        // Out of retries: each file shows its failure and a retry (its old text, if
-        // it had one, stays readable under the failure).
-        for (const k of failed)
-          if (this.current(k, asked.get(k)!)) {
-            const old = this.texts.get(k)
-            this.loadedAt.set(k, asked.get(k)!)
-            this.update((texts) =>
-              texts.set(k, { text: old?.text ?? '', rest: null, loading: false, failed: true })
-            )
-          }
+        this.fail(failed.filter((k) => this.current(k, asked.get(k)!)))
       })
       .finally(() => {
         this.running--
       })
+  }
+
+  /**
+   * Out of retries: each file shows its failure and a retry (its old text, if it had
+   * one, stays readable, marked outdated). It is not settled: it is asked again
+   * after {@link RECOVER_MS}, and on any sync after that.
+   */
+  private fail(keys: string[]): void {
+    if (!keys.length || this.disposed) return
+    const at = Date.now()
+    const failures = new Map<string, { at: number; fingerprint: string }>()
+    for (const k of keys) {
+      this.pending.delete(k)
+      const failure = { at, fingerprint: this.wanted.get(k)! }
+      failures.set(k, failure)
+      this.failedAt.set(k, failure)
+    }
+    this.update((texts) => {
+      for (const k of keys) {
+        const old = texts.get(k)
+        texts.set(k, { text: old?.text ?? '', rest: null, loading: false, failed: true })
+      }
+    })
+    const timer = setTimeout(() => {
+      this.timers.delete(timer)
+      if (!this.disposed)
+        this.fetchMissing(keys.filter((k) => this.failedAt.get(k) === failures.get(k)))
+    }, this.recoverMs)
+    this.timers.add(timer)
   }
 
   /** A large file: its first page now, the rest on request. */
@@ -313,24 +356,19 @@ export class DiffTextLoader {
     const src = this.textSource(key, this.fromPaths.get(key))
     const page = await this.source.text(src, null).catch(() => null)
     if (!this.current(key, fingerprint) || this.pending.get(key) !== fingerprint) return
+    if (!page) {
+      this.fail([key])
+      return
+    }
     this.sources.set(key, src)
-    this.settle(
-      key,
-      fingerprint,
-      page
-        ? {
-            text: page.text,
-            rest: page.cursor
-              ? {
-                  cursor: page.cursor,
-                  remainingBytes: page.totalBytes - utf8ByteLength(page.text)
-                }
-              : null,
-            loading: false,
-            failed: false
-          }
-        : { text: '', rest: null, loading: false, failed: true }
-    )
+    this.settle(key, fingerprint, {
+      text: page.text,
+      rest: page.cursor
+        ? { cursor: page.cursor, remainingBytes: page.totalBytes - utf8ByteLength(page.text) }
+        : null,
+      loading: false,
+      failed: false
+    })
   }
 
   /** Load the rest of a large file (every remaining page). */

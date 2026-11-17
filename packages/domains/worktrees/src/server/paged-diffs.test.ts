@@ -262,6 +262,45 @@ describe('the working-diff snapshot, paged, during a conflicted merge', () => {
   })
 })
 
+describe('per-file fingerprints of deferred files', () => {
+  it('an unstaged file’s fingerprint changes when its index entry does (a partial stage)', async () => {
+    const r = mkdtempSync(join(tmpdir(), 'paged-fp-'))
+    try {
+      git(r, 'init', '-q', '-b', 'main')
+      const lines = Array.from({ length: 400 }, (_, i) => `line ${i}`)
+      writeFileSync(join(r, 'p.txt'), `${lines.join('\n')}\n`)
+      git(r, 'add', '-A')
+      git(r, 'commit', '-qm', 'base')
+      // Two hunks, far apart.
+      const edited = [...lines]
+      edited[5] = 'changed 5'
+      edited[350] = 'changed 350'
+      writeFileSync(join(r, 'p.txt'), `${edited.join('\n')}\n`)
+      const opts = { contextLines: '3', paged: true, maxPatchBytes: 1 }
+      const before = await getWorkingDiff(r, opts)
+      expect(before.deferred?.unstaged).toEqual(['p.txt'])
+      // Stage only the first hunk (the worktree file itself is untouched).
+      const partial = [...lines]
+      partial[5] = 'changed 5'
+      const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: r,
+        env,
+        input: `${partial.join('\n')}\n`
+      })
+        .toString()
+        .trim()
+      git(r, 'update-index', '--cacheinfo', `100644,${blob},p.txt`)
+      const after = await getWorkingDiff(r, opts)
+      expect(after.deferred?.unstaged).toEqual(['p.txt'])
+      expect(after.deferred?.fingerprints?.unstaged['p.txt']).not.toBe(
+        before.deferred?.fingerprints?.unstaged['p.txt']
+      )
+    } finally {
+      rmSync(r, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('untracked files, paged', () => {
   it('a batch answers within the budget; deferred and large name the rest', async () => {
     for (const n of [1, 2, 3]) writeFileSync(join(repo, `u${n}.txt`), content(`u${n}`, 60 * KB))

@@ -49,6 +49,7 @@ import { useGitDiffCollapse } from './useGitDiffCollapse'
 import { useGitDiffTurns } from './useGitDiffTurns'
 import { useGitDiffData } from './useGitDiffData'
 import { DiffRestButton } from './DiffRestButton'
+import { DiffFailedFiles, DiffOutdatedBar } from './DiffLoadIssue'
 import { useGitDiffFolders } from './useGitDiffFolders'
 import { useGitDiffSelection } from './useGitDiffSelection'
 import { useGitDiffFlow } from './useGitDiffFlow'
@@ -107,6 +108,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     getDiffRest,
     loadDiffRest,
     isDiffFailed,
+    isDiffOutdated,
     retryDiff,
     hasAnyChanges
   } = useGitDiffData(targetPath, {
@@ -635,6 +637,13 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
             {/* Body */}
             {diffContinuousFlow ? (
               <div className="flex-1 min-h-0 flex flex-col pt-2">
+                {/* Files whose diff could not be read have no row of their own here. */}
+                <DiffFailedFiles
+                  count={flatEntries.filter(isDiffFailed).length}
+                  onRetry={() => {
+                    for (const entry of flatEntries) if (isDiffFailed(entry)) retryDiff(entry)
+                  }}
+                />
                 {flowEntries.length === 0 ? (
                   <div className="flex-1 min-h-0 flex items-center justify-center p-6">
                     <p className="text-xs text-muted-foreground">No changes</p>
@@ -746,6 +755,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                             style={{ ...style, paddingBottom: 8 }}
                           >
                             <div className="overflow-hidden rounded-b-lg border-x border-b border-border bg-card shadow-sm">
+                              {isDiffOutdated(entry) && (
+                                <DiffOutdatedBar onRetry={() => retryDiff(entry)} />
+                              )}
                               <DiffView
                                 diff={diff}
                                 sideBySide={diffSideBySide}
@@ -800,6 +812,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                 )}
                 {selectedFile && selectedDiff && (
                   <div className="flex-1 min-h-0 overflow-auto">
+                    {selectedEntry && isDiffOutdated(selectedEntry) && (
+                      <DiffOutdatedBar onRetry={() => retryDiff(selectedEntry)} />
+                    )}
                     <DiffView
                       diff={selectedDiff}
                       sideBySide={diffSideBySide}

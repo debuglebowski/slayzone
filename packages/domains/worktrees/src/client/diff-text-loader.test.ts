@@ -384,6 +384,41 @@ describe('DiffTextLoader', () => {
     failing.dispose()
   })
 
+  it('files that failed past their retries are asked again on their own, without a content change', async () => {
+    const f = source()
+    let down = true
+    const filesPage = f.s.filesPage
+    f.s.filesPage = async (...args) => {
+      if (down) throw new Error('computer offline')
+      return filesPage(...args)
+    }
+    const untrackedPage = f.s.untrackedPage
+    f.s.untrackedPage = async (...args) => {
+      if (down) throw new Error('computer offline')
+      return untrackedPage(...args)
+    }
+    const snapshot = () =>
+      snap({
+        untrackedFiles: ['u.txt'],
+        deferred: { unstaged: ['d.txt'], staged: [], renamedFrom: {}, fingerprint: 'f' }
+      })
+    const loader = new DiffTextLoader(f.s, { opts: {} }, { retryDelaysMs: [0, 0], recoverMs: 30 })
+    loader.sync(snapshot())
+    await vi.waitFor(() => {
+      expect(loader.getSnapshot().get('u:d.txt')?.failed).toBe(true)
+      expect(loader.getSnapshot().get('?:u.txt')?.failed).toBe(true)
+    })
+    // The computer is back; the snapshot is unchanged (an equal one syncs, or none).
+    down = false
+    loader.sync(snapshot())
+    await vi.waitFor(() => {
+      expect(loader.getSnapshot().get('u:d.txt')?.text).toBe(patch('d.txt', 'v1'))
+      expect(loader.getSnapshot().get('?:u.txt')?.text).toBe(patch('u.txt', 'v1'))
+    })
+    expect(loader.getSnapshot().get('u:d.txt')?.failed).toBe(false)
+    loader.dispose()
+  })
+
   it('a file the reply leaves out (gone) is answered empty, not left pending', async () => {
     const f = source()
     f.s.filesPage = async (_kind, filePaths) => ({
