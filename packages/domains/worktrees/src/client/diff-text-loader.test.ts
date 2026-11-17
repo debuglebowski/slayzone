@@ -254,26 +254,155 @@ describe('DiffTextLoader', () => {
     expect(f.calls.filter((c) => c.endsWith(' null')).length).toBe(2)
   })
 
-  it('refetches deferred files when the fingerprint changes; drops files no longer deferred', async () => {
+  it('refetches only the deferred files whose own fingerprint changed, keeping their old text until the new one arrives; drops files no longer deferred', async () => {
     const f = source()
+    let hold: Promise<void> | null = null
+    const filesPage = f.s.filesPage
+    f.s.filesPage = async (...args) => {
+      if (hold) await hold
+      return filesPage(...args)
+    }
     const loader = new DiffTextLoader(f.s, { opts: {} })
-    const deferred = (fp: string, files: string[]) =>
+    const deferred = (fps: Record<string, string>) =>
       snap({
-        unstagedFiles: files,
-        deferred: { unstaged: files, staged: [], renamedFrom: {}, fingerprint: fp }
+        unstagedFiles: Object.keys(fps),
+        deferred: {
+          unstaged: Object.keys(fps),
+          staged: [],
+          renamedFrom: {},
+          fingerprint: JSON.stringify(fps),
+          fingerprints: { unstaged: fps, staged: {} }
+        }
       })
-    loader.sync(deferred('f1', ['a', 'b']))
+    loader.sync(deferred({ a: '1', b: '1' }))
     await idle(loader)
-    loader.sync(deferred('f1', ['a', 'b']))
+    loader.sync(deferred({ a: '1', b: '1' }))
     await idle(loader)
-    expect(f.calls.length).toBe(1)
+    expect(f.calls).toEqual(['page unstaged a,b'])
+    const b = loader.getSnapshot().get('u:b')
     f.setVersion('v2')
-    loader.sync(deferred('f2', ['a']))
+    let release!: () => void
+    hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    loader.sync(deferred({ a: '2', b: '1' }))
+    // While `a` is refetched, its old text stays on screen (no "Loading…" flash).
+    expect(loader.getSnapshot().get('u:a')?.text).toBe(patch('a', 'v1'))
+    release()
     await idle(loader)
+    expect(f.calls.at(-1)).toBe('page unstaged a')
     expect(loader.getSnapshot().get('u:a')?.text).toBe(patch('a', 'v2'))
+    expect(loader.getSnapshot().get('u:b')).toBe(b)
+    loader.sync(deferred({ a: '2' }))
     expect(loader.getSnapshot().has('u:b')).toBe(false)
     loader.sync(snap({ unstagedFiles: ['a'], unstagedPatch: patch('a') }))
     expect(loader.getSnapshot().has('u:a')).toBe(false)
+  })
+
+  it('an older computer’s whole-set fingerprint change refetches all, old texts kept until then', async () => {
+    const f = source()
+    const loader = new DiffTextLoader(f.s, { opts: {} })
+    const deferred = (fp: string) =>
+      snap({ deferred: { unstaged: ['a', 'b'], staged: [], renamedFrom: {}, fingerprint: fp } })
+    loader.sync(deferred('f1'))
+    await idle(loader)
+    f.setVersion('v2')
+    loader.sync(deferred('f2'))
+    expect(loader.getSnapshot().get('u:a')?.text).toBe(patch('a', 'v1'))
+    await idle(loader)
+    expect(f.calls).toEqual(['page unstaged a,b', 'page unstaged a,b'])
+    expect(loader.getSnapshot().get('u:b')?.text).toBe(patch('b', 'v2'))
+  })
+
+  it('a loaded rest survives another deferred file’s change', async () => {
+    const f = source()
+    const loader = new DiffTextLoader(f.s, { opts: {} })
+    const deferred = (aFp: string) =>
+      snap({
+        deferred: {
+          unstaged: ['a', 'big.txt'],
+          staged: [],
+          renamedFrom: {},
+          fingerprint: aFp,
+          fingerprints: { unstaged: { a: aFp, 'big.txt': 'same' }, staged: {} }
+        }
+      })
+    loader.sync(deferred('1'))
+    await idle(loader)
+    await loader.loadRest('u:big.txt')
+    const whole = loader.getSnapshot().get('u:big.txt')
+    expect(whole?.text).toBe(f.bigWhole)
+    loader.sync(deferred('2'))
+    await idle(loader)
+    expect(loader.getSnapshot().get('u:big.txt')).toBe(whole)
+  })
+
+  it('a failed batch is retried (bounded); then marked failed with a retry, never left loading', async () => {
+    const f = source()
+    let failures = 1
+    const filesPage = f.s.filesPage
+    f.s.filesPage = async (...args) => {
+      if (failures-- > 0) throw new Error('computer reconnecting')
+      return filesPage(...args)
+    }
+    const deferred = snap({
+      deferred: { unstaged: ['a'], staged: [], renamedFrom: {}, fingerprint: 'f' }
+    })
+    const loader = new DiffTextLoader(f.s, { opts: {} }, { retryDelaysMs: [0, 0] })
+    loader.sync(deferred)
+    await vi.waitFor(() => expect(loader.getSnapshot().get('u:a')?.text).toBe(patch('a', 'v1')))
+    loader.dispose()
+
+    failures = 99
+    const failing = new DiffTextLoader(f.s, { opts: {} }, { retryDelaysMs: [0, 0] })
+    failing.sync(deferred)
+    await vi.waitFor(() =>
+      expect(failing.getSnapshot().get('u:a')).toEqual({
+        text: '',
+        rest: null,
+        loading: false,
+        failed: true
+      })
+    )
+    await idle(failing)
+    expect(failing.busy).toBe(false)
+    // A change of its content asks again too (not only the retry control).
+    failures = 0
+    failing.sync(
+      snap({ deferred: { unstaged: ['a'], staged: [], renamedFrom: {}, fingerprint: 'g' } })
+    )
+    await vi.waitFor(() => expect(failing.getSnapshot().get('u:a')?.text).toBe(patch('a', 'v1')))
+    failures = 99
+    failing.sync(
+      snap({ deferred: { unstaged: ['a'], staged: [], renamedFrom: {}, fingerprint: 'h' } })
+    )
+    await vi.waitFor(() => expect(failing.getSnapshot().get('u:a')?.failed).toBe(true))
+    await idle(failing)
+    failures = 0
+    failing.retry('u:a')
+    await vi.waitFor(() => expect(failing.getSnapshot().get('u:a')?.text).toBe(patch('a', 'v1')))
+    failing.dispose()
+  })
+
+  it('a file the reply leaves out (gone) is answered empty, not left pending', async () => {
+    const f = source()
+    f.s.filesPage = async (_kind, filePaths) => ({
+      diffs: Object.fromEntries(filePaths.filter((p) => p !== 'gone').map((p) => [p, patch(p)])),
+      deferred: [],
+      large: []
+    })
+    const loader = new DiffTextLoader(f.s, { opts: {} })
+    loader.sync(
+      snap({ deferred: { unstaged: ['a', 'gone'], staged: [], renamedFrom: {}, fingerprint: 'f' } })
+    )
+    await idle(loader)
+    expect(loader.getSnapshot().get('u:gone')).toEqual({
+      text: '',
+      rest: null,
+      loading: false,
+      failed: false
+    })
+    loader.dispose()
   })
 
   it('untracked files: new ones fetched once (paged), removed ones dropped', async () => {

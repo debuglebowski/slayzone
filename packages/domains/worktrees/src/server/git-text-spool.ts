@@ -14,7 +14,7 @@
  * @module worktrees/server/git-text-spool
  */
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { open, readFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -39,11 +39,54 @@ export interface GitTextSpoolOptions {
   maxBytes?: number
 }
 
+const SPOOL_DIR_PREFIX = 'slayzone-git-text-'
+/** A folder without its owner's pid (an older build) is left this long. */
+const LEGACY_SPOOL_DIR_MS = 24 * 60 * 60_000
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM: it exists, owned by someone else.
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Remove spool folders left in `root` by processes that are gone (killed by a
+ * signal, so their exit handler never ran): `slayzone-git-text-<pid>-…` of a pid
+ * that no longer runs, and an older build's pid-less folder after a day.
+ */
+export function sweepStaleGitTextDirs(root: string = tmpdir()): void {
+  let names: string[]
+  try {
+    names = readdirSync(root)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    try {
+      if (!name.startsWith(SPOOL_DIR_PREFIX)) continue
+      const full = path.join(root, name)
+      const pid = /^(\d+)-/.exec(name.slice(SPOOL_DIR_PREFIX.length))?.[1]
+      const stale = pid
+        ? Number(pid) !== process.pid && !processAlive(Number(pid))
+        : Date.now() - statSync(full).mtimeMs > LEGACY_SPOOL_DIR_MS
+      if (stale) rmSync(full, { recursive: true, force: true })
+    } catch {
+      /* another sweeper got it first, or it is not ours to remove */
+    }
+  }
+}
+
 let spoolDir: string | null = null
-/** This process's spool folder, made on first use and removed when it exits. */
+/** This process's spool folder, made on first use (sweeping exited processes'
+ *  leftovers then) and removed when it exits. */
 function dir(): string {
   if (!spoolDir) {
-    const made = mkdtempSync(path.join(tmpdir(), 'slayzone-git-text-'))
+    sweepStaleGitTextDirs()
+    const made = mkdtempSync(path.join(tmpdir(), `${SPOOL_DIR_PREFIX}${process.pid}-`))
     spoolDir = made
     process.once('exit', () => rmSync(made, { recursive: true, force: true }))
   }
@@ -55,11 +98,26 @@ export class GitTextSpool {
   private readonly now: () => number
   private readonly idleMs: number
   private readonly maxBytes: number
+  /** Drops idle spools while any is held (unref'd: never keeps the process alive). */
+  private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: GitTextSpoolOptions = {}) {
     this.now = opts.now ?? Date.now
     this.idleMs = opts.idleMs ?? 5 * 60_000
     this.maxBytes = opts.maxBytes ?? 1024 * 1024 * 1024
+  }
+
+  private arm(): void {
+    if (this.timer || this.spools.size === 0) return
+    this.timer = setTimeout(
+      () => {
+        this.timer = null
+        this.sweep()
+        this.arm()
+      },
+      Math.max(1_000, this.idleMs / 2)
+    )
+    this.timer.unref?.()
   }
 
   /** Spools held. */
@@ -93,6 +151,7 @@ export class GitTextSpool {
       total -= s.bytes
       this.drop(other)
     }
+    this.arm()
     return id
   }
 

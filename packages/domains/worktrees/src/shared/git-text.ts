@@ -55,6 +55,9 @@ export interface GitDiffDeferred {
   renamedFrom: Record<string, string>
   /** Changes whenever any deferred file's content changes: refetch them. */
   fingerprint: string
+  /** Per deferred file (`path → fingerprint`): refetch only the files that changed.
+   *  Absent from older computers (then {@link fingerprint} covers them all). */
+  fingerprints?: { unstaged: Record<string, string>; staged: Record<string, string> }
 }
 
 /** One batch of per-file patches (`getFileDiffsPage`, paged `getUntrackedFileDiffs`). */

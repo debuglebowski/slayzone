@@ -101,16 +101,21 @@ one whole string per reply (`-U99999` and unlimited stdout). Large changes then
 exceeded the 100 MiB frame limit and stalled the computer.
 - **Snapshot.** With `opts.paged` (the renderer always sends it; older computers
   ignore it), each side carries whole files up to 4 MiB, cut between file
-  sections. `deferred` names the rest, and its fingerprint (worktree stat / index
-  `--raw`) changes when any deferred file changes. Files are mapped by count: the
-  k-th section is the k-th `--name-status` entry with the same flags, because
-  headers quote paths and `-w` drops the same files from both. Renames keep their
-  old path.
+  sections. `deferred` names the rest (the `--name-status` entries with the same
+  flags, so `-w` drops the same files, that git wrote no section for; read from the
+  `diff --git` / `diff --cc` headers it actually wrote, C-quoted paths decoded, never
+  by position: during a merge the unmerged `--cc` section comes first and
+  `--name-status` lists that path twice). The patch is forced to `a/` `b/` prefixes.
+  Each deferred file has its own fingerprint (worktree stat / index `--raw` entry),
+  plus one over all of them for older clients; the panel refetches only the files
+  whose own fingerprint changed and keeps their old text until the new one arrives.
+  A failed batch is retried twice, then shows a retry. Renames keep their old path.
 - **Deferred files.** They come in budgeted batches (`getFileDiffsPage`, 8
   concurrent gits, rename pathspec paired).
 - **Large files.** A file over budget is read by `readGitText`: git runs once,
-  spooled to a temp file, and is served in line-cut pages (5 min idle, 1 GiB LRU,
-  `GIT_TEXT_EXPIRED` restarts the read). The panel shows the first page plus
+  spooled to a temp file, and is served in line-cut pages (5 min idle, dropped by
+  an unref'd timer; 1 GiB LRU; `GIT_TEXT_EXPIRED` restarts the read). Spool folders
+  are named by pid; the first spool sweeps folders of processes that are gone. The panel shows the first page plus
   "Load rest of diff (X MB)".
 - **Untracked files.** `getUntrackedFileDiffs` gains `paged` (`$paged` answer).
 - **Stash diffs.** They read through `readGitText` too.
@@ -118,4 +123,4 @@ exceeded the 100 MiB frame limit and stalled the computer.
 
 **2026-11-15: Setup-script replies and commit lists are bounded (FU1 S4)**
 - **Setup scripts.** A worktree setup script's reply carries only the LAST 1 MiB of its output (`output-tail.ts`, UTF-8-safe), plus `outputBytes` and `outputTruncated`. The full output still streams as it runs; no UI shows the reply's output. Under 1 MiB the reply is unchanged.
-- **Commit lists.** `getCommitsSincePage` pages `getCommitsSince` (≤ 2000 commits / 4 MiB). Its cursor pins the branch's tip as of page 1. For a `boundedReads` computer, the hub assembles `worktrees.getCommitsSince` from those pages, and builds `getResolvedForkGraph` / `getResolvedUpstreamGraph` WHOLE itself, with the same graph and counts (`fork-graph.ts`, pure). Older computers get the whole-answer ops.
+- **Commit lists.** `getCommitsSincePage` pages `getCommitsSince` (≤ 2000 commits / 4 MiB). Its cursor pins both ends as of page 1 (the branch's tip and `sinceRef`'s commit); a later page's error is an error, never a short list. For a `boundedReads` computer, the hub assembles `worktrees.getCommitsSince` from those pages, and builds `getResolvedForkGraph` / `getResolvedUpstreamGraph` WHOLE itself, with the same graph and counts (`fork-graph.ts`, pure). Older computers get the whole-answer ops.

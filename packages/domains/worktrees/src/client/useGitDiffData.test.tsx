@@ -179,6 +179,39 @@ describe('useGitDiffData', () => {
     expect(result.current.isDiffPending(b)).toBe(false)
   })
 
+  it('a deferred file whose reads keep failing shows a failure with a retry, not Loading forever', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let fail = true
+      filesPageQuery.mockImplementation(async (i: { filePaths: string[] }) => {
+        if (fail) throw new Error('computer reconnecting')
+        return {
+          diffs: Object.fromEntries(i.filePaths.map((f) => [f, patchOf(f)])),
+          deferred: [],
+          large: []
+        }
+      })
+      snapshotState.snapshot = {
+        ...snap(['b.ts']),
+        deferred: { unstaged: ['b.ts'], staged: [], renamedFrom: {}, fingerprint: 'f' }
+      }
+      const { result } = renderHook(() => useGitDiffData('/repo', OPTS))
+      const b = { path: 'b.ts', status: 'M' as const, source: 'unstaged' as const }
+      await vi.waitFor(() => expect(filesPageQuery).toHaveBeenCalled())
+      expect(result.current.isDiffPending(b)).toBe(true)
+      // The bounded retries run out.
+      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.waitFor(() => expect(result.current.isDiffFailed(b)).toBe(true))
+      expect(result.current.isDiffPending(b)).toBe(false)
+      fail = false
+      result.current.retryDiff(b)
+      await vi.waitFor(() => expect(result.current.getDiffForEntry(b)).toBeDefined())
+      expect(result.current.isDiffFailed(b)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a large deferred file shows its first page; loadDiffRest brings the rest', async () => {
     const head = 'diff --git a/big.ts b/big.ts\n--- a/big.ts\n+++ b/big.ts\n@@ -1,2 +1,2 @@\n-a\n'
     const tail = '+b\n'

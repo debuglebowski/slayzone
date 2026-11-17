@@ -186,6 +186,20 @@ export function useGitDiffData(
     [diffTexts]
   )
 
+  /** A file whose diff could not be read (its batch failed past the retries). */
+  const isDiffFailed = useCallback(
+    (entry: FileEntry): boolean => {
+      const t = texts.get(textKeyOf(entry))
+      return !!t?.failed && !t.rest && !getDiffForEntry(entry)
+    },
+    [texts, getDiffForEntry]
+  )
+
+  const retryDiff = useCallback(
+    (entry: FileEntry): void => diffTexts?.retry(textKeyOf(entry)),
+    [diffTexts]
+  )
+
   const hasAnyChanges =
     !!snapshot &&
     (snapshot.files.length > 0 ||
@@ -209,6 +223,8 @@ export function useGitDiffData(
     isDiffPending,
     getDiffRest,
     loadDiffRest,
+    isDiffFailed,
+    retryDiff,
     hasAnyChanges
   }
 }

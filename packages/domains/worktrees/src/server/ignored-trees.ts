@@ -45,12 +45,32 @@ export class IgnoredTreeStore {
   private readonly idleMs: number
   private readonly max: number
   private readonly idPrefix: string
+  /** Drops idle indexes while any is held (unref'd: never keeps the process alive). */
+  private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: IgnoredTreeStoreOptions = {}) {
     this.now = opts.now ?? Date.now
     this.idleMs = opts.idleMs ?? 10 * 60_000
     this.max = opts.max ?? 4
     this.idPrefix = opts.idPrefix ?? ''
+  }
+
+  /** Indexes held. */
+  get size(): number {
+    return this.held.size
+  }
+
+  private arm(): void {
+    if (this.timer || this.held.size === 0) return
+    this.timer = setTimeout(
+      () => {
+        this.timer = null
+        this.sweep()
+        this.arm()
+      },
+      Math.max(1_000, this.idleMs / 2)
+    )
+    this.timer.unref?.()
   }
 
   private sweep(): void {
@@ -74,6 +94,7 @@ export class IgnoredTreeStore {
       if (oldest === null) break
       this.held.delete(oldest)
     }
+    this.arm()
     return { treeId, totalFiles: index.totalFiles, root: index.page('', null) }
   }
 

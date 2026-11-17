@@ -63,6 +63,27 @@ describe('getCommitsSincePage', () => {
     expect(rest).toEqual(whole)
   })
 
+  it('a moving sinceRef (a branch name) is pinned too: no commit is skipped or repeated', async () => {
+    const tip = git(repo, 'rev-parse', 'main').trim()
+    git(repo, 'branch', '-f', 'since', base)
+    const whole = await getCommitsSince(repo, 'since', tip)
+    const first = await getCommitsSincePage(repo, 'since', tip, null, { maxItems: 50 })
+    // The since branch moves forward 10 commits mid-read.
+    git(repo, 'branch', '-f', 'since', `${tip}~${whole.length - 10}`)
+    const rest = await collectPages(async (cursor) =>
+      cursor === null ? first : getCommitsSincePage(repo, 'since', tip, cursor, { maxItems: 50 })
+    )
+    expect(rest).toEqual(whole)
+  })
+
+  it('a later page that fails is an error, never a silently short list', async () => {
+    const first = await getCommitsSincePage(repo, base, 'main', null, { maxItems: 50 })
+    expect(first.nextCursor).not.toBeNull()
+    // A cursor naming commits this repo does not have (the history it pinned is gone).
+    const gone = first.nextCursor!.replace(/^[0-9a-f]{40}/, 'f'.repeat(40))
+    await expect(getCommitsSincePage(repo, base, 'main', gone, { maxItems: 50 })).rejects.toThrow()
+  })
+
   it('an unknown branch is empty (as the whole read); a malformed cursor is refused', async () => {
     expect(await getCommitsSincePage(repo, base, 'no-such-branch', null)).toEqual({
       items: [],

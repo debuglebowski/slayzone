@@ -59,6 +59,8 @@ let releaseOpen: (() => void) | null = null
 const held = new Map<string, IgnoredIndex>()
 const calls: string[] = []
 let ids = 0
+/** The next preset matches that fail (a transient host error). */
+let matchFailures = 0
 const get = (id: string) => {
   const i = held.get(id)
   if (!i) throw new Error(`${IGNORED_TREE_EXPIRED}: gone`)
@@ -84,8 +86,13 @@ const client = {
       }
     },
     matchIgnoredTree: {
-      query: async (i: { treeId: string; globs: string[]; cursor: string | null }) =>
-        get(i.treeId).matchPage(i.globs, i.cursor)
+      query: async (i: { treeId: string; globs: string[]; cursor: string | null }) => {
+        if (matchFailures > 0) {
+          matchFailures--
+          throw new Error('computer reconnecting')
+        }
+        return get(i.treeId).matchPage(i.globs, i.cursor)
+      }
     }
   }
 }
@@ -122,6 +129,7 @@ afterEach(() => {
   releaseOpen = null
   held.clear()
   calls.length = 0
+  matchFailures = 0
   PATHS = ['.env', 'cache.bin', 'docs/a.md', 'docs/b.md']
 })
 
@@ -213,6 +221,17 @@ describe('CopyFilesDialog', () => {
     await act(async () => releaseOpen?.())
     expect(preset()).toBe('env')
     await expectCopy('Copy 1 file')
+  })
+
+  it('a preset match that fails shows a retry instead of silently copying 0 files', async () => {
+    setPresets(JSON.stringify([{ id: 'env', name: 'Env', pathGlobs: ['.env*'] }]))
+    matchFailures = 1
+    renderDialog(true)
+    const retry = await screen.findByRole('button', { name: /could not apply the preset/i })
+    expect(copyLabel()).toBe('Copy 0 files')
+    fireEvent.click(retry)
+    await expectCopy('Copy 1 file')
+    expect(screen.queryByRole('button', { name: /could not apply the preset/i })).toBeNull()
   })
 
   it('a manual toggle switches to Custom and the selection sticks', async () => {

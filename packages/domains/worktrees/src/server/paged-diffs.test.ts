@@ -11,10 +11,10 @@
  * Every piece, put back together, equals the whole answer of the old ops.
  */
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PAGE_MAX_BYTES, utf8ByteLength } from '@slayzone/platform/bounded-reads'
 import {
   getFileDiff,
@@ -24,7 +24,12 @@ import {
   getUntrackedFileDiffs,
   getWorkingDiff
 } from './git-worktree'
-import { GIT_TEXT_EXPIRED, GitTextSpool, readGitText } from './git-text-spool'
+import {
+  GIT_TEXT_EXPIRED,
+  GitTextSpool,
+  readGitText,
+  sweepStaleGitTextDirs
+} from './git-text-spool'
 
 const KB = 1024
 const env = {
@@ -196,6 +201,64 @@ describe('the working-diff snapshot, paged', () => {
   it('under the budget nothing is deferred (the snapshot is the whole answer)', async () => {
     const small = await getWorkingDiff(repo, { contextLines: '3', paged: true })
     expect(small.deferred).toBeUndefined()
+  })
+})
+
+describe('the working-diff snapshot, paged, during a conflicted merge', () => {
+  /** The paths whose sections a patch carries (`diff --git a/x b/x`, `diff --cc x`, and
+   *  their C-quoted forms; this repo's names need only `\"` unescaped, as in JSON). */
+  const sectionPaths = (patch: string) =>
+    [
+      ...patch.matchAll(
+        /^diff (?:--git "a\/.*" "b\/(.*)"|--git a\/.* b\/(.*)|--(?:cc|combined) "(.*)"|--(?:cc|combined) (.*))$/gm
+      )
+    ].map((m) => {
+      const quoted = m[1] ?? m[3]
+      return quoted !== undefined ? (JSON.parse(`"${quoted}"`) as string) : (m[2] ?? m[4])
+    })
+  let merging: string
+  beforeAll(() => {
+    merging = mkdtempSync(join(tmpdir(), 'paged-merge-'))
+    git(merging, 'init', '-q', '-b', 'main')
+    for (const f of ['a.txt', 'f.txt', 'z.txt', 's1.txt', 's2.txt', 'quo"te.txt'])
+      writeFileSync(join(merging, f), content(`base-${f}`, 2 * KB))
+    git(merging, 'add', '-A')
+    git(merging, 'commit', '-qm', 'base')
+    git(merging, 'checkout', '-q', '-b', 'other')
+    writeFileSync(join(merging, 'f.txt'), content('other-f', 2 * KB))
+    git(merging, 'commit', '-qam', 'other')
+    git(merging, 'checkout', '-q', 'main')
+    writeFileSync(join(merging, 'f.txt'), content('main-f', 2 * KB))
+    git(merging, 'commit', '-qam', 'main')
+    try {
+      git(merging, 'merge', '-q', 'other')
+    } catch {
+      // The conflict is the point: f.txt is unmerged.
+    }
+    for (const f of ['a.txt', 'z.txt', 'quo"te.txt'])
+      writeFileSync(join(merging, f), content(`work-${f}`, 2 * KB))
+    for (const f of ['s1.txt', 's2.txt'])
+      writeFileSync(join(merging, f), content(`st-${f}`, 2 * KB))
+    git(merging, 'add', 's1.txt', 's2.txt')
+  })
+  afterAll(() => rmSync(merging, { recursive: true, force: true }))
+
+  it('every changed file is either in its side’s patch or deferred, exactly once', async () => {
+    const whole = await getWorkingDiff(merging, { contextLines: '3' })
+    for (const maxPatchBytes of [1 * KB, 5 * KB, 9 * KB]) {
+      const paged = await getWorkingDiff(merging, { contextLines: '3', paged: true, maxPatchBytes })
+      for (const [patch, wholePatch, deferred] of [
+        [paged.unstagedPatch, whole.unstagedPatch, paged.deferred?.unstaged ?? []],
+        [paged.stagedPatch, whole.stagedPatch, paged.deferred?.staged ?? []]
+      ] as const) {
+        const emitted = sectionPaths(patch)
+        // No file is both shown and deferred, none is deferred twice.
+        expect(emitted.filter((p) => deferred.includes(p))).toEqual([])
+        expect(new Set(deferred).size).toBe(deferred.length)
+        // Shown + deferred covers every file whose section the whole patch has.
+        for (const p of sectionPaths(wholePatch)) expect([...emitted, ...deferred]).toContain(p)
+      }
+    }
   })
 })
 
@@ -375,5 +438,45 @@ describe('readGitText: a large text read page by page', () => {
     expect(
       (await readGitText(spool, repo, src, b.cursor, { maxBytes: 64 * KB })).text.length
     ).toBeGreaterThan(0)
+  })
+})
+
+describe('spool lifetimes', () => {
+  it('an idle spool is dropped by its own timer, not only by the next call', async () => {
+    vi.useFakeTimers()
+    try {
+      const spool = new GitTextSpool({ idleMs: 60_000 })
+      const file = join(repo, 'idle-spool.txt')
+      writeFileSync(file, 'x'.repeat(100))
+      spool.hold(file, repo, 100)
+      expect(spool.size).toBe(1)
+      await vi.advanceTimersByTimeAsync(3 * 60_000)
+      expect(spool.size).toBe(0)
+      await vi.waitFor(() => expect(existsSync(file)).toBe(false))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stale spool folders of exited processes are swept; a live process keeps its own', () => {
+    const root = mkdtempSync(join(tmpdir(), 'git-text-sweep-'))
+    try {
+      const dead = join(root, 'slayzone-git-text-2147483646-abc')
+      const live = join(root, `slayzone-git-text-${process.pid}-def`)
+      const legacyOld = join(root, 'slayzone-git-text-ghi')
+      const legacyNew = join(root, 'slayzone-git-text-jkl')
+      const other = join(root, 'unrelated-dir')
+      for (const d of [dead, live, legacyOld, legacyNew, other]) mkdirSync(d)
+      const dayAgo = (Date.now() - 2 * 24 * 60 * 60_000) / 1000
+      utimesSync(legacyOld, dayAgo, dayAgo)
+      sweepStaleGitTextDirs(root)
+      expect(existsSync(dead)).toBe(false)
+      expect(existsSync(legacyOld)).toBe(false)
+      expect(existsSync(live)).toBe(true)
+      expect(existsSync(legacyNew)).toBe(true)
+      expect(existsSync(other)).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

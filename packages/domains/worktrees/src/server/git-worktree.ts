@@ -1142,34 +1142,111 @@ async function diffNames(
   return out
 }
 
+/** A path token as git writes it in a section header: C-quoted (`"…"`, with `\"`, `\\`,
+ *  `\t`… and octal bytes) when it holds special bytes, else verbatim. */
+function unquoteGitPath(token: string): string {
+  if (!token.startsWith('"') || !token.endsWith('"') || token.length < 2) return token
+  const escapes: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 }
+  const bytes: number[] = []
+  for (let i = 1; i < token.length - 1; i++) {
+    const c = token[i]
+    if (c !== '\\') {
+      bytes.push(...Buffer.from(c, 'utf8'))
+      continue
+    }
+    const next = token[++i]
+    if (next >= '0' && next <= '7') {
+      bytes.push(Number.parseInt(token.slice(i, i + 3), 8))
+      i += 2
+    } else bytes.push(escapes[next] ?? next.charCodeAt(0))
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+/**
+ * The files whose sections `patch` carries, read from the headers git actually wrote.
+ * Not by position: during a merge git writes the unmerged `diff --cc` section first,
+ * and `--name-status` lists an unmerged path twice (`U` and its worktree status).
+ */
+function emittedPaths(patch: string, names: Array<{ path: string; from?: string }>): Set<string> {
+  const byHeader = new Map(names.map((n) => [`a/${n.from ?? n.path} b/${n.path}`, n.path]))
+  const out = new Set<string>()
+  for (const m of patch.matchAll(/^diff (--git|--cc|--combined) (.*)$/gm)) {
+    const rest = m[2].replace(/"(?:[^"\\]|\\.)*"/g, unquoteGitPath)
+    if (m[1] !== '--git') out.add(rest)
+    else {
+      const path = byHeader.get(rest)
+      if (path !== undefined) out.add(path)
+    }
+  }
+  return out
+}
+
+/** git's default prefixes, whatever the user's `diff.noprefix` / `diff.mnemonicPrefix`:
+ *  the panel's parser and {@link emittedPaths} read `a/…` `b/…`. */
+const DIFF_PREFIXES = ['--src-prefix=a/', '--dst-prefix=b/']
+
 /** One side of a paged snapshot: whole files up to the budget, the rest named. */
 async function pagedSide(
   repoPath: string,
   patchArgs: string[],
   maxBytes: number
 ): Promise<{ patch: string; deferred: Array<{ path: string; from?: string }> }> {
-  const page = await readGitPatchFiles(patchArgs, { cwd: repoPath, maxBytes })
+  const args = [patchArgs[0], ...DIFF_PREFIXES, ...patchArgs.slice(1)]
+  const page = await readGitPatchFiles(args, { cwd: repoPath, maxBytes })
   if (page.complete) return { patch: page.text, deferred: [] }
   const names = await diffNames(repoPath, patchArgs)
-  // The k-th file section is the k-th name (one diff queue, one order).
-  return { patch: page.text, deferred: names.slice(page.files) }
+  const emitted = emittedPaths(page.text, names)
+  // Every name git did not write a section for, once (an unmerged path is listed twice).
+  const seen = new Set<string>()
+  const deferred = names.filter((n) => {
+    if (emitted.has(n.path) || seen.has(n.path)) return false
+    seen.add(n.path)
+    return true
+  })
+  return { patch: page.text, deferred }
 }
 
-/** Changes when any deferred file's content does: the worktree file's size+mtime
- *  (unstaged), the index blobs (staged). Range diffs are immutable: ''. */
-async function deferredFingerprint(
+/** Each deferred file's fingerprint, and one over them all: the worktree file's
+ *  size+mtime (unstaged), its index entry (staged). Range diffs are immutable: ''. */
+async function deferredFingerprints(
   repoPath: string,
   unstaged: string[],
-  stagedDeferred: boolean
-): Promise<string> {
-  const hash = createHash('sha256')
+  staged: string[]
+): Promise<{
+  fingerprint: string
+  fingerprints: { unstaged: Record<string, string>; staged: Record<string, string> }
+}> {
+  const fingerprints = {
+    unstaged: {} as Record<string, string>,
+    staged: {} as Record<string, string>
+  }
   for (const f of unstaged) {
     const st = await stat(path.join(repoPath, f)).catch(() => null)
-    hash.update(`${f}\0${st ? `${st.size}:${st.mtimeMs}` : 'gone'}\0`)
+    fingerprints.unstaged[f] = st ? `${st.size}:${st.mtimeMs}` : 'gone'
   }
-  if (stagedDeferred)
-    hash.update(await execGit(['diff', '--cached', '--raw', '-z'], { cwd: repoPath }))
-  return hash.digest('hex')
+  if (staged.length > 0) {
+    // `:<modes> <shas> <status>\0<path>\0` (+ `<new path>\0` for a rename/copy).
+    const raw = (await execGit(['diff', '--cached', '--raw', '-z'], { cwd: repoPath })).split('\0')
+    const entries = new Map<string, string>()
+    for (let i = 0; i + 1 < raw.length; ) {
+      const meta = raw[i]
+      if (!meta.startsWith(':')) {
+        i++
+        continue
+      }
+      const pair = /\s[RC]\d*$/.test(meta)
+      const target = pair ? raw[i + 2] : raw[i + 1]
+      entries.set(target, `${meta}\0${raw[i + 1]}`)
+      i += pair ? 3 : 2
+    }
+    for (const f of staged) fingerprints.staged[f] = entries.get(f) ?? 'gone'
+  }
+  const hash = createHash('sha256')
+  for (const side of [fingerprints.unstaged, fingerprints.staged])
+    for (const [f, fp] of Object.entries(side)) hash.update(`${f}\0${fp}\0`)
+  hash.update('\0')
+  return { fingerprint: hash.digest('hex'), fingerprints }
 }
 
 async function getWorkingDiffPaged(
@@ -1181,7 +1258,7 @@ async function getWorkingDiffPaged(
   const toDeferred = (
     unstaged: Array<{ path: string; from?: string }>,
     staged: Array<{ path: string; from?: string }>,
-    fingerprint: string
+    prints: Pick<GitDiffDeferred, 'fingerprint' | 'fingerprints'>
   ): GitDiffDeferred | undefined => {
     if (unstaged.length === 0 && staged.length === 0) return undefined
     const renamedFrom: Record<string, string> = {}
@@ -1190,7 +1267,7 @@ async function getWorkingDiffPaged(
       unstaged: unstaged.map((n) => n.path),
       staged: staged.map((n) => n.path),
       renamedFrom,
-      fingerprint
+      ...prints
     }
   }
   if (opts.fromSha && opts.toSha) {
@@ -1198,7 +1275,13 @@ async function getWorkingDiffPaged(
       execGitFileList(['diff', '--name-only', opts.fromSha, opts.toSha], { cwd: repoPath }),
       pagedSide(repoPath, ['diff', '--no-ext-diff', ...flags, opts.fromSha, opts.toSha], maxBytes)
     ])
-    const deferred = toDeferred(side.deferred, [], '')
+    const deferred = toDeferred(side.deferred, [], {
+      fingerprint: '',
+      fingerprints: {
+        unstaged: Object.fromEntries(side.deferred.map((n) => [n.path, ''])),
+        staged: {}
+      }
+    })
     return {
       targetPath: repoPath,
       files: files.sort(),
@@ -1223,12 +1306,12 @@ async function getWorkingDiffPaged(
     unstaged.deferred,
     staged.deferred,
     unstaged.deferred.length || staged.deferred.length
-      ? await deferredFingerprint(
+      ? await deferredFingerprints(
           repoPath,
           unstaged.deferred.map((n) => n.path),
-          staged.deferred.length > 0
+          staged.deferred.map((n) => n.path)
         )
-      : ''
+      : { fingerprint: '' }
   )
   return {
     targetPath: repoPath,
@@ -1863,9 +1946,10 @@ export const COMMITS_PAGE_ITEMS = 2000
 /**
  * {@link getCommitsSince} in bounded pages: newest first, at most
  * {@link COMMITS_PAGE_ITEMS} commits and {@link PAGE_MAX_BYTES} per page. The cursor
- * pins the branch's tip as it was at the first page, so one read's pages describe
- * one history (a commit landing meanwhile is not in it). Errors read as empty, as
- * the whole read answers them.
+ * pins both ends as they were at the first page (the branch's tip and `sinceRef`'s
+ * commit), so one read's pages describe one history even when either ref moves. The
+ * first page reads errors as empty, as the whole read answers them; a later page's
+ * error is an error (never a silently short list).
  */
 export async function getCommitsSincePage(
   repoPath: string,
@@ -1875,19 +1959,25 @@ export async function getCommitsSincePage(
   opts: { maxItems?: number } = {}
 ): Promise<Page<CommitInfo>> {
   let tip: string
+  let since: string
   let skip: number
   if (cursor === null) {
-    const resolved = await execGit(['rev-parse', '--verify', '--quiet', `${branch}^{commit}`], {
-      cwd: repoPath
-    }).catch(() => '')
-    tip = resolved.trim()
-    if (!tip) return { items: [], nextCursor: null }
+    const commitOf = (ref: string) =>
+      execGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoPath })
+        .then((out) => out.trim())
+        .catch(() => '')
+    const [resolvedTip, resolvedSince] = await Promise.all([commitOf(branch), commitOf(sinceRef)])
+    if (!resolvedTip || !resolvedSince) return { items: [], nextCursor: null }
+    tip = resolvedTip
+    since = resolvedSince
     skip = 0
   } else {
-    const m = /^([0-9a-f]{40,64}):(\d+)$/.exec(cursor)
+    // `tip:since:skip`; an older computer's `tip:skip` keeps its `sinceRef` by name.
+    const m = /^([0-9a-f]{40,64}):(?:([0-9a-f]{40,64}):)?(\d+)$/.exec(cursor)
     if (!m) throw new Error(`invalid commits cursor '${cursor}'`)
     tip = m[1]
-    skip = Number(m[2])
+    since = m[2] ?? sinceRef
+    skip = Number(m[3])
   }
   const maxItems = Math.max(1, Math.min(opts.maxItems ?? COMMITS_PAGE_ITEMS, COMMITS_PAGE_ITEMS))
   let commits: CommitInfo[]
@@ -1895,7 +1985,7 @@ export async function getCommitsSincePage(
     const output = await execGit(
       [
         'log',
-        `${sinceRef}..${tip}`,
+        `${since}..${tip}`,
         `--skip=${skip}`,
         `-${maxItems + 1}`,
         '--format=%H%n%h%n%s%n%an%n%ar'
@@ -1903,12 +1993,13 @@ export async function getCommitsSincePage(
       { cwd: repoPath }
     )
     commits = parseCommitOutput(output)
-  } catch {
+  } catch (err) {
+    if (cursor !== null) throw err
     return { items: [], nextCursor: null }
   }
   const n = pageCut(commits.slice(0, maxItems), { maxItems })
   const more = n < commits.length
-  return { items: commits.slice(0, n), nextCursor: more ? `${tip}:${skip + n}` : null }
+  return { items: commits.slice(0, n), nextCursor: more ? `${tip}:${since}:${skip + n}` : null }
 }
 
 export async function getCommitsBeforeRef(

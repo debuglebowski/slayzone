@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { collectPages } from '@slayzone/platform/bounded-reads'
 import { getIgnoredFileTree } from './git-worktree'
 import { scanIgnoredIndex } from './ignored-scan'
@@ -149,5 +149,21 @@ describe('expiry and binding', () => {
   it('isIgnoredTreeExpired recognises the message across a transport (no class identity)', () => {
     expect(isIgnoredTreeExpired(new Error(`x ${IGNORED_TREE_EXPIRED}: gone`))).toBe(true)
     expect(isIgnoredTreeExpired(new Error('other'))).toBe(false)
+  })
+})
+
+describe('IgnoredTreeStore lifetimes', () => {
+  it('an idle index is dropped by its own timer, not only by the next call', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new IgnoredTreeStore({ idleMs: 60_000 })
+      const { IgnoredIndex } = await import('./ignored-index')
+      store.adopt('/repo', IgnoredIndex.build(['a', 'b']))
+      expect(store.size).toBe(1)
+      await vi.advanceTimersByTimeAsync(3 * 60_000)
+      expect(store.size).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

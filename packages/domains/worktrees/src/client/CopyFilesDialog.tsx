@@ -181,6 +181,10 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
   // Bumped by every selection change; an async selection (a preset's match, an
   // uncheck that first loads folders) applies only if nothing changed meanwhile.
   const generation = useRef(0)
+  /** The preset match that failed (a host error): show a retry, not an empty selection. */
+  const [failedMatch, setFailedMatch] = useState<{ presetId: string; attempt: number } | null>(null)
+  /** Bumped by that retry: runs the match again for the same preset. */
+  const [matchAttempt, setMatchAttempt] = useState(0)
 
   // Presets settings + the ignored-file index. Both follow `open`: a fresh index
   // (a new scan) each time the dialog opens, as the whole-tree query refetched.
@@ -242,13 +246,16 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
     loader
       .match(preset.pathGlobs)
       .then((roots) => {
-        if (generation.current === gen)
-          setSelected(new Map(roots.map((r) => [r.path, r.fileCount])))
+        if (generation.current !== gen) return
+        setSelected(new Map(roots.map((r) => [r.path, r.fileCount])))
+        setFailedMatch(null)
       })
       .catch(() => {
-        /* the index went away (closed, host gone): keep the selection */
+        // The selection is not the preset's: say so, with a retry.
+        if (generation.current === gen)
+          setFailedMatch({ presetId: preset.id, attempt: matchAttempt })
       })
-  }, [selectedPresetId, presets, loader, ready])
+  }, [selectedPresetId, presets, loader, ready, matchAttempt])
 
   // An expanded folder with nothing loaded (just expanded, or the index was
   // reopened after it expired) loads its first page.
@@ -368,6 +375,15 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
                 {selectedPresetId === 'custom' && <SelectItem value="custom">Custom</SelectItem>}
               </SelectContent>
             </Select>
+            {failedMatch?.presetId === selectedPresetId && failedMatch.attempt === matchAttempt && (
+              <button
+                type="button"
+                className="text-xs text-destructive hover:text-foreground"
+                onClick={() => setMatchAttempt((n) => n + 1)}
+              >
+                Could not apply the preset. Retry
+              </button>
+            )}
           </div>
 
           {loading ? (

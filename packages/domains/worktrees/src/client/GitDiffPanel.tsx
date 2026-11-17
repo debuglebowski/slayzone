@@ -106,6 +106,8 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     isDiffPending,
     getDiffRest,
     loadDiffRest,
+    isDiffFailed,
+    retryDiff,
     hasAnyChanges
   } = useGitDiffData(targetPath, {
     visible,
@@ -779,11 +781,21 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                 )}
                 {selectedFile && !selectedDiff && (
                   <div className="flex-1 flex items-center justify-center p-6">
-                    <p className="text-xs text-muted-foreground">
-                      {selectedEntry && isDiffPending(selectedEntry)
-                        ? 'Loading...'
-                        : 'No diff content'}
-                    </p>
+                    {selectedEntry && isDiffFailed(selectedEntry) ? (
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => retryDiff(selectedEntry)}
+                      >
+                        Could not load this diff. Retry
+                      </button>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {selectedEntry && isDiffPending(selectedEntry)
+                          ? 'Loading...'
+                          : 'No diff content'}
+                      </p>
+                    )}
                   </div>
                 )}
                 {selectedFile && selectedDiff && (
