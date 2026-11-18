@@ -1519,6 +1519,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/direct-pty-read.test.ts \
   packages/shared/transport/src/client/direct-task-data.test.ts \
   packages/shared/transport/src/client/direct-connection.test.ts \
+  packages/shared/transport/src/client/hub-keepalive.test.ts \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \

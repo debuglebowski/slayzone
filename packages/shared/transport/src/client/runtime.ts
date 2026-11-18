@@ -63,7 +63,17 @@ export type CreateTrpcClientOpts = {
    * short ones; callers otherwise take the defaults.
    */
   handshakeTiming?: HandshakeTiming
+  /** Override the keepalive pings ({@link HUB_KEEPALIVE}). Tests pass short ones. */
+  keepAlive?: { intervalMs: number; pongTimeoutMs: number }
 }
+
+/**
+ * Client pings on the hub socket: a half-open one (NAT dropped the flow,
+ * sleep/wake, a network switch) sends no FIN, so without them the app never
+ * learns it is dead — its subscriptions never restart and nothing catches up.
+ * A hub (tRPC's ws handler) answers every `PING`.
+ */
+export const HUB_KEEPALIVE = { intervalMs: 15_000, pongTimeoutMs: 10_000 }
 
 // Vanilla (non-React) client — used by the provider boot and by e2e via
 // window.getTrpcVanillaClient(). Shape: client.<router>.<proc>.query/mutate(input).
@@ -94,6 +104,7 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
     onOpen: pacer.onOpen,
     onClose: pacer.onCloseOrError,
     onError: pacer.onCloseOrError,
+    keepAlive: { enabled: true, ...(opts.keepAlive ?? HUB_KEEPALIVE) },
     // Only attach connectionParams when a token is present — an absent token
     // keeps the connect frame identical to the untokened (local) path.
     ...(opts.token ? { connectionParams: async () => ({ token: opts.token as string }) } : {})
