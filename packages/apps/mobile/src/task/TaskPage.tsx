@@ -1,50 +1,51 @@
 /**
- * One task, managed entirely from here — desktop's task page:
+ * One task, managed entirely from here — desktop's task page.
  *
- * - header: ‹ back to the board (named after the project), ⋯ (mark unread, archive,
- *   delete);
- * - the status icon (tap: change status) and the title (edit in place); priority, tags
- *   and due date under it (tap priority or due to change them);
- * - phone: a segmented control — Agent (the chat or the terminal, full height), Details
- *   (description, sub-tasks, the details list), Artifacts (with how many);
- * - iPad (`wide`): Agent and Details side by side (Artifacts as a tab of the right pane).
+ * Phone: the page is the conversation. A compact nav bar — ‹ back to the board, the
+ * title (one line) with the agent under it ("<provider> · <state>"; a tap opens the
+ * agent menu: provider, agent tabs, every action), Start while the agent offers it, and
+ * ⓘ, which opens Details / Artifacts as a sheet (`TaskInfoSheet`, its own route: the
+ * page stays mounted under it, so a draft, a running terminal or an upload survive) —
+ * then the agent, full height (the chat, its controls one model pill in the composer;
+ * or the terminal).
  *
- * A part, once shown, stays mounted while another is shown (hidden: not drawn to touch,
- * not read by VoiceOver): a chat's draft, a running terminal, an upload in progress
- * survive a look at Details. Each mounts the first time it is shown. While the keyboard
- * is up on a phone, the line under the title steps aside to leave room to type.
+ * iPad (`wide`): the header — ‹ back, ⋯ (mark unread, archive, delete), the status icon
+ * (tap: change status), the title (edit in place), priority, tags and due date under it
+ * — then Agent and Details side by side (Artifacts as a tab of the right pane). A part,
+ * once shown, stays mounted while another is shown (hidden: not drawn to touch, not read
+ * by VoiceOver); each mounts the first time it is shown.
  *
  * Scopes itself to the task's hub: every read and write goes to the hub that owns it.
  */
 import type { HubSession } from '../hub-session'
 import { HubScope } from '@slayzone/transport/client'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { AgentPanel } from '../agents/AgentPanel'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { type AgentNav, AgentPanel } from '../agents/AgentPanel'
 import { hubTarget } from '../artifacts/hub-rest'
 import { ArtifactsScreen } from '../artifacts/ArtifactsScreen'
 import { useTaskArtifacts } from '../artifacts/use-task-artifacts'
-import { cardModel, statusCategoryOf } from '../board/card-model'
-import { TaskComputer } from '../computers/TaskComputer'
 import { ChatUploadTargetContext } from '../chat/ChatUploadTarget'
-import { useKeyboardVisible } from '../chat/use-keyboard'
 import type { HubFeed, TaskRow } from '../hub-board'
-import { DescriptionSection } from '../task-edit/DescriptionSection'
-import { dueLabel, priorityLabel, statusLabel } from '../task-edit/fields'
-import { BlockersSection, SubtasksSection, TagsSection } from '../task-edit/OrganiseSections'
-import { useTaskActions } from '../task-edit/TaskActions'
-import { type TaskField, TitleInput, useFieldSheets } from '../task-edit/TaskFields'
-import { makeStyles as editStyles } from '../task-edit/ui'
-import { type TaskWrites, useTaskWrites } from '../task-edit/use-task-writes'
+import { useFieldSheets } from '../task-edit/TaskFields'
+import { useTaskWrites } from '../task-edit/use-task-writes'
 import { type ChromeColors, useTheme } from '../theme'
-import { useTRPCClient } from '../trpc'
-import { BottomSheet } from '../ui-kit/Chrome'
-import { PriorityIcon, StatusIcon, TagPills } from '../ui-kit/TaskGlyphs'
-import { keepScratchTaskInput, todayISO } from '@slayzone/tasks/board'
-import type { ColumnConfig } from '@slayzone/workflow'
+import { AgentDot } from '../ui-kit/TaskGlyphs'
+import {
+  artifactsLabel,
+  DetailsPanel,
+  KeptPart,
+  PartSegments,
+  TaskMenu,
+  TaskMenuButton,
+  TitleBlock
+} from './task-parts'
 
 export type TaskSegment = 'agent' | 'details' | 'artifacts'
 export const TASK_SEGMENTS: readonly TaskSegment[] = ['agent', 'details', 'artifacts']
+/** The parts of the phone's Details / Artifacts sheet (and the iPad's right pane). */
+export type InfoSegment = Exclude<TaskSegment, 'agent'>
+export const INFO_SEGMENTS: readonly InfoSegment[] = ['details', 'artifacts']
 
 export interface TaskPageProps {
   row: TaskRow
@@ -54,8 +55,11 @@ export interface TaskPageProps {
   showHub: boolean
   /** iPad: Agent and Details side by side. */
   wide: boolean
+  /** iPad: the part shown in the right pane (`agent`: Details). */
   segment: TaskSegment
   onSegment: (segment: TaskSegment) => void
+  /** Phone: open the Details / Artifacts sheet on that part. */
+  onOpenInfo?: (segment: InfoSegment) => void
   /** The agent tab shown; undefined = the main one. */
   agentTabId: string | undefined
   onSelectAgentTab: (tabId: string) => void
@@ -71,110 +75,141 @@ export interface TaskPageProps {
 export function TaskPage(props: TaskPageProps) {
   return (
     <HubScope hubId={props.row.hubId}>
-      <Page {...props} />
+      {props.wide ? <WidePage {...props} /> : <PhonePage {...props} />}
     </HubScope>
   )
 }
 
-function Page(props: TaskPageProps) {
-  const { row, wide, segment, onSegment } = props
+/** Phone: the nav bar, then the agent. */
+function PhonePage(props: TaskPageProps) {
+  const { row } = props
+  const styles = makeStyles(useTheme())
+  const uploadTarget = useMemo(() => hubTarget(props.session), [props.session])
+  return (
+    <View style={styles.screen} testID="task-page">
+      <ChatUploadTargetContext.Provider value={uploadTarget}>
+        <AgentPanel
+          hubId={row.hubId}
+          feed={props.feed}
+          row={row}
+          showHub={props.showHub}
+          tabId={props.agentTabId}
+          onSelectTab={props.onSelectAgentTab}
+          nav={(agent) => <NavBar {...props} agent={agent} />}
+        />
+      </ChatUploadTargetContext.Provider>
+    </View>
+  )
+}
+
+/** A nav-bar button: 44pt, a glyph in a circle. */
+const NAV_BUTTON = 44
+/** The nav bar's words grow with Dynamic Type, but not past what one line holds. */
+const NAV_MAX_SCALE = 1.3
+
+function NavBar({ row, onBack, onOpenInfo, agent }: TaskPageProps & { agent: AgentNav }) {
+  const theme = useTheme()
+  const styles = makeStyles(theme)
+  const line = `${agent.provider} · ${agent.status}`
+  const project = row.project?.name ?? 'the board'
+  return (
+    <View style={styles.nav}>
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          accessibilityRole="button"
+          accessibilityLabel={`Back to ${project}`}
+          style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.navGlyph} maxFontSizeMultiplier={NAV_MAX_SCALE}>
+            ‹
+          </Text>
+        </Pressable>
+      ) : (
+        <View style={styles.navSpacer} />
+      )}
+      <Pressable
+        onPress={agent.openMenu}
+        accessibilityRole="button"
+        accessibilityLabel={`${row.task.title}, ${line}`}
+        accessibilityHint="Opens the agent menu."
+        style={({ pressed }) => [styles.navTitle, pressed && styles.pressed]}
+      >
+        <Text
+          testID="task-title"
+          style={styles.title}
+          numberOfLines={1}
+          maxFontSizeMultiplier={NAV_MAX_SCALE}
+        >
+          {row.task.title}
+        </Text>
+        <View style={styles.agentLine}>
+          {agent.dot ? <AgentDot kind={agent.dot} size={7} /> : null}
+          <Text
+            testID="task-agent-line"
+            style={styles.agentText}
+            numberOfLines={1}
+            maxFontSizeMultiplier={NAV_MAX_SCALE}
+          >
+            {line}
+          </Text>
+          <Text style={styles.agentText} maxFontSizeMultiplier={NAV_MAX_SCALE}>
+            ⌄
+          </Text>
+        </View>
+      </Pressable>
+      {agent.start ? (
+        <Pressable
+          onPress={agent.start}
+          accessibilityRole="button"
+          accessibilityLabel="Start the agent"
+          style={({ pressed }) => [styles.start, pressed && styles.pressed]}
+        >
+          <Text style={styles.startText} maxFontSizeMultiplier={NAV_MAX_SCALE}>
+            Start
+          </Text>
+        </Pressable>
+      ) : null}
+      {onOpenInfo ? (
+        <Pressable
+          onPress={() => onOpenInfo('details')}
+          accessibilityRole="button"
+          accessibilityLabel="Details and artifacts"
+          testID="task-info"
+          style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.infoGlyph} maxFontSizeMultiplier={NAV_MAX_SCALE}>
+            ⓘ
+          </Text>
+        </Pressable>
+      ) : (
+        <View style={styles.navSpacer} />
+      )}
+    </View>
+  )
+}
+
+/** iPad: the header, then Agent and Details side by side. */
+function WidePage(props: TaskPageProps) {
+  const { row, segment, onSegment } = props
   const theme = useTheme()
   const styles = makeStyles(theme)
   const writes = useTaskWrites(row.task)
   const fields = useFieldSheets(row, writes)
   const [menu, setMenu] = useState(false)
   const { artifacts } = useTaskArtifacts(row.task.id)
-  const keyboardUp = useKeyboardVisible()
   const uploadTarget = useMemo(() => hubTarget(props.session), [props.session])
+  const shown: InfoSegment = segment === 'artifacts' ? 'artifacts' : 'details'
   // The parts shown so far: each stays mounted from its first showing on.
-  const [visited, setVisited] = useState<ReadonlySet<TaskSegment>>(() => new Set([segment]))
-  const shownRight: TaskSegment = segment === 'artifacts' ? 'artifacts' : 'details'
-  if (!visited.has(segment) || (wide && !visited.has(shownRight))) {
-    setVisited(new Set([...visited, segment, ...(wide ? [shownRight] : [])]))
-  }
-  const artifactsLabel = artifacts?.length ? `Artifacts ${artifacts.length}` : 'Artifacts'
+  const [visited, setVisited] = useState<ReadonlySet<InfoSegment>>(() => new Set([shown]))
+  if (!visited.has(shown)) setVisited(new Set([...visited, shown]))
 
-  const segments = (shown: readonly TaskSegment[]) => (
-    <View style={styles.segments} accessibilityRole="tablist">
-      {shown.map((s) => {
-        const on = s === segment || (!shown.includes(segment) && s === shown[0])
-        return (
-          <Pressable
-            key={s}
-            onPress={() => onSegment(s)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: on }}
-            testID={`segment-${s}`}
-            style={[styles.segment, on && styles.segmentOn]}
-          >
-            <Text style={[styles.segmentText, on && styles.segmentTextOn]}>
-              {s === 'agent' ? 'Agent' : s === 'details' ? 'Details' : artifactsLabel}
-            </Text>
-          </Pressable>
-        )
-      })}
-    </View>
-  )
-
-  const agent = (
-    <AgentPanel
-      hubId={row.hubId}
-      feed={props.feed}
-      row={{ ...row, task: writes.task }}
-      showHub={props.showHub}
-      tabId={props.agentTabId}
-      onSelectTab={props.onSelectAgentTab}
-    />
-  )
-  const details = <DetailsPanel {...props} writes={writes} openField={fields.open} />
-  const artifactList = (
-    <ArtifactsScreen
-      session={props.session}
-      taskId={row.task.id}
-      layout="list"
-      selected={null}
-      embedded
-      onSelect={(id) => props.onOpenArtifact(id, null)}
-      onSelectVersion={props.onOpenArtifact}
-      onBack={() => onSegment('agent')}
-    />
-  )
-
-  const kept = (part: TaskSegment, shown: boolean, node: ReactNode) =>
+  const kept = (part: InfoSegment, node: ReactNode) =>
     visited.has(part) ? (
-      <KeptPart key={part} shown={shown} testID={`part-${part}`}>
+      <KeptPart key={part} shown={shown === part} testID={`part-${part}`}>
         {node}
       </KeptPart>
     ) : null
-
-  let body: ReactNode
-  if (wide) {
-    body = (
-      <View style={styles.panes}>
-        <View style={[styles.pane, styles.agentPane]} testID="pane-agent">
-          {agent}
-        </View>
-        <View style={[styles.pane, styles.sidePane]} testID="pane-side">
-          {segments(['details', 'artifacts'])}
-          <View style={styles.flex}>
-            {kept('details', shownRight === 'details', details)}
-            {kept('artifacts', shownRight === 'artifacts', artifactList)}
-          </View>
-        </View>
-      </View>
-    )
-  } else {
-    body = (
-      <>
-        {segments(TASK_SEGMENTS)}
-        <View style={styles.flex}>
-          {kept('agent', segment === 'agent', agent)}
-          {kept('details', segment === 'details', details)}
-          {kept('artifacts', segment === 'artifacts', artifactList)}
-        </View>
-      </>
-    )
-  }
 
   return (
     <View style={styles.screen} testID="task-page">
@@ -192,16 +227,7 @@ function Page(props: TaskPageProps) {
           </Pressable>
         ) : null}
         <View style={styles.flex} />
-        <Pressable
-          onPress={() => setMenu(true)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Task actions"
-          testID="task-menu"
-          style={styles.iconButton}
-        >
-          <Text style={styles.iconGlyph}>⋯</Text>
-        </Pressable>
+        <TaskMenuButton onPress={() => setMenu(true)} />
       </View>
       <TitleBlock
         row={row}
@@ -209,11 +235,56 @@ function Page(props: TaskPageProps) {
         feed={props.feed}
         showHub={props.showHub}
         openField={fields.open}
-        compact={keyboardUp && !wide}
       />
       {writes.error ? <Text style={styles.error}>{writes.error}</Text> : null}
       <ChatUploadTargetContext.Provider value={uploadTarget}>
-        {body}
+        <View style={styles.panes}>
+          <View style={[styles.pane, styles.agentPane]} testID="pane-agent">
+            <AgentPanel
+              hubId={row.hubId}
+              feed={props.feed}
+              row={{ ...row, task: writes.task }}
+              showHub={props.showHub}
+              tabId={props.agentTabId}
+              onSelectTab={props.onSelectAgentTab}
+            />
+          </View>
+          <View style={[styles.pane, styles.sidePane]} testID="pane-side">
+            <PartSegments
+              parts={INFO_SEGMENTS}
+              shown={shown}
+              labelOf={(part) =>
+                part === 'details' ? 'Details' : artifactsLabel(artifacts?.length)
+              }
+              onShow={onSegment}
+            />
+            <View style={styles.flex}>
+              {kept(
+                'details',
+                <DetailsPanel
+                  row={row}
+                  feed={props.feed}
+                  writes={writes}
+                  openField={fields.open}
+                  onOpenTask={props.onOpenTask}
+                />
+              )}
+              {kept(
+                'artifacts',
+                <ArtifactsScreen
+                  session={props.session}
+                  taskId={row.task.id}
+                  layout="list"
+                  selected={null}
+                  embedded
+                  onSelect={(id) => props.onOpenArtifact(id, null)}
+                  onSelectVersion={props.onOpenArtifact}
+                  onBack={() => onSegment('agent')}
+                />
+              )}
+            </View>
+          </View>
+        </View>
       </ChatUploadTargetContext.Provider>
       {fields.sheets}
       <TaskMenu
@@ -227,233 +298,46 @@ function Page(props: TaskPageProps) {
   )
 }
 
-/**
- * A part of the page kept mounted while hidden: laid out in place (its views keep their
- * size — a terminal is never resized to nothing), but transparent, untouchable and
- * hidden from VoiceOver.
- */
-function KeptPart({
-  shown,
-  testID,
-  children
-}: {
-  shown: boolean
-  testID: string
-  children: ReactNode
-}) {
-  const styles = makeStyles(useTheme())
-  return (
-    <View
-      style={[StyleSheet.absoluteFill, !shown && styles.hiddenPart]}
-      pointerEvents={shown ? 'auto' : 'none'}
-      accessibilityElementsHidden={!shown}
-      importantForAccessibility={shown ? 'auto' : 'no-hide-descendants'}
-      testID={testID}
-    >
-      {children}
-    </View>
-  )
-}
-
-function TitleBlock({
-  row,
-  writes,
-  feed,
-  showHub,
-  openField,
-  compact
-}: {
-  row: TaskRow
-  writes: TaskWrites
-  feed: HubFeed
-  showHub: boolean
-  openField: (field: TaskField) => void
-  /** The keyboard is up on a phone: the title only, the line under it steps aside. */
-  compact: boolean
-}) {
-  const styles = makeStyles(useTheme())
-  const { task } = writes
-  const look = statusCategoryOf(task.status, row.project)
-  const model = cardModel(feed, task, row.project)
-  const due = task.due_date ? dueLabel(task.due_date, todayISO()) : null
-  return (
-    <View style={styles.titleBlock}>
-      <View style={styles.titleRow}>
-        <Pressable
-          onPress={() => openField('status')}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel={`Status: ${look.label}`}
-          testID="task-status-icon"
-          style={styles.statusButton}
-        >
-          <StatusIcon category={look.category} tone={look.tone} size={18} />
-        </Pressable>
-        <TitleInput writes={writes} />
-      </View>
-      {compact ? null : (
-        <View style={styles.meta}>
-          <Pressable
-            onPress={() => openField('priority')}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={`Priority: ${priorityLabel(task.priority)}`}
-            style={styles.metaChip}
-          >
-            <PriorityIcon priority={task.priority} />
-            <Text style={styles.metaText}>{priorityLabel(task.priority)}</Text>
-          </Pressable>
-          <TagPills tags={model.tags} />
-          {task.due_date ? (
-            <Pressable
-              onPress={() => openField('due')}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel={due ?? undefined}
-              style={[styles.metaChip, model.overdue && styles.overdue]}
-            >
-              <Text style={[styles.metaText, model.overdue && styles.overdueText]}>{due}</Text>
-            </Pressable>
-          ) : null}
-          {model.blocked ? <Text style={styles.blocked}>Blocked</Text> : null}
-          {task.archived_at ? <Text style={styles.metaText}>Archived</Text> : null}
-          {showHub ? <Text style={styles.metaText}>{row.hubLabel}</Text> : null}
-        </View>
-      )}
-    </View>
-  )
-}
-
-/** Desktop's Settings panel: description, sub-tasks, then the details list. */
-function DetailsPanel({
-  row,
-  feed,
-  writes,
-  openField,
-  onOpenTask
-}: TaskPageProps & { writes: TaskWrites; openField: (field: TaskField) => void }) {
-  const theme = useTheme()
-  const styles = makeStyles(theme)
-  const ui = editStyles(theme)
-  const board = feed.board.data
-  const { task } = writes
-  const shownRow = { ...row, task }
-  const detail = (label: string, value: string, field: TaskField) => (
-    <Pressable
-      onPress={() => openField(field)}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}, ${value}`}
-      testID={`task-${field}`}
-      style={ui.detailRow}
-    >
-      <Text style={ui.detailLabel}>{label}</Text>
-      <Text style={ui.detailValue} numberOfLines={1}>
-        {value} ▾
-      </Text>
-    </Pressable>
-  )
-  return (
-    <ScrollView
-      style={styles.flex}
-      contentContainerStyle={styles.details}
-      keyboardShouldPersistTaps="handled"
-      automaticallyAdjustKeyboardInsets
-      testID="task-details"
-    >
-      <View style={ui.card}>
-        <DescriptionSection row={shownRow} />
-      </View>
-      {board ? (
-        <View style={ui.card}>
-          <SubtasksSection row={shownRow} board={board} writes={writes} onOpenTask={onOpenTask} />
-        </View>
-      ) : null}
-      <View style={[ui.card, styles.detailsCard]}>
-        <Text style={ui.heading}>Details</Text>
-        <View>
-          {detail('Status', statusLabel(task.status, row.project), 'status')}
-          {detail('Priority', priorityLabel(task.priority), 'priority')}
-          {detail('Due', dueLabel(task.due_date ?? null, todayISO()), 'due')}
-        </View>
-        {board ? (
-          <>
-            <View style={styles.subsection}>
-              <TagsSection row={shownRow} board={board} writes={writes} />
-            </View>
-            <View style={styles.subsection}>
-              <BlockersSection row={shownRow} board={board} writes={writes} />
-            </View>
-          </>
-        ) : null}
-        <View style={styles.subsection}>
-          <TaskComputer row={shownRow} />
-        </View>
-      </View>
-    </ScrollView>
-  )
-}
-
-function TaskMenu({
-  visible,
-  writes,
-  columns,
-  onDeleted,
-  onClose
-}: {
-  visible: boolean
-  writes: TaskWrites
-  /** The task's project's columns ("Keep as task" moves it to the first started one). */
-  columns: ColumnConfig[] | null | undefined
-  onDeleted: () => void
-  onClose: () => void
-}) {
-  const theme = useTheme()
-  const styles = makeStyles(theme)
-  const client = useTRPCClient()
-  const actions = useTaskActions(writes, onDeleted)
-  const item = (label: string, onPress: () => void, destructive = false) => (
-    <Pressable
-      key={label}
-      accessibilityRole="button"
-      onPress={() => {
-        onClose()
-        onPress()
-      }}
-      style={styles.menuRow}
-    >
-      <Text style={[styles.menuText, destructive && styles.menuDestructive]}>{label}</Text>
-    </Pressable>
-  )
-  return (
-    <BottomSheet visible={visible} onClose={onClose} testID="task-menu-sheet">
-      {writes.task.is_temporary
-        ? item(
-            'Keep as task',
-            () =>
-              void writes.run(() =>
-                client.task.update.mutate(keepScratchTaskInput(writes.task.id, columns))
-              )
-          )
-        : null}
-      {writes.task.needs_attention
-        ? null
-        : item(
-            'Mark as unread',
-            () =>
-              void writes.run(() =>
-                client.task.update.mutate({ id: writes.task.id, needsAttention: true })
-              )
-          )}
-      {item(actions.archived ? 'Unarchive' : 'Archive', actions.toggleArchive)}
-      {item('Delete', actions.remove, true)}
-    </BottomSheet>
-  )
-}
-
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.background },
     flex: { flex: 1 },
+    pressed: { opacity: 0.6 },
+    nav: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 6,
+      minHeight: NAV_BUTTON + 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: t.border
+    },
+    navButton: {
+      width: NAV_BUTTON,
+      height: NAV_BUTTON,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: NAV_BUTTON / 2
+    },
+    navSpacer: { width: NAV_BUTTON },
+    navGlyph: { fontSize: 30, lineHeight: 34, color: t.primary, fontWeight: '400' },
+    infoGlyph: { fontSize: 22, color: t.primary },
+    navTitle: {
+      flex: 1,
+      minHeight: NAV_BUTTON,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4
+    },
+    title: { fontSize: 16, fontWeight: '600', color: t.foreground },
+    agentLine: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%' },
+    agentText: { flexShrink: 1, fontSize: 12, color: t.mutedForeground },
+    start: {
+      minHeight: NAV_BUTTON,
+      justifyContent: 'center',
+      paddingHorizontal: 12
+    },
+    startText: { fontSize: 15, fontWeight: '600', color: t.primary },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -463,66 +347,7 @@ const makeStyles = (t: ChromeColors) =>
       gap: 8
     },
     back: { fontSize: 16, color: t.primary, fontWeight: '500', maxWidth: 240 },
-    iconButton: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: t.surface2,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.border
-    },
-    iconGlyph: { fontSize: 16, color: t.mutedForeground },
-    titleBlock: { paddingHorizontal: 16, paddingBottom: 6, gap: 8 },
-    titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-    statusButton: { paddingTop: 4 },
-    meta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
-    metaChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: 7,
-      paddingVertical: 2,
-      borderRadius: 6,
-      backgroundColor: t.surface2
-    },
-    metaText: { fontSize: 12, color: t.mutedForeground },
-    overdue: { borderWidth: 1, borderColor: t.destructive },
-    overdueText: { color: t.destructive, fontWeight: '600' },
-    blocked: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: t.warningForeground,
-      borderWidth: 1,
-      borderColor: t.warning,
-      borderRadius: 999,
-      paddingHorizontal: 7,
-      paddingVertical: 1,
-      overflow: 'hidden'
-    },
     error: { color: t.destructive, fontSize: 13, paddingHorizontal: 16, paddingBottom: 4 },
-    segments: {
-      flexDirection: 'row',
-      marginHorizontal: 14,
-      marginVertical: 6,
-      padding: 2,
-      borderRadius: 10,
-      backgroundColor: t.surface2
-    },
-    segment: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 8 },
-    segmentOn: { backgroundColor: t.surface3 },
-    segmentText: { fontSize: 13, fontWeight: '600', color: t.mutedForeground },
-    segmentTextOn: { color: t.foreground },
-    details: { padding: 14, gap: 12, paddingBottom: 48 },
-    detailsCard: { gap: 6 },
-    subsection: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.border,
-      paddingTop: 10,
-      marginTop: 2
-    },
-    hiddenPart: { opacity: 0 },
     panes: { flex: 1, flexDirection: 'row', gap: 10, padding: 10 },
     pane: {
       backgroundColor: t.surface1,
@@ -532,12 +357,5 @@ const makeStyles = (t: ChromeColors) =>
       overflow: 'hidden'
     },
     agentPane: { flex: 3 },
-    sidePane: { flex: 2 },
-    menuRow: {
-      paddingVertical: 14,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.border
-    },
-    menuText: { fontSize: 16, color: t.foreground },
-    menuDestructive: { color: t.destructive }
+    sidePane: { flex: 2 }
   })

@@ -1,11 +1,11 @@
 import type { TerminalState } from '@slayzone/terminal-contracts'
 import { EMPTY_TERMINAL_STATE } from '@slayzone/terminal/terminal-state'
 import { act, render, screen, userEvent, waitFor, within } from '@testing-library/react-native'
-import { Alert } from 'react-native'
+import { Alert, Pressable, Text } from 'react-native'
 import { type BoardData, type BoardTask, findTaskRow, type HubFeed } from '../hub-board'
 import { hubEntryOf } from '../hub-session'
 import { trpcTest } from '../testing'
-import { AgentPanel, type AgentPanelProps } from './AgentPanel'
+import { type AgentNav, AgentPanel, type AgentPanelProps } from './AgentPanel'
 
 /** How many times a terminal was mounted (a new process gets a fresh terminal), what
  *  it was asked through its handle, and the grid it reports. */
@@ -53,9 +53,20 @@ beforeEach(() => {
   mockTerminal.props = null
 })
 jest.mock('../chat', () => ({
-  ChatSession: (props: { hubId: string; taskId: string; tabId: string; mode: string }) => {
+  ChatSession: (props: {
+    hubId: string
+    taskId: string
+    tabId: string
+    mode: string
+    controls?: string
+  }) => {
     const { Text: T } = jest.requireActual('react-native')
-    return <T testID="chat">{`chat ${props.hubId} ${props.taskId} ${props.tabId} ${props.mode}`}</T>
+    return (
+      <>
+        <T testID="chat">{`chat ${props.hubId} ${props.taskId} ${props.tabId} ${props.mode}`}</T>
+        {props.controls ? <T>{`chat controls ${props.controls}`}</T> : null}
+      </>
+    )
   }
 }))
 
@@ -461,5 +472,168 @@ describe('AgentPanel', () => {
         { taskId: 't', mode: 'claude-code' }
       ])
     )
+  })
+})
+
+/** The phone task page's nav bar, as a stand-in: what the panel hands it. */
+function NavStub({ agent }: { agent: AgentNav }) {
+  return (
+    <>
+      <Text testID="nav">{`${agent.provider} · ${agent.status}${agent.busy ? ' · busy' : ''}`}</Text>
+      <Pressable accessibilityRole="button" onPress={agent.openMenu}>
+        <Text>open agent menu</Text>
+      </Pressable>
+      {agent.start ? (
+        <Pressable accessibilityRole="button" onPress={agent.start}>
+          <Text>nav start</Text>
+        </Pressable>
+      ) : null}
+    </>
+  )
+}
+
+function renderPage(
+  feed: HubFeed,
+  b: ReturnType<typeof backend>,
+  extra: { tabId?: string; onSelectTab?: (id: string) => void } = {}
+) {
+  return render(
+    <AgentPanel
+      hubId={hub.id}
+      feed={feed}
+      row={findTaskRow(feed, 't')!}
+      showHub={false}
+      tabId={extra.tabId}
+      onSelectTab={extra.onSelectTab ?? (() => undefined)}
+      nav={(agent) => <NavStub agent={agent} />}
+    />,
+    { wrapper: b.wrapper }
+  )
+}
+
+/** Opens the agent menu from the nav bar, then presses `label` in it. */
+async function agentMenu(label: string) {
+  const user = userEvent.setup()
+  await user.press(screen.getByText('open agent menu'))
+  await user.press(within(screen.getByTestId('agent-menu')).getByText(label))
+}
+
+describe('AgentPanel on the phone task page (its bar is the nav bar)', () => {
+  it('hands the nav its provider and state; no bar, ⋯ or tab strip of its own', async () => {
+    const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
+    await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }, { 't:t': 2 }), b)
+    await waitFor(() =>
+      expect(screen.getByTestId('nav')).toHaveTextContent(
+        'Claude Code · Active · 2 background jobs'
+      )
+    )
+    expect(screen.queryByLabelText('More agent actions')).toBeNull()
+    expect(screen.queryByLabelText('Change provider')).toBeNull()
+    expect(screen.queryByText('Stop')).toBeNull()
+    expect(screen.queryByText('Terminal')).toBeNull()
+    expect(await screen.findByText('terminal t:t live')).toBeOnTheScreen()
+  })
+
+  it('every action is in the agent menu; Stop asks first', async () => {
+    const b = backend()
+    const alert = confirmAll()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
+    await userEvent.setup().press(screen.getByText('open agent menu'))
+    const menu = within(screen.getByTestId('agent-menu'))
+    for (const label of [
+      'Provider',
+      'Interrupt',
+      'Stop agent',
+      'Restart',
+      'New conversation',
+      'Copy screen text',
+      'Copy all output',
+      'Share all output…',
+      'Fit text to width'
+    ])
+      expect(menu.getByText(label)).toBeOnTheScreen()
+    await userEvent.setup().press(menu.getByText('Stop agent'))
+    expect(alert).toHaveBeenCalled()
+    await waitFor(() => expect(b.calls).toEqual([['pty.kill', { sessionId: 't:t' }]]))
+  })
+
+  it('New conversation resets (after asking); Restart restarts', async () => {
+    const b = backend()
+    confirmAll()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
+    await agentMenu('New conversation')
+    await waitFor(() =>
+      expect(b.paths()).toEqual(['pty.kill', 'task.resetConversation', 'task.startMainAgent'])
+    )
+    await agentMenu('Restart')
+    await waitFor(() => expect(b.paths().slice(3)).toEqual(['pty.kill', 'task.startMainAgent']))
+  })
+
+  it("the terminal's copy, share and text size are in the menu", async () => {
+    const b = backend()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
+    await agentMenu('Copy screen text')
+    await agentMenu('Copy all output')
+    await agentMenu('Share all output…')
+    await agentMenu('Fit text to width')
+    expect(mockTerminal.calls).toEqual(['copy screen', 'copy all', 'share all', 'toggle text size'])
+  })
+
+  it('Start stays up front (in the nav) while offered, and in the menu', async () => {
+    const b = backend()
+    await renderPage(feedOf(taskOf(), { 't:t': 'dead' }), b)
+    await userEvent.setup().press(await screen.findByText('nav start'))
+    await waitFor(() => expect(b.calls).toEqual([['task.startMainAgent', { taskId: 't' }]]))
+  })
+
+  it('no Start up front while the agent runs', async () => {
+    const b = backend()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
+    await screen.findByText('terminal t:t live')
+    expect(screen.queryByText('nav start')).toBeNull()
+  })
+
+  it('switches the provider from the menu (after asking)', async () => {
+    const b = backend()
+    confirmAll()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
+    const user = userEvent.setup()
+    await user.press(screen.getByText('open agent menu'))
+    const menu = within(screen.getByTestId('agent-menu'))
+    await user.press(menu.getByLabelText('Provider'))
+    await waitFor(() => expect(menu.getByText('Codex')).toBeOnTheScreen())
+    expect(menu.queryByText('Gemini')).toBeNull()
+    await user.press(menu.getByText('Codex'))
+    await waitFor(() =>
+      expect(b.calls).toEqual([
+        ['task.switchMode', { taskId: 't', mode: 'codex' }],
+        ['task.startMainAgent', { taskId: 't' }]
+      ])
+    )
+  })
+
+  it("lists the task's agent tabs in the menu and opens another", async () => {
+    const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
+    const onSelectTab = jest.fn()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b, { onSelectTab })
+    await userEvent.setup().press(screen.getByText('open agent menu'))
+    await waitFor(() =>
+      expect(within(screen.getByTestId('agent-menu')).getByText('Terminal')).toBeOnTheScreen()
+    )
+    await agentMenu('Terminal')
+    expect(onSelectTab).toHaveBeenCalledWith('side')
+  })
+
+  it("a chat's controls are one model pill (in the composer)", async () => {
+    const b = backend([tab('t', 'claude-chat', true)])
+    await renderPage(feedOf(taskOf({ agent_id: 'claude-chat' }), { 't:t': 'idle' }), b)
+    expect(await screen.findByText('chat controls pill')).toBeOnTheScreen()
+  })
+
+  it('in the panel (iPad) the chat keeps its chips', async () => {
+    const b = backend([tab('t', 'claude-chat', true)])
+    await renderScreen(feedOf(taskOf({ agent_id: 'claude-chat' }), { 't:t': 'idle' }), b)
+    await screen.findByTestId('chat')
+    expect(screen.queryByText('chat controls pill')).toBeNull()
   })
 })

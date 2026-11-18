@@ -18,7 +18,10 @@
  * Detail screens push onto the tab they were opened from (the tab bar stays); a deep
  * link opens them in the Board tab, above the board:
  *
- *   /task/<hub>/<id>       a task (`?segment=agent|details|artifacts`, `&tab=<agent tab>`)
+ *   /task/<hub>/<id>       a task (`?segment=agent|details|artifacts`, `&tab=<agent tab>`;
+ *                          a phone opens Details / Artifacts as the sheet below)
+ *   /task/<hub>/<id>/info  the phone's Details / Artifacts sheet over the task's page
+ *                          (`?segment=details|artifacts`)
  *   /agent/<hub>/<id>      older link: the task's Agent (`?tab=<tab id>`)
  *   /projects/<hub>/<id>   a project's settings (`projects/routes.ts`)
  *   /artifacts/<hub>/…     a task's artifacts (`artifacts/routes.ts`)
@@ -46,6 +49,15 @@ export function taskHref(
     .flatMap((key) => (options[key] ? [`${key}=${segment(options[key])}`] : []))
     .join('&')
   return query ? `${path}?${query}` : path
+}
+
+/** The phone's Details / Artifacts sheet of a task, on `part`. */
+export function taskInfoHref(
+  hubAddress: string,
+  taskId: string,
+  part: 'details' | 'artifacts'
+): string {
+  return `/task/${segment(hubAddress)}/${segment(taskId)}/info?segment=${part}`
 }
 
 /** The signed-in session of the hub a route names; undefined = not signed in to it. */

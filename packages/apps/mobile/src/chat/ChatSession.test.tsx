@@ -4,7 +4,15 @@
  * the hub no longer takes, and the mode picker.
  */
 import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
-import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  userEvent,
+  waitFor,
+  within
+} from '@testing-library/react-native'
 import { Alert, DeviceEventEmitter, StyleSheet } from 'react-native'
 import { trpcTest } from '../testing'
 import { ChatSession } from './ChatSession'
@@ -36,9 +44,18 @@ jest.mock('./attach-files', () => {
 const TAB = 'task-1'
 const TASK = 'task-1'
 
-async function open(hub: FakeHub, mode = 'claude-chat') {
+async function open(hub: FakeHub, mode = 'claude-chat', controls?: 'chips' | 'pill') {
   const { wrapper } = trpcTest(hub.backend)
-  await render(<ChatSession hubId="hub-1" taskId={TASK} tabId={TAB} mode={mode} />, { wrapper })
+  await render(
+    <ChatSession
+      hubId="hub-1"
+      taskId={TASK}
+      tabId={TAB}
+      mode={mode}
+      {...(controls ? { controls } : {})}
+    />,
+    { wrapper }
+  )
 }
 
 /** Push saved events the way the hub does (seq after seq). */
@@ -659,6 +676,87 @@ describe('ChatSession: controls', () => {
     expect(screen.getByText('Codex lists its models once it has started.')).toBeOnTheScreen()
     expect(screen.queryAllByRole('radio')).toEqual([])
     expect(screen.queryByLabelText(/^Effort:/)).toBeNull()
+  })
+})
+
+describe('ChatSession: controls as one model pill (phone task page)', () => {
+  const CODEX_LISTED = [
+    {
+      id: 'gpt-6-luna',
+      label: 'GPT-6 Luna',
+      supportsEffort: true,
+      isDefault: true,
+      efforts: [
+        { id: 'low', label: 'Low' },
+        { id: 'ultra', label: 'Ultra' }
+      ],
+      defaultEffort: 'low'
+    }
+  ]
+
+  it('one model pill in the composer, no chip row; a tap picks the model', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.getModels', () => CODEX_LISTED)
+    hub.on('chat.getModel', () => 'gpt-6-luna')
+    await open(hub, 'codex-chat', 'pill')
+    const composer = within(await screen.findByTestId('chat-composer'))
+    const pill = await composer.findByLabelText('Model: GPT-6 Luna')
+    expect(screen.queryByTestId('chat-controls')).toBeNull()
+    expect(screen.queryByLabelText(/^Permission mode:/)).toBeNull()
+    await userEvent.setup().press(pill)
+    const sheet = within(screen.getByTestId('chat-control-sheet'))
+    expect(sheet.getByText('Model')).toBeOnTheScreen()
+    expect(sheet.getByText('GPT-6 Luna')).toBeOnTheScreen()
+  })
+
+  it('a long press opens the permission mode and effort; one is changed from there', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub, 'claude-chat', 'pill')
+    const pill = await screen.findByLabelText(/^Model: /)
+    await act(async () => fireEvent(pill, 'longPress'))
+    const sheet = within(screen.getByTestId('chat-control-sheet'))
+    const mode = sheet.getByLabelText('Permission mode')
+    expect(mode.props.accessibilityValue).toEqual({ text: 'Auto-accept edits' })
+    expect(sheet.getByLabelText('Effort')).toBeOnTheScreen()
+    await userEvent.setup().press(mode)
+    await userEvent.setup().press(screen.getByText('Plan mode'))
+    await waitFor(() =>
+      expect(hub.callsTo('chat.setMode')).toEqual([
+        expect.objectContaining({ tabId: TAB, chatMode: 'plan' })
+      ])
+    )
+  })
+
+  it('VoiceOver: the pill says how to reach mode and effort, and offers them as actions', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub, 'claude-chat', 'pill')
+    const pill = await screen.findByLabelText(/^Model: /)
+    expect(pill.props.accessibilityHint).toMatch(/permission mode and effort/i)
+    expect(pill.props.accessibilityActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'mode', label: 'Permission mode' }),
+        expect.objectContaining({ name: 'effort', label: 'Effort' })
+      ])
+    )
+    await act(async () =>
+      fireEvent(pill, 'accessibilityAction', { nativeEvent: { actionName: 'mode' } })
+    )
+    expect(within(screen.getByTestId('chat-control-sheet')).getByText('Plan mode')).toBeTruthy()
+  })
+
+  it('Codex: the collaboration mode is with mode and effort', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.getModels', () => CODEX_LISTED)
+    hub.on('chat.getModel', () => 'gpt-6-luna')
+    hub.on('chat.getEffort', () => 'ultra')
+    await open(hub, 'codex-chat', 'pill')
+    const pill = await screen.findByLabelText('Model: GPT-6 Luna')
+    await act(async () => fireEvent(pill, 'longPress'))
+    const sheet = within(screen.getByTestId('chat-control-sheet'))
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Effort').props.accessibilityValue).toEqual({ text: 'Ultra' })
+    )
+    expect(sheet.getByLabelText('Collaboration mode')).toBeOnTheScreen()
   })
 })
 

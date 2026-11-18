@@ -1,26 +1,7 @@
-/**
- * The software keyboard: whether it is up (iOS says so before it moves, so a layout that
- * reacts to it does not jump), and how much of a view it covers (`useKeyboardOverlap`).
- */
+/** The software keyboard: how much of a view it covers (`useKeyboardOverlap`). */
 import { type ComponentRef, type RefObject, useEffect, useState } from 'react'
 import { Keyboard, type KeyboardEvent, LayoutAnimation, Platform, type View } from 'react-native'
 import { useStableCallback } from './useStableCallback'
-
-const SHOW = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
-const HIDE = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
-
-export function useKeyboardVisible(): boolean {
-  const [up, setUp] = useState(false)
-  useEffect(() => {
-    const show = Keyboard.addListener(SHOW, () => setUp(true))
-    const hide = Keyboard.addListener(HIDE, () => setUp(false))
-    return () => {
-      show.remove()
-      hide.remove()
-    }
-  }, [])
-  return up
-}
 
 /** Animates the next layout change with the keyboard's own move (as `KeyboardAvoidingView`). */
 function moveWithKeyboard(e: KeyboardEvent): void {

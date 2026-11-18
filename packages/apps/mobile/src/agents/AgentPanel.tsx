@@ -12,6 +12,12 @@
  * Opening it marks the task read, as opening it on desktop does — once per opening
  * (`openingKey`, `opening-reads.ts`), so "Mark as unread" survives a remount.
  *
+ * On the phone's task page (`nav`) the panel has no bar of its own: the page's nav bar
+ * shows the agent (`AgentNav`: provider, state, Start while offered) and opens the
+ * agent menu, which holds everything the bar, ⋯ and the tab strip offer — the
+ * provider, the agent tabs, every action — and a chat's mode / model / effort are one
+ * model pill in its composer.
+ *
  * Rendered inside the HubScope of the hub that owns the task (`feed`'s hub): every
  * call here goes to that hub.
  */
@@ -30,7 +36,7 @@ import { computerName } from '@slayzone/computers/labels'
 import { workComputerId } from '@slayzone/projects-contracts/placements'
 import { useSubscription } from '@slayzone/transport/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -45,7 +51,7 @@ import { useHubComputers } from '../computers/use-hub-computers'
 import { TerminalView, type TerminalViewHandle } from '../terminal/TerminalView'
 import { type ChromeColors, useTheme } from '../theme'
 import { type RouterOutputs, useTRPC, useTRPCClient } from '../trpc'
-import { agentDotOf } from '../board/card-model'
+import { type AgentDot as AgentDotKind, agentDotOf } from '../board/card-model'
 import { BottomSheet } from '../ui-kit/Chrome'
 import { AgentDot } from '../ui-kit/TaskGlyphs'
 import { agentStateLabel } from './agent-status'
@@ -79,6 +85,28 @@ export interface AgentPanelProps {
    * Omitted: once per mount.
    */
   openingKey?: string
+  /**
+   * The phone's task page: its nav bar, drawn by the page from what the panel hands it
+   * (`AgentNav`). The panel then has no bar, ⋯ or tab strip of its own — all of it is
+   * in the agent menu the nav opens — and a chat's controls are one model pill.
+   * Omitted (iPad): the panel's own bar.
+   */
+  nav?: (agent: AgentNav) => ReactNode
+}
+
+/** What the page's nav bar shows of the agent, and what it can do from there. */
+export interface AgentNav {
+  /** The provider (main tab), or the tab's own label. */
+  provider: string
+  /** Its state and what else to know ("Idle · Unread"). */
+  status: string
+  dot: AgentDotKind | null
+  /** An action runs, or the agents' states are still loading. */
+  busy: boolean
+  /** Opens the agent menu: provider, agent tabs, every action. */
+  openMenu: () => void
+  /** Start, up front while offered (the agent isn't running); null otherwise. */
+  start: (() => void) | null
 }
 
 /** A tab as `taskTerminals.list` returns it. */
@@ -140,7 +168,8 @@ export function AgentPanel({
   tabId,
   onSelectTab,
   row,
-  openingKey
+  openingKey,
+  nav
 }: AgentPanelProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -237,10 +266,13 @@ export function AgentPanel({
   } | null>(null)
   const [picking, setPicking] = useState(false)
   const [menu, setMenu] = useState(false)
+  // The agent menu (phone): its provider list folded out.
+  const [menuProviders, setMenuProviders] = useState(false)
   // The terminal's text size when ⋯ opened: what its switch offers is the other one.
   const [menuTextSize, setMenuTextSize] = useState<'readable' | 'fit'>('readable')
   const openMenu = (): void => {
     setMenuTextSize(terminal.get()?.textSize() ?? 'readable')
+    setMenuProviders(false)
     setMenu(true)
   }
 
@@ -267,6 +299,7 @@ export function AgentPanel({
 
   const switchTo = (mode: string): void => {
     setPicking(false)
+    setMenu(false)
     if (mode === task.agent_id) return
     confirmThen(
       'Switch',
@@ -292,7 +325,14 @@ export function AgentPanel({
 
   const tabLabels = numberDuplicateLabels(new Map(tabs.map((t) => [t.id, getTabLabel(t)])))
 
-  const actions: Array<{ name: string; label?: string; onPress: () => void; more?: boolean }> = []
+  const actions: Array<{
+    name: string
+    /** Its words in the agent menu (phone), when not its name. */
+    label?: string
+    destructive?: boolean
+    onPress: () => void
+    more?: boolean
+  }> = []
   // Nothing to act on until the agent's state is known.
   if (onMain && !live && loaded)
     actions.push({
@@ -308,6 +348,8 @@ export function AgentPanel({
   if (live)
     actions.push({
       name: 'Stop',
+      label: 'Stop agent',
+      destructive: true,
       more: !working,
       onPress: () =>
         confirmThen(
@@ -332,6 +374,7 @@ export function AgentPanel({
   if (onMain)
     actions.push({
       name: 'Reset',
+      label: 'New conversation',
       more: true,
       onPress: () =>
         confirmThen(
@@ -368,6 +411,202 @@ export function AgentPanel({
 
   const inline = actions.filter((a) => !a.more)
   const more = actions.filter((a) => a.more)
+  const start = actions.find((a) => a.name === 'Start')
+  const providerLabel = onMain
+    ? modeLabel(task.agent_id)
+    : (tabLabels.get(selected.id) ?? modeLabel(selected.mode))
+  const providers = (modesQ.data ?? []).filter((m) => m.enabled).sort((a, b) => a.order - b.order)
+
+  const problems = (
+    <>
+      {loadError ? (
+        <View style={styles.problemRow}>
+          <View style={styles.problemText}>
+            <Text style={styles.problem}>Couldn’t load the agent’s state.</Text>
+            <Text style={styles.problemDetail} numberOfLines={2}>
+              {loadError}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading the agent’s state"
+            onPress={() => void queryClient.refetchQueries({ queryKey: AGENT_SNAPSHOT_QUERY_KEY })}
+            hitSlop={PILL_HIT_SLOP}
+            style={styles.action}
+          >
+            <Text style={styles.actionText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+              Retry
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {actionError ? (
+        <View style={styles.problemRow} accessibilityLiveRegion="polite">
+          <View style={styles.problemText}>
+            <Text style={styles.problem}>
+              {FAILED[actionError.name] ?? `Couldn’t ${actionError.name.toLowerCase()}.`}
+            </Text>
+            <Text style={styles.problemDetail} numberOfLines={2}>
+              {actionError.detail}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Retry: ${actionError.name}`}
+            onPress={actionError.retry}
+            disabled={busy !== null}
+            hitSlop={PILL_HIT_SLOP}
+            style={styles.action}
+          >
+            <Text style={styles.actionText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+              Retry
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss the error"
+            onPress={() => setActionError(null)}
+            style={styles.dismiss}
+          >
+            <Text style={styles.dismissText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+              ✕
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </>
+  )
+
+  const body = (
+    <View style={styles.body}>
+      {chat ? (
+        <ChatSession
+          hubId={hubId}
+          taskId={taskId}
+          tabId={selected.id}
+          mode={selected.mode}
+          {...(nav ? { controls: 'pill' as const } : {})}
+        />
+      ) : (
+        <TerminalView
+          onHandle={terminal.attach}
+          key={`${sessionId}#${restarts}`}
+          sessionId={sessionId}
+          taskId={taskId}
+          live={live}
+          stateLoading={!loaded}
+          computerName={taskComputer}
+          notRunningHint={onMain ? 'Tap Start to run it.' : undefined}
+        />
+      )}
+    </View>
+  )
+
+  if (nav) {
+    const row = (
+      key: string,
+      label: string,
+      onPress: () => void,
+      opts: {
+        destructive?: boolean
+        value?: string
+        selected?: boolean
+        expanded?: boolean
+        /** A choice under the row above (a provider under Provider). */
+        nested?: boolean
+        /** Offered while an action runs (switching tabs is not one). */
+        alwaysEnabled?: boolean
+      } = {}
+    ) => {
+      const disabled = !opts.alwaysEnabled && busy !== null
+      return (
+        <Pressable
+          key={key}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          {...(opts.value !== undefined ? { accessibilityValue: { text: opts.value } } : {})}
+          accessibilityState={{
+            disabled,
+            ...(opts.selected !== undefined ? { selected: opts.selected } : {}),
+            ...(opts.expanded !== undefined ? { expanded: opts.expanded } : {})
+          }}
+          disabled={disabled}
+          onPress={onPress}
+          style={[styles.menuRow, opts.nested && styles.menuNested]}
+        >
+          <Text style={[styles.pickerText, opts.destructive && styles.destructive]}>{label}</Text>
+          {opts.value !== undefined ? (
+            <Text style={styles.menuValue} numberOfLines={1}>
+              {opts.value} {opts.expanded ? '⌄' : '›'}
+            </Text>
+          ) : null}
+          {opts.selected ? <Text style={styles.pickerText}>✓</Text> : null}
+        </Pressable>
+      )
+    }
+    const close = (then: () => void) => () => {
+      setMenu(false)
+      then()
+    }
+    return (
+      <View style={styles.screen}>
+        {nav({
+          provider: providerLabel,
+          status: statusParts.join(' · '),
+          dot,
+          busy: busy !== null || (!loaded && !loadError),
+          openMenu,
+          start: start && busy === null ? start.onPress : null
+        })}
+        {problems}
+        {body}
+        <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">
+          <ScrollView style={styles.menuScroll}>
+            <View style={styles.menuHead} accessible>
+              {dot ? <AgentDot kind={dot} /> : <View style={styles.noDot} />}
+              <Text style={styles.mode} numberOfLines={1}>
+                {providerLabel}
+              </Text>
+              <Text style={styles.statusText} numberOfLines={2}>
+                {statusParts.join(' · ')}
+              </Text>
+            </View>
+            {onMain
+              ? row('provider', 'Provider', () => setMenuProviders((v) => !v), {
+                  value: modeLabel(task.agent_id),
+                  expanded: menuProviders
+                })
+              : null}
+            {onMain && menuProviders
+              ? providers.map((m) =>
+                  row(`mode-${m.id}`, m.label, () => switchTo(m.id), {
+                    selected: m.id === task.agent_id,
+                    nested: true
+                  })
+                )
+              : null}
+            {tabs.length > 1 ? (
+              <>
+                <Text style={[styles.pickerTitle, styles.menuSection]}>Agents</Text>
+                {tabs.map((t) =>
+                  row(
+                    `tab-${t.id}`,
+                    tabLabels.get(t.id) ?? getTabLabel(t),
+                    close(() => onSelectTab(t.id)),
+                    { selected: t.id === selected.id, alwaysEnabled: true }
+                  )
+                )}
+                <View style={styles.menuSection} />
+              </>
+            ) : null}
+            {actions.map((a) =>
+              row(a.name, a.label ?? a.name, close(a.onPress), { destructive: a.destructive })
+            )}
+          </ScrollView>
+        </BottomSheet>
+      </View>
+    )
+  }
 
   return (
     <View style={styles.screen}>
@@ -443,61 +682,7 @@ export function AgentPanel({
           </View>
         ) : null}
       </View>
-      {loadError ? (
-        <View style={styles.problemRow}>
-          <View style={styles.problemText}>
-            <Text style={styles.problem}>Couldn’t load the agent’s state.</Text>
-            <Text style={styles.problemDetail} numberOfLines={2}>
-              {loadError}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Retry loading the agent’s state"
-            onPress={() => void queryClient.refetchQueries({ queryKey: AGENT_SNAPSHOT_QUERY_KEY })}
-            hitSlop={PILL_HIT_SLOP}
-            style={styles.action}
-          >
-            <Text style={styles.actionText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-              Retry
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {actionError ? (
-        <View style={styles.problemRow} accessibilityLiveRegion="polite">
-          <View style={styles.problemText}>
-            <Text style={styles.problem}>
-              {FAILED[actionError.name] ?? `Couldn’t ${actionError.name.toLowerCase()}.`}
-            </Text>
-            <Text style={styles.problemDetail} numberOfLines={2}>
-              {actionError.detail}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Retry: ${actionError.name}`}
-            onPress={actionError.retry}
-            disabled={busy !== null}
-            hitSlop={PILL_HIT_SLOP}
-            style={styles.action}
-          >
-            <Text style={styles.actionText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-              Retry
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss the error"
-            onPress={() => setActionError(null)}
-            style={styles.dismiss}
-          >
-            <Text style={styles.dismissText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-              ✕
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
+      {problems}
       {tabs.length > 1 ? (
         <ScrollView horizontal style={styles.tabs} contentContainerStyle={styles.tabsContent}>
           {tabs.map((t) => (
@@ -516,22 +701,7 @@ export function AgentPanel({
           ))}
         </ScrollView>
       ) : null}
-      <View style={styles.body}>
-        {chat ? (
-          <ChatSession hubId={hubId} taskId={taskId} tabId={selected.id} mode={selected.mode} />
-        ) : (
-          <TerminalView
-            onHandle={terminal.attach}
-            key={`${sessionId}#${restarts}`}
-            sessionId={sessionId}
-            taskId={taskId}
-            live={live}
-            stateLoading={!loaded}
-            computerName={taskComputer}
-            notRunningHint={onMain ? 'Tap Start to run it.' : undefined}
-          />
-        )}
-      </View>
+      {body}
       <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">
         {more.map((a) => (
           <Pressable
@@ -549,21 +719,18 @@ export function AgentPanel({
       </BottomSheet>
       <BottomSheet visible={picking} onClose={() => setPicking(false)} testID="mode-picker">
         <Text style={styles.pickerTitle}>Provider</Text>
-        {(modesQ.data ?? [])
-          .filter((m) => m.enabled)
-          .sort((a, b) => a.order - b.order)
-          .map((m) => (
-            <Pressable
-              key={m.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: m.id === task.agent_id }}
-              onPress={() => switchTo(m.id)}
-              style={styles.pickerRow}
-            >
-              <Text style={styles.pickerText}>{m.label}</Text>
-              {m.id === task.agent_id ? <Text style={styles.pickerText}>✓</Text> : null}
-            </Pressable>
-          ))}
+        {providers.map((m) => (
+          <Pressable
+            key={m.id}
+            accessibilityRole="button"
+            accessibilityState={{ selected: m.id === task.agent_id }}
+            onPress={() => switchTo(m.id)}
+            style={styles.pickerRow}
+          >
+            <Text style={styles.pickerText}>{m.label}</Text>
+            {m.id === task.agent_id ? <Text style={styles.pickerText}>✓</Text> : null}
+          </Pressable>
+        ))}
       </BottomSheet>
     </View>
   )
@@ -648,5 +815,21 @@ const makeStyles = (t: ChromeColors) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: t.border
     },
-    pickerText: { fontSize: 16, color: t.foreground }
+    pickerText: { fontSize: 16, color: t.foreground },
+    destructive: { color: t.destructive },
+    menuScroll: { flexGrow: 0 },
+    menuHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 12 },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      minHeight: 48,
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.border
+    },
+    menuValue: { flexShrink: 1, fontSize: 15, color: t.mutedForeground, marginLeft: 'auto' },
+    menuNested: { paddingLeft: 16 },
+    menuSection: { paddingTop: 14 }
   })

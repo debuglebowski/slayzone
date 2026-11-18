@@ -45,8 +45,34 @@ jest.mock('./task/TaskPage', () => ({
             <Text>stand-in back</Text>
           </Pressable>
         ) : null}
+        {p.onOpenInfo ? (
+          <Pressable onPress={() => p.onOpenInfo?.('artifacts')}>
+            <Text>stand-in info</Text>
+          </Pressable>
+        ) : null}
+      </>
+    )
+  }
+}))
+// The Details / Artifacts sheet writes to its hub (`task/TaskInfoSheet.test.tsx`): here
+// which task and part it opens on, and where its buttons lead.
+jest.mock('./task/TaskInfoSheet', () => ({
+  TaskInfoSheet: (p: import('./task/TaskInfoSheet').TaskInfoSheetProps) => {
+    const { Pressable, Text } = jest.requireActual('react-native')
+    return (
+      <>
+        <Text>{`task info ${p.row.hubLabel} ${p.row.task.id} ${p.segment}`}</Text>
         <Pressable onPress={() => p.onSegment('details')}>
-          <Text>stand-in details</Text>
+          <Text>stand-in sheet details</Text>
+        </Pressable>
+        <Pressable onPress={p.onClose}>
+          <Text>stand-in done</Text>
+        </Pressable>
+        <Pressable onPress={p.onDeleted}>
+          <Text>stand-in deleted</Text>
+        </Pressable>
+        <Pressable onPress={() => p.onOpenTask('t9')}>
+          <Text>stand-in subtask</Text>
         </Pressable>
       </>
     )
@@ -279,12 +305,39 @@ describe('routing', () => {
       expect(screen).toHavePathname('/')
     })
 
-    it('the part of the task shown lives in the route', async () => {
+    it("the task's ⓘ opens Details / Artifacts as a sheet over the page, its part in the route; Done closes it", async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
-      await userEvent.setup().press(await screen.findByText('stand-in details'))
-      expect(screen).toHavePathnameWithParams('/task/home.example/t0?segment=details')
-      expect(screen.getByText('task page home.example t0 details main')).toBeOnTheScreen()
+      const user = userEvent.setup()
+      await user.press(await screen.findByText('stand-in info'))
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0/info?segment=artifacts')
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]', 'info'])
+      expect(await screen.findByText('task info home.example t0 artifacts')).toBeOnTheScreen()
+      await user.press(screen.getByText('stand-in sheet details'))
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0/info?segment=details')
+      await user.press(screen.getByText('stand-in done'))
+      expect(screen).toHavePathname('/task/home.example/t0')
+      expect(screen.getByText('task page home.example t0 agent main')).toBeOnTheScreen()
+    })
+
+    it('a task deleted from its sheet: the sheet and the page go, back to where it was opened', async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/' })
+      const user = userEvent.setup()
+      await user.press(await screen.findByText('Write spec'))
+      await user.press(await screen.findByText('stand-in info'))
+      await user.press(await screen.findByText('stand-in deleted'))
+      expect(screen).toHavePathname('/')
+    })
+
+    it("a sub-task tapped in the sheet: the sheet goes, the sub-task's page opens", async () => {
+      signedIn()
+      await renderRouter(ROUTES, { initialUrl: '/task/home.example/t0' })
+      const user = userEvent.setup()
+      await user.press(await screen.findByText('stand-in info'))
+      await user.press(await screen.findByText('stand-in subtask'))
+      expect(screen).toHavePathname('/task/home.example/t9')
+      expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
     })
 
     it('the floating ＋ tapped opens new-task in the Board tab for the shown project and column; created, the task replaces it', async () => {
@@ -342,6 +395,18 @@ describe('routing', () => {
       expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
       await userEvent.setup().press(tab('board').getByText('stand-in back'))
       expect(screen).toHavePathname('/')
+    })
+
+    it("a task link naming Details or Artifacts opens the page with that part's sheet over it (phone)", async () => {
+      signedIn()
+      await renderRouter(ROUTES, {
+        initialUrl: link('slayzone://task/home.example/t0?segment=details&tab=side')
+      })
+      expect(await screen.findByText('task info home.example t0 details')).toBeOnTheScreen()
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0/info?segment=details')
+      await userEvent.setup().press(screen.getByText('stand-in done'))
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0?segment=agent&tab=side')
+      expect(screen.getByText('task page home.example t0 agent side')).toBeOnTheScreen()
     })
 
     it("an older agent link opens the task's Agent, with the agent tab it names", async () => {

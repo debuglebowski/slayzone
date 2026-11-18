@@ -100,6 +100,12 @@ async function openFromBell(title: string) {
   return board
 }
 
+/** The task page's ⓘ: its Details / Artifacts sheet, on Details. */
+async function openDetails(board: ReturnType<typeof tab>) {
+  await press(board.getByLabelText('Details and artifacts'))
+  await board.findByTestId('task-info-sheet')
+}
+
 describe('the demo', () => {
   it('opens from the sign-in screen on the Board, its agents behind the 🔔', async () => {
     await enterDemo()
@@ -158,10 +164,10 @@ describe('the demo', () => {
   it('a task: its subtasks, tags and artifacts; a markdown artifact with a diagram', async () => {
     await enterDemo()
     const board = await openFromBell('Search endpoint')
-    await press(board.getByTestId('segment-details'))
+    await openDetails(board)
     expect(await board.findByTestId(`subtask-${DEMO_IDS.searchIndex}`)).toBeOnTheScreen()
     expect(board.getByText('Ranking tests')).toBeOnTheScreen()
-    // Under the title and in the Tags section.
+    // Under the sheet's title and in the Tags section.
     expect(board.getAllByText('feature').length).toBeGreaterThan(0)
 
     await press(board.getByTestId('segment-artifacts'))
@@ -219,7 +225,7 @@ describe('the demo', () => {
   it('writes stay in the demo: a new sub-task is gone after Exit demo and Try demo again', async () => {
     await enterDemo()
     let board = await openFromBell('Search endpoint')
-    await press(board.getByTestId('segment-details'))
+    await openDetails(board)
     await press(await board.findByTestId('add-subtask'))
     await userEvent.setup().type(board.getByTestId('new-subtask-title'), 'Benchmark on prod copy', {
       submitEditing: true
@@ -229,7 +235,7 @@ describe('the demo', () => {
     await press(board.getByTestId('exit-demo'))
     await press(await screen.findByText('Try demo'))
     board = await openFromBell('Search endpoint')
-    await press(board.getByTestId('segment-details'))
+    await openDetails(board)
     expect(await board.findByTestId(`subtask-${DEMO_IDS.searchIndex}`)).toBeOnTheScreen()
     expect(board.queryByText('Benchmark on prod copy')).toBeNull()
     expect(mockKeychain.save).not.toHaveBeenCalled()

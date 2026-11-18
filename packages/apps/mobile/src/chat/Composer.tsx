@@ -8,13 +8,14 @@
  *
  * In a screen too short for all of it (the keyboard is up), the `/` menu and the queue
  * shrink and scroll; the input row never does, so it stays above the keyboard.
+ * `accessory` sits in the input row before Stop / Send (the phone task page's model pill).
  */
 import {
   userMessageAttachments,
   type ChatAttachment,
   type QueuedChatMessage
 } from '@slayzone/terminal-contracts'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -54,7 +55,8 @@ export function Composer({
   disabled,
   placeholder,
   cliLabel = 'Claude Code',
-  attach = null
+  attach = null,
+  accessory = null
 }: {
   composer: ChatComposer
   queued: readonly QueuedChatMessage[]
@@ -74,6 +76,8 @@ export function Composer({
   cliLabel?: string
   /** ＋: attach a photo; null = not offered. */
   attach?: ChatAttach | null
+  /** Drawn in the input row before Stop / Send (the model pill); null = none. */
+  accessory?: ReactNode
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
   const [attachSheet, setAttachSheet] = useState(false)
@@ -102,7 +106,7 @@ export function Composer({
   const listed = new Set(queued.map((q) => q.id))
   const unconfirmed = (composer.pendingQueuedMessages ?? []).filter((e) => !listed.has(e.id))
   return (
-    <View style={s.wrap}>
+    <View style={s.wrap} testID="chat-composer">
       {composer.menu && (
         <FlatList
           testID="slash-menu"
@@ -287,6 +291,7 @@ export function Composer({
           accessibilityLabel="Message"
           autoCorrect
         />
+        {accessory}
         {inFlight && (
           <Pressable
             onPress={stop}

@@ -2,7 +2,8 @@
  * A full chat view for one chat tab (`claude-chat` / `codex-chat`) of a task, built on
  * desktop's shared chat logic, not its DOM components: the timeline (desktop's reducer),
  * the composer with the `/` menu and the queue, the "waiting for you" dock, the mode /
- * model / effort chips, and the background jobs. Rendered inside the `HubScope` of the
+ * model / effort chips (or, `controls="pill"`, one model pill in the composer), and the
+ * background jobs. Rendered inside the `HubScope` of the
  * hub that owns the task (every call goes to that hub).
  *
  * First the tab's folder is resolved (`useChatCwd`): the hub keys a chat tab by it, so
@@ -56,12 +57,18 @@ export function ChatSession({
   hubId,
   taskId,
   tabId,
-  mode
+  mode,
+  controls = 'chips'
 }: {
   hubId: string
   taskId: string
   tabId: string
   mode: string
+  /**
+   * The mode / model / effort controls: `chips`, a row above the timeline; `pill`, the
+   * model alone in the composer (the rest behind its long press) — the phone task page.
+   */
+  controls?: 'chips' | 'pill'
 }): JSX.Element {
   const { s, theme } = useThemedStyles(makeStyles)
   // Fail loud when mounted in another hub's scope: every call would go to that hub.
@@ -108,12 +115,13 @@ export function ChatSession({
         <ChatView
           key={JSON.stringify([tabId, mode, cwd.cwd])}
           target={{ tabId, taskId, mode, cwd: cwd.cwd, providerFlagsOverride: null }}
+          controls={controls}
         />
       )
   }
 }
 
-function ChatView({ target }: { target: ChatTarget }) {
+function ChatView({ target, controls }: { target: ChatTarget; controls: 'chips' | 'pill' }) {
   const { s } = useThemedStyles(makeStyles)
   const caps = chatCapabilitiesForMode(target.mode)
   const provider = chatProviderForMode(target.mode)
@@ -264,7 +272,9 @@ function ChatView({ target }: { target: ChatTarget }) {
           style={[s.root, keyboard.bottom > 0 && { paddingBottom: keyboard.bottom }]}
           testID="chat-session"
         >
-          <ChatControls mode={target.mode} settings={settings} models={models} />
+          {controls === 'chips' && (
+            <ChatControls mode={target.mode} settings={settings} models={models} />
+          )}
           <BackgroundJobs state={state} tabId={target.tabId} onError={notify} />
           <ChatTimeline
             state={state}
@@ -349,6 +359,16 @@ function ChatView({ target }: { target: ChatTarget }) {
             withdrawSteered={caps.withdrawSteered}
             cliLabel={provider.product}
             attach={attach}
+            accessory={
+              controls === 'pill' ? (
+                <ChatControls
+                  mode={target.mode}
+                  settings={settings}
+                  models={models}
+                  variant="pill"
+                />
+              ) : null
+            }
             inFlight={session.inFlight}
             disabled={session.hydrating || ended}
             placeholder={session.inFlight ? 'Queue a message…' : 'Message'}
