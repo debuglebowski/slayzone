@@ -31,12 +31,18 @@ const deps: ExportDeps = {
  * request guard's and the process watch's decisions), kept bounded and printed — each
  * line prefixed `[export-diag]` — only when the test fails. A passing test prints
  * nothing.
+ *
+ * Only the noisy lines are bounded (Chrome's stderr and raw CDP events: the first
+ * `DIAG_HEAD` and the last `DIAG_TAIL`). The client's own decisions (`watch-*`,
+ * `process-fate`, `guard-*`, `load-wait`, `page-*`, `exit`, …) and the facts gathered at
+ * failure are never dropped. Pure noise is not kept at all: D-Bus complaints on stderr,
+ * `Tracing.dataCollected` chunks and trace chunks that name no frame.
  */
 const DIAG = '[export-diag]'
 const DIAG_HEAD = 100
 const DIAG_TAIL = 300
 const DIAG_LINE = 1200
-const DIAG_TOTAL = 150_000
+const DIAG_TOTAL = 400_000
 
 /** JSON with stack traces dropped and long strings cut (`html` kept longer). */
 function compact(value: unknown): string {
@@ -117,8 +123,8 @@ function browserProcesses(userDataDir: string | undefined): string[] {
 interface Diagnostics {
   debug: DebugHook
   add(line: string): void
-  /** The pid the export watches for the page, if it named one. */
-  watchedPid(): number | undefined
+  /** The page's pid the trace named, if any, and whether the export watches it. */
+  tracedPid(): { pid: number; watched: boolean } | undefined
   userDataDir(): string | undefined
   /** Run `fn`; on failure print everything gathered (and `more()`), then fail as it did. */
   report(fn: () => Promise<void>, more?: () => Promise<string[]>): Promise<void>
@@ -126,28 +132,18 @@ interface Diagnostics {
 
 function diagnostics(test: string): Diagnostics {
   const started = Date.now()
-  const head: string[] = []
-  const tail: string[] = []
-  let dropped = 0
+  /** Every line, in order; `noisy` ones are the only ones the bound may drop. */
+  const lines: Array<{ text: string; noisy: boolean }> = []
   let previous = ''
+  let previousNoisy = false
   let repeats = 0
   let dataDir: string | undefined
-  let watched: number | undefined
-  const push = (line: string): void => {
-    if (head.length < DIAG_HEAD) head.push(line)
-    else {
-      tail.push(line)
-      if (tail.length > DIAG_TAIL) {
-        tail.shift()
-        dropped++
-      }
-    }
-  }
+  let traced: { pid: number; watched: boolean } | undefined
   const flushRepeats = (): void => {
-    if (repeats > 0) push(`  (previous line ×${repeats + 1})`)
+    if (repeats > 0) lines.push({ text: `  (previous line ×${repeats + 1})`, noisy: previousNoisy })
     repeats = 0
   }
-  const add = (line: string): void => {
+  const addLine = (line: string, noisy: boolean): void => {
     const body = line.length > DIAG_LINE ? `${line.slice(0, DIAG_LINE)}…` : line
     if (body === previous) {
       repeats++
@@ -155,27 +151,55 @@ function diagnostics(test: string): Diagnostics {
     }
     flushRepeats()
     previous = body
-    push(`+${Date.now() - started}ms ${body}`)
+    previousNoisy = noisy
+    lines.push({ text: `+${Date.now() - started}ms ${body}`, noisy })
+  }
+  const add = (line: string): void => addLine(line, false)
+  /** The lines to print: every first-class one, the noisy ones cut to head + tail. */
+  const render = (head: number, tail: number): string[] => {
+    const noisy = lines.filter((l) => l.noisy).length
+    const out: string[] = []
+    let seen = 0
+    let dropped = 0
+    for (const l of lines) {
+      if (l.noisy) {
+        const keep = seen < head || seen >= noisy - tail
+        seen++
+        if (!keep) {
+          dropped++
+          continue
+        }
+      }
+      if (dropped) out.push(`… ${dropped} noisy line(s) dropped …`)
+      dropped = 0
+      out.push(l.text)
+    }
+    if (dropped) out.push(`… ${dropped} noisy line(s) dropped …`)
+    return out
   }
   const debug: DebugHook = (what, detail) => {
     if (what === 'stderr') {
-      for (const l of String(detail?.text ?? '').split('\n')) if (l.trim()) add(`stderr| ${l}`)
+      for (const l of String(detail?.text ?? '').split('\n')) {
+        if (l.trim() && !l.includes('dbus/')) addLine(`stderr| ${l}`, true)
+      }
       return
     }
     if (what === 'launch') dataDir = String(detail?.userDataDir)
-    if (what === 'watch-process' && typeof detail?.pid === 'number') watched = detail.pid
-    if (what === 'event' && detail?.method === 'Tracing.dataCollected') {
-      add('event Tracing.dataCollected')
+    if (what === 'watch-process' && typeof detail?.pid === 'number') {
+      traced = { pid: detail.pid, watched: detail.watched === true }
+    }
+    if (what === 'event' && detail?.method === 'Tracing.dataCollected') return
+    if (what === 'trace-frames' && Array.isArray(detail?.frames) && detail.frames.length === 0) {
       return
     }
-    add(`${what} ${compact(detail)}`)
+    addLine(`${what} ${compact(detail)}`, what === 'event')
     // The load wait is over, the browser still runs: which processes it has now.
     if (what === 'page-state') for (const l of browserProcesses(dataDir)) add(l)
   }
   return {
     debug,
     add,
-    watchedPid: () => watched,
+    tracedPid: () => traced,
     userDataDir: () => dataDir,
     async report(fn, more) {
       try {
@@ -186,19 +210,27 @@ function diagnostics(test: string): Diagnostics {
         ])
         for (const l of [...systemFacts(), ...extra]) add(l)
         flushRepeats()
-        let text = [
-          `===== ${test}: FAILED (${(err as Error).message.slice(0, 300)})`,
-          ...head,
-          ...(dropped ? [`… ${dropped} line(s) dropped …`] : []),
-          ...tail,
-          `===== ${test}: end`
-        ]
-          .map((l) => `${DIAG} ${l}`)
-          .join('\n')
-        if (text.length > DIAG_TOTAL) {
-          text = `${text.slice(0, DIAG_TOTAL / 3)}\n${DIAG} …(cut)…\n${text.slice(-(DIAG_TOTAL * 2) / 3)}`
+        const text = (head: number, tail: number): string =>
+          [
+            `===== ${test}: FAILED (${(err as Error).message.slice(0, 300)})`,
+            ...render(head, tail),
+            `===== ${test}: end`
+          ]
+            .map((l) => `${DIAG} ${l}`)
+            .join('\n')
+        // Over the total: fewer noisy lines first; only then is the middle cut.
+        let head = DIAG_HEAD
+        let tail = DIAG_TAIL
+        let out = text(head, tail)
+        while (out.length > DIAG_TOTAL && head + tail > 0) {
+          head = Math.floor(head / 2)
+          tail = Math.floor(tail / 2)
+          out = text(head, tail)
         }
-        console.error(text)
+        if (out.length > DIAG_TOTAL) {
+          out = `${out.slice(0, DIAG_TOTAL / 3)}\n${DIAG} …(cut)…\n${out.slice(-(DIAG_TOTAL * 2) / 3)}`
+        }
+        console.error(out)
         throw err
       }
     }
@@ -314,8 +346,12 @@ describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () =>
     // What the browser and the OS say about the page's process when the crash goes unseen.
     const more = async (): Promise<string[]> => {
       const lines: string[] = []
-      const pid = diag.watchedPid()
-      lines.push(pid === undefined ? 'watched pid: none' : `watched ${procFacts(pid)}`)
+      const traced = diag.tracedPid()
+      lines.push(
+        traced === undefined
+          ? 'traced pid: none'
+          : `traced (${traced.watched ? 'watched' : 'NOT watched'}) ${procFacts(traced.pid)}`
+      )
       const ps = browserProcesses(diag.userDataDir())
       lines.push(...ps)
       for (const m of ps.join('\n').matchAll(/^ps\|\s*(\d+)\s.*--type=renderer/gm)) {
@@ -490,7 +526,8 @@ function localServer(): {
 const PROBE_WAIT_MS = 6_000
 const PROBE_VARIANTS: Array<{ label: string; drop?: string; add?: string }> = [
   { label: 'as the export launches it (control)' },
-  { label: 'without --disable-crashpad-for-testing', drop: '--disable-crashpad-for-testing' },
+  // Round 3's cause, kept as a reference point: this one should say NOT requested.
+  { label: 'with --disable-crashpad-for-testing', add: '--disable-crashpad-for-testing' },
   {
     label: 'with Local/Private Network Access checks off',
     add: '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessForNavigations,PrivateNetworkAccessRespectPreflightResults'

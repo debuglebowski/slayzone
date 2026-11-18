@@ -235,14 +235,13 @@ export function browserArgs(userDataDir: string, platform = process.platform): s
   if (platform === 'darwin') args.push('--use-mock-keychain')
   // Chromium refuses to start as root with its sandbox on (containers, CI).
   if (platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
-  // No crash handler: a renderer that crashes (out of memory on a huge document) should
-  // die at once, so the browser reports it and the export fails fast. On Linux,
-  // crashpad holds a crashing renderer until its handler has dumped it (a stalled
-  // handler delays the crash event by as long). A throwaway export has no use for the
-  // dump either (it would land in the person's own browser crash reports). The kernel
-  // can still hold the renderer while the system's dump handler takes its core: that
-  // one is caught by watching the page's process (see the top of this file).
-  if (platform === 'linux') args.push('--disable-crashpad-for-testing')
+  // Crashpad stays on. `--disable-crashpad-for-testing` makes Chrome's network service
+  // crash on start on Linux ("Crashing due to FD ownership violation", Chrome 157), and
+  // restart and crash again in a loop: nothing loads over the network, not even a child
+  // frame from 127.0.0.1. A crashed renderer the kernel holds while the system's dump
+  // handler takes its core is caught by watching the page's process instead (see the
+  // top of this file); crashpad itself, even with its handler stopped, did not keep the
+  // renderer from crashing on (checked on Linux, Chrome 157).
   args.push('about:blank')
   return args
 }
@@ -288,11 +287,24 @@ export function processFate(
  * profile flag every Chrome child process is started with — a pid seen from another PID
  * namespace (a browser in a Flatpak sandbox) names some other process here, which must
  * never be taken for the page's. Elsewhere a browser's pids are the system's.
+ *
+ * Chrome's zygote-forked processes — renderers among them — retitle themselves
+ * (setproctitle): `/proc/<pid>/cmdline` is then the whole command line as ONE
+ * space-joined string, the rest of the old argv zero-filled. So the flag counts as a
+ * whole NUL-separated argument or as a space-bounded token of such a title.
  */
-function ownProcess(pid: number, userDataDir: string): boolean {
-  if (process.platform !== 'linux') return true
+export function ownProcess(
+  pid: number,
+  userDataDir: string,
+  platform: NodeJS.Platform = process.platform,
+  read: ReadText = readText
+): boolean {
+  if (platform !== 'linux') return true
   try {
-    return readText(`/proc/${pid}/cmdline`).split('\0').includes(`--user-data-dir=${userDataDir}`)
+    const flag = ` --user-data-dir=${userDataDir} `
+    return read(`/proc/${pid}/cmdline`)
+      .split('\0')
+      .some((arg) => ` ${arg} `.includes(flag))
   } catch {
     return false
   }
