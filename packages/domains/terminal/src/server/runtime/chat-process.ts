@@ -333,6 +333,13 @@ export class ChatProcess implements OutboxProcess {
       )
     })
     this.handle.onError((err) => {
+      if (!this.spawned && this.stopRequested) {
+        // Stopped before it started (a restart replacing a start still queued on
+        // its computer): the start's cancellation IS the stop we asked for — it
+        // ends as a stopped process, never as "The agent couldn't start".
+        this.finish(null, null, false)
+        return
+      }
       if (!this.spawned) {
         for (const boundary of this.boundaries.values()) boundary.release()
         this.ended = true

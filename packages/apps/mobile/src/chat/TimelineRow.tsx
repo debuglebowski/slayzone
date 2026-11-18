@@ -230,6 +230,18 @@ function UserMessage({ item, s }: { item: Item<'user-text'>; s: Styles }) {
 function AgentProblem({ item, s }: { item: Item<'agent-problem'>; s: Styles }) {
   const { restartAgent, takeOver } = useChatView()
   const { title, hint, inUse } = agentProblemText(item)
+  if (item.resolved) {
+    // History: the agent started after it. No Retry — it would replace that agent.
+    return (
+      <View style={s.box}>
+        <Text style={s.muted}>{title}</Text>
+        <Text style={[s.mono, s.muted]} selectable>
+          {item.message}
+        </Text>
+        <Text style={s.muted}>The agent started after this.</Text>
+      </View>
+    )
+  }
   return (
     <View style={[s.box, s.errorBox]} accessibilityRole="alert">
       <Text style={s.error}>{title}</Text>

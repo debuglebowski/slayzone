@@ -736,3 +736,50 @@ test('a user start joining a queued restore asks its computer to start it next',
   await waitUntil(() => true)
   await mgr.removeSession(TAB_OPTS.tabId)
 })
+
+// A start still queued on its computer, replaced by a restart (the user's, or the
+// hub's own on boot): stopping it cancels it there, and that cancellation is the
+// stop we asked for — never "The agent couldn't start".
+test('a queued start cancelled by a restart is not a start failure', async () => {
+  const {
+    transportHarness,
+    fakeChild,
+    until: waitUntil,
+    TAB_OPTS
+  } = await import('./chat-transport-testkit')
+  const queued = fakeChild()
+  const live = fakeChild({ exitOnKill: true })
+  // The queued start never runs; its kill is answered by the computer's refusal.
+  ;(queued.child as unknown as { kill: (s?: string) => boolean }).kill = () => {
+    setImmediate(() =>
+      queued.emitter.emit(
+        'error',
+        Object.assign(new Error('Process start was cancelled'), { syscall: 'spawn' })
+      )
+    )
+    return true
+  }
+  let spawns = 0
+  const h = transportHarness({
+    deps: {
+      backend: {
+        spawn: async () => {
+          spawns++
+          if (spawns === 1) return childProcessToHandle(queued.child)
+          setImmediate(() => live.emitter.emit('spawn'))
+          return childProcessToHandle(live.child)
+        }
+      }
+    }
+  })
+  await mgr.hydrateSession(TAB_OPTS)
+  const first = mgr.ensureSpawned(TAB_OPTS.tabId).catch((err: unknown) => err)
+  await waitUntil(() => spawns === 1)
+  await mgr.respawn(TAB_OPTS.tabId, TAB_OPTS)
+  await first
+  expect(spawns).toBe(2)
+  expect(h.saved().filter((e) => e.kind === 'error')).toEqual([])
+  expect(h.states.at(-1)).toBe('idle')
+  expect(h.states).not.toContain('dead')
+  await mgr.removeSession(TAB_OPTS.tabId)
+})

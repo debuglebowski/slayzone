@@ -102,6 +102,8 @@ export type TimelineItem =
       binary?: string
       timestamp: number
       parentToolUseId?: string
+      /** The agent started after it (a retry, a restart): no longer a problem. */
+      resolved?: true
     }
   | {
       kind: 'text'
@@ -689,6 +691,11 @@ export interface ChatTimelineState {
    */
   importingHistory: boolean
   /**
+   * Row of the latest start failure (`agent-problem`) no start has followed yet;
+   * the next `session-spawn` marks it `resolved`.
+   */
+  openAgentProblem: number | null
+  /**
    * Background sub-agents that ended since the last turn closed: the next
    * agent-started turn answers them (its `turn-trigger` row names them). A
    * user message, a result, a Stop or the process ending clears them.
@@ -769,7 +776,8 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     turnTriggers: NO_TRIGGERS,
     turnNotifications: NO_NOTIFICATIONS,
     turnsClosed: 0,
-    importingHistory: false
+    importingHistory: false,
+    openAgentProblem: null
   }
 }
 
@@ -1239,6 +1247,16 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       // Prompt-only (post-pass in `reducer`).
       return state
   }
+}
+
+/** The agent started: the start failure shown before it is resolved. */
+function resolveAgentProblem(state: ChatTimelineState): ChatTimelineState {
+  const at = state.openAgentProblem
+  if (at === null) return state
+  const it = rowAt(state.timeline, at)
+  const timeline = writable(state.timeline)
+  if (it?.kind === 'agent-problem') timeline[at] = { ...it, resolved: true }
+  return { ...state, timeline, openAgentProblem: null }
 }
 
 /** Start failures the chat shows as a card with a fix (`ChatSpawnFailureCode`). */
@@ -2389,6 +2407,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         const binary = (event.detail as { binary?: unknown }).binary
         return {
           ...state,
+          openAgentProblem: state.timeline.length,
           timeline: appended<TimelineItem | undefined>(state.timeline, {
             kind: 'agent-problem',
             code,
@@ -2493,7 +2512,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // gone with it.
       return {
         ...failInFlightSubAgents(
-          endRunningCommandTasks(settleStreams(state)),
+          endRunningCommandTasks(resolveAgentProblem(settleStreams(state))),
           'stopped',
           'process'
         ),

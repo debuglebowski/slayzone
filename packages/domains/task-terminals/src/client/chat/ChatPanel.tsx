@@ -775,6 +775,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
         restartAgent: () => {
           void handleRestart()
         },
+        restartingAgent: restarting,
         takeOver: () => {
           takeOver().catch((err: unknown) =>
             toast(`Couldn't continue here: ${err instanceof Error ? err.message : String(err)}`)
@@ -816,6 +817,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
         sendMessage,
         retryMessage,
         handleRestart,
+        restarting,
         takeOver,
         quoteReply,
         threadApi.view,

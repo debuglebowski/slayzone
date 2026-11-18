@@ -9,7 +9,7 @@ export function AgentProblemCard({
 }: {
   item: Extract<TimelineItem, { kind: 'agent-problem' }>
 }): React.JSX.Element {
-  const { restartAgent, takeOver, onOpenUrl } = useChatView()
+  const { restartAgent, restartingAgent, takeOver, onOpenUrl } = useChatView()
   const inUse = item.code === 'conversation-in-use'
   const product = item.binary ? chatProviderForBinary(item.binary) : null
   const name = product?.product ?? item.binary ?? 'The agent'
@@ -27,6 +27,23 @@ export function AgentProblemCard({
       : inUse
         ? 'One conversation runs in one place at a time. Continue it here (the terminal stops first), or stop it there and retry.'
         : 'Fix the cause below, then retry.'
+  if (item.resolved) {
+    // History: the agent started after it. No Retry — it would replace that agent.
+    return (
+      <div
+        data-agent-problem={item.code}
+        data-resolved
+        className="mx-4 my-2 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground"
+      >
+        <div className="flex items-center gap-1.5 font-medium">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          <span>{title}</span>
+        </div>
+        <p className="mt-1 font-mono text-[11px] break-words">{item.message}</p>
+        <p className="mt-1">The agent started after this.</p>
+      </div>
+    )
+  }
   return (
     <div
       data-agent-problem={item.code}
@@ -53,10 +70,11 @@ export function AgentProblemCard({
         {restartAgent ? (
           <button
             type="button"
-            className="rounded border border-border px-2 py-0.5 font-medium text-foreground hover:bg-accent"
+            disabled={restartingAgent}
+            className="rounded border border-border px-2 py-0.5 font-medium text-foreground hover:bg-accent disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent"
             onClick={() => restartAgent()}
           >
-            Retry
+            {restartingAgent ? 'Retrying…' : 'Retry'}
           </button>
         ) : null}
         {item.code === 'cli-not-installed' && product && onOpenUrl ? (

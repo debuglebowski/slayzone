@@ -2692,6 +2692,22 @@ describe('transport notices', () => {
       binary: 'claude'
     })
   })
+
+  test('a later start resolves the open problem card (and only that one)', () => {
+    const failed: AgentEvent = {
+      kind: 'error',
+      message: 'Process start was cancelled',
+      detail: { code: 'spawn-failed' }
+    }
+    let s = run([failed])
+    expect(rowsOf(s).at(-1)).not.toHaveProperty('resolved')
+    s = run([{ kind: 'session-spawn', spawnId: 'sp-1' }], s)
+    expect(rowsOf(s).at(-1)).toMatchObject({ kind: 'agent-problem', resolved: true })
+    // A new failure after it is open again; the earlier card stays resolved.
+    s = run([failed], s)
+    const cards = rowsOf(s).filter((i) => i.kind === 'agent-problem')
+    expect(cards.map((c) => 'resolved' in c && c.resolved === true)).toEqual([true, false])
+  })
 })
 
 describe('turn errors are visible', () => {

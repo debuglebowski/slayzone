@@ -63,6 +63,8 @@ export interface ChatViewState {
   retryMessage?: (id: string) => void
   /** Start the agent again (the start-failure card's Retry). */
   restartAgent?: () => void
+  /** `restartAgent` is running: Retry is busy until the agent is up (or failed again). */
+  restartingAgent?: boolean
   /**
    * The start was refused because the terminal runs this conversation: stop
    * the terminal and start here (the card's "Continue here").

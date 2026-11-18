@@ -52,4 +52,16 @@ describe('TimelineRow: an agent that could not start', () => {
     await userEvent.setup().press(screen.getByText('Retry'))
     expect(value.restartAgent).toHaveBeenCalledTimes(1)
   })
+
+  it('a card the agent started after says so and offers no Retry (it would replace that agent)', async () => {
+    const value = view()
+    await render(
+      <ChatViewContext.Provider value={value}>
+        <TimelineRow item={{ ...problem('spawn-failed'), resolved: true } as TimelineItem} />
+      </ChatViewContext.Provider>
+    )
+    expect(screen.getByText('The agent started after this.')).toBeOnTheScreen()
+    expect(screen.queryByText('Retry')).toBeNull()
+    expect(screen.queryByText('Continue here')).toBeNull()
+  })
 })
