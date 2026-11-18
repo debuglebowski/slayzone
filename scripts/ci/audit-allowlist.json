@@ -28,25 +28,6 @@
       "reviewed": "2026-11-02",
       "expires": "2027-02-02",
       "advisories": ["GHSA-3g3m-2fjr-6pw4", "GHSA-gcqx-w48m-w2h4"]
-    },
-    {
-      "packages": ["node-forge"],
-      "reason": "Via Expo build tooling in the mobile app (@expo/cli dev server and code signing): runs on the developer machine on our own project files, never shipped in the app bundle. Fixed in node-forge 1.4.3 (published 2026-11-04), which clears the 14-day minimumReleaseAge on 2026-11-18; then raise the node-forge override in pnpm-workspace.yaml to ^1.4.3 and remove this entry.",
-      "reviewed": "2026-11-11",
-      "expires": "2026-11-25",
-      "advisories": [
-        "GHSA-6889-vf6x-f3g5",
-        "GHSA-w4xr-hqv8-ch44",
-        "GHSA-6cv4-p8m7-4r25",
-        "GHSA-j8rw-jp99-435v"
-      ]
-    },
-    {
-      "packages": ["@hono/node-server"],
-      "reason": "Via @modelcontextprotocol/sdk's StreamableHTTPServerTransport, which only uses getRequestListener inside our Express MCP route: no WebSocket upgrade goes through it, and path routing is Express's, not node-server's. Fixed in @hono/node-server 2.1.6 (published 2026-11-02), which clears the 14-day minimumReleaseAge on 2026-11-16; then run pnpm update -r @hono/node-server and remove this entry.",
-      "reviewed": "2026-11-15",
-      "expires": "2026-11-23",
-      "advisories": ["GHSA-qv5m-9pm6-hqp3", "GHSA-jpvv-r467-5p4w"]
     }
   ]
 }
