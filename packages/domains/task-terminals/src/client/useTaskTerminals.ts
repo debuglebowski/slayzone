@@ -79,7 +79,13 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
   useEffect(() => {
     const loadTabs = async () => {
       try {
-        await trpcClient.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode })
+        // The main tab is the task creator's (T-100): someone else working on a shared
+        // task has only the tabs they open themselves, so a refusal here is not an error.
+        await trpcClient.taskTerminals.ensureMain
+          .mutate({ taskId, mode: defaultMode })
+          .catch((err: unknown) => {
+            if ((err as { data?: { code?: string } })?.data?.code !== 'NOT_FOUND') throw err
+          })
         const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
         setTabs(loadedTabs)
         // Set active to main group if the current active one doesn't exist

@@ -205,7 +205,12 @@ import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
-import { ArtifactShareDialog, useRunsAgentsHere, useSharingStatus } from '@slayzone/projects/client'
+import {
+  ArtifactShareDialog,
+  useMyRole,
+  useRunsAgentsHere,
+  useSharingStatus
+} from '@slayzone/projects/client'
 import { useSharedCardHeights } from './useSharedCardHeights'
 import {
   SortableSubTask,
@@ -969,6 +974,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Sharing one file with people (T-100); only on a hub with login.
   const sharing = useSharingStatus()
   const runsAgentsHere = useRunsAgentsHere(task?.id)
+  // Someone who may edit a task another person created runs their OWN agents on it,
+  // on their own computer (T-100); one who may only view it runs none.
+  const taskRole = useMyRole('task', task?.id)
+  const canRunOwnAgents = taskRole === 'edit' || taskRole === 'manage'
   const [sharingArtifact, setSharingArtifact] = useState<{ id: string; title: string } | null>(null)
   const pendingArtifactRef = useRef<string | null>(null)
   const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
@@ -3085,9 +3094,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       : { flex: 1, order: panelOrderIdx.terminal ?? 0 }
                 }
               >
-                {!runsAgentsHere ? (
-                  // A shared task (T-100): its agents and terminals are its owner's,
-                  // on the owner's computers — never shown to a member.
+                {!runsAgentsHere && !canRunOwnAgents ? (
+                  // A shared task you may only view (T-100): its agents and terminals are
+                  // the people's running them, on their own computers — never shown here.
                   <div
                     className="flex h-full w-full items-center justify-center p-6"
                     data-testid="agent-pane-not-yours"
@@ -3095,11 +3104,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     <div className="max-w-sm space-y-2 text-center">
                       <TerminalIcon className="mx-auto size-10 text-muted-foreground/60" />
                       <div className="text-sm font-medium text-muted-foreground">
-                        This task's agents run on its owner's computer
+                        You can view this task
                       </div>
                       <div className="text-xs text-muted-foreground/70">
-                        You can read and change the task and its files. Terminals and chats stay
-                        with the person running them.
+                        To run agents on it from your own computer, ask for edit access.
                       </div>
                     </div>
                   </div>

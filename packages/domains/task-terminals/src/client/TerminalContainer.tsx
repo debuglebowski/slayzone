@@ -23,7 +23,7 @@ import {
   useStableCallback,
   useAppearance
 } from '@slayzone/ui'
-import { useTheme } from '@slayzone/ui'
+import { Button, useTheme } from '@slayzone/ui'
 import type { TerminalGroup, TerminalTab } from '../shared/types'
 import { isChatSupported } from '../shared/chat-modes'
 import { getTabLabel } from './get-tab-label'
@@ -684,6 +684,32 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             mainTabContextMenu={mainTabContextMenu}
           />
           <div className="flex-1 min-h-0 relative">
+            {groups.length === 0 && (
+              // No tab of one's own yet: someone working on a task another person created
+              // (T-100) — the main agent is theirs, on their computer.
+              <div
+                className="absolute inset-0 flex items-center justify-center p-6"
+                data-testid="terminal-empty-own"
+              >
+                <div className="max-w-sm space-y-3 text-center">
+                  <div className="text-sm font-medium text-muted-foreground">
+                    Start your own agent on this task
+                  </div>
+                  <div className="text-xs text-muted-foreground/70">
+                    It runs on your computer, in your own folder. The task's other agents and
+                    terminals stay with the people running them.
+                  </div>
+                  <div className="flex justify-center gap-2">
+                    <Button size="sm" onClick={() => void createTab(defaultMode)}>
+                      Start agent
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void createTab('terminal')}>
+                      Terminal
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
             {groups
               .filter((group) => mountedGroupIds.has(group.id))
               .map((group) => {
