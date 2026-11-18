@@ -1,6 +1,32 @@
 # Changelog
 
 
+## v0.41.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.41.0...v0.41.1)
+
+v0.41.0 never shipped on desktop (its Linux, Windows x64 and macOS arm64 builds failed the packaged-size check); its npm packages did publish. v0.41.1 ships v0.41.0's changes, including computer protocol v9, plus the fix below.
+
+### 🩹 Fixes
+
+- **artifacts:** Desktop zip uses shared encoder; drop archiver ([461b45eab](https://github.com/debuglebowski/slayzone/commit/461b45eab))
+
+### ✅ Tests
+
+- **computer-runtime:** Named pipe for local-link pair on Windows ([1cfe510c8](https://github.com/debuglebowski/slayzone/commit/1cfe510c8))
+- **watcher:** Fail fs.watch natively on Linux too ([3061e541f](https://github.com/debuglebowski/slayzone/commit/3061e541f))
+- **hub:** Await assertTaskActive in restore matrix ([769d3cd69](https://github.com/debuglebowski/slayzone/commit/769d3cd69))
+- **chat-runtime:** Replaced publication source gets a new inode ([66df3bea8](https://github.com/debuglebowski/slayzone/commit/66df3bea8))
+- Register TerminalContainer + benignWindowError suites ([5b84aa3f6](https://github.com/debuglebowski/slayzone/commit/5b84aa3f6))
+
+### 🎨 Styles
+
+- **terminal:** Biome format codex chat session + transport test ([97c67a545](https://github.com/debuglebowski/slayzone/commit/97c67a545))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.41.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.40.0...v0.41.0)
