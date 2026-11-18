@@ -97,10 +97,13 @@ export async function computerServes(
 ): Promise<boolean> {
   if (!authRequired) return true
   const owner = await computerOwnerOf(db, computerId)
+  // Running a task / a project's work as one's own (T-100): its owner may edit it.
+  const need = work.kind === 'taskRunner' || work.kind === 'projectRunner' ? 'edit' : 'view'
   return canAccess(
     db,
     { authRequired, principal: owner ? { userId: owner } : null },
-    ownerWork(work)
+    ownerWork(work),
+    need
   )
 }
 

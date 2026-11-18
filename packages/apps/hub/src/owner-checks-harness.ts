@@ -244,6 +244,9 @@ export interface Owned {
   /** The task / project as their computer side (T-100): the same rows, owner-only. */
   readonly taskOwner: string
   readonly projectOwner: string
+  /** The task / project run on one's own computer (T-100): the same rows again. */
+  readonly taskRunner: string
+  readonly projectRunner: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -273,7 +276,9 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md'),
     taskMove: id('taskMove'),
     taskOwner: id('task'),
-    projectOwner: id('project')
+    projectOwner: id('project'),
+    taskRunner: id('task'),
+    projectRunner: id('project')
   }
 }
 

@@ -37,6 +37,7 @@ import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identit
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
   listDisabledComputerIds,
+  personalWorkspaceUser,
   resolveTaskComputerId
 } from '@slayzone/computers/server'
 import type { ComputerWork, ComputerWorkGate } from '@slayzone/computer-transport/server'
@@ -161,13 +162,40 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
    * Work the hub does on its own (no acting user) is decided by the work alone.
    */
   const admit = async (computerId: string, work: OwnedResource | null): Promise<void> => {
-    const caller = callerPrincipal()
-    const callersOwn =
-      caller === null ||
-      (await mayUseComputer(db, { authRequired: true, principal: caller }, computerId))
-    if (callersOwn && (await serves(computerId, work))) return
+    const asked = await asCallersWork(work)
+    if ((await callerOwns(computerId)) && (await serves(computerId, asked))) return
     auditRefusal(computerId, work)
     throw new ComputerNotYoursError()
+  }
+
+  /** No acting user (the hub's own work), or the computer is the acting user's. */
+  const callerOwns = async (computerId: string): Promise<boolean> => {
+    const caller = callerPrincipal()
+    return (
+      caller === null ||
+      (await mayUseComputer(db, { authRequired: true, principal: caller }, computerId))
+    )
+  }
+
+  /**
+   * The work as the acting user does it (T-100): a task they did not create is run in
+   * their PERSONAL workspace (`taskRunner`), a project they do not own on their own
+   * computer (`projectRunner`) — both need edit, and only ever reach their computers.
+   * The creator's (owner's) work, and the hub's own, stay as named.
+   */
+  const asCallersWork = async (work: OwnedResource | null): Promise<OwnedResource | null> => {
+    const caller = callerPrincipal()
+    if (!work || !caller) return work
+    if (work.kind === 'task' && (await personalWorkspaceUser(db, work.id, caller.userId)))
+      return { kind: 'taskRunner', id: work.id }
+    if (work.kind === 'project') {
+      const row = await db.get<{ owner_user_id: string | null }>(
+        'SELECT owner_user_id FROM projects WHERE id = ?',
+        [work.id]
+      )
+      if (row && row.owner_user_id !== caller.userId) return { kind: 'projectRunner', id: work.id }
+    }
+    return work
   }
 
   /** The usable computers that are not disabled — what a default pick chooses among. */
@@ -178,10 +206,13 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
     return usable.filter((c) => !disabled.has(c.computerId))
   }
 
-  /** The connected default among the computers that may do `work`. */
+  /** The connected default among the acting user's computers that may do `work`. */
   const pickFor = async (work: OwnedResource | null): Promise<string | null> => {
+    const asked = await asCallersWork(work)
     const candidates: UsableComputer[] = []
-    for (const c of await enabledUsable()) if (await serves(c.computerId, work)) candidates.push(c)
+    for (const c of await enabledUsable())
+      if ((await callerOwns(c.computerId)) && (await serves(c.computerId, asked)))
+        candidates.push(c)
     return pickDefault(candidates)
   }
 
@@ -194,7 +225,11 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
   }
 
   const forTask = async (taskId: string): Promise<string | null> => {
-    const bound = await resolveTaskComputerId(db, taskId)
+    // The acting user's workspace on the task (T-100): the task row's for its creator
+    // and for the hub's own work, a personal one for anyone else.
+    const bound = requireLogin
+      ? await resolveTaskComputerId(db, taskId, callerPrincipal()?.userId ?? null)
+      : await resolveTaskComputerId(db, taskId)
     if (!requireLogin) return bound ?? pickDefault(await enabledUsable())
     const work = resource('task', taskId)
     if (bound !== null) {
@@ -210,7 +245,10 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
     const bound = await projectBinding(projectId)
     if (!requireLogin) return bound ?? pickDefault(await enabledUsable())
     const work = resource('project', projectId)
-    if (bound !== null) return (await serves(bound, work)) ? bound : null
+    // The project's default is its owner's computer: another user's work never runs
+    // there (T-100), it picks among their own.
+    if (bound !== null && (await callerOwns(bound)))
+      return (await serves(bound, await asCallersWork(work))) ? bound : null
     return pickFor(work)
   }
 

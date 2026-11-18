@@ -158,7 +158,9 @@ const OF_A: Record<ResourceKind, string> = {
   ownedPath: join(aRoot, 'README.md'),
   taskMove: 'mvA',
   taskOwner: 'tA',
-  projectOwner: 'pA'
+  projectOwner: 'pA',
+  taskRunner: 'tA',
+  projectRunner: 'pA'
 }
 
 describe('every kind: the owner, and nobody else', () => {
@@ -624,12 +626,28 @@ describe('sharing (T-100): members, private tasks, grants', () => {
   test('taskOwner / projectOwner: the one owner user — members and grantees never', async () => {
     expect(await role(A, 'taskOwner', 'tS')).toBe('manage')
     expect(await role(B, 'taskOwner', 'tS')).toBeNull()
-    expect(await role(B, 'taskOwner', 'tSsub')).toBeNull()
     expect(await role(B, 'taskOwner', 'tPriv')).toBe('manage')
     expect(await role(A, 'taskOwner', 'tPriv')).toBeNull()
     expect(await role(D, 'taskOwner', 'tGrant')).toBeNull()
     expect(await role(A, 'projectOwner', 'pS')).toBe('manage')
     expect(await role(B, 'projectOwner', 'pS')).toBeNull()
+  })
+
+  test("taskOwner is the task's CREATOR (its main agent): B's own project task is B's", async () => {
+    // tSsub was created by member B inside A's project-visible task.
+    expect(await role(B, 'taskOwner', 'tSsub')).toBe('manage')
+    expect(await role(A, 'taskOwner', 'tSsub')).toBeNull()
+    expect(await role(A, 'taskOwner', 'tS')).toBe('manage')
+  })
+
+  test('taskRunner / projectRunner: anyone who may edit runs it on their own computer', async () => {
+    expect(await role(B, 'taskRunner', 'tS')).toBe('edit')
+    expect(await role(C, 'taskRunner', 'tS')).toBe('view')
+    expect(await role(D, 'taskRunner', 'tS')).toBeNull()
+    expect(await at(B, 'taskRunner', 'tS', 'edit')).toBe(true)
+    expect(await at(C, 'taskRunner', 'tS', 'edit')).toBe(false)
+    expect(await role(B, 'projectRunner', 'pS')).toBe('edit')
+    expect(await role(D, 'projectRunner', 'pS')).toBeNull()
   })
 
   test('canAccess with a need: view < edit < manage', async () => {

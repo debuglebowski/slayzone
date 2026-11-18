@@ -5905,6 +5905,34 @@ export const migrations: Migration[] = [
         END;
       `)
     }
+  },
+  {
+    // Personal workspaces (T-100): how one user works on a task they did not create —
+    // which computer, whether it has a worktree or a custom folder there, and the branch
+    // the worktree merges back into. The CREATOR's workspace stays on the task row
+    // (`computer_id`, `has_worktree`, `has_base_dir`, `worktree_computer_id`,
+    // `worktree_parent_branch`), exactly as before; everyone else's is a row here. The
+    // folders themselves live on that user's computer, as the creator's do on theirs.
+    version: 222,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE task_workspaces (
+          task_id                TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          user_id                TEXT NOT NULL,
+          computer_id            TEXT,
+          has_worktree           INTEGER NOT NULL DEFAULT 0,
+          has_base_dir           INTEGER NOT NULL DEFAULT 0,
+          worktree_computer_id   TEXT,
+          worktree_parent_branch TEXT,
+          PRIMARY KEY (task_id, user_id)
+        );
+        CREATE INDEX idx_task_workspaces_user ON task_workspaces(user_id);
+        CREATE INDEX idx_task_workspaces_computer ON task_workspaces(computer_id);
+        CREATE INDEX idx_task_workspaces_holder ON task_workspaces(worktree_computer_id);
+      `)
+      // task_workspaces carries a task_id: fenced like every such table.
+      installContentErasureFences(db)
+    }
   }
 ]
 

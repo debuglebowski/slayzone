@@ -19,6 +19,7 @@ import {
   createComputerPlacement,
   type UsableComputer
 } from './computer-placement.js'
+import { resolveTaskComputerId, setTaskComputer } from '@slayzone/computers/server'
 
 /** The error `p` rejects with, or null when it resolves. */
 async function rejection(p: Promise<unknown>): Promise<Error | null> {
@@ -227,6 +228,37 @@ test("work whose rows are gone (permanent deletion) picks among its owner's comp
   expect(await withLogin.forOwner(A), "never someone else's").toBeNull()
   usable = [{ computerId: 'cA' }]
   expect(await placementFor(false).forOwner(null), 'no login: the connected default').toBe('cA')
+})
+
+test("T-100: a member's request runs A's task in the member's own workspace, on the member's computer", async () => {
+  const p = placementFor(true)
+  sql(
+    `INSERT OR IGNORE INTO project_members (project_id, user_id, role) VALUES ('pA', ?, 'edit')`,
+    B
+  )
+  sql(`UPDATE tasks SET created_by_user_id = ? WHERE id = 'tA'`, A)
+  usable = [{ computerId: 'cA' }, { computerId: 'cB' }]
+  expect(await as(A, () => p.forTask('tA')), "A, the creator: A's computer").toBe('cA')
+  expect(await as(B, () => p.forTask('tA')), "B: B's own computer").toBe('cB')
+  // B's pin is B's alone: the task row (A's workspace) is untouched.
+  await setTaskComputer(db, 'tA', 'cB', B)
+  expect(raw.prepare(`SELECT computer_id FROM tasks WHERE id = 'tA'`).get()).toEqual({
+    computer_id: null
+  })
+  expect(await resolveTaskComputerId(db, 'tA', B)).toBe('cB')
+  expect(await resolveTaskComputerId(db, 'tA', A)).toBeNull()
+  // B pinned to A's computer is refused, whatever the row says.
+  raw.prepare(`UPDATE task_workspaces SET computer_id = 'cA' WHERE user_id = ?`).run(B)
+  expect((await as(B, () => rejection(p.forTask('tA')))) instanceof ComputerNotYoursError).toBe(
+    true
+  )
+  // An outsider (no edit) gets nothing to run on.
+  sql(`UPDATE project_members SET role = 'view' WHERE user_id = ?`, B)
+  raw.prepare(`DELETE FROM task_workspaces`).run()
+  expect(await as(B, () => rejection(p.forTask('tA')))).not.toBeNull()
+  sql(`DELETE FROM project_members WHERE project_id = 'pA'`)
+  sql(`UPDATE tasks SET created_by_user_id = NULL WHERE id = 'tA'`)
+  usable = []
 })
 
 test("T-100: a user's request reaches only that user's computers, even for work it may touch", async () => {

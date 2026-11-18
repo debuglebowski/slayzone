@@ -130,6 +130,8 @@ export type ResourceKind =
   | 'taskMove'
   | 'taskOwner'
   | 'projectOwner'
+  | 'taskRunner'
+  | 'projectRunner'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -153,7 +155,9 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'ownedPath',
   'taskMove',
   'taskOwner',
-  'projectOwner'
+  'projectOwner',
+  'taskRunner',
+  'projectRunner'
 ]
 
 /** The kinds whose id is a filesystem path. A path can carry a user's directory
@@ -302,8 +306,9 @@ async function projectFacts(db: SlayzoneDb, projectId: string): Promise<SharedOw
 interface TaskFacts {
   /** Who may reach the task's hub-resident content, with which role. */
   readonly shared: SharedOwnership
-  /** The ONE user its computer-resident things fall back to when a row names none
-   *  (a legacy tab, a task process): a private task's creator, else the project owner. */
+  /** The ONE user its main runtime is, and its computer-resident things fall back to
+   *  when a row names none (a legacy tab, a task process): its creator, else (a row
+   *  from before creators were recorded) its project's owner. */
   readonly ownerUser: string | null
 }
 
@@ -344,10 +349,13 @@ async function taskFacts(db: SlayzoneDb, taskId: string): Promise<TaskFacts | nu
   if (!project) return null
   const root = chain[chain.length - 1]
   const taskGrants: AccessGrant[] = chain.flatMap((t) => JSON.parse(t.grants) as AccessGrant[])
+  // The task's MAIN runtime (its main agent, conversation, workspace on the task row) is
+  // its creator's; before creators were recorded, its project owner's.
+  const creator = chain[0].created_by_user_id ?? project.owner_user_id
   if (root.visibility === 'private') {
     return {
       shared: { owner_user_id: root.created_by_user_id, grants: taskGrants },
-      ownerUser: root.created_by_user_id
+      ownerUser: creator
     }
   }
   const members = project.grants ?? []
@@ -362,7 +370,7 @@ async function taskFacts(db: SlayzoneDb, taskId: string): Promise<TaskFacts | nu
       owner_user_id: project.owner_user_id,
       grants: [...members, ...creators, ...taskGrants]
     },
-    ownerUser: project.owner_user_id
+    ownerUser: creator
   }
 }
 
@@ -1015,7 +1023,11 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   // The computer side of a task / project, and whatever spans tasks the caller may
   // not see: its one owner user (T-100). Never shared.
   taskOwner: (db, id) => taskOwnerOnly(db, id),
-  projectOwner: viaQuery(OWNER_OF_PROJECT)
+  projectOwner: viaQuery(OWNER_OF_PROJECT),
+  // Running a task / a project's work on one's OWN computer (T-100): whoever may
+  // edit it (the computer is the caller's — the placement gate holds that line).
+  taskRunner: viaTask,
+  projectRunner: async (db, id) => sharedOf(await projectFacts(db, id))
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */

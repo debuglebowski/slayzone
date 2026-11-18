@@ -227,6 +227,15 @@ function successionOps(formerIds: readonly string[], successorId: string): Batch
       `UPDATE tasks SET worktree_computer_id = ? WHERE worktree_computer_id IN (${placeholders})`,
       [successorId, ...formerIds]
     ),
+    // Personal workspaces (T-100) name computers the same way.
+    run(`UPDATE task_workspaces SET computer_id = ? WHERE computer_id IN (${placeholders})`, [
+      successorId,
+      ...formerIds
+    ]),
+    run(
+      `UPDATE task_workspaces SET worktree_computer_id = ? WHERE worktree_computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
     run(
       `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
       [successorId, ...formerIds]
@@ -338,6 +347,11 @@ export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> 
   // would send the removal to whichever computer is the default instead.
   await db.batchTxn([
     { type: 'run', sql: `UPDATE tasks SET computer_id = NULL WHERE computer_id = ?`, params: [id] },
+    {
+      type: 'run',
+      sql: `UPDATE task_workspaces SET computer_id = NULL WHERE computer_id = ?`,
+      params: [id]
+    },
     {
       type: 'run',
       sql: `UPDATE projects SET default_computer_id = NULL WHERE default_computer_id = ?`,
@@ -502,12 +516,25 @@ export async function isComputerDisabled(db: SlayzoneDb, id: string): Promise<bo
 
 // --- task/project computer binding ----------------------------------------------
 
-/** `null` = inherit the project default (`projects.default_computer_id`). */
+/**
+ * `null` = inherit the project default (`projects.default_computer_id`). With `userId`
+ * not the task's creator: that user's personal workspace pin (T-100).
+ */
 export async function setTaskComputer(
   db: SlayzoneDb,
   taskId: string,
-  computerId: string | null
+  computerId: string | null,
+  userId?: string | null
 ): Promise<void> {
+  const personal = await personalWorkspaceUser(db, taskId, userId)
+  if (personal) {
+    await db.run(
+      `INSERT INTO task_workspaces (task_id, user_id, computer_id) VALUES (?, ?, ?)
+       ON CONFLICT (task_id, user_id) DO UPDATE SET computer_id = excluded.computer_id`,
+      [taskId, personal, computerId]
+    )
+    return
+  }
   await db.run(`UPDATE tasks SET computer_id = ? WHERE id = ?`, [computerId, taskId])
 }
 
@@ -557,11 +584,58 @@ export const TASK_COMPUTER_SQL = `SELECT ${TASK_COMPUTER_EXPR} AS computer_id
   FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
   WHERE t.id = ?`
 
+/**
+ * Whose WORKSPACE `userId` works in on a task (T-100): null = the task row's — they
+ * created it (before creators were recorded: its project's owner), or no user is
+ * named (the hub's own work, a hub without login). Else their own personal row in
+ * `task_workspaces`: one user's computer, worktree and parent branch for a task
+ * someone else created.
+ */
+export async function personalWorkspaceUser(
+  db: SlayzoneDb,
+  taskId: string,
+  userId: string | null | undefined
+): Promise<string | null> {
+  if (!userId) return null
+  const row = await db.get<{ creator: string | null }>(
+    `SELECT COALESCE(t.created_by_user_id, p.owner_user_id) AS creator
+       FROM tasks t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = ?`,
+    [taskId]
+  )
+  if (!row || row.creator === null || row.creator === userId) return null
+  return userId
+}
+
+/**
+ * {@link TASK_COMPUTER_SQL} for a PERSONAL workspace: the holder of its folder while it
+ * has one, else its own pin, else — only for the project's owner, whose computer it
+ * is — the project's default. Two parameters: task id, user id.
+ */
+export const PERSONAL_TASK_COMPUTER_SQL = `SELECT COALESCE(
+    CASE WHEN (w.has_worktree = 1 OR w.has_base_dir = 1)
+      AND NOT EXISTS (SELECT 1 FROM computer_retirements r
+                       WHERE r.computer_id = w.worktree_computer_id AND r.successor_id IS NULL)
+    THEN w.worktree_computer_id END,
+    w.computer_id,
+    CASE WHEN p.owner_user_id = u.user_id THEN p.default_computer_id END) AS computer_id
+  FROM (SELECT ? AS task_id, ? AS user_id) u
+  JOIN tasks t ON t.id = u.task_id LEFT JOIN projects p ON p.id = t.project_id
+  LEFT JOIN task_workspaces w ON w.task_id = u.task_id AND w.user_id = u.user_id`
+
+/**
+ * THE task → computer answer. With `userId` (a request that names its user): the
+ * computer of THAT user's workspace on the task (T-100) — the task row's when they
+ * created it, else their personal one.
+ */
 export async function resolveTaskComputerId(
   db: SlayzoneDb,
-  taskId: string
+  taskId: string,
+  userId?: string | null
 ): Promise<string | null> {
-  const row = await db.get<{ computer_id: string | null }>(TASK_COMPUTER_SQL, [taskId])
+  const personal = await personalWorkspaceUser(db, taskId, userId)
+  const row = personal
+    ? await db.get<{ computer_id: string | null }>(PERSONAL_TASK_COMPUTER_SQL, [taskId, personal])
+    : await db.get<{ computer_id: string | null }>(TASK_COMPUTER_SQL, [taskId])
   return row?.computer_id ?? null
 }
 
@@ -587,17 +661,28 @@ export class TaskFoldersElsewhereError extends Error {
 export async function assertTaskMovable(
   db: SlayzoneDb,
   taskId: string,
-  computerId: string | null
+  computerId: string | null,
+  userId?: string | null
 ): Promise<void> {
   if (computerId === null) return
-  const row = await db.get<{ holder: string | null; name: string | null }>(
-    `SELECT t.worktree_computer_id AS holder, c.name AS name FROM tasks t
-       LEFT JOIN computers c ON c.id = t.worktree_computer_id
-      WHERE t.id = ? AND (t.has_worktree = 1 OR t.has_base_dir = 1)
-        AND NOT EXISTS (SELECT 1 FROM computer_retirements r
-                         WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)`,
-    [taskId]
-  )
+  const personal = await personalWorkspaceUser(db, taskId, userId)
+  const row = personal
+    ? await db.get<{ holder: string | null; name: string | null }>(
+        `SELECT w.worktree_computer_id AS holder, c.name AS name FROM task_workspaces w
+           LEFT JOIN computers c ON c.id = w.worktree_computer_id
+          WHERE w.task_id = ? AND w.user_id = ? AND (w.has_worktree = 1 OR w.has_base_dir = 1)
+            AND NOT EXISTS (SELECT 1 FROM computer_retirements r
+                             WHERE r.computer_id = w.worktree_computer_id AND r.successor_id IS NULL)`,
+        [taskId, personal]
+      )
+    : await db.get<{ holder: string | null; name: string | null }>(
+        `SELECT t.worktree_computer_id AS holder, c.name AS name FROM tasks t
+           LEFT JOIN computers c ON c.id = t.worktree_computer_id
+          WHERE t.id = ? AND (t.has_worktree = 1 OR t.has_base_dir = 1)
+            AND NOT EXISTS (SELECT 1 FROM computer_retirements r
+                             WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)`,
+        [taskId]
+      )
   if (!row?.holder || row.holder === computerId) return
   throw new TaskFoldersElsewhereError(taskId, row.holder, row.name ?? `computer ${row.holder}`)
 }

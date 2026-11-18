@@ -323,12 +323,16 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await requireBindable(ctx, input.computerId)
       // Its folder exists only on the computer holding it (robustness plan §9, 7e).
-      await assertTaskMovable(ctx.db, input.taskId, input.computerId).catch((error: unknown) => {
-        if (error instanceof TaskFoldersElsewhereError)
-          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message })
-        throw error
-      })
-      await storeSetTaskComputer(ctx.db, input.taskId, input.computerId)
+      const me = ctx.principal?.userId ?? null
+      await assertTaskMovable(ctx.db, input.taskId, input.computerId, me).catch(
+        (error: unknown) => {
+          if (error instanceof TaskFoldersElsewhereError)
+            throw new TRPCError({ code: 'PRECONDITION_FAILED', message: error.message })
+          throw error
+        }
+      )
+      // The caller's own workspace on the task (T-100): the task row when they created it.
+      await storeSetTaskComputer(ctx.db, input.taskId, input.computerId, me)
       notifyComputerBindingChanged()
       return { ok: true as const }
     }),
@@ -415,7 +419,11 @@ export const computersRouter = router({
   resolveTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const computerId = await storeResolveTaskComputerId(ctx.db, input.taskId)
+      const computerId = await storeResolveTaskComputerId(
+        ctx.db,
+        input.taskId,
+        ctx.principal?.userId ?? null
+      )
       const localComputerId = getComputersDepsOrNull()?.localComputerId ?? null
       const onHubMachine =
         localComputerId !== null && (computerId ?? localComputerId) === localComputerId

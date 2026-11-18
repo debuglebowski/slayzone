@@ -23,6 +23,8 @@ export {
   setProjectDefaultComputer,
   setComputerOwner,
   resolveTaskComputerId,
+  personalWorkspaceUser,
+  PERSONAL_TASK_COMPUTER_SQL,
   TASK_COMPUTER_SQL,
   TASK_COMPUTER_EXPR,
   assertTaskMovable,
