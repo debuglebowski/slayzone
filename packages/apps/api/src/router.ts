@@ -65,6 +65,7 @@ import { notifyRouter, type NotifyMounts } from '@slayzone/notify/server'
 import {
   projectsRouter,
   projectGroupsRouter,
+  sharingRouter,
   type ProjectGroupsMounts,
   type ProjectsMounts
 } from '@slayzone/projects/server'
@@ -109,6 +110,8 @@ export const appRouter = router({
   pty: ptyRouter,
   computers: computersRouter,
   settings: settingsRouter,
+  // Who else may reach a project, task or artifact (T-100, projects domain).
+  sharing: sharingRouter,
   workspace: workspaceRouter,
   tags: tagsRouter,
   task: taskRouter,

@@ -52,6 +52,17 @@ export {
   type ProjectsRouterDeps
 } from './projects-router-deps'
 export type { ProjectsMounts } from './router-mounts'
+export {
+  emitSharingChanged,
+  sharingRouter,
+  type SharingRouter,
+  type SharingChangedEvent
+} from './sharing-router'
+export {
+  setSharingRouterDeps,
+  getSharingRouterDeps,
+  type SharingRouterDeps
+} from './sharing-router-deps'
 export { handleTerminalStateChange } from './task-automation'
 export {
   ACCESS_ROLES,

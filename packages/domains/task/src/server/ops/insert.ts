@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { currentSecurityContext } from '@slayzone/platform/security-log'
 import type { ProviderConfig, Task } from '@slayzone/task-contracts'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { buildTaskCreatedEvents } from '../history.js'
@@ -40,6 +41,8 @@ export interface TaskRowData {
   updatedAt?: string | null
   /** Board position. Omitted: the column default (0). */
   order?: number | null
+  /** Who created it. Omitted: the request's acting user, else the project's owner. */
+  createdByUserId?: string | null
 }
 
 const INSERT_SQL = `
@@ -50,9 +53,10 @@ const INSERT_SQL = `
     is_temporary, repo_name,
     dangerously_skip_permissions, panel_visibility, panel_sizes, browser_tabs, web_panel_urls,
     external_id, external_provider,
-    updated_at, "order"
+    updated_at, "order", created_by_user_id
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    COALESCE(?, datetime('now')), COALESCE(?, 0))
+    COALESCE(?, datetime('now')), COALESCE(?, 0),
+    COALESCE(?, (SELECT owner_user_id FROM projects WHERE id = ?)))
 `
 
 /**
@@ -95,7 +99,12 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
     // key on a half-populated tuple.
     row.externalId ? (row.externalProvider ?? null) : null,
     row.updatedAt ?? null,
-    row.order ?? null
+    row.order ?? null,
+    // Who created it (T-100: a private task is its creator's): the acting user of
+    // the request (tRPC, REST and MCP all carry one), else the project's owner — the
+    // hub itself (an automation, an import) acts for the project.
+    row.createdByUserId ?? currentSecurityContext()?.actor ?? null,
+    row.projectId
   ]
 
   // Activity events are derived from the task being created; all fields the

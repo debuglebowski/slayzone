@@ -2331,6 +2331,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.104.5
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       lucide-react:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)

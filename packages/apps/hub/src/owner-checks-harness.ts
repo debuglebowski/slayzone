@@ -23,6 +23,7 @@ import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import { getAppDeps, getMenuEvents, getNotifyEvents, type AppRouter } from '@slayzone/api'
 import { getAutomationsEvents } from '@slayzone/automations/server'
+import { emitSharingChanged } from '@slayzone/projects/server'
 import { agentSessionsEvents, artifactWatcherEvents, taskEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import {
@@ -583,7 +584,8 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'worktrees.onDiffWatchFailed': (o) =>
     getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path, taskId: o.task }),
   // An `admin` subscription (T-106): a void signal, attributed to who caused it.
-  'automations.onChanged': (o) => asUser(o.userId, () => getAutomationsEvents().emit('changed'))
+  'automations.onChanged': (o) => asUser(o.userId, () => getAutomationsEvents().emit('changed')),
+  'sharing.onChanged': (o) => emitSharingChanged({ userIds: o.userId ? [o.userId] : [] })
 }
 
 /** Subscriptions an owner's own `task.update` (a real mutation) produces events on. */

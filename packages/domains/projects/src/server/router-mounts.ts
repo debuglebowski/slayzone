@@ -1,5 +1,6 @@
 import type { ProjectsRouter } from './projects-router'
 import type { ProjectGroupsRouter } from './project-groups-router'
+import type { SharingRouter } from './sharing-router'
 
 /**
  * Where this domain's routers sit in the app router. One combined type: projects and
@@ -9,4 +10,6 @@ import type { ProjectGroupsRouter } from './project-groups-router'
 export type ProjectsMounts = {
   projects: ProjectsRouter
   projectGroups: ProjectGroupsRouter
+  /** Who else may reach a project, task or artifact (T-100). */
+  sharing: SharingRouter
 }

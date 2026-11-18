@@ -9,7 +9,7 @@
  */
 import { setDiagnosticsRouterDeps } from '@slayzone/diagnostics/server'
 import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/hub'
-import { setProjectsRouterDeps } from '@slayzone/projects/server'
+import { setProjectsRouterDeps, setSharingRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setTagsRouterDeps } from '@slayzone/tags/server'
 import { detectChildRepos, setWorktreesRouterDeps } from '@slayzone/worktrees/hub'
@@ -20,7 +20,7 @@ import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
 import { setUsageAnalyticsRouterDeps } from '@slayzone/usage-analytics/server'
 import { setComputersRouterDeps } from '@slayzone/computers/server'
 import { setExportImportOpsFactory } from '@slayzone/settings/server'
-import { createAccessScope } from './access'
+import { createAccessScope, invalidateAccessCache } from './access'
 import { filterManagedComputers, mayManageComputer } from './computer-access'
 import { buildExportImportOps } from './export-import'
 import { emitTasksChanged, getAppDeps, getComputersDepsOrNull } from './app-deps'
@@ -45,6 +45,14 @@ setDiagnosticsRouterDeps({
         )
     }
   }
+})
+
+// Sharing (T-100): the decision is api's one access function; the hub adds moving a
+// computer-held artifact to the hub (`setSharingRouterDeps` in its composition).
+setSharingRouterDeps({
+  roleOf: (ctx, r) => Promise.resolve(createAccessScope(ctx.db, accessRequestOf(ctx)).roleOf(r)),
+  invalidate: invalidateAccessCache,
+  tasksChanged: (taskIds) => emitTasksChanged({ taskIds })
 })
 
 setFileEditorRouterDeps({

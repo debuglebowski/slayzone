@@ -293,6 +293,16 @@ const oneOrNull =
     return r && (await scope.allows(r)) ? data : null
   }
 
+/** `sharing.sharedWithMe`: each invited task and artifact, cut to what the caller sees. */
+const sharedWithMe: OutputFilter = async (data, scope) => {
+  if (!isRecord(data)) return data
+  return {
+    ...data,
+    tasks: await rows('id', 'task')(data.tasks, scope),
+    artifacts: await rows('id', 'artifact')(data.artifacts, scope)
+  }
+}
+
 /** `task.loadBoardData` / `task.loadBoardRows`: the board (or a few of its rows),
  *  cut to the caller's projects. */
 const board: OutputFilter = async (data, scope) => {
@@ -474,17 +484,22 @@ const byActor: EventFilter = (event, { userId }) => {
 }
 
 /**
- * `notify.onTasksChanged`: a refetch ping attributed like {@link byActor}, which may
- * also name the changed task ids (`TasksChangedEvent`). Named ids are cut to the
- * caller's tasks — a ping naming only other users' tasks is not sent (nothing the
- * caller can see changed). `taskIds: null` (unknown scope) names nothing and passes.
+ * `notify.onTasksChanged`: a refetch ping, which may name the changed task ids
+ * (`TasksChangedEvent`). Named ids are cut to the tasks the caller may see, whoever
+ * caused the change — a ping naming none of them is not sent (nothing the caller can
+ * see changed). One naming nothing (`taskIds` absent or null: unknown scope) is
+ * attributed like {@link byActor}: the actor's own.
  */
 const tasksChangedEvents: EventFilter = async (event, state) => {
-  // byActor reads the async context: call it before any await.
-  if (byActor(event, state) === DROP) return DROP
-  if (!isRecord(event) || !Array.isArray(event.taskIds)) return event
-  const taskIds = (await ids('task')(event.taskIds, state.scope)) as unknown[]
-  return taskIds.length > 0 ? { ...event, taskIds } : DROP
+  // A ping naming its tasks goes to everyone who may see one of them — whoever
+  // caused it: a member of a shared project sees another's edit live (T-100).
+  if (isRecord(event) && Array.isArray(event.taskIds)) {
+    const taskIds = (await ids('task')(event.taskIds, state.scope)) as unknown[]
+    return taskIds.length > 0 ? { ...event, taskIds } : DROP
+  }
+  // Naming nothing: attributed to its actor (byActor reads the async context, so it
+  // runs before any await).
+  return byActor(event, state)
 }
 
 // ── reasons for `no-owned-input` ──────────────────────────────────────────────
@@ -1257,6 +1272,29 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'settings.getEffectiveTheme': none(HOST),
   'settings.getThemeSource': none(HOST),
   'settings.setTheme': none(HOST),
+
+  // ── sharing (T-100): reading who is in needs `view`; every change `manage` ──
+  'sharing.directory': none(
+    "the hub's enabled accounts (id, name, email): whom one can share with — listed to every user by design (T-100)"
+  ),
+  'sharing.myRoles': none(
+    "the caller's own role on each named resource, decided by the access function; null hides whether it exists"
+  ),
+  'sharing.projectMembers': checked(project('projectId')),
+  'sharing.setProjectMember': needing('manage', checked(project('projectId'))),
+  'sharing.removeProjectMember': needing('manage', checked(project('projectId'))),
+  'sharing.taskSharing': checked(task('taskId')),
+  'sharing.setTaskVisibility': needing('manage', checked(task('taskId'))),
+  'sharing.setTaskGrant': needing('manage', checked(task('taskId'))),
+  'sharing.removeTaskGrant': needing('manage', checked(task('taskId'))),
+  'sharing.artifactGrants': checked(artifact('artifactId')),
+  'sharing.setArtifactGrant': needing('manage', checked(artifact('artifactId'))),
+  'sharing.removeArtifactGrant': needing('manage', checked(artifact('artifactId'))),
+  'sharing.sharedWithMe': listed(sharedWithMe),
+  // Each event names the users it concerns: only theirs (who may now see more or less).
+  'sharing.onChanged': streamed((event, { userId }) =>
+    isRecord(event) && Array.isArray(event.userIds) && event.userIds.includes(userId) ? event : DROP
+  ),
 
   // ── tags ──
   'tags.list': listed(rows('project_id', 'project')),
