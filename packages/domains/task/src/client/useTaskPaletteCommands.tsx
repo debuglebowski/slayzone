@@ -64,8 +64,7 @@ import type { AgentDefinition } from '@slayzone/terminal-contracts'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
 import { priorityOptions, type Task, type TaskTemplate } from '@slayzone/task-contracts'
 import { getSnoozePresets } from './SnoozePicker'
-
-const selectTasks = (board: { tasks: Task[] }): Task[] => board.tasks
+import { useBoardTasks } from './useBoardTasks'
 
 // Module-level so each priority keeps one component identity across rebuilds.
 const PRIORITY_ICONS = new Map<number, PaletteIcon>(
@@ -213,13 +212,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
   const { data: blockers } = useQuery(
     trpc.task.getBlockers.queryOptions({ taskId }, { enabled: enabled && !!task })
   )
-  const { data: allTasks } = useQuery(
-    trpc.task.loadBoardData.queryOptions(undefined, {
-      enabled: enabled && !!task,
-      staleTime: 30_000,
-      select: selectTasks
-    })
-  )
+  const allTasks = useBoardTasks({ enabled: enabled && !!task })
   const { data: projects } = useQuery(
     trpc.projects.list.queryOptions(undefined, { enabled: enabled && !!task })
   )

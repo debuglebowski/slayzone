@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { ListChecks, MessageSquare, SearchIcon, X } from 'lucide-react'
 import type { Task } from '@slayzone/task-contracts'
@@ -11,6 +11,7 @@ import { Button } from '@slayzone/ui'
 import { Input, Textarea } from '@slayzone/ui'
 import { useTrack } from '@slayzone/telemetry/client'
 import { BlockerStatusIcon } from './BlockerStatusIcon'
+import { useBoardTasks } from './useBoardTasks'
 
 interface BlockedBySectionProps {
   task: Task
@@ -21,8 +22,6 @@ interface BlockedBySectionProps {
   addBlockerSearch: string
   setAddBlockerSearch: React.Dispatch<React.SetStateAction<string>>
 }
-
-const selectTasks = (board: { tasks: Task[] }): Task[] => board.tasks
 
 function matchesTaskSearch(task: Task, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase()
@@ -241,13 +240,10 @@ function BlockerPicker({
   setSearch,
   onPick
 }: BlockerPickerProps): React.JSX.Element {
-  const trpc = useTRPC()
   // Read from the board query the app already holds (`task.loadBoardData` — the
   // same rows `task.getAll` returns) rather than a second multi-MB cache entry.
-  const allTasksQuery = useQuery(
-    trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000, select: selectTasks })
-  )
-  const availableBlockers = (allTasksQuery.data ?? []).filter(
+  const allTasks = useBoardTasks({ enabled: true })
+  const availableBlockers = (allTasks ?? []).filter(
     (t) =>
       t.id !== task.id &&
       !blockers.some((b) => b.id === t.id) &&
