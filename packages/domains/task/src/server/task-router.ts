@@ -25,7 +25,11 @@ import {
   type CreateTaskInput,
   type UpdateTaskInput
 } from '@slayzone/task-contracts'
-import { router, publicProcedure } from '@slayzone/trpc-server'
+import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
+import { overlayWorkspace, overlayWorkspaces } from './workspace-overlay'
+
+/** The acting user: tasks they read carry their own workspace (T-100). */
+const me = (ctx: Pick<TrpcContext, 'principal'>): string | null => ctx.principal?.userId ?? null
 import {
   conversationInOtherTabMessage,
   liveConversationSession,
@@ -102,11 +106,15 @@ const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
 
 export const taskRouter = router({
   // --- Task CRUD ---
-  getAll: publicProcedure.query(({ ctx }) => ops().getAllTasksOp(ctx.db)),
+  getAll: publicProcedure.query(async ({ ctx }) =>
+    overlayWorkspaces(ctx.db, await ops().getAllTasksOp(ctx.db), me(ctx))
+  ),
 
   getByProject: publicProcedure
     .input(z.object({ projectId: z.string() }))
-    .query(({ ctx, input }) => ops().getByProjectOp(ctx.db, input.projectId)),
+    .query(async ({ ctx, input }) =>
+      overlayWorkspaces(ctx.db, await ops().getByProjectOp(ctx.db, input.projectId), me(ctx))
+    ),
 
   /** Fallback browser URL for a task with none of its own (see the op). */
   getSiblingBrowserUrl: publicProcedure
@@ -117,7 +125,9 @@ export const taskRouter = router({
 
   get: publicProcedure
     .input(z.object({ id: z.string() }))
-    .query(({ ctx, input }) => ops().getTaskOp(ctx.db, input.id)),
+    .query(async ({ ctx, input }) =>
+      overlayWorkspace(ctx.db, await ops().getTaskOp(ctx.db, input.id), me(ctx))
+    ),
 
   // A task's worktree path and custom folder live on its computer (§9 Phase 7d):
   // read there, never from the hub. A task whose computer is away answers `offline`.
@@ -182,11 +192,14 @@ export const taskRouter = router({
 
   getSubTasks: publicProcedure
     .input(z.object({ parentId: z.string() }))
-    .query(({ ctx, input }) => ops().getSubTasksOp(ctx.db, input.parentId)),
+    .query(async ({ ctx, input }) =>
+      overlayWorkspaces(ctx.db, await ops().getSubTasksOp(ctx.db, input.parentId), me(ctx))
+    ),
 
   update: publicProcedure.input(updateInput).mutation(async ({ ctx, input }) => {
     const r = await asBadRequest(() => ops().updateTaskOp(ctx.db, input, deps()))
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+    if (me(ctx)) return (await overlayWorkspace(ctx.db, r, me(ctx))) ?? r
     return r
   }),
 
@@ -366,12 +379,14 @@ export const taskRouter = router({
   restore: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const r = await ops().restoreTaskOp(ctx.db, input.id, deps())
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+    if (me(ctx)) return (await overlayWorkspace(ctx.db, r, me(ctx))) ?? r
     return r
   }),
 
   archive: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const r = await ops().archiveTaskOp(ctx.db, input.id, deps())
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
+    if (me(ctx)) return (await overlayWorkspace(ctx.db, r, me(ctx))) ?? r
     return r
   }),
 
@@ -460,13 +475,23 @@ export const taskRouter = router({
     ),
 
   // --- Board ---
-  loadBoardData: publicProcedure.query(({ ctx }) => ops().loadBoardDataOp(ctx.db)),
+  loadBoardData: publicProcedure.query(async ({ ctx }) => {
+    const board = await ops().loadBoardDataOp(ctx.db)
+    return me(ctx)
+      ? { ...board, tasks: await overlayWorkspaces(ctx.db, board.tasks, me(ctx)) }
+      : board
+  }),
   // A few rows of the board — what the renderer patches in when a
   // `notify.onTasksChanged` event names the changed tasks. Capped: an event
   // naming more rows than this is cheaper as a full board reload.
   loadBoardRows: publicProcedure
     .input(z.object({ ids: z.array(z.string()).max(500) }))
-    .query(({ ctx, input }) => ops().loadBoardRowsOp(ctx.db, input.ids)),
+    .query(async ({ ctx, input }) => {
+      const rows = await ops().loadBoardRowsOp(ctx.db, input.ids)
+      return me(ctx)
+        ? { ...rows, tasks: await overlayWorkspaces(ctx.db, rows.tasks, me(ctx)) }
+        : rows
+    }),
 
   // --- Subscription ---
   // Fires on any task mutation. Replaces the renderer's `tasks:changed` polling once

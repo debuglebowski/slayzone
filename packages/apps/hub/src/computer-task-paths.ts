@@ -35,6 +35,8 @@ import {
 } from '@slayzone/task/server'
 import type { TaskPathState } from '@slayzone/task-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { currentSecurityContext } from '@slayzone/platform/security-log'
+import { personalWorkspaceUser, resolveTaskComputerId } from '@slayzone/computers/server'
 import type { FaultLedger } from '@slayzone/platform/isolation'
 import { normalizeTaskPath } from '@slayzone/chat-runtime/shared'
 import type { HandoffKind } from './computer-data-handoff'
@@ -62,6 +64,11 @@ export interface ComputerTaskPathsDeps {
   log?(message: string, error: unknown): void
   /** The hub's own Needs-attention ledger: a path no computer takes is recorded there. */
   ledger?: FaultLedger
+  /**
+   * The acting user's computer for a task they did not create, when their workspace
+   * names none yet (T-100): placement's pick among their own (`forTask`).
+   */
+  personalComputer?(taskId: string): Promise<string | null>
 }
 
 /** Needs-attention pass of a task path no computer takes (item key `<taskId>:<field>`). */
@@ -348,10 +355,32 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
 
   /** The connected holder of a task's folders, with the hub's staged row delivered. */
   async function holder(taskId: string): Promise<string> {
+    const personal = await personalOf(taskId)
+    if (personal) return personalHolder(taskId, personal)
     const computerId = await deps.targetOf(TASK_PATH_KIND, taskId)
     if (computerId === null || !deps.usable(computerId))
       throw new TaskFoldersOfflineError(taskId, computerId)
     await deps.flushTask(taskId, computerId, PATH_KINDS)
+    return computerId
+  }
+
+  /**
+   * The acting user's PERSONAL workspace on a task they did not create (T-100), or null
+   * (the creator's, the hub's own work, a hub without login). Its folders are on that
+   * user's own computer, never staged on the hub: the task's staged rows are the
+   * creator's.
+   */
+  const personalOf = (taskId: string): Promise<string | null> =>
+    personalWorkspaceUser(db, taskId, currentSecurityContext()?.actor ?? null)
+
+  /** The connected computer of a personal workspace (its holder, else its pin, else the user's pick). */
+  async function personalHolder(taskId: string, userId: string): Promise<string> {
+    const computerId =
+      (await resolveTaskComputerId(db, taskId, userId)) ??
+      (await deps.personalComputer?.(taskId)) ??
+      null
+    if (computerId === null || !deps.usable(computerId))
+      throw new TaskFoldersOfflineError(taskId, computerId)
     return computerId
   }
 
@@ -361,7 +390,13 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
       const out: Record<string, TaskPathState> = {}
       const byComputer = new Map<string, string[]>()
       for (const taskId of taskIds) {
-        const computerId = await deps.targetOf(TASK_PATH_KIND, taskId)
+        // A personal workspace's folders are on its user's own computer (T-100).
+        const personal = await personalOf(taskId)
+        const computerId = personal
+          ? ((await resolveTaskComputerId(db, taskId, personal)) ??
+            (await deps.personalComputer?.(taskId)) ??
+            null)
+          : await deps.targetOf(TASK_PATH_KIND, taskId)
         if (computerId === null || !deps.usable(computerId)) {
           out[taskId] = { state: 'offline', computerId }
           continue
@@ -377,7 +412,8 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
         const ids: string[] = []
         for (const id of all) {
           try {
-            await deps.flushTask(id, computerId, PATH_KINDS)
+            // Staged rows are the creator's: a personal workspace never takes them.
+            if (!(await personalOf(id))) await deps.flushTask(id, computerId, PATH_KINDS)
             ids.push(id)
           } catch (error) {
             log(`staged paths of ${id} not delivered to ${computerId}`, error)
@@ -413,6 +449,10 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
     async changed(taskId, given) {
       const row = await projectOf(taskId)
       if (!row) return
+      // A personal workspace's paths are set by `apply` on its own computer, and its
+      // clears go with the task's lifecycle there (T-100): the hub's writers below
+      // (create, archive, project move) speak for the creator's.
+      if (await personalOf(taskId)) return
       // Judged once, here: nothing a computer refuses is ever sent or staged.
       const judged = given.op === 'set' ? await judge.lenient(taskId, given) : null
       const change = judged ? judged.patch : given
@@ -442,6 +482,40 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
     async apply(taskId, given) {
       // The user's own write: a path no computer takes fails it, before any computer.
       const patch = judge.strict(given)
+      const personal = await personalOf(taskId)
+      if (personal) {
+        // Their own workspace (T-100): on their own computer, recorded as its holder.
+        const row = await projectOf(taskId)
+        if (!row) throw new Error(`Task ${taskId} not found`)
+        await db.run(
+          `UPDATE task_workspaces SET worktree_computer_id = NULL
+            WHERE task_id = ? AND user_id = ? AND worktree_computer_id IS NOT NULL
+              AND ((has_worktree = 0 AND has_base_dir = 0) OR EXISTS(
+                SELECT 1 FROM computer_retirements r
+                 WHERE r.computer_id = task_workspaces.worktree_computer_id AND r.successor_id IS NULL))`,
+          [taskId, personal]
+        )
+        const computerId = await personalHolder(taskId, personal)
+        await call(computerId, {
+          op: 'set',
+          taskId,
+          projectId: row.project_id,
+          ...(patch.worktreePath !== undefined ? { worktreePath: patch.worktreePath } : {}),
+          ...(patch.baseDir !== undefined ? { baseDir: patch.baseDir } : {}),
+          at: now()
+        })
+        await db.run(
+          `INSERT INTO task_workspaces (task_id, user_id, worktree_computer_id) VALUES (?, ?, ?)
+           ON CONFLICT (task_id, user_id) DO UPDATE
+             SET worktree_computer_id = COALESCE(task_workspaces.worktree_computer_id, excluded.worktree_computer_id)`,
+          [taskId, personal, computerId]
+        )
+        await judge.settled(
+          taskId,
+          FIELDS.filter((field) => field in patch)
+        )
+        return patch
+      }
       // A task with no folder has no holder, nor one on a computer removed for good
       // (its folders went with it): a stale one goes, so the new folder is on the
       // computer the task's work runs on now.

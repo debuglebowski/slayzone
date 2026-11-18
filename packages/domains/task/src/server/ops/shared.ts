@@ -1,4 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { currentSecurityContext } from '@slayzone/platform/security-log'
+import { personalWorkspaceUser } from '@slayzone/computers/server'
 import type {
   ProviderConfig,
   Task,
@@ -1426,6 +1428,30 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       )
     // The flags follow what the computer holds now (the delegate's answer).
     pathPatch = await taskPathsDelegate.apply(data.id, pathPatch)
+  }
+  // Someone who did not create the task works in their PERSONAL workspace (T-100):
+  // their folder flags and parent branch are theirs, never the task row's.
+  const personal = await personalWorkspaceUser(db, data.id, currentSecurityContext()?.actor ?? null)
+  if (personal) {
+    const set: Record<string, unknown> = {}
+    if (pathPatch.worktreePath !== undefined) set.has_worktree = pathPatch.worktreePath ? 1 : 0
+    if (pathPatch.baseDir !== undefined) set.has_base_dir = pathPatch.baseDir ? 1 : 0
+    const branchAt = fields.indexOf('worktree_parent_branch = ?')
+    if (branchAt >= 0) {
+      set.worktree_parent_branch = values[branchAt]
+      fields.splice(branchAt, 1)
+      values.splice(branchAt, 1)
+    }
+    const cols = Object.keys(set)
+    if (cols.length > 0) {
+      await db.run(
+        `INSERT INTO task_workspaces (task_id, user_id, ${cols.join(', ')})
+         VALUES (?, ?, ${cols.map(() => '?').join(', ')})
+         ON CONFLICT (task_id, user_id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}`,
+        [data.id, personal, ...cols.map((c) => set[c])]
+      )
+    }
+    pathPatch = {}
   }
   if (pathPatch.worktreePath !== undefined || pathPatch.baseDir !== undefined) {
     if (pathPatch.worktreePath !== undefined) {

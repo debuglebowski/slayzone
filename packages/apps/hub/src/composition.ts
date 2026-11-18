@@ -393,6 +393,7 @@ import {
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
   getComputer,
+  personalWorkspaceUser,
   recordedProjectRoot,
   setComputerBindingChangedListener,
   setComputerRemovedListener
@@ -1248,7 +1249,9 @@ export function composeServer(opts: {
       computerDataHandoff.flushTask(taskId, computerId, kinds),
     usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
     request: (computerId, request) => computerChat.lifecycle.request(computerId, request),
-    ledger: hubFaults
+    ledger: hubFaults,
+    // A personal workspace with no computer yet: the acting user's own pick (T-100).
+    personalComputer: (taskId) => placement.forTask(taskId).catch(() => null)
   })
   setTaskPathsDelegate({
     ...computerTaskPaths,
@@ -1271,6 +1274,9 @@ export function composeServer(opts: {
     usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
     flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
     track: (taskId, computerId) => computerChat.lifecycle.track(taskId, computerId),
+    // A computer whose owner did not create the task runs it as their own (T-100).
+    personal: async (taskId, computerId) =>
+      (await personalWorkspaceUser(db, taskId, await computerOwnerOf(db, computerId))) !== null,
     recoverTabs: async (taskId, computerId) => {
       await recoverTaskSessionTabs(
         {

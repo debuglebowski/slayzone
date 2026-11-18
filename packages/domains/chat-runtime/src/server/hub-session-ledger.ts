@@ -41,6 +41,13 @@ export interface ComputerSessionLedgerDeps {
   track(taskId: string, computerId: string): Promise<void>
   /** The task's one-time per-tab recovery, run against that computer (session-tab-recovery.ts). */
   recoverTabs?(taskId: string, computerId: string): Promise<void>
+  /**
+   * Whether that computer runs the task as someone's PERSONAL workspace (T-100: a user
+   * who did not create it, on their own computer). It is tracked — the task's pause,
+   * deletion and erasure reach it — but never handed the task's own rows, intents or
+   * tab recovery: those are the creator's, on the creator's computer.
+   */
+  personal?(taskId: string, computerId: string): Promise<boolean>
   /** A task's sessions changed (the sessions list refreshes). */
   onChanged?(taskId: string): void
 }
@@ -156,6 +163,10 @@ export function createComputerSessionLedger(deps: ComputerSessionLedgerDeps) {
     const running = preparing.get(key)
     if (running) return running
     const work = (async () => {
+      if (await deps.personal?.(taskId, computerId)) {
+        await deps.track(taskId, computerId)
+        return
+      }
       await deps.flushTask(taskId, computerId)
       await deps.track(taskId, computerId)
       await deliverIntents(taskId, computerId)
