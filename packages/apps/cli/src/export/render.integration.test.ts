@@ -3,6 +3,7 @@
  * `slay tasks artifacts download --type pdf|png` takes (shared document → CDP over a
  * pipe). Skipped when this machine has no browser to find; never downloads one.
  */
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -10,7 +11,7 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { defaultBrowserEnv, findBrowser } from './browser'
 import { buildDocumentHtml } from '@slayzone/task-artifacts/export-html'
-import { type Browser, launchBrowser, openPage } from './cdp'
+import { type Browser, type DebugHook, launchBrowser, openPage } from './cdp'
 import { defaultExportDeps, exportArtifact, type ExportDeps } from './export-artifact'
 import { renderPdf, renderPng } from './render'
 
@@ -21,6 +22,186 @@ const deps: ExportDeps = {
   ...defaultExportDeps(),
   installBrowser: async () => {
     throw new Error('the integration test never downloads a browser')
+  }
+}
+
+/**
+ * CI diagnostics for the tests that have failed only on GitHub's Linux runners: what
+ * the export's debug hook reports (launch, every CDP event, Chrome's stderr, the
+ * request guard's and the process watch's decisions), kept bounded and printed — each
+ * line prefixed `[export-diag]` — only when the test fails. A passing test prints
+ * nothing.
+ */
+const DIAG = '[export-diag]'
+const DIAG_HEAD = 100
+const DIAG_TAIL = 300
+const DIAG_LINE = 1200
+const DIAG_TOTAL = 150_000
+
+/** JSON with stack traces dropped and long strings cut (`html` kept longer). */
+function compact(value: unknown): string {
+  return JSON.stringify(value ?? null, (key, v) => {
+    if (key === 'initiator' && v && typeof v === 'object') return (v as { type?: unknown }).type
+    if (key === 'stackTrace' || key === 'stack') return undefined
+    if (typeof v === 'string') {
+      const max = key === 'html' ? 4000 : 400
+      return v.length > max ? `${v.slice(0, max)}…(${v.length})` : v
+    }
+    return v
+  })
+}
+
+function run(cmd: string, args: string[]): string {
+  try {
+    return execFileSync(cmd, args, { encoding: 'utf8', timeout: 5_000 }).trim()
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; message: string }
+    return `(failed: ${(e.stderr || e.stdout || e.message).trim().slice(0, 300)})`
+  }
+}
+
+function readOr(file: string): string {
+  try {
+    return fs.readFileSync(file, 'utf8').trim()
+  } catch (err) {
+    return `(${(err as NodeJS.ErrnoException).code ?? (err as Error).message})`
+  }
+}
+
+/** The OS's say on core dumps and sandboxing (Linux; elsewhere what applies). */
+function systemFacts(): string[] {
+  const facts = [
+    `platform ${process.platform} ${os.release()} uid=${process.getuid?.()} node=${process.version} electron=${process.versions.electron ?? '-'}`,
+    `ulimit -c: ${run('sh', ['-c', 'ulimit -c'])}`
+  ]
+  if (process.platform === 'linux') {
+    for (const f of [
+      '/proc/sys/kernel/core_pattern',
+      '/proc/sys/kernel/core_pipe_limit',
+      '/proc/sys/fs/suid_dumpable',
+      '/proc/sys/kernel/yama/ptrace_scope',
+      '/proc/sys/kernel/apparmor_restrict_unprivileged_userns',
+      '/proc/sys/kernel/unprivileged_userns_clone',
+      '/proc/sys/user/max_user_namespaces'
+    ]) {
+      facts.push(`${f}: ${readOr(f)}`)
+    }
+    facts.push(
+      `coredumpctl: ${run('coredumpctl', ['--no-pager', '--no-legend', 'list', '--since=-10min']).slice(0, 2000)}`
+    )
+  }
+  return facts
+}
+
+/** What /proc says about `pid` (Linux): state, core dump, PID namespaces. */
+function procFacts(pid: number): string {
+  if (process.platform !== 'linux')
+    return `pid ${pid}: ${run('ps', ['-o', 'pid,stat,etime', '-p', String(pid)])}`
+  const status = readOr(`/proc/${pid}/status`)
+  const pick = (k: string) => status.match(new RegExp(`^${k}:\\s*(.*)$`, 'm'))?.[1] ?? '?'
+  return `pid ${pid}: exists=${fs.existsSync(`/proc/${pid}`)} State=${pick('State')} CoreDumping=${pick('CoreDumping')} PPid=${pick('PPid')} NSpid=${pick('NSpid')} TracerPid=${pick('TracerPid')}`
+}
+
+/** This browser's processes (`--user-data-dir`), as `ps` lists them. */
+function browserProcesses(userDataDir: string | undefined): string[] {
+  const all = run('ps', ['-ww', '-eo', 'pid,ppid,stat,etime,args']).split('\n')
+  const ours = userDataDir ? all.filter((l) => l.includes(userDataDir)) : []
+  return [
+    `ps: ${ours.length} process(es) with ${userDataDir ?? '(no user-data-dir known)'}`,
+    ...ours
+      .slice(0, 40)
+      .map((l) => `ps| ${l.replace(/\s--(?!type=|utility-sub-type=)[^\s]+/g, '').slice(0, 300)}`)
+  ]
+}
+
+interface Diagnostics {
+  debug: DebugHook
+  add(line: string): void
+  /** The pid the export watches for the page, if it named one. */
+  watchedPid(): number | undefined
+  userDataDir(): string | undefined
+  /** Run `fn`; on failure print everything gathered (and `more()`), then fail as it did. */
+  report(fn: () => Promise<void>, more?: () => Promise<string[]>): Promise<void>
+}
+
+function diagnostics(test: string): Diagnostics {
+  const started = Date.now()
+  const head: string[] = []
+  const tail: string[] = []
+  let dropped = 0
+  let previous = ''
+  let repeats = 0
+  let dataDir: string | undefined
+  let watched: number | undefined
+  const push = (line: string): void => {
+    if (head.length < DIAG_HEAD) head.push(line)
+    else {
+      tail.push(line)
+      if (tail.length > DIAG_TAIL) {
+        tail.shift()
+        dropped++
+      }
+    }
+  }
+  const flushRepeats = (): void => {
+    if (repeats > 0) push(`  (previous line ×${repeats + 1})`)
+    repeats = 0
+  }
+  const add = (line: string): void => {
+    const body = line.length > DIAG_LINE ? `${line.slice(0, DIAG_LINE)}…` : line
+    if (body === previous) {
+      repeats++
+      return
+    }
+    flushRepeats()
+    previous = body
+    push(`+${Date.now() - started}ms ${body}`)
+  }
+  const debug: DebugHook = (what, detail) => {
+    if (what === 'stderr') {
+      for (const l of String(detail?.text ?? '').split('\n')) if (l.trim()) add(`stderr| ${l}`)
+      return
+    }
+    if (what === 'launch') dataDir = String(detail?.userDataDir)
+    if (what === 'watch-process' && typeof detail?.pid === 'number') watched = detail.pid
+    if (what === 'event' && detail?.method === 'Tracing.dataCollected') {
+      add('event Tracing.dataCollected')
+      return
+    }
+    add(`${what} ${compact(detail)}`)
+    // The load wait is over, the browser still runs: which processes it has now.
+    if (what === 'page-state') for (const l of browserProcesses(dataDir)) add(l)
+  }
+  return {
+    debug,
+    add,
+    watchedPid: () => watched,
+    userDataDir: () => dataDir,
+    async report(fn, more) {
+      try {
+        await fn()
+      } catch (err) {
+        const extra = await (more?.() ?? Promise.resolve([])).catch((e: Error) => [
+          `(gathering failed: ${e.message})`
+        ])
+        for (const l of [...systemFacts(), ...extra]) add(l)
+        flushRepeats()
+        let text = [
+          `===== ${test}: FAILED (${(err as Error).message.slice(0, 300)})`,
+          ...head,
+          ...(dropped ? [`… ${dropped} line(s) dropped …`] : []),
+          ...tail,
+          `===== ${test}: end`
+        ]
+          .map((l) => `${DIAG} ${l}`)
+          .join('\n')
+        if (text.length > DIAG_TOTAL) {
+          text = `${text.slice(0, DIAG_TOTAL / 3)}\n${DIAG} …(cut)…\n${text.slice(-(DIAG_TOTAL * 2) / 3)}`
+        }
+        console.error(text)
+        throw err
+      }
+    }
   }
 }
 
@@ -129,11 +310,44 @@ describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () =>
   // browser hears nothing (GitHub's Ubuntu runners: systemd-coredump), the page's own
   // process says it.
   test('a long command on a crashed page rejects within seconds', { timeout: 60_000 }, async () => {
-    // A liveness interval far beyond the test: only the crash itself can end it.
-    b = await launchBrowser(BROWSER as string, { livenessIntervalMs: 120_000 })
+    const diag = diagnostics('crash test')
+    // What the browser and the OS say about the page's process when the crash goes unseen.
+    const more = async (): Promise<string[]> => {
+      const lines: string[] = []
+      const pid = diag.watchedPid()
+      lines.push(pid === undefined ? 'watched pid: none' : `watched ${procFacts(pid)}`)
+      const ps = browserProcesses(diag.userDataDir())
+      lines.push(...ps)
+      for (const m of ps.join('\n').matchAll(/^ps\|\s*(\d+)\s.*--type=renderer/gm)) {
+        lines.push(`renderer ${procFacts(Number(m[1]))}`)
+      }
+      for (const [method, params] of [
+        ['Browser.getVersion', {}],
+        ['Target.getTargets', {}],
+        ['SystemInfo.getProcessInfo', {}]
+      ] as const) {
+        const answer = await Promise.race([
+          b?.send(method, params).then(compact, (e: Error) => `error ${e.message}`),
+          new Promise<string>((r) => setTimeout(() => r('no answer in 3 s'), 3_000))
+        ])
+        lines.push(`${method}: ${answer}`)
+      }
+      return lines
+    }
+    await diag.report(async () => {
+      // A liveness interval far beyond the test: only the crash itself can end it.
+      b = await launchBrowser(BROWSER as string, {
+        livenessIntervalMs: 120_000,
+        debug: diag.debug
+      })
+      await crashedPageRejects(b)
+    }, more)
+  })
+
+  async function crashedPageRejects(browser: Browser): Promise<void> {
     // The page as an export opens it.
-    const { sessionId } = await openPage(b)
-    const long = b.sendLong(
+    const { sessionId } = await openPage(browser)
+    const long = browser.sendLong(
       'Runtime.evaluate',
       { expression: 'new Promise(() => {})', awaitPromise: true },
       sessionId
@@ -144,7 +358,7 @@ describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () =>
     )
     const started = Date.now()
     // Page.crash itself is never answered: the renderer is gone.
-    b.send('Page.crash', {}, sessionId).catch(() => undefined)
+    browser.send('Page.crash', {}, sessionId).catch(() => undefined)
     // Bounded well inside the test's timeout: a miss fails here, as an assertion.
     let bound: NodeJS.Timeout | undefined
     const missed = new Promise<string>((resolve) => {
@@ -153,7 +367,7 @@ describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () =>
     expect(await Promise.race([outcome, missed])).toMatch(/page (crashed|closed) while rendering/)
     clearTimeout(bound)
     expect(Date.now() - started).toBeLessThan(10_000)
-  })
+  }
 })
 
 describe.skipIf(!BROWSER)('an html artifact that opens JS dialogs (review 6, #2)', () => {
@@ -215,15 +429,22 @@ describe.skipIf(!BROWSER)('a script that loops once printing starts (review 7, #
 function localServer(): {
   origin: () => string
   hits: string[]
+  /** Diagnostics: every connection and request (method, headers), timestamped. */
+  log: string[]
   start: () => Promise<void>
   stop: () => Promise<void>
 } {
   const hits: string[] = []
+  const log: string[] = []
+  const stamp = (line: string): void => {
+    log.push(`server ${new Date().toISOString()} ${line}`)
+  }
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
     'base64'
   )
   const server = http.createServer((req, res) => {
+    stamp(`${req.method} ${req.url} ${compact(req.headers)}`)
     hits.push(req.url ?? '')
     if (req.url?.startsWith('/slow-frame')) {
       setTimeout(() => {
@@ -247,12 +468,88 @@ function localServer(): {
     }
     res.writeHead(200, { 'content-type': 'text/html' }).end('<p>remote page</p>')
   })
+  server.on('connection', (socket) => {
+    stamp(`connection from ${socket.remoteAddress}:${socket.remotePort}`)
+  })
   return {
     hits,
+    log,
     origin: () => `http://127.0.0.1:${(server.address() as { port: number }).port}`,
     start: () => new Promise((r) => server.listen(0, '127.0.0.1', () => r())),
     stop: () => new Promise((r) => server.close(() => r()))
   }
+}
+
+/**
+ * Diagnostics, run only once a child-frame test has failed: does a child frame's
+ * request reach `server` from a browser launched as the export launches it, and from
+ * one launched with a flag changed? The browser is started through a wrapper script
+ * (as `--browser` allows), so the export code is unchanged. Each variant: one page,
+ * one iframe, at most `PROBE_WAIT_MS` for its request.
+ */
+const PROBE_WAIT_MS = 6_000
+const PROBE_VARIANTS: Array<{ label: string; drop?: string; add?: string }> = [
+  { label: 'as the export launches it (control)' },
+  { label: 'without --disable-crashpad-for-testing', drop: '--disable-crashpad-for-testing' },
+  {
+    label: 'with Local/Private Network Access checks off',
+    add: '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessForNavigations,PrivateNetworkAccessRespectPreflightResults'
+  },
+  { label: 'with --no-sandbox', add: '--no-sandbox' }
+]
+
+async function frameProbes(server: ReturnType<typeof localServer>): Promise<string[]> {
+  const lines: string[] = []
+  const quote = (v: string): string => `'${v.replace(/'/g, "'\\''")}'`
+  for (const [i, variant] of PROBE_VARIANTS.entries()) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-export-probe-'))
+    const script = path.join(dir, 'browser.sh')
+    fs.writeFileSync(
+      script,
+      [
+        '#!/bin/sh',
+        `for a in "$@"; do shift; [ "$a" = ${quote(variant.drop ?? '')} ] || set -- "$@" "$a"; done`,
+        `exec ${quote(BROWSER as string)} "$@"${variant.add ? ` ${quote(variant.add)}` : ''}`
+      ].join('\n'),
+      { mode: 0o755 }
+    )
+    const probePath = `/probe-${i}`
+    const started = Date.now()
+    let outcome = 'NOT requested'
+    let probe: Browser | undefined
+    try {
+      probe = await launchBrowser(script, { commandTimeoutMs: 10_000 })
+      const { sessionId } = await openPage(probe)
+      await probe.send('Page.enable', {}, sessionId)
+      const { frameTree } = await probe.send<{ frameTree: { frame: { id: string } } }>(
+        'Page.getFrameTree',
+        {},
+        sessionId
+      )
+      await probe.send(
+        'Page.setDocumentContent',
+        {
+          frameId: frameTree.frame.id,
+          html: `<!DOCTYPE html><p>probe</p><iframe src="${server.origin()}${probePath}"></iframe>`
+        },
+        sessionId
+      )
+      while (Date.now() - started < PROBE_WAIT_MS) {
+        if (server.hits.includes(probePath)) {
+          outcome = 'requested'
+          break
+        }
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    } catch (err) {
+      outcome = `probe failed: ${(err as Error).message.slice(0, 300)}`
+    } finally {
+      await probe?.close({ kill: true }).catch(() => undefined)
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+    lines.push(`frame probe ${variant.label}: ${outcome} (${Date.now() - started} ms)`)
+  }
+  return lines
 }
 
 /**
@@ -414,15 +711,30 @@ describe.skipIf(!BROWSER)('the export document cannot navigate itself (review 9,
     timeout: 90_000
   }, async () => {
     server.hits.length = 0
+    server.log.length = 0
+    const diag = diagnostics('navigations test')
     // The refresh (a dashboard's) is due long after the export is done.
     const html = `<!DOCTYPE html><meta http-equiv="refresh" content="600"><p>x</p><iframe id="f" src="${server.origin()}/frame"></iframe><script>
       location.hash = '#a'; history.pushState({}, '', '#b')
       addEventListener('load', () => { document.getElementById('f').src = '${server.origin()}/frame2' })
     </script>`
-    const pdf = await renderPdf(BROWSER as string, html, { ...opts, readyTimeoutMs: 3_000 })
-    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
-    expect(server.hits).toContain('/frame')
-    expect(server.hits).toContain('/frame2')
+    await diag.report(
+      async () => {
+        const pdf = await renderPdf(BROWSER as string, html, {
+          ...opts,
+          readyTimeoutMs: 3_000,
+          browser: { ...opts.browser, debug: diag.debug }
+        })
+        expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+        expect(server.hits).toContain('/frame')
+        expect(server.hits).toContain('/frame2')
+      },
+      async () => [
+        `server origin ${server.origin()}`,
+        ...server.log,
+        ...(await frameProbes(server))
+      ]
+    )
   })
 
   // CI round 2: a cross-site child frame loads in a process of its own, and
@@ -433,13 +745,24 @@ describe.skipIf(!BROWSER)('the export document cannot navigate itself (review 9,
     timeout: 90_000
   }, async () => {
     server.hits.length = 0
+    server.log.length = 0
+    const diag = diagnostics('slow child frame test')
     const html = `<!DOCTYPE html><p>x</p><iframe src="${server.origin()}/slow-frame"></iframe>`
-    const pdf = await renderPdf(BROWSER as string, html, {
-      waitReady: false,
-      browser: { commandTimeoutMs: 30_000 }
-    })
-    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
-    expect(server.hits).toContain('served /slow-frame')
+    await diag.report(
+      async () => {
+        const pdf = await renderPdf(BROWSER as string, html, {
+          waitReady: false,
+          browser: { commandTimeoutMs: 30_000, debug: diag.debug }
+        })
+        expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+        expect(server.hits).toContain('served /slow-frame')
+      },
+      async () => [
+        `server origin ${server.origin()}`,
+        ...server.log,
+        ...(await frameProbes(server))
+      ]
+    )
   })
 })
 
