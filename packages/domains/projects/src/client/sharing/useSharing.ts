@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { hashKey, type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import { useTRPC, useTRPCClient } from '../trpc'
@@ -152,17 +152,62 @@ export function useBoardRoles(taskIds: readonly string[]): void {
   }, [enabled, signature, queryClient])
 }
 
+type BoardRoles = Record<string, string | null>
+
+/**
+ * One listener per query client for the board's role cache, fanned out to every reader.
+ * Hundreds of readers are mounted (each card, list row and task menu), and the query
+ * cache emits an event for every change to ANY query (each agent event, each board
+ * patch) — so readers must not each listen to the cache, nor look the key up (which
+ * hashes it) per event. The cache's own listener is held only while readers exist.
+ */
+interface BoardRolesStore {
+  subscribe: (onChange: () => void) => () => void
+  roles: () => BoardRoles | undefined
+}
+const BOARD_ROLES_HASH = hashKey(BOARD_ROLES_KEY)
+const boardRolesStores = new WeakMap<QueryClient, BoardRolesStore>()
+
+function boardRolesStore(queryClient: QueryClient): BoardRolesStore {
+  const existing = boardRolesStores.get(queryClient)
+  if (existing) return existing
+  const cache = queryClient.getQueryCache()
+  const read = (): BoardRoles | undefined => cache.get<BoardRoles>(BOARD_ROLES_HASH)?.state.data
+  const listeners = new Set<() => void>()
+  let current: BoardRoles | undefined
+  let unsubscribeCache: (() => void) | null = null
+  const store: BoardRolesStore = {
+    roles: () => (unsubscribeCache ? current : read()),
+    subscribe: (onChange) => {
+      listeners.add(onChange)
+      if (!unsubscribeCache) {
+        current = read()
+        unsubscribeCache = cache.subscribe((event) => {
+          if (event.query.queryHash !== BOARD_ROLES_HASH) return
+          const next = read()
+          if (next === current) return
+          current = next
+          for (const listener of listeners) listener()
+        })
+      }
+      return () => {
+        listeners.delete(onChange)
+        if (listeners.size === 0 && unsubscribeCache) {
+          unsubscribeCache()
+          unsubscribeCache = null
+        }
+      }
+    }
+  }
+  boardRolesStores.set(queryClient, store)
+  return store
+}
+
 /**
  * Whether the board's role cache says the caller may only view this task. Reads the
  * cache only (never fetches, never re-renders unless this task's answer changes).
  */
 export function useIsTaskViewOnly(taskId: string): boolean {
-  const queryClient = useQueryClient()
-  return useSyncExternalStore(
-    (onChange) => queryClient.getQueryCache().subscribe(onChange),
-    () =>
-      queryClient.getQueryData<Record<string, string | null>>(BOARD_ROLES_KEY)?.[
-        `task:${taskId}`
-      ] === 'view'
-  )
+  const store = boardRolesStore(useQueryClient())
+  return useSyncExternalStore(store.subscribe, () => store.roles()?.[`task:${taskId}`] === 'view')
 }
