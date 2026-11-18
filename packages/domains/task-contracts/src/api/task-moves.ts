@@ -204,6 +204,7 @@ export const MOVE_DROPPED_TABLES: Readonly<Record<string, string>> = {
   // A project's
   automation_action_runs: 'automation run history: the automations move, their runs do not',
   processes: 'running processes belong to the source computers',
+  task_computer_moves: "move journal between the source hub's computers: the target starts none",
   chat_cli_snapshots: 'cache the target rebuilds',
   chat_cli_command_details: 'cache the target rebuilds',
   chat_cli_models: 'cache the target rebuilds',

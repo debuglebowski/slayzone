@@ -34,16 +34,18 @@ function retainedEntry(root: string, contract: number) {
     )
   expect(source.includes(`HOST_CONTRACT_VERSION = ${contract};`)).toBe(true)
   expect(source).toContain(`COMPUTER_PROTOCOL_VERSION = ${COMPUTER_PROTOCOL_VERSION - 1};`)
+  // The bundler renames colliding top-level names (`id` → `id2`), so match any identifier.
   source = source
     .replace(
-      'getTabState: external_exports.tuple([id, tabStateScope.optional()]),',
-      'getTabState: external_exports.tuple([id]),'
+      /getTabState: external_exports\.tuple\(\[(\w+), (\w+)\.optional\(\)\]\),/,
+      'getTabState: external_exports.tuple([$1]),'
     )
     .replace(
-      'saveTabDraft: external_exports.tuple([id, chatDraftSchema, tabStateScope.optional()]),',
-      'saveTabDraft: external_exports.tuple([id, chatDraftSchema]),'
+      /saveTabDraft: external_exports\.tuple\(\[(\w+), (\w+), (\w+)\.optional\(\)\]\),/,
+      'saveTabDraft: external_exports.tuple([$1, $2]),'
     )
-  expect(source).toContain('getTabState: external_exports.tuple([id]),')
+  expect(source).toMatch(/getTabState: external_exports\.tuple\(\[\w+\]\),/)
+  expect(source).toMatch(/saveTabDraft: external_exports\.tuple\(\[\w+, \w+\]\),/)
   const queue = /(?:var )?queueOptions = ([\s\S]*?)\n\s*(?:var )?chatQueueOperationSchemas/.exec(
     source
   )

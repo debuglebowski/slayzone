@@ -4,6 +4,7 @@
  */
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform'
 import { constants, createWriteStream } from 'node:fs'
 import {
   chmod,
@@ -60,9 +61,10 @@ const safeId = (id: string) => {
   return id
 }
 async function git(cwd: string, args: string[], output?: string, input?: string): Promise<string> {
-  const child = spawn('git', args, {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' }
+  const child = spawn(gitCommand(env), args, {
     cwd,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' },
+    env,
     stdio: ['pipe', 'pipe', 'pipe']
   })
   child.stdin.on('error', () => {
