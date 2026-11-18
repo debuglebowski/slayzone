@@ -673,6 +673,9 @@ run_harness scripts/check-task-computer-resolver.test.mjs
 run_harness scripts/check-tsconfig-hermetic.test.mjs
 # CI's Turborepo typecheck cache keeps only the current run's entries before it is saved.
 run_harness scripts/ci/turbo-cache-prune.test.mjs
+# Machine-wide CI lock around heavy local runs (`pnpm test:e2e`, `test:unit`), shared with
+# madacademy ci/lock.sh: same queue/lock files, FIFO, stale cleanup, release on signals.
+run_harness scripts/ci-lock.test.mjs
 # `pnpm lint:theme` (Tailwind sources): every class-bearing module a theme-css shell renders
 # sits under an @source path, else its classes are never generated (MediaView bg-popover/90).
 run_harness scripts/check-tailwind-sources.test.mjs

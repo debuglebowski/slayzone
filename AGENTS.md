@@ -42,6 +42,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm test:e2e:perf` | Run perf E2E budgets alone (not in `test:e2e`) |
 | `pnpm lint` | Lint all packages |
 
+**Machine-wide CI lock.** `pnpm test:e2e` (+ `:perf`, `:chat`) and `pnpm test:unit` (+ `:fast`) first take a FIFO lock shared with other repos' local gates (`scripts/ci-lock.mjs`; same `/tmp/ci-local.{queue,lock}` files as madacademy `ci/lock.sh`) and print who holds it while waiting. Skipped when `CI` is set; `SLZ_NO_CI_LOCK=1` opts out.
+
 ## Commit Messages
 
 [Conventional Commits](https://www.conventionalcommits.org/):
