@@ -21,7 +21,8 @@ export interface TurnListOutcome {
 }
 
 export interface TurnGitRouting {
-  computerForTask(taskId: string): Promise<string | null>
+  /** The computer of the task's checkout — `userId`'s own (a tab's owner, T-100) when given. */
+  computerForTask(taskId: string, userId?: string | null): Promise<string | null>
   request(computerId: string, op: TurnGitOpName, input: unknown): Promise<unknown>
   /** Record one turn boundary on the computer holding the checkout. */
   record(
@@ -45,8 +46,11 @@ export function setTurnGitRouting(next: TurnGitRouting | null): void {
   routing = next
 }
 
-export function computerForTurnTask(taskId: string): Promise<string | null> {
-  return routing ? routing.computerForTask(taskId) : Promise.resolve(null)
+export function computerForTurnTask(
+  taskId: string,
+  userId?: string | null
+): Promise<string | null> {
+  return routing ? routing.computerForTask(taskId, userId) : Promise.resolve(null)
 }
 
 /** Run `op` on `computerId`; none = refused. */

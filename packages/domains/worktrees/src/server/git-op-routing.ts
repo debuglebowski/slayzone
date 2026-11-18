@@ -15,6 +15,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { inPathScopeOf, PathScopeRequiredError } from '@slayzone/platform/path-scope'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
+import { currentSecurityContext } from '@slayzone/platform/security-log'
 import { gitOpTimeoutMs, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
 import type { GitOpResult } from './git-ops'
 import { getGitWatcher } from './git-watcher'
@@ -79,7 +80,7 @@ interface RoutedWatch {
   computerId: string
   watchId: string
   worktreePath: string
-  owner: { taskId?: string; projectId?: string }
+  owner: WatchOwner
   count: number
   /** The computer's start: a panel joining while it is in flight waits for it (M3). */
   started: Promise<void>
@@ -87,9 +88,18 @@ interface RoutedWatch {
 const routedWatches = new Map<string, RoutedWatch>()
 let watchSeq = 0
 
-/** One watch per scope and checkout. */
+/** What a watch's events carry for their owner check: its scope, and whose it is. */
+type WatchOwner = { taskId?: string; projectId?: string; userId?: string }
+
+/** The acting user (T-100): on a shared task each person watches their own checkout. */
+function watcher(): string | null {
+  return currentSecurityContext()?.actor ?? null
+}
+
+/** One watch per user, scope and checkout. */
 function watchKey(target: GitScope, worktreePath: string): string {
   return JSON.stringify([
+    watcher(),
     target.taskId ?? null,
     target.projectId ?? null,
     target.projectWide === true,
@@ -97,9 +107,13 @@ function watchKey(target: GitScope, worktreePath: string): string {
   ])
 }
 
-/** The scope a watch's events carry, for their owner check. */
-function ownerOf(target: GitScope): { taskId?: string; projectId?: string } {
-  return target.taskId ? { taskId: target.taskId } : { projectId: target.projectId }
+/** The scope a watch's events carry, and its watcher: who they reach. */
+function ownerOf(target: GitScope): WatchOwner {
+  const userId = watcher()
+  const scope: WatchOwner = target.taskId
+    ? { taskId: target.taskId }
+    : { projectId: target.projectId }
+  return userId ? { ...scope, userId } : scope
 }
 
 /** `worktrees.watchStart`: watch where the checkout lives, under its scope. */

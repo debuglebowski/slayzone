@@ -13,6 +13,9 @@
  */
 import Database from 'better-sqlite3'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { getGitWatcher } from '@slayzone/worktrees/server'
+// Same module instance the routers subscribe to (see owner-checks-harness.ts).
+import { agentTurnsEvents } from '../../../domains/agent-turns/src/server/index.js'
 import {
   bootInProcessHub,
   hubClient,
@@ -188,6 +191,75 @@ describe('T-100 sharing: members, roles, private tasks and grants on a real hub'
     }
     expect(task.assignee_user_id).toBe(ids.c)
     expect(task.assignee).toBe('linear-person')
+  })
+
+  test("a member's own agent turns and git diffs reach them live; the creator's stay the creator's", async () => {
+    raw
+      .prepare(
+        `INSERT INTO terminal_tabs (id, task_id, mode, is_main, owner_user_id) VALUES ('tab_b_own', ?, 'claude-code', 0, ?)`
+      )
+      .run(A.task, ids.b)
+    const got: Record<string, unknown[]> = {}
+    const subs: { unsubscribe: () => void }[] = []
+    const listen = (who: string, c: Client, path: string) =>
+      new Promise<void>((resolve, reject) => {
+        got[`${who} ${path}`] = []
+        subs.push(
+          procedureAt(c.client, path).subscribe(undefined, {
+            onStarted: () => resolve(),
+            onData: (v) => got[`${who} ${path}`]!.push(v),
+            onError: (e) => reject(new Error(`${who} ${path}: ${String(e)}`))
+          })
+        )
+      })
+    const paths = ['agentTurns.onChanged', 'worktrees.onDiffChanged']
+    await Promise.all(paths.flatMap((p) => [listen('A', ca, p), listen('B', cb, p)]))
+    try {
+      const counts = async (emit: () => void): Promise<Record<string, number>> => {
+        for (const k of Object.keys(got)) got[k] = []
+        emit()
+        await new Promise((r) => setTimeout(r, 400))
+        return Object.fromEntries(Object.entries(got).map(([k, v]) => [k, v.length]))
+      }
+      // B's agent finished a turn in B's own tab: B refreshes, A has nothing to refresh.
+      expect(
+        await counts(() =>
+          agentTurnsEvents.emit('agent-turns:changed', {
+            worktreePath: '/b/checkout',
+            taskId: A.task,
+            tabId: 'tab_b_own'
+          })
+        )
+      ).toMatchObject({ 'B agentTurns.onChanged': 1, 'A agentTurns.onChanged': 0 })
+      // A's own tab: A's alone.
+      expect(
+        await counts(() =>
+          agentTurnsEvents.emit('agent-turns:changed', {
+            worktreePath: '/a/checkout',
+            taskId: A.task,
+            tabId: A.tab
+          })
+        )
+      ).toMatchObject({ 'B agentTurns.onChanged': 0, 'A agentTurns.onChanged': 1 })
+      // A diff watch is the watcher's: B's checkout to B, A's to A.
+      const diff = (userId: string) => () =>
+        getGitWatcher().emit('git:diff-changed', {
+          worktreePath: '/checkout',
+          refsChanged: false,
+          taskId: A.task,
+          userId
+        })
+      expect(await counts(diff(ids.b))).toMatchObject({
+        'B worktrees.onDiffChanged': 1,
+        'A worktrees.onDiffChanged': 0
+      })
+      expect(await counts(diff(A.userId!))).toMatchObject({
+        'B worktrees.onDiffChanged': 0,
+        'A worktrees.onDiffChanged': 1
+      })
+    } finally {
+      for (const s of subs) s.unsubscribe()
+    }
   })
 
   test('removing a member closes the project to them', async () => {

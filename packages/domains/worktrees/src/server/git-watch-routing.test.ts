@@ -70,6 +70,38 @@ describe('routed git watch', () => {
     await caller.watchStop({ target: { projectId: 'p-test' }, worktreePath: '/w/s' })
   })
 
+  test('each person watches their own checkout (T-100): one watch per user, events name its watcher', async () => {
+    calls.length = 0
+    // A request's user, as the hub's tRPC context carries it.
+    const as = (userId: string) =>
+      worktreesRouter.createCaller({
+        db: noCheckouts as never,
+        dataRoot: '',
+        principal: { userId }
+      } as never)
+    const target = { projectId: 'p-test' }
+    await as('u_a').watchStart({ target, worktreePath: '/w/u' })
+    const aWatch = watchIds.at(-1)!
+    await as('u_b').watchStart({ target, worktreePath: '/w/u' })
+    const bWatch = watchIds.at(-1)!
+    // Same path, two people: two watches (each on their own computer in a real hub).
+    expect(calls).toEqual(['start c1 /w/u', 'start c1 /w/u'])
+    const seen: unknown[] = []
+    const on = (p: unknown) => seen.push(p)
+    getGitWatcher().on('git:diff-changed', on)
+    deliverGitWatchEvent('c1', { watchId: bWatch, kind: 'changed', refsChanged: false })
+    deliverGitWatchEvent('c1', { watchId: aWatch, kind: 'changed', refsChanged: false })
+    getGitWatcher().off('git:diff-changed', on)
+    expect(seen).toEqual([
+      { worktreePath: '/w/u', refsChanged: false, projectId: 'p-test', userId: 'u_b' },
+      { worktreePath: '/w/u', refsChanged: false, projectId: 'p-test', userId: 'u_a' }
+    ])
+    // B's stop ends B's watch only.
+    await as('u_b').watchStop({ target, worktreePath: '/w/u' })
+    expect(calls).toEqual(['start c1 /w/u', 'start c1 /w/u', 'stop c1 last'])
+    await as('u_a').watchStop({ target, worktreePath: '/w/u' })
+  })
+
   test('a lost computer: watch-failed, and the next subscribe starts afresh', async () => {
     calls.length = 0
     await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/t' })

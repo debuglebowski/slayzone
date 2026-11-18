@@ -7,6 +7,9 @@ import { agentTurnsEvents } from './events'
  * The task of a tab and the computer its checkout is on. Which checkout (its
  * worktree, else its project's folder there) the computer knows itself (§9 Phase
  * 7c: the hub keeps no task path). Null without a computer.
+ *
+ * A tab is one user's (T-100): a member's agent on a shared task runs in the member's
+ * own checkout on their own computer, so the turn is resolved as the tab's owner.
  */
 async function resolveTabContext(
   db: SlayzoneDb,
@@ -14,11 +17,13 @@ async function resolveTabContext(
 ): Promise<{ taskId: string; projectId: string | null; computerId: string } | null> {
   const row = (await db
     .prepare(
-      `SELECT t.id AS task_id, t.project_id FROM terminal_tabs tt JOIN tasks t ON t.id = tt.task_id WHERE tt.id = ?`
+      `SELECT t.id AS task_id, t.project_id, tt.owner_user_id FROM terminal_tabs tt JOIN tasks t ON t.id = tt.task_id WHERE tt.id = ?`
     )
-    .get(tabId)) as { task_id: string; project_id: string | null } | undefined
+    .get(tabId)) as
+    | { task_id: string; project_id: string | null; owner_user_id: string | null }
+    | undefined
   if (!row) return null
-  const computerId = await computerForTurnTask(row.task_id)
+  const computerId = await computerForTurnTask(row.task_id, row.owner_user_id)
   // No computer: the snapshot has nowhere to run (the hub runs no git). Skipped
   // quietly — this fires on every agent turn.
   if (computerId == null) return null
@@ -36,13 +41,13 @@ function isCleanPrompt(text: string): boolean {
   return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x1b]/.test(text)
 }
 
-function broadcastChange(worktreePath: string, taskId: string): void {
+function broadcastChange(worktreePath: string, taskId: string, tabId: string): void {
   // Pure domain signal — electron-free so this module lives in `server/`. The
   // tRPC `agentTurns.onChanged` subscription wraps this emitter; the Electron-
   // only `initAgentTurnsBroadcast()` subscriber (../electron/agent-turns-broadcast.ts)
   // mirrors each change onto the legacy `agent-turns:changed` + `tasks:changed`
   // webContents.send channels until the renderer drops IPC (slice 5).
-  agentTurnsEvents.emit('agent-turns:changed', { worktreePath, taskId })
+  agentTurnsEvents.emit('agent-turns:changed', { worktreePath, taskId, tabId })
 }
 
 /**
@@ -72,7 +77,7 @@ export async function recordTurnBoundary(
       `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
     )
     .run(outcome.createdAt, ctx.taskId, outcome.createdAt)
-  broadcastChange(outcome.worktreePath, ctx.taskId)
+  broadcastChange(outcome.worktreePath, ctx.taskId, tabId)
 }
 
 /**

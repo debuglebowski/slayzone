@@ -4,6 +4,8 @@ import { TypedEmitter } from '@slayzone/platform/events'
 export interface AgentTurnsChange {
   worktreePath: string
   taskId: string
+  /** The tab whose agent ran the turn: its owner is who it reaches (T-100). */
+  tabId?: string
 }
 
 export type AgentTurnsEventMap = {

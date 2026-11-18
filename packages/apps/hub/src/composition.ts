@@ -2886,7 +2886,13 @@ export function composeServer(opts: {
       }
     }
     setTurnGitRouting({
-      computerForTask: (taskId) => placement.forTarget({ taskId }),
+      // A turn is its tab owner's (T-100): placed as them, onto their own computer.
+      computerForTask: (taskId, userId) =>
+        userId
+          ? runWithSecurityContext({ actor: userId, ip: null, route: 'agent-turn' }, () =>
+              placement.forTarget({ taskId })
+            )
+          : placement.forTarget({ taskId }),
       request: async (computerId, op, input) =>
         gitOpResultSchema.parse(
           await computerGateway.request(

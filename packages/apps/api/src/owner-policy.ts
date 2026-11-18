@@ -444,6 +444,19 @@ const onScopeOwner: EventFilter = (event, ctx) =>
     ? on('taskId', 'taskOwner')(event, ctx)
     : on('projectId', 'projectOwner')(event, ctx)
 
+/**
+ * A git watch's event (T-100): each person watches their own checkout, so one naming
+ * its watcher reaches that user only, who must still run work on the scope. One
+ * naming no watcher (a hub without login) is its scope owner's.
+ */
+const onWatcher: EventFilter = (event, ctx) => {
+  if (!isRecord(event) || typeof event.userId !== 'string') return onScopeOwner(event, ctx)
+  if (event.userId !== ctx.userId) return DROP
+  return typeof event.taskId === 'string'
+    ? on('taskId', 'taskRunner')(event, ctx)
+    : on('projectId', 'projectRunner')(event, ctx)
+}
+
 /** The event IS the id. */
 const onValue =
   (kind: ResourceKind): EventFilter =>
@@ -543,7 +556,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'agentSessions.recordDetected': checked(taskRunner('taskId')),
   'agentSessions.testLedger': checked(taskRunner('taskId')),
   'agentTurns.list': then(checked(taskRunner('taskId')), rows('task_id', 'taskRunner')),
-  'agentTurns.onChanged': streamed(on('taskId', 'taskOwner')),
+  // A turn is its tab's (T-100): its owner refreshes; one naming no tab, the task's runtime.
+  'agentTurns.onChanged': streamed(onFirst(['tabId', 'tab'], ['taskId', 'taskOwner'])),
 
   // ── AI config ──
   // Disk procedures name their PATH SCOPE (§9 Phase 7c): the project (or task) the
@@ -1579,8 +1593,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.getPrDiff': checked(...TARGET),
   'worktrees.getGhUser': checked(...TARGET),
   'worktrees.editPrComment': checked(...TARGET),
-  'worktrees.onDiffChanged': streamed(onScopeOwner),
-  'worktrees.onDiffWatchFailed': streamed(onScopeOwner),
+  'worktrees.onDiffChanged': streamed(onWatcher),
+  'worktrees.onDiffWatchFailed': streamed(onWatcher),
 
   // ── `admin` procedures (T-106): management, never another user's content (O-6) ──
   'aiConfig.marketplace.addRegistry': none(LIBRARY),

@@ -73,6 +73,8 @@ export interface GitDiffChangedPayload {
   /** The task / project the watch was opened for (the event's owner check). */
   taskId?: string
   projectId?: string
+  /** Whose watch it is (T-100): each person watches their own checkout. */
+  userId?: string
 }
 
 export interface GitWatcherEvents {
@@ -87,6 +89,7 @@ export interface GitWatcherEvents {
     worktreePath: string
     taskId?: string
     projectId?: string
+    userId?: string
   }) => void
 }
 

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { listAgentTurnsForTask } from './list-turns'
 import { recordTurnBoundary } from './turn-tracker'
+import { agentTurnsEvents } from './events'
 import { setTurnGitRouting, type TurnGitRouting } from './turn-git-routing'
 
 const h = await createTestHarness()
@@ -101,6 +102,32 @@ describe('turns on the computer', () => {
     expect(h.db.prepare('SELECT last_interaction_at FROM tasks WHERE id=?').get('t1')).toEqual({
       last_interaction_at: 1234
     })
+  })
+
+  test("a member's tab records on the member's own computer, and its event names the tab (T-100)", async () => {
+    h.db
+      .prepare(
+        'INSERT INTO terminal_tabs (id, task_id, mode, position, owner_user_id) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('tab_member', 't1', 'claude-code', 1, 'u_member')
+    const asked: Array<[string, string | null | undefined]> = []
+    route({
+      computerForTask: async (taskId, userId) => {
+        asked.push([taskId, userId])
+        return userId === 'u_member' ? 'c_member' : 'c1'
+      }
+    })
+    const events: unknown[] = []
+    const onChange = (c: unknown) => void events.push(c)
+    agentTurnsEvents.on('agent-turns:changed', onChange)
+    try {
+      await recordTurnBoundary(db, 'tab_member', 'go')
+    } finally {
+      agentTurnsEvents.off('agent-turns:changed', onChange)
+    }
+    expect(asked).toEqual([['t1', 'u_member']])
+    expect(sent.map((s) => s.computerId)).toEqual(['c_member'])
+    expect(events).toEqual([{ worktreePath: '/real/wt', taskId: 't1', tabId: 'tab_member' }])
   })
 
   test('raw terminal input is never a preview', async () => {
