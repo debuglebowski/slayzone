@@ -229,6 +229,14 @@ export interface ChatAvailability {
   /** Hub recovery watermark. A ready computer can have missed live notifications. */
   recoveryGeneration?: string
 }
+/**
+ * Whether the chat's computer can run its agent now: 'ready', or 'preparing' (the
+ * computer's normal chat load). Anything else (offline, upgrading, paused, …) fails
+ * a start — a restore waits for the computer instead of attempting one.
+ */
+export function chatComputerCanStart(state: ChatAvailability['state']): boolean {
+  return state === 'ready' || state === 'preparing'
+}
 export function chatAvailabilityMessage(
   status: ChatAvailability
 ): { title: string; detail: string } | null {

@@ -55,7 +55,11 @@ import {
   selectCodexPlanReview,
   useChatSession
 } from '@slayzone/terminal/client'
-import { chatCapabilitiesForMode, chatProviderForMode } from '@slayzone/terminal-contracts'
+import {
+  chatCapabilitiesForMode,
+  chatComputerCanStart,
+  chatProviderForMode
+} from '@slayzone/terminal-contracts'
 import type { AgentState } from '@slayzone/terminal-contracts'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { useChatAttachments } from './attachments/useChatAttachments'
@@ -548,6 +552,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       isMain,
       isTemporary,
       shown: isActive,
+      computerReady: storage.status !== null && chatComputerCanStart(storage.status.state),
       chatApi,
       inFlight,
       hydrating,

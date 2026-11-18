@@ -81,6 +81,7 @@ export type {
 export {
   CHAT_UNAVAILABLE_TITLE,
   chatAvailabilityMessage,
+  chatComputerCanStart,
   chatUnavailableDetail,
   chatUnavailableMessage
 } from './computer-chat'

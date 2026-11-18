@@ -7,6 +7,7 @@ import type { ChatTimelineState } from '@slayzone/terminal/client'
 import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,
+  chatComputerCanStart,
   parseAgentStartupMode,
   type AgentState
 } from '@slayzone/terminal-contracts'
@@ -29,6 +30,12 @@ export interface UseChatLifecycleOpts {
   /** Task view on screen. Off screen (tab-bar restore on reload/restart) the
    *  startup mode only restores what `auto` would; the rest waits until shown. */
   shown?: boolean
+  /**
+   * The chat's computer can run its agent now (the tab's chat availability, which is
+   * read while the tab is on screen). A start deferred because that computer could
+   * not run it waits for this. Absent = assume it can.
+   */
+  computerReady?: boolean
   chatApi: ChatActions
   inFlight: boolean
   hydrating: boolean
@@ -51,6 +58,22 @@ type ChatTarget = {
 // Imperative bodies live outside the hook: the React Compiler cannot lower
 // `finally` clauses or value blocks inside try/catch, so keeping them here lets
 // the hook itself compile.
+/**
+ * Can the tab's chat computer run its agent now? Unknown (an older hub without the
+ * read, a failed read) answers yes: the start is attempted as before.
+ */
+function computerCanStartNow(
+  trpcClient: ReturnType<typeof useTRPCClient>,
+  tabId: string
+): Promise<boolean> {
+  return Promise.resolve()
+    .then(() => trpcClient.chat.availability.query({ tabId }))
+    .then(
+      (status) => chatComputerCanStart(status.state),
+      () => true
+    )
+}
+
 async function restartChat(
   chatApi: ChatActions,
   target: ChatTarget,
@@ -145,6 +168,7 @@ export function useChatLifecycle({
   isMain = false,
   isTemporary = false,
   shown = true,
+  computerReady = true,
   chatApi,
   inFlight,
   hydrating,
@@ -170,8 +194,13 @@ export function useChatLifecycle({
   const [openState] = useState(() => ({ agentState, isMain, isTemporary }))
   const autoStartedRef = useRef(false)
   // 'now' = start, 'shown' = start once the task is on screen (effect below),
-  // 'none' = leave it for the user.
-  const [startDecision, setStartDecision] = useState<'now' | 'shown' | 'none' | null>(null)
+  // 'computer' = start once on screen AND its computer can run it (it could not
+  // when decided: offline, upgrading, … — attempting it then only failed, one
+  // toast per restored tab, while the chat already says why), 'none' = leave it
+  // for the user.
+  const [startDecision, setStartDecision] = useState<'now' | 'shown' | 'computer' | 'none' | null>(
+    null
+  )
   useEffect(() => {
     if (hydrating || autoStartedRef.current) return
     autoStartedRef.current = true
@@ -180,18 +209,22 @@ export function useChatLifecycle({
     void trackRestoration(
       Promise.all([
         trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
-        hubAllows(trpcClient, 'chat.start')
+        hubAllows(trpcClient, 'chat.start'),
+        computerCanStartNow(trpcClient, tabId)
       ])
     )
-      .then(([raw, canStart]) => {
+      .then(([raw, canStart, computerCan]) => {
         // Older hubs and narrower credentials may deny startup. Restoring a tab
         // must not issue a forbidden spawn or leave the startup card loading.
         if (!canStart) {
           setStartDecision('none')
           return
         }
+        const starts = (decision: 'now' | 'shown'): void =>
+          setStartDecision(computerCan ? decision : 'computer')
         if (!openState.isMain) {
-          setStartDecision(openState.agentState === 'running' ? 'now' : 'none')
+          if (openState.agentState === 'running') starts('now')
+          else setStartDecision('none')
           return
         }
         const rule = {
@@ -199,15 +232,15 @@ export function useChatLifecycle({
           state: openState.agentState,
           isTemporary: openState.isTemporary
         }
-        if (agentStartsOnOpen({ ...rule, shown: false })) setStartDecision('now')
-        else if (agentStartsOnOpen({ ...rule, shown: true })) setStartDecision('shown')
+        if (agentStartsOnOpen({ ...rule, shown: false })) starts('now')
+        else if (agentStartsOnOpen({ ...rule, shown: true })) starts('shown')
         else setStartDecision('none')
       })
       .catch(() => {
         // Best-effort — the chat still spawns when the user types.
         setStartDecision('none')
       })
-  }, [hydrating, openState, trpcClient, trackRestoration])
+  }, [hydrating, openState, trpcClient, trackRestoration, tabId])
   // Still coming up (the startup card counts it, see chat-loading.ts): until the
   // decision lands. A 'now' start is requested in the same commit (effect below),
   // after which the hub reports the agent itself. A failed load is shown in the
@@ -221,6 +254,7 @@ export function useChatLifecycle({
   useEffect(() => {
     if (startDecision === null || startDecision === 'none') return
     if (startDecision === 'shown' && !shown) return
+    if (startDecision === 'computer' && !(shown && computerReady)) return
     if (startFiredRef.current) return
     startFiredRef.current = true
     // 'now' off screen = reopening the workspace (a restore: the computer starts
@@ -244,6 +278,7 @@ export function useChatLifecycle({
   }, [
     startDecision,
     shown,
+    computerReady,
     chatApi,
     tabId,
     taskId,

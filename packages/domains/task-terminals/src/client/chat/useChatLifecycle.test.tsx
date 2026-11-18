@@ -24,11 +24,14 @@ const deferred = <T,>(): Deferred<T> => {
 
 type SettingsGet = (input: { key: string }) => Promise<string | null>
 type RecordClientEvent = (input: Record<string, unknown>) => Promise<unknown>
+type AvailabilityQuery = (input: { tabId: string }) => Promise<{ state: string }>
 
 const m = vi.hoisted(() => {
   const settingsGet = vi.fn<SettingsGet>()
   const recordClientEvent = vi.fn<RecordClientEvent>()
+  const availability = vi.fn<AvailabilityQuery>()
   return {
+    availability,
     hubAllows: vi.fn<(client: unknown, path: string) => Promise<boolean>>(),
     settingsGet,
     recordClientEvent,
@@ -37,6 +40,7 @@ const m = vi.hoisted(() => {
     // are swappable: a leak test installs a plain function (see `leakable`).
     client: {
       settings: { get: { query: settingsGet as SettingsGet } },
+      chat: { availability: { query: availability as AvailabilityQuery } },
       diagnostics: { recordClientEvent: { mutate: recordClientEvent as RecordClientEvent } }
     }
   }
@@ -153,6 +157,7 @@ beforeEach(() => {
   m.settingsGet.mockReset().mockResolvedValue('auto')
   m.recordClientEvent.mockReset().mockResolvedValue(undefined)
   m.toast.mockReset()
+  m.availability.mockReset().mockResolvedValue({ state: 'ready' })
   m.client.settings.get.query = m.settingsGet
   m.client.diagnostics.recordClientEvent.mutate = m.recordClientEvent
 })
@@ -682,5 +687,51 @@ describe('useChatLifecycle restore of the tab on screen', () => {
     await flush()
     update({ shown: true })
     expect(chatApi.start).toHaveBeenCalledTimes(1)
+  })
+})
+
+// A restore whose computer cannot run it (offline, upgrading, …) is not attempted:
+// every such tab used to fail its start and toast "Couldn't start the agent:
+// computer '…' is not connected" — one toast per restored tab — while the chat
+// itself already says the computer is offline. It starts once the tab is on screen
+// and its computer is ready (back online) instead.
+describe('useChatLifecycle startup waits for the computer', () => {
+  it('does not start or toast a restore whose computer is offline', async () => {
+    m.availability.mockResolvedValue({ state: 'offline' })
+    const { chatApi } = setup({ agentState: 'running', shown: false, computerReady: false })
+    await flush()
+    expect(m.availability).toHaveBeenCalledWith({ tabId: TARGET.tabId })
+    expect(chatApi.start).not.toHaveBeenCalled()
+    expect(m.toast).not.toHaveBeenCalled()
+  })
+
+  it('starts once the tab is shown and its computer is back', async () => {
+    m.availability.mockResolvedValue({ state: 'offline' })
+    const { chatApi, update } = setup({ agentState: 'running', shown: false, computerReady: false })
+    await flush()
+    update({ shown: true, computerReady: false })
+    await flush()
+    expect(chatApi.start).not.toHaveBeenCalled()
+    update({ shown: true, computerReady: true })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'user' })
+    update({ shown: false, computerReady: true })
+    update({ shown: true, computerReady: true })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts as before when the hub cannot say (older hub, failed read)', async () => {
+    m.availability.mockRejectedValue(new Error('no such procedure'))
+    const { chatApi } = setup({ agentState: 'running', shown: false, computerReady: false })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'restore' })
+  })
+
+  it('starts at once when the computer is ready', async () => {
+    const { chatApi } = setup({ agentState: 'running', shown: false })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'restore' })
   })
 })
