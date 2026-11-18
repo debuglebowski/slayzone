@@ -586,8 +586,10 @@ export async function lockedProjectIds(
   const rows = await db.all<{ project_id: string }>(
     `SELECT DISTINCT project_id FROM task_moves
       WHERE (direction = 'in' OR mode = 'move') AND scope = 'project' AND status IN ${LOCKING_SQL}
-        AND project_id IN (${placeholders(projectIds.length)})`,
-    [...projectIds]
+        AND project_id IN (${placeholders(projectIds.length)})
+      UNION SELECT t.project_id FROM task_computer_moves cm JOIN tasks t ON t.id=cm.task_id
+        WHERE cm.status IN ('running','failed') AND t.project_id IN (${placeholders(projectIds.length)})`,
+    [...projectIds, ...projectIds]
   )
   return rows.map((r) => r.project_id)
 }
@@ -625,7 +627,8 @@ export async function previewProjectMove(
 /** Whether any move holds a lock now — the write gate's cheap first question. */
 export async function anyTaskMoveLocking(db: SlayzoneDb): Promise<boolean> {
   return !!(await db.get(
-    `SELECT 1 FROM task_moves WHERE (direction = 'in' OR mode = 'move') AND status IN ${LOCKING_SQL} LIMIT 1`
+    `SELECT 1 FROM task_moves WHERE (direction = 'in' OR mode = 'move') AND status IN ${LOCKING_SQL}
+      UNION ALL SELECT 1 FROM task_computer_moves WHERE status IN ('running','failed') LIMIT 1`
   ))
 }
 
@@ -634,8 +637,9 @@ export async function lockedTaskIds(db: SlayzoneDb, taskIds: readonly string[]):
   if (taskIds.length === 0) return []
   const rows = await db.all<{ task_id: string }>(
     `SELECT DISTINCT mt.task_id FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
-      WHERE (m.direction = 'in' OR m.mode = 'move') AND m.status IN ${LOCKING_SQL} AND mt.task_id IN (${placeholders(taskIds.length)})`,
-    [...taskIds]
+      WHERE (m.direction = 'in' OR m.mode = 'move') AND m.status IN ${LOCKING_SQL} AND mt.task_id IN (${placeholders(taskIds.length)})
+      UNION SELECT task_id FROM task_computer_moves WHERE status IN ('running','failed') AND task_id IN (${placeholders(taskIds.length)})`,
+    [...taskIds, ...taskIds]
   )
   return rows.map((r) => r.task_id)
 }

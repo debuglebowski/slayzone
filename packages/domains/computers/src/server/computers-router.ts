@@ -322,6 +322,7 @@ export const computersRouter = router({
     .input(z.object({ taskId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       await requireBindable(ctx, input.computerId)
+      await getComputersDepsOrNull()?.assertTaskRebind?.(input.taskId, input.computerId)
       // Its folder exists only on the computer holding it (robustness plan §9, 7e).
       const me = ctx.principal?.userId ?? null
       await assertTaskMovable(ctx.db, input.taskId, input.computerId, me).catch(

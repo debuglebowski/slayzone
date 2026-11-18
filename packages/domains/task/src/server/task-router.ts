@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { computerMoves } from './computer-move'
 import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from './events'
@@ -105,6 +106,39 @@ const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
 }
 
 export const taskRouter = router({
+  computerMovePreview: publicProcedure
+    .input(z.object({ taskId: z.string().min(1), computerId: z.string().nullable() }))
+    .query(({ input }) => computerMoves().preview(input.taskId, input.computerId)),
+  computerMove: publicProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .query(({ input }) => computerMoves().get(input.taskId)),
+  beginComputerMove: publicProcedure
+    .input(
+      z.object({
+        taskId: z.string().min(1),
+        computerId: z.string().nullable(),
+        allowFreshSessions: z.boolean().default(false)
+      })
+    )
+    .mutation(async ({ input }) => {
+      const move = await computerMoves().begin(input)
+      // Owned by the hub, independent of the requesting tab or WebSocket lifetime.
+      void computerMoves()
+        .run(input.taskId)
+        .catch((error: unknown) => console.error('[computer-move] runner:', error))
+      return move
+    }),
+  runComputerMove: publicProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .mutation(({ input }) => {
+      void computerMoves()
+        .run(input.taskId)
+        .catch((error: unknown) => console.error('[computer-move] runner:', error))
+      return { ok: true }
+    }),
+  cancelComputerMove: publicProcedure
+    .input(z.object({ taskId: z.string().min(1) }))
+    .mutation(({ input }) => computerMoves().cancel(input.taskId)),
   // --- Task CRUD ---
   getAll: publicProcedure.query(async ({ ctx }) =>
     overlayWorkspaces(ctx.db, await ops().getAllTasksOp(ctx.db), me(ctx))

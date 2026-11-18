@@ -22,6 +22,7 @@ export interface ComputerDialer {
 export type ComputerLog = (message: string, meta?: Record<string, unknown>) => void
 
 export interface HandlerContext {
+  assertTaskAvailable?: (taskId: string) => void
   assertWorkAllowed?: () => void
   hookDirectory?: string
   cliRelay?: ComputerCliRelay

@@ -3,6 +3,7 @@ import type { TxnSigOf } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/recorder'
 import { recordActivityEvents } from '@slayzone/history/recorder'
 import { projectTagsByName, remapTaskTagsToProject } from '@slayzone/tags/db'
+import type { ComputerMove } from '@slayzone/task-contracts'
 
 /**
  * Named-transaction adapters for the task domain. These are the conditional
@@ -186,6 +187,13 @@ function beginMove(
         .all(...p.taskIds) as Array<{ task_id: string }>
       if (busy.length > 0)
         return { outcome: 'conflict' as const, taskIds: busy.map((r) => r.task_id) }
+      const computerBusy = db
+        .prepare(
+          `SELECT task_id FROM task_computer_moves WHERE status IN ('running','failed') AND task_id IN (${placeholders})`
+        )
+        .all(...p.taskIds) as Array<{ task_id: string }>
+      if (computerBusy.length)
+        return { outcome: 'conflict' as const, taskIds: computerBusy.map((r) => r.task_id) }
     }
     // A project already moving (either way), or one a move of tasks is heading into.
     const project = p.scope === 'project' ? p.projectId : p.targetProjectId
@@ -619,6 +627,79 @@ function finishDuplicate(
 }
 
 export const taskTxns = {
+  'task:begin-computer-move': (db: Database, p: { move: ComputerMove }) =>
+    db.transaction(() => {
+      const m = p.move
+      if (
+        !db
+          .prepare(
+            `SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=? AND t.project_id=? AND t.computer_id IS ? AND t.worktree_computer_id IS ? AND t.has_worktree=? AND t.has_base_dir=? AND p.default_computer_id IS ? AND t.repo_name IS ? AND t.deleted_at IS NULL AND t.archived_at IS NULL`
+          )
+          .get(
+            m.taskId,
+            m.projectId,
+            m.sourceState.binding,
+            m.sourceState.holder,
+            m.sourceState.hasWorktree,
+            m.sourceState.hasBaseDir,
+            m.sourceState.projectDefault,
+            m.sourceState.repoName
+          )
+      )
+        throw new Error('Task changed during the move preview. Choose its destination again.')
+      if (
+        db
+          .prepare(
+            `SELECT 1 FROM task_move_tasks mt JOIN task_moves m ON m.id=mt.move_id WHERE mt.task_id=? AND m.status IN ('running','failed','paused')`
+          )
+          .get(m.taskId)
+      )
+        throw new Error('Task is already moving to another hub')
+      db.prepare(
+        'INSERT INTO task_computer_moves(id,task_id,status,value,updated_at) VALUES(?,?,?,?,?)'
+      ).run(m.id, m.taskId, m.status, JSON.stringify(m), Date.now())
+    })(),
+  'task:commit-computer-move': (db: Database, p: { move: ComputerMove }) =>
+    db.transaction(() => {
+      const m = p.move
+      const current = db
+        .prepare('SELECT status,value FROM task_computer_moves WHERE id=?')
+        .get(m.id) as { status: string; value: string } | undefined
+      if (!current || current.status !== 'running')
+        throw new Error('Computer move is no longer running')
+      if (
+        !db
+          .prepare(
+            `SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=? AND t.project_id=? AND t.computer_id IS ? AND t.worktree_computer_id IS ? AND t.has_worktree=? AND t.has_base_dir=? AND p.default_computer_id IS ? AND t.repo_name IS ? AND t.deleted_at IS NULL AND t.archived_at IS NULL`
+          )
+          .get(
+            m.taskId,
+            m.projectId,
+            m.sourceState.binding,
+            m.sourceState.holder,
+            m.sourceState.hasWorktree,
+            m.sourceState.hasBaseDir,
+            m.sourceState.projectDefault,
+            m.sourceState.repoName
+          )
+      )
+        throw new Error('Task changed during the computer move. Cancel and start again.')
+      const changed = db
+        .prepare(
+          "UPDATE tasks SET computer_id=?,worktree_computer_id=CASE WHEN has_worktree=1 OR has_base_dir=1 THEN ? ELSE worktree_computer_id END,updated_at=datetime('now') WHERE id=? AND project_id=?"
+        )
+        .run(m.binding, m.destinationComputerId, m.taskId, m.projectId)
+      if (!changed.changes) throw new Error('Task changed during computer move')
+      for (const chat of m.chats)
+        db.prepare(
+          `UPDATE chat_ownership SET computer_id=?,epoch=?,state='active',cleanup_pending=0,migration_id=NULL,destination_computer_id=NULL,source_computer_id=NULL WHERE id=? AND task_id=?`
+        ).run(m.destinationComputerId, chat.epoch, chat.id, m.taskId)
+      db.prepare('UPDATE task_computer_moves SET value=?,updated_at=? WHERE id=?').run(
+        JSON.stringify(m),
+        Date.now(),
+        m.id
+      )
+    })(),
   'task:insert-row': insertRow,
   'task:soft-delete': softDelete,
   'task:soft-delete-many': softDeleteMany,

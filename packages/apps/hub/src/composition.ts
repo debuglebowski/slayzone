@@ -19,6 +19,9 @@ function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): v
   }
 }
 import { createTaskWorktreeRouting } from './task-worktree-routing'
+import { installComputerMoves } from './computer-move-host'
+import { taskEvents } from '@slayzone/task/server'
+import { notifyComputerBindingChanged } from '@slayzone/computers/server'
 import { eraseTasksOnComputer, type ErasureReply } from './erasure-fanout'
 import {
   CHAT_SETTINGS_KIND,
@@ -1439,6 +1442,7 @@ export function composeServer(opts: {
       (...args: A): Promise<R> =>
         throughLocalBoot(() => call(...args), bootOffline)
     setTaskMoveSessionsDelegate({
+      forComputer: d.forComputer,
       exportTask: afterBoot(d.exportTask),
       read: afterBoot(d.read),
       readAttachment: afterBoot(d.readAttachment),
@@ -1460,6 +1464,24 @@ export function composeServer(opts: {
       settle: afterBoot(d.settle)
     })
   }
+  const taskComputerMoves = installComputerMoves({
+    db,
+    gateway: () => execGateway,
+    placement,
+    revoke: async (taskId) => {
+      const outcome = await directLinkIssuer?.revoke({ by: 'task', taskId }, 'task_computer_move')
+      if (outcome?.failed.length)
+        throw new Error(
+          'A direct connection could not be closed. Reconnect the source computer and retry.'
+        )
+    },
+    changed: (taskId) => {
+      notifyComputerBindingChanged()
+      taskEvents.emit('task:paths-changed', { taskId })
+      agentSessionsEvents.emit('agent-sessions:changed', { taskId })
+      notifyTasksChanged({ taskIds: [taskId] })
+    }
+  })
   /** How long the hub gathers one tab's prompt changes into one notification (FU5). */
   const PROMPT_CHANGE_COALESCE_MS = 200
   setTaskSessionPromptReader((_db, taskId, ids) =>
@@ -2269,6 +2291,11 @@ export function composeServer(opts: {
     }
   })
   setComputersDeps({
+    assertTaskRebind: async (taskId, computerId) => {
+      const preview = await taskComputerMoves.preview(taskId, computerId)
+      if (preview.requiresMigration)
+        throw new Error('Use Move to computer to transfer this task’s files and agent sessions.')
+    },
     itemFaults,
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
@@ -2533,6 +2560,11 @@ export function composeServer(opts: {
     setUnattachedLaunchResolver((target) =>
       resolveTerminalTabLaunch(db, target, (id) => getTaskOp(db, id))
     )
+    computerGateway.events.on('computer-connected', () => {
+      void taskComputerMoves
+        .recover()
+        .catch((error: unknown) => console.error('[computer-move] recovery pending:', error))
+    })
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,

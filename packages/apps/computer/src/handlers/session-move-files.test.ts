@@ -167,12 +167,18 @@ describe('a moved task’s session files', () => {
     const [entry] = await A.files.list(TASK, 'p')
     // The first chunk landed, then the app quit.
     const first = await A.files.read(TASK, 'p', entry.ref, 0, 4)
-    B.files.write({ taskId: TASK, projectId: 'p', ref: entry.ref, offset: 0, data: first.data })
-    expect(B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 4 }])
+    await B.files.write({
+      taskId: TASK,
+      projectId: 'p',
+      ref: entry.ref,
+      offset: 0,
+      data: first.data
+    })
+    expect(await B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 4 }])
 
     await copy(A, B)
-    expect(B.files.readPlaced(TASK, 'p', entry.ref)).toBe('0123456789')
-    expect(B.files.missing(TASK, 'p', [entry])).toEqual([])
+    expect(await B.files.readPlaced(TASK, 'p', entry.ref)).toBe('0123456789')
+    expect(await B.files.missing(TASK, 'p', [entry])).toEqual([])
   })
 
   test('a copy that does not match its hash is refused and leaves nothing behind', async () => {
@@ -181,7 +187,7 @@ describe('a moved task’s session files', () => {
     putTranscript(A.folder!, 'sess-1', 'abcdef')
     const [entry] = await A.files.list(TASK, 'p')
     const all = await A.files.read(TASK, 'p', entry.ref, 0, 100)
-    expect(() =>
+    await expect(
       B.files.write({
         taskId: TASK,
         projectId: 'p',
@@ -190,10 +196,10 @@ describe('a moved task’s session files', () => {
         data: Buffer.from('tampered').toString('base64'),
         complete: { size: entry.size, hash: entry.hash }
       })
-    ).toThrow(/hash|match/)
+    ).rejects.toThrow(/hash|match/)
     expect(all.eof).toBe(true)
-    expect(B.files.readPlaced(TASK, 'p', entry.ref)).toBeNull()
-    expect(B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 0 }])
+    expect(await B.files.readPlaced(TASK, 'p', entry.ref)).toBeNull()
+    expect(await B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 0 }])
   })
 
   test('a task coming back: the grown transcript replaces the old one, a diverged one stays', async () => {
@@ -233,9 +239,15 @@ describe('a moved task’s session files', () => {
     putTranscript(A.folder!, 'sess-1', 'abcdef')
     const [entry] = await A.files.list(TASK, 'p')
     const part = await A.files.read(TASK, 'p', entry.ref, 0, 3)
-    B.files.write({ taskId: TASK, projectId: 'p', ref: entry.ref, offset: 0, data: part.data })
-    B.files.discardStaging(TASK, 'p', [entry.ref])
-    expect(B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 0 }])
+    await B.files.write({
+      taskId: TASK,
+      projectId: 'p',
+      ref: entry.ref,
+      offset: 0,
+      data: part.data
+    })
+    await B.files.discardStaging(TASK, 'p', [entry.ref])
+    expect(await B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 0 }])
   })
 
   test('forgetting a task’s scrollback removes its folder and nothing else', () => {

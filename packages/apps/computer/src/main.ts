@@ -78,6 +78,7 @@ import { createTestScanHandlers } from './handlers/test-scan'
 import { createWorkspaceChangesHandlers } from './handlers/workspace-changes'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
+import { createWorkspaceMoveHandlers } from './handlers/workspace-move-handlers'
 import { createPtyHandlers } from './handlers/pty'
 import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
 import { COMPUTER_LOG_DIR_NAME } from './file-log'
@@ -398,11 +399,40 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     stopTask: async (taskId, state) => {
       await pty.stopTask(taskId, state)
       if (state === 'deleted') {
+        await workspaceMove.eraseTask(taskId)
         await proc.stopTask(taskId)
         await deps.dialer.forgetTaskEvents?.(taskId)
       }
     }
   })
+  const workspaceMove = createWorkspaceMoveHandlers({
+    ctx,
+    stateDir: deps.stateDir ?? dirname(getComputerConfigFilePath()),
+    hubScope: deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? '',
+    paths: async (taskId) => {
+      const rows = (await chat.request({
+        kind: 'taskPaths',
+        value: { op: 'get', taskIds: [taskId] }
+      })) as Array<{ taskId: string; worktreePath: string | null; baseDir: string | null }>
+      return rows.find((r) => r.taskId === taskId) ?? { worktreePath: null, baseDir: null }
+    },
+    project: (projectId) => deps.getProjectPaths?.()?.get(projectId) ?? undefined,
+    history: chat.moveHistoryModes,
+    hasWork: (taskId) =>
+      pty.hasTaskWork(taskId) || proc.hasTaskWork(taskId) || chat.hasTaskWork(taskId),
+    stop: async (taskId) => {
+      await pty.stopTask(taskId)
+      await proc.stopTask(taskId)
+      await chat.stopForMove(taskId)
+    },
+    setPaths: async (taskId, projectId, paths) => {
+      await chat.request({
+        kind: 'taskPaths',
+        value: { op: 'set', taskId, projectId, ...paths, at: Date.now() }
+      })
+    }
+  })
+  ctx.assertTaskAvailable = workspaceMove.assertAvailable
   const { recoverRelocation, assertRelocationAvailable, ...projectHandlers } =
     createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null), {
       assertIdle: async (projectId) => {
@@ -445,6 +475,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   const onHubDisconnected: Array<() => void> = []
   const table: HubMethodTable = {
     [HubToComputerMethods.ping]: () => ({ ts: Date.now() }),
+    [HubToComputerMethods.workspaceMove]: workspaceMove.request,
     [HubToComputerMethods.chatRequest]: chat.request,
     [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,

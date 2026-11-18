@@ -208,7 +208,15 @@ export function createChatRuntimeHandlers(opts: {
     (moveFilesInstance ??= createSessionMoveFiles({
       stateDir: opts.stateDir,
       hubScope: opts.hubScope,
-      projectFolder: (projectId) => opts.getProjectPaths()?.get(projectId)?.path ?? null,
+      projectFolder: async (projectId, taskId) => {
+        const paths = taskId ? await (await runtime()).taskPaths.get(taskId) : null
+        return (
+          paths?.worktreePath ??
+          paths?.baseDir ??
+          opts.getProjectPaths()?.get(projectId)?.path ??
+          null
+        )
+      },
       sessionIds: async (taskId) => (await runtime()).sessionMoves.cliSessionIds(taskId)
     }))
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
@@ -263,10 +271,14 @@ export function createChatRuntimeHandlers(opts: {
         admission: opts.admission,
         spawnProcess: opts.spawnProcess,
         assertTaskActive: async (taskId) => {
+          opts.ctx.assertTaskAvailable?.(taskId)
           await (await runtime()).assertTaskActive(taskId)
         },
         taskAdmission: {
-          acquire: async (taskId) => (await runtime()).taskAdmission.acquire(taskId)
+          acquire: async (taskId) => {
+            opts.ctx.assertTaskAvailable?.(taskId)
+            return (await runtime()).taskAdmission.acquire(taskId)
+          }
         }
       }
     )
@@ -756,9 +768,9 @@ export function createChatRuntimeHandlers(opts: {
       case 'sessionMove.fileRead':
         return moveFiles(r).read(req.taskId, req.projectId, req.ref, req.offset, req.length)
       case 'sessionMove.fileMissing':
-        return { missing: moveFiles(r).missing(req.taskId, req.projectId, req.entries) }
+        return { missing: await moveFiles(r).missing(req.taskId, req.projectId, req.entries) }
       case 'sessionMove.fileWrite':
-        return moveFiles(r).write(req)
+        return await moveFiles(r).write(req)
       case 'migration.verify':
         return { missing: await r.attachments.missing(req.id) }
       case 'migration.prepared':
@@ -968,9 +980,28 @@ export function createChatRuntimeHandlers(opts: {
     direct,
     directTaskData,
     taskAdmission: {
-      acquire: async (taskId: string) => (await runtime()).taskAdmission.acquire(taskId)
+      acquire: async (taskId: string) => {
+        opts.ctx.assertTaskAvailable?.(taskId)
+        return (await runtime()).taskAdmission.acquire(taskId)
+      }
     },
-    assertTaskActive: async (taskId: string) => (await runtime()).assertTaskActive(taskId),
+    async moveHistoryModes(taskId: string): Promise<string[]> {
+      const r = await runtime()
+      const modes = ((await r.ledger.handle({
+        op: 'sessionModesInScope',
+        args: { taskId, tabId: null }
+      })) ?? []) as string[]
+      const chats = await r.storage.listForTask(taskId)
+      return [...new Set([...modes, ...chats.map((c) => c.identity.mode)])]
+    },
+    async stopForMove(taskId: string) {
+      ;(await runtime()).transport.killByTaskId(taskId)
+      await localProcs?.stopTask(taskId)
+    },
+    async assertTaskActive(taskId: string) {
+      opts.ctx.assertTaskAvailable?.(taskId)
+      await (await runtime()).assertTaskActive(taskId)
+    },
     captureHook: async (hook: ResolvedAgentHook) => (await runtime()).captureHook(hook),
     sessionTasks: async (conversationIds: string[]) =>
       (await runtime()).ledger.sessionTasks(conversationIds),

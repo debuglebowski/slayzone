@@ -147,3 +147,6 @@ export { requestTaskMoveRunner } from './ops/task-moves'
 export { copySnapshotRoot } from './copy-snapshot-files'
 
 export * as taskMoveOps from './ops/task-moves'
+export { createComputerMoves, setComputerMoves } from './computer-move'
+export type { ComputerMoveHost } from './computer-move'
+export { stageComputerMoveSessions, taskMoveSessionsOrNull } from './ops/task-move-sessions'

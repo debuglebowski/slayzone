@@ -15,7 +15,7 @@ const mutations: Record<string, ReturnType<typeof vi.fn>> = {
 }
 const client = {
   taskTerminals: {
-    ensureMain: { mutate: () => Promise.resolve() },
+    ensureMain: { mutate: vi.fn().mockResolvedValue(undefined) },
     list: { query: () => Promise.resolve(listResult) }
   }
 }
@@ -78,13 +78,43 @@ beforeEach(() => {
   mutations.delete.mockReset().mockResolvedValue(true)
   mutations.kill.mockReset().mockResolvedValue(undefined)
   mutations.remove.mockReset().mockResolvedValue(undefined)
+  client.taskTerminals.ensureMain.mutate.mockReset().mockResolvedValue(undefined)
 })
 
 describe('useTaskTerminals active group', () => {
+  it('loads existing tabs without a mutation while the task is locked for migration', async () => {
+    client.taskTerminals.ensureMain.mutate.mockRejectedValue(new Error('Task is moving'))
+    const { result } = await setup([MAIN])
+    expect(result.current.tabs).toEqual([MAIN])
+    expect(client.taskTerminals.ensureMain.mutate).not.toHaveBeenCalled()
+  })
+
   it('keeps a valid active group', async () => {
     const { result } = await setup([MAIN, tab('x', 'gx', false, 1)])
     act(() => result.current.setActiveGroupId('gx'))
     expect(result.current.activeGroupId).toBe('gx')
+  })
+
+  it('still provisions a missing main tab', async () => {
+    listResult = []
+    client.taskTerminals.ensureMain.mutate.mockImplementation(async () => {
+      listResult = [MAIN]
+    })
+    const { result } = renderHook(() => useTaskTerminals(TASK, 'terminal'))
+    await waitFor(() => expect(result.current.tabs).toEqual([MAIN]))
+    expect(client.taskTerminals.ensureMain.mutate).toHaveBeenCalledWith({
+      taskId: TASK,
+      mode: 'terminal'
+    })
+  })
+
+  it('still synchronizes a changed main-tab mode', async () => {
+    listResult = [tab(TASK, TASK, true)]
+    client.taskTerminals.ensureMain.mutate.mockImplementation(async () => {
+      listResult = [{ ...MAIN, mode: 'claude-code' }]
+    })
+    const { result } = renderHook(() => useTaskTerminals(TASK, 'claude-code'))
+    await waitFor(() => expect(result.current.tabs[0]?.mode).toBe('claude-code'))
   })
 
   it('falls back to the main group when the active group is closed', async () => {

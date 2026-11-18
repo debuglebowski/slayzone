@@ -5941,6 +5941,26 @@ export const migrations: Migration[] = [
       // task_workspaces carries a task_id: fenced like every such table.
       installContentErasureFences(db)
     }
+  },
+  {
+    // Task moves between this hub's computers: a durable recovery journal, separate
+    // from cross-hub transfers, so a move survives a restart and resumes or cancels.
+    version: 223,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE task_computer_moves (
+          id         TEXT PRIMARY KEY,
+          task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          status     TEXT NOT NULL CHECK(status IN ('running','failed','done','canceled')),
+          value      TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX idx_task_computer_move_active ON task_computer_moves(task_id)
+          WHERE status IN ('running','failed');
+      `)
+      // task_computer_moves carries a task_id: fenced like every such table.
+      installContentErasureFences(db)
+    }
   }
 ]
 

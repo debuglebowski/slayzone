@@ -49,6 +49,7 @@ import {
   closeSync,
   constants as fsConstants,
   fstatSync,
+  fchmodSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -899,6 +900,53 @@ function forgettingRootSpellings<T extends Record<string, (...args: never[]) => 
  * Each one forgets the remembered root spellings once it has acted (module doc).
  */
 export const jailedFs = forgettingRootSpellings({
+  /** Restore POSIX directory permissions after installing its children. */
+  setDirectoryMode(judged: string, mode: number): void {
+    if (process.platform === 'win32') return
+    assertParentUnchanged(judged)
+    const fd = openSync(judged, fsConstants.O_RDONLY | NOFOLLOW)
+    try {
+      if (!fstatSync(fd).isDirectory()) throw new Error('Expected a directory')
+      fchmodSync(fd, mode)
+    } finally {
+      closeSync(fd)
+    }
+  },
+  /** Install an already-verified internal transfer file into a judged user path.
+   * Unlike tree-copy, the source is deliberately computer-owned staging state. */
+  async installVerifiedFile(
+    src: string,
+    judgedDest: string,
+    mode: number,
+    replace = false
+  ): Promise<void> {
+    const fd = openForWrite(judgedDest, !replace)
+    try {
+      const source = await openAsync(src, fsConstants.O_RDONLY | NOFOLLOW)
+      try {
+        const buf = Buffer.allocUnsafe(256 * 1024)
+        for (;;) {
+          const { bytesRead } = await source.read(buf, 0, buf.length, null)
+          if (!bytesRead) break
+          let off = 0
+          while (off < bytesRead)
+            off += (await writeAsync(fd, buf, off, bytesRead - off)).bytesWritten
+        }
+        fchmodSync(fd, mode)
+      } finally {
+        await source.close()
+      }
+    } finally {
+      closeSync(fd)
+    }
+  },
+  /** Create a link itself, after all files were installed; never follow its target. */
+  createSymlink(judgedDest: string, target: string): void {
+    mkdirs(dirname(judgedDest))
+    assertParentUnchanged(judgedDest)
+    if (lstatOrNull(judgedDest)) throw new Error('Target already exists')
+    symlinkSync(target, judgedDest)
+  },
   /** Create or overwrite a file (its folders too). */
   writeFile(judged: string, content: string | Uint8Array): void {
     const fd = openForWrite(judged, false)

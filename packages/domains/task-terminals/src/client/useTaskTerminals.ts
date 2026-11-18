@@ -6,6 +6,30 @@ import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { AgentId } from '@slayzone/terminal-contracts'
 import { usePty } from '@slayzone/terminal'
 
+/**
+ * A task's tabs, opened read-only — including while the task is migrating: the main
+ * tab is provisioned or synchronized only when it is missing or in another mode. The
+ * main tab is the task creator's (T-100): someone else working on a shared task has
+ * only the tabs they open themselves, so a NOT_FOUND refusal here is not an error.
+ */
+async function loadTaskTabs(
+  client: ReturnType<typeof useTRPCClient>,
+  taskId: string,
+  defaultMode: AgentId
+): Promise<TerminalTab[]> {
+  const tabs = await client.taskTerminals.list.query({ taskId })
+  const main = tabs.find((tab) => tab.isMain)
+  if (main && main.mode === defaultMode) return tabs
+  const ensured = await client.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode }).then(
+    () => true,
+    (err: unknown) => {
+      if ((err as { data?: { code?: string } })?.data?.code !== 'NOT_FOUND') throw err
+      return false
+    }
+  )
+  return ensured ? client.taskTerminals.list.query({ taskId }) : tabs
+}
+
 interface UseTaskTerminalsResult {
   tabs: TerminalTab[]
   groups: TerminalGroup[]
@@ -77,16 +101,8 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
 
   // Load tabs on mount
   useEffect(() => {
-    const loadTabs = async () => {
-      try {
-        // The main tab is the task creator's (T-100): someone else working on a shared
-        // task has only the tabs they open themselves, so a refusal here is not an error.
-        await trpcClient.taskTerminals.ensureMain
-          .mutate({ taskId, mode: defaultMode })
-          .catch((err: unknown) => {
-            if ((err as { data?: { code?: string } })?.data?.code !== 'NOT_FOUND') throw err
-          })
-        const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
+    loadTaskTabs(trpcClient, taskId, defaultMode)
+      .then((loadedTabs) => {
         setTabs(loadedTabs)
         // Set active to main group if the current active one doesn't exist
         const loadedGroups = computeGroups(loadedTabs)
@@ -96,11 +112,10 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
             loadedGroups.some((g) => g.id === current) ? current : mainGroup.id
           )
         }
-      } catch (err) {
+      })
+      .catch((err: unknown) => {
         console.error('[useTaskTerminals] Failed to load tabs:', err)
-      }
-    }
-    loadTabs()
+      })
   }, [taskId, defaultMode, trpcClient])
 
   // Re-fetch when an external actor (CLI via REST, other window) mutates tabs.

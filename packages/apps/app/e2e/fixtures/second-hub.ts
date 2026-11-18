@@ -15,6 +15,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 import type { AnyTRPCRouter } from '@trpc/server'
+import { E2E_OWNER_ENV } from './stale-processes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -84,7 +85,8 @@ export async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
       SLAYZONE_HUB_REQUIRE_LOGIN: '1',
       SLAYZONE_ROOT: hubRoot,
       // The hub's test-only chat seams (seed / read a conversation) answer only under it.
-      PLAYWRIGHT: '1'
+      PLAYWRIGHT: '1',
+      [E2E_OWNER_ENV]: String(process.pid)
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -197,7 +199,14 @@ export interface HubComputer {
  */
 export async function attachComputerToHub(
   hub: SecondHub,
-  opts: { storeDir: string; name: string; allowedRoot: string }
+  opts: {
+    storeDir: string
+    name: string
+    allowedRoot: string
+    /** Test-owned transport relay; enrollment and every RPC still reach the real hub. */
+    routeHub?: (url: string) => string
+    extraEnv?: (rootDir: string) => Record<string, string>
+  }
 ): Promise<HubComputer> {
   if (!fs.existsSync(COMPUTER_BIN))
     throw new Error(`computer bin missing: ${COMPUTER_BIN} (run pnpm build)`)
@@ -224,11 +233,13 @@ export async function attachComputerToHub(
       ...cleanEnv,
       ELECTRON_RUN_AS_NODE: '1',
       PLAYWRIGHT: '1',
+      [E2E_OWNER_ENV]: String(process.pid),
       SLAYZONE_SUPERVISED: '',
       SLAYZONE_ROOT: rootDir,
-      SLAYZONE_HUB_ADDRESS: new URL(payload.hubUrl).host,
+      SLAYZONE_HUB_ADDRESS: new URL(opts.routeHub?.(payload.hubUrl) ?? payload.hubUrl).host,
       SLAYZONE_HUB_JOIN_TOKEN: minted.token,
-      SLAYZONE_COMPUTER_CREDENTIALS_DIR: path.join(opts.storeDir, `${opts.name}-creds`)
+      SLAYZONE_COMPUTER_CREDENTIALS_DIR: path.join(opts.storeDir, `${opts.name}-creds`),
+      ...opts.extraEnv?.(rootDir)
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })

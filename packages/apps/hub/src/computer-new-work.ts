@@ -28,6 +28,7 @@ import type { HubComputerGateway } from '@slayzone/computer-transport/server'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
 import { computerDisabledError, getComputer } from '@slayzone/computers/server'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { currentPathScope } from '@slayzone/platform/path-scope'
 
 /** Methods that start something on the computer, whatever their params. */
 const NEW_WORK_METHODS: ReadonlySet<string> = new Set([
@@ -154,6 +155,19 @@ export function createNewWorkGuard(
 ): (computerId: string, method: string, params: unknown) => Promise<void> {
   return async (computerId, method, params) => {
     if (!startsNewWork(method, params)) return
+    const scope = currentPathScope()
+    const taskId =
+      scope?.kind === 'task' ? scope.taskId : (params as { taskId?: string } | null)?.taskId
+    if (
+      taskId &&
+      (await db.get(
+        "SELECT 1 FROM task_computer_moves WHERE task_id=? AND status IN ('running','failed')",
+        [taskId]
+      ))
+    )
+      throw new Error(
+        'Task is moving to another computer. Retry or cancel its move before starting work.'
+      )
     const row = await getComputer(db, computerId)
     if (row?.disabled_at != null) throw computerDisabledError(row.name)
   }

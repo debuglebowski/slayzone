@@ -71,3 +71,22 @@ Client-driven spawning (`pty.create` after `pty.attach`) let two clients race an
 `taskMoves` is the durable transfer journal. Moves keep IDs, lock originals, carry sessions when selected, and release the source with redirects. Copies freeze rows and artifact bytes, assign new IDs, preserve writable originals, start fresh sessions, and drop external blockers. `shared/task-copy-bundle.ts` remaps content and structured references; Duplicate remains a separate fresh-follow-up preset. Integration-linked content is refused.
 
 Same-hub copies use the same snapshot/import/commit operations through `copyOnHub`. Cross-hub UI and REST requests use the app's step engine; CLI handoffs and controls persist in the source journal and are picked up by `TaskMovesPanel`. The CLI talks only to its source hub. Copy imports have separate journal IDs, allowing both ends to be the same hub. Source snapshots survive pause/recovery and are removed on completion/cancellation.
+
+### Move to computer
+
+The desktop Computer selector previews a move before changing execution machines.
+`task.computerMovePreview`, `beginComputerMove`, `computerMove`, `runComputerMove`
+and `cancelComputerMove` share the durable `task_computer_moves` journal, owned by
+`server/computer-move.ts`. Empty tasks can still rebind immediately. Existing work
+locks through the API's common move lock and a persistent lock on each computer.
+
+Computers stop the task's processes, snapshot folders and Git objects/index, copy
+files in resumable chunks, install a separate destination checkout, and verify
+source and destination before committing task/folder/chat ownership together.
+Staged, unstaged, ignored files and nested repositories travel. Claude terminal/chat
+and Codex chat sessions can resume; unsupported sessions require explicit consent
+to start fresh. Processes restart through the normal task controls. Source files
+stay intact; interrupted destination copies are preserved rather than overwritten.
+Failed moves expose retry/cancel; running moves recover when computers reconnect.
+The hub stores IDs and progress, while computer paths and workspace bytes stay on
+the computers. OS-specific dependencies and absolute symlinks can need adjustment.

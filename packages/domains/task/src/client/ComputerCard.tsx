@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+import { useTRPC, useTRPCClient } from './trpc'
+import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+import type { ComputerMove, ComputerMovePreview } from '@slayzone/task-contracts'
+import { ComputerMoveDialog } from './ComputerMoveDialog'
 // The words every client shows for a computer choice (the mobile app too).
 import {
   computerName,
@@ -32,6 +34,15 @@ import {
  */
 
 const INHERIT_VALUE = '__inherit__'
+const MOVE_STEP_LABELS: Record<ComputerMove['step'], string> = {
+  stop: 'Stopping running work',
+  files: 'Copying files',
+  activate: 'Preparing destination',
+  sessions: 'Copying agent history',
+  verify: 'Verifying transfer',
+  commit: 'Switching computer',
+  finish: 'Finishing move'
+}
 
 interface ComputerCardProps {
   taskId: string
@@ -41,17 +52,60 @@ interface ComputerCardProps {
   projectDefaultComputerId: string | null
 }
 
-export function ComputerCard({
+export function ComputerCard({ ...props }: ComputerCardProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const computers = useQuery(trpc.computers.list.queryOptions()).data ?? []
+  if (computers.length === 0)
+    return (
+      <div>
+        <label className="mb-1 block text-sm text-muted-foreground">Computer</label>
+        <p className="text-sm text-muted-foreground">{NO_COMPUTERS_NOTE}</p>
+      </div>
+    )
+  return <ComputerCardControls key={props.taskId} {...props} computers={computers} />
+}
+
+function ComputerCardControls({
   taskId,
   taskComputerId,
-  projectDefaultComputerId
-}: ComputerCardProps): React.JSX.Element {
+  projectDefaultComputerId,
+  computers
+}: ComputerCardProps & {
+  computers: Array<{ id: string; name: string; disabledAt?: number | null; usable?: boolean }>
+}): React.JSX.Element {
   const trpc = useTRPC()
-  const computersQuery = useQuery(trpc.computers.list.queryOptions())
+  const client = useTRPCClient()
+  const selectId = useId()
+  const currentTask = useRef<string | null>(taskId)
+  useLayoutEffect(() => {
+    currentTask.current = taskId
+    return () => {
+      currentTask.current = null
+    }
+  }, [taskId])
   const resolvedQuery = useQuery(trpc.computers.resolveTaskComputer.queryOptions({ taskId }))
   const setTaskComputer = useMutation(trpc.computers.setTaskComputer.mutationOptions())
-
-  const computers = computersQuery.data ?? []
+  const moveQuery = useQuery({
+    ...trpc.task.computerMove.queryOptions({ taskId }),
+    refetchInterval: (query) =>
+      query.state.data && ['running', 'failed'].includes(query.state.data.status) ? 1000 : false
+  })
+  const completedMoveId = moveQuery.data?.status === 'done' ? moveQuery.data.id : null
+  const refetchResolved = resolvedQuery.refetch
+  useEffect(() => {
+    void refetchResolved()
+  }, [completedMoveId, taskComputerId, projectDefaultComputerId, refetchResolved])
+  const beginMove = useMutation(trpc.task.beginComputerMove.mutationOptions())
+  const retryMove = useMutation(trpc.task.runComputerMove.mutationOptions())
+  const cancelMove = useMutation(trpc.task.cancelComputerMove.mutationOptions())
+  const [candidate, setCandidate] = useState<{
+    computerId: string | null
+    preview: ComputerMovePreview
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [allowFresh, setAllowFresh] = useState(false)
+  const moving = moveQuery.data?.status === 'running' || moveQuery.data?.status === 'failed'
 
   // Local mirror of the task's binding so the select reflects the choice
   // immediately; re-sync when the task (or its persisted binding) changes.
@@ -61,38 +115,85 @@ export function ComputerCard({
   if (syncedFrom.taskId !== taskId || syncedFrom.taskComputerId !== taskComputerId) {
     setSyncedFrom({ taskId, taskComputerId })
     setBinding(taskComputerId)
+    if (syncedFrom.taskId !== taskId) {
+      setCandidate(null)
+      setError(null)
+      setChecking(false)
+      setAllowFresh(false)
+    }
   }
 
   const nameFor = (id: string | null): string => computerName(computers, id)
 
+  const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
   const handleChange = async (value: string): Promise<void> => {
     const computerId = value === INHERIT_VALUE ? null : value
-    setBinding(computerId)
-    await setTaskComputer.mutateAsync({ taskId, computerId }).catch((err: unknown) => {
-      // The save failed, so the server still holds the persisted binding: show it again.
-      setBinding(taskComputerId)
-      throw err
-    })
-    await resolvedQuery.refetch()
+    setError(null)
+    setChecking(true)
+    const switchComputer = async (): Promise<void> => {
+      const preview = await client.task.computerMovePreview.query({ taskId, computerId })
+      if (currentTask.current !== taskId) return
+      if (preview.requiresMigration || !preview.ready) {
+        setAllowFresh(false)
+        setCandidate({ computerId, preview })
+        return
+      }
+      setBinding(computerId)
+      await setTaskComputer.mutateAsync({ taskId, computerId })
+      await resolvedQuery.refetch()
+    }
+    await switchComputer()
+      .catch((err: unknown) => {
+        if (currentTask.current !== taskId) return
+        setBinding(taskComputerId)
+        setError(messageOf(err))
+      })
+      .then(() => {
+        if (currentTask.current === taskId) setChecking(false)
+      })
   }
-
-  // No computers enrolled → runs locally. Keep the card minimal (don't hide it).
-  if (computers.length === 0) {
-    return (
-      <div>
-        <label className="mb-1 block text-sm text-muted-foreground">Computer</label>
-        <p className="text-sm text-muted-foreground">{NO_COMPUTERS_NOTE}</p>
-      </div>
-    )
+  const confirm = async () => {
+    if (!candidate) return
+    setError(null)
+    const start = async (): Promise<void> => {
+      await beginMove.mutateAsync({
+        taskId,
+        computerId: candidate.computerId,
+        allowFreshSessions: allowFresh
+      })
+      if (currentTask.current !== taskId) return
+      setCandidate(null)
+      await moveQuery.refetch()
+    }
+    await start().catch((err: unknown) => {
+      if (currentTask.current === taskId) setError(messageOf(err))
+    })
+  }
+  const control = async (action: 'retry' | 'cancel') => {
+    setError(null)
+    const mutation = action === 'retry' ? retryMove : cancelMove
+    const run = async (): Promise<void> => {
+      await mutation.mutateAsync({ taskId })
+      await moveQuery.refetch()
+      await resolvedQuery.refetch()
+    }
+    await run().catch((err: unknown) => setError(messageOf(err)))
   }
 
   const effectiveId = resolvedQuery.data?.computerId ?? null
 
   return (
     <div>
-      <label className="mb-1 block text-sm text-muted-foreground">Computer</label>
-      <Select value={binding ?? INHERIT_VALUE} onValueChange={handleChange}>
-        <SelectTrigger className="w-full">
+      <label htmlFor={selectId} className="mb-1 block text-sm text-muted-foreground">
+        Computer
+      </label>
+      <Select
+        value={binding ?? INHERIT_VALUE}
+        onValueChange={handleChange}
+        disabled={checking || moving}
+      >
+        <SelectTrigger id={selectId} className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -122,6 +223,69 @@ export function ComputerCard({
         </SelectContent>
       </Select>
       <p className="mt-1 text-xs text-muted-foreground">{runsOnLabel(nameFor(effectiveId))}</p>
+      {checking && <p className="mt-1 text-xs text-muted-foreground">Checking destination…</p>}
+      {error && !candidate && (
+        <p role="alert" className="mt-1 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+      {moving && moveQuery.data && (
+        <div className="mt-2 space-y-2 text-sm" aria-live="polite">
+          <p>
+            Moving to {nameFor(moveQuery.data.destinationComputerId)} ·{' '}
+            {MOVE_STEP_LABELS[moveQuery.data.step]}
+          </p>
+          {moveQuery.data.bytesTotal > 0 && (
+            <progress
+              className="w-full"
+              aria-label="Workspace transfer"
+              value={moveQuery.data.bytesDone}
+              max={moveQuery.data.bytesTotal}
+            />
+          )}
+          {moveQuery.data.error && (
+            <p role="alert" className="text-destructive">
+              {moveQuery.data.error}
+            </p>
+          )}
+          {moveQuery.data.status === 'failed' && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void control('retry')}
+                disabled={retryMove.isPending}
+              >
+                Retry move
+              </Button>
+              {moveQuery.data.step !== 'finish' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void control('cancel')}
+                  disabled={cancelMove.isPending}
+                >
+                  Cancel move
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <ComputerMoveDialog
+        preview={candidate?.preview ?? null}
+        source={nameFor(candidate?.preview.sourceComputerId ?? null)}
+        destination={nameFor(candidate?.preview.destinationComputerId ?? null)}
+        allowFresh={allowFresh}
+        onAllowFresh={setAllowFresh}
+        pending={beginMove.isPending}
+        error={error}
+        onClose={() => {
+          setCandidate(null)
+          setError(null)
+        }}
+        onConfirm={() => void confirm()}
+      />
     </div>
   )
 }

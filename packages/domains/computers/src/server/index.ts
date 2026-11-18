@@ -148,3 +148,4 @@ export {
   type ComputerTakeover,
   type TakeoverCandidate
 } from './takeovers'
+export { notifyComputerBindingChanged } from './computers-router-deps'

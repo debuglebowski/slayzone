@@ -15,6 +15,38 @@ type MockSelectProps = MockChildren & {
 // fireEvent.change (SelectTrigger renders nothing — its content lives in the
 // options emitted by SelectContent).
 vi.mock('@slayzone/ui', () => ({
+  Button: ({
+    children,
+    onClick,
+    disabled
+  }: MockChildren & { onClick?: () => void; disabled?: boolean }) => (
+    <button onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
+  Dialog: ({ children, open }: MockChildren & { open: boolean }) =>
+    open ? <section role="dialog">{children}</section> : null,
+  DialogContent: ({ children }: MockChildren) => <>{children}</>,
+  DialogHeader: ({ children }: MockChildren) => <>{children}</>,
+  DialogTitle: ({ children }: MockChildren) => <h2>{children}</h2>,
+  DialogDescription: ({ children }: MockChildren) => <p>{children}</p>,
+  DialogFooter: ({ children }: MockChildren) => <>{children}</>,
+  Checkbox: ({
+    checked,
+    onCheckedChange,
+    id
+  }: {
+    checked: boolean
+    onCheckedChange: (v: boolean) => void
+    id: string
+  }) => (
+    <input
+      type="checkbox"
+      id={id}
+      checked={checked}
+      onChange={(e) => onCheckedChange(e.target.checked)}
+    />
+  ),
   Select: ({ children, value, onValueChange }: MockSelectProps) => (
     <select
       data-testid="computer-select"
@@ -38,11 +70,21 @@ let computersData: Array<{ id: string; name: string }> = []
 let resolvedComputerId: string | null = null
 const setTaskComputerSpy = vi.fn()
 const refetchSpy = vi.fn()
+const previewSpy = vi.fn()
+const beginMoveSpy = vi.fn()
+let moveData: unknown = null
 
 // The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
 vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
+  useTRPCClient: () => ({ task: { computerMovePreview: { query: previewSpy } } }),
   useTRPC: () => ({
+    task: {
+      computerMove: { queryOptions: () => ({ queryKey: ['task.computerMove'] }) },
+      beginComputerMove: { mutationOptions: () => ({ __mutationKey: 'task.beginComputerMove' }) },
+      runComputerMove: { mutationOptions: () => ({ __mutationKey: 'task.runComputerMove' }) },
+      cancelComputerMove: { mutationOptions: () => ({ __mutationKey: 'task.cancelComputerMove' }) }
+    },
     computers: {
       list: { queryOptions: () => ({ queryKey: ['computers.list'] }) },
       resolveTaskComputer: {
@@ -58,13 +100,19 @@ vi.mock('@slayzone/transport/client', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = opts.queryKey[0]
+    if (key === 'task.computerMove') return { data: moveData, refetch: refetchSpy }
     if (key === 'computers.list') {
       return { data: computersData, isLoading: false, refetch: refetchSpy }
     }
     return { data: { computerId: resolvedComputerId }, isLoading: false, refetch: refetchSpy }
   },
   useMutation: (opts: { __mutationKey: string }) => ({
-    mutateAsync: opts.__mutationKey === 'computers.setTaskComputer' ? setTaskComputerSpy : vi.fn(),
+    mutateAsync:
+      opts.__mutationKey === 'computers.setTaskComputer'
+        ? setTaskComputerSpy
+        : opts.__mutationKey === 'task.beginComputerMove'
+          ? beginMoveSpy
+          : vi.fn(),
     mutate: vi.fn(),
     isPending: false
   })
@@ -77,10 +125,77 @@ beforeEach(() => {
   vi.clearAllMocks()
   computersData = []
   resolvedComputerId = null
+  moveData = null
+  previewSpy.mockResolvedValue({
+    sourceComputerId: 'computer-a',
+    destinationComputerId: 'computer-b',
+    requiresMigration: false,
+    hasFiles: false,
+    ready: true,
+    blockers: [],
+    agents: []
+  })
+  beginMoveSpy.mockResolvedValue({ id: 'move-1' })
   setTaskComputerSpy.mockResolvedValue({ ok: true })
 })
 
 describe('ComputerCard', () => {
+  it('previews a real migration without saving the binding, then confirms explicitly', async () => {
+    computersData = [
+      { id: 'computer-a', name: 'source' },
+      { id: 'computer-b', name: 'destination' }
+    ]
+    previewSpy.mockResolvedValueOnce({
+      sourceComputerId: 'computer-a',
+      destinationComputerId: 'computer-b',
+      requiresMigration: true,
+      hasFiles: true,
+      ready: true,
+      blockers: [],
+      agents: []
+    })
+    render(
+      <ComputerCard taskId="task-1" taskComputerId="computer-a" projectDefaultComputerId={null} />
+    )
+    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-b' } })
+    expect(await screen.findByRole('dialog')).toBeDefined()
+    expect(setTaskComputerSpy).not.toHaveBeenCalled()
+    expect(beginMoveSpy).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Move to destination' }))
+    await waitFor(() =>
+      expect(beginMoveSpy).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        computerId: 'computer-b',
+        allowFreshSessions: false
+      })
+    )
+  })
+  it('shows destination blockers and never starts an unavailable move', async () => {
+    computersData = [{ id: 'computer-b', name: 'destination' }]
+    previewSpy.mockResolvedValueOnce({
+      sourceComputerId: 'computer-a',
+      destinationComputerId: 'computer-b',
+      requiresMigration: true,
+      hasFiles: true,
+      ready: false,
+      blockers: ['Destination must be online.'],
+      agents: []
+    })
+    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
+    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-b' } })
+    expect(await screen.findByText('Destination must be online.')).toBeDefined()
+    expect(
+      (screen.getByRole('button', { name: 'Move to destination' }) as HTMLButtonElement).disabled
+    ).toBe(true)
+    expect(beginMoveSpy).not.toHaveBeenCalled()
+  })
+  it('reports failed saves inline without an unhandled rejection', async () => {
+    computersData = [{ id: 'computer-a', name: 'source' }]
+    setTaskComputerSpy.mockRejectedValueOnce(new Error('Connection lost'))
+    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
+    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-a' } })
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Connection lost')
+  })
   it('shows a minimal "runs locally" state when no computers are enrolled', () => {
     computersData = []
     render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)

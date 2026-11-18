@@ -1140,6 +1140,260 @@ export function createComputerChatServices(opts: {
     await opts.gate?.(computerId, taskId)
     return computerId
   }
+  function moveSessionsFor(destination?: string): TaskMoveSessionsDelegate {
+    const moveTargetComputer = async (taskId: string) => {
+      if (!destination) return moveComputerOf(taskId)
+      await opts.gate?.(destination, taskId)
+      return destination
+    }
+    return {
+      forComputer: (computerId: string) => moveSessionsFor(computerId),
+      async exportTask(moveId, taskId, only) {
+        // Chats whose history still sits in this hub's own tables (older versions), or whose
+        // migration to a computer is not finished, go to their computer first: only what a
+        // computer holds can be exported.
+        const owners = await ownership.forTask(taskId)
+        const tables = await legacyChatTables(opts.db)
+        if (
+          owners.some((o) => !['active', 'deleted'].includes(o.state) || o.cleanupPending) ||
+          (await opts.db.get(
+            `SELECT 1 FROM terminal_tabs t WHERE t.task_id = ? AND ${legacyChatTabContentSql(tables)}`,
+            [taskId]
+          ))
+        )
+          await relay.migrateWholeTask(taskId)
+        const computers = new Set<string>(only ?? [])
+        if (!only) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId)
+          if (home) computers.add(home)
+        }
+        const transfers: Array<{
+          computerId: string
+          manifest: Parameters<TaskMoveSessionsDelegate['begin']>[1]
+        }> = []
+        const ledgers: SessionLedgerBundle[] = []
+        for (const computerId of [...computers].sort()) {
+          await opts.gate?.(computerId, taskId)
+          const exported = (await computerRequest(computerId, {
+            kind: 'sessionMove.export',
+            moveId,
+            taskId
+          })) as {
+            transfers: (typeof transfers)[number]['manifest'][]
+            ledger: SessionLedgerBundle
+          }
+          for (const manifest of exported.transfers) transfers.push({ computerId, manifest })
+          ledgers.push(exported.ledger)
+        }
+        return { transfers, ledger: mergeSessionLedgers(ledgers) }
+      },
+      async read(input) {
+        const r = (await computerRequest(input.computerId, {
+          kind: 'sessionMove.read',
+          moveId: input.moveId,
+          conversationId: input.conversationId,
+          offset: input.offset,
+          length: input.length
+        })) as { data: string }
+        return r.data
+      },
+      async readAttachment(input) {
+        const ranged = await readRanges(input.computerId, {
+          type: 'attachment',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref
+        })
+        if (ranged) return ranged.bytes.toString('base64')
+        const r = (await computerRequest(input.computerId, {
+          kind: 'attachment.read',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref
+        })) as { data: string }
+        return r.data
+      },
+      async discard(moveId, taskIds) {
+        const computers = new Set<string>()
+        for (const taskId of taskIds) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId).catch(() => null)
+          if (home) computers.add(home)
+        }
+        for (const computerId of computers)
+          await computerRequest(computerId, { kind: 'sessionMove.discard', moveId }).catch(
+            () => undefined
+          )
+      },
+      async holders(taskId) {
+        const computers = new Set<string>()
+        for (const o of await ownership.forTask(taskId))
+          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+        const tracked = await opts.db.all<{ computer_id: string }>(
+          'SELECT computer_id FROM chat_task_computers WHERE task_id = ?',
+          [taskId]
+        )
+        for (const r of tracked) computers.add(r.computer_id)
+        return [...computers].sort()
+      },
+      async forgetOn(taskId, computerId) {
+        await opts.gate?.(computerId, taskId)
+        await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
+      },
+      async forget(taskIds) {
+        for (const taskId of taskIds) {
+          const computers = new Set<string>()
+          for (const o of await ownership.forTask(taskId))
+            if (o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId).catch(() => null)
+          if (home) computers.add(home)
+          for (const computerId of [...computers].sort())
+            await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
+        }
+      },
+      async files(moveId, taskId, only) {
+        void moveId
+        const projectId = await moveProjectOf(taskId)
+        const computers = new Set<string>(only ?? [])
+        if (!only) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId)
+          if (home) computers.add(home)
+        }
+        const files: Awaited<ReturnType<TaskMoveSessionsDelegate['files']>> = []
+        const seen = new Set<string>()
+        for (const computerId of [...computers].sort()) {
+          await opts.gate?.(computerId, taskId)
+          const listed = (await computerRequest(computerId, {
+            kind: 'sessionMove.files',
+            taskId,
+            projectId
+          })) as { files: Array<Omit<(typeof files)[number], 'computerId'>> }
+          for (const file of listed.files) {
+            const key = JSON.stringify(file.ref)
+            if (seen.has(key)) continue
+            seen.add(key)
+            files.push({ ...file, computerId })
+          }
+        }
+        return files
+      },
+      async readFile(input) {
+        return (await computerRequest(input.computerId, {
+          kind: 'sessionMove.fileRead',
+          taskId: input.taskId,
+          projectId: await moveProjectOf(input.taskId),
+          ref: input.ref,
+          offset: input.offset,
+          length: input.length
+        })) as { data: string; eof: boolean }
+      },
+      async missingFiles(taskId, entries) {
+        const pc = await moveTargetComputer(taskId)
+        const answer = (await computerRequest(pc, {
+          kind: 'sessionMove.fileMissing',
+          taskId,
+          projectId: await moveProjectOf(taskId),
+          entries
+        })) as { missing: Awaited<ReturnType<TaskMoveSessionsDelegate['missingFiles']>> }
+        return answer.missing
+      },
+      async writeFile(input) {
+        const pc = await moveTargetComputer(input.taskId)
+        await computerRequest(pc, {
+          kind: 'sessionMove.fileWrite',
+          taskId: input.taskId,
+          projectId: await moveProjectOf(input.taskId),
+          ref: input.ref,
+          offset: input.offset,
+          data: input.data,
+          ...(input.complete ? { complete: input.complete } : {})
+        })
+      },
+      computerOf: moveTargetComputer,
+      async begin(taskId, manifest) {
+        const pc = await moveTargetComputer(taskId)
+        const begun = (await computerRequest(pc, { kind: 'transfer.begin', manifest })) as {
+          id: string
+          offset: number
+        }
+        return { transferId: begun.id, offset: begun.offset }
+      },
+      async chunk(taskId, transferId, offset, data) {
+        const pc = await moveTargetComputer(taskId)
+        await computerRequest(pc, { kind: 'transfer.chunk', id: transferId, offset, data })
+      },
+      async finish(taskId, transferId) {
+        const pc = await moveTargetComputer(taskId)
+        const staged = (await computerRequest(pc, { kind: 'transfer.finish', id: transferId })) as {
+          id: string
+          epoch: number
+        }
+        const verified = (await computerRequest(pc, {
+          kind: 'migration.verify',
+          id: staged.id
+        })) as { missing: Array<Parameters<TaskMoveSessionsDelegate['putAttachment']>[0]['ref']> }
+        return { conversationId: staged.id, epoch: staged.epoch, missing: verified.missing }
+      },
+      async putAttachment(input) {
+        const pc = await moveTargetComputer(input.taskId)
+        const route = { id: input.conversationId, epoch: input.epoch }
+        await withUploadedBytes(
+          {
+            computerId: pc,
+            bounded: opts.boundedReads?.(pc) === true,
+            send: (body) => computerRequest(pc, body),
+            source: Buffer.from(input.data, 'base64'),
+            owner: {
+              route,
+              operationId: createHash('sha256')
+                .update(JSON.stringify(['session-move', route, input.ref]))
+                .digest('hex')
+            }
+          },
+          (bytes) =>
+            computerRequest(pc, {
+              kind: 'attachment.put',
+              route,
+              ref: input.ref,
+              ...bytes
+            })
+        )
+      },
+      async activate(input) {
+        const pc = await moveTargetComputer(input.taskId)
+        const left = (await computerRequest(pc, {
+          kind: 'migration.verify',
+          id: input.conversationId
+        })) as { missing: unknown[] }
+        if (left.missing.length) throw new Error('The chat is still missing attachments.')
+        await computerRequest(pc, {
+          kind: 'migration.activate',
+          id: input.conversationId,
+          epoch: input.epoch,
+          migrationId: input.migrationId,
+          hash: input.hash
+        })
+      },
+      async importLedger(taskId, ledger) {
+        const pc = await moveTargetComputer(taskId)
+        const result = (await computerRequest(pc, {
+          kind: 'data.import',
+          value: {
+            kind: 'session-ledger-move',
+            items: [{ key: `session-ledger-move:${taskId}`, taskId, value: ledger }]
+          }
+        })) as { rejected: Array<{ message: string }> }
+        if (result.rejected.length) throw new Error(result.rejected[0].message)
+      },
+      async settle(computerId) {
+        invalidateRecovery(computerId)
+        await recoverComputer(computerId, true)
+      }
+    }
+  }
   const computers: ChatComputerOps = {
     listBackups: (pc) =>
       computerRequest(pc, { kind: 'backup.list' }) as ReturnType<ChatComputerOps['listBackups']>,
@@ -1308,252 +1562,7 @@ export function createComputerChatServices(opts: {
      * (cross-hub move, `copy-sessions`): the app relays; each call asks one computer,
      * through the same admission and recovery every computer request here passes.
      */
-    taskMoveSessions: {
-      async exportTask(moveId, taskId, only) {
-        // Chats whose history still sits in this hub's own tables (older versions), or whose
-        // migration to a computer is not finished, go to their computer first: only what a
-        // computer holds can be exported.
-        const owners = await ownership.forTask(taskId)
-        const tables = await legacyChatTables(opts.db)
-        if (
-          owners.some((o) => !['active', 'deleted'].includes(o.state) || o.cleanupPending) ||
-          (await opts.db.get(
-            `SELECT 1 FROM terminal_tabs t WHERE t.task_id = ? AND ${legacyChatTabContentSql(tables)}`,
-            [taskId]
-          ))
-        )
-          await relay.migrateWholeTask(taskId)
-        const computers = new Set<string>(only ?? [])
-        if (!only) {
-          for (const o of await ownership.forTask(taskId))
-            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
-          const home = await opts.resolveComputer(taskId)
-          if (home) computers.add(home)
-        }
-        const transfers: Array<{
-          computerId: string
-          manifest: Parameters<TaskMoveSessionsDelegate['begin']>[1]
-        }> = []
-        const ledgers: SessionLedgerBundle[] = []
-        for (const computerId of [...computers].sort()) {
-          await opts.gate?.(computerId, taskId)
-          const exported = (await computerRequest(computerId, {
-            kind: 'sessionMove.export',
-            moveId,
-            taskId
-          })) as {
-            transfers: (typeof transfers)[number]['manifest'][]
-            ledger: SessionLedgerBundle
-          }
-          for (const manifest of exported.transfers) transfers.push({ computerId, manifest })
-          ledgers.push(exported.ledger)
-        }
-        return { transfers, ledger: mergeSessionLedgers(ledgers) }
-      },
-      async read(input) {
-        const r = (await computerRequest(input.computerId, {
-          kind: 'sessionMove.read',
-          moveId: input.moveId,
-          conversationId: input.conversationId,
-          offset: input.offset,
-          length: input.length
-        })) as { data: string }
-        return r.data
-      },
-      async readAttachment(input) {
-        const ranged = await readRanges(input.computerId, {
-          type: 'attachment',
-          route: { id: input.conversationId, epoch: input.epoch },
-          ref: input.ref
-        })
-        if (ranged) return ranged.bytes.toString('base64')
-        const r = (await computerRequest(input.computerId, {
-          kind: 'attachment.read',
-          route: { id: input.conversationId, epoch: input.epoch },
-          ref: input.ref
-        })) as { data: string }
-        return r.data
-      },
-      async discard(moveId, taskIds) {
-        const computers = new Set<string>()
-        for (const taskId of taskIds) {
-          for (const o of await ownership.forTask(taskId))
-            if (o.computerId) computers.add(o.computerId)
-          const home = await opts.resolveComputer(taskId).catch(() => null)
-          if (home) computers.add(home)
-        }
-        for (const computerId of computers)
-          await computerRequest(computerId, { kind: 'sessionMove.discard', moveId }).catch(
-            () => undefined
-          )
-      },
-      async holders(taskId) {
-        const computers = new Set<string>()
-        for (const o of await ownership.forTask(taskId))
-          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
-        const tracked = await opts.db.all<{ computer_id: string }>(
-          'SELECT computer_id FROM chat_task_computers WHERE task_id = ?',
-          [taskId]
-        )
-        for (const r of tracked) computers.add(r.computer_id)
-        return [...computers].sort()
-      },
-      async forgetOn(taskId, computerId) {
-        await opts.gate?.(computerId, taskId)
-        await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
-      },
-      async forget(taskIds) {
-        for (const taskId of taskIds) {
-          const computers = new Set<string>()
-          for (const o of await ownership.forTask(taskId))
-            if (o.computerId) computers.add(o.computerId)
-          const home = await opts.resolveComputer(taskId).catch(() => null)
-          if (home) computers.add(home)
-          for (const computerId of [...computers].sort())
-            await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
-        }
-      },
-      async files(moveId, taskId, only) {
-        void moveId
-        const projectId = await moveProjectOf(taskId)
-        const computers = new Set<string>(only ?? [])
-        if (!only) {
-          for (const o of await ownership.forTask(taskId))
-            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
-          const home = await opts.resolveComputer(taskId)
-          if (home) computers.add(home)
-        }
-        const files: Awaited<ReturnType<TaskMoveSessionsDelegate['files']>> = []
-        const seen = new Set<string>()
-        for (const computerId of [...computers].sort()) {
-          await opts.gate?.(computerId, taskId)
-          const listed = (await computerRequest(computerId, {
-            kind: 'sessionMove.files',
-            taskId,
-            projectId
-          })) as { files: Array<Omit<(typeof files)[number], 'computerId'>> }
-          for (const file of listed.files) {
-            const key = JSON.stringify(file.ref)
-            if (seen.has(key)) continue
-            seen.add(key)
-            files.push({ ...file, computerId })
-          }
-        }
-        return files
-      },
-      async readFile(input) {
-        return (await computerRequest(input.computerId, {
-          kind: 'sessionMove.fileRead',
-          taskId: input.taskId,
-          projectId: await moveProjectOf(input.taskId),
-          ref: input.ref,
-          offset: input.offset,
-          length: input.length
-        })) as { data: string; eof: boolean }
-      },
-      async missingFiles(taskId, entries) {
-        const pc = await moveComputerOf(taskId)
-        const answer = (await computerRequest(pc, {
-          kind: 'sessionMove.fileMissing',
-          taskId,
-          projectId: await moveProjectOf(taskId),
-          entries
-        })) as { missing: Awaited<ReturnType<TaskMoveSessionsDelegate['missingFiles']>> }
-        return answer.missing
-      },
-      async writeFile(input) {
-        const pc = await moveComputerOf(input.taskId)
-        await computerRequest(pc, {
-          kind: 'sessionMove.fileWrite',
-          taskId: input.taskId,
-          projectId: await moveProjectOf(input.taskId),
-          ref: input.ref,
-          offset: input.offset,
-          data: input.data,
-          ...(input.complete ? { complete: input.complete } : {})
-        })
-      },
-      computerOf: moveComputerOf,
-      async begin(taskId, manifest) {
-        const pc = await moveComputerOf(taskId)
-        const begun = (await computerRequest(pc, { kind: 'transfer.begin', manifest })) as {
-          id: string
-          offset: number
-        }
-        return { transferId: begun.id, offset: begun.offset }
-      },
-      async chunk(taskId, transferId, offset, data) {
-        const pc = await moveComputerOf(taskId)
-        await computerRequest(pc, { kind: 'transfer.chunk', id: transferId, offset, data })
-      },
-      async finish(taskId, transferId) {
-        const pc = await moveComputerOf(taskId)
-        const staged = (await computerRequest(pc, { kind: 'transfer.finish', id: transferId })) as {
-          id: string
-          epoch: number
-        }
-        const verified = (await computerRequest(pc, {
-          kind: 'migration.verify',
-          id: staged.id
-        })) as { missing: Array<Parameters<TaskMoveSessionsDelegate['putAttachment']>[0]['ref']> }
-        return { conversationId: staged.id, epoch: staged.epoch, missing: verified.missing }
-      },
-      async putAttachment(input) {
-        const pc = await moveComputerOf(input.taskId)
-        const route = { id: input.conversationId, epoch: input.epoch }
-        await withUploadedBytes(
-          {
-            computerId: pc,
-            bounded: opts.boundedReads?.(pc) === true,
-            send: (body) => computerRequest(pc, body),
-            source: Buffer.from(input.data, 'base64'),
-            owner: {
-              route,
-              operationId: createHash('sha256')
-                .update(JSON.stringify(['session-move', route, input.ref]))
-                .digest('hex')
-            }
-          },
-          (bytes) =>
-            computerRequest(pc, {
-              kind: 'attachment.put',
-              route,
-              ref: input.ref,
-              ...bytes
-            })
-        )
-      },
-      async activate(input) {
-        const pc = await moveComputerOf(input.taskId)
-        const left = (await computerRequest(pc, {
-          kind: 'migration.verify',
-          id: input.conversationId
-        })) as { missing: unknown[] }
-        if (left.missing.length) throw new Error('The chat is still missing attachments.')
-        await computerRequest(pc, {
-          kind: 'migration.activate',
-          id: input.conversationId,
-          epoch: input.epoch,
-          migrationId: input.migrationId,
-          hash: input.hash
-        })
-      },
-      async importLedger(taskId, ledger) {
-        const pc = await moveComputerOf(taskId)
-        const result = (await computerRequest(pc, {
-          kind: 'data.import',
-          value: {
-            kind: 'session-ledger-move',
-            items: [{ key: `session-ledger-move:${taskId}`, taskId, value: ledger }]
-          }
-        })) as { rejected: Array<{ message: string }> }
-        if (result.rejected.length) throw new Error(result.rejected[0].message)
-      },
-      async settle(computerId) {
-        invalidateRecovery(computerId)
-        await recoverComputer(computerId, true)
-      }
-    } satisfies TaskMoveSessionsDelegate,
+    taskMoveSessions: moveSessionsFor(),
     chatSettings: {
       async ownedModes(taskId: string): Promise<ReadonlySet<string>> {
         const rows = await opts.db.all<{ mode: string }>(

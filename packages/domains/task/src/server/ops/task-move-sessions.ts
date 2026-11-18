@@ -25,6 +25,8 @@ import type {} from '../task-txns.js'
  * the procedures refuse.
  */
 export interface TaskMoveSessionsDelegate {
+  /** Stage on an explicit destination while task routing still names source. */
+  forComputer?(computerId: string): TaskMoveSessionsDelegate
   // --- The hub the task leaves ---
   /**
    * Each of the task's computers (or, with `computers`, just those) exports its chats
@@ -134,6 +136,65 @@ export function taskMoveSessions(): TaskMoveSessionsDelegate {
   if (!delegate)
     throw new TaskMoveRefusedError('This hub cannot move agent sessions: it has no computers.')
   return delegate
+}
+
+/** Stage a same-hub computer move. Source ownership and its files stay intact;
+ * only the task-computer move's final transaction installs the returned owners. */
+export async function stageComputerMoveSessions(input: {
+  id: string
+  taskId: string
+  sourceComputerId: string
+  destinationComputerId: string
+  participants?: string[]
+}): Promise<Array<{ id: string; tabId: string; mode: string; epoch: number }>> {
+  const d = taskMoveSessions()
+  const target = d.forComputer?.(input.destinationComputerId)
+  if (!target) throw new Error('This hub cannot stage sessions on another computer.')
+  const from = (input.participants ?? (await d.holders(input.taskId))).filter(
+    (id) => id !== input.destinationComputerId
+  )
+  if (
+    input.sourceComputerId !== input.destinationComputerId &&
+    !from.includes(input.sourceComputerId)
+  )
+    from.push(input.sourceComputerId)
+  let chats: Array<{ id: string; tabId: string; mode: string; epoch: number }> = []
+  await copyMovedSessions({
+    move: { id: input.id, taskIds: [input.taskId] },
+    source: {
+      sessionsExport: async (id, task) => {
+        // Some tabs can already live on destination. Keep their ledger records,
+        // but do not re-import their conversations onto the same computer.
+        const exported = await d.exportTask(id, task, [...from, input.destinationComputerId])
+        return {
+          ...exported,
+          transfers: exported.transfers.filter((t) => t.computerId !== input.destinationComputerId)
+        }
+      },
+      sessionsRead: (i) => d.read(i),
+      sessionsReadAttachment: (i) => d.readAttachment(i),
+      sessionsFiles: (id, task) => d.files(id, task, from),
+      sessionsFileRead: (i) => d.readFile(i),
+      sessionsDiscard: async () => {
+        /* Snapshot is retained until final commit/cancel. */
+      }
+    },
+    target: {
+      sessionsBegin: (_id, task, manifest) => target.begin(task, manifest),
+      sessionsChunk: (i) => target.chunk(i.taskId, i.transferId, i.offset, i.data),
+      sessionsFinish: (_id, task, transferId) => target.finish(task, transferId),
+      sessionsPutAttachment: (i) => target.putAttachment(i),
+      sessionsActivate: (i) => target.activate(i),
+      sessionsImportLedger: (_id, task, ledger) => target.importLedger(task, ledger),
+      sessionsFilesMissing: (_id, task, entries) => target.missingFiles(task, entries),
+      sessionsFileWrite: (i) => target.writeFile(i),
+      sessionsRegister: async (_id, _task, staged) => {
+        chats = staged
+      }
+    },
+    reportProgress: async () => undefined
+  })
+  return chats
 }
 
 /**

@@ -52,6 +52,8 @@ export type ComputerGateway = {
 }
 
 export type ComputersDeps = {
+  /** Refuse a plain rebind when existing sessions require the migration workflow. */
+  assertTaskRebind?: (taskId: string, computerId: string | null) => Promise<void>
   /**
    * Push connection changes to subscribers. Wired in `composition.ts`, where the
    * real gateway and its typed event map are in scope — a structural mirror of a

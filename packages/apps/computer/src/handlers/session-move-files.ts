@@ -154,8 +154,8 @@ export async function relocateClaudeTranscript(
 export function createSessionMoveFiles(opts: {
   stateDir: string
   hubScope: string
-  /** The folder this computer keeps `projectId` in, or null. */
-  projectFolder(projectId: string): string | null
+  /** The folder the task's sessions run in here (its worktree, else the project's), or null. */
+  projectFolder(projectId: string, taskId?: string): string | null | Promise<string | null>
   /** The Claude session ids the task's ledger knows. */
   sessionIds(taskId: string): string[] | Promise<string[]>
 }) {
@@ -179,15 +179,22 @@ export function createSessionMoveFiles(opts: {
       const found = findCodexRollout(ref.sessionId)
       return found && found.name === ref.name && found.date === ref.date ? found.path : null
     }
-    const found = await locateClaudeTranscript(ref.sessionId, opts.projectFolder(projectId) ?? '')
+    const found = await locateClaudeTranscript(
+      ref.sessionId,
+      (await opts.projectFolder(projectId, taskId)) ?? ''
+    )
     return found?.path ?? null
   }
 
   /** Where `ref` goes on THIS computer (null = no place for it here). */
-  function targetPath(taskId: string, projectId: string, ref: SessionMoveFileRef): string | null {
+  async function targetPath(
+    taskId: string,
+    projectId: string,
+    ref: SessionMoveFileRef
+  ): Promise<string | null> {
     if (ref.kind === 'pty-history') return join(scrollbackDir(taskId), ref.name)
     if (ref.kind === 'codex-rollout') return join(codexHome(), 'sessions', ref.date, ref.name)
-    const folder = opts.projectFolder(projectId)
+    const folder = await opts.projectFolder(projectId, taskId)
     return folder ? claudeTranscriptPath(folder, ref.sessionId) : null
   }
 
@@ -266,14 +273,14 @@ export function createSessionMoveFiles(opts: {
      * where its staged copy stands. A file with no place here (a transcript when the
      * task's project has no folder on this computer) is not asked for.
      */
-    missing(
+    async missing(
       taskId: string,
       projectId: string,
       entries: SessionMoveFileEntry[]
-    ): Array<SessionMoveFileEntry & { offset: number }> {
+    ): Promise<Array<SessionMoveFileEntry & { offset: number }>> {
       const out: Array<SessionMoveFileEntry & { offset: number }> = []
       for (const entry of entries) {
-        const target = targetPath(taskId, projectId, entry.ref)
+        const target = await targetPath(taskId, projectId, entry.ref)
         if (!target) continue
         if (
           existsSync(target) &&
@@ -289,15 +296,15 @@ export function createSessionMoveFiles(opts: {
     },
 
     /** A chunk at `offset`; the last one (`complete`) checks the whole and puts it in place. */
-    write(input: {
+    async write(input: {
       taskId: string
       projectId: string
       ref: SessionMoveFileRef
       offset: number
       data: string
       complete?: { size: number; hash: string }
-    }): { placed: boolean } {
-      const target = targetPath(input.taskId, input.projectId, input.ref)
+    }): Promise<{ placed: boolean }> {
+      const target = await targetPath(input.taskId, input.projectId, input.ref)
       if (!target) throw new Error('This computer has no place for that session file')
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
       const staging = stagingOf(target)
@@ -338,16 +345,24 @@ export function createSessionMoveFiles(opts: {
     },
 
     /** Drop staged copies of files a move will not finish (canceled). */
-    discardStaging(taskId: string, projectId: string, refs: SessionMoveFileRef[]): void {
+    async discardStaging(
+      taskId: string,
+      projectId: string,
+      refs: SessionMoveFileRef[]
+    ): Promise<void> {
       for (const ref of refs) {
-        const target = targetPath(taskId, projectId, ref)
+        const target = await targetPath(taskId, projectId, ref)
         if (target) rmSync(stagingOf(target), { force: true })
       }
     },
 
     /** For tests and diagnostics: the text of a file in place. */
-    readPlaced(taskId: string, projectId: string, ref: SessionMoveFileRef): string | null {
-      const target = targetPath(taskId, projectId, ref)
+    async readPlaced(
+      taskId: string,
+      projectId: string,
+      ref: SessionMoveFileRef
+    ): Promise<string | null> {
+      const target = await targetPath(taskId, projectId, ref)
       return target && existsSync(target) ? readFileSync(target, 'utf8') : null
     }
   }

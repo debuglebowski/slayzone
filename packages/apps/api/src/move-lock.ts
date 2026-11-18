@@ -20,19 +20,28 @@ import { idValuesAt } from './http/owner-scope'
  * Writes the lock lets through though they name a moving project: the order of the
  * project list is not the project's content (a reorder names every listed project).
  */
-export const MOVE_LOCK_EXEMPT: ReadonlySet<string> = new Set(['projects.reorder'])
+export const MOVE_LOCK_EXEMPT: ReadonlySet<string> = new Set([
+  'projects.reorder',
+  'task.runComputerMove',
+  'task.cancelComputerMove'
+])
 
 /** A write to a task, or to a project, that is being moved to another hub. */
 export class TaskMovingError extends Error {
   override name = 'TaskMovingError'
   constructor(
     readonly taskIds: readonly string[],
-    readonly projectIds: readonly string[] = []
+    readonly projectIds: readonly string[] = [],
+    computerMove = false
   ) {
     super(
       projectIds.length > 0
-        ? 'This project is being moved to another hub. Wait for the move to finish, or cancel it.'
-        : 'This task is being moved to another hub. Wait for the move to finish, or cancel it.'
+        ? computerMove
+          ? 'A task in this project is moving to another computer. Wait for its move to finish, or cancel it.'
+          : 'This project is being moved to another hub. Wait for the move to finish, or cancel it.'
+        : computerMove
+          ? 'This task is being moved to another computer. Wait for the move to finish, or cancel it.'
+          : 'This task is being moved to another hub. Wait for the move to finish, or cancel it.'
     )
   }
 }
@@ -108,6 +117,22 @@ export async function assertNotMoving(
   if (!(await anyTaskMoveLocking(db))) return
   const locked = await lockedTaskIds(db, await taskIdsOf(db, resources))
   const lockedProjects = await lockedProjectIds(db, await projectIdsOf(db, resources))
+  if (
+    lockedProjects.length > 0 &&
+    (await db.get(
+      `SELECT 1 FROM task_computer_moves cm JOIN tasks t ON t.id=cm.task_id WHERE cm.status IN ('running','failed') AND t.project_id IN (${lockedProjects.map(() => '?').join(',')}) LIMIT 1`,
+      [...lockedProjects]
+    ))
+  )
+    throw new TaskMovingError([], lockedProjects, true)
+  if (
+    locked.length > 0 &&
+    (await db.get(
+      `SELECT 1 FROM task_computer_moves WHERE status IN ('running','failed') AND task_id IN (${locked.map(() => '?').join(',')}) LIMIT 1`,
+      [...locked]
+    ))
+  )
+    throw new TaskMovingError(locked, [], true)
   if (locked.length > 0 || lockedProjects.length > 0)
     throw new TaskMovingError(locked, lockedProjects)
 }

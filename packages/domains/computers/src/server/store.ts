@@ -647,7 +647,7 @@ export class TaskFoldersElsewhereError extends Error {
     readonly holderName: string
   ) {
     super(
-      `This task's folder is on ${holderName}, and its work runs there. Remove its worktree or base folder to move it to another computer.`
+      `This task has files on ${holderName}. Use Move to computer to transfer its files and agent sessions.`
     )
     this.name = 'TaskFoldersElsewhereError'
   }
