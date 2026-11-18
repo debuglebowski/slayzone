@@ -154,9 +154,18 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
       ? computerServes(db, true, computerId, work)
       : mayUseComputer(db, { authRequired: true, principal: callerPrincipal() }, computerId)
 
-  /** Throw unless this computer may do `work`. */
+  /**
+   * Throw unless this computer may do `work` — and, for a request a user made, unless
+   * it is that user's own computer (T-100): a member of a shared task works on its
+   * own computers, never on the owner's (or anyone else's), whatever the task allows.
+   * Work the hub does on its own (no acting user) is decided by the work alone.
+   */
   const admit = async (computerId: string, work: OwnedResource | null): Promise<void> => {
-    if (await serves(computerId, work)) return
+    const caller = callerPrincipal()
+    const callersOwn =
+      caller === null ||
+      (await mayUseComputer(db, { authRequired: true, principal: caller }, computerId))
+    if (callersOwn && (await serves(computerId, work))) return
     auditRefusal(computerId, work)
     throw new ComputerNotYoursError()
   }

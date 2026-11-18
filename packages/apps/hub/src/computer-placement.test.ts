@@ -228,3 +228,21 @@ test("work whose rows are gone (permanent deletion) picks among its owner's comp
   usable = [{ computerId: 'cA' }]
   expect(await placementFor(false).forOwner(null), 'no login: the connected default').toBe('cA')
 })
+
+test("T-100: a user's request reaches only that user's computers, even for work it may touch", async () => {
+  const gate = placementFor(true).gate!
+  // B is a member of A's project: B may touch A's task, never A's computer.
+  sql(
+    `INSERT OR IGNORE INTO project_members (project_id, user_id, role) VALUES ('pA', ?, 'edit')`,
+    B
+  )
+  expect(
+    (await as(B, () => rejection(gate('cA', { kind: 'task', id: 'tA' })))) instanceof
+      ComputerNotYoursError,
+    "B's request on A's computer"
+  ).toBe(true)
+  expect(await as(A, () => rejection(gate('cA', { kind: 'task', id: 'tA' }))), "A's own").toBe(null)
+  // The hub's own work (no acting user) is decided by the work alone, as before.
+  expect(await as(null, () => rejection(gate('cA', { kind: 'task', id: 'tA' })))).toBe(null)
+  sql(`DELETE FROM project_members WHERE project_id = 'pA'`)
+})
