@@ -1,0 +1,216 @@
+import { spawn, type ChildProcess } from 'child_process'
+import fs from 'fs'
+import net from 'net'
+import os from 'os'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
+import { chromium, test, expect, type Browser, type Page } from '@playwright/test'
+import { scrubbedEnv, until } from '../fixtures/web-shell-computer'
+
+/**
+ * T-100 sharing, through the real UI: two people on one login hub, each in their own
+ * browser. The owner adds the second person to a project as View in Project Settings →
+ * Members; that person then sees the project's tasks, gets the read-only agent pane,
+ * and loses a task live the moment the owner makes it private.
+ *
+ * The access rules themselves (roles × kinds × grants) are covered by unit tests on a
+ * real hub (`apps/hub/src/sharing.test.ts`); this proves the screens reach them.
+ */
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const require = createRequire(import.meta.url)
+const HUB_DIR = path.resolve(__dirname, '..', '..', '..', 'hub')
+const HUB_BIN = path.join(HUB_DIR, 'dist', 'bin.cjs')
+const WEB_INDEX = path.join(HUB_DIR, 'dist', 'web', 'index.html')
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.on('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+      srv.close(() => resolve(port))
+    })
+  })
+}
+
+interface Owner {
+  email: string
+  password: string
+  token: string
+}
+
+interface Hub {
+  base: string
+  root: string
+  owner: Owner
+  stop: () => Promise<void>
+}
+
+async function spawnLoginHub(): Promise<Hub> {
+  if (!fs.existsSync(HUB_BIN) || !fs.existsSync(WEB_INDEX)) {
+    throw new Error(`hub or web shell not built (${HUB_BIN}, ${WEB_INDEX}): run pnpm build`)
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-web-shell-sharing-'))
+  const port = await freePort()
+  const proc: ChildProcess = spawn(require('electron') as unknown as string, [HUB_BIN], {
+    env: {
+      ...scrubbedEnv(),
+      ELECTRON_RUN_AS_NODE: '1',
+      PLAYWRIGHT: '1',
+      SLAYZONE_ROOT: root,
+      SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
+      SLAYZONE_HUB_REQUIRE_LOGIN: '1'
+    },
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+  proc.stdout?.on('data', () => undefined)
+  proc.stderr?.on('data', () => undefined)
+  const stop = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
+      const t = setTimeout(() => proc.kill('SIGKILL'), 3_000)
+      proc.once('exit', () => {
+        clearTimeout(t)
+        resolve()
+      })
+      proc.kill('SIGTERM')
+    })
+  const base = `http://127.0.0.1:${port}`
+  try {
+    await until(async () => ((await fetch(`${base}/health`)).ok ? true : null), 'hub /health')
+    const owner = await until<Owner>(() => {
+      const o = JSON.parse(fs.readFileSync(path.join(root, 'hub.owner.json'), 'utf8')) as Owner
+      return o.token && o.email && o.password ? o : null
+    }, 'bootstrap owner')
+    return { base, root, owner, stop }
+  } catch (err) {
+    await stop()
+    throw err
+  }
+}
+
+/** POST as the owner (the hub's admin); the response's `data`. */
+async function postAsOwner<T>(hub: Hub, url: string, body: unknown): Promise<T> {
+  const r = await fetch(`${hub.base}${url}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${hub.owner.token}`
+    },
+    body: JSON.stringify(body)
+  })
+  if (!r.ok) throw new Error(`${url}: ${r.status} ${await r.text()}`)
+  return ((await r.json()) as { data: T }).data
+}
+
+async function signIn(page: Page, hub: Hub, email: string, password: string): Promise<void> {
+  await page.goto(`${hub.base}/`)
+  await page.getByTestId('web-login-email').fill(email)
+  await page.getByTestId('web-login-password').fill(password)
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    page.getByTestId('web-login-submit').click()
+  ])
+  await expect(page.getByTestId('web-login-screen')).toHaveCount(0, { timeout: 30_000 })
+}
+
+test.describe('web shell sharing — two people, one login hub', () => {
+  let hub: Hub
+  let browser: Browser
+
+  test.beforeAll(async () => {
+    hub = await spawnLoginHub()
+    browser = await chromium.launch()
+  })
+
+  test.afterAll(async () => {
+    await browser?.close()
+    await hub?.stop()
+    if (hub) fs.rmSync(hub.root, { recursive: true, force: true })
+  })
+
+  test('a View member sees the project, may only view, and loses a task made private', async () => {
+    test.setTimeout(120_000)
+    await postAsOwner(hub, '/api/dev/sql', {
+      sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')",
+      method: 'run'
+    })
+    const project = await postAsOwner<{ id: string }>(hub, '/api/projects', {
+      name: 'Shared Project'
+    })
+    await postAsOwner(hub, '/api/tasks', { projectId: project.id, title: 'Open Task' })
+    await postAsOwner(hub, '/api/tasks', { projectId: project.id, title: 'Secret Task' })
+    const member = await postAsOwner<{ id: string; password: string }>(hub, '/api/hub/users', {
+      email: 'member@example.com'
+    })
+
+    const ownerContext = await browser.newContext()
+    const memberContext = await browser.newContext()
+    try {
+      const ownerPage = await ownerContext.newPage()
+      const memberPage = await memberContext.newPage()
+
+      // Before any sharing the member's hub is empty.
+      await signIn(memberPage, hub, 'member@example.com', member.password)
+      await expect(memberPage.getByText('Click + in sidebar to create a project')).toBeVisible({
+        timeout: 30_000
+      })
+
+      // The owner adds the member as View in Project Settings → Members.
+      await signIn(ownerPage, hub, hub.owner.email, hub.owner.password)
+      await expect(ownerPage.getByText('Secret Task').first()).toBeVisible({ timeout: 30_000 })
+      const dialog = ownerPage
+        .getByRole('dialog')
+        .filter({ has: ownerPage.getByRole('heading', { name: 'Project Settings' }) })
+      await ownerPage
+        .locator('[data-slot="sidebar"]')
+        .first()
+        .getByRole('button', { name: 'SH', exact: true })
+        .last()
+        .click({ button: 'right' })
+      await ownerPage.getByRole('menuitem', { name: 'Settings', exact: true }).click()
+      await dialog.getByText('Members', { exact: true }).first().click()
+      await expect(dialog.getByTestId('project-members-tab')).toBeVisible()
+      // Page-level test ids: an open Select hides the dialog from role queries.
+      const person = ownerPage.getByTestId('project-member-picker-person')
+      await expect(async () => {
+        if (!(await ownerPage.getByRole('listbox').isVisible())) await person.click()
+        await ownerPage
+          .getByRole('option', { name: /member@example\.com/ })
+          .click({ timeout: 2_000 })
+        await expect(person).toContainText('member@example.com', { timeout: 2_000 })
+      }).toPass({ timeout: 15_000 })
+      await expect(ownerPage.getByTestId('project-member-picker-role')).toContainText('Can view')
+      await ownerPage.getByTestId('project-member-picker-add').click()
+      await expect(dialog.getByTestId(`project-member-${member.id}`)).toBeVisible()
+      await ownerPage.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+
+      // The member gets the project live, with both tasks.
+      await expect(memberPage.getByText('Open Task').first()).toBeVisible({ timeout: 20_000 })
+      await expect(memberPage.getByText('Secret Task').first()).toBeVisible()
+
+      // The owner makes one task private: it leaves the member's board live.
+      await ownerPage.getByText('Secret Task').first().click()
+      const visibility = ownerPage.getByTestId('task-visibility').filter({ visible: true })
+      await visibility.click({ timeout: 20_000 })
+      await ownerPage.getByRole('option', { name: /^Private/ }).click()
+      await expect(visibility).toContainText('Private')
+      await expect(memberPage.getByText('Secret Task')).toHaveCount(0, { timeout: 20_000 })
+      await expect(memberPage.getByText('Open Task').first()).toBeVisible()
+
+      // View only: the task opens, but the agent pane offers nothing to run.
+      await memberPage.getByText('Open Task').first().click()
+      await expect(
+        memberPage.getByTestId('agent-pane-not-yours').filter({ visible: true })
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(memberPage.getByText('You can view this task').first()).toBeVisible()
+    } finally {
+      await ownerContext.close()
+      await memberContext.close()
+    }
+  })
+})
