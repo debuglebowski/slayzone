@@ -28,6 +28,12 @@ export type SharingRouterDeps = {
    * there (a new one: see hub `artifact-promotion.ts`); a hub one answers itself.
    */
   promoteArtifact: (artifactId: string) => Promise<string>
+  /**
+   * These users' access changed: their own agents on a task they may no longer edit
+   * stop (they ran it on their computer as someone allowed to; no longer). In the
+   * background.
+   */
+  accessChanged: (userIds: readonly string[]) => void
 }
 
 // Unwired (a unit harness, a hub without login): nobody but the owner, nothing to move.
@@ -37,7 +43,8 @@ let deps: SharingRouterDeps = {
   tasksChanged: () => undefined,
   onTaskShared: () => undefined,
   onProjectShared: () => undefined,
-  promoteArtifact: async (id) => id
+  promoteArtifact: async (id) => id,
+  accessChanged: () => undefined
 }
 
 export function setSharingRouterDeps(next: Partial<SharingRouterDeps>): void {

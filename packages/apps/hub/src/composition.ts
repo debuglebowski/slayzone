@@ -149,6 +149,7 @@ import {
   hubGithubSignInConvexUrl,
   evictAgentTree,
   checkOwnership,
+  canAccess,
   resetAgentHookStateForTest,
   type AppDeps,
   type NotifyEventMap,
@@ -1341,8 +1342,39 @@ export function composeServer(opts: {
     onTaskShared: (taskId) =>
       inBackground('moving shared task files', artifactPromotion.promoteTask(taskId)),
     onProjectShared: (projectId) =>
-      inBackground('moving shared project files', artifactPromotion.promoteProject(projectId))
+      inBackground('moving shared project files', artifactPromotion.promoteProject(projectId)),
+    // Someone who may no longer edit a task stops running their own agents on it.
+    accessChanged: (userIds) =>
+      inBackground('stopping agents after an access change', stopAgentsWithoutEdit(userIds))
   })
+
+  /** Each user's own tabs on tasks they may no longer edit: their agents stop (T-100). */
+  async function stopAgentsWithoutEdit(userIds: readonly string[]): Promise<void> {
+    for (const userId of userIds) {
+      const tabs = await db.all<{ id: string; task_id: string }>(
+        'SELECT id, task_id FROM terminal_tabs WHERE owner_user_id = ?',
+        [userId]
+      )
+      const decided = new Map<string, boolean>()
+      for (const tab of tabs) {
+        const known = decided.get(tab.task_id)
+        const mayRun =
+          known ??
+          (await canAccess(
+            db,
+            { authRequired: true, principal: { userId } },
+            { kind: 'taskRunner', id: tab.task_id },
+            'edit'
+          ))
+        decided.set(tab.task_id, mayRun)
+        if (mayRun) continue
+        await Promise.resolve(getPtyDeps().ops.ptyKill(`${tab.task_id}:${tab.id}`)).catch(
+          () => undefined
+        )
+        await Promise.resolve(getChatDeps().ops.kill(tab.id)).catch(() => undefined)
+      }
+    }
+  }
   // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).
   const chatRelayWatch = createChatRelayWatch({
     log: (message, detail) => console.warn(`[chat] ${message}`, detail),

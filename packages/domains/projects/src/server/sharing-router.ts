@@ -42,6 +42,7 @@ function changed(ctx: TrpcContext, userIds: readonly (string | null | undefined)
   for (const u of userIds) if (u) who.add(u)
   if (ctx.principal) who.add(ctx.principal.userId)
   events.emit('changed', { userIds: [...who] } satisfies SharingChangedEvent)
+  getSharingRouterDeps().accessChanged([...who])
 }
 
 /** The enabled accounts of this hub, as a member picker lists them. */

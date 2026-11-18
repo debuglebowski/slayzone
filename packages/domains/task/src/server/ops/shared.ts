@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { currentSecurityContext } from '@slayzone/platform/security-log'
+import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
 import { personalWorkspaceUser } from '@slayzone/computers/server'
 import type {
   ProviderConfig,
@@ -494,9 +494,42 @@ export async function cleanupTaskFull(
     'SELECT has_worktree, project_id FROM tasks WHERE id = ?',
     [taskId]
   )
+  if (!task || opts.skipWorktree) return 'none'
 
-  if (!task?.has_worktree || opts.skipWorktree) return 'none'
+  // Every workspace's worktree goes, each on its own computer (T-100): the creator's
+  // (the task row), as the hub's own work; then each other user's personal one, as
+  // that user — the delegate and placement then reach THEIR computer, and only it.
+  const outcomes: WorktreeCleanup[] = []
+  if (task.has_worktree) {
+    outcomes.push(
+      await runWithSecurityContext({ actor: null, ip: null, route: 'task-cleanup' }, () =>
+        removeWorkspaceWorktree(db, taskId, task.project_id, batchIds)
+      )
+    )
+  }
+  const personal = await db.all<{ user_id: string }>(
+    'SELECT user_id FROM task_workspaces WHERE task_id = ? AND has_worktree = 1',
+    [taskId]
+  )
+  for (const w of personal) {
+    outcomes.push(
+      await runWithSecurityContext({ actor: w.user_id, ip: null, route: 'task-cleanup' }, () =>
+        removeWorkspaceWorktree(db, taskId, task.project_id, batchIds)
+      )
+    )
+  }
+  if (outcomes.includes('failed')) return 'failed'
+  return outcomes.includes('removed') ? 'removed' : 'none'
+}
 
+/** One workspace's worktree of a task, on the computer holding it (the acting user's). */
+async function removeWorkspaceWorktree(
+  db: SlayzoneDb,
+  taskId: string,
+  projectId: string,
+  batchIds: string[]
+): Promise<WorktreeCleanup> {
+  const task = { project_id: projectId }
   // The computer holding the task's folders knows its worktree and whether another
   // live task (outside this batch) still names it — a subtask inherits its parent's
   // worktree; the first batch member to clean up removes it (robustness plan §9, 7e).

@@ -50,6 +50,12 @@ export async function archiveManyTasksOp(
   // `worktree_computer_id` stays so the clear reaches the computer holding the
   // folders; without a folder it no longer decides where work runs.
   for (const id of allIds) await notifyTaskPaths(id, { op: 'clear' })
+  // Every other user's personal workspace too (T-100): their worktrees went above.
+  await db.run(
+    `UPDATE task_workspaces SET has_worktree = 0, has_base_dir = 0
+      WHERE task_id IN (SELECT value FROM json_each(?))`,
+    [JSON.stringify(allIds)]
+  )
   for (const id of allIds) {
     ipcMain?.emit('db:tasks:archive:done', null, id)
     const projectRow = await db.get<{ project_id: string }>(
