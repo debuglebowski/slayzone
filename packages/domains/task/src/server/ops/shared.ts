@@ -36,6 +36,7 @@ import {
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
+import { forEachIsolated } from '@slayzone/platform/isolation'
 import type { WorktreeCopyBehavior } from '@slayzone/projects-contracts'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
 import { taskEvents } from '../events.js'
@@ -511,13 +512,19 @@ export async function cleanupTaskFull(
     'SELECT user_id FROM task_workspaces WHERE task_id = ? AND has_worktree = 1',
     [taskId]
   )
-  for (const w of personal) {
-    outcomes.push(
-      await runWithSecurityContext({ actor: w.user_id, ip: null, route: 'task-cleanup' }, () =>
-        removeWorkspaceWorktree(db, taskId, task.project_id, batchIds)
+  // One member's worktree failing must not leave the others' behind.
+  const members = await forEachIsolated(
+    personal,
+    { pass: 'task.cleanup-personal-worktrees', key: (w) => w.user_id, taskId: () => taskId },
+    async (w) => {
+      outcomes.push(
+        await runWithSecurityContext({ actor: w.user_id, ip: null, route: 'task-cleanup' }, () =>
+          removeWorkspaceWorktree(db, taskId, task.project_id, batchIds)
+        )
       )
-    )
-  }
+    }
+  )
+  if (members.failed.length > 0) outcomes.push('failed')
   if (outcomes.includes('failed')) return 'failed'
   return outcomes.includes('removed') ? 'removed' : 'none'
 }
