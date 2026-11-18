@@ -118,6 +118,15 @@ test('every change of the turn status is published live, with rising revisions',
   expect(replay.live.events.filter((e) => e.kind === 'turn-status')).toEqual([seen.at(-1)])
 })
 
+test('a freshly hydrated tab already carries its status: a viewer never guesses from the transcript', async () => {
+  transportHarness()
+  await mgr.hydrateSession({ ...TAB_OPTS })
+  const replay = await mgr.getReplay(TAB_OPTS.tabId, -1)
+  const status = replay.live.events.filter((e) => e.kind === 'turn-status')
+  expect(status).toHaveLength(1)
+  expect(status[0]).toMatchObject({ state: 'not-spawned', turnOpen: false, revision: 1 })
+})
+
 test('an authoritative session publishes authoritative status', async () => {
   const h = transportHarness()
   await startTab({ lifecycleMode: 'authoritative' } as never)

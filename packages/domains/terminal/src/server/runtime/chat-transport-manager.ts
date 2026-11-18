@@ -2883,6 +2883,9 @@ export function createChatTransport(
     if (scan.unfinishedTurn) await routeHostEvent(tab, { kind: 'interrupted' })
     for (const event of (await deps.workspaceStore?.recover?.(tab.tabId)) ?? [])
       await routeHostEvent(tab, event)
+    // Every tab instance states its status from the start (a new `epoch`): a
+    // viewer attaching now never falls back to guessing from its transcript.
+    publishStatus(tab)
 
     return toInfo(tab)
   }
