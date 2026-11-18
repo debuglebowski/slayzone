@@ -1004,6 +1004,8 @@ run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifacts.test.ts
 run_harness packages/domains/task-artifacts/src/server/standalone.test.ts
 run_harness packages/apps/hub/src/computer-chat.test.ts
+# Chat controls must name the task they act on (owner scope stamped by the hub).
+run_harness packages/apps/hub/src/chat-control-authority.test.ts
 run_harness packages/apps/hub/src/store-rollback-recovery.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
@@ -1592,6 +1594,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/app-shell/useAppShortcuts.home-panels.test.tsx \
   packages/apps/app/src/renderer/src/hooks/useTabLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatPanelKeyboard.test.tsx \
+  packages/domains/task-terminals/src/client/chat/AgentProblemCard.test.tsx \
   packages/domains/task-terminals/src/client/chat/files-changed/files-changed.test.tsx \
   packages/domains/task-terminals/src/client/chat/files-changed/WorkspaceChangesRow.test.tsx \
   packages/shared/diff-view/src/DiffView.line-action.test.tsx \
