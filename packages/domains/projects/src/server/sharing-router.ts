@@ -152,6 +152,7 @@ export const sharingRouter = router({
         [input.projectId, input.userId, input.role, ctx.principal?.userId ?? null]
       )
       changed(ctx, [input.userId])
+      getSharingRouterDeps().onProjectShared(input.projectId)
       return { ok: true as const }
     }),
   removeProjectMember: publicProcedure
@@ -252,6 +253,9 @@ export const sharingRouter = router({
       )
       changed(ctx, [project?.owner_user_id, creator, ...members.map((m) => m.user_id)])
       getSharingRouterDeps().tasksChanged(subtree)
+      // Visible to the project again: its members now reach its artifacts.
+      if (input.visibility === 'project' && members.length > 0)
+        getSharingRouterDeps().onTaskShared(task.id)
       return { ok: true as const }
     }),
   setTaskGrant: publicProcedure
@@ -265,7 +269,7 @@ export const sharingRouter = router({
       )
       changed(ctx, [input.userId])
       getSharingRouterDeps().tasksChanged(await subtreeOf(ctx, input.taskId))
-      await getSharingRouterDeps().onTaskShared(input.taskId)
+      getSharingRouterDeps().onTaskShared(input.taskId)
       return { ok: true as const }
     }),
   removeTaskGrant: publicProcedure
@@ -291,21 +295,31 @@ export const sharingRouter = router({
     }),
   /**
    * Invite one user to one artifact. A shared artifact lives on the hub: one held
-   * by a computer is copied there first (every version), so the grantee can reach it
-   * while that computer is away.
+   * by a computer is moved there first (every version), so the grantee can reach it
+   * while that computer is away. The move gives it a new id, which this answers.
    */
   setArtifactGrant: publicProcedure
     .input(z.object({ artifactId: z.string().min(1), userId, role: artifactRole }))
     .mutation(async ({ ctx, input }) => {
       await assertKnownUser(input.userId)
-      await getSharingRouterDeps().promoteArtifact(input.artifactId)
+      let artifactId: string
+      try {
+        artifactId = await getSharingRouterDeps().promoteArtifact(input.artifactId)
+      } catch (err) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `This file is on a computer that must be connected to share it (${
+            err instanceof Error ? err.message : String(err)
+          })`
+        })
+      }
       await ctx.db.run(
         `INSERT INTO artifact_grants (artifact_id, user_id, role, added_by) VALUES (?, ?, ?, ?)
          ON CONFLICT (artifact_id, user_id) DO UPDATE SET role = excluded.role`,
-        [input.artifactId, input.userId, input.role, ctx.principal?.userId ?? null]
+        [artifactId, input.userId, input.role, ctx.principal?.userId ?? null]
       )
       changed(ctx, [input.userId])
-      return { ok: true as const }
+      return { ok: true as const, artifactId }
     }),
   removeArtifactGrant: publicProcedure
     .input(z.object({ artifactId: z.string().min(1), userId }))

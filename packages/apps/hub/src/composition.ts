@@ -101,7 +101,13 @@ import {
 } from '@slayzone/platform/path-scope'
 import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createComputerArtifactStorage } from './computer-artifacts'
-import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
+import {
+  createArtifactStore,
+  getArtifactStorage,
+  setArtifactStorage
+} from '@slayzone/task-artifacts/server'
+import { setSharingRouterDeps } from '@slayzone/projects/server'
+import { createArtifactPromotion } from './artifact-promotion'
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -1299,6 +1305,23 @@ export function composeServer(opts: {
         (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.boundedReads === true
     })
   )
+  // Sharing (T-100): a shared artifact lives on the hub — one a computer holds moves
+  // here when its task, project or itself is shared (and again once that computer is
+  // back, for one that could not move while it was away).
+  const artifactPromotion = createArtifactPromotion({
+    db,
+    store: () => getArtifactStorage(dataRoot),
+    local: createArtifactStore(dataRoot)
+  })
+  const inBackground = (what: string, work: Promise<unknown>): void =>
+    void work.catch((err) => console.warn(`[sharing] ${what} failed`, err))
+  setSharingRouterDeps({
+    promoteArtifact: (artifactId) => artifactPromotion.promote(artifactId),
+    onTaskShared: (taskId) =>
+      inBackground('moving shared task files', artifactPromotion.promoteTask(taskId)),
+    onProjectShared: (projectId) =>
+      inBackground('moving shared project files', artifactPromotion.promoteProject(projectId))
+  })
   // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).
   const chatRelayWatch = createChatRelayWatch({
     log: (message, detail) => console.warn(`[chat] ${message}`, detail),
@@ -2512,6 +2535,12 @@ export function composeServer(opts: {
           console.error('[chat] computer reconciliation pending')
         )
       void reapOrphanWarms(computer.computerId)
+      // Shared files this computer still holds (it was away when they were shared).
+      if (!resettingForTest)
+        inBackground(
+          'moving shared files from a reconnected computer',
+          artifactPromotion.promoteSharedOn(computer.computerId)
+        )
     })
     // Bring back the chat agents that ran at shutdown on this computer — once per
     // computer per hub run, whatever any client is doing (agent-restore.ts).

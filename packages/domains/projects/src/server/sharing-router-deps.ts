@@ -17,11 +17,17 @@ export type SharingRouterDeps = {
   tasksChanged: (taskIds: readonly string[]) => void
   /**
    * A task became reachable by someone besides its owner: its artifacts held by a
-   * computer move to the hub (a shared artifact always lives there).
+   * computer move to the hub (a shared artifact always lives there). In the
+   * background: a copy can take a while, and a computer that is away is retried.
    */
-  onTaskShared: (taskId: string) => Promise<void>
-  /** Copy one computer-held artifact (every version) to the hub; a hub one: no-op. */
-  promoteArtifact: (artifactId: string) => Promise<void>
+  onTaskShared: (taskId: string) => void
+  /** The same, for every project-visible task of a project that gained a member. */
+  onProjectShared: (projectId: string) => void
+  /**
+   * Move one computer-held artifact (every version) to the hub, answering its id
+   * there (a new one: see hub `artifact-promotion.ts`); a hub one answers itself.
+   */
+  promoteArtifact: (artifactId: string) => Promise<string>
 }
 
 // Unwired (a unit harness, a hub without login): nobody but the owner, nothing to move.
@@ -29,8 +35,9 @@ let deps: SharingRouterDeps = {
   roleOf: async () => null,
   invalidate: () => {},
   tasksChanged: () => {},
-  onTaskShared: async () => {},
-  promoteArtifact: async () => {}
+  onTaskShared: () => {},
+  onProjectShared: () => {},
+  promoteArtifact: async (id) => id
 }
 
 export function setSharingRouterDeps(next: Partial<SharingRouterDeps>): void {
