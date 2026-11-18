@@ -7,7 +7,7 @@
  */
 import type { WorkflowCategory } from '@slayzone/workflow'
 import { useEffect, useState } from 'react'
-import { Animated, StyleSheet, Text, View } from 'react-native'
+import { AccessibilityInfo, Animated, StyleSheet, Text, View } from 'react-native'
 import type { AgentDot as AgentDotKind, CardTag } from '../board/card-model'
 import {
   AGENT_DOT_COLORS,
@@ -147,7 +147,7 @@ export function PriorityIcon({ priority, size = 14 }: { priority: number; size?:
 }
 
 const DOT_LABELS: Readonly<Record<AgentDotKind, string>> = {
-  attention: 'Waiting for you',
+  attention: 'Ready for review',
   running: 'Running',
   background: 'Subagents working',
   idle: 'Idle',
@@ -155,9 +155,32 @@ const DOT_LABELS: Readonly<Record<AgentDotKind, string>> = {
   hibernated: 'Paused'
 }
 
+/** Whether iOS's Reduce Motion is on (follows the setting while mounted); null until known. */
+function useReduceMotion(): boolean | null {
+  const [reduce, setReduce] = useState<boolean | null>(null)
+  useEffect(() => {
+    let live = true
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((on) => {
+        if (live) setReduce(on)
+      })
+      // Unknown setting: animate, as iOS does by default.
+      .catch(() => {
+        if (live) setReduce(false)
+      })
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduce)
+    return () => {
+      live = false
+      sub.remove()
+    }
+  }, [])
+  return reduce
+}
+
 export function AgentDot({ kind, size = 9 }: { kind: AgentDotKind; size?: number }) {
   const [pulse] = useState(() => new Animated.Value(1))
-  const animated = kind === 'running' || kind === 'attention'
+  const reduceMotion = useReduceMotion()
+  const animated = (kind === 'running' || kind === 'attention') && reduceMotion === false
   useEffect(() => {
     if (!animated) return
     // JS driver: a native-driver loop warns whenever its card unmounts mid-frame (a board

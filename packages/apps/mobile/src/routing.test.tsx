@@ -7,10 +7,11 @@
 import { userEvent } from '@testing-library/react-native'
 import { act, renderRouter, screen, within } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
-import { Dimensions } from 'react-native'
+import { Dimensions, Platform } from 'react-native'
 import type { BoardData, HubFeed } from './hub-board'
 import type { HubSession } from './hub-session'
 import { redirectSystemPath } from './app/+native-intent'
+import { acceptConfirmations } from './ui-kit/testing-confirm'
 
 const mockSessions: { kept: HubSession[] } = { kept: [] }
 const mockFeeds: { list: HubFeed[] } = { list: [] }
@@ -138,12 +139,21 @@ const homeWithAgent: HubFeed = {
   agents: { ...homeFeed.agents, state: { ...homeFeed.agents.state, byId: { 't0:t0': 'running' } } }
 }
 
-/** A phone-sized window (the default test window is 750 wide: an iPad split). */
+/**
+ * A phone-sized window, or an iPad's (the idiom too: desktop's layout is an iPad's,
+ * `useWide`, never an iPhone's).
+ */
+let padIdiom: jest.SpyInstance | null = null
 function phone() {
+  padIdiom?.mockRestore()
+  padIdiom = null
   const window = { width: 390, height: 844, scale: 3, fontScale: 1 }
   Dimensions.set({ window, screen: window })
 }
 function tablet() {
+  padIdiom = jest
+    .spyOn(Platform as { readonly isPad: boolean }, 'isPad', 'get')
+    .mockReturnValue(true)
   const window = { width: 1024, height: 1366, scale: 2, fontScale: 1 }
   Dimensions.set({ window, screen: window })
 }
@@ -277,10 +287,10 @@ describe('routing', () => {
       expect(screen.getByText('task page home.example t0 details main')).toBeOnTheScreen()
     })
 
-    it('the floating ＋ long-pressed opens new-task in the Board tab for the shown project and column; created, the task replaces it', async () => {
+    it('the floating ＋ tapped opens new-task in the Board tab for the shown project and column; created, the task replaces it', async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: '/' })
-      await userEvent.setup().longPress(await screen.findByTestId('new-task'))
+      await userEvent.setup().press(await screen.findByTestId('new-task'))
       expect(await screen.findByText('new task home.example p todo -')).toBeOnTheScreen()
       expect(screen).toHaveSegments(['(tabs)', '(board)', 'new-task'])
       await userEvent.setup().press(screen.getByText('stand-in create'))
@@ -376,16 +386,20 @@ describe('routing', () => {
   it('while a hub is still loading, Settings signs out of it', async () => {
     signedIn({ ...homeFeed, board: { ...homeFeed.board, data: undefined, pending: true } })
     await renderRouter(ROUTES, { initialUrl: '/settings' })
+    const confirmations = acceptConfirmations()
     await userEvent.setup().press(await tab('settings').findByText('Sign out'))
     await act(async () => undefined)
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
+    confirmations.mockRestore()
   })
 
   it('signing out of the last hub (Settings) returns to sign-in', async () => {
     signedIn()
     await renderRouter(ROUTES, { initialUrl: '/settings' })
+    const confirmations = acceptConfirmations()
     await userEvent.setup().press(await screen.findByText('Sign out'))
     await act(async () => undefined)
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
+    confirmations.mockRestore()
   })
 })

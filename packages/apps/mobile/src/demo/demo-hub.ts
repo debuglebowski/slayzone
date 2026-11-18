@@ -51,6 +51,8 @@ import { type ProcOut, procedures, type SubscriptionEvent, subscriptions } from 
 /** The demo hub's address: never resolves (RFC 2606 `.invalid`). */
 export const DEMO_HUB_ADDRESS = 'demo.invalid'
 export const DEMO_HUB_ENTRY = hubEntryOf(DEMO_HUB_ADDRESS)
+/** The demo's one computer, as Settings and a chat's availability name it. */
+const DEMO_COMPUTER_NAME = 'MacBook Pro'
 /** Who the demo is signed in as (Hubs → the demo hub's card). */
 export const DEMO_ACCOUNT_EMAIL = 'demo@slay.zone'
 
@@ -482,7 +484,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     'computers.list': () => [
       {
         id: DEMO_COMPUTER_ID,
-        name: 'MacBook Pro',
+        name: DEMO_COMPUTER_NAME,
         platform: 'darwin',
         version: '0.36.4',
         upgradeStatus: undefined,
@@ -591,6 +593,13 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
     'pty.touch': () => true,
 
     // Chat
+    // The demo's one computer is always connected and runs every chat — also a tab
+    // asked about before it exists or after it is gone (a hub answers by the task's
+    // computer, not the tab's history).
+    'chat.availability': () => ({
+      state: 'ready',
+      computer: { id: DEMO_COMPUTER_ID, name: DEMO_COMPUTER_NAME }
+    }),
     'chat.getInfo': ({ tabId }) => (chats.has(tabId) ? chatInfo(tabId) : null),
     'chat.hydrate': ({ tabId, taskId, cwd }) => {
       if (!chats.has(tabId)) chats.set(tabId, { taskId, cwd, events: [] })

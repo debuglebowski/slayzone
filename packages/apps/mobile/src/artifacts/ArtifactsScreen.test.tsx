@@ -1,17 +1,22 @@
 import { act, render, screen, userEvent, waitFor, within } from '@testing-library/react-native'
-import { ActionSheetIOS } from 'react-native'
+import { ActionSheetIOS, Linking } from 'react-native'
 import type { HubFeed } from '../hub-board'
 import { type HubSession, hubEntryOf } from '../hub-session'
 import { trpcTest } from '../testing'
 import { ArtifactsScreen, type ArtifactsScreenProps } from './ArtifactsScreen'
 import { artifactRow, fakeArtifactsHub, folderRow } from './fake-artifacts-hub'
-import { pickUploads } from './pick-uploads'
+import { PickerPermissionError, pickUploads } from './pick-uploads'
+import { webViewMounts } from './webview-mock'
 
-jest.mock('./pick-uploads', () => ({ pickUploads: jest.fn() }))
+jest.mock('./pick-uploads', () => ({
+  ...jest.requireActual('./pick-uploads'),
+  pickUploads: jest.fn()
+}))
 
 type MockOnProgress = (progress: { bytesSent: number; totalBytes: number }) => void
 const mockUploads: Array<{ uri: string; url: string; options: Record<string, unknown> }> = []
-const mockUploadAnswer: { next: () => { status: number; body: string } } = {
+type MockAnswer = { status: number; body: string }
+const mockUploadAnswer: { next: () => MockAnswer | Promise<MockAnswer> } = {
   next: () => ({ status: 200, body: '{"ok":true,"data":{}}' })
 }
 jest.mock('expo-file-system', () => ({
@@ -24,7 +29,14 @@ jest.mock('expo-file-system', () => ({
       mockUploads.push({ uri: this.uri, url, options })
       const onProgress = options.onProgress as MockOnProgress | undefined
       onProgress?.({ bytesSent: 5, totalBytes: 10 })
-      return { ...mockUploadAnswer.next(), headers: {} }
+      const signal = options.signal as AbortSignal | undefined
+      const answer = await Promise.race([
+        mockUploadAnswer.next(),
+        new Promise<never>((_, reject) =>
+          signal?.addEventListener('abort', () => reject(new Error('Upload cancelled')))
+        )
+      ])
+      return { ...answer, headers: {} }
     }
   },
   Directory: class {},
@@ -95,7 +107,9 @@ describe('ArtifactsScreen', () => {
     })
     await show(hub)
     await screen.findByTestId('artifact-row-a1')
-    expect(rowTexts()).toEqual(['▾', 'inside.md', 'alpha.png', 'zeta.md'])
+    expect(rowTexts()).toEqual(['Docs', 'inside.md', 'alpha.png', 'zeta.md'])
+    // VoiceOver reads the folder, not its chevron.
+    expect(screen.getByRole('button', { name: 'Docs, folder' })).toBeOnTheScreen()
     expect(screen.getByText('Write spec')).toBeOnTheScreen()
     expect(screen.getByText('PNG')).toBeOnTheScreen()
     expect(screen.getByText(/^Image · /)).toBeOnTheScreen()
@@ -208,6 +222,76 @@ describe('ArtifactsScreen', () => {
     expect(screen.queryByText('Disk full')).toBeNull()
   })
 
+  it('an upload keeps going while the list is away; its failure shows when the list is back', async () => {
+    const hub = fakeArtifactsHub({ artifacts: [] })
+    jest
+      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
+      .mockImplementation((_options, pick) => pick(2))
+    jest.mocked(pickUploads).mockResolvedValue([{ uri: 'file:///tmp/s.pdf', name: 'Spec.pdf' }])
+    let answer: (a: MockAnswer) => void = () => undefined
+    mockUploadAnswer.next = () => new Promise<MockAnswer>((resolve) => (answer = resolve))
+
+    const { wrapper } = trpcTest(hub.backend)
+    const screenEl = (
+      <ArtifactsScreen
+        session={home}
+        taskId="t1"
+        layout="list"
+        selected={null}
+        onSelect={jest.fn()}
+        onSelectVersion={jest.fn()}
+        onBack={jest.fn()}
+      />
+    )
+    await render(screenEl, { wrapper })
+    await screen.findByText('No artifacts yet')
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Upload' }))
+    await screen.findByTestId('upload-Spec.pdf')
+    // The task page switches segment: the list unmounts mid-upload.
+    await act(async () => screen.unmount())
+    await act(async () => answer({ status: 500, body: '{"ok":false,"error":"Disk full"}' }))
+    await render(screenEl, { wrapper })
+    await screen.findByText('Disk full')
+  })
+
+  it('Cancel stops an upload in progress', async () => {
+    const hub = fakeArtifactsHub({ artifacts: [] })
+    jest
+      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
+      .mockImplementation((_options, pick) => pick(2))
+    jest.mocked(pickUploads).mockResolvedValue([{ uri: 'file:///tmp/s.pdf', name: 'Spec.pdf' }])
+    mockUploadAnswer.next = () => new Promise<MockAnswer>(() => undefined)
+    await show(hub)
+    await screen.findByText('No artifacts yet')
+    const user = userEvent.setup()
+    await user.press(screen.getByRole('button', { name: 'Upload' }))
+    await screen.findByTestId('upload-Spec.pdf')
+    await user.press(screen.getByRole('button', { name: 'Cancel upload of Spec.pdf' }))
+    expect((mockUploads[0].options.signal as AbortSignal).aborted).toBe(true)
+    await waitFor(() => expect(screen.queryByTestId('upload-Spec.pdf')).toBeNull())
+    expect(screen.queryByText(/cancelled/i)).toBeNull()
+  })
+
+  it('no camera permission: says so, with Open Settings, and can be dismissed', async () => {
+    const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined)
+    const hub = fakeArtifactsHub({ artifacts: [] })
+    jest
+      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
+      .mockImplementation((_options, pick) => pick(1))
+    jest
+      .mocked(pickUploads)
+      .mockRejectedValue(new PickerPermissionError('SlayZone may not use the camera.'))
+    await show(hub)
+    await screen.findByText('No artifacts yet')
+    const user = userEvent.setup()
+    await user.press(screen.getByRole('button', { name: 'Upload' }))
+    await screen.findByText('SlayZone may not use the camera.')
+    await user.press(screen.getByRole('button', { name: 'Open Settings' }))
+    expect(openSettings).toHaveBeenCalled()
+    await user.press(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText('SlayZone may not use the camera.')).toBeNull()
+  })
+
   it('says why a picker could not open (no camera permission)', async () => {
     const hub = fakeArtifactsHub({ artifacts: [] })
     jest
@@ -231,6 +315,41 @@ describe('ArtifactsScreen', () => {
   })
 })
 
+describe('ArtifactsScreen, one artifact instance across layouts', () => {
+  it('an iPad going narrow and wide again keeps the open artifact (no new viewer)', async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'b.md'), artifactRow('a2', 'a.md')],
+      content: { a1: '# B', a2: '# A' }
+    })
+    const { wrapper } = trpcTest(hub.backend)
+    const at = (layout: ArtifactsScreenProps['layout']) => (
+      <ArtifactsScreen
+        session={home}
+        taskId="t1"
+        layout={layout}
+        selected={{ artifactId: 'a1', version: null }}
+        onSelect={jest.fn()}
+        onSelectVersion={jest.fn()}
+        onBack={jest.fn()}
+        onCloseArtifact={jest.fn()}
+        artifactBackLabel="Artifacts"
+      />
+    )
+    const { rerender } = await render(at('split'), { wrapper })
+    await screen.findByTestId('artifact-page-markdown')
+    expect(screen.getByTestId('artifact-row-a2')).toBeOnTheScreen()
+    const mounts = webViewMounts.count
+
+    await rerender(at('artifact'))
+    expect(screen.queryByTestId('artifact-row-a2')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Back to Artifacts' })).toBeOnTheScreen()
+    await rerender(at('split'))
+    expect(screen.getByTestId('artifact-row-a2')).toBeOnTheScreen()
+    expect(screen.getByTestId('artifact-page-markdown').props.source.html).toContain('<h1>B</h1>')
+    expect(webViewMounts.count).toBe(mounts)
+  })
+})
+
 describe('ArtifactsScreen errors', () => {
   it('says why the list failed, with Retry', async () => {
     const hub = fakeArtifactsHub()
@@ -244,5 +363,23 @@ describe('ArtifactsScreen errors', () => {
     fail = false
     await userEvent.setup().press(screen.getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(screen.getByTestId('artifact-row-a1')).toBeOnTheScreen())
+  })
+
+  it('a reload that fails while the list shows says so, with Retry; the list stays', async () => {
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'plan.md')] })
+    await show(hub)
+    await screen.findByTestId('artifact-row-a1')
+    hub.on('artifacts.getByTask', () => {
+      throw new Error('Network request failed')
+    })
+    await act(async () => hub.emit('notify.onTasksChanged', { taskIds: ['t1'] }))
+    await screen.findByText("Couldn't refresh: Network request failed", undefined, {
+      timeout: 5000
+    })
+    expect(screen.getByTestId('artifact-row-a1')).toBeOnTheScreen()
+    hub.on('artifacts.getByTask', () => [artifactRow('a1', 'plan.md'), artifactRow('a2', 'new.md')])
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByTestId('artifact-row-a2')
+    expect(screen.queryByText(/Couldn't refresh/)).toBeNull()
   })
 })

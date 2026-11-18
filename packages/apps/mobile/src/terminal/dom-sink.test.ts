@@ -1,4 +1,4 @@
-import { createDomSink, type DomTerminal } from './dom-sink'
+import { createDomSink, type DomTerminal, MAX_WRITE, WRITES_PER_FRAME } from './dom-sink'
 
 function setup() {
   const calls: string[] = []
@@ -73,5 +73,34 @@ describe('createDomSink', () => {
     terminal = s.terminal
     sink.flush()
     expect(s.calls).toEqual(['write a'])
+  })
+
+  it('sends a large replay in pieces of at most 64KB, a few per frame, in order', () => {
+    const s = setup()
+    const sink = createDomSink(() => s.terminal, s.schedule)
+    const big = 'x'.repeat(MAX_WRITE * (WRITES_PER_FRAME + 1) + 10)
+    sink.write(big)
+    sink.resize(80, 24)
+    s.frame()
+    const sizes = () => s.calls.map((c) => (c.startsWith('write ') ? c.length - 6 : c))
+    expect(sizes()).toEqual(Array(WRITES_PER_FRAME).fill(MAX_WRITE))
+    expect(s.scheduled()).toBe(true)
+    s.frame()
+    expect(sizes().slice(WRITES_PER_FRAME)).toEqual([MAX_WRITE, 10, 'resize 80x24'])
+    expect(s.scheduled()).toBe(false)
+    expect(
+      s.calls
+        .filter((c) => c.startsWith('write '))
+        .map((c) => c.slice(6))
+        .join('')
+    ).toBe(big)
+  })
+
+  it('never cuts a character in two (a UTF-16 surrogate pair)', () => {
+    const s = setup()
+    const sink = createDomSink(() => s.terminal, s.schedule)
+    sink.write(`${'a'.repeat(MAX_WRITE - 1)}😀b`)
+    s.frame()
+    expect(s.calls.map((c) => c.slice(6))).toEqual(['a'.repeat(MAX_WRITE - 1), '😀b'])
   })
 })

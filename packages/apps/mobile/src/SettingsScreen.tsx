@@ -5,6 +5,7 @@ import type { HubSession } from './hub-session'
 import { HubDetails } from './hubs/HubDetails'
 import { type ChromeColors, useTheme, useThemeVariant } from './theme'
 import { Caption } from './ui-kit/Chrome'
+import { confirmExitDemo, confirmSignOut } from './ui-kit/confirm'
 
 /** Settings stay a readable width on an iPad. */
 const MAX_CONTENT_WIDTH = 720
@@ -14,11 +15,13 @@ const MAX_CONTENT_WIDTH = 720
  *
  * - Hubs (desktop's Connections): the hubs this app is signed in to, in sign-in order,
  *   each with its connection, who the app is signed in as there, its computers (live),
- *   and Sign out (which removes it: its tasks and agents leave every list, its bearer
- *   and the theme kept from it are forgotten). Add a hub opens the sign-in screen.
- *   The demo hub (`HubSession.inProcess`) shows as the demo, with Exit demo instead of
- *   Sign out (both go through `onSignOut`, which closes the demo for its hub).
- * - Appearance: the theme is the first hub's (desktop's Appearance settings there).
+ *   Retry while it can't be reached, and Sign out (which removes it: its tasks and agents
+ *   leave every list, its bearer and the theme kept from it are forgotten) once the user
+ *   confirms. Add a hub opens the sign-in screen. The demo hub (`HubSession.inProcess`)
+ *   shows as the demo, with Exit demo instead of Sign out (both go through `onSignOut`,
+ *   which closes the demo for its hub).
+ * - Appearance: the theme is the first hub's (desktop's Appearance settings there); the
+ *   demo's is the default.
  * - About: the app's version.
  *
  * A project's folders and computer are its settings (the project switcher's ⋯).
@@ -27,17 +30,23 @@ export function SettingsScreen({
   feeds,
   sessions,
   onAdd,
-  onSignOut
+  onSignOut,
+  onRetry
 }: {
   feeds: readonly HubFeed[]
   sessions: readonly HubSession[]
   onAdd: () => void
   onSignOut: (hubId: string) => void
+  /** Reconnect to a hub that can't be reached (or reload one that failed). */
+  onRetry: (hubId: string) => void
 }) {
   const theme = useTheme()
   const variant = useThemeVariant()
   const styles = makeStyles(theme)
-  const themeHub = feeds[0]?.hub.label
+  const themeFeed = feeds[0]
+  const themeFromDemo =
+    themeFeed !== undefined &&
+    sessions.some((s) => s.entry.id === themeFeed.hub.id && s.inProcess !== undefined)
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -48,7 +57,13 @@ export function SettingsScreen({
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.sectionHead}>
           <Caption>Hubs</Caption>
-          <Pressable onPress={onAdd} hitSlop={8} accessibilityRole="button" testID="add-hub">
+          <Pressable
+            onPress={onAdd}
+            hitSlop={8}
+            style={styles.action}
+            accessibilityRole="button"
+            testID="add-hub"
+          >
             <Text style={styles.link}>＋ Add a hub</Text>
           </Pressable>
         </View>
@@ -56,11 +71,13 @@ export function SettingsScreen({
           const status = statusOf(item)
           const session = sessions.find((s) => s.entry.id === item.hub.id)
           const demo = session?.inProcess !== undefined
+          const name = item.hub.label
+          const problem = hubProblem(item)
           return (
             <View key={item.hub.id} testID={`hub-${item.hub.id}`} style={styles.card}>
               <View style={styles.row}>
                 <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>{demo ? 'SlayZone demo' : item.hub.label}</Text>
+                  <Text style={styles.rowTitle}>{demo ? 'SlayZone demo' : name}</Text>
                   <Text style={styles.rowMeta}>
                     {demo
                       ? 'Sample data inside the app — nothing is sent anywhere'
@@ -69,10 +86,27 @@ export function SettingsScreen({
                         : status}
                   </Text>
                 </View>
+                {problem && !demo ? (
+                  <Pressable
+                    onPress={() => onRetry(item.hub.id)}
+                    hitSlop={8}
+                    style={styles.action}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Retry ${name}`}
+                  >
+                    <Text style={styles.link}>Retry</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
-                  onPress={() => onSignOut(item.hub.id)}
+                  onPress={() =>
+                    demo
+                      ? confirmExitDemo(() => onSignOut(item.hub.id))
+                      : confirmSignOut(name, () => onSignOut(item.hub.id))
+                  }
                   hitSlop={8}
+                  style={styles.action}
                   accessibilityRole="button"
+                  accessibilityLabel={demo ? 'Exit demo' : `Sign out of ${name}`}
                 >
                   <Text style={styles.destructive}>{demo ? 'Exit demo' : 'Sign out'}</Text>
                 </Pressable>
@@ -86,12 +120,13 @@ export function SettingsScreen({
           <Caption>Appearance</Caption>
         </View>
         <View style={styles.card}>
-          <Text style={styles.rowTitle}>
-            {variant === 'dark' ? 'Dark' : 'Light'} theme
-            {themeHub ? ` · from ${themeHub}` : ''}
-          </Text>
+          <Text style={styles.rowTitle}>{variant === 'dark' ? 'Dark' : 'Light'} appearance</Text>
           <Text style={styles.rowMeta}>
-            The app paints in the theme chosen on desktop (Settings → Appearance) on the first hub.
+            {themeFromDemo
+              ? "The demo uses SlayZone's default look."
+              : themeFeed
+                ? `Matches the theme picked in SlayZone on your computer (Settings → Appearance) for ${themeFeed.hub.label}.`
+                : "SlayZone's default look, light or dark like your device."}
           </Text>
         </View>
 
@@ -101,7 +136,8 @@ export function SettingsScreen({
         <View style={styles.card}>
           <Text style={styles.rowTitle}>SlayZone {Constants.expoConfig?.version ?? ''}</Text>
           <Text style={styles.rowMeta}>
-            Project folders and computers: the project switcher's ⋯ on the board.
+            To change a project's folders or computer, tap the project name on the Board, then ⋯
+            beside the project.
           </Text>
         </View>
       </ScrollView>
@@ -123,6 +159,8 @@ const makeStyles = (t: ChromeColors) =>
     headerTitle: { fontSize: 24, fontWeight: '700', color: t.foreground },
     link: { fontSize: 14, color: t.primary, fontWeight: '600' },
     destructive: { fontSize: 14, color: t.destructive, fontWeight: '500' },
+    // A text button a finger can hit: 44pt tall.
+    action: { minHeight: 44, justifyContent: 'center' },
     list: {
       width: '100%',
       maxWidth: MAX_CONTENT_WIDTH,

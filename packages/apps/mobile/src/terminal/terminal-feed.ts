@@ -59,6 +59,9 @@ export interface FeedStatus {
   /** A process runs at the session id (`pty.attach` `exists`). */
   exists: boolean
   error: string | null
+  /** Output was written since the terminal was last cleared (a stopped agent's last
+   *  output stays on screen; an empty terminal needs saying why it is empty). */
+  output: boolean
 }
 
 export class TerminalFeed {
@@ -70,6 +73,8 @@ export class TerminalFeed {
   private generation = 0
   private exists = false
   private offline = false
+  /** Something was written since the last reset (`FeedStatus.output`). */
+  private output = false
   /**
    * The last catch-up failed: live chunks wait in the queue instead of each one
    * starting another (a failing hub would otherwise be asked in a tight loop).
@@ -127,7 +132,19 @@ export class TerminalFeed {
 
   private setOffline(): void {
     this.offline = true
-    this.onStatus({ phase: 'offline', exists: this.exists, error: null })
+    this.status('offline', null)
+  }
+
+  private status(phase: FeedStatus['phase'], error: string | null): void {
+    this.onStatus({ phase, exists: this.exists, error, output: this.output })
+  }
+
+  /** Write output to the terminal; the first since a reset is reported. */
+  private write(data: string): void {
+    this.sink.write(data)
+    if (this.output || data.length === 0) return
+    this.output = true
+    if (this.attached && !this.syncing && !this.offline) this.status('ready', null)
   }
 
   /** The session's size changed (`pty.onResize`). */
@@ -160,7 +177,7 @@ export class TerminalFeed {
       void this.catchUp()
       return false
     }
-    this.sink.write(data)
+    this.write(data)
     this.lastSeq = seq
     return true
   }
@@ -177,7 +194,7 @@ export class TerminalFeed {
 
   private attach(): Promise<void> {
     const generation = ++this.generation
-    this.onStatus({ phase: 'attaching', exists: this.exists, error: null })
+    this.status('attaching', null)
     const run = (async () => {
       try {
         const result = await this.client.attach(this.sessionId, -1)
@@ -189,20 +206,21 @@ export class TerminalFeed {
           return
         }
         this.sink.reset()
+        this.output = false
         if (result.size) this.sink.resize(result.size.cols, result.size.rows)
         this.lastSeq = -1
         const buffer = result.buffer
         if (buffer) {
-          if (buffer.prelude) this.sink.write(buffer.prelude)
-          for (const chunk of buffer.chunks) this.sink.write(chunk.data)
+          if (buffer.prelude) this.write(buffer.prelude)
+          for (const chunk of buffer.chunks) this.write(chunk.data)
           this.lastSeq = buffer.currentSeq
         }
         this.attached = true
         this.exists = result.exists
-        this.onStatus({ phase: 'ready', exists: result.exists, error: null })
+        this.status('ready', null)
       } catch (error) {
         if (generation !== this.generation) return
-        this.onStatus({ phase: 'error', exists: this.exists, error: messageOf(error) })
+        this.status('error', messageOf(error))
       }
     })()
     return this.track(run, generation)
@@ -223,17 +241,17 @@ export class TerminalFeed {
         }
         for (const chunk of buffer.chunks) {
           if (chunk.seq <= this.lastSeq) continue
-          this.sink.write(chunk.data)
+          this.write(chunk.data)
           this.lastSeq = chunk.seq
         }
         // Chunks evicted before they could be read are gone: go on from here.
         this.lastSeq = Math.max(this.lastSeq, buffer.currentSeq)
-        this.onStatus({ phase: 'ready', exists: this.exists, error: null })
+        this.status('ready', null)
       } catch (error) {
         if (generation !== this.generation) return
         this.stalled = true
         if (isComputerOffline(error)) this.setOffline()
-        else this.onStatus({ phase: 'error', exists: this.exists, error: messageOf(error) })
+        else this.status('error', messageOf(error))
       } finally {
         if (startOver && generation === this.generation) {
           // Hand over to a fresh attach; it flushes the queue when it is done.

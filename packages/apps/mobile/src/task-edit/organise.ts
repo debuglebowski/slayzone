@@ -44,3 +44,44 @@ export function blockerCandidates(
       (!q || t.title.toLowerCase().includes(q))
   )
 }
+
+/**
+ * Writes where only the newest value matters and order does (a task's tag set: the hub
+ * keeps whichever arrives last): one in flight at a time; values pushed meanwhile fold
+ * into the newest, sent once the one in flight is answered. Each push resolves with how
+ * the write that carried its value (itself, or a newer one that replaced it) did.
+ */
+export function createLatestWriter<T>(): {
+  push: (value: T, send: (value: T) => Promise<boolean>) => Promise<boolean>
+} {
+  interface Queued {
+    value: T
+    send: (value: T) => Promise<boolean>
+    waiters: Array<(ok: boolean) => void>
+  }
+  let inFlight = false
+  let queued: Queued | null = null
+  const start = ({ value, send, waiters }: Queued) => {
+    inFlight = true
+    void send(value)
+      .catch(() => false)
+      .then((ok) => {
+        inFlight = false
+        for (const waiter of waiters) waiter(ok)
+        const next = queued
+        queued = null
+        if (next) start(next)
+      })
+  }
+  return {
+    push: (value, send) =>
+      new Promise<boolean>((resolve) => {
+        if (!inFlight) start({ value, send, waiters: [resolve] })
+        else if (queued) {
+          queued.value = value
+          queued.send = send
+          queued.waiters.push(resolve)
+        } else queued = { value, send, waiters: [resolve] }
+      })
+  }
+}

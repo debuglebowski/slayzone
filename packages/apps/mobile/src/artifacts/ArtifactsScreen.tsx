@@ -1,8 +1,12 @@
 /**
  * A task's artifacts: the tree desktop's panel shows (folders first, then artifacts, by
  * name; folders collapsible, open at first), live, plus Upload (photos, camera, files) to
- * the task's hub. Phone: the list alone, a tap opens the artifact on its own screen.
- * Wide screen (iPad): the list with the selected artifact beside it.
+ * the task's hub. Phone: the list alone, a tap opens the artifact on its own screen
+ * (`artifact`: this screen showing just the artifact). Wide screen (iPad): the list with
+ * the selected artifact beside it. `split` and `artifact` show the artifact in the same
+ * place of the same tree, so an iPad going narrow or wide (rotating, Split View) keeps
+ * the open artifact as it is — a video playing, a zoomed image — rather than opening it
+ * anew.
  *
  * Must render inside the task's hub scope (`HubScope`): every read and the uploads go
  * to the hub that owns the task.
@@ -10,11 +14,13 @@
 import { getEffectiveRenderMode, RENDER_MODE_INFO } from '@slayzone/task-contracts/types'
 import { dbTimestampToIso, formatRelativeDate } from '@slayzone/task-artifacts/shared'
 import type { TaskArtifact } from '@slayzone/task-contracts/types'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   ActionSheetIOS,
   ActivityIndicator,
   FlatList,
+  type HostInstance,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -24,7 +30,7 @@ import { findTaskRow } from '../hub-board'
 import { useHubFeeds } from '../hub-connections'
 import type { HubSession } from '../hub-session'
 import { type ChromeColors, useTheme } from '../theme'
-import { ArtifactViewer } from './ArtifactViewer'
+import { anchorOf, ArtifactViewer } from './ArtifactViewer'
 import { hubTarget } from './hub-rest'
 import type { UploadSource } from './pick-uploads'
 import { HeaderButton, ScreenHeader } from './ScreenHeader'
@@ -39,14 +45,22 @@ const collapsedFolders = new Map<string, Set<string>>()
 export interface ArtifactsScreenProps {
   session: HubSession
   taskId: string
-  /** `split`: the list + the selected artifact beside it (iPad); `list`: the list (phone). */
-  layout: 'list' | 'split'
-  /** Split: the artifact beside the list (null: the first) and the version shown. */
+  /**
+   * `split`: the list + the selected artifact beside it (iPad); `list`: the list (phone);
+   * `artifact`: the selected artifact alone (phone, or an iPad gone narrow).
+   */
+  layout: 'list' | 'split' | 'artifact'
+  /** Split / artifact: the artifact shown (split, null: the first) and the version shown. */
   selected: { artifactId: string; version: number | null } | null
   /** A row was tapped (phone: open it; split: show it beside the list). */
   onSelect: (artifactId: string) => void
   onSelectVersion: (artifactId: string, version: number | null) => void
+  /** An artifact link was tapped in the artifact shown (default: `onSelect`). */
+  onOpenArtifact?: (artifactId: string) => void
   onBack: () => void
+  /** `artifact`: leaves the artifact; its Back is labelled `artifactBackLabel`. */
+  onCloseArtifact?: () => void
+  artifactBackLabel?: string
   /** Inside the task page (its Artifacts tab): no screen header, an Upload row instead. */
   embedded?: boolean
 }
@@ -64,7 +78,10 @@ export function ArtifactsScreen({
   selected,
   onSelect,
   onSelectVersion,
+  onOpenArtifact = onSelect,
   onBack,
+  onCloseArtifact,
+  artifactBackLabel,
   embedded = false
 }: ArtifactsScreenProps) {
   const theme = useTheme()
@@ -88,12 +105,15 @@ export function ArtifactsScreen({
     setCollapsed(next)
   }
 
+  // iPad: the sheet is a popover from the Upload button.
+  const uploadButton = useRef<HostInstance>(null)
   const chooseUpload = () =>
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: 'Upload to this task',
         options: [...UPLOAD_SOURCES.map((s) => s.label), 'Cancel'],
-        cancelButtonIndex: UPLOAD_SOURCES.length
+        cancelButtonIndex: UPLOAD_SOURCES.length,
+        anchor: anchorOf(uploadButton.current)
       },
       (index) => {
         const choice = UPLOAD_SOURCES[index]
@@ -108,7 +128,9 @@ export function ArtifactsScreen({
     layout === 'split'
       ? (selected?.artifactId ??
         (firstArtifact?.kind === 'artifact' ? firstArtifact.artifact.id : null))
-      : null
+      : layout === 'artifact'
+        ? (selected?.artifactId ?? null)
+        : null
 
   const subtitle = [taskTitle, feeds.length > 1 ? session.entry.label : null]
     .filter(Boolean)
@@ -118,7 +140,12 @@ export function ArtifactsScreen({
     <View style={layout === 'split' ? styles.listPane : styles.fill}>
       {embedded ? (
         <View style={styles.embeddedBar}>
-          <HeaderButton label="＋ Upload" onPress={chooseUpload} />
+          <HeaderButton
+            ref={uploadButton}
+            label="＋ Upload"
+            accessibilityLabel="Upload"
+            onPress={chooseUpload}
+          />
         </View>
       ) : (
         <ScreenHeader
@@ -126,18 +153,36 @@ export function ArtifactsScreen({
           subtitle={subtitle || null}
           onBack={onBack}
           backLabel="Task"
-          actions={<HeaderButton label="Upload" onPress={chooseUpload} />}
+          actions={<HeaderButton ref={uploadButton} label="Upload" onPress={chooseUpload} />}
         />
       )}
-      {uploads.pickError ? <Text style={styles.error}>{uploads.pickError}</Text> : null}
+      {uploads.pickError ? (
+        <Banner
+          message={uploads.pickError.message}
+          action={
+            uploads.pickError.needsSettings
+              ? { label: 'Open Settings', onPress: () => void Linking.openSettings() }
+              : null
+          }
+          onDismiss={uploads.dismissPickError}
+        />
+      ) : null}
       {uploads.items.map((item) => (
         <UploadRow
           key={item.id}
           item={item}
           onRetry={() => uploads.retry(item.id)}
+          onCancel={() => uploads.cancel(item.id)}
           onDismiss={() => uploads.dismiss(item.id)}
         />
       ))}
+      {/* A reload that failed while the list shows: say so, the list stays. */}
+      {list.error && list.artifacts ? (
+        <Banner
+          message={`Couldn't refresh: ${list.error}`}
+          action={{ label: 'Retry', onPress: list.refresh }}
+        />
+      ) : null}
       {list.error && !list.artifacts ? (
         <View style={styles.center}>
           <Text style={styles.note}>{list.error}</Text>
@@ -167,27 +212,52 @@ export function ArtifactsScreen({
     </View>
   )
 
-  if (layout === 'list') return <View style={styles.screen}>{listPane}</View>
+  // One tree for every layout: the list pane and the artifact pane keep their places
+  // (a pane not shown is null), so changing layout never remounts the artifact.
   return (
-    <View style={[styles.screen, styles.split]}>
-      {listPane}
-      <View style={styles.detailPane}>
-        {shownId ? (
-          <ArtifactViewer
-            key={shownId}
-            target={target}
-            taskId={taskId}
-            artifactId={shownId}
-            version={selected?.artifactId === shownId ? selected.version : null}
-            onSelectVersion={(version) => onSelectVersion(shownId, version)}
-            onOpenArtifact={onSelect}
-          />
-        ) : (
-          <View style={styles.center}>
-            <Text style={styles.note}>{list.artifacts ? 'No artifacts yet' : ''}</Text>
-          </View>
-        )}
-      </View>
+    <View style={[styles.screen, layout === 'split' ? styles.split : null]}>
+      {layout === 'artifact' ? null : listPane}
+      {layout === 'list' ? null : (
+        <View style={styles.detailPane}>
+          {shownId ? (
+            <ArtifactViewer
+              key={shownId}
+              target={target}
+              taskId={taskId}
+              artifactId={shownId}
+              version={selected?.artifactId === shownId ? selected.version : null}
+              onSelectVersion={(version) => onSelectVersion(shownId, version)}
+              onOpenArtifact={onOpenArtifact}
+              onBack={layout === 'artifact' ? onCloseArtifact : undefined}
+              backLabel={artifactBackLabel}
+            />
+          ) : (
+            <View style={styles.center}>
+              <Text style={styles.note}>{list.artifacts ? 'No artifacts yet' : ''}</Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  )
+}
+
+/** A line under the header: what went wrong, an action, and (optionally) Dismiss. */
+function Banner({
+  message,
+  action,
+  onDismiss
+}: {
+  message: string
+  action: { label: string; onPress: () => void } | null
+  onDismiss?: () => void
+}) {
+  const styles = makeStyles(useTheme())
+  return (
+    <View style={styles.banner}>
+      <Text style={styles.bannerText}>{message}</Text>
+      {action ? <HeaderButton label={action.label} onPress={action.onPress} /> : null}
+      {onDismiss ? <HeaderButton label="Dismiss" onPress={onDismiss} /> : null}
     </View>
   )
 }
@@ -210,12 +280,16 @@ function TreeRow({
       <Pressable
         testID={`artifact-folder-${row.folder.id}`}
         accessibilityRole="button"
+        // VoiceOver: the folder's name and state, not the chevron glyph.
+        accessibilityLabel={`${row.folder.name}, folder`}
         accessibilityState={{ expanded: row.expanded }}
         onPress={() => onToggle(row.folder.id)}
         style={[styles.row, indent]}
       >
-        <Text style={styles.chevron}>{row.expanded ? '▾' : '▸'}</Text>
-        <Text style={styles.folderName} numberOfLines={1}>
+        <Text style={styles.chevron} importantForAccessibility="no" accessibilityElementsHidden>
+          {row.expanded ? '▾' : '▸'}
+        </Text>
+        <Text style={styles.folderName} numberOfLines={1} ellipsizeMode="middle">
           {row.folder.name}
         </Text>
       </Pressable>
@@ -254,7 +328,7 @@ function ArtifactRow({
     >
       <View style={styles.rowText}>
         <View style={styles.titleLine}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
             {artifact.title}
           </Text>
           {badge ? <Text style={styles.badge}>{badge}</Text> : null}
@@ -270,10 +344,12 @@ function ArtifactRow({
 function UploadRow({
   item,
   onRetry,
+  onCancel,
   onDismiss
 }: {
   item: UploadItem
   onRetry: () => void
+  onCancel: () => void
   onDismiss: () => void
 }) {
   const theme = useTheme()
@@ -282,7 +358,7 @@ function UploadRow({
   return (
     <View style={styles.upload} testID={`upload-${item.file.name}`}>
       <View style={styles.rowText}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
           {item.file.name}
         </Text>
         {item.status === 'failed' ? (
@@ -301,9 +377,16 @@ function UploadRow({
           <HeaderButton label="Dismiss" onPress={onDismiss} />
         </>
       ) : (
-        <Text style={styles.meta}>
-          {item.total > 0 ? `${Math.round(fraction * 100)}%` : 'Uploading…'}
-        </Text>
+        <>
+          <Text style={styles.meta}>
+            {item.total > 0 ? `${Math.round(fraction * 100)}%` : 'Uploading…'}
+          </Text>
+          <HeaderButton
+            label="Cancel"
+            accessibilityLabel={`Cancel upload of ${item.file.name}`}
+            onPress={onCancel}
+          />
+        </>
       )}
     </View>
   )
@@ -331,7 +414,16 @@ const makeStyles = (t: ChromeColors) =>
     detailPane: { flex: 1 },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
     note: { color: t.mutedForeground, textAlign: 'center', padding: 24 },
-    error: { color: t.destructive, paddingHorizontal: 16, paddingVertical: 8, fontSize: 13 },
+    banner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: t.border
+    },
+    bannerText: { flex: 1, color: t.destructive, fontSize: 13 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -343,7 +435,7 @@ const makeStyles = (t: ChromeColors) =>
     },
     rowSelected: { backgroundColor: t.muted },
     chevron: { width: 14, fontSize: 13, color: t.mutedForeground },
-    folderName: { flex: 1, fontSize: 15, color: t.foreground, fontFamily: 'Menlo' },
+    folderName: { flex: 1, fontSize: 15, color: t.foreground },
     rowText: { flex: 1, gap: 3 },
     titleLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     title: { flexShrink: 1, fontSize: 15, color: t.foreground },

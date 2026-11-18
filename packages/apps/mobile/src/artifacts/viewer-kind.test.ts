@@ -1,5 +1,5 @@
 import type { TaskArtifact } from '@slayzone/task-contracts'
-import { extensionBadge, looksBinary, viewerKindOf } from './viewer-kind'
+import { extensionBadge, isPlayableOnDevice, looksBinary, viewerKindOf } from './viewer-kind'
 
 const a = (title: string, render_mode: TaskArtifact['render_mode'] = null) =>
   ({ title, render_mode }) as TaskArtifact
@@ -43,5 +43,25 @@ describe('extensionBadge', () => {
     expect(extensionBadge('archive.tar.gz')).toBe('GZ')
     expect(extensionBadge('README')).toBe('')
     expect(extensionBadge('.env')).toBe('')
+  })
+})
+
+describe('isPlayableOnDevice', () => {
+  it("knows the containers iOS's player can't open (desktop's Chromium can)", () => {
+    for (const title of ['clip.webm', 'song.ogg', 'song.OGA', 'memo.opus', 'film.mkv', 'x.ogv']) {
+      expect(isPlayableOnDevice(title)).toBe(false)
+    }
+    for (const title of [
+      'clip.mp4',
+      'clip.mov',
+      'clip.m4v',
+      'a.mp3',
+      'a.m4a',
+      'a.wav',
+      'a.flac',
+      'a.aac'
+    ]) {
+      expect(isPlayableOnDevice(title)).toBe(true)
+    }
   })
 })

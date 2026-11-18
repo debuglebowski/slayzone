@@ -3,8 +3,9 @@
  * current version), with desktop's search options — Match case (`Aa`) and Regular
  * expression (`.*`). Results grouped by artifact like desktop's search panel: title,
  * its task, its hub (with several), and each matching line with its number; a group
- * folds away. A hub that fails says why below the others' results. Tapping a result opens
- * that artifact on its own hub.
+ * folds away, and the query is highlighted in each line. A hub that fails says why below
+ * the others' results, as do files a hub skipped as too large. Tapping a result opens
+ * that artifact on its own hub; dragging the results puts the keyboard away.
  */
 import { type ReactNode, useState } from 'react'
 import {
@@ -21,6 +22,7 @@ import type { HubSession } from '../hub-session'
 import { type ChromeColors, useTheme } from '../theme'
 import { hubTarget } from './hub-rest'
 import type { HubArtifactSearchResult } from './search'
+import { highlightParts } from './search-highlight'
 import { HeaderButton, ScreenHeader } from './ScreenHeader'
 import { useArtifactSearch } from './use-artifact-search'
 import { extensionBadge } from './viewer-kind'
@@ -76,6 +78,11 @@ export function ArtifactSearchScreen({
 
   const failures = outcome?.hubs.filter((h) => !h.ok) ?? []
   const truncated = outcome?.hubs.filter((h) => h.ok && h.truncated) ?? []
+  const skipped = (outcome?.hubs ?? []).flatMap((h) =>
+    h.ok && h.skippedLarge.length > 0 ? [{ hub: h, files: h.skippedLarge }] : []
+  )
+  // What the shown results were searched for (the query may have moved on since).
+  const highlight = { q: q.trim(), caseSensitive, regex }
 
   return (
     <View style={styles.screen}>
@@ -119,6 +126,8 @@ export function ArtifactSearchScreen({
         </View>
       ) : (
         <FlatList
+          testID="artifact-search-list"
+          keyboardDismissMode="on-drag"
           data={searching ? [] : (outcome?.results ?? [])}
           ListHeaderComponent={before ? <>{before(q)}</> : undefined}
           keyExtractor={(r) => r.key}
@@ -129,6 +138,7 @@ export function ArtifactSearchScreen({
               taskTitle={taskTitle(item)}
               hubLabel={severalHubs ? item.hubLabel : null}
               folded={folded.has(item.key)}
+              highlight={highlight}
               onToggle={() => toggleFold(item.key)}
               onOpen={() => onOpen(item)}
             />
@@ -160,6 +170,12 @@ export function ArtifactSearchScreen({
                   {h.hubLabel} has more results; refine the search.
                 </Text>
               ))}
+              {skipped.map(({ hub, files }) => (
+                <Text key={`skipped-${hub.hubId}`} style={styles.note}>
+                  Too large to search{severalHubs ? ` on ${hub.hubLabel}` : ''}:{' '}
+                  {files.map((f) => f.label).join(', ')}
+                </Text>
+              ))}
             </View>
           }
         />
@@ -173,6 +189,7 @@ function ResultGroup({
   taskTitle,
   hubLabel,
   folded,
+  highlight,
   onToggle,
   onOpen
 }: {
@@ -180,6 +197,7 @@ function ResultGroup({
   taskTitle: string | null
   hubLabel: string | null
   folded: boolean
+  highlight: { q: string; caseSensitive: boolean; regex: boolean }
   onToggle: () => void
   onOpen: () => void
 }) {
@@ -193,8 +211,10 @@ function ResultGroup({
         {lines.length > 0 ? (
           <Pressable
             onPress={onToggle}
-            hitSlop={8}
+            hitSlop={{ top: 12, bottom: 12, left: 14, right: 14 }}
             accessibilityRole="button"
+            // VoiceOver: what it does, not the chevron glyph.
+            accessibilityLabel={`Matching lines in ${result.title}`}
             accessibilityState={{ expanded: !folded }}
           >
             <Text style={styles.chevron}>{folded ? '▸' : '▾'}</Text>
@@ -209,7 +229,7 @@ function ResultGroup({
           testID={`artifact-search-result-${result.artifactId}`}
         >
           <View style={styles.titleLine}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
               {result.title}
             </Text>
             {badge ? <Text style={styles.badge}>{badge}</Text> : null}
@@ -233,7 +253,15 @@ function ResultGroup({
             >
               <Text style={styles.lineNumber}>{m.line ?? ''}</Text>
               <Text style={styles.snippet} numberOfLines={2}>
-                {m.snippet}
+                {highlightParts(m.snippet, highlight.q, highlight).map((part, j) =>
+                  part.match ? (
+                    <Text key={j} style={styles.hit} testID="artifact-search-hit">
+                      {part.text}
+                    </Text>
+                  ) : (
+                    part.text
+                  )
+                )}
               </Text>
             </Pressable>
           ))}
@@ -304,5 +332,6 @@ const makeStyles = (t: ChromeColors) =>
       color: t.mutedForeground,
       fontFamily: 'Menlo'
     },
-    snippet: { flex: 1, fontSize: 13, color: t.foreground, fontFamily: 'Menlo' }
+    snippet: { flex: 1, fontSize: 13, color: t.foreground, fontFamily: 'Menlo' },
+    hit: { backgroundColor: t.accent, color: t.accentForeground, fontWeight: '600' }
   })

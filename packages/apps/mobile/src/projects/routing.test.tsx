@@ -6,7 +6,7 @@
 import { userEvent } from '@testing-library/react-native'
 import { renderRouter, screen, within } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
-import { Dimensions } from 'react-native'
+import { Dimensions, Platform } from 'react-native'
 import { redirectSystemPath } from '../app/+native-intent'
 import type { HubFeed } from '../hub-board'
 import type { HubSession } from '../hub-session'
@@ -49,11 +49,18 @@ const homeFeed = feedOf(
   })
 )
 
+/** iPad idiom: desktop's layout is an iPad's (`useWide`), never an iPhone's. */
+let padIdiom: jest.SpyInstance | null = null
 function phone() {
+  padIdiom?.mockRestore()
+  padIdiom = null
   const window = { width: 390, height: 844, scale: 3, fontScale: 1 }
   Dimensions.set({ window, screen: window })
 }
 function tablet() {
+  padIdiom = jest
+    .spyOn(Platform as { readonly isPad: boolean }, 'isPad', 'get')
+    .mockReturnValue(true)
   const window = { width: 1024, height: 1366, scale: 2, fontScale: 1 }
   Dimensions.set({ window, screen: window })
 }

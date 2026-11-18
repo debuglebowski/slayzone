@@ -160,6 +160,11 @@ export class TerminalController {
     await (reloaded ? this.feed.restart() : this.feed.start())
   }
 
+  /** Try again after a failed load (attach or catch-up). */
+  retry(): void {
+    if (this.subscribed && this.domReady) void this.feed.start()
+  }
+
   /** The user is here (`force`: opened) — throttled unless forced. */
   touch(force: boolean): void {
     const now = Date.now()

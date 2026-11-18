@@ -56,7 +56,9 @@ describe('artifact logic shared with desktop', () => {
     expect(
       markdownPage('# x', { theme: testPageTheme('dark'), mermaidScript: null }).html
     ).toContain('<h1>x</h1>')
-    expect(htmlReportPage('<p>x</p>', { forcedTheme: null })).toContain('sandbox="allow-scripts"')
+    expect(htmlReportPage('<p>x</p>', { forcedTheme: null }).html).toContain(
+      'sandbox="allow-scripts"'
+    )
     expect(typeof searchArtifacts).toBe('function')
     expect(typeof uploadArtifact).toBe('function')
     expect(typeof downloadArtifactFile).toBe('function')

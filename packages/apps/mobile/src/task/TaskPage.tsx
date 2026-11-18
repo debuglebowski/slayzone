@@ -9,17 +9,25 @@
  *   (description, sub-tasks, the details list), Artifacts (with how many);
  * - iPad (`wide`): Agent and Details side by side (Artifacts as a tab of the right pane).
  *
+ * A part, once shown, stays mounted while another is shown (hidden: not drawn to touch,
+ * not read by VoiceOver): a chat's draft, a running terminal, an upload in progress
+ * survive a look at Details. Each mounts the first time it is shown. While the keyboard
+ * is up on a phone, the line under the title steps aside to leave room to type.
+ *
  * Scopes itself to the task's hub: every read and write goes to the hub that owns it.
  */
 import type { HubSession } from '../hub-session'
 import { HubScope } from '@slayzone/transport/client'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useMemo, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { AgentPanel } from '../agents/AgentPanel'
+import { hubTarget } from '../artifacts/hub-rest'
 import { ArtifactsScreen } from '../artifacts/ArtifactsScreen'
 import { useTaskArtifacts } from '../artifacts/use-task-artifacts'
 import { cardModel, statusCategoryOf } from '../board/card-model'
 import { TaskComputer } from '../computers/TaskComputer'
+import { ChatUploadTargetContext } from '../chat/ChatUploadTarget'
+import { useKeyboardVisible } from '../chat/use-keyboard'
 import type { HubFeed, TaskRow } from '../hub-board'
 import { DescriptionSection } from '../task-edit/DescriptionSection'
 import { dueLabel, priorityLabel, statusLabel } from '../task-edit/fields'
@@ -76,6 +84,14 @@ function Page(props: TaskPageProps) {
   const fields = useFieldSheets(row, writes)
   const [menu, setMenu] = useState(false)
   const { artifacts } = useTaskArtifacts(row.task.id)
+  const keyboardUp = useKeyboardVisible()
+  const uploadTarget = useMemo(() => hubTarget(props.session), [props.session])
+  // The parts shown so far: each stays mounted from its first showing on.
+  const [visited, setVisited] = useState<ReadonlySet<TaskSegment>>(() => new Set([segment]))
+  const shownRight: TaskSegment = segment === 'artifacts' ? 'artifacts' : 'details'
+  if (!visited.has(segment) || (wide && !visited.has(shownRight))) {
+    setVisited(new Set([...visited, segment, ...(wide ? [shownRight] : [])]))
+  }
   const artifactsLabel = artifacts?.length ? `Artifacts ${artifacts.length}` : 'Artifacts'
 
   const segments = (shown: readonly TaskSegment[]) => (
@@ -124,9 +140,15 @@ function Page(props: TaskPageProps) {
     />
   )
 
+  const kept = (part: TaskSegment, shown: boolean, node: ReactNode) =>
+    visited.has(part) ? (
+      <KeptPart key={part} shown={shown} testID={`part-${part}`}>
+        {node}
+      </KeptPart>
+    ) : null
+
   let body: ReactNode
   if (wide) {
-    const right = segment === 'artifacts' ? 'artifacts' : 'details'
     body = (
       <View style={styles.panes}>
         <View style={[styles.pane, styles.agentPane]} testID="pane-agent">
@@ -134,7 +156,10 @@ function Page(props: TaskPageProps) {
         </View>
         <View style={[styles.pane, styles.sidePane]} testID="pane-side">
           {segments(['details', 'artifacts'])}
-          {right === 'details' ? details : artifactList}
+          <View style={styles.flex}>
+            {kept('details', shownRight === 'details', details)}
+            {kept('artifacts', shownRight === 'artifacts', artifactList)}
+          </View>
         </View>
       </View>
     )
@@ -143,7 +168,9 @@ function Page(props: TaskPageProps) {
       <>
         {segments(TASK_SEGMENTS)}
         <View style={styles.flex}>
-          {segment === 'agent' ? agent : segment === 'details' ? details : artifactList}
+          {kept('agent', segment === 'agent', agent)}
+          {kept('details', segment === 'details', details)}
+          {kept('artifacts', segment === 'artifacts', artifactList)}
         </View>
       </>
     )
@@ -182,9 +209,12 @@ function Page(props: TaskPageProps) {
         feed={props.feed}
         showHub={props.showHub}
         openField={fields.open}
+        compact={keyboardUp && !wide}
       />
       {writes.error ? <Text style={styles.error}>{writes.error}</Text> : null}
-      {body}
+      <ChatUploadTargetContext.Provider value={uploadTarget}>
+        {body}
+      </ChatUploadTargetContext.Provider>
       {fields.sheets}
       <TaskMenu
         visible={menu}
@@ -197,23 +227,55 @@ function Page(props: TaskPageProps) {
   )
 }
 
+/**
+ * A part of the page kept mounted while hidden: laid out in place (its views keep their
+ * size — a terminal is never resized to nothing), but transparent, untouchable and
+ * hidden from VoiceOver.
+ */
+function KeptPart({
+  shown,
+  testID,
+  children
+}: {
+  shown: boolean
+  testID: string
+  children: ReactNode
+}) {
+  const styles = makeStyles(useTheme())
+  return (
+    <View
+      style={[StyleSheet.absoluteFill, !shown && styles.hiddenPart]}
+      pointerEvents={shown ? 'auto' : 'none'}
+      accessibilityElementsHidden={!shown}
+      importantForAccessibility={shown ? 'auto' : 'no-hide-descendants'}
+      testID={testID}
+    >
+      {children}
+    </View>
+  )
+}
+
 function TitleBlock({
   row,
   writes,
   feed,
   showHub,
-  openField
+  openField,
+  compact
 }: {
   row: TaskRow
   writes: TaskWrites
   feed: HubFeed
   showHub: boolean
   openField: (field: TaskField) => void
+  /** The keyboard is up on a phone: the title only, the line under it steps aside. */
+  compact: boolean
 }) {
   const styles = makeStyles(useTheme())
   const { task } = writes
   const look = statusCategoryOf(task.status, row.project)
   const model = cardModel(feed, task, row.project)
+  const due = task.due_date ? dueLabel(task.due_date, todayISO()) : null
   return (
     <View style={styles.titleBlock}>
       <View style={styles.titleRow}>
@@ -229,35 +291,35 @@ function TitleBlock({
         </Pressable>
         <TitleInput writes={writes} />
       </View>
-      <View style={styles.meta}>
-        <Pressable
-          onPress={() => openField('priority')}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={`Priority: ${priorityLabel(task.priority)}`}
-          style={styles.metaChip}
-        >
-          <PriorityIcon priority={task.priority} />
-          <Text style={styles.metaText}>{priorityLabel(task.priority)}</Text>
-        </Pressable>
-        <TagPills tags={model.tags} />
-        {task.due_date ? (
+      {compact ? null : (
+        <View style={styles.meta}>
           <Pressable
-            onPress={() => openField('due')}
+            onPress={() => openField('priority')}
             hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel={`Due ${task.due_date}`}
-            style={[styles.metaChip, model.overdue && styles.overdue]}
+            accessibilityLabel={`Priority: ${priorityLabel(task.priority)}`}
+            style={styles.metaChip}
           >
-            <Text style={[styles.metaText, model.overdue && styles.overdueText]}>
-              {task.due_date}
-            </Text>
+            <PriorityIcon priority={task.priority} />
+            <Text style={styles.metaText}>{priorityLabel(task.priority)}</Text>
           </Pressable>
-        ) : null}
-        {model.blocked ? <Text style={styles.blocked}>Blocked</Text> : null}
-        {task.archived_at ? <Text style={styles.metaText}>Archived</Text> : null}
-        {showHub ? <Text style={styles.metaText}>{row.hubLabel}</Text> : null}
-      </View>
+          <TagPills tags={model.tags} />
+          {task.due_date ? (
+            <Pressable
+              onPress={() => openField('due')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={due ?? undefined}
+              style={[styles.metaChip, model.overdue && styles.overdue]}
+            >
+              <Text style={[styles.metaText, model.overdue && styles.overdueText]}>{due}</Text>
+            </Pressable>
+          ) : null}
+          {model.blocked ? <Text style={styles.blocked}>Blocked</Text> : null}
+          {task.archived_at ? <Text style={styles.metaText}>Archived</Text> : null}
+          {showHub ? <Text style={styles.metaText}>{row.hubLabel}</Text> : null}
+        </View>
+      )}
     </View>
   )
 }
@@ -280,6 +342,7 @@ function DetailsPanel({
     <Pressable
       onPress={() => openField(field)}
       accessibilityRole="button"
+      accessibilityLabel={`${label}, ${value}`}
       testID={`task-${field}`}
       style={ui.detailRow}
     >
@@ -459,6 +522,7 @@ const makeStyles = (t: ChromeColors) =>
       paddingTop: 10,
       marginTop: 2
     },
+    hiddenPart: { opacity: 0 },
     panes: { flex: 1, flexDirection: 'row', gap: 10, padding: 10 },
     pane: {
       backgroundColor: t.surface1,

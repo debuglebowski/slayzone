@@ -2,28 +2,47 @@
  * The composer: the `/` menu above the input while a command is being typed, the
  * messages waiting in the queue ("Up next", removable, addable to the running
  * turn — then "With agent…" until the agent reads it), the files the next message
- * carries (given back by Stop; removable), and the input with Send — and Stop while a
- * turn runs. Keyboard dictation works as in any text field.
+ * carries (given back by Stop, or a photo attached with ＋; removable), and the input
+ * with Send — and Stop while a turn runs (asking first when queued messages would be
+ * dropped). Keyboard dictation works as in any text field.
+ *
+ * In a screen too short for all of it (the keyboard is up), the `/` menu and the queue
+ * shrink and scroll; the input row never does, so it stays above the keyboard.
  */
 import {
   userMessageAttachments,
   type ChatAttachment,
   type QueuedChatMessage
 } from '@slayzone/terminal-contracts'
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useState } from 'react'
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from 'react-native'
 import type { ChromeColors } from '../theme'
+import { BottomSheet } from '../ui-kit/Chrome'
 import { attachmentLabel, queuedFiles, queuedLabel } from './attachments'
 import type { SlashItem } from './slash-menu'
 import { MONO, useThemedStyles } from './styles'
+import type { ChatAttach, AttachSource } from './useChatAttach'
 import type { ChatComposer } from './useChatComposer'
 
-const KIND_LABELS: Record<SlashItem['type'], string> = {
+const KIND_LABELS: Record<Exclude<SlashItem['type'], 'cli'>, string> = {
   builtin: 'app',
   skill: 'skill',
   command: 'command',
-  agent: 'agent',
-  cli: 'Claude Code'
+  agent: 'agent'
 }
+
+/** Send / Stop: 40pt drawn, 44pt+ to a finger. */
+const BUTTON_SLOP = 4
 
 export function Composer({
   composer,
@@ -33,7 +52,9 @@ export function Composer({
   withdrawSteered = false,
   inFlight,
   disabled,
-  placeholder
+  placeholder,
+  cliLabel = 'Claude Code',
+  attach = null
 }: {
   composer: ChatComposer
   queued: readonly QueuedChatMessage[]
@@ -49,8 +70,33 @@ export function Composer({
   /** Not ready to send yet (loading), or the session ended. */
   disabled: boolean
   placeholder: string
+  /** What the `/` menu calls the CLI's own commands: its product ("Claude Code", "Codex"). */
+  cliLabel?: string
+  /** ＋: attach a photo; null = not offered. */
+  attach?: ChatAttach | null
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
+  const [attachSheet, setAttachSheet] = useState(false)
+  const pickFrom = (source: AttachSource) => {
+    setAttachSheet(false)
+    attach?.pick(source)
+  }
+  const waiting = queued.length + (composer.pendingQueuedMessages?.length ?? 0)
+  // Stop clears the queue too: with messages waiting, ask first.
+  const stop = () => {
+    if (waiting === 0) {
+      composer.stop()
+      return
+    }
+    Alert.alert(
+      `Stop and drop ${waiting === 1 ? '1 queued message' : `${waiting} queued messages`}?`,
+      'Stopping clears the queue: the messages waiting are not sent.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Stop', style: 'destructive', onPress: composer.stop }
+      ]
+    )
+  }
   // Saved on this device, not confirmed by the hub yet: shown at once at the end of
   // Up next (no actions until confirmed); the hub's row replaces it once listed.
   const listed = new Set(queued.map((q) => q.id))
@@ -78,7 +124,9 @@ export function Composer({
                     <Text style={s.menuHint}> {item.argumentHint}</Text>
                   ) : null}
                 </Text>
-                <Text style={s.menuKind}>{KIND_LABELS[item.type]}</Text>
+                <Text style={s.menuKind}>
+                  {item.type === 'cli' ? cliLabel : KIND_LABELS[item.type]}
+                </Text>
               </View>
               {item.description ? (
                 <Text style={s.menuDescription} numberOfLines={1}>
@@ -90,7 +138,7 @@ export function Composer({
         />
       )}
       {queued.length + unconfirmed.length > 0 && (
-        <View style={s.queue} testID="chat-queue">
+        <ScrollView style={s.queue} testID="chat-queue" keyboardShouldPersistTaps="handled">
           <Text style={s.queueTitle}>Up next</Text>
           {queued.map((q) => {
             const label = queuedLabel(q)
@@ -195,7 +243,7 @@ export function Composer({
               </View>
             )
           })}
-        </View>
+        </ScrollView>
       )}
       {composer.attachments.length > 0 && (
         <View style={s.files} testID="chat-attachments">
@@ -210,6 +258,23 @@ export function Composer({
         </View>
       )}
       <View style={s.inputRow}>
+        {attach ? (
+          <Pressable
+            onPress={() => setAttachSheet(true)}
+            disabled={disabled}
+            hitSlop={BUTTON_SLOP}
+            style={[s.button, s.plus, disabled && s.off]}
+            accessibilityRole="button"
+            accessibilityLabel="Attach a photo"
+            accessibilityState={{ disabled, busy: attach.uploading > 0 }}
+          >
+            {attach.uploading > 0 ? (
+              <ActivityIndicator size="small" color={theme.mutedForeground} />
+            ) : (
+              <Text style={s.plusText}>＋</Text>
+            )}
+          </Pressable>
+        ) : null}
         <TextInput
           testID="chat-input"
           value={composer.draft}
@@ -224,7 +289,8 @@ export function Composer({
         />
         {inFlight && (
           <Pressable
-            onPress={composer.stop}
+            onPress={stop}
+            hitSlop={BUTTON_SLOP}
             style={[s.button, s.stop]}
             accessibilityRole="button"
             accessibilityLabel="Stop generation"
@@ -234,6 +300,7 @@ export function Composer({
         )}
         <Pressable
           onPress={composer.send}
+          hitSlop={BUTTON_SLOP}
           disabled={disabled || !composer.canSend}
           style={[s.button, s.send, (disabled || !composer.canSend) && s.off]}
           accessibilityRole="button"
@@ -243,6 +310,28 @@ export function Composer({
           <Text style={s.sendText}>↑</Text>
         </Pressable>
       </View>
+      {attach ? (
+        <BottomSheet
+          visible={attachSheet}
+          onClose={() => setAttachSheet(false)}
+          testID="attach-sheet"
+        >
+          <Pressable
+            onPress={() => pickFrom('camera')}
+            accessibilityRole="button"
+            style={s.sheetRow}
+          >
+            <Text style={s.sheetText}>Take photo</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => pickFrom('photos')}
+            accessibilityRole="button"
+            style={s.sheetRow}
+          >
+            <Text style={s.sheetText}>Photo library</Text>
+          </Pressable>
+        </BottomSheet>
+      ) : null}
     </View>
   )
 }
@@ -276,6 +365,8 @@ function AttachedFile({
 function makeStyles(t: ChromeColors) {
   return StyleSheet.create({
     wrap: {
+      // Shrinks (its menu and queue do) before the input row could leave the screen.
+      flexShrink: 1,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: t.border,
       backgroundColor: t.background,
@@ -285,6 +376,8 @@ function makeStyles(t: ChromeColors) {
     },
     menu: {
       maxHeight: 240,
+      flexShrink: 1,
+      minHeight: 44,
       marginBottom: 6,
       borderRadius: 8,
       borderWidth: StyleSheet.hairlineWidth,
@@ -299,6 +392,9 @@ function makeStyles(t: ChromeColors) {
     menuKind: { color: t.mutedForeground, fontSize: 11 },
     menuDescription: { color: t.mutedForeground, fontSize: 12, marginTop: 1 },
     queue: {
+      flexShrink: 1,
+      flexGrow: 0,
+      minHeight: 44,
       marginBottom: 6,
       padding: 8,
       borderRadius: 8,
@@ -328,10 +424,10 @@ function makeStyles(t: ChromeColors) {
     },
     fileName: { flexShrink: 1, color: t.foreground, fontSize: 13 },
     queueRemove: { color: t.mutedForeground, fontSize: 14 },
-    inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+    inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, flexShrink: 0 },
     input: {
       flex: 1,
-      minHeight: 38,
+      minHeight: 40,
       maxHeight: 160,
       borderRadius: 18,
       borderWidth: StyleSheet.hairlineWidth,
@@ -344,9 +440,9 @@ function makeStyles(t: ChromeColors) {
       fontSize: 16
     },
     button: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center'
     },
@@ -354,6 +450,16 @@ function makeStyles(t: ChromeColors) {
     sendText: { color: t.primaryForeground, fontSize: 18, fontWeight: '700' },
     stop: { backgroundColor: t.destructive },
     stopText: { color: t.background, fontSize: 14 },
-    off: { opacity: 0.4 }
+    off: { opacity: 0.4 },
+    plus: { backgroundColor: t.surface2 },
+    plusText: { color: t.foreground, fontSize: 18 },
+    sheetRow: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.border
+    },
+    sheetText: { fontSize: 16, color: t.foreground }
   })
 }

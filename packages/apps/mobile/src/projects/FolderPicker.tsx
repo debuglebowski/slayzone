@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { type ChromeColors, useTheme } from '../theme'
+import { MODAL_ORIENTATIONS } from '../ui-kit/Chrome'
 import { useTRPC } from '../trpc'
 
 /** The machine to browse and the project it is for (`workspace.*`'s target). */
@@ -43,6 +44,7 @@ export function FolderPicker({
     <Modal
       visible={visible}
       animationType="slide"
+      supportedOrientations={MODAL_ORIENTATIONS}
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
@@ -148,7 +150,6 @@ function FolderPickerBody({
             accessibilityRole="button"
             accessibilityLabel="Up one folder"
             disabled={!parent}
-            hitSlop={8}
             onPress={() => parent && go(parent)}
             style={styles.upButton}
           >
@@ -299,7 +300,8 @@ const makeStyles = (t: ChromeColors) =>
     disabled: { color: t.mutedForeground },
     description: { fontSize: 12, color: t.mutedForeground, padding: 16, paddingBottom: 8 },
     pathRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16 },
-    upButton: { paddingHorizontal: 6, paddingVertical: 4 },
+    // 44pt square: the path field beside it sets the row's height anyway.
+    upButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
     pathInput: {
       flex: 1,
       fontFamily: 'Menlo',

@@ -16,6 +16,7 @@ import { ComputerStatus } from '../computers/ComputerStatus'
 import { choiceLabel, type HubComputer } from '../computers/hub-computers'
 import { useHubComputers } from '../computers/use-hub-computers'
 import type { TaskRow } from '../hub-board'
+import { statusLabel } from '../task-edit/fields'
 import { type ChromeColors, useTheme } from '../theme'
 import { useTRPC } from '../trpc'
 import { type FolderRow, placementStatusText, projectFolders } from './folders'
@@ -121,7 +122,7 @@ function ProjectDetailBody({
           <Text style={styles.taskTitle} numberOfLines={2}>
             {task.task.title}
           </Text>
-          <Text style={styles.taskMeta}>{task.task.status}</Text>
+          <Text style={styles.taskMeta}>{statusLabel(task.task.status, row.project)}</Text>
         </Pressable>
       ))}
     </ScrollView>
@@ -217,6 +218,16 @@ function FolderItem({ row, folder }: { row: ProjectRow; folder: FolderRow }) {
       .mutateAsync(target)
       .catch((err: unknown) => Alert.alert("Couldn't remove that folder", messageOf(err)))
   }
+  // Removing forgets where the project lives on that computer: ask first.
+  const confirmRemove = (): void =>
+    Alert.alert(
+      `Remove the folder on ${folder.name}?`,
+      `The project stops using ${folder.placement?.path ?? 'its folder'} on ${folder.name}. The folder and its files stay on that computer.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: remove }
+      ]
+    )
 
   return (
     <View style={styles.card} testID={`folder-${folder.computerId}`}>
@@ -241,13 +252,19 @@ function FolderItem({ row, folder }: { row: ProjectRow; folder: FolderRow }) {
           <Pressable
             accessibilityRole="button"
             disabled={busy}
-            hitSlop={8}
+            hitSlop={12}
             onPress={() => setPicking(true)}
           >
             <Text style={styles.link}>{folder.placement ? 'Change' : 'Pick folder'}</Text>
           </Pressable>
           {folder.placement ? (
-            <Pressable accessibilityRole="button" disabled={busy} hitSlop={8} onPress={remove}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Remove the folder on ${folder.name}`}
+              disabled={busy}
+              hitSlop={12}
+              onPress={confirmRemove}
+            >
               <Text style={styles.link}>Remove</Text>
             </Pressable>
           ) : null}

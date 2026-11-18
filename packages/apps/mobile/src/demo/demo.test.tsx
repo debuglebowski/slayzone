@@ -9,6 +9,7 @@ import { userEvent } from '@testing-library/react-native'
 import { router } from 'expo-router'
 import { act, renderRouter, screen, waitFor, within } from 'expo-router/testing-library'
 import { Dimensions } from 'react-native'
+import { acceptConfirmations } from '../ui-kit/testing-confirm'
 import { DEMO_IDS } from './seed'
 
 /** What the terminal's web view was sent (a DOM component cannot run in Node). */
@@ -63,7 +64,11 @@ const ROUTES = 'src/app'
 /** Queries inside one tab's stack (every tab stays mounted). */
 const tab = (name: 'board' | 'search' | 'settings') => within(screen.getByTestId(`tab-${name}`))
 
+// Exit demo asks first; these suites are about what follows.
+let confirmations: jest.SpyInstance
+afterEach(() => confirmations.mockRestore())
 beforeEach(() => {
+  confirmations = acceptConfirmations()
   const window = { width: 390, height: 844, scale: 3, fontScale: 1 }
   Dimensions.set({ window, screen: window })
   jest.clearAllMocks()
@@ -180,6 +185,12 @@ describe('the demo', () => {
         'Move the session checks out of the route handlers into one middleware. Keep the 401 body exactly as it is.'
       )
     ).toBeOnTheScreen()
+    // Every chat op the screen calls is served: no load error, no computer notice.
+    await act(async () => {
+      jest.advanceTimersByTime(100)
+    })
+    expect(board.queryByText(/Couldn't load the chat/)).toBeNull()
+    expect(board.queryByText(/unexpected op/)).toBeNull()
 
     await userEvent
       .setup()

@@ -4,10 +4,12 @@
  * by `marked`'s lexer (pure JS, no DOM, no native module) and drawn here. Text that is
  * still streaming renders as far as it goes: an unfinished `**` shows as typed.
  *
- * Links open in the browser, web links only — unless `onLink` takes them first (a task
- * description's `artifact:` links open the artifact). Images show as their alt text,
- * linked.
+ * Links open in the in-app browser (Safari View Controller: the app stays where it was),
+ * web links only — unless `onLink` takes them first (a task description's `artifact:`
+ * links open the artifact). Images show as their alt text, linked. A table's columns line
+ * up: each column one width (from its longest cell, capped), cells aligned as written.
  */
+import * as WebBrowser from 'expo-web-browser'
 import { lexer, type Token, type Tokens } from 'marked'
 import { memo, type ReactNode, useMemo } from 'react'
 import { Linking, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native'
@@ -126,11 +128,12 @@ function block(token: Token, s: Styles, key: string): ReactNode {
     }
     case 'table': {
       const t = token as Tokens.Table
+      const widths = columnWidths([t.header, ...t.rows])
       const row = (cells: Tokens.TableCell[], header: boolean, rowKey: string) => (
         <View key={rowKey} style={s.tableRow}>
           {cells.map((cell, i) => (
-            <View key={i} style={s.tableCell}>
-              <Text style={[s.text, header && s.strong]}>
+            <View key={i} style={[s.tableCell, { width: widths[i] }]}>
+              <Text style={[s.text, header && s.strong, alignOf(t.align[i] ?? cell.align)]}>
                 {inline(cell.tokens, s, `${rowKey}.${i}`)}
               </Text>
             </View>
@@ -233,10 +236,30 @@ function inlineToken(token: Token, s: Styles, key: string): ReactNode {
   }
 }
 
-/** Open a link the agent wrote: web links only (never `file:`, app schemes, …). */
+/** Open a link the agent wrote, in the in-app browser: web links only (never `file:`, app schemes, …). */
 export function openWebLink(href: string): void {
   if (!/^https?:\/\//i.test(href)) return
-  void Linking.openURL(href).catch(() => undefined)
+  void WebBrowser.openBrowserAsync(href).catch(() => Linking.openURL(href).catch(() => undefined))
+}
+
+/** Per column: wide enough for its longest cell (≈ 8pt a character), within bounds. */
+const CELL_MIN = 60
+const CELL_MAX = 240
+const CHAR_WIDTH = 8
+const CELL_PAD = 16
+function columnWidths(rows: readonly Tokens.TableCell[][]): number[] {
+  const widths: number[] = []
+  for (const cells of rows) {
+    cells.forEach((cell, i) => {
+      const w = Math.min(CELL_MAX, Math.max(CELL_MIN, cell.text.length * CHAR_WIDTH + CELL_PAD))
+      widths[i] = Math.max(widths[i] ?? 0, w)
+    })
+  }
+  return widths
+}
+
+function alignOf(align: 'left' | 'center' | 'right' | null | undefined): TextStyle | undefined {
+  return align ? { textAlign: align } : undefined
 }
 
 const ENTITIES: Record<string, string> = {
@@ -290,8 +313,6 @@ function makeStyles(t: ChromeColors, muted: boolean) {
     table: { borderWidth: StyleSheet.hairlineWidth, borderColor: t.border, borderRadius: 4 },
     tableRow: { flexDirection: 'row' },
     tableCell: {
-      minWidth: 80,
-      maxWidth: 240,
       paddingHorizontal: 8,
       paddingVertical: 4,
       borderWidth: StyleSheet.hairlineWidth,

@@ -4,12 +4,18 @@
  * runs as a CLI task: `chat.commandTaskOutput`, polled only while the card is open), the
  * todo list, or the raw output. AskUserQuestion and ExitPlanMode show the questions /
  * the plan and how they were answered (answering happens in the prompt dock).
+ *
+ * Output shows its first lines only (no scroll area inside the chat's scroll); "Show
+ * all" opens the whole of it on its own screen, selectable, with Copy. Opened or closed,
+ * a card stays so when the list draws its row again (`useExpanded`).
  */
 import type { ChatPrompt } from '@slayzone/terminal/chat-prompts'
 import type { ToolInvocation } from '@slayzone/terminal/reducer'
 import { useQuery } from '@tanstack/react-query'
 import { memo, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { TextViewer } from './TextViewer'
+import { useExpanded } from './timeline-ui'
 import type { ChromeColors } from '../theme'
 import { useChatView } from './ChatViewContext'
 import { Markdown } from './Markdown'
@@ -18,6 +24,8 @@ import { type ToolBody, toolBody, toolSummary } from './timeline-rows'
 import { useTRPC } from '../trpc'
 
 const POLL_MS = 1_000
+/** Lines of output a card shows before "Show all". */
+export const PREVIEW_LINES = 12
 
 export const ToolCard = memo(function ToolCard({
   invocation,
@@ -28,17 +36,17 @@ export const ToolCard = memo(function ToolCard({
   streaming?: boolean
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
-  const { prompts } = useChatView()
+  const { prompts, agentName = 'Claude' } = useChatView()
   const prompt = latestPromptFor(prompts, invocation.id)
   const special = invocation.name === 'AskUserQuestion' || invocation.name === 'ExitPlanMode'
-  const [open, setOpen] = useState(special)
+  const [open, toggle] = useExpanded(`tool:${invocation.id}`, special)
   const { title, summary } = toolSummary(invocation)
   const waiting = prompt?.status === 'pending'
 
   return (
     <View style={[s.card, waiting && s.cardWaiting]} testID={`tool-${invocation.id}`}>
       <Pressable
-        onPress={() => setOpen((o) => !o)}
+        onPress={toggle}
         style={s.header}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
@@ -49,17 +57,19 @@ export const ToolCard = memo(function ToolCard({
         <Text style={s.summary} numberOfLines={1}>
           {summary}
         </Text>
-        <Text style={s.chevron}>{open ? '▾' : '▸'}</Text>
+        <Text style={s.chevron} accessible={false}>
+          {open ? '▾' : '▸'}
+        </Text>
       </Pressable>
       {waiting && <Text style={s.waiting}>Waiting for your answer</Text>}
       {open && (
         <View style={s.body}>
           {invocation.name === 'AskUserQuestion' ? (
-            <Questions invocation={invocation} prompt={prompt} s={s} />
+            <Questions invocation={invocation} prompt={prompt} agentName={agentName} s={s} />
           ) : invocation.name === 'ExitPlanMode' ? (
-            <Plan invocation={invocation} prompt={prompt} s={s} />
+            <Plan invocation={invocation} prompt={prompt} agentName={agentName} s={s} />
           ) : (
-            <Body invocation={invocation} s={s} />
+            <Body invocation={invocation} title={title} s={s} />
           )}
         </View>
       )}
@@ -89,7 +99,8 @@ function StatusGlyph({
   return <Text style={[s.glyph, s.ok]}>✓</Text>
 }
 
-function Body({ invocation, s }: { invocation: ToolInvocation; s: Styles }) {
+function Body({ invocation, title, s }: { invocation: ToolInvocation; title: string; s: Styles }) {
+  const [all, setAll] = useState(false)
   const running = invocation.task?.status === 'running'
   const live = useCommandOutput(invocation.task?.taskId, running)
   let body: ToolBody = toolBody(invocation)
@@ -111,22 +122,45 @@ function Body({ invocation, s }: { invocation: ToolInvocation; s: Styles }) {
       </View>
     )
   }
+  const lines =
+    body.type === 'diff' ? body.lines.map((l) => `${l.sign} ${l.text}`) : body.text.split('\n')
+  const hidden = lines.length - PREVIEW_LINES
+  const preview = hidden > 0 ? lines.slice(0, PREVIEW_LINES) : lines
   return (
-    <ScrollView horizontal style={s.code}>
-      {body.type === 'diff' ? (
-        <View>
-          {body.lines.map((l, i) => (
-            <Text key={i} style={[s.mono, l.sign === '-' ? s.removed : s.added]}>
-              {l.sign} {l.text}
-            </Text>
-          ))}
-        </View>
-      ) : (
-        <Text style={s.mono} selectable>
-          {body.text}
-        </Text>
-      )}
-    </ScrollView>
+    <View>
+      <ScrollView horizontal>
+        {body.type === 'diff' ? (
+          <View>
+            {body.lines.slice(0, preview.length).map((l, i) => (
+              <Text key={i} style={[s.mono, l.sign === '-' ? s.removed : s.added]}>
+                {l.sign} {l.text}
+              </Text>
+            ))}
+          </View>
+        ) : (
+          <Text style={s.mono} selectable>
+            {preview.join('\n')}
+          </Text>
+        )}
+      </ScrollView>
+      {hidden > 0 ? (
+        <Pressable
+          onPress={() => setAll(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Show all ${lines.length} lines`}
+          style={s.showAll}
+        >
+          <Text style={s.showAllText}>Show all ({hidden} more lines)</Text>
+        </Pressable>
+      ) : null}
+      <TextViewer
+        title={title}
+        text={lines.join('\n')}
+        mono
+        visible={all}
+        onClose={() => setAll(false)}
+      />
+    </View>
   )
 }
 
@@ -162,10 +196,12 @@ export function questionsOf(input: unknown): AskQuestion[] {
 function Questions({
   invocation,
   prompt,
+  agentName,
   s
 }: {
   invocation: ToolInvocation
   prompt: ChatPrompt | null
+  agentName: string
   s: Styles
 }) {
   const answers = answersOf(prompt)
@@ -185,7 +221,7 @@ function Questions({
           })}
         </View>
       ))}
-      <Text style={s.muted}>{promptStatus(prompt, answers !== null)}</Text>
+      <Text style={s.muted}>{promptStatus(prompt, answers !== null, agentName)}</Text>
     </View>
   )
 }
@@ -193,17 +229,19 @@ function Questions({
 function Plan({
   invocation,
   prompt,
+  agentName,
   s
 }: {
   invocation: ToolInvocation
   prompt: ChatPrompt | null
+  agentName: string
   s: Styles
 }) {
   const plan = (invocation.input as { plan?: string } | null)?.plan ?? ''
   return (
     <View>
       <Markdown text={plan} />
-      <Text style={s.muted}>{promptStatus(prompt, false)}</Text>
+      <Text style={s.muted}>{promptStatus(prompt, false, agentName)}</Text>
     </View>
   )
 }
@@ -215,13 +253,13 @@ function answersOf(prompt: ChatPrompt | null): Record<string, string> | null {
   return answers && typeof answers === 'object' ? (answers as Record<string, string>) : null
 }
 
-function promptStatus(prompt: ChatPrompt | null, answered: boolean): string {
+function promptStatus(prompt: ChatPrompt | null, answered: boolean, agentName: string): string {
   if (!prompt) return ''
   switch (prompt.status) {
     case 'pending':
       return 'Waiting for your answer'
     case 'cancelled':
-      return 'Withdrawn by Claude'
+      return `Withdrawn by ${agentName}`
     case 'expired':
       return 'No longer active'
     default:
@@ -264,7 +302,8 @@ function makeStyles(t: ChromeColors) {
     chevron: { color: t.mutedForeground, fontSize: 12 },
     waiting: { color: t.infoForeground, fontSize: 12, paddingHorizontal: 10, paddingBottom: 6 },
     body: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border, padding: 10 },
-    code: { maxHeight: 280 },
+    showAll: { minHeight: 44, justifyContent: 'center' },
+    showAllText: { color: t.infoForeground, fontSize: 13, fontWeight: '600' },
     mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: t.foreground },
     removed: { color: t.diffRemovedForeground },
     added: { color: t.diffAddedForeground },

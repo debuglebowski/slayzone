@@ -201,7 +201,7 @@ describe('TerminalFeed', () => {
       (s) => statuses.push(s)
     )
     await none.start()
-    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: false, error: null })
+    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: false, error: null, output: false })
 
     const failing = new TerminalFeed(
       't:t',
@@ -214,7 +214,12 @@ describe('TerminalFeed', () => {
       (s) => statuses.push(s)
     )
     await failing.start()
-    expect(statuses.at(-1)).toEqual({ phase: 'error', exists: false, error: 'hub gone' })
+    expect(statuses.at(-1)).toEqual({
+      phase: 'error',
+      exists: false,
+      error: 'hub gone',
+      output: false
+    })
   })
 
   it("says its computer is offline (not a blank 'ready'), and catches up when it is back", async () => {
@@ -232,10 +237,10 @@ describe('TerminalFeed', () => {
     })
     const feed = new TerminalFeed('t:t', c, sink, (s) => statuses.push(s))
     await feed.start()
-    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null })
+    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null, output: false })
     online = true
     await feed.computerAvailable(true)
-    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: true, error: null })
+    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: true, error: null, output: true })
     expect(ops.filter((op) => op.startsWith('write'))).toEqual(['write a', 'write b'])
   })
 
@@ -256,10 +261,10 @@ describe('TerminalFeed', () => {
     const feed = new TerminalFeed('t:t', c, sink, (s) => statuses.push(s))
     await feed.start()
     await feed.computerAvailable(false)
-    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null })
+    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null, output: true })
     await feed.computerAvailable(true)
     expect(since).toEqual([0])
-    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: true, error: null })
+    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: true, error: null, output: true })
     expect(ops.filter((op) => op.startsWith('write'))).toEqual(['write a', 'write b', 'write c'])
   })
 
@@ -277,6 +282,21 @@ describe('TerminalFeed', () => {
     feed.data(5, 'gap')
     await flush()
     await flush()
-    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null })
+    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null, output: true })
+  })
+
+  it('says whether anything was written (a blank terminal is explained, kept output is not hidden)', async () => {
+    const { sink } = recordingSink()
+    const statuses: Array<{ output: boolean }> = []
+    const feed = new TerminalFeed('t:t', client({ attach: async () => live([]) }), sink, (s) =>
+      statuses.push(s)
+    )
+    await feed.start()
+    expect(statuses.at(-1)?.output).toBe(false)
+    feed.data(0, 'first')
+    expect(statuses.at(-1)?.output).toBe(true)
+    const count = statuses.length
+    feed.data(1, 'more')
+    expect(statuses).toHaveLength(count)
   })
 })

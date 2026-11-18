@@ -1,6 +1,13 @@
 import type { BoardData } from '../hub-board'
 import { boardOf, projectOf, taskOf } from '../hubs/testing'
-import { blockerCandidates, isBlocked, projectTags, subtasksOf, toggleTag } from './organise'
+import {
+  blockerCandidates,
+  createLatestWriter,
+  isBlocked,
+  projectTags,
+  subtasksOf,
+  toggleTag
+} from './organise'
 
 const tag = (id: string, project_id: string) => ({
   id,
@@ -73,5 +80,36 @@ describe('blockers', () => {
   it('blocked = the board says so (a blocker, or the flag)', () => {
     expect(isBlocked(board(), 'other')).toBe(true)
     expect(isBlocked(board(), 't')).toBe(false)
+  })
+})
+
+describe('createLatestWriter', () => {
+  it('sends one value at a time; values pushed meanwhile fold into the newest', async () => {
+    const sent: string[] = []
+    const replies: Array<(ok: boolean) => void> = []
+    const send = (value: string) =>
+      new Promise<boolean>((resolve) => {
+        sent.push(value)
+        replies.push(resolve)
+      })
+    const writer = createLatestWriter<string>()
+    const first = writer.push('a', send)
+    const second = writer.push('b', send)
+    const third = writer.push('c', send)
+    expect(sent).toEqual(['a'])
+    replies.shift()?.(true)
+    expect(await first).toBe(true)
+    expect(sent).toEqual(['a', 'c'])
+    replies.shift()?.(false)
+    // "b" never went out: it learns how "c", which replaced it, did.
+    expect(await second).toBe(false)
+    expect(await third).toBe(false)
+    expect(sent).toEqual(['a', 'c'])
+  })
+
+  it('a send that throws counts as failed and does not stall the next one', async () => {
+    const writer = createLatestWriter<number>()
+    expect(await writer.push(1, () => Promise.reject(new Error('no')))).toBe(false)
+    expect(await writer.push(2, () => Promise.resolve(true))).toBe(true)
   })
 })

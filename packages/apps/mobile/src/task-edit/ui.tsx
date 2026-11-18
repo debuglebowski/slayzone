@@ -6,6 +6,7 @@
 import { type ReactNode, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { type ChromeColors, useTheme } from '../theme'
+import { MODAL_ORIENTATIONS } from '../ui-kit/Chrome'
 
 export function Section({
   title,
@@ -25,7 +26,7 @@ export function Section({
         {action ? (
           <Pressable
             onPress={action.onPress}
-            hitSlop={8}
+            hitSlop={12}
             accessibilityRole="button"
             testID={action.testID}
           >
@@ -58,6 +59,7 @@ export function FieldButton({
       disabled={!onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      hitSlop={4}
       style={styles.field}
     >
       <Text style={styles.fieldText} numberOfLines={1}>
@@ -87,13 +89,14 @@ export function Sheet({
     <Modal
       visible={visible}
       animationType="slide"
+      supportedOrientations={MODAL_ORIENTATIONS}
       presentationStyle="formSheet"
       onRequestClose={onClose}
     >
       <View testID={testID} style={styles.sheet}>
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{title}</Text>
-          <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button">
+          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button">
             <Text style={styles.link}>{closeLabel}</Text>
           </Pressable>
         </View>
@@ -170,7 +173,10 @@ export const makeStyles = (t: ChromeColors) =>
       textTransform: 'uppercase'
     },
     link: { fontSize: 14, color: t.primary, fontWeight: '600' },
+    // 36pt + 4pt hitSlop each way = 44pt.
     field: {
+      minHeight: 36,
+      justifyContent: 'center',
       paddingHorizontal: 10,
       paddingVertical: 6,
       borderRadius: 8,
@@ -222,6 +228,16 @@ export const makeStyles = (t: ChromeColors) =>
     error: { fontSize: 13, color: t.destructive },
     check: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
     checkText: { flex: 1 },
+    // A checklist row tall enough for its 44pt box target.
+    checkRow: { minHeight: 44, paddingVertical: 0 },
+    // 44pt around the 18pt box; the negative margins keep the box where it was drawn.
+    boxTarget: {
+      width: 44,
+      height: 44,
+      marginHorizontal: -13,
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
     box: {
       width: 18,
       height: 18,

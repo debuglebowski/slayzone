@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { type HubFeed, type HubProblem, hubProblem } from './hub-board'
 import { type ChromeColors, useTheme } from './theme'
+import { confirmSignOut } from './ui-kit/confirm'
 
 /**
  * A banner for every hub with a problem (`HubBanner`), in sign-in order; none while all
@@ -31,7 +32,8 @@ export function HubBanners({
 /**
  * What is wrong with one hub, above the list: it can't be reached, it is still
  * connecting, or it refused the board. Always with Retry and Sign out — a hub that is
- * gone for good must not trap the user (the other hubs' rows stay in the list).
+ * gone for good must not trap the user (the other hubs' rows stay in the list). Sign out
+ * is set apart (red) and asks first: a thumb aiming at Retry must not wipe the hub.
  */
 export function HubBanner({
   problem,
@@ -58,11 +60,23 @@ export function HubBanner({
           </Text>
         ) : null}
       </View>
-      <Pressable onPress={onRetry} hitSlop={8} accessibilityRole="button">
+      <Pressable
+        onPress={onRetry}
+        hitSlop={8}
+        style={styles.button}
+        accessibilityRole="button"
+        accessibilityLabel={`Retry ${problem.hub.label}`}
+      >
         <Text style={styles.action}>Retry</Text>
       </Pressable>
-      <Pressable onPress={onSignOut} hitSlop={8} accessibilityRole="button">
-        <Text style={styles.action}>Sign out</Text>
+      <Pressable
+        onPress={() => confirmSignOut(problem.hub.label, onSignOut)}
+        hitSlop={8}
+        style={styles.button}
+        accessibilityRole="button"
+        accessibilityLabel={`Sign out of ${problem.hub.label}`}
+      >
+        <Text style={styles.signOut}>Sign out</Text>
       </Pressable>
     </View>
   )
@@ -87,7 +101,8 @@ const makeStyles = (t: ChromeColors) =>
       alignItems: 'center',
       gap: 16,
       paddingHorizontal: 16,
-      paddingVertical: 10,
+      // The 44pt buttons set the height; a little more around a two-line detail.
+      paddingVertical: 4,
       backgroundColor: t.muted,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: t.border
@@ -96,5 +111,7 @@ const makeStyles = (t: ChromeColors) =>
     text: { flex: 1 },
     title: { fontSize: 14, fontWeight: '600', color: t.foreground },
     detail: { fontSize: 12, color: t.mutedForeground, marginTop: 2 },
-    action: { fontSize: 14, fontWeight: '500', color: t.foreground }
+    button: { minHeight: 44, justifyContent: 'center' },
+    action: { fontSize: 14, fontWeight: '600', color: t.foreground },
+    signOut: { fontSize: 14, fontWeight: '400', color: t.destructive }
   })

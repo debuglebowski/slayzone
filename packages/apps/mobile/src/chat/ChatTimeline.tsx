@@ -4,21 +4,41 @@
  * bottom; scrolled up, the visible rows stay put). Below the last row, the agent's
  * current step while a turn runs (desktop's `deriveLoadingLabel`). What a rewind / fork /
  * switch left the conversation without stays folded behind its divider until opened.
+ *
+ * At (or near) the newest row, a change scrolls back to it — a new row, a growing answer
+ * stays in view (`autoscrollToTopThreshold`: the inverted list's top is its bottom);
+ * scrolled up, the rows in view stay put and a ↓ pill jumps back to the newest. What the
+ * user opened stays open when the list recycles a row; a long press on a message offers
+ * to copy or share it.
  */
 import { type ChatTimelineState, deriveLoadingLabel } from '@slayzone/terminal/reducer'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
   type ListRenderItem,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Pressable,
   StyleSheet,
   Text,
   View
 } from 'react-native'
 import type { ChromeColors } from '../theme'
+import { BottomSheet } from '../ui-kit/Chrome'
+import { codeBlocksOf, copyText, shareText } from './message-text'
 import { useThemedStyles } from './styles'
+import { TextViewer } from './TextViewer'
 import { TimelineRow } from './TimelineRow'
+import { ExpandedStore, type TimelineUi, TimelineUiContext } from './timeline-ui'
 import { subAgentItems, type TimelineRow as Row, timelineRows } from './timeline-rows'
+
+/** Within this of the newest row (pt), a change scrolls back to it. */
+const FOLLOW_THRESHOLD = 80
+/** Scrolled further than this from the newest row, the ↓ pill shows. */
+const PILL_OFFSET = 200
+
+const MVCP = { minIndexForVisible: 1, autoscrollToTopThreshold: FOLLOW_THRESHOLD }
 
 export function ChatTimeline({
   state,
@@ -33,6 +53,24 @@ export function ChatTimeline({
   emptyText: string
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
+  const list = useRef<FlatList<Row>>(null)
+  const [away, setAway] = useState(false)
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const far = e.nativeEvent.contentOffset.y > PILL_OFFSET
+    setAway((prev) => (prev === far ? prev : far))
+  }, [])
+  const jumpToLatest = useCallback(() => {
+    list.current?.scrollToOffset({ offset: 0, animated: true })
+    setAway(false)
+  }, [])
+  // The message a long press picked: its actions, then (Select text) its own screen.
+  const [actionsFor, setActionsFor] = useState<string | null>(null)
+  const [reading, setReading] = useState<string | null>(null)
+  const [expanded] = useState(() => new ExpandedStore())
+  const ui = useMemo<TimelineUi>(
+    () => ({ expanded, showMessageActions: setActionsFor }),
+    [expanded]
+  )
   const [openBranches, setOpenBranches] = useState<ReadonlySet<string>>(() => new Set())
   const toggleBranch = useCallback((id: string) => {
     setOpenBranches((prev) => {
@@ -58,6 +96,7 @@ export function ChatTimeline({
             ? subAgentItems({ timeline, childIndex }, item.item.toolUseId)
             : undefined
         }
+        rowKey={item.key}
         branchOpen={item.item.kind === 'conversation-branch' && openBranches.has(item.item.id)}
         onToggleBranch={toggleBranch}
       />
@@ -84,28 +123,86 @@ export function ChatTimeline({
       </View>
     )
   }
+  const code = actionsFor ? codeBlocksOf(actionsFor) : []
+  const act = (run: () => void) => () => {
+    setActionsFor(null)
+    run()
+  }
   return (
-    <FlatList
-      testID="chat-timeline"
-      inverted
-      data={rows}
-      keyExtractor={(row) => row.key}
-      renderItem={renderItem}
-      ListHeaderComponent={
-        label ? (
-          <View style={s.working} testID="chat-working">
-            <ActivityIndicator size="small" color={theme.mutedForeground} />
-            <Text style={s.workingText}>{label}</Text>
-          </View>
-        ) : undefined
-      }
-      contentContainerStyle={s.content}
-      keyboardDismissMode="interactive"
-      keyboardShouldPersistTaps="handled"
-      maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-      initialNumToRender={15}
-      windowSize={11}
-    />
+    <TimelineUiContext.Provider value={ui}>
+      <View style={s.flex}>
+        <FlatList
+          ref={list}
+          testID="chat-timeline"
+          inverted
+          data={rows}
+          keyExtractor={(row) => row.key}
+          renderItem={renderItem}
+          ListHeaderComponent={
+            label ? (
+              <View style={s.working} testID="chat-working">
+                <ActivityIndicator size="small" color={theme.mutedForeground} />
+                <Text style={s.workingText}>{label}</Text>
+              </View>
+            ) : undefined
+          }
+          contentContainerStyle={s.content}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          maintainVisibleContentPosition={MVCP}
+          onScroll={onScroll}
+          scrollEventThrottle={64}
+          initialNumToRender={15}
+          windowSize={11}
+        />
+        {away ? (
+          <Pressable
+            onPress={jumpToLatest}
+            style={s.pill}
+            accessibilityRole="button"
+            accessibilityLabel="Jump to latest"
+            hitSlop={8}
+            testID="jump-to-latest"
+          >
+            <Text style={s.pillText}>↓</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <BottomSheet
+        visible={actionsFor !== null}
+        onClose={() => setActionsFor(null)}
+        testID="message-actions"
+      >
+        <SheetAction label="Copy text" onPress={act(() => copyText(actionsFor ?? ''))} s={s} />
+        {code.length > 0 ? (
+          <SheetAction label="Copy code" onPress={act(() => copyText(code.join('\n\n')))} s={s} />
+        ) : null}
+        <SheetAction label="Share…" onPress={act(() => shareText(actionsFor ?? ''))} s={s} />
+        <SheetAction label="Select text" onPress={act(() => setReading(actionsFor))} s={s} />
+      </BottomSheet>
+      <TextViewer
+        title="Message"
+        text={reading ?? ''}
+        visible={reading !== null}
+        onClose={() => setReading(null)}
+      />
+    </TimelineUiContext.Provider>
+  )
+}
+
+function SheetAction({
+  label,
+  onPress,
+  s
+}: {
+  label: string
+  onPress: () => void
+  s: ReturnType<typeof makeStyles>
+}) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" style={s.sheetRow}>
+      <Text style={s.sheetText}>{label}</Text>
+    </Pressable>
   )
 }
 
@@ -121,6 +218,29 @@ function makeStyles(t: ChromeColors) {
       marginHorizontal: 16,
       marginVertical: 8
     },
-    workingText: { color: t.mutedForeground, fontSize: 13 }
+    workingText: { color: t.mutedForeground, fontSize: 13 },
+    flex: { flex: 1 },
+    pill: {
+      position: 'absolute',
+      right: 14,
+      bottom: 10,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.surface3,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.border
+    },
+    pillText: { color: t.foreground, fontSize: 18, fontWeight: '700' },
+    sheetRow: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.border
+    },
+    sheetText: { fontSize: 16, color: t.foreground }
   })
 }

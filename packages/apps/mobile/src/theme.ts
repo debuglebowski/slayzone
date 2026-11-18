@@ -9,8 +9,8 @@ import {
   type Theme,
   unifiedThemes
 } from '@slayzone/theme-tokens'
-import { createContext, createElement, type ReactNode, useContext } from 'react'
-import { useColorScheme } from 'react-native'
+import { createContext, createElement, type ReactNode, useContext, useEffect } from 'react'
+import { Appearance, useColorScheme } from 'react-native'
 
 /**
  * The app's colours: desktop's theme presets (`@slayzone/theme-tokens`), chosen the
@@ -69,10 +69,25 @@ export function useThemeVariant(): Theme {
 }
 
 /**
+ * The scheme the system UI (keyboard, alerts, action sheets, pickers) must take for the
+ * theme `settings` paint: the painted variant when it does not depend on the device —
+ * an explicit light or dark choice, or a preset with no light variant — else null (the
+ * theme follows the device, so the system UI already matches it). Never reads the
+ * device's scheme, so setting it cannot feed back into the choice. Pure.
+ */
+export function systemSchemeOverride(settings: HubThemeSettings | null): Theme | null {
+  const inLight = resolveNativeTheme(settings, 'light').variant
+  const inDark = resolveNativeTheme(settings, 'dark').variant
+  return inLight === inDark ? inDark : null
+}
+
+/**
  * Paints its subtree in theme settings the app already holds (null = the defaults),
  * without reading a hub: the first paint, before the app knows its sessions, uses the
  * ones read last (`hubThemeCache.loadLast()`); `HubThemeProvider` (`hub-theme.tsx`)
- * passes the primary hub's.
+ * passes the primary hub's. The system UI takes the painted scheme
+ * (`systemSchemeOverride`): a dark theme on a light phone gets a dark keyboard and dark
+ * alerts. Given back to the device when the theme follows it, or this unmounts.
  */
 export function KeptThemeProvider({
   settings,
@@ -81,6 +96,11 @@ export function KeptThemeProvider({
   settings: HubThemeSettings | null
   children: ReactNode
 }) {
+  const scheme = systemSchemeOverride(settings)
+  useEffect(() => {
+    Appearance.setColorScheme(scheme ?? 'unspecified')
+    return () => Appearance.setColorScheme('unspecified')
+  }, [scheme])
   return createElement(HubThemeContext.Provider, { value: settings }, children)
 }
 
@@ -132,11 +152,26 @@ export const ATTENTION_BADGE = { background: '#f59e0b', text: '#000000' } as con
 export const AVATAR_TEXT = '#ffffff'
 
 /** A new project's colour choices (desktop's `CreateProjectDialog`); it stores the value. */
-export const PROJECT_COLORS: readonly string[] = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899'
+const PROJECT_PALETTE: readonly { color: string; name: string }[] = [
+  { color: '#3b82f6', name: 'Blue' },
+  { color: '#10b981', name: 'Green' },
+  { color: '#f59e0b', name: 'Amber' },
+  { color: '#ef4444', name: 'Red' },
+  { color: '#8b5cf6', name: 'Violet' },
+  { color: '#ec4899', name: 'Pink' }
 ]
+export const PROJECT_COLORS: readonly string[] = PROJECT_PALETTE.map((p) => p.color)
+/** A project colour's name, read aloud by VoiceOver. */
+export const PROJECT_COLOR_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
+  PROJECT_PALETTE.map((p) => [p.color, p.name])
+)
+
+/**
+ * A sheet's backdrop (iOS's dimming view): black over light and dark themes alike — a
+ * veil of the theme's own background would whiten the screen in a light theme. Stronger
+ * over a dark theme, where a light dim does not read.
+ */
+export const SCRIM: Readonly<Record<Theme, string>> = {
+  light: 'rgba(0, 0, 0, 0.3)',
+  dark: 'rgba(0, 0, 0, 0.55)'
+}

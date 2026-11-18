@@ -13,7 +13,7 @@ import {
 import { projectWaitingCounts } from '../board/card-model'
 import { rowKey } from '../hub-board'
 import { useHubFeeds } from '../hub-connections'
-import { type ChromeColors, PROJECT_COLORS, useTheme } from '../theme'
+import { type ChromeColors, PROJECT_COLOR_NAMES, PROJECT_COLORS, useTheme } from '../theme'
 import { useTRPCClient } from '../trpc'
 import { BottomSheet, Caption, CountBadge, Pill, ProjectAvatar } from '../ui-kit/Chrome'
 import { type ProjectRef, type ProjectRow, projectTasks } from './hub-projects'
@@ -104,6 +104,7 @@ export function ProjectSwitcher({
                     </Pressable>
                     <Pressable
                       hitSlop={8}
+                      style={styles.moreButton}
                       accessibilityRole="button"
                       accessibilityLabel={`${row.project.name} settings`}
                       testID={`project-settings-${row.project.id}`}
@@ -182,12 +183,14 @@ function NewProject({
         returnKeyType="done"
       />
       <View style={styles.colors}>
-        {PROJECT_COLORS.map((c) => (
+        {PROJECT_COLORS.map((c, i) => (
           <Pressable
             key={c}
             onPress={() => setColor(c)}
             accessibilityRole="button"
+            accessibilityLabel={PROJECT_COLOR_NAMES[c] ?? `Colour ${i + 1}`}
             accessibilityState={{ selected: c === color }}
+            hitSlop={7}
             style={[styles.swatch, { backgroundColor: c }, c === color && styles.swatchOn]}
           />
         ))}
@@ -265,6 +268,7 @@ const makeStyles = (t: ChromeColors) =>
     sub: { fontSize: 12, color: t.mutedForeground },
     check: { fontSize: 15, color: t.foreground, fontWeight: '700' },
     more: { fontSize: 20, color: t.mutedForeground, paddingHorizontal: 6 },
+    moreButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
     newRow: { paddingVertical: 14 },
     newText: { fontSize: 15, fontWeight: '600', color: t.primary },
     form: { gap: 14, paddingBottom: 8 },

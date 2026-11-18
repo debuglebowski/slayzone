@@ -1,7 +1,8 @@
 /**
  * A markdown artifact as a page, rendered the way desktop's editor shows it: GitHub
- * flavoured (tables, task lists, strikethrough, autolinks), raw HTML kept but `<script>`
- * and `<style>` dropped (desktop: DOMPurify, `FORBID_TAGS: ['script','style']`), artifact
+ * flavoured (tables, task lists, strikethrough, autolinks), raw HTML kept through an
+ * allowlist (`sanitize-html.ts`; desktop: DOMPurify without `<script>`/`<style>`) and
+ * links/images only to safe URLs, artifact
  * links (`[Title](artifact:<id>)`) as chips that open the artifact, code blocks as plain
  * monospace (desktop highlights none), ```` ```mermaid ```` fences drawn as diagrams.
  * Task-list checkboxes show their state but are not toggles: the phone views, it does
@@ -20,13 +21,7 @@ import {
   type PageTheme,
   pageShell
 } from './page-style'
-
-const SCRIPT_OR_STYLE_ELEMENT = /<(script|style)\b[\s\S]*?<\/\1\s*>/gi
-const SCRIPT_OR_STYLE_TAG = /<\/?(?:script|style)\b[^>]*>/gi
-
-/** Raw HTML minus `<script>`/`<style>` (whole elements; a stray tag alone). */
-const withoutScriptsAndStyles = (html: string): string =>
-  html.replace(SCRIPT_OR_STYLE_ELEMENT, '').replace(SCRIPT_OR_STYLE_TAG, '')
+import { decodeEntities, isSafeUrl, sanitizeHtml } from './sanitize-html'
 
 const isMermaidFence = (token: Tokens.Code): boolean =>
   token.lang?.trim().split(/\s+/, 1)[0] === MERMAID_FENCE_LANGUAGE
@@ -36,16 +31,23 @@ function parser(drawDiagrams: boolean): Marked {
     gfm: true,
     renderer: {
       link(token) {
-        if (!token.href.startsWith('artifact:')) return false
         const text = this.parser.parseInline(token.tokens)
+        // A link to anything but the web, mail or an artifact shows as its text.
+        if (!isSafeUrl(decodeEntities(token.href), 'link')) return text
+        if (!token.href.startsWith('artifact:')) return false
         return `<a class="artifact-link" href="${escapeHtml(token.href)}">${text}</a>`
+      },
+      image(token) {
+        return isSafeUrl(decodeEntities(token.href), 'media', 'img')
+          ? false
+          : escapeHtml(token.text)
       },
       code(token) {
         if (!drawDiagrams || !isMermaidFence(token)) return false
         return mermaidBlock(token.text, { fill: false })
       },
       html(token) {
-        return withoutScriptsAndStyles(token.text)
+        return sanitizeHtml(token.text)
       }
     }
   })

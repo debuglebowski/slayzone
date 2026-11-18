@@ -22,12 +22,17 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   FlatList,
+  type HostInstance,
+  findNodeHandle,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View
 } from 'react-native'
+import { BottomSheet } from '../ui-kit/Chrome'
 import { type ChromeColors, useTheme, useThemeVariant } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { mediaPlayer } from './media-player'
@@ -56,8 +61,8 @@ import {
   extensionBadge,
   isFileKind,
   isMediaKind,
+  isPlayableOnDevice,
   isShareOnlyKind,
-  looksBinary,
   type ViewerKind,
   viewerKindOf
 } from './viewer-kind'
@@ -72,22 +77,27 @@ export interface ArtifactViewerProps {
   onSelectVersion: (version: number | null) => void
   /** An artifact link was tapped. */
   onOpenArtifact: (artifactId: string) => void
-  /** Phone: back to the list. */
+  /** Phone: back to where the artifact was opened from. */
   onBack?: () => void
+  /** The back button's label: the screen it goes back to. */
+  backLabel?: string
 }
 
 export function ArtifactViewer(props: ArtifactViewerProps) {
   const styles = makeStyles(useTheme())
-  const { artifact, error, contentTick } = useArtifactRow(props.taskId, props.artifactId)
+  const { artifact, error, contentTick, retry } = useArtifactRow(props.taskId, props.artifactId)
 
   if (artifact) return <LoadedArtifact {...props} artifact={artifact} contentTick={contentTick} />
   return (
     <View style={styles.screen} testID="artifact-viewer">
-      <ScreenHeader title="" onBack={props.onBack} backLabel="Artifacts" />
+      <ScreenHeader title="" onBack={props.onBack} backLabel={props.backLabel} />
       {artifact === null ? (
         <Text style={styles.note}>This artifact no longer exists.</Text>
       ) : error ? (
-        <Text style={styles.note}>{error}</Text>
+        <Center>
+          <Text style={styles.note}>{error}</Text>
+          <HeaderButton label="Retry" onPress={retry} />
+        </Center>
       ) : (
         <Center>
           <ActivityIndicator testID="artifact-loading" />
@@ -101,6 +111,7 @@ type Body =
   | { kind: 'page'; page: DocumentPage }
   | { kind: 'image'; uri: string }
   | { kind: 'binary' }
+  | { kind: 'too-large'; size: number }
   | { kind: 'media'; uri: string }
   | { kind: 'unsupported'; message: string }
   | { kind: 'loading' }
@@ -113,7 +124,8 @@ function LoadedArtifact({
   version,
   onSelectVersion,
   onOpenArtifact,
-  onBack
+  onBack,
+  backLabel
 }: ArtifactViewerProps & { artifact: TaskArtifact; contentTick: number }) {
   const theme = useTheme()
   const variant = useThemeVariant()
@@ -126,10 +138,16 @@ function LoadedArtifact({
   const fileKind = isFileKind(kind)
   const mediaKind = isMediaKind(kind)
   const player = mediaKind ? mediaPlayer() : null
+  // A container iOS can't play (WebM, Ogg) never reaches the player.
+  const playable = !mediaKind || isPlayableOnDevice(artifact.title)
   // Played from the downloaded file when this build has the native player.
-  const downloads = fileKind || player !== null
-  const shareOnly = isShareOnlyKind(kind) || (mediaKind && player === null)
+  const downloads = fileKind || (player !== null && playable)
+  const shareOnly = isShareOnlyKind(kind) || (mediaKind && (player === null || !playable))
+  // The file the player reported it can't play.
+  const [unplayableUri, setUnplayableUri] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  // The button whose action sheet points at it on an iPad.
+  const exportButton = useRef<HostInstance>(null)
   const [view, setView] = useState<'preview' | 'source'>(
     artifact.view_mode === 'raw' ? 'source' : 'preview'
   )
@@ -137,6 +155,8 @@ function LoadedArtifact({
     busy: false,
     error: null
   })
+  // Why saving the colour scheme failed (its own line: not Share's).
+  const [themeError, setThemeError] = useState<string | null>(null)
   const [exportState, setExportState] = useState<{
     busy: boolean
     error: string | null
@@ -158,13 +178,14 @@ function LoadedArtifact({
 
   const text = useArtifactText(artifact.id, selected, !downloads && !shareOnly && versionReady)
   const file = useArtifactFile(target, artifact, selected, contentTick, downloads && versionReady)
-  const isText = text.data !== undefined && !looksBinary(text.data)
+  const content = text.data?.kind === 'text' ? text.data.content : undefined
+  const isText = content !== undefined
   const needsMermaid = useMemo(
     () =>
-      isText &&
-      ((kind === 'markdown' && markdownNeedsMermaid(text.data ?? '')) ||
+      content !== undefined &&
+      ((kind === 'markdown' && markdownNeedsMermaid(content)) ||
         (kind === 'mermaid' && view === 'preview')),
-    [isText, kind, view, text.data]
+    [content, kind, view]
   )
   const mermaid = useMermaidScript(needsMermaid)
   const pageTheme = useMemo<PageTheme>(() => ({ colors: theme, variant }), [theme, variant])
@@ -175,10 +196,10 @@ function LoadedArtifact({
   const ready = isText && !(needsMermaid && mermaid.data === undefined && mermaid.error === null)
   const page = useMemo(
     () =>
-      ready && text.data !== undefined
-        ? textPage(kind, text.data, view, scheme, pageTheme, mermaid.data ?? null)
+      ready && content !== undefined
+        ? textPage(kind, content, view, scheme, pageTheme, mermaid.data ?? null)
         : null,
-    [ready, kind, text.data, view, scheme, pageTheme, mermaid.data]
+    [ready, kind, content, view, scheme, pageTheme, mermaid.data]
   )
 
   let body: Body
@@ -195,9 +216,11 @@ function LoadedArtifact({
   } else if (shareOnly) {
     body = {
       kind: 'unsupported',
-      message: mediaKind
-        ? `This ${kind} can't be played in this build of the app. Share it to open it in another app.`
-        : `${kind === 'font' ? 'Fonts' : 'Archives'} can't be shown in the app yet. Share it to open it in another app.`
+      message: !mediaKind
+        ? `${kind === 'font' ? 'Fonts' : 'Archives'} can't be shown in the app yet. Share it to open it in another app.`
+        : player === null
+          ? `This ${kind} can't be played in this build of the app. Share it to open it in another app.`
+          : unplayableMessage()
     }
   } else if (downloads) {
     body = file.error
@@ -205,14 +228,18 @@ function LoadedArtifact({
       : file.data === undefined
         ? { kind: 'loading' }
         : mediaKind
-          ? { kind: 'media', uri: file.data }
+          ? file.data === unplayableUri
+            ? { kind: 'unsupported', message: unplayableMessage() }
+            : { kind: 'media', uri: file.data }
           : kind === 'image'
             ? { kind: 'image', uri: file.data }
             : { kind: 'page', page: { kind: 'file', fileUri: file.data } }
   } else if (text.error) {
     body = { kind: 'error', message: text.error, retry: text.retry }
-  } else if (text.data !== undefined && !isText) {
+  } else if (text.data?.kind === 'binary') {
     body = { kind: 'binary' }
+  } else if (text.data?.kind === 'too-large') {
+    body = { kind: 'too-large', size: text.data.size }
   } else {
     // Diagrams wait for the mermaid build; if it can't be read they show as code.
     body = page ? { kind: 'page', page } : { kind: 'loading' }
@@ -242,14 +269,16 @@ function LoadedArtifact({
   // What is on screen: the working copy's text or the version's. Nothing while the
   // version picked is loading or missing, or the text failed to load: the screen shows
   // a spinner or an error then, and the cache may still hold another copy's text.
-  const exportContent = versionReady && !text.error && isText ? text.data : undefined
+  const exportContent = versionReady && !text.error ? content : undefined
   const chooseExport = () => {
     if (exportContent === undefined) return
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: 'Export',
         options: [...exportFormats.map((f) => f.label), 'Cancel'],
-        cancelButtonIndex: exportFormats.length
+        cancelButtonIndex: exportFormats.length,
+        // iPad: a popover from the button.
+        anchor: anchorOf(exportButton.current)
       },
       (index) => {
         const choice = exportFormats[index]
@@ -291,14 +320,13 @@ function LoadedArtifact({
   const htmlTheme = artifact.html_theme_override ?? 'system'
   const cycleHtmlTheme = () => {
     const next = nextHtmlTheme(htmlTheme)
+    setThemeError(null)
     hubClient.artifacts.update
       .mutate({ id: artifact.id, htmlThemeOverride: next === 'system' ? null : next })
       .then(() =>
         queryClient.invalidateQueries(trpc.artifacts.get.queryFilter({ id: artifact.id }))
       )
-      .catch((err: unknown) =>
-        setShareState({ busy: false, error: err instanceof Error ? err.message : String(err) })
-      )
+      .catch((err: unknown) => setThemeError(err instanceof Error ? err.message : String(err)))
   }
 
   const badge = extensionBadge(artifact.title)
@@ -325,11 +353,7 @@ function LoadedArtifact({
           onPress={cycleHtmlTheme}
         />
       ) : null}
-      <HeaderButton
-        label="History"
-        active={showHistory}
-        onPress={() => setShowHistory((s) => !s)}
-      />
+      <HeaderButton label="History" active={showHistory} onPress={() => setShowHistory(true)} />
       <HeaderButton
         label={shareState.busy ? 'Sharing…' : 'Share'}
         // The version picked is loading or missing: there is nothing of it to share
@@ -339,6 +363,7 @@ function LoadedArtifact({
       />
       {exportFormats.length > 0 ? (
         <HeaderButton
+          ref={exportButton}
           label={exportState.busy ? 'Exporting…' : 'Export'}
           disabled={exportState.busy || exportContent === undefined}
           onPress={chooseExport}
@@ -355,7 +380,7 @@ function LoadedArtifact({
           .filter(Boolean)
           .join(' · ')}
         onBack={onBack}
-        backLabel="Artifacts"
+        backLabel={backLabel}
       />
       {/* Below the title, so a phone's narrow header keeps the title readable. */}
       <View style={styles.toolbar}>{actions}</View>
@@ -371,28 +396,49 @@ function LoadedArtifact({
         </View>
       ) : null}
       {shareState.error ? <Text style={styles.error}>{shareState.error}</Text> : null}
+      {themeError ? <Text style={styles.error}>{themeError}</Text> : null}
       {exportState.error ? <Text style={styles.error}>{exportState.error}</Text> : null}
       {exportState.notice ? <Text style={styles.notice}>{exportState.notice}</Text> : null}
       <View style={styles.body}>
-        <ArtifactBody body={body} onOpenArtifact={onOpenArtifact} onShare={share} kind={kind} />
-        {showHistory ? (
-          <VersionsList
-            artifact={artifact}
-            versions={versions}
-            selected={version}
-            onSelect={(n) => {
-              setShowHistory(false)
-              onSelectVersion(n)
-            }}
-          />
-        ) : null}
+        <ArtifactBody
+          body={body}
+          onOpenArtifact={onOpenArtifact}
+          onShare={share}
+          onUnplayable={setUnplayableUri}
+          kind={kind}
+        />
       </View>
+      <BottomSheet
+        visible={showHistory}
+        onClose={() => setShowHistory(false)}
+        testID="artifact-history-sheet"
+      >
+        <VersionsList
+          artifact={artifact}
+          versions={versions}
+          selected={version}
+          onClose={() => setShowHistory(false)}
+          onSelect={(n) => {
+            setShowHistory(false)
+            onSelectVersion(n)
+          }}
+        />
+      </BottomSheet>
       {exportRenderer.view}
     </View>
   )
 }
 
 const HTML_THEME_LABEL = { system: 'System', dark: 'Dark', light: 'Light' } as const
+
+const unplayableMessage = (): string =>
+  `Can't play this format on ${Platform.OS === 'ios' && Platform.isPad ? 'iPad' : 'iPhone'}. Share it to open it in another app.`
+
+/** A view to point an iPad's action sheet (a popover) at; none on a phone. */
+export function anchorOf(view: HostInstance | null): number | undefined {
+  if (!view) return undefined
+  return findNodeHandle(view) ?? undefined
+}
 
 /** The page for a text kind. */
 function textPage(
@@ -408,8 +454,11 @@ function textPage(
       const page = markdownPage(text, { theme, mermaidScript })
       return { kind: 'document', html: page.html, scripts: page.scripts }
     }
-    case 'html':
-      return { kind: 'report', html: htmlReportPage(text, { forcedTheme: scheme }) }
+    case 'html': {
+      // No scheme of its own: the app's (desktop's frame follows the app's theme too).
+      const report = htmlReportPage(text, { forcedTheme: scheme ?? theme.variant })
+      return { kind: 'report', html: report.html, token: report.token }
+    }
     case 'svg':
       return {
         kind: 'document',
@@ -429,12 +478,15 @@ function ArtifactBody({
   body,
   kind,
   onOpenArtifact,
-  onShare
+  onShare,
+  onUnplayable
 }: {
   body: Body
   kind: ViewerKind
   onOpenArtifact: (id: string) => void
   onShare: () => void
+  /** The player can't play the file at `uri`. */
+  onUnplayable: (uri: string) => void
 }) {
   const styles = makeStyles(useTheme())
   switch (body.kind) {
@@ -460,6 +512,16 @@ function ArtifactBody({
           <HeaderButton label="Share" onPress={onShare} />
         </Center>
       )
+    case 'too-large':
+      return (
+        <Center>
+          <Text style={styles.note} testID="artifact-too-large">
+            This file is too large to preview ({formatBytes(body.size)}). Share it to open it in
+            another app.
+          </Text>
+          <HeaderButton label="Share" onPress={onShare} />
+        </Center>
+      )
     case 'unsupported':
       return (
         <Center>
@@ -471,7 +533,10 @@ function ArtifactBody({
       )
     case 'media': {
       const Player = mediaPlayer()?.ArtifactMediaPlayer
-      return Player ? <Player uri={body.uri} testID="artifact-media" /> : null
+      const uri = body.uri
+      return Player ? (
+        <Player uri={uri} testID="artifact-media" onUnplayable={() => onUnplayable(uri)} />
+      ) : null
     }
     case 'image':
       return <ZoomableImage uri={body.uri} testID="artifact-image" />
@@ -486,21 +551,32 @@ function ArtifactBody({
   }
 }
 
+const AUTHOR_LABEL = { user: 'Person', agent: 'Agent' } as const
+
 function VersionsList({
   artifact,
   versions,
   selected,
-  onSelect
+  onSelect,
+  onClose
 }: {
   artifact: TaskArtifact
   versions: { data: ArtifactVersion[] | undefined; error: string | null; retry: () => void }
   selected: number | null
   onSelect: (version: number | null) => void
+  onClose: () => void
 }) {
   const styles = makeStyles(useTheme())
+  const { height } = useWindowDimensions()
   let content: ReactNode
-  if (versions.error) content = <Text style={styles.note}>{versions.error}</Text>
-  else if (!versions.data) content = <ActivityIndicator />
+  if (versions.error) {
+    content = (
+      <View style={styles.historyError}>
+        <Text style={styles.note}>{versions.error}</Text>
+        <HeaderButton label="Retry" onPress={versions.retry} />
+      </View>
+    )
+  } else if (!versions.data) content = <ActivityIndicator style={styles.historyLoading} />
   else if (versions.data.length === 0) content = <Text style={styles.note}>No versions yet.</Text>
   else {
     content = (
@@ -509,26 +585,29 @@ function VersionsList({
         keyExtractor={(v) => v.id}
         renderItem={({ item }) => {
           const current = item.id === artifact.current_version_id
+          const shown = current ? selected === null : selected === item.version_num
           return (
             <Pressable
               testID={`artifact-version-${item.version_num}`}
               accessibilityRole="button"
+              accessibilityState={{ selected: shown }}
               onPress={() => onSelect(current ? null : item.version_num)}
-              style={[
-                styles.version,
-                selected === item.version_num ? styles.versionSelected : null
-              ]}
+              style={[styles.version, shown ? styles.versionSelected : null]}
             >
               <View style={styles.versionLine}>
-                <Text style={styles.versionNum}>v{item.version_num}</Text>
-                <Text style={styles.versionHash}>{item.content_hash.slice(0, 7)}</Text>
+                <Text style={styles.versionNum}>Version {item.version_num}</Text>
+                {item.name ? (
+                  <Text style={styles.versionName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                ) : null}
                 {current ? <Text style={styles.chip}>current</Text> : null}
               </View>
               <Text style={styles.versionMeta} numberOfLines={1}>
                 {[
-                  item.name,
-                  item.author_type,
-                  formatRelativeDate(dbTimestampToIso(item.created_at))
+                  item.author_type ? AUTHOR_LABEL[item.author_type] : null,
+                  formatRelativeDate(dbTimestampToIso(item.created_at)),
+                  formatBytes(item.size)
                 ]
                   .filter(Boolean)
                   .join(' · ')}
@@ -540,11 +619,30 @@ function VersionsList({
     )
   }
   return (
-    <View style={styles.history} testID="artifact-history">
-      <Text style={styles.historyTitle}>History</Text>
+    <View style={[styles.history, { maxHeight: height * 0.7 }]} testID="artifact-history">
+      <View style={styles.historyHeader}>
+        <Text style={styles.historyTitle} accessibilityRole="header">
+          History
+        </Text>
+        <HeaderButton label="Done" onPress={onClose} />
+      </View>
       {content}
     </View>
   )
+}
+
+/** A byte count as people read it: `12 KB`, `68.4 MB`. */
+export function formatBytes(bytes: number): string {
+  const units = ['bytes', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return unit === 0
+    ? `${value} bytes`
+    : `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
 }
 
 function Center({ children }: { children: ReactNode }) {
@@ -579,18 +677,17 @@ const makeStyles = (t: ChromeColors) =>
     },
     bannerText: { color: t.foreground, fontSize: 13 },
     bannerAction: { color: t.foreground, fontSize: 13, fontWeight: '600' },
-    history: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      width: '100%',
-      maxWidth: 360,
-      backgroundColor: t.popover,
-      borderLeftWidth: StyleSheet.hairlineWidth,
-      borderLeftColor: t.border
+    history: { minHeight: 160 },
+    historyHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingBottom: 8
     },
-    historyTitle: { fontSize: 15, fontWeight: '600', color: t.foreground, padding: 16 },
+    historyTitle: { fontSize: 15, fontWeight: '600', color: t.foreground },
+    historyLoading: { padding: 24 },
+    historyError: { alignItems: 'center', gap: 12, padding: 16 },
     version: {
       paddingHorizontal: 16,
       paddingVertical: 10,
@@ -600,7 +697,7 @@ const makeStyles = (t: ChromeColors) =>
     versionSelected: { backgroundColor: t.muted },
     versionLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     versionNum: { fontSize: 14, fontWeight: '600', color: t.foreground },
-    versionHash: { fontSize: 12, color: t.mutedForeground, fontFamily: 'Menlo' },
+    versionName: { flexShrink: 1, fontSize: 14, color: t.foreground },
     versionMeta: { fontSize: 12, color: t.mutedForeground, marginTop: 2 },
     chip: {
       fontSize: 11,

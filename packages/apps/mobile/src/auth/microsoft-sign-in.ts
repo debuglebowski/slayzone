@@ -26,6 +26,7 @@ import {
 import * as Crypto from 'expo-crypto'
 import * as WebBrowser from 'expo-web-browser'
 import {
+  cantReachHub,
   hubEntryOf,
   type HubSession,
   type HubSessionStore,
@@ -71,20 +72,17 @@ const appDeps: MicrosoftSignInDeps = {
   sessions: hubSessions
 }
 
-const unreachable = (error: string): SignInResult => ({
-  ok: false,
-  error: `Could not reach the hub: ${error}`
-})
-
-/** Sign in to the hub at `address` (`host[:port]`) with Microsoft; keeps the session. */
+/**
+ * Sign in to the hub at `typed` (its address as typed, `normalizeHubAddress`) with
+ * Microsoft; keeps the session. Closed by the person: `cancelled`, nothing to show.
+ */
 export async function signInWithMicrosoft(
-  address: string,
+  typed: string,
   deps: MicrosoftSignInDeps = appDeps
 ): Promise<SignInResult> {
-  const probe = await probeSignInOffer(address, deps.transport)
-  if (!probe.ok) {
-    return probe.reason === 'address' ? { ok: false, error: probe.error } : unreachable(probe.error)
-  }
+  const probe = await probeSignInOffer(typed, deps.transport)
+  if (!probe.ok) return { ok: false, error: probe.error }
+  const { address } = probe
   if (!probe.offer.microsoft) return { ok: false, error: 'This hub does not offer single sign-on' }
 
   const pending = await startAppSignIn(probe.baseUrl, deps.crypto)
@@ -98,13 +96,9 @@ export async function signInWithMicrosoft(
     }
   }
   if (ended.type !== 'success' || ended.url === undefined) {
-    return {
-      ok: false,
-      error:
-        ended.type === 'locked'
-          ? 'Another sign-in window is already open. Finish or close it first.'
-          : 'Sign-in was cancelled.'
-    }
+    return ended.type === 'locked'
+      ? { ok: false, error: 'Another sign-in window is already open. Finish or close it first.' }
+      : { ok: false, error: 'Sign-in was cancelled.', cancelled: true }
   }
   const callback = readAppSignInCallback(ended.url, pending)
   if (!callback.ok) {
@@ -126,7 +120,7 @@ export async function signInWithMicrosoft(
     switch (exchanged.reason) {
       case 'unreachable':
       case 'timeout':
-        return unreachable(exchanged.error)
+        return { ok: false, error: cantReachHub(address, exchanged.reason) }
       case 'expired':
         return { ok: false, error: 'The sign-in took too long to finish. Try again.' }
       default:
@@ -139,7 +133,7 @@ export async function signInWithMicrosoft(
         }
     }
   }
-  const session: HubSession = { entry: hubEntryOf(address.trim()), token: exchanged.token }
+  const session: HubSession = { entry: hubEntryOf(address), token: exchanged.token }
   await deps.sessions.save(session)
   return { ok: true, session }
 }

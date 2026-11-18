@@ -9,8 +9,11 @@
  *   clears it when work resumes, and a client clears it when the user opens the task.
  *
  * The hub reports a finished turn and an agent blocked on a question the same way
- * (both `idle`, both unread), so they are one group, "Waiting for you". Labels are
- * desktop's words (`TERMINAL_STATE_LABELS`, pinned equal to desktop's dots).
+ * (both `idle`, both unread — no session state or hub fact tells them apart), so they
+ * are one group, "Ready for review": the agent's turn ended and the user has not looked
+ * at it yet — it may have finished, or asked something. Not "waiting": the agent is
+ * idle, which the task page shows as such. Labels are desktop's words
+ * (`TERMINAL_STATE_LABELS`, pinned equal to desktop's dots).
  */
 import { TERMINAL_STATE_LABELS, type TerminalState } from '@slayzone/terminal-contracts'
 
@@ -26,7 +29,7 @@ export const AGENT_GROUP_ORDER: readonly AgentGroup[] = [
 ]
 
 export const AGENT_GROUP_TITLES: Readonly<Record<AgentGroup, string>> = {
-  waiting: 'Waiting for you',
+  waiting: 'Ready for review',
   error: 'Error',
   running: 'Running',
   hibernated: 'Paused',

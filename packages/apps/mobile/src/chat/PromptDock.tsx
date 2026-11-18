@@ -11,7 +11,11 @@
  *   - ExitPlanMode: approve (with a mode), or tell Claude what to change.
  *
  * One at a time ("1 of N"). An answer is sent once: the buttons are disabled while it
- * is on its way, and a refusal (no longer pending) is said, not retried.
+ * is on its way, and a refusal (no longer pending) is said, not retried. The agent is
+ * named as its provider is ("Codex is waiting…"), Claude by default.
+ *
+ * The dock gives way to the composer: in a screen too short for both (the keyboard is
+ * up), it shrinks and its body scrolls, so the input is never pushed under the keyboard.
  */
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from '@slayzone/terminal/chat-prompts'
@@ -26,13 +30,16 @@ import {
   questionAnswerDecision,
   REJECT_MESSAGE
 } from '@slayzone/task-terminals/prompt-options'
-import { type ReactNode, useState } from 'react'
+import { createContext, type ReactNode, useContext, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { MONO, useThemedStyles } from './styles'
 import { questionsOf } from './ToolCard'
 
 export type PromptAnswer = (optionId: string, decision: PermissionDecision) => Promise<boolean>
+
+/** The agent as a sentence names it (`chatProviderForMode(mode).agent`). */
+const AgentContext = createContext('Claude')
 
 export function PromptDock({
   prompts,
@@ -42,7 +49,8 @@ export function PromptDock({
   permissionMode,
   cwd,
   timeline,
-  sendMessage
+  sendMessage,
+  agent = 'Claude'
 }: {
   prompts: readonly ChatPrompt[]
   submitting: ReadonlySet<string>
@@ -54,6 +62,8 @@ export function PromptDock({
   timeline: Readonly<TimelineRows>
   /** Sends feedback after "approve with this feedback". */
   sendMessage: (text: string) => void
+  /** The agent as a sentence names it: "Claude", "Codex". */
+  agent?: string
 }) {
   const { s } = useThemedStyles(makeStyles)
   const pending = prompts.filter((p) => p.status === 'pending')
@@ -94,19 +104,21 @@ export function PromptDock({
     )
   }
   return (
-    <View
-      style={s.dock}
-      testID="prompt-dock"
-      accessibilityLabel="Claude is waiting for your answer"
-    >
-      <View style={s.dockHeader}>
-        <Text style={s.dockTitle}>Claude is waiting for your answer</Text>
-        {pending.length > 1 && <Text style={s.dockCount}>1 of {pending.length}</Text>}
+    <AgentContext.Provider value={agent}>
+      <View
+        style={s.dock}
+        testID="prompt-dock"
+        accessibilityLabel={`${agent} is waiting for your answer`}
+      >
+        <View style={s.dockHeader}>
+          <Text style={s.dockTitle}>{`${agent} is waiting for your answer`}</Text>
+          {pending.length > 1 && <Text style={s.dockCount}>1 of {pending.length}</Text>}
+        </View>
+        <ScrollView style={s.dockBody} keyboardShouldPersistTaps="handled">
+          {body}
+        </ScrollView>
       </View>
-      <ScrollView style={s.dockBody} keyboardShouldPersistTaps="handled">
-        {body}
-      </ScrollView>
-    </View>
+    </AgentContext.Provider>
   )
 }
 
@@ -280,6 +292,7 @@ function PermissionPrompt({
   answer: PromptAnswer
   s: Styles
 }) {
+  const agent = useContext(AgentContext)
   const view = buildPermissionView(prompt.request, {
     autoModeAvailable,
     permissionMode,
@@ -315,12 +328,12 @@ function PermissionPrompt({
           disabled={busy}
           accessibilityRole="button"
         >
-          <Text style={s.link}>No, and tell Claude what to do differently</Text>
+          <Text style={s.link}>{`No, and tell ${agent} what to do differently`}</Text>
         </Pressable>
       )}
       {amendFor && (
         <Feedback
-          placeholder="No, and tell Claude what to do differently"
+          placeholder={`No, and tell ${agent} what to do differently`}
           busy={busy}
           onCancel={() => setAmendFor(null)}
           onSubmit={(text) =>
@@ -478,6 +491,7 @@ function PlanPrompt({
   sendMessage: (text: string) => void
   s: Styles
 }) {
+  const agent = useContext(AgentContext)
   const options = buildPlanOptions({ autoModeAvailable })
   const [writing, setWriting] = useState(false)
   const choose = (index: number): void => {
@@ -493,9 +507,9 @@ function PlanPrompt({
   return (
     <View>
       <Text style={s.title}>Ready to code?</Text>
-      <Text style={s.muted}>Here is Claude's plan: see the plan card above.</Text>
+      <Text style={s.muted}>{`Here is ${agent}'s plan: see the plan card above.`}</Text>
       <Text style={s.question}>
-        Claude has written up a plan and is ready to execute. Would you like to proceed?
+        {`${agent} has written up a plan and is ready to execute. Would you like to proceed?`}
       </Text>
       <Rows options={options} busy={busy} onChoose={choose} s={s} />
       {writing && (
@@ -529,6 +543,7 @@ function PlanFeedback({
   onCancel: () => void
   s: Styles
 }) {
+  const agent = useContext(AgentContext)
   const [text, setText] = useState('')
   const t = text.trim()
   return (
@@ -537,8 +552,8 @@ function PlanFeedback({
         autoFocus
         value={text}
         onChangeText={setText}
-        placeholder="Tell Claude what to change"
-        accessibilityLabel="Tell Claude what to change"
+        placeholder={`Tell ${agent} what to change`}
+        accessibilityLabel={`Tell ${agent} what to change`}
         multiline
         editable={!busy}
         style={s.input}
@@ -574,7 +589,10 @@ function makeStyles(t: ChromeColors) {
       borderWidth: 1,
       borderColor: t.info,
       backgroundColor: t.card,
-      maxHeight: 420
+      maxHeight: 420,
+      // Gives way to the composer when the screen is short (the keyboard is up).
+      flexShrink: 1,
+      minHeight: 96
     },
     dockHeader: {
       flexDirection: 'row',
@@ -584,7 +602,7 @@ function makeStyles(t: ChromeColors) {
     },
     dockTitle: { color: t.infoForeground, fontSize: 12, fontWeight: '600' },
     dockCount: { color: t.mutedForeground, fontSize: 12 },
-    dockBody: { paddingHorizontal: 12, paddingVertical: 8 },
+    dockBody: { paddingHorizontal: 12, paddingVertical: 8, flexShrink: 1 },
     title: { color: t.foreground, fontSize: 15, fontWeight: '700', marginBottom: 2 },
     header: {
       color: t.infoForeground,

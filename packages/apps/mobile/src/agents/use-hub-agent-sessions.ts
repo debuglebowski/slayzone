@@ -34,6 +34,9 @@ import type { HubAgentSessions } from './hub-agents'
 /** Backstop for a push lost without a reconnect (desktop: 15s, plus window focus). */
 const SNAPSHOT_INTERVAL_MS = 30_000
 
+/** The snapshot's query (`refetchQueries` with it: load the agents again now). */
+export const AGENT_SNAPSHOT_QUERY_KEY = ['agents', 'snapshot'] as const
+
 type Step = (state: TerminalStateData) => TerminalStatePatch
 
 function applyStep(state: TerminalStateData, step: Step): TerminalStateData {
@@ -47,7 +50,7 @@ export function useHubAgentSessions(): HubAgentSessions {
   const [state, dispatch] = useReducer(applyStep, EMPTY_TERMINAL_STATE)
 
   const snapshot = useQuery({
-    queryKey: ['agents', 'snapshot'],
+    queryKey: AGENT_SNAPSHOT_QUERY_KEY,
     queryFn: async () => {
       // Taken before the fetch: a push that lands while it is in flight is fresher
       // than what the snapshot could see, and keeps its value (`reconcile`).

@@ -13,14 +13,22 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import type { BoardData, BoardTask, TaskRow } from '../hub-board'
 import { useTheme } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
-import { blockerCandidates, isBlocked, projectTags, subtasksOf, toggleTag } from './organise'
+import {
+  blockerCandidates,
+  createLatestWriter,
+  isBlocked,
+  projectTags,
+  subtasksOf,
+  toggleTag
+} from './organise'
 import { makeStyles, PromptSheet, Section, Sheet } from './ui'
 import type { TaskWrites } from './use-task-writes'
 
 /**
  * The task's subtasks as a checklist (desktop's Sub-tasks card): the box ticks one done
  * (its project's first completed status) or opens it again (the default status); the
- * title opens it. "＋ Add sub-task": same project, the project's default status.
+ * title opens it. "＋ Add sub-task": same project, the project's default status; the typed
+ * title stays until the hub has created it (a refused create keeps it to try again).
  */
 export function SubtasksSection({
   row,
@@ -39,22 +47,29 @@ export function SubtasksSection({
   const client = useTRPCClient()
   const [adding, setAdding] = useState(false)
   const [title, setTitle] = useState('')
+  const [saving, setSaving] = useState(false)
   const columns = row.project?.columns_config
   const subtasks = subtasksOf(board, row.task.id)
   const done = subtasks.filter((s) => isCompletedStatus(s.status, columns)).length
 
   const add = () => {
     const next = title.trim()
-    if (!next) return
-    setTitle('')
-    void writes.run(() =>
-      client.task.create.mutate({
-        projectId: row.task.project_id,
-        parentId: row.task.id,
-        title: next,
-        status: getDefaultStatus(columns)
+    if (!next || saving) return
+    setSaving(true)
+    void writes
+      .run(() =>
+        client.task.create.mutate({
+          projectId: row.task.project_id,
+          parentId: row.task.id,
+          title: next,
+          status: getDefaultStatus(columns)
+        })
+      )
+      .then((created) => {
+        setSaving(false)
+        // Created: clear the field (unless the user typed on meanwhile). Refused: keep it.
+        if (created !== undefined) setTitle((typed) => (typed.trim() === next ? '' : typed))
       })
-    )
   }
   const toggle = (sub: BoardTask) => {
     const status = isCompletedStatus(sub.status, columns)
@@ -68,17 +83,18 @@ export function SubtasksSection({
       {subtasks.map((sub) => {
         const checked = isCompletedStatus(sub.status, columns)
         return (
-          <View key={sub.id} style={styles.check}>
+          <View key={sub.id} style={[styles.check, styles.checkRow]}>
             <Pressable
               testID={`subtask-check-${sub.id}`}
               accessibilityRole="checkbox"
               accessibilityState={{ checked }}
               accessibilityLabel={sub.title}
-              hitSlop={8}
               onPress={() => toggle(sub)}
-              style={[styles.box, checked && styles.boxChecked]}
+              style={styles.boxTarget}
             >
-              {checked ? <Text style={styles.boxMark}>✓</Text> : null}
+              <View style={[styles.box, checked && styles.boxChecked]}>
+                {checked ? <Text style={styles.boxMark}>✓</Text> : null}
+              </View>
             </Pressable>
             <Pressable
               testID={`subtask-${sub.id}`}
@@ -100,6 +116,7 @@ export function SubtasksSection({
           onChangeText={setTitle}
           onSubmitEditing={add}
           onBlur={() => setAdding(false)}
+          editable={!saving}
           submitBehavior="submit"
           returnKeyType="done"
           autoFocus
@@ -112,7 +129,7 @@ export function SubtasksSection({
           accessibilityRole="button"
           testID="add-subtask"
           onPress={() => setAdding(true)}
-          hitSlop={6}
+          hitSlop={12}
         >
           <Text style={styles.muted}>＋ Add sub-task</Text>
         </Pressable>
@@ -137,6 +154,8 @@ export function TagsSection({
   const saved = board.taskTags[row.task.id] ?? []
   // The set shown at once, until the board's reload carries the hub's (render-time sync).
   const [shown, setShown] = useState<readonly string[]>(saved)
+  // Toggles reach the hub in order, one at a time (a late reply can't undo a newer set).
+  const [writer] = useState(() => createLatestWriter<string[]>())
   const savedKey = saved.join('\n')
   const [syncedFrom, setSyncedFrom] = useState({ taskId: row.task.id, savedKey })
   if (syncedFrom.taskId !== row.task.id || syncedFrom.savedKey !== savedKey) {
@@ -147,8 +166,13 @@ export function TagsSection({
   const toggle = (tagId: string) => {
     const tagIds = toggleTag(shown, tagId)
     setShown(tagIds)
-    void writes
-      .run(() => client.tags.setForTask.mutate({ taskId: row.task.id, tagIds }).then(() => true))
+    const taskId = row.task.id
+    void writer
+      .push(tagIds, (ids) =>
+        writes
+          .run(() => client.tags.setForTask.mutate({ taskId, tagIds: ids }).then(() => true))
+          .then((ok) => ok === true)
+      )
       .then((ok) => {
         if (!ok) setShown(saved)
       })

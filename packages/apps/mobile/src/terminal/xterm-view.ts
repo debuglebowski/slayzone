@@ -10,8 +10,11 @@
  *   (`@slayzone/terminal/suppress-device-status`) is installed too, as a second line.
  *   Keys come from the native key bar and text field instead.
  * - Session size: `resize(cols, rows)` takes the hub's size for the session (the
- *   phone never resizes the agent's terminal) and fits it to the screen by font size
- *   (`terminal-scale.ts`); a pinch zooms, a double tap toggles fit ↔ readable.
+ *   phone never resizes the agent's terminal) and sizes the font to the screen
+ *   (`terminal-scale.ts`): readable (wider sessions pan) or fit-to-width, the user's
+ *   choice; a pinch zooms, a double tap toggles the two (`onTextSize` reports it).
+ * - Text: the web link under a tapped point (`linkAt`), and the screen or the whole
+ *   output as plain text (`text`), for the phone to open or share.
  * - Reports the cursor-key mode (DECCKM) when it changes, so the key bar's arrows send
  *   what xterm would.
  * - Touch scroll the PROGRAM takes (mouse wheel reports, or the alternate screen):
@@ -26,7 +29,8 @@ import {
 } from '@slayzone/terminal/suppress-device-status'
 import type { TerminalThemeColors } from '@slayzone/theme-tokens'
 import type { Terminal as XTerm } from '@xterm/xterm'
-import { clampZoom, fitFontSize, readableZoom } from './terminal-scale'
+import { urlAtCell } from './terminal-links'
+import { baseFont, clampZoom, fitFontSize, type TextSize } from './terminal-scale'
 import {
   type MouseEncoding,
   type MouseTracking,
@@ -44,7 +48,17 @@ export interface TerminalLike {
   rows: number
   options: { fontSize?: number; theme?: unknown }
   modes: { applicationCursorKeysMode: boolean; mouseTrackingMode: MouseTracking }
-  buffer: { active: { type: 'normal' | 'alternate' } }
+  buffer: {
+    active: {
+      type: 'normal' | 'alternate'
+      /** The first line shown (lines above it are scrollback). */
+      viewportY: number
+      length: number
+      getLine(
+        y: number
+      ): { isWrapped: boolean; translateToString(trimRight?: boolean): string } | undefined
+    }
+  }
   parser: Pick<XTerm['parser'], 'registerCsiHandler' | 'registerEscHandler'>
   open(element: HTMLElement): void
   write(data: string, callback?: () => void): void
@@ -68,6 +82,8 @@ export interface XtermHost {
   viewportWidth(): number
   /** The terminal's rendered cells (all columns × rows) at the current font size. */
   screenRect(): ScreenRect
+  /** The font size changed (the screen's size with it). */
+  fontChanged?(): void
 }
 
 export interface XtermOptions {
@@ -85,6 +101,8 @@ export interface XtermEvents {
   onModes?: (modes: { applicationCursorKeys: boolean }) => void
   /** Bytes for the program from a gesture (touch scroll), as xterm would send them. */
   onInput?: (data: string) => void
+  /** The user switched the text size here (a double tap). */
+  onTextSize?: (size: TextSize) => void
 }
 
 const BASE_FONT = 14
@@ -95,6 +113,7 @@ const SCROLLBACK = 5_000
 export class XtermView {
   private readonly term: TerminalLike
   private fitFont = BASE_FONT
+  /** The pinch zoom, × the text size's base font. */
   private zoom = 1
   private pinchZoom = 1
   private applicationCursorKeys = false
@@ -105,7 +124,8 @@ export class XtermView {
     create: (options: XtermOptions) => TerminalLike,
     private readonly host: XtermHost,
     private readonly events: XtermEvents,
-    theme?: TerminalThemeColors
+    theme?: TerminalThemeColors,
+    private textSize: TextSize = 'readable'
   ) {
     this.term = create({
       cols: 80,
@@ -145,7 +165,15 @@ export class XtermView {
   refit(): void {
     const current = this.term.options.fontSize ?? BASE_FONT
     this.fitFont = fitFontSize(current, this.host.screenRect().width, this.host.viewportWidth())
-    this.zoom = clampZoom(this.zoom, this.fitFont)
+    this.zoom = clampZoom(this.zoom, this.fitFont, this.base())
+    this.applyFont()
+  }
+
+  /** The text size the user keeps (the phone's choice); a pinch is dropped. */
+  setTextSize(size: TextSize): void {
+    if (size === this.textSize) return
+    this.textSize = size
+    this.zoom = 1
     this.applyFont()
   }
 
@@ -159,14 +187,47 @@ export class XtermView {
 
   /** `scale`: the pinch's distance now ÷ at its start. */
   pinchMove(scale: number): void {
-    this.zoom = clampZoom(this.pinchZoom * scale, this.fitFont)
+    this.zoom = clampZoom(this.pinchZoom * scale, this.fitFont, this.base())
     this.applyFont()
   }
 
-  /** Double tap: readable size, or back to the fit. */
-  toggleZoom(): void {
-    this.zoom = this.zoom > 1 ? 1 : clampZoom(readableZoom(this.fitFont), this.fitFont)
-    this.applyFont()
+  /** Double tap: readable ↔ fit to width (reported, for the phone to keep). */
+  toggleTextSize(): void {
+    this.setTextSize(this.textSize === 'readable' ? 'fit' : 'readable')
+    this.events.onTextSize?.(this.textSize)
+  }
+
+  /** The web link at a point of the web view (a tap), or null. */
+  linkAt(clientX: number, clientY: number): string | null {
+    const rect = this.host.screenRect()
+    const { cols, rows } = this.term
+    if (rect.width <= 0 || rect.height <= 0) return null
+    const col = Math.floor((clientX - rect.left) / (rect.width / cols))
+    const row = Math.floor((clientY - rect.top) / (rect.height / rows))
+    if (col < 0 || col >= cols || row < 0 || row >= rows) return null
+    const buffer = this.term.buffer.active
+    return urlAtCell((y) => buffer.getLine(y), buffer.viewportY + row, col)
+  }
+
+  /**
+   * The screen (`screen`) or everything kept, scrollback included (`all`), as plain
+   * text: wrapped lines joined, trailing blanks dropped.
+   */
+  text(kind: 'screen' | 'all'): string {
+    const buffer = this.term.buffer.active
+    const from = kind === 'screen' ? buffer.viewportY : 0
+    const to = kind === 'screen' ? Math.min(buffer.length, from + this.term.rows) : buffer.length
+    const lines: string[] = []
+    for (let y = from; y < to; y++) {
+      const line = buffer.getLine(y)
+      if (!line) break
+      // A line the next one continues keeps its trailing spaces (they are text).
+      const content = line.translateToString(!buffer.getLine(y + 1)?.isWrapped)
+      if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += content
+      else lines.push(content)
+    }
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
+    return lines.join('\n')
   }
 
   /**
@@ -231,9 +292,15 @@ export class XtermView {
     })
   }
 
+  private base(): number {
+    return baseFont(this.textSize, this.fitFont)
+  }
+
   private applyFont(): void {
-    const font = this.fitFont * this.zoom
-    if (this.term.options.fontSize !== font) this.term.options.fontSize = font
+    const font = this.base() * this.zoom
+    if (this.term.options.fontSize === font) return
+    this.term.options.fontSize = font
+    this.host.fontChanged?.()
   }
 
   private checkModes(): void {

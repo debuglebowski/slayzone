@@ -9,6 +9,10 @@
  * - `artifact:<id>` (an artifact link) opens that artifact in the app;
  * - http(s) and mailto open outside the app (desktop: a bare click opens externally);
  * - anything else (other files, `javascript:`, app schemes) is refused.
+ *
+ * On the app's own pages and reports (`requireTap`) a link is followed only when the
+ * person tapped it (`navigationType` `click`): a `<meta>` refresh, a script, a form or a
+ * redirect never opens Safari, Mail or another artifact by itself.
  */
 
 export type NavigationDecision =
@@ -36,8 +40,17 @@ function filePathOf(url: string): string | null {
 }
 
 export function decideNavigation(
+  request: { url: string; isTopFrame?: boolean; navigationType?: string },
+  page: { fileUri?: string; requireTap?: boolean } = {}
+): NavigationDecision {
+  const decision = decide(request, page)
+  if (decision.kind === 'load' || decision.kind === 'block') return decision
+  return page.requireTap && request.navigationType !== 'click' ? { kind: 'block' } : decision
+}
+
+function decide(
   request: { url: string; isTopFrame?: boolean },
-  page: { fileUri?: string } = {}
+  page: { fileUri?: string }
 ): NavigationDecision {
   const { url } = request
   if (request.isTopFrame === false) return { kind: 'load' }

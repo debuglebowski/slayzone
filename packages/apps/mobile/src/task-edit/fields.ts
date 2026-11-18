@@ -34,7 +34,7 @@ export interface DueChoice extends FieldChoice {
   date: string | null
 }
 
-/** Quick due dates from `today` (`YYYY-MM-DD`); any other day is typed (`parseDueDate`). */
+/** Quick due dates from `today` (`YYYY-MM-DD`); any other day is picked on the calendar. */
 export function dueChoices(today: string): DueChoice[] {
   return [
     { key: 'none', label: 'No due date', date: null },
@@ -44,12 +44,31 @@ export function dueChoices(today: string): DueChoice[] {
   ]
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** A `YYYY-MM-DD` day the short way ("Nov 18"; "Dec 31, 2025" when not `today`'s year). */
+export function formatDay(day: string, today: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
+  const month = m ? MONTHS[Number(m[2]) - 1] : undefined
+  if (!m || !month) return day
+  const short = `${month} ${Number(m[3])}`
+  return m[1] === today.slice(0, 4) ? short : `${short}, ${m[1]}`
+}
+
 export function dueLabel(due: string | null, today: string): string {
   if (!due) return 'No due date'
   if (due === today) return 'Due today'
   if (due === addDaysISO(today, 1)) return 'Due tomorrow'
-  if (due < today) return `Overdue: ${due}`
-  return `Due ${due}`
+  if (due < today) return `Overdue: ${formatDay(due, today)}`
+  return `Due ${formatDay(due, today)}`
+}
+
+/** A due date on a card: Yesterday / Today / Tomorrow, else the short day. */
+export function dueDayLabel(due: string, today: string): string {
+  if (due === today) return 'Today'
+  if (due === addDaysISO(today, 1)) return 'Tomorrow'
+  if (due === addDaysISO(today, -1)) return 'Yesterday'
+  return formatDay(due, today)
 }
 
 /** A typed due date: `YYYY-MM-DD` naming a real day, else null. */
@@ -105,4 +124,16 @@ export function applyTemplate(
       ? template.default_priority
       : fields.priority
   return { status, priority }
+}
+
+/** A `YYYY-MM-DD` day as a Date at that day's local midnight (what a date picker shows). */
+export function dateOfDay(day: string): Date {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1)
+}
+
+/** The local calendar day of `date`, as `YYYY-MM-DD` (what a date picker picked). */
+export function dayOfDate(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }

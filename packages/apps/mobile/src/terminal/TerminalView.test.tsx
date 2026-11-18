@@ -1,35 +1,58 @@
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
-import { Keyboard } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
+import { Keyboard, Share } from 'react-native'
+import { openWebLink } from '../chat/Markdown'
 import { trpcTest } from '../testing'
-import { TerminalView } from './TerminalView'
+import { TerminalView, type TerminalViewHandle } from './TerminalView'
 
 /** What the web view's terminal was sent, and the props it got. */
 const mockDom = {
   ops: [] as string[],
   props: null as null | {
+    textSize: 'readable' | 'fit'
     onModes: (applicationCursorKeys: boolean) => Promise<void>
     onInteract: () => Promise<void>
     onInput: (data: string) => Promise<void>
+    onOpenLink: (url: string) => Promise<void>
+    onTextSize: (size: 'readable' | 'fit') => Promise<void>
+    onText: (text: string) => Promise<void>
   }
 }
+
+// Opening a link is the chat's rule (web links only); here: that a tap reaches it.
+jest.mock('../chat/Markdown', () => ({ openWebLink: jest.fn() }))
+
+/** The device's kept terminal preferences (a file on the phone). */
+const mockPrefs = { text: null as string | null }
+jest.mock('./terminal-prefs-file', () => {
+  const { createTerminalPrefs } = jest.requireActual('./terminal-prefs')
+  return {
+    terminalPrefsFile: createTerminalPrefs({
+      read: () => mockPrefs.text,
+      write: (text: string) => {
+        mockPrefs.text = text
+      }
+    })
+  }
+})
 
 // The web view (a DOM component) cannot run in Node: a stand-in with its handle.
 jest.mock('./TerminalDom', () => {
   const { useEffect, useImperativeHandle, useState } = jest.requireActual('react')
-  function FakeTerminalDom(props: {
-    ref: unknown
-    onReady: () => Promise<void>
-    onModes: (applicationCursorKeys: boolean) => Promise<void>
-    onInteract: () => Promise<void>
-    onInput: (data: string) => Promise<void>
-  }) {
+  function FakeTerminalDom(
+    props: NonNullable<typeof mockDom.props> & {
+      ref: unknown
+      onReady: () => Promise<void>
+    }
+  ) {
     mockDom.props = props
     useImperativeHandle(
       props.ref,
       () => ({
         write: (data: string) => mockDom.ops.push(`write ${data}`),
         reset: () => mockDom.ops.push('reset'),
-        resize: (cols: number, rows: number) => mockDom.ops.push(`resize ${cols}x${rows}`)
+        resize: (cols: number, rows: number) => mockDom.ops.push(`resize ${cols}x${rows}`),
+        requestText: (kind: string) => mockDom.ops.push(`text ${kind}`)
       }),
       []
     )
@@ -54,6 +77,7 @@ jest.mock('@slayzone/transport/client', () => ({
 }))
 
 beforeEach(() => {
+  mockPrefs.text = null
   mockDom.ops = []
   mockDom.props = null
   mockDirect.lease = null
@@ -69,7 +93,7 @@ function withoutWriteId(input: unknown): unknown {
   return rest
 }
 
-function hub(opts: { offline?: () => boolean } = {}) {
+function hub(opts: { offline?: () => boolean; attach?: () => unknown } = {}) {
   const calls: Array<[string, unknown]> = []
   let emitData: (data: unknown) => void = () => undefined
   let emitResize: (data: unknown) => void = () => undefined
@@ -84,20 +108,22 @@ function hub(opts: { offline?: () => boolean } = {}) {
   const test = trpcTest({
     procedures: {
       'pty.attach': () =>
-        opts.offline?.()
-          ? {
-              exists: true,
-              state: 'running',
-              buffer: null,
-              size: { cols: 100, rows: 30 },
-              unavailable: 'computer-offline'
-            }
-          : {
-              exists: true,
-              state: 'running',
-              buffer: { chunks: [{ seq: 0, data: 'hello ' }], currentSeq: 0, prelude: '' },
-              size: { cols: 100, rows: 30 }
-            },
+        opts.attach
+          ? opts.attach()
+          : opts.offline?.()
+            ? {
+                exists: true,
+                state: 'running',
+                buffer: null,
+                size: { cols: 100, rows: 30 },
+                unavailable: 'computer-offline'
+              }
+            : {
+                exists: true,
+                state: 'running',
+                buffer: { chunks: [{ seq: 0, data: 'hello ' }], currentSeq: 0, prelude: '' },
+                size: { cols: 100, rows: 30 }
+              },
       'pty.getBufferSince': () => ({ chunks: [], currentSeq: 0, prelude: '' }),
       'pty.write': record('pty.write'),
       'pty.submit': record('pty.submit'),
@@ -183,6 +209,224 @@ describe('TerminalView', () => {
     await waitFor(() =>
       expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\x1b[<64;3;2M' }])
     )
+    // Through the ordered writer, as every keystroke: it carries the write id.
+    expect(h.calls.find(([p]) => p === 'pty.write')?.[1]).toHaveProperty('writeId')
+  })
+
+  it('lifts the key bar and the message field above the keyboard', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    // KeyboardAvoidingView's view: it measures itself against the keyboard's frame.
+    expect(screen.getByTestId('terminal-view').props.onLayout).toBeInstanceOf(Function)
+  })
+
+  it('says it is connecting until the output is in', async () => {
+    let answer: (value: unknown) => void = () => undefined
+    const h = hub({ attach: () => new Promise((resolve) => (answer = resolve)) })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    expect(await screen.findByLabelText('Connecting to the agent')).toBeTruthy()
+    await act(async () =>
+      answer({
+        exists: true,
+        state: 'running',
+        buffer: { chunks: [{ seq: 0, data: 'hi' }], currentSeq: 0, prelude: '' },
+        size: { cols: 80, rows: 24 }
+      })
+    )
+    await waitFor(() => expect(screen.queryByLabelText('Connecting to the agent')).toBeNull())
+  })
+
+  it('says the agent is not running (and how to start it) instead of a blank terminal', async () => {
+    const h = hub({
+      attach: () => ({ exists: false, state: null, buffer: null, size: null })
+    })
+    await render(
+      <TerminalView
+        sessionId={SID}
+        taskId="t1"
+        live={false}
+        notRunningHint="Tap Start to run it."
+      />,
+      { wrapper: h.wrapper }
+    )
+    expect(await screen.findByText('The agent isn’t running. Tap Start to run it.')).toBeTruthy()
+  })
+
+  it('does not claim the agent is stopped while its state is still loading', async () => {
+    const h = hub({
+      attach: () => ({ exists: false, state: null, buffer: null, size: null })
+    })
+    await render(<TerminalView sessionId={SID} taskId="t1" live={false} stateLoading />, {
+      wrapper: h.wrapper
+    })
+    await waitFor(() => expect(screen.queryByLabelText('Connecting to the agent')).toBeNull())
+    expect(screen.queryByText(/isn’t running/)).toBeNull()
+  })
+
+  it('keeps the last output of a stopped agent on screen', async () => {
+    const h = hub({
+      attach: () => ({
+        exists: false,
+        state: null,
+        buffer: { chunks: [{ seq: 0, data: 'bye' }], currentSeq: 0, prelude: '' },
+        size: { cols: 80, rows: 24 }
+      })
+    })
+    await render(<TerminalView sessionId={SID} taskId="t1" live={false} />, {
+      wrapper: h.wrapper
+    })
+    await waitFor(() => expect(written()).toBe('bye'))
+    expect(screen.queryByText(/isn’t running/)).toBeNull()
+  })
+
+  it('a failed load says so and retries on request', async () => {
+    let fail = true
+    const h = hub({
+      attach: () => {
+        if (fail) throw new Error('hub hiccup')
+        return {
+          exists: true,
+          state: 'running',
+          buffer: { chunks: [{ seq: 0, data: 'back' }], currentSeq: 0, prelude: '' },
+          size: { cols: 80, rows: 24 }
+        }
+      }
+    })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    expect(await screen.findByText('Couldn’t load the agent’s output.')).toBeTruthy()
+    fail = false
+    await userEvent.setup().press(screen.getByLabelText('Retry loading the output'))
+    await waitFor(() => expect(written()).toBe('back'))
+    expect(screen.queryByText('Couldn’t load the agent’s output.')).toBeNull()
+  })
+
+  it('Ctrl then a typed letter sends Ctrl+letter (the letter is not typed)', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    const user = userEvent.setup()
+    const ctrl = screen.getByLabelText('Control')
+    await user.press(ctrl)
+    expect(screen.getByLabelText('Control').props.accessibilityState).toMatchObject({
+      selected: true
+    })
+    const input = screen.getByLabelText('Message to the agent')
+    await act(async () => fireEvent.changeText(input, 'r'))
+    await waitFor(() => expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\x12' }]))
+    expect(screen.getByLabelText('Message to the agent').props.value).toBe('')
+    // Used up: the next letter is typed.
+    await act(async () => fireEvent.changeText(input, 'r'))
+    expect(screen.getByLabelText('Message to the agent').props.value).toBe('r')
+    expect(screen.getByLabelText('Control').props.accessibilityState).toMatchObject({
+      selected: false
+    })
+  })
+
+  it('an arrow held down repeats', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    await userEvent.setup().longPress(screen.getByLabelText('Arrow up'), { duration: 600 })
+    await waitFor(() => expect(h.of('pty.write').length).toBeGreaterThanOrEqual(3))
+    const count = h.of('pty.write').length
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)))
+    expect(h.of('pty.write')).toHaveLength(count)
+    expect(new Set(h.of('pty.write').map((w) => (w as { data: string }).data))).toEqual(
+      new Set(['\x1b[A'])
+    )
+  })
+
+  it('the message field is for prose: several lines, spell-checked, in the theme’s keyboard', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    const input = screen.getByLabelText('Message to the agent')
+    expect(input.props).toMatchObject({
+      multiline: true,
+      autoCorrect: true,
+      spellCheck: true,
+      submitBehavior: 'submit'
+    })
+    expect(['dark', 'light']).toContain(input.props.keyboardAppearance)
+  })
+
+  it('opens a web link the user tapped in the terminal', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    await act(async () => mockDom.props?.onOpenLink('https://example.com/x'))
+    expect(openWebLink).toHaveBeenCalledWith('https://example.com/x')
+  })
+
+  it('copies the screen’s text, or shares the whole output', async () => {
+    const copy = jest.spyOn(Clipboard, 'setStringAsync').mockResolvedValue(true)
+    const share = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: 'sharedAction', activityType: undefined })
+    try {
+      const h = hub()
+      const ref: { current: TerminalViewHandle | null } = { current: null }
+      const onHandle = (handle: TerminalViewHandle | null) => {
+        ref.current = handle
+      }
+      await render(<TerminalView onHandle={onHandle} sessionId={SID} taskId="t1" live />, {
+        wrapper: h.wrapper
+      })
+      await act(async () => ref.current?.exportText('screen', 'copy'))
+      await waitFor(() => expect(mockDom.ops).toContain('text screen'))
+      await act(async () => mockDom.props?.onText('$ ls\nREADME.md'))
+      expect(copy).toHaveBeenCalledWith('$ ls\nREADME.md')
+      expect(share).not.toHaveBeenCalled()
+
+      await act(async () => ref.current?.exportText('all', 'share'))
+      await waitFor(() => expect(mockDom.ops).toContain('text all'))
+      await act(async () => mockDom.props?.onText('everything'))
+      expect(share).toHaveBeenCalledWith({ message: 'everything' })
+    } finally {
+      copy.mockRestore()
+      share.mockRestore()
+    }
+  })
+
+  it('keeps the text size the user picks on this device (readable by default)', async () => {
+    const h = hub()
+    const ref: { current: TerminalViewHandle | null } = { current: null }
+    const onHandle = (handle: TerminalViewHandle | null) => {
+      ref.current = handle
+    }
+    const view = await render(
+      <TerminalView onHandle={onHandle} sessionId={SID} taskId="t1" live />,
+      {
+        wrapper: h.wrapper
+      }
+    )
+    expect(mockDom.props?.textSize).toBe('readable')
+    expect(ref.current?.textSize()).toBe('readable')
+    await act(async () => ref.current?.toggleTextSize())
+    expect(mockDom.props?.textSize).toBe('fit')
+    expect(JSON.parse(mockPrefs.text ?? '{}')).toEqual({ textSize: 'fit' })
+    // A double tap in the terminal changes it too.
+    await act(async () => mockDom.props?.onTextSize('readable'))
+    expect(JSON.parse(mockPrefs.text ?? '{}')).toEqual({ textSize: 'readable' })
+    await view.unmount()
+    mockPrefs.text = JSON.stringify({ textSize: 'fit' })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: hub().wrapper })
+    expect(mockDom.props?.textSize).toBe('fit')
+  })
+
+  it('knows the grid a terminal the phone starts should have (its screen at a readable size)', async () => {
+    const h = hub()
+    const ref: { current: TerminalViewHandle | null } = { current: null }
+    const onHandle = (handle: TerminalViewHandle | null) => {
+      ref.current = handle
+    }
+    await render(<TerminalView onHandle={onHandle} sessionId={SID} taskId="t1" live={false} />, {
+      wrapper: h.wrapper
+    })
+    expect(ref.current?.grid()).toBeUndefined()
+    await act(async () =>
+      fireEvent(screen.getByTestId('terminal-area'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 500 } }
+      })
+    )
+    expect(ref.current?.grid()).toEqual(expect.objectContaining({ cols: expect.any(Number) }))
+    expect(ref.current?.grid()?.cols).toBeGreaterThanOrEqual(60)
   })
 
   it('submits typed text (the agent’s own Enter); an empty send presses Enter', async () => {
@@ -245,12 +489,23 @@ describe('TerminalView', () => {
     let offline = true
     const h = hub({ offline: () => offline })
     await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
-    await waitFor(() => expect(screen.getByText('Computer offline')).toBeTruthy())
+    const note = 'The computer running this agent is offline. Its output resumes when it’s back.'
+    await waitFor(() => expect(screen.getByText(note)).toBeTruthy())
     expect(written()).toBe('')
     offline = false
     await h.emitAvailability({ sessionId: SID, available: true })
     await waitFor(() => expect(written()).toContain('hello '))
-    expect(screen.queryByText('Computer offline')).toBeNull()
+    expect(screen.queryByText(note)).toBeNull()
+  })
+
+  it('names the offline computer when it knows it', async () => {
+    const h = hub({ offline: () => true })
+    await render(<TerminalView sessionId={SID} taskId="t1" live computerName="Mac Studio" />, {
+      wrapper: h.wrapper
+    })
+    expect(
+      await screen.findByText('Mac Studio is offline. Its output resumes when it’s back.')
+    ).toBeTruthy()
   })
 
   it('sends nothing while no agent runs', async () => {
@@ -307,6 +562,17 @@ describe('TerminalView: direct link', () => {
       end: () => act(async () => end?.())
     }
   }
+
+  it('a touch scroll goes over the link too, in order with the keys', async () => {
+    const d = directLease()
+    mockDirect.lease = d.lease
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    await d.start()
+    await act(async () => mockDom.props?.onInput('\x1b[<64;3;2M'))
+    await waitFor(() => expect(d.writes).toEqual([{ sessionId: SID, data: '\x1b[<64;3;2M' }]))
+    expect(h.of('pty.write')).toEqual([])
+  })
 
   it('streams from the computer, not the hub, and types to it; submit stays a hub call', async () => {
     const d = directLease()

@@ -13,14 +13,22 @@
  * desktop's receiver checks — and the app opens it outside (desktop: a bare click opens
  * externally). Other links navigate inside the frame, as on desktop.
  *
+ * The host's check is the only thing between the report and the app, and WKWebView gives
+ * its message handler to every frame: the report could post to the app straight,
+ * skipping it. So the host signs what it forwards with the page's token (a fresh secret
+ * per page, only in the host's script — the frame is of another origin and can't read
+ * it), and the app drops every message without it (`DocumentWebView`).
+ *
  * Theme: a colour scheme the artifact forces (`html_theme_override`) is injected the way
- * desktop serves it (`injectForcedHtmlTheme`); otherwise the report follows the device.
+ * desktop serves it (`injectForcedHtmlTheme`); otherwise the app's own (desktop: the
+ * frame follows the app's theme, which sets the window's scheme).
  */
 import { type ForcedHtmlTheme, injectForcedHtmlTheme } from '@slayzone/platform/forced-html-theme'
 import {
   buildHtmlPreviewLinkBridgeScript,
   HTML_PREVIEW_LINK_MESSAGE_TYPE
 } from '@slayzone/platform/html-preview-links'
+import { newToken } from './page-style'
 
 const HEAD_OPEN = /<head(?:\s[^>]*)?>/i
 const HTML_OPEN = /<html(?:\s[^>]*)?>/i
@@ -40,31 +48,42 @@ export function insertIntoHead(html: string, markup: string): string {
 const escapeAttribute = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 
-/** The host's only script: forward the report frame's link messages to the app. */
-const HOST_SCRIPT = `(function () {
+/** The host's only script: forward the report frame's link messages to the app, signed with `token`. */
+const hostScript = (token: string): string => `(function () {
+  var token = ${JSON.stringify(token)};
   var frame = document.querySelector('iframe');
   window.addEventListener('message', function (e) {
     if (e.source !== frame.contentWindow) return;
     var d = e.data;
     if (!d || d.type !== ${JSON.stringify(HTML_PREVIEW_LINK_MESSAGE_TYPE)} || typeof d.url !== 'string') return;
     if (navigator.userActivation && !navigator.userActivation.isActive) return;
-    window.ReactNativeWebView.postMessage(JSON.stringify(d));
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: d.type, url: d.url, metaKey: d.metaKey === true,
+      ctrlKey: d.ctrlKey === true, shiftKey: d.shiftKey === true, token: token }));
   });
 })();`
 
+export interface HtmlReportPage {
+  html: string
+  /** What the host's messages carry; the app drops a message without it. */
+  token: string
+}
+
+/** `forcedTheme`: the artifact's own scheme, else the app's variant. */
 export function htmlReportPage(
   report: string,
   options: { forcedTheme: ForcedHtmlTheme | null }
-): string {
+): HtmlReportPage {
   const themed = options.forcedTheme ? injectForcedHtmlTheme(report, options.forcedTheme) : report
   const framed = insertIntoHead(themed, `<script>${buildHtmlPreviewLinkBridgeScript()}</script>`)
-  return [
+  const token = newToken()
+  const html = [
     '<!doctype html><html><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=8">',
     '<style>html, body { margin: 0; height: 100%; } iframe { display: block; border: 0; width: 100%; height: 100%; }</style>',
     '</head><body>',
     `<iframe sandbox="allow-scripts" title="HTML preview" srcdoc="${escapeAttribute(framed)}"></iframe>`,
-    `<script>${HOST_SCRIPT}</script>`,
+    `<script>${hostScript(token)}</script>`,
     '</body></html>'
   ].join('')
+  return { html, token }
 }

@@ -13,6 +13,7 @@ import { useHubId } from '@slayzone/transport/client'
 import {
   chatCapabilitiesForMode,
   chatAvailabilityMessage,
+  chatProviderForMode,
   type PermissionDecision
 } from '@slayzone/terminal-contracts'
 import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
@@ -30,15 +31,7 @@ import {
   useRef,
   useState
 } from 'react'
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View
-} from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { BackgroundJobs } from './BackgroundJobs'
 import { ChatControls } from './ChatControls'
@@ -49,6 +42,8 @@ import { Composer } from './Composer'
 import { PromptDock } from './PromptDock'
 import { MONO, useThemedStyles } from './styles'
 import { useTRPCClient } from '../trpc'
+import { useKeyboardOverlap } from './use-keyboard'
+import { useChatAttach } from './useChatAttach'
 import { useChatComposer } from './useChatComposer'
 import { useChatCwd } from './useChatCwd'
 import { useChatQueue } from './useChatQueue'
@@ -121,6 +116,7 @@ export function ChatSession({
 function ChatView({ target }: { target: ChatTarget }) {
   const { s } = useThemedStyles(makeStyles)
   const caps = chatCapabilitiesForMode(target.mode)
+  const provider = chatProviderForMode(target.mode)
   const notice = useNotice()
   const { show: notify } = notice
   const session = useChatSession(target)
@@ -184,6 +180,13 @@ function ChatView({ target }: { target: ChatTarget }) {
     sessionEnded: ended
   })
 
+  const attach = useChatAttach({
+    taskId: target.taskId,
+    caps,
+    onAttached: composer.addAttachments,
+    notify
+  })
+
   // A session that ended clears its queue (desktop does the same).
   const { clear: clearQueue } = queue
   useEffect(() => {
@@ -206,7 +209,8 @@ function ChatView({ target }: { target: ChatTarget }) {
     (requestId: string, optionId: string, decision: PermissionDecision) =>
       respondPermission({ requestId, decision, optionId }).then(
         (ok) => {
-          if (!ok) notify('This request is no longer active — Claude stopped waiting for it.')
+          if (!ok)
+            notify(`This request is no longer active — ${provider.agent} stopped waiting for it.`)
           return ok
         },
         (err: unknown) => {
@@ -214,7 +218,7 @@ function ChatView({ target }: { target: ChatTarget }) {
           return false
         }
       ),
-    [respondPermission, notify]
+    [respondPermission, notify, provider.agent]
   )
 
   // What streams right now reaches only the rows that stream (desktop's live store).
@@ -237,33 +241,29 @@ function ChatView({ target }: { target: ChatTarget }) {
       retryMessage: (id) => void retryMessage(id),
       prompts: state.prompts,
       restartAgent: restart,
-      takeOver
+      takeOver,
+      agentName: provider.agent
     }),
-    [target.tabId, retryMessage, state.prompts, restart, takeOver]
+    [target.tabId, retryMessage, state.prompts, restart, takeOver, provider.agent]
   )
 
-  // The keyboard lifts the composer by what it covers of THIS view: its offset is how
-  // far the view sits below the top of the window (the screen's header, safe area…),
-  // measured, so the parent need not know or pass it.
+  // The keyboard lifts the composer by what it covers of THIS view, measured where the
+  // view sits in the window — on its own layout and once the keyboard has moved — so
+  // the parent need not know or pass an offset, and a screen above that moves (the task
+  // page's title line steps aside while typing) never leaves it stale.
   const rootRef = useRef<ComponentRef<typeof View>>(null)
-  const [top, setTop] = useState(0)
-  const measure = useCallback(() => {
-    rootRef.current?.measureInWindow((_x: number, y: number) =>
-      setTop((prev) => (prev === y ? prev : y))
-    )
-  }, [])
+  const keyboard = useKeyboardOverlap(rootRef)
 
   const awaitingUser = caps.promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
   return (
     <ChatViewContext.Provider value={view}>
       <LiveBlockStoreContext.Provider value={liveStore}>
-        <KeyboardAvoidingView
-          style={s.root}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={top}
+        <View
+          ref={rootRef}
+          onLayout={keyboard.onLayout}
+          style={[s.root, keyboard.bottom > 0 && { paddingBottom: keyboard.bottom }]}
           testID="chat-session"
         >
-          <View ref={rootRef} onLayout={measure} style={s.probe} />
           <ChatControls mode={target.mode} settings={settings} models={models} />
           <BackgroundJobs state={state} tabId={target.tabId} onError={notify} />
           <ChatTimeline
@@ -310,6 +310,7 @@ function ChatView({ target }: { target: ChatTarget }) {
               cwd={target.cwd}
               timeline={state.timeline}
               sendMessage={(text) => void sendMessage(text).catch(() => undefined)}
+              agent={provider.agent}
             />
           )}
           {ended && (
@@ -346,11 +347,13 @@ function ChatView({ target }: { target: ChatTarget }) {
                 }
               : {})}
             withdrawSteered={caps.withdrawSteered}
+            cliLabel={provider.product}
+            attach={attach}
             inFlight={session.inFlight}
             disabled={session.hydrating || ended}
             placeholder={session.inFlight ? 'Queue a message…' : 'Message'}
           />
-        </KeyboardAvoidingView>
+        </View>
       </LiveBlockStoreContext.Provider>
     </ChatViewContext.Provider>
   )
@@ -379,7 +382,6 @@ function useNotice(): { text: string | null; show: (message: string) => void } {
 function makeStyles(t: ChromeColors) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: t.background },
-    probe: { height: 0 },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
     note: { color: t.mutedForeground, padding: 24, textAlign: 'center' },
     notFound: { padding: 24, gap: 8 },

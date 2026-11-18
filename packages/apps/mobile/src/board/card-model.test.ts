@@ -5,6 +5,7 @@ import { boardOf, feedOf, homeHub, projectOf, taskOf, workHub } from '../hubs/te
 import {
   agentDotOf,
   aliveTaskIds,
+  cardAccessibilityLabel,
   cardModel,
   projectWaitingCounts,
   statusCategoryOf,
@@ -133,5 +134,43 @@ describe('statusCategoryOf', () => {
       category: 'unstarted',
       tone: 'gray'
     })
+  })
+})
+
+describe('cardAccessibilityLabel', () => {
+  const model = {
+    dot: null,
+    subtasks: null,
+    tags: [],
+    blocked: false,
+    overdue: false
+  }
+
+  it('reads the title, status, priority and due date', () => {
+    expect(
+      cardAccessibilityLabel(
+        taskOf('t', { title: 'Ship it', priority: 1, due_date: '2026-10-31' }),
+        model,
+        'Doing',
+        '2026-10-30'
+      )
+    ).toBe('Ship it, Doing, Urgent, due Tomorrow')
+  })
+
+  it('adds overdue, blocked, subtasks and what its agent is doing', () => {
+    expect(
+      cardAccessibilityLabel(
+        taskOf('t', { title: 'Fix', priority: 3, due_date: '2026-10-01' }),
+        {
+          ...model,
+          overdue: true,
+          blocked: true,
+          dot: 'attention',
+          subtasks: { done: 1, total: 3 }
+        },
+        'Queued',
+        '2026-10-30'
+      )
+    ).toBe('Fix, Queued, Medium, overdue Oct 1, blocked, 1 of 3 sub-tasks done, agent needs you')
   })
 })

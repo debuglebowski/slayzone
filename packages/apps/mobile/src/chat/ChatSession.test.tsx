@@ -5,9 +5,33 @@
  */
 import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { Alert, DeviceEventEmitter, StyleSheet } from 'react-native'
 import { trpcTest } from '../testing'
 import { ChatSession } from './ChatSession'
+import { ChatUploadTargetContext } from './ChatUploadTarget'
 import { type FakeHub, fakeHub } from './fake-hub'
+
+// The phone's photo picker and file reads (native): a picked PNG, read from "disk".
+const mockPicked = { files: [] as Array<{ uri: string; name: string }> }
+jest.mock('../artifacts/pick-uploads', () => ({
+  pickUploads: jest.fn(async () => mockPicked.files)
+}))
+const mockPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
+const mockUploads: Array<{ taskId: string; file: { name: string } }> = []
+jest.mock('./attach-files', () => {
+  const actual = jest.requireActual('./attach-files')
+  return {
+    ...actual,
+    attachFile: (...args: unknown[]) =>
+      actual.attachFile(...args.slice(0, 4), {
+        read: () => ({ size: 2048, head: mockPng }),
+        upload: async (_target: unknown, taskId: string, file: { name: string }) => {
+          mockUploads.push({ taskId, file })
+          return { id: 'art-1', title: file.name }
+        }
+      })
+  }
+})
 
 const TAB = 'task-1'
 const TASK = 'task-1'
@@ -23,6 +47,136 @@ async function hubSends(hub: FakeHub, events: AgentEvent[], from = 0) {
     events.forEach((event, i) => hub.emit('chat.onEvent', { tabId: TAB, event, seq: from + i }))
   })
 }
+
+describe('ChatSession: attaching a photo', () => {
+  const target = { hubId: 'hub-1', label: 'hub', address: 'hub', token: 't' }
+
+  async function openWithHub(hub: FakeHub, mode = 'claude-chat') {
+    const { wrapper: Trpc } = trpcTest(hub.backend)
+    await render(<ChatSession hubId="hub-1" taskId={TASK} tabId={TAB} mode={mode} />, {
+      wrapper: ({ children }) => (
+        <Trpc>
+          <ChatUploadTargetContext.Provider value={target}>
+            {children}
+          </ChatUploadTargetContext.Provider>
+        </Trpc>
+      )
+    })
+  }
+
+  it('＋ takes a photo from the library to the task, and the next message carries it', async () => {
+    mockUploads.length = 0
+    mockPicked.files = [{ uri: 'file:///tmp/IMG_1.png', name: 'IMG_1.png' }]
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await openWithHub(hub)
+    await screen.findByText('Send a message to start.')
+    const user = userEvent.setup()
+    await user.press(screen.getByLabelText('Attach a photo'))
+    await user.press(await screen.findByText('Photo library'))
+    expect(await screen.findByLabelText('Remove IMG_1.png')).toBeOnTheScreen()
+    expect(mockUploads).toEqual([{ taskId: TASK, file: mockPicked.files[0] }])
+    await user.press(screen.getByLabelText('Send'))
+    await waitFor(() => expect(hub.callsTo('chat.send')).toHaveLength(1))
+    expect(hub.callsTo('chat.send')[0].message.content).toEqual([
+      {
+        type: 'attachment',
+        attachment: {
+          artifactId: 'art-1',
+          name: 'IMG_1.png',
+          kind: 'image',
+          mediaType: 'image/png',
+          size: 2048
+        }
+      }
+    ])
+  })
+
+  it('without the hub to upload to, there is no ＋', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub)
+    await screen.findByText('Send a message to start.')
+    expect(screen.queryByLabelText('Attach a photo')).toBeNull()
+  })
+})
+
+describe('ChatSession: the keyboard', () => {
+  it('measures where it sits again once the keyboard has shown (the screen above it moved)', async () => {
+    // Every host view's `measureInWindow` (the test renderer's native stand-in).
+    const native = jest.requireActual('@react-native/jest-preset/jest/MockNativeMethods').default
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub)
+    await screen.findByText('Send a message to start.')
+    native.measureInWindow.mockClear()
+    await act(async () => {
+      DeviceEventEmitter.emit('keyboardDidShow', { endCoordinates: { height: 300, screenY: 500 } })
+    })
+    expect(native.measureInWindow).toHaveBeenCalled()
+  })
+
+  it('lifts the composer by what the keyboard covers of the chat, wherever the chat sits', async () => {
+    const native = jest.requireActual('@react-native/jest-preset/jest/MockNativeMethods').default
+    // The chat spans y 100…700 of the window; the screen above it can move it.
+    let frame = { y: 100, height: 600 }
+    native.measureInWindow.mockImplementation((cb: (...n: number[]) => void) =>
+      cb(0, frame.y, 390, frame.height)
+    )
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub)
+    await screen.findByText('Send a message to start.')
+    const padding = () =>
+      StyleSheet.flatten(screen.getByTestId('chat-session').props.style).paddingBottom ?? 0
+    await act(async () => {
+      fireEvent(screen.getByTestId('chat-session'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 600 } }
+      })
+    })
+    expect(padding()).toBe(0)
+    await act(async () => {
+      DeviceEventEmitter.emit('keyboardWillShow', { endCoordinates: { height: 300, screenY: 500 } })
+    })
+    expect(padding()).toBe(200)
+    // The title line above steps aside: the chat grows upwards, its bottom stays.
+    frame = { y: 72, height: 628 }
+    await act(async () => {
+      fireEvent(screen.getByTestId('chat-session'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 628 } }
+      })
+    })
+    expect(padding()).toBe(200)
+    await act(async () => {
+      DeviceEventEmitter.emit('keyboardWillHide', { endCoordinates: { height: 0, screenY: 844 } })
+    })
+    expect(padding()).toBe(0)
+    native.measureInWindow.mockReset()
+  })
+
+  it('in a short screen the / menu and the prompt dock give way, never the input', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub)
+    await screen.findByText('Send a message to start.')
+    await fireEvent.changeText(screen.getByTestId('chat-input'), '/')
+    const shrinks = (id: string) =>
+      StyleSheet.flatten(screen.getByTestId(id).props.style).flexShrink
+    expect(shrinks('slash-menu')).toBe(1)
+    await hubSends(hub, [
+      { kind: 'user-message', id: 'u1', text: 'go' },
+      {
+        kind: 'permission-request',
+        requestId: 'r1',
+        toolUseId: 't1',
+        toolName: 'Bash',
+        input: { command: 'ls' }
+      } as AgentEvent
+    ])
+    expect(
+      StyleSheet.flatten((await screen.findByTestId('prompt-dock')).props.style).flexShrink
+    ).toBe(1)
+    // The input row keeps its height: it is what must stay above the keyboard.
+    expect(
+      StyleSheet.flatten(screen.getByTestId('chat-input').parent?.props.style).flexShrink
+    ).toBe(0)
+  })
+})
 
 describe('ChatSession: computer availability', () => {
   it('replays output saved during a computer disconnect even when availability stays ready', async () => {
@@ -384,6 +538,19 @@ describe('ChatSession: answering', () => {
     await waitFor(() => expect(screen.queryByTestId('prompt-dock')).toBeNull())
   })
 
+  it('a Codex chat names Codex, not Claude, while it waits and when it stopped waiting', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.respondPermission', () => false)
+    await open(hub, 'codex-chat')
+    await screen.findByText('Send a message to start.')
+    await hubSends(hub, [{ kind: 'user-message', id: 'u1', text: 'go' }, request])
+    expect(await screen.findByText('Codex is waiting for your answer')).toBeOnTheScreen()
+    expect(screen.getByText('No, and tell Codex what to do differently')).toBeOnTheScreen()
+    expect(screen.queryByText(/Claude/)).toBeNull()
+    await userEvent.setup().press(screen.getByText('Yes'))
+    expect(await screen.findByText(/Codex stopped waiting for it/)).toBeOnTheScreen()
+  })
+
   it('rejects with typed feedback (the turn goes on)', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
     await open(hub)
@@ -424,6 +591,16 @@ describe('ChatSession: controls', () => {
       ])
     )
     await screen.findByLabelText('Permission mode: Plan mode')
+  })
+
+  it('the chips scroll sideways when they do not fit; a chip opens the app’s bottom sheet', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub)
+    expect((await screen.findByTestId('chat-controls')).props.horizontal).toBe(true)
+    await userEvent
+      .setup()
+      .press(await screen.findByLabelText('Permission mode: Auto-accept edits'))
+    expect(screen.getByTestId('chat-control-sheet')).toBeOnTheScreen()
   })
 
   /** What Codex's CLI listed for the account (`chat.getModels`): not a list of the app's. */
@@ -740,6 +917,44 @@ describe('ChatSession: files attached on desktop', () => {
       { kind: 'turn-init', sessionId: 's', model: 'opus', cwd: '/w', tools: [] },
       { kind: 'user-message', id: 'u1', text: 'build', content: [{ type: 'text', text: 'build' }] }
     ])
+
+  it('Stop with messages waiting asks first: they would be dropped', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    hub.on('chat.queue.list', () => [queuedRow()])
+    const alert = jest.spyOn(Alert, 'alert')
+    await open(hub)
+    await screen.findByTestId('chat-queue')
+    await runningTurn(hub)
+    const user = userEvent.setup()
+    alert.mockImplementationOnce((_t, _m, buttons) =>
+      buttons?.find((b) => b.text === 'Cancel')?.onPress?.()
+    )
+    await user.press(await screen.findByLabelText('Stop generation'))
+    expect(alert).toHaveBeenCalledTimes(1)
+    expect(alert.mock.calls[0][0]).toMatch(/1 queued message/)
+    expect(hub.callsTo('chat.abortAndPop')).toHaveLength(0)
+    expect(hub.callsTo('chat.queue.clear')).toHaveLength(0)
+    alert.mockImplementationOnce((_t, _m, buttons) =>
+      buttons?.find((b) => b.text === 'Stop')?.onPress?.()
+    )
+    await user.press(screen.getByLabelText('Stop generation'))
+    await waitFor(() => expect(hub.callsTo('chat.abortAndPop')).toHaveLength(1))
+    alert.mockRestore()
+  })
+
+  it('Send and Stop are at least 44pt to a finger', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await open(hub)
+    await screen.findByText('Send a message to start.')
+    await runningTurn(hub)
+    for (const label of ['Queue message', 'Stop generation']) {
+      const button = await screen.findByLabelText(label)
+      const style = StyleSheet.flatten(button.props.style)
+      const slop = button.props.hitSlop ?? 0
+      expect(style.width + 2 * slop).toBeGreaterThanOrEqual(44)
+      expect(style.height + 2 * slop).toBeGreaterThanOrEqual(44)
+    }
+  })
 
   it('"Send now" on a queued message while a turn runs', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })

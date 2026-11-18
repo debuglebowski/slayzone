@@ -6,9 +6,12 @@
  */
 import { renderRouter, screen } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
-import { Dimensions } from 'react-native'
+import { act } from '@testing-library/react-native'
+import { router } from 'expo-router'
+import { Dimensions, Platform } from 'react-native'
 import type { HubSession } from '../hub-session'
 import { redirectSystemPath } from '../app/+native-intent'
+import { artifactBackLabel } from './ArtifactRoutes'
 
 const mockSessions: { kept: HubSession[] } = { kept: [] }
 
@@ -47,15 +50,19 @@ jest.mock('../trpc', () => ({
   useTRPCClient: () => null
 }))
 jest.mock('./ArtifactsScreen', () => ({
-  ArtifactsScreen: (p: { taskId: string; layout: string; selected: unknown }) => {
+  ArtifactsScreen: (p: {
+    taskId: string
+    layout: string
+    selected: unknown
+    artifactBackLabel?: string
+  }) => {
     const { Text: T } = require('react-native')
-    return <T>{`list ${p.taskId} ${p.layout} ${JSON.stringify(p.selected)}`}</T>
-  }
-}))
-jest.mock('./ArtifactViewer', () => ({
-  ArtifactViewer: (p: { taskId: string; artifactId: string; version: number | null }) => {
-    const { Text: T } = require('react-native')
-    return <T>{`viewer ${p.taskId} ${p.artifactId} ${p.version}`}</T>
+    return (
+      <>
+        <T>{`list ${p.taskId} ${p.layout} ${JSON.stringify(p.selected)}`}</T>
+        {p.layout === 'artifact' ? <T>{`back: ${p.artifactBackLabel}`}</T> : null}
+      </>
+    )
   }
 }))
 jest.mock('./ArtifactSearchScreen', () => ({
@@ -74,6 +81,10 @@ const MOUNT = { timeout: 10_000 }
 
 function setWindow(size: typeof PHONE) {
   jest.spyOn(Dimensions, 'get').mockReturnValue(size)
+  // Desktop's split is an iPad's (`useWide`), never an iPhone's.
+  jest
+    .spyOn(Platform as { readonly isPad: boolean }, 'isPad', 'get')
+    .mockReturnValue(size === TABLET)
 }
 
 beforeEach(() => {
@@ -96,7 +107,33 @@ describe('artifact routes', () => {
 
   it('/artifacts/<hub>/<task>/<id>?version=: that version of the artifact (phone)', async () => {
     await renderRouter('src/app', { initialUrl: '/artifacts/home.example/t1/a1?version=3' })
-    expect(await screen.findByText('viewer t1 a1 3', undefined, MOUNT)).toBeOnTheScreen()
+    expect(
+      await screen.findByText('list t1 artifact {"artifactId":"a1","version":3}', undefined, MOUNT)
+    ).toBeOnTheScreen()
+    // Opened by a link: Back goes to the tab's root (the board), and says so.
+    expect(screen.getByText('back: Board')).toBeOnTheScreen()
+  })
+
+  it("an artifact's Back names the screen it was opened from", async () => {
+    await renderRouter('src/app', { initialUrl: '/artifacts/home.example/t1' })
+    await screen.findByText('list t1 list null', undefined, MOUNT)
+    await act(async () => router.push('/artifacts/home.example/t1/a1'))
+    expect(await screen.findByText('back: Artifacts', undefined, MOUNT)).toBeOnTheScreen()
+    await act(async () => router.push('/task/home.example/t1'))
+    await act(async () => router.push('/artifacts/home.example/t1/a2'))
+    expect(await screen.findByText('back: Task', undefined, MOUNT)).toBeOnTheScreen()
+  })
+
+  it('an iPhone in landscape keeps the phone layout (no split)', async () => {
+    setWindow({ width: 932, height: 430, scale: 3, fontScale: 1 })
+    await renderRouter('src/app', { initialUrl: '/artifacts/home.example/t1/a1' })
+    expect(
+      await screen.findByText(
+        'list t1 artifact {"artifactId":"a1","version":null}',
+        undefined,
+        MOUNT
+      )
+    ).toBeOnTheScreen()
   })
 
   it('wide screen: the list with the named artifact beside it', async () => {
@@ -123,6 +160,18 @@ describe('artifact routes', () => {
     expect(
       await screen.findByText('Not signed in to other.example', undefined, MOUNT)
     ).toBeOnTheScreen()
-    expect(screen.queryByText(/^viewer/)).toBeNull()
+    expect(screen.queryByText(/^list/)).toBeNull()
+  })
+})
+
+describe('artifactBackLabel', () => {
+  it('names the screen below the artifact by its route', () => {
+    expect(artifactBackLabel('artifacts/[hub]/[task]/index')).toBe('Artifacts')
+    expect(artifactBackLabel('task/[hub]/[id]')).toBe('Task')
+    expect(artifactBackLabel('artifacts/index')).toBe('Search')
+    expect(artifactBackLabel('index')).toBe('Board')
+    expect(artifactBackLabel('artifacts/[hub]/[task]/[id]')).toBe('Back')
+    expect(artifactBackLabel('something/else')).toBe('Back')
+    expect(artifactBackLabel(undefined)).toBe('Artifacts')
   })
 })

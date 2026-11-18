@@ -4,9 +4,10 @@
  * keychain (`expo-secure-store`). "Sign in with Microsoft" shows only where the hub
  * offers it; each way the sign-in ends says what happened.
  */
-import { render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { act, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { AccessibilityInfo } from 'react-native'
 import * as WebBrowser from 'expo-web-browser'
-import { hubEntryOf, type HubSession } from './hub-session'
+import { cantReachHub, hubEntryOf, type HubSession } from './hub-session'
 import { SignInScreen } from './SignInScreen'
 
 jest.mock('expo-web-browser', () => ({ openAuthSessionAsync: jest.fn() }))
@@ -88,7 +89,7 @@ async function typeHub(address: string) {
   const onSignedIn = jest.fn<void, [HubSession]>()
   await render(<SignInScreen title="Sign in to a hub" onSignedIn={onSignedIn} />)
   const user = userEvent.setup()
-  await user.type(screen.getByPlaceholderText('hub.example.com or 127.0.0.1:8788'), address)
+  await user.type(screen.getByPlaceholderText('hub.yourcompany.com'), address)
   return { onSignedIn, user }
 }
 
@@ -125,11 +126,16 @@ describe('SignInScreen: Sign in with Microsoft', () => {
     expect(screen.queryByText('Email')).toBeNull()
   })
 
-  it('cancelled in the sheet', async () => {
+  it('cancelled in the sheet: back to the form, no error', async () => {
     openAuthSession.mockResolvedValue({ type: 'cancel' })
     const { onSignedIn, user } = await typeHub('sso.example.com')
     await user.press(await screen.findByText('Sign in with Microsoft'))
-    expect(await screen.findByText('Sign-in was cancelled.')).toBeOnTheScreen()
+    await waitFor(() => expect(openAuthSession).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Sign in with Microsoft' })).toBeEnabled()
+    )
+    expect(screen.queryByText('Sign-in was cancelled.')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(onSignedIn).not.toHaveBeenCalled()
     expect(mockKeychain.size).toBe(0)
   })
@@ -159,7 +165,9 @@ describe('SignInScreen: Sign in with Microsoft', () => {
     delete HUBS['sso.example.com'] // goes away between the probe and the press
     try {
       await user.press(button)
-      expect(await screen.findByText(/^Could not reach the hub: /)).toBeOnTheScreen()
+      expect(
+        await screen.findByText(cantReachHub('sso.example.com', 'unreachable'))
+      ).toBeOnTheScreen()
       expect(openAuthSession).not.toHaveBeenCalled()
     } finally {
       HUBS['sso.example.com'] = {
@@ -176,5 +184,109 @@ describe('SignInScreen: Sign in with Microsoft', () => {
     await waitFor(() => expect(healthCalls).toBeGreaterThan(0))
     expect(screen.queryByText('Sign in with Microsoft')).toBeNull()
     expect(screen.getByText('Password')).toBeOnTheScreen()
+  })
+})
+
+describe('SignInScreen: the form', () => {
+  it('says what a hub is, under the app name, with a real-world placeholder', async () => {
+    await render(<SignInScreen title="Sign in to a hub" onSignedIn={jest.fn()} />)
+    expect(screen.getByText('SlayZone')).toBeOnTheScreen()
+    expect(
+      screen.getByText(
+        'A hub is the SlayZone server your desktop app or your team runs. Ask whoever set it up for its address.'
+      )
+    ).toBeOnTheScreen()
+    expect(screen.getByPlaceholderText('hub.yourcompany.com')).toBeOnTheScreen()
+    expect(screen.queryByPlaceholderText(/127\.0\.0\.1/)).toBeNull()
+  })
+
+  it('scrolls, so nothing is pushed out of reach by the keyboard or landscape', async () => {
+    await render(<SignInScreen title="Sign in to a hub" onSignedIn={jest.fn()} />)
+    const scroller = screen.getByTestId('sign-in-scroll')
+    expect(scroller.props.keyboardShouldPersistTaps).toBe('handled')
+  })
+
+  it('Return moves from field to field, and Go on the password signs in', async () => {
+    await render(<SignInScreen title="Sign in to a hub" onSignedIn={jest.fn()} />)
+    const hub = screen.getByPlaceholderText('hub.yourcompany.com')
+    const email = screen.getByPlaceholderText('you@example.com')
+    const password = screen.getByTestId('sign-in-password')
+    expect(hub.props.returnKeyType).toBe('next')
+    expect(email.props.returnKeyType).toBe('next')
+    expect(password.props.returnKeyType).toBe('go')
+    expect(hub.props.autoCapitalize).toBe('none')
+    expect(hub.props.autoCorrect).toBe(false)
+    expect(hub.props.keyboardType).toBe('url')
+
+    const user = userEvent.setup()
+    await user.type(hub, 'pw.example.com')
+    await user.type(email, 'me@example.com')
+    await user.type(password, 'wrong', { submitEditing: true })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeOnTheScreen())
+  })
+
+  it('the Sign in button is a button; the fields are read-only while signing in', async () => {
+    let release: () => void = () => undefined
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const realFetch = global.fetch
+    global.fetch = jest.fn(async (input: string) => {
+      await pending
+      return realFetch(input)
+    }) as unknown as typeof fetch
+    await render(<SignInScreen title="Sign in to a hub" onSignedIn={jest.fn()} />)
+    const user = userEvent.setup()
+    await user.type(screen.getByPlaceholderText('hub.yourcompany.com'), 'pw.example.com')
+    await user.type(screen.getByPlaceholderText('you@example.com'), 'me@example.com')
+    await user.type(screen.getByTestId('sign-in-password'), 'pw')
+    await user.press(screen.getByRole('button', { name: 'Sign in' }))
+    expect(screen.getByPlaceholderText('hub.yourcompany.com').props.editable).toBe(false)
+    expect(screen.getByTestId('sign-in-password').props.editable).toBe(false)
+    await act(async () => release())
+  })
+
+  it('the spinner shows only in the button of the way in flight', async () => {
+    openAuthSession.mockImplementation(() => new Promise(() => undefined))
+    const { user } = await typeHub('both.example.com')
+    await user.press(await screen.findByText('Sign in with Microsoft'))
+    await waitFor(() => expect(openAuthSession).toHaveBeenCalled())
+    expect(screen.getByTestId('sign-in-microsoft-busy')).toBeOnTheScreen()
+    expect(screen.queryByTestId('sign-in-password-busy')).toBeNull()
+    expect(screen.getByText('Sign in')).toBeOnTheScreen()
+  })
+
+  it('tells VoiceOver what went wrong', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility')
+    await render(<SignInScreen title="Sign in to a hub" onSignedIn={jest.fn()} />)
+    const user = userEvent.setup()
+    await user.type(screen.getByPlaceholderText('hub.yourcompany.com'), 'down.example.com')
+    await user.type(screen.getByPlaceholderText('you@example.com'), 'me@example.com')
+    await user.type(screen.getByTestId('sign-in-password'), 'pw')
+    await user.press(screen.getByRole('button', { name: 'Sign in' }))
+    const error = cantReachHub('down.example.com', 'unreachable')
+    expect(await screen.findByRole('alert')).toHaveTextContent(error)
+    expect(announce).toHaveBeenCalledWith(error)
+    announce.mockRestore()
+  })
+})
+
+describe('SignInScreen: a hub already signed in to', () => {
+  it('says so: signing in again replaces that sign-in', async () => {
+    await render(
+      <SignInScreen
+        title="Sign in to another hub"
+        onSignedIn={jest.fn()}
+        onCancel={jest.fn()}
+        signedInAddresses={['pw.example.com']}
+      />
+    )
+    const user = userEvent.setup()
+    await user.type(screen.getByPlaceholderText('hub.yourcompany.com'), 'https://PW.example.com')
+    expect(
+      screen.getByText(
+        "You're already signed in to pw.example.com. Signing in again replaces that sign-in."
+      )
+    ).toBeOnTheScreen()
   })
 })

@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from 'react-native'
 import { agentDotOf } from '../board/card-model'
 import type { AgentRow } from '../agents/hub-agents'
 import type { HubFeed } from '../hub-board'
@@ -8,13 +16,14 @@ import type { ProjectRef } from '../projects/hub-projects'
 import { type ChromeColors, useTheme } from '../theme'
 import { BottomSheet, Pill } from '../ui-kit/Chrome'
 import { AgentDot } from '../ui-kit/TaskGlyphs'
-import { attentionRows, attentionSubtitle } from './attention'
+import { attentionLoad, attentionRows, attentionSections, attentionSubtitle } from './attention'
 
 /**
- * The 🔔 sheet — desktop's bell + agent status panel: every hub's agents, the ones
- * waiting for you first, for all projects or the board's project. Tap one: into its
- * task. × on an unread one: dismissed (the task is marked read on its hub, as opening
- * it would; desktop's "mark as read").
+ * The 🔔 sheet — desktop's bell + agent status panel: every hub's agents under a header
+ * per group, the ones ready for review first, for all projects or the board's project.
+ * Until the hubs' agents are in it says so (and why, when they could not be read),
+ * rather than "No agents". Tap one: into its task. × on an unread one: dismissed (the
+ * task is marked read on its hub, as opening it would; desktop's "mark as read").
  */
 export function AttentionSheet({
   feeds,
@@ -36,6 +45,7 @@ export function AttentionSheet({
   const { clientFor } = useHubFeeds()
   const [onlyProject, setOnlyProject] = useState(false)
   const rows = attentionRows(feeds, onlyProject && project ? project : null)
+  const load = attentionLoad(feeds)
   const severalHubs = feeds.length > 1
 
   const dismiss = (row: AgentRow) => {
@@ -65,44 +75,64 @@ export function AttentionSheet({
         ) : null}
       </View>
       <ScrollView>
-        {rows.length === 0 ? <Text style={styles.note}>No agents</Text> : null}
-        {rows.map((row) => {
-          const dot = agentDotOf(row.state, row.unread)
-          return (
-            <View key={row.key} style={styles.row}>
-              <Pressable
-                style={styles.rowMain}
-                accessibilityRole="button"
-                testID={`attention-row-${row.task.id}`}
-                onPress={() => {
-                  onClose()
-                  onOpen(row)
-                }}
-              >
-                <View style={styles.dot}>{dot ? <AgentDot kind={dot} /> : null}</View>
-                <View style={styles.text}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {row.task.title}
-                  </Text>
-                  <Text style={styles.sub} numberOfLines={1}>
-                    {attentionSubtitle(row, severalHubs)}
-                  </Text>
+        {load.kind === 'error' ? (
+          <Text style={styles.problem}>Couldn’t load the agents. {load.message}</Text>
+        ) : null}
+        {rows.length === 0 && load.kind === 'loading' ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={theme.mutedForeground} />
+            <Text style={styles.note}>Loading agents…</Text>
+          </View>
+        ) : null}
+        {rows.length === 0 && load.kind === 'ready' ? (
+          <Text style={styles.note}>No agents</Text>
+        ) : null}
+        {attentionSections(rows).map((section) => (
+          <View key={section.group}>
+            <Text style={styles.header} accessibilityRole="header">
+              {section.title}
+            </Text>
+            {section.rows.map((row) => {
+              const dot = agentDotOf(row.state, row.unread)
+              return (
+                <View key={row.key} style={styles.row}>
+                  <Pressable
+                    style={styles.rowMain}
+                    accessibilityRole="button"
+                    testID={`attention-row-${row.task.id}`}
+                    onPress={() => {
+                      onClose()
+                      onOpen(row)
+                    }}
+                  >
+                    <View style={styles.dot}>{dot ? <AgentDot kind={dot} /> : null}</View>
+                    <View style={styles.text}>
+                      <Text style={styles.title} numberOfLines={1}>
+                        {row.task.title}
+                      </Text>
+                      <Text style={styles.sub} numberOfLines={1}>
+                        {attentionSubtitle(row, severalHubs)}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  {row.unread ? (
+                    <Pressable
+                      onPress={() => dismiss(row)}
+                      style={styles.dismissButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Dismiss ${row.task.title}`}
+                      testID={`attention-dismiss-${row.task.id}`}
+                    >
+                      <Text style={styles.dismiss} maxFontSizeMultiplier={1.4}>
+                        ✕
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
-              </Pressable>
-              {row.unread ? (
-                <Pressable
-                  onPress={() => dismiss(row)}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Dismiss ${row.task.title}`}
-                  testID={`attention-dismiss-${row.task.id}`}
-                >
-                  <Text style={styles.dismiss}>✕</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          )
-        })}
+              )
+            })}
+          </View>
+        ))}
       </ScrollView>
     </BottomSheet>
   )
@@ -112,6 +142,17 @@ const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     scopes: { flexDirection: 'row', gap: 6, marginBottom: 6 },
     note: { color: t.mutedForeground, paddingVertical: 24, textAlign: 'center' },
+    loading: { alignItems: 'center', paddingTop: 24 },
+    problem: { color: t.destructive, fontSize: 13, paddingVertical: 10 },
+    header: {
+      fontSize: 11,
+      fontWeight: '600',
+      letterSpacing: 0.6,
+      color: t.mutedForeground,
+      textTransform: 'uppercase',
+      paddingTop: 14,
+      paddingBottom: 6
+    },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -124,5 +165,6 @@ const makeStyles = (t: ChromeColors) =>
     text: { flex: 1 },
     title: { fontSize: 15, color: t.foreground },
     sub: { fontSize: 12, color: t.mutedForeground, marginTop: 2 },
-    dismiss: { fontSize: 14, color: t.mutedForeground, paddingHorizontal: 4 }
+    dismissButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    dismiss: { fontSize: 14, color: t.mutedForeground }
   })

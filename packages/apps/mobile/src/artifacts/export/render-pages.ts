@@ -32,7 +32,7 @@
  */
 import { mermaidInitOptions } from '@slayzone/markdown/mermaid-config'
 import { buildDocumentHtml, buildPngHtml } from '@slayzone/task-artifacts/export-html'
-import { contentPolicy, inlineScript, newNonce, pageShell } from '../pages/page-style'
+import { contentPolicy, inlineScript, newNonce, newToken, pageShell } from '../pages/page-style'
 
 /** Marks the replies of these pages among anything else a page could post. */
 export const EXPORT_RENDER_SOURCE = 'slayzone-export'
@@ -109,9 +109,6 @@ const pngMaxChars = (pixels: number): number => base64Chars(Math.ceil(pixels * 4
  */
 const replyHead = (token: string): string =>
   `{"source":${JSON.stringify(EXPORT_RENDER_SOURCE)},"token":${JSON.stringify(token)}`
-
-/** A fresh token: three nonces, so no page can guess another's. */
-const newToken = (): string => `${newNonce()}${newNonce()}${newNonce()}`
 
 /** A value as script source, safe inside an inline `<script>`. */
 export function scriptJson(value: unknown): string {

@@ -6,15 +6,26 @@
  *
  * - Output: `TerminalFeed` (subscribe → attach → dedupe → catch up), started once the
  *   data subscription runs AND the web view's terminal exists; a reloaded web view
- *   gets the session replayed. Rendered at the session's size, never resized.
+ *   gets the session replayed. Rendered at the session's size, never resized; the
+ *   text size (readable — wider sessions pan — or fit to width) is the user's, kept on
+ *   this device (`terminal-prefs.ts`; a double tap in the terminal switches it too).
+ * - Says what an empty terminal means: connecting, the agent not running (nothing
+ *   written), the computer offline (output resumes when it is back), or a failed load
+ *   (with Retry).
  * - Input: key bar → `pty.write` (Esc and Ctrl+C also `pty.interrupt`, as desktop),
- *   and so does a touch scroll the program takes (wheel / arrow bytes from the view);
- *   text → `pty.submit` (the agent's own submit, which knows its Enter), an empty
- *   send presses Enter. OSC strings are stripped from typed text, as desktop strips
- *   them from its terminal's input.
- * - Keyboard: Return sends and keeps the keyboard up, and the terminal is a web view
- *   (a touch there does not blur the field), so closing it is explicit: the Hide
- *   button beside Send while typing, or touching the terminal.
+ *   and so does a touch scroll the program takes (wheel / arrow bytes from the view) —
+ *   all through the controller's ordered writer; text → `pty.submit` (the agent's own
+ *   submit, which knows its Enter), an empty send presses Enter. OSC strings are
+ *   stripped from typed text, as desktop strips them from its terminal's input.
+ *   Ctrl is sticky: tapped, the next character typed goes as Ctrl+it. Arrows repeat
+ *   while held.
+ * - Keyboard: the key bar and the field ride above it (`KeyboardAvoidingView`; the web
+ *   view refits to the smaller area and keeps its newest line in view). Return sends
+ *   and keeps the keyboard up, and the terminal is a web view (a touch there does not
+ *   blur the field), so closing it is explicit: the Hide button beside Send while
+ *   typing, or touching the terminal.
+ * - A tapped web link opens in the browser; the screen's or all the output's text can
+ *   be shared (iOS's share sheet has Copy) — `TerminalViewHandle`.
  * - Presence: `pty.touch` when opened and, at most every 4s (desktop's throttle), on
  *   interaction — the idle-close timer must not put an agent the user is watching
  *   to sleep.
@@ -25,43 +36,97 @@
  */
 import { ENTER, stripOscReplies } from '@slayzone/terminal-contracts'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import { type ChromeColors, useTerminalColors, useTheme } from '../theme'
+import { type ComponentRef, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  type LayoutChangeEvent,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from 'react-native'
+import { openWebLink } from '../chat/Markdown'
+import { copyText, shareText } from '../chat/message-text'
+import { type ChromeColors, useTerminalColors, useTheme, useThemeVariant } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
-import { type BarKey, KEY_BAR, type KeyModes, keyBytes } from './key-bar'
+import { type BarKey, ctrlChar, KEY_BAR, type KeyModes, KeyRepeater, keyBytes } from './key-bar'
 import TerminalDom, { type TerminalDomHandle } from './TerminalDom'
 import { TerminalController } from './terminal-controller'
 import type { FeedStatus } from './terminal-feed'
+import { terminalPrefsFile } from './terminal-prefs-file'
+import { phoneGrid, type TextSize } from './terminal-scale'
 import { useNativeMounted } from './use-native-mounted'
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
+/** Chrome glyphs and labels grow with Dynamic Type, but not past what the bar holds. */
+const MAX_CHROME_SCALE = 1.4
+
+/** What the agent panel does with the terminal (its ⋯ menu, its Start). */
+export interface TerminalViewHandle {
+  /**
+   * The grid a terminal the phone starts should have: this terminal's area at the
+   * readable font (keyboard closed). Undefined until it was measured.
+   */
+  grid(): { cols: number; rows: number } | undefined
+  /** Copy or share the screen's (`screen`) or all the output's (`all`) text. */
+  exportText(kind: 'screen' | 'all', how: 'copy' | 'share'): void
+  /** The text size shown (and kept on this device). */
+  textSize(): TextSize
+  toggleTextSize(): void
+}
+
 export function TerminalView({
   sessionId,
   taskId,
-  live
+  live,
+  computerName,
+  notRunningHint,
+  stateLoading = false,
+  onHandle
 }: {
   sessionId: string
   /** The task the session belongs to: the direct link's computer target. */
   taskId: string
   live: boolean
+  /** The name of the computer the task runs on, for "<name> is offline". */
+  computerName?: string | null
+  /** What to do about an agent that is not running (after "The agent isn't running."). */
+  notRunningHint?: string
+  /** The hub's agent states are not in yet: `live` false means "not known", not "stopped". */
+  stateLoading?: boolean
+  /**
+   * Given the terminal's handle (null when it goes) — the panel's way to act on it
+   * from its handlers. A prop rather than a `ref`: the holder reads it in handlers only.
+   */
+  onHandle?: (handle: TerminalViewHandle | null) => void
 }) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const theme = useTheme()
+  const variant = useThemeVariant()
   const colors = useTerminalColors()
   const styles = makeStyles(theme)
   const [modes, setModes] = useState<KeyModes>({ applicationCursorKeys: false })
   const [status, setStatus] = useState<FeedStatus>({
     phase: 'attaching',
     exists: false,
-    error: null
+    error: null,
+    output: false
   })
   const [text, setText] = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
   const [typing, setTyping] = useState(false)
+  const [ctrlArmed, setCtrlArmed] = useState(false)
+  const [textSize, setTextSize] = useState<TextSize>(() => terminalPrefsFile.load().textSize)
+  const [repeater] = useState(() => new KeyRepeater())
+  useEffect(() => () => repeater.release(), [repeater])
 
   const terminal = useRef<TerminalDomHandle>(null)
   // The web view mounts one render later (`useNativeMounted`: expo's mount-time call
@@ -144,8 +209,20 @@ export function TerminalView({
     })
   }
 
+  /** Bytes for the agent, in the order typed (key bar, Ctrl+letter, touch scroll). */
+  const write = (data: string): void => {
+    if (!live) return
+    touch()
+    send(() => controller.write(data))
+  }
+
   const press = (key: BarKey): void => {
     if (!live) return
+    if (key.modifier) {
+      setCtrlArmed((armed) => !armed)
+      return
+    }
+    setCtrlArmed(false)
     touch()
     const data = keyBytes(key, modes)
     send(async () => {
@@ -154,11 +231,19 @@ export function TerminalView({
     })
   }
 
-  /** Bytes from the terminal itself (a touch scroll), as a keyboard would send them. */
-  const write = (data: string): void => {
-    if (!live) return
-    touch()
-    send(() => client.pty.write.mutate({ sessionId, data }))
+  const changeText = (next: string): void => {
+    if (ctrlArmed) {
+      setCtrlArmed(false)
+      // One character typed after Ctrl: it goes as Ctrl+it, not into the field.
+      if (next.length === text.length + 1 && next.startsWith(text)) {
+        const bytes = ctrlChar(next.slice(-1))
+        if (bytes !== null) {
+          write(bytes)
+          return
+        }
+      }
+    }
+    setText(next)
   }
 
   const submit = (): void => {
@@ -170,13 +255,128 @@ export function TerminalView({
     else send(() => controller.write(ENTER))
   }
 
+  const keepTextSize = (size: TextSize): void => {
+    setTextSize(size)
+    terminalPrefsFile.save({ textSize: size })
+  }
+
+  // The area the terminal had with the keyboard closed: what a phone-started agent's
+  // grid is sized to (`grid`).
+  const area = useRef<{ width: number; height: number } | null>(null)
+  const measureArea = (event: LayoutChangeEvent): void => {
+    if (Keyboard.isVisible()) return
+    const { width, height } = event.nativeEvent.layout
+    area.current = { width, height }
+  }
+
+  useEffect(() => {
+    if (!onHandle) return
+    onHandle({
+      grid: () => {
+        const measured = area.current
+        return (measured && phoneGrid(measured.width, measured.height)) ?? undefined
+      },
+      exportText: (kind, how) => {
+        textAction.current = how
+        terminal.current?.requestText(kind)
+      },
+      textSize: () => textSize,
+      toggleTextSize: () => keepTextSize(textSize === 'readable' ? 'fit' : 'readable')
+    })
+    return () => onHandle(null)
+  })
+
+  // What the text the terminal sends back is for (set by `exportText`, in a handler).
+  const textAction = useRef<'copy' | 'share'>('share')
+  const exportTextNow = async (text: string): Promise<void> => {
+    if (text.trim().length === 0) return
+    if (textAction.current === 'copy') copyText(text)
+    else shareText(text)
+  }
+
+  // The keyboard lifts the key bar and field by what it covers of THIS view: its
+  // offset is how far the view sits below the top of the window, measured — again
+  // when the keyboard opens, as what is above may have changed height since.
+  const rootRef = useRef<ComponentRef<typeof View>>(null)
+  const [top, setTop] = useState(0)
+  const measure = useCallback(() => {
+    rootRef.current?.measureInWindow((_x: number, y: number) =>
+      setTop((prev) => (prev === y ? prev : y))
+    )
+  }, [])
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardWillShow', measure)
+    return () => sub.remove()
+  }, [measure])
+
+  let overlay = null
+  if (status.phase === 'attaching') {
+    overlay = (
+      <View style={styles.overlay} accessible accessibilityLabel="Connecting to the agent">
+        <ActivityIndicator color={colors.foreground} />
+      </View>
+    )
+  } else if (status.phase === 'error') {
+    overlay = (
+      <View style={styles.overlay}>
+        <Text style={styles.overlayTitle}>Couldn’t load the agent’s output.</Text>
+        {status.error ? (
+          <Text style={styles.overlayDetail} numberOfLines={3}>
+            {status.error}
+          </Text>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading the output"
+          onPress={() => controller.retry()}
+          style={({ pressed }) => [styles.retry, pressed && styles.keyPressed]}
+        >
+          <Text style={styles.retryText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+            Retry
+          </Text>
+        </Pressable>
+      </View>
+    )
+  } else if (status.phase === 'offline') {
+    overlay = (
+      <View style={styles.overlay} pointerEvents="none">
+        <Text style={styles.overlayTitle} accessibilityLiveRegion="polite">
+          {computerName
+            ? `${computerName} is offline. Its output resumes when it’s back.`
+            : 'The computer running this agent is offline. Its output resumes when it’s back.'}
+        </Text>
+      </View>
+    )
+  } else if (!live && !stateLoading && !status.output) {
+    overlay = (
+      <View style={styles.overlay} pointerEvents="none">
+        <Text style={styles.overlayTitle}>
+          {notRunningHint
+            ? `The agent isn’t running. ${notRunningHint}`
+            : 'The agent isn’t running.'}
+        </Text>
+      </View>
+    )
+  }
+
   return (
-    <View style={styles.root}>
-      <View style={[styles.terminal, { backgroundColor: colors.background }]}>
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={top}
+      testID="terminal-view"
+    >
+      <View ref={rootRef} onLayout={measure} style={styles.probe} />
+      <View
+        style={[styles.terminal, { backgroundColor: colors.background }]}
+        onLayout={measureArea}
+        testID="terminal-area"
+      >
         {webMounted ? (
           <TerminalDom
             ref={terminal}
             colors={colors}
+            textSize={textSize}
             onReady={() => controller.terminalReady()}
             onModes={async (applicationCursorKeys) => setModes({ applicationCursorKeys })}
             onInteract={async () => {
@@ -184,19 +384,13 @@ export function TerminalView({
               touch()
             }}
             onInput={async (data) => write(data)}
+            onOpenLink={async (url) => openWebLink(url)}
+            onTextSize={async (size) => keepTextSize(size)}
+            onText={exportTextNow}
             dom={{ style: styles.web, scrollEnabled: false, bounces: false }}
           />
         ) : null}
-        {status.phase === 'error' ? (
-          <Text style={styles.problem} numberOfLines={2}>
-            {status.error}
-          </Text>
-        ) : null}
-        {status.phase === 'offline' ? (
-          <Text style={styles.problem} numberOfLines={2}>
-            Computer offline
-          </Text>
-        ) : null}
+        {overlay}
       </View>
       <ScrollView
         horizontal
@@ -205,19 +399,29 @@ export function TerminalView({
         style={styles.keys}
         contentContainerStyle={styles.keysContent}
       >
-        {KEY_BAR.map((key) => (
-          <Pressable
-            key={key.id}
-            accessibilityRole="button"
-            accessibilityLabel={key.accessibilityLabel}
-            accessibilityState={{ disabled: !live }}
-            disabled={!live}
-            onPress={() => press(key)}
-            style={({ pressed }) => [styles.key, pressed && styles.keyPressed]}
-          >
-            <Text style={[styles.keyLabel, !live && styles.disabled]}>{key.label}</Text>
-          </Pressable>
-        ))}
+        {KEY_BAR.map((key) => {
+          const armed = key.modifier === true && ctrlArmed
+          return (
+            <Pressable
+              key={key.id}
+              accessibilityRole="button"
+              accessibilityLabel={key.accessibilityLabel}
+              accessibilityState={{ disabled: !live, selected: armed }}
+              disabled={!live}
+              onPress={key.repeats ? undefined : () => press(key)}
+              onPressIn={key.repeats ? () => repeater.press(() => press(key)) : undefined}
+              onPressOut={key.repeats ? () => repeater.release() : undefined}
+              style={({ pressed }) => [styles.key, (pressed || armed) && styles.keyPressed]}
+            >
+              <Text
+                style={[styles.keyLabel, !live && styles.disabled]}
+                maxFontSizeMultiplier={MAX_CHROME_SCALE}
+              >
+                {key.label}
+              </Text>
+            </Pressable>
+          )
+        })}
       </ScrollView>
       {sendError ? <Text style={styles.problem}>Not sent: {sendError}</Text> : null}
       <View style={styles.inputRow}>
@@ -225,15 +429,18 @@ export function TerminalView({
           accessibilityLabel="Message to the agent"
           style={styles.input}
           value={text}
-          onChangeText={setText}
+          onChangeText={changeText}
           onSubmitEditing={submit}
           editable={live}
-          placeholder={live ? 'Message' : 'Not running'}
+          placeholder={live ? (ctrlArmed ? 'Ctrl + a letter' : 'Message') : 'Not running'}
           placeholderTextColor={theme.mutedForeground}
-          autoCapitalize="none"
-          autoCorrect={false}
+          multiline
+          submitBehavior="submit"
           returnKeyType="send"
-          blurOnSubmit={false}
+          autoCapitalize="sentences"
+          autoCorrect
+          spellCheck
+          keyboardAppearance={variant}
           onFocus={() => setTyping(true)}
           onBlur={() => setTyping(false)}
         />
@@ -242,9 +449,11 @@ export function TerminalView({
             accessibilityRole="button"
             accessibilityLabel="Hide keyboard"
             onPress={() => Keyboard.dismiss()}
-            hitSlop={8}
+            style={styles.textButton}
           >
-            <Text style={styles.hide}>Hide</Text>
+            <Text style={styles.hide} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+              Hide
+            </Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -253,20 +462,45 @@ export function TerminalView({
           accessibilityState={{ disabled: !live }}
           disabled={!live}
           onPress={submit}
-          hitSlop={8}
+          style={styles.textButton}
         >
-          <Text style={[styles.send, !live && styles.disabled]}>Send</Text>
+          <Text
+            style={[styles.send, !live && styles.disabled]}
+            maxFontSizeMultiplier={MAX_CHROME_SCALE}
+          >
+            Send
+          </Text>
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   )
 }
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     root: { flex: 1 },
+    probe: { height: 0 },
     terminal: { flex: 1 },
     web: { flex: 1 },
+    overlay: {
+      ...StyleSheet.absoluteFill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: 24
+    },
+    overlayTitle: { color: t.foreground, fontSize: 15, textAlign: 'center' },
+    overlayDetail: { color: t.mutedForeground, fontSize: 12, textAlign: 'center' },
+    retry: {
+      minHeight: 44,
+      minWidth: 88,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.muted
+    },
+    retryText: { fontSize: 15, fontWeight: '600', color: t.foreground },
     problem: { color: t.destructive, fontSize: 12, paddingHorizontal: 12, paddingVertical: 4 },
     keys: {
       flexGrow: 0,
@@ -274,28 +508,31 @@ const makeStyles = (t: ChromeColors) =>
       borderTopColor: t.border,
       backgroundColor: t.surface1
     },
-    keysContent: { paddingHorizontal: 8, paddingVertical: 6, gap: 6 },
+    keysContent: { paddingHorizontal: 8, paddingVertical: 4, gap: 6 },
     key: {
-      minWidth: 40,
+      minWidth: 44,
+      minHeight: 44,
       paddingHorizontal: 10,
-      paddingVertical: 8,
       borderRadius: 6,
       backgroundColor: t.muted,
-      alignItems: 'center'
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     keyPressed: { backgroundColor: t.accent },
-    keyLabel: { fontSize: 14, color: t.foreground, fontWeight: '500' },
+    keyLabel: { fontSize: 15, color: t.foreground, fontWeight: '500' },
     disabled: { color: t.mutedForeground },
     inputRow: {
       flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
+      alignItems: 'flex-end',
+      gap: 4,
       paddingHorizontal: 12,
-      paddingVertical: 8,
+      paddingVertical: 6,
       backgroundColor: t.surface1
     },
     input: {
       flex: 1,
+      minHeight: 40,
+      maxHeight: 120,
       fontSize: 15,
       color: t.foreground,
       backgroundColor: t.background,
@@ -303,7 +540,16 @@ const makeStyles = (t: ChromeColors) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.border,
       paddingHorizontal: 10,
-      paddingVertical: 8
+      paddingTop: 10,
+      paddingBottom: 10,
+      textAlignVertical: 'top'
+    },
+    textButton: {
+      minHeight: 44,
+      minWidth: 44,
+      paddingHorizontal: 6,
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     hide: { fontSize: 15, color: t.mutedForeground },
     send: { fontSize: 15, fontWeight: '600', color: t.foreground }

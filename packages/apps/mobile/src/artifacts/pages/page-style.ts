@@ -35,6 +35,12 @@ export function newNonce(): string {
 }
 
 /**
+ * A fresh secret for one page's messages to the app: three nonces, so no page can guess
+ * another's. Only the app's own script on the page holds it.
+ */
+export const newToken = (): string => `${newNonce()}${newNonce()}${newNonce()}`
+
+/**
  * A script for inline embedding: refused if it holds `<script` or `</script`, which
  * would end (or nest) the element early and turn the rest into page content.
  */
@@ -43,9 +49,13 @@ export function inlineScript(nonce: string, js: string): string {
   return `<script nonce="${nonce}">${js}</script>`
 }
 
-/** Images, media and fonts from the web (desktop's previews load them too); no requests else. */
+/**
+ * Images, media and fonts from the web (desktop's previews load them too); no requests
+ * else. No form submits anywhere and no `<base>` (`form-action`, `base-uri` don't fall
+ * back to `default-src`).
+ */
 const BASE_POLICY =
-  "default-src 'none'; img-src https: data:; media-src https:; font-src https: data:; style-src 'unsafe-inline'"
+  "default-src 'none'; img-src https: data:; media-src https:; font-src https: data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"
 
 export function contentPolicy(scriptNonce: string | null): string {
   return `${BASE_POLICY}; script-src ${scriptNonce ? `'nonce-${scriptNonce}'` : "'none'"}`

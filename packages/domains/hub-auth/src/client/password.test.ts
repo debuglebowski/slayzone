@@ -49,7 +49,7 @@ describe('signInWithPassword', () => {
       status: 403,
       code: 'HUB_PASSWORD_DISABLED',
       hubError: 'Password sign-in is off on this hub.',
-      error: 'Sign-in failed (HTTP 403)'
+      error: 'This hub does not offer password sign-in.'
     })
     const plain = fakeHubTransport(() => ({ status: 401, body: 'nope' }))
     expect(await signInWithPassword(plain.transport, BASE, CREDS)).toEqual({
@@ -57,6 +57,41 @@ describe('signInWithPassword', () => {
       reason: 'refused',
       status: 401,
       error: 'Sign-in failed (HTTP 401)'
+    })
+  })
+
+  it("better-auth's refusals ({code, message}): a plain sentence for a known code", async () => {
+    const hub = fakeHubTransport(() => ({
+      status: 401,
+      body: { code: 'INVALID_EMAIL_OR_PASSWORD', message: 'Invalid email or password' }
+    }))
+    expect(await signInWithPassword(hub.transport, BASE, CREDS)).toEqual({
+      ok: false,
+      reason: 'refused',
+      status: 401,
+      code: 'INVALID_EMAIL_OR_PASSWORD',
+      hubError: 'Invalid email or password',
+      error: 'Wrong email or password.'
+    })
+  })
+
+  it("an unknown code: the hub's message (`error`, else better-auth's `message`)", async () => {
+    const hub = fakeHubTransport(() => ({
+      status: 400,
+      body: { code: 'SOMETHING_NEW', message: 'Something new went wrong' }
+    }))
+    expect(await signInWithPassword(hub.transport, BASE, CREDS)).toMatchObject({
+      code: 'SOMETHING_NEW',
+      hubError: 'Something new went wrong',
+      error: 'Something new went wrong'
+    })
+  })
+
+  it('too many attempts (HTTP 429): says to wait', async () => {
+    const hub = fakeHubTransport(() => ({ status: 429, body: { message: 'Too many requests' } }))
+    expect(await signInWithPassword(hub.transport, BASE, CREDS)).toMatchObject({
+      status: 429,
+      error: 'Too many sign-in attempts. Wait a minute, then try again.'
     })
   })
 

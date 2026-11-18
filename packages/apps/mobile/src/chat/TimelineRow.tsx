@@ -9,7 +9,7 @@
 import { useLiveBlock } from '@slayzone/terminal/live-blocks'
 import { apiRetryReason } from '@slayzone/terminal-contracts'
 import { streamKeyOf, type TimelineItem } from '@slayzone/terminal/reducer'
-import { memo, useState } from 'react'
+import { memo } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { attachmentLabel } from './attachments'
@@ -17,6 +17,7 @@ import { useChatView } from './ChatViewContext'
 import { Markdown } from './Markdown'
 import { MONO, useThemedStyles } from './styles'
 import { ToolCard } from './ToolCard'
+import { useExpanded, useTimelineUi } from './timeline-ui'
 import { agentProblemText, branchLabel, branchToggleLabel, interruptedLabel } from './timeline-rows'
 
 type Item<K extends TimelineItem['kind']> = Extract<TimelineItem, { kind: K }>
@@ -24,10 +25,13 @@ type Item<K extends TimelineItem['kind']> = Extract<TimelineItem, { kind: K }>
 export const TimelineRow = memo(function TimelineRow({
   item,
   childItems,
+  rowKey,
   branchOpen = false,
   onToggleBranch
 }: {
   item: TimelineItem
+  /** The row's stable key (`timelineRows`): what it keeps open is kept by it. */
+  rowKey?: string
   /** A sub-agent's own items (its row lists them when opened). */
   childItems?: readonly TimelineItem[]
   /** A `conversation-branch` divider: its folded rows are shown. */
@@ -42,7 +46,7 @@ export const TimelineRow = memo(function TimelineRow({
     case 'text':
       return <AssistantText item={item} s={s} />
     case 'thinking':
-      return <Thinking item={item} s={s} />
+      return <Thinking item={item} rowKey={rowKey} s={s} />
     case 'tool':
       return <ToolCard invocation={item.invocation} streaming={item.inputStreaming === true} />
     case 'sub-agent':
@@ -163,12 +167,24 @@ const DELIVERY: Record<string, string> = {
   cancelled: 'Cancelled'
 }
 
+/** A long press on a message's text: its actions (copy, share, select). */
+function useMessageLongPress(text: string): (() => void) | undefined {
+  const ui = useTimelineUi()
+  return ui && text ? () => ui.showMessageActions(text) : undefined
+}
+
 function UserMessage({ item, s }: { item: Item<'user-text'>; s: Styles }) {
   const { retryMessage } = useChatView()
   const failed = item.delivery === 'failed'
+  const onLongPress = useMessageLongPress(item.text)
   return (
     <View style={s.userWrap}>
-      <View style={[s.userBubble, failed && s.userFailed]}>
+      <Pressable
+        onLongPress={onLongPress}
+        disabled={!onLongPress}
+        accessibilityHint={onLongPress ? 'Long press to copy or share' : undefined}
+        style={[s.userBubble, failed && s.userFailed]}
+      >
         {item.attachments && item.attachments.length > 0 ? (
           <View style={s.userFiles}>
             {item.attachments.map((file, i) => (
@@ -188,7 +204,7 @@ function UserMessage({ item, s }: { item: Item<'user-text'>; s: Styles }) {
             {item.text}
           </Text>
         ) : null}
-      </View>
+      </Pressable>
       {failed ? (
         <View style={s.userStatusRow}>
           <Text style={[s.status, s.error]} numberOfLines={2}>
@@ -244,27 +260,44 @@ function AssistantText({ item, s }: { item: Item<'text'>; s: Styles }) {
   // Streaming: the live block holds the text so far; the row's own text once final.
   const live = useLiveBlock(item.stream ? streamKeyOf(item) : undefined)
   const text = live?.text ?? item.text
+  const onLongPress = useMessageLongPress(text)
   if (!text) return null
   return (
-    <View style={s.assistant}>
+    // Not one element to VoiceOver: its links stay reachable on their own.
+    <Pressable
+      style={s.assistant}
+      onLongPress={onLongPress}
+      disabled={!onLongPress}
+      accessible={false}
+    >
       <Markdown text={text} />
-    </View>
+    </Pressable>
   )
 }
 
-function Thinking({ item, s }: { item: Item<'thinking'>; s: Styles }) {
+function Thinking({
+  item,
+  rowKey,
+  s
+}: {
+  item: Item<'thinking'>
+  rowKey: string | undefined
+  s: Styles
+}) {
   const live = useLiveBlock(item.stream ? streamKeyOf(item) : undefined)
   const text = live?.text ?? item.text
-  const [open, setOpen] = useState(false)
+  const [open, toggle] = useExpanded(rowKey && `thinking:${rowKey}`, false)
+  const caption = item.stream === 'open' ? 'Thinking…' : 'Thought'
   return (
     <View style={s.thinking}>
       <Pressable
-        onPress={() => setOpen((o) => !o)}
+        onPress={toggle}
         accessibilityRole="button"
+        accessibilityLabel={caption}
         accessibilityState={{ expanded: open }}
       >
         <Text style={s.caption}>
-          {item.stream === 'open' ? 'Thinking…' : 'Thought'} {open ? '▾' : '▸'}
+          {caption} {open ? '▾' : '▸'}
         </Text>
       </Pressable>
       {open && text ? <Markdown text={text} muted /> : null}
@@ -281,14 +314,16 @@ function SubAgent({
   childItems: readonly TimelineItem[]
   s: Styles
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, toggle] = useExpanded(`sub-agent:${item.toolUseId}`, false)
   const state =
     item.phase === 'in-flight' ? 'Running' : item.phase === 'completed' ? 'Done' : 'Failed'
+  const tools = item.toolUses ? `, ${item.toolUses} tools` : ''
   return (
     <View style={[s.box, s.subAgent]}>
       <Pressable
-        onPress={() => setOpen((o) => !o)}
+        onPress={toggle}
         accessibilityRole="button"
+        accessibilityLabel={`Sub-agent, ${state}${tools}${item.description ? `: ${item.description}` : ''}`}
         accessibilityState={{ expanded: open }}
       >
         <Text style={s.caption}>
@@ -374,7 +409,7 @@ function makeStyles(t: ChromeColors) {
     userStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
     status: { color: t.mutedForeground, fontSize: 11, marginTop: 2 },
     retry: { color: t.infoForeground, fontSize: 13, fontWeight: '600' },
-    assistant: { marginHorizontal: 16, marginVertical: 4 },
+    assistant: { paddingHorizontal: 16, paddingVertical: 4 },
     thinking: { marginHorizontal: 16, marginVertical: 4 },
     divider: {
       flexDirection: 'row',

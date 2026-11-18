@@ -5,6 +5,9 @@
  * - Start: `task.startMainAgent` only. The hub resolves the folder, provider and
  *   resume, and answers a live session instead of replacing it, so the phone and a
  *   desktop starting together share one agent. The phone never calls `pty.create`.
+ *   A terminal agent the phone starts gets the phone's grid (`AgentSize`, the
+ *   terminal's area at a readable font), so its text is readable without panning; a
+ *   desktop that attaches later fits it to its own window, as always.
  * - Stop: `pty.kill` (terminal agent) / `chat.kill` (chat agent).
  * - Restart: stop, start (the conversation resumes).
  * - Reset (fresh conversation): terminal — stop, `task.resetConversation` (the ledger
@@ -35,8 +38,15 @@ export const sessionIdOfTarget = (t: AgentTarget): string => `${t.taskId}:${t.ta
 
 export const isMainTab = (t: AgentTarget): boolean => t.tabId === t.taskId
 
-export function startAgent(client: HubClient, taskId: string): Promise<StartedAgent> {
-  return client.task.startMainAgent.mutate({ taskId })
+/** The terminal size to start a terminal agent at; undefined = the runtime's default. */
+export type AgentSize = { cols: number; rows: number } | undefined
+
+export function startAgent(
+  client: HubClient,
+  taskId: string,
+  size?: AgentSize
+): Promise<StartedAgent> {
+  return client.task.startMainAgent.mutate(size ? { taskId, ...size } : { taskId })
 }
 
 export async function stopAgent(client: HubClient, target: AgentTarget): Promise<void> {
@@ -44,16 +54,24 @@ export async function stopAgent(client: HubClient, target: AgentTarget): Promise
   else await client.pty.kill.mutate({ sessionId: sessionIdOfTarget(target) })
 }
 
-export async function restartAgent(client: HubClient, target: AgentTarget): Promise<StartedAgent> {
+export async function restartAgent(
+  client: HubClient,
+  target: AgentTarget,
+  size?: AgentSize
+): Promise<StartedAgent> {
   await stopAgent(client, target)
-  return startAgent(client, target.taskId)
+  return startAgent(client, target.taskId, size)
 }
 
-export async function resetAgent(client: HubClient, target: AgentTarget): Promise<void> {
+export async function resetAgent(
+  client: HubClient,
+  target: AgentTarget,
+  size?: AgentSize
+): Promise<void> {
   if (!isChatSupported(target.mode)) {
     await stopAgent(client, target)
     await client.task.resetConversation.mutate({ id: target.taskId, mode: target.mode })
-    await startAgent(client, target.taskId)
+    await startAgent(client, target.taskId, size)
     return
   }
   // `chat.reset` re-creates the tab in its folder, which the hub resolved when it
@@ -80,8 +98,9 @@ export async function interruptAgent(client: HubClient, target: AgentTarget): Pr
 export async function switchAgentMode(
   client: HubClient,
   taskId: string,
-  mode: string
+  mode: string,
+  size?: AgentSize
 ): Promise<StartedAgent> {
   await client.task.switchMode.mutate({ taskId, mode })
-  return startAgent(client, taskId)
+  return startAgent(client, taskId, size)
 }

@@ -5,7 +5,7 @@
  */
 import { createHash, webcrypto } from 'node:crypto'
 import type { HubHttpRequest, HubTransport, PkceCrypto } from '@slayzone/hub-auth/client'
-import { hubEntryOf, type HubSession } from '../hub-session'
+import { cantReachHub, hubEntryOf, type HubSession } from '../hub-session'
 import { type AuthSessionResult, signInWithMicrosoft } from './microsoft-sign-in'
 
 const nodeCrypto: PkceCrypto = {
@@ -92,14 +92,14 @@ describe('signInWithMicrosoft', () => {
     expect(session.opened().origin).toBe('http://127.0.0.1:8788')
   })
 
-  it('cancelled in the sheet: says so, keeps nothing, never exchanges', async () => {
+  it('cancelled in the sheet: nothing to show (cancelled), keeps nothing, never exchanges', async () => {
     for (const type of ['cancel', 'dismiss'] as const) {
       const hub = hubAnswering({ status: 200, body: { token: 'tok' } })
       const { result, saved } = run(
         hub,
         authSession(() => ({ type }))
       )
-      expect(await result).toEqual({ ok: false, error: 'Sign-in was cancelled.' })
+      expect(await result).toEqual({ ok: false, error: 'Sign-in was cancelled.', cancelled: true })
       expect(saved).toEqual([])
       expect(hub.requests.some((r) => r.url.endsWith('/token'))).toBe(false)
     }
@@ -209,7 +209,7 @@ describe('signInWithMicrosoft', () => {
     const { result } = run(hub, session)
     expect(await result).toEqual({
       ok: false,
-      error: 'Could not reach the hub: Network request failed'
+      error: cantReachHub('hub.example.com', 'unreachable')
     })
     expect(session.open).not.toHaveBeenCalled()
   })
@@ -222,7 +222,17 @@ describe('signInWithMicrosoft', () => {
     )
     expect(await result).toEqual({
       ok: false,
-      error: 'Could not reach the hub: Network request failed'
+      error: cantReachHub('hub.example.com', 'unreachable')
+    })
+  })
+
+  it('takes the address as pasted (scheme, capitals, trailing slash)', async () => {
+    const hub = hubAnswering({ status: 200, body: { token: 'tok' } })
+    const session = returning((state) => `code=${'c'.repeat(43)}&state=${state}`)
+    const { result } = run(hub, session, 'https://Hub.example.com/')
+    expect(await result).toEqual({
+      ok: true,
+      session: { entry: hubEntryOf('hub.example.com'), token: 'tok' }
     })
   })
 
@@ -245,11 +255,11 @@ describe('signInWithMicrosoft', () => {
       await run(
         hub,
         authSession(() => ({ type: 'cancel' })),
-        'https://x/'
+        'me@hub example'
       ).result
     ).toEqual({
       ok: false,
-      error: 'Enter the hub as host or host:port'
+      error: "Enter the hub's address, like hub.yourcompany.com or hub.yourcompany.com:8788."
     })
   })
 })

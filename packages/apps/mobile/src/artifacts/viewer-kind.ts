@@ -52,6 +52,18 @@ export const isMediaKind = (kind: ViewerKind): kind is 'video' | 'audio' =>
   kind === 'video' || kind === 'audio'
 
 /**
+ * Containers iOS's player (AVPlayer) can't open, though desktop's Chromium plays them:
+ * WebM, Ogg (Vorbis, Opus, Theora), Matroska. Never handed to the player: it would show
+ * a black box.
+ */
+const UNPLAYABLE_ON_DEVICE = new Set(['.webm', '.weba', '.ogg', '.oga', '.ogv', '.opus', '.mkv'])
+
+/** Whether a video or audio artifact can play on the device, by its title's extension. */
+export function isPlayableOnDevice(title: string): boolean {
+  return !UNPLAYABLE_ON_DEVICE.has(getExtensionFromTitle(title).toLowerCase())
+}
+
+/**
  * Kinds the phone has no viewer for yet: a note and Share. Nothing is fetched up
  * front; only Share needs the file.
  */

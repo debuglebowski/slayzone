@@ -1,8 +1,10 @@
 import { columnToCreateTaskDraft } from '@slayzone/tasks/board'
-import { type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   FlatList,
+  findNodeHandle,
   type HostInstance,
   Pressable,
   type ScrollViewInstance,
@@ -22,12 +24,14 @@ import {
   type BoardFilter,
   boardColumns,
   displayGroup,
+  filterNarrows,
   neighbourStatuses,
   projectStatuses,
   treeColumns
 } from './board-model'
 import type { BoardView } from './board-prefs'
 import { aliveTaskIds, cardModel, statusCategoryOf } from './card-model'
+import { createAutoScroll, createScrollRegistry, type DragLayout } from './auto-scroll'
 import { type DropTargets, dropTarget, type Rect } from './drag'
 import { dragAllowed, type Grouping, planDrop, planStatusChange, reorderAllowed } from './moves'
 import { type CardMoves, TaskCard } from './TaskCard'
@@ -48,6 +52,13 @@ export const measureInWindow: Measure = (view) =>
 export const COLUMN_WIDTH = 288
 /** How close to a phone's edge a dragged card turns the page to the next column. */
 const EDGE = 28
+/** The ＋'s other choice: a temporary task, opened on its agent (desktop's ⌘T). */
+const NEW_SESSION = 'New agent session'
+const NEW_SESSION_ACTION = 'newSession'
+/** How long a pull's spinner waits for the board's reload to be seen starting (ms). */
+const PULL_GRACE_MS = 1500
+/** While a drag auto-scrolls, its drop targets are measured again this often (ms). */
+const MEASURE_EVERY = 150
 /** Room under the last card for the floating ＋ (iOS content inset). */
 const FAB_ROOM = { top: 0, left: 0, right: 0, bottom: 76 }
 
@@ -62,7 +73,9 @@ interface Drag {
   origin: { x: number; y: number }
 }
 
-type Registered = { kind: 'column'; id: string } | { kind: 'row'; id: string; columnId: string }
+type Registered =
+  | { kind: 'column'; id: string; atEnd?: boolean }
+  | { kind: 'row'; id: string; columnId: string }
 
 /**
  * The views a drag can land on, kept by their ref callbacks (mounted = registered) and
@@ -107,13 +120,19 @@ export interface NewTaskDraft {
  *
  * Long-press a card, then drag: within a column it reorders, onto another column (on a
  * phone: onto its pill in the strip, or to the screen's edge to turn the page) it moves
- * there — its status or priority (`planDrop`). As on desktop: no drag in due-date groups,
- * a reorder sticks only in Manual order (or Priority order, among the same priority).
- * `activeColumn`: the phone's page, kept by the screen across re-renders.
+ * there — its status or priority (`planDrop`). Near a column's top or bottom edge the
+ * column scrolls, near an iPad's left or right edge the row of columns does
+ * (`auto-scroll.ts`); a drop after a scroll measures where the rows are now. As on
+ * desktop: no drag in due-date groups, a reorder sticks only in Manual order (or Priority
+ * order, among the same priority). `activeColumn`: the phone's page, kept by the screen
+ * across re-renders.
  *
- * The floating ＋ (bottom right): a tap starts a temporary task (a session, desktop's ⌘T;
- * `use-scratch-task.ts`), a long-press creates a task — on a phone's board in the shown
- * column (its status, priority or due date).
+ * Pull down to reload (the spinner shows only for a pull, never for the board's own
+ * background reloads). A filter that leaves nothing says so, with "Clear filters".
+ *
+ * The floating ＋ (bottom right): a tap creates a task — on a phone's board in the shown
+ * column (its status, priority or due date); a long-press offers that or a temporary task
+ * (a session, desktop's ⌘T; `use-scratch-task.ts`).
  */
 export function ProjectBoard({
   feed,
@@ -126,7 +145,8 @@ export function ProjectBoard({
   measure = measureInWindow,
   onOpen,
   onNewTask,
-  onRefresh
+  onRefresh,
+  onClearFilters
 }: {
   feed: HubFeed
   project: BoardProject
@@ -141,7 +161,10 @@ export function ProjectBoard({
   onOpen: (row: TaskRow) => void
   /** The floating ＋: a new task, with the shown column's fields (phone board) if any. */
   onNewTask: (draft: NewTaskDraft) => void
+  /** Reload the hub (a pull); the spinner waits for the board's reload. */
   onRefresh: () => void
+  /** A filter left nothing: its "Clear filters". */
+  onClearFilters?: () => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -168,7 +191,17 @@ export function ProjectBoard({
   const [pageWidth, setPageWidth] = useState(windowWidth)
   const [drag, setDrag] = useState<Drag | null>(null)
   const [targets] = useState(createTargetRegistry)
+  const [scrollers] = useState(createScrollRegistry)
+  // A drag near an edge scrolls (`auto-scroll.ts`); stops with the board.
+  const [auto] = useState(() => createAutoScroll(scrollers))
+  useEffect(() => () => auto.stop(), [auto])
+  // The pull-to-refresh spinner: only a pull shows it — `asked` until the board's reload
+  // is seen under way, `running` until it has finished (render-time sync below).
+  const [pull, setPull] = useState<'idle' | 'asked' | 'running'>('idle')
+  if (pull === 'asked' && feed.board.refreshing) setPull('running')
+  if (pull === 'running' && !feed.board.refreshing) setPull('idle')
   const rootRef = useRef<HostInstance>(null)
+  const fabRef = useRef<HostInstance>(null)
   const pagerRef = useRef<ScrollViewInstance>(null)
   const stripRef = useRef<ScrollViewInstance>(null)
   // Where each chip sits in the strip, and the strip's width (to keep the shown chip in view).
@@ -176,6 +209,8 @@ export function ProjectBoard({
   const stripWidth = useRef(0)
   // The edge a drag last turned the page at (one turn per visit to an edge).
   const turnedAt = useRef<'left' | 'right' | null>(null)
+  // A measurement of the drop targets due after an auto-scroll.
+  const measureTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   if (!data) return null
   const activeTaskIds = aliveTaskIds(feed)
@@ -219,27 +254,32 @@ export function ProjectBoard({
   )
   const shown = columns[shownIndex]
 
-  const measureTargets = (taskId: string) => {
+  /** The drop targets and the board itself, where they are now (window coordinates). */
+  const collectTargets = (): Promise<{ found: DropTargets; root: Rect | null }> => {
     const entries = targets.entries()
     const root = rootRef.current
-    void Promise.all([
+    return Promise.all([
       root ? measure(root) : Promise.resolve(null),
       ...entries.map((e) => measure(e.view))
     ]).then(([rootRect, ...rects]) => {
-      const found: DropTargets = { columns: [], rows: [] }
+      const columnTargets: { id: string; rect: Rect; atEnd?: boolean }[] = []
+      const rows: { taskId: string; columnId: string; rect: Rect }[] = []
       entries.forEach(({ info }, i) => {
         const rect = rects[i]
         if (!rect) return
-        if (info.kind === 'column')
-          (found.columns as { id: string; rect: Rect }[]).push({ id: info.id, rect })
-        else
-          (found.rows as { taskId: string; columnId: string; rect: Rect }[]).push({
-            taskId: info.id,
-            columnId: info.columnId,
-            rect
-          })
+        if (info.kind === 'column') columnTargets.push({ id: info.id, rect, atEnd: info.atEnd })
+        else rows.push({ taskId: info.id, columnId: info.columnId, rect })
       })
-      const origin = rootRect ? { x: rootRect.x, y: rootRect.y } : { x: 0, y: 0 }
+      return { found: { columns: columnTargets, rows }, root: rootRect ?? null }
+    })
+  }
+
+  const measureTargets = (taskId: string) => {
+    const snapshot = auto.snapshot()
+    void collectTargets().then(({ found, root }) => {
+      auto.update({ columns: found.columns, root })
+      auto.measured(snapshot)
+      const origin = root ? { x: root.x, y: root.y } : { x: 0, y: 0 }
       setDrag((d) => (d && d.taskId === taskId ? { ...d, targets: found, origin } : d))
     })
   }
@@ -264,14 +304,31 @@ export function ProjectBoard({
     pagerRef.current?.scrollTo({ x: index * pageWidth, animated })
   }
 
+  // An auto-scroll moved the rows: measure again soon (at most every MEASURE_EVERY ms).
+  const measureSoon = (taskId: string) => {
+    if (measureTimer.current !== null) return
+    measureTimer.current = setTimeout(() => {
+      measureTimer.current = null
+      measureTargets(taskId)
+    }, MEASURE_EVERY)
+  }
+
   const startDrag = (task: BoardTask, fromColumn: string, point: { x: number; y: number }) => {
     turnedAt.current = null
     setDrag({ taskId: task.id, title: task.title, fromColumn, point, targets: null, origin: point })
+    const layout: DragLayout = {
+      mode: phonePages ? 'pages' : view !== 'list' && wide ? 'columns' : 'list',
+      columns: [],
+      root: null,
+      shownId: shown?.id
+    }
+    auto.start(point, layout, () => measureSoon(task.id))
     measureTargets(task.id)
   }
 
   const dragMove = (point: { x: number; y: number }) => {
     setDrag((d) => (d ? { ...d, point } : d))
+    auto.move(point)
     if (!drag || !phonePages) return
     const edge = point.x < EDGE ? 'left' : point.x > windowWidth - EDGE ? 'right' : null
     if (edge === null) {
@@ -283,29 +340,44 @@ export function ProjectBoard({
     if (next < 0 || next >= columns.length) return
     turnedAt.current = edge
     goToPage(next)
+    auto.update({ shownId: columns[next]?.id })
+    auto.markStale()
     const taskId = drag.taskId
     setTimeout(() => measureTargets(taskId), 350)
   }
 
+  const stopDrag = () => {
+    auto.stop()
+    if (measureTimer.current !== null) clearTimeout(measureTimer.current)
+    measureTimer.current = null
+    setDrag(null)
+  }
+
   const endDrag = () => {
     const d = drag
-    setDrag(null)
+    const stale = auto.stale()
+    stopDrag()
     if (!d?.targets) return
-    const at = dropTarget(d.targets, d.point)
-    if (!at) return
-    const plan = planDrop(
-      data,
-      project.id,
-      {
-        taskId: d.taskId,
-        fromColumn: d.fromColumn,
-        toColumn: at.column,
-        beforeTaskId: at.beforeTaskId
-      },
-      visibleOf(at.column),
-      grouping
-    )
-    if (plan) void move(plan)
+    const land = (found: DropTargets) => {
+      const at = dropTarget(found, d.point)
+      if (!at) return
+      const plan = planDrop(
+        data,
+        project.id,
+        {
+          taskId: d.taskId,
+          fromColumn: d.fromColumn,
+          toColumn: at.column,
+          beforeTaskId: at.beforeTaskId
+        },
+        visibleOf(at.column),
+        grouping
+      )
+      if (plan) void move(plan)
+    }
+    // Something scrolled since the targets were measured: where are the rows now?
+    if (stale) void collectTargets().then(({ found }) => land(found))
+    else land(d.targets)
   }
 
   const movesOf = (task: BoardTask, column: BoardColumn): CardMoves => {
@@ -347,6 +419,7 @@ export function ProjectBoard({
           selected={task.id === selectedTaskId}
           moves={movesOf(task, column)}
           dragging={drag?.taskId === task.id}
+          statusLabel={statusLabel.get(task.status) ?? statusCategoryOf(task.status, project).label}
           measureRef={register(`row:${column.id}:${task.id}`, {
             kind: 'row',
             id: task.id,
@@ -384,12 +457,21 @@ export function ProjectBoard({
     )
   }
 
-  const empty = <Text style={styles.empty}>No tasks</Text>
+  const narrows = filterNarrows(filter)
+  const empty = <Text style={styles.empty}>{narrows ? 'No matching tasks' : 'No tasks'}</Text>
+  // Only a pull spins (the board's own reloads after a move or a push stay quiet); the
+  // spinner waits for the reload the pull started. One never seen starting (it ended at
+  // once, or the hub is down) stops the spinner after PULL_GRACE_MS.
+  const pullToRefresh = () => {
+    setPull('asked')
+    onRefresh()
+    setTimeout(() => setPull((p) => (p === 'asked' ? 'idle' : p)), PULL_GRACE_MS)
+  }
   const refresh = (
     <RefreshControl
       tintColor={theme.foreground}
-      refreshing={feed.board.refreshing}
-      onRefresh={onRefresh}
+      refreshing={pull !== 'idle'}
+      onRefresh={pullToRefresh}
     />
   )
   const scrolls = drag === null
@@ -406,10 +488,50 @@ export function ProjectBoard({
     dueDate: created.dueDate ?? undefined
   }
 
+  const newSession = () => scratch.create(project, data.tasks)
+  // The ＋ long-pressed: iOS's action sheet (iPad: a popover from the ＋).
+  const moreNew = () => {
+    const node = fabRef.current ? findNodeHandle(fabRef.current) : null
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: [newTaskLabel, NEW_SESSION, 'Cancel'],
+        cancelButtonIndex: 2,
+        anchor: node ?? undefined
+      },
+      (index) => {
+        if (index === 0) onNewTask(newTaskDraft)
+        else if (index === 1) newSession()
+      }
+    )
+  }
+
   let body: ReactNode
-  if (view !== 'list' && wide) {
+  if (narrows && columns.every((c) => c.tasks.length === 0)) {
+    // A filter left nothing: say so (not "No tasks" in every column), and undo it.
     body = (
-      <ScrollView horizontal scrollEnabled={scrolls} contentContainerStyle={styles.columns}>
+      <ScrollView contentContainerStyle={styles.noMatches} refreshControl={refresh}>
+        <Text style={styles.noMatchesTitle}>No matching tasks</Text>
+        <Text style={styles.empty}>The filter hides every task of this project.</Text>
+        {onClearFilters ? (
+          <Pressable
+            onPress={onClearFilters}
+            accessibilityRole="button"
+            testID="board-clear-filters"
+            style={({ pressed }) => [styles.clearFilters, pressed && styles.fabPressed]}
+          >
+            <Text style={styles.clearFiltersText}>Clear filters</Text>
+          </Pressable>
+        ) : null}
+      </ScrollView>
+    )
+  } else if (view !== 'list' && wide) {
+    body = (
+      <ScrollView
+        horizontal
+        scrollEnabled={scrolls}
+        contentContainerStyle={styles.columns}
+        {...scrollers.props('columns', 'x')}
+      >
         {columns.map((column) => (
           <View
             key={column.id}
@@ -420,10 +542,12 @@ export function ProjectBoard({
             {columnHead(column)}
             <ScrollView
               scrollEnabled={scrolls}
+              refreshControl={refresh}
               contentInset={FAB_ROOM}
               scrollIndicatorInsets={FAB_ROOM}
               style={styles.columnBody}
               contentContainerStyle={styles.columnBodyContent}
+              {...scrollers.props(`col:${column.id}`, 'y', FAB_ROOM.bottom)}
             >
               {column.tasks.length === 0 ? empty : null}
               {column.tasks.map((t) => card(t, column, view === 'tree' ? 'row' : 'card'))}
@@ -453,7 +577,7 @@ export function ProjectBoard({
             return (
               <View
                 key={column.id}
-                ref={register(`chip:${column.id}`, { kind: 'column', id: column.id })}
+                ref={register(`chip:${column.id}`, { kind: 'column', id: column.id, atEnd: true })}
                 testID={`column-drop-${column.id}`}
                 onLayout={(e) => {
                   const { x, width } = e.nativeEvent.layout
@@ -517,8 +641,10 @@ export function ProjectBoard({
                 scrollIndicatorInsets={FAB_ROOM}
                 style={styles.columnBody}
                 contentContainerStyle={styles.columnBodyContent}
+                testID={`column-list-${column.id}`}
                 ListEmptyComponent={empty}
                 renderItem={({ item }) => card(item, column, 'card')}
+                {...scrollers.props(`page:${column.id}`, 'y', FAB_ROOM.bottom)}
               />
             </View>
           ))}
@@ -532,6 +658,7 @@ export function ProjectBoard({
         refreshControl={refresh}
         contentInset={FAB_ROOM}
         scrollIndicatorInsets={FAB_ROOM}
+        {...scrollers.props('list', 'y', FAB_ROOM.bottom)}
       >
         {columns.map((column) => (
           <View
@@ -556,20 +683,25 @@ export function ProjectBoard({
       onResponderTerminationRequest={() => false}
       onResponderMove={(e) => dragMove({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
       onResponderRelease={endDrag}
-      onResponderTerminate={() => setDrag(null)}
+      onResponderTerminate={stopDrag}
     >
       {body}
       {drag ? null : (
         <Pressable
-          onPress={() => scratch.create(project, data.tasks)}
-          onLongPress={() => onNewTask(newTaskDraft)}
+          ref={fabRef}
+          onPress={() => onNewTask(newTaskDraft)}
+          onLongPress={moreNew}
           disabled={scratch.creating}
           accessibilityRole="button"
-          accessibilityLabel="New session"
-          accessibilityHint={`Long-press: ${newTaskLabel}`}
-          accessibilityActions={[{ name: 'longpress', label: newTaskLabel }]}
+          accessibilityLabel="New task"
+          accessibilityHint={
+            newTaskColumn
+              ? `Adds it to ${newTaskColumn.title}. Long-press for a new agent session.`
+              : 'Long-press for a new agent session.'
+          }
+          accessibilityActions={[{ name: NEW_SESSION_ACTION, label: NEW_SESSION }]}
           onAccessibilityAction={(e) => {
-            if (e.nativeEvent.actionName === 'longpress') onNewTask(newTaskDraft)
+            if (e.nativeEvent.actionName === NEW_SESSION_ACTION) newSession()
           }}
           testID="new-task"
           style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
@@ -633,6 +765,24 @@ const makeStyles = (t: ChromeColors) =>
       textAlign: 'center',
       paddingVertical: 16
     },
+    noMatches: {
+      flexGrow: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      padding: 24
+    },
+    noMatchesTitle: { fontSize: 17, fontWeight: '600', color: t.foreground },
+    clearFilters: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 20,
+      borderRadius: 22,
+      backgroundColor: t.surface2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.border
+    },
+    clearFiltersText: { fontSize: 15, fontWeight: '600', color: t.foreground },
     strip: { flexGrow: 0 },
     stripContent: { paddingHorizontal: 14, paddingBottom: 6, gap: 6 },
     chip: { flexDirection: 'row', alignItems: 'center', gap: 6 },

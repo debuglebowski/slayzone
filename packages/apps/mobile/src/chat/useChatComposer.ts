@@ -9,7 +9,7 @@
  *     it is not running). A use of a `/command` is counted for the menu's ranking.
  *   - Stop: the queue is cleared and the turn aborted (`chat.abortAndPop`); when nothing
  *     came back yet the message is withdrawn and put back in the draft — its files too
- *     (attached on desktop; the phone has no file picker yet), sent again with the next
+ *     (attached on desktop, or a photo attached here with ＋), sent again with the next
  *     message unless removed.
  *   - The `/` menu: a tap accepts an entry (runs a builtin, or puts it in the draft);
  *     Send while the menu is open does what Enter does on desktop (`enterSlash`).
@@ -53,6 +53,8 @@ export interface ChatComposer {
   /** Files the next message carries (given back by Stop). */
   attachments: readonly ChatAttachment[]
   removeAttachment: (index: number) => void
+  /** Files attached here (a photo from ＋): added to what the next message carries. */
+  addAttachments: (files: readonly ChatAttachment[]) => void
   /** The `/` menu's entries, best first; null = no menu. */
   menu: SlashItem[] | null
   pick: (item: SlashItem) => void
@@ -309,6 +311,8 @@ export function useChatComposer({
     setDraft,
     attachments,
     removeAttachment: (index) => setAttachments(attachments.filter((_, i) => i !== index)),
+    // From the snapshot, not the render: uploads finish one by one, between renders.
+    addAttachments: (files) => setAttachments([...draftSnapshot.current.attachments, ...files]),
     menu: menu && menu.length > 0 ? menu : null,
     pick: (item) => run(acceptSlash(item, draft, caps), item),
     send,

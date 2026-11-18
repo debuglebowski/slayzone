@@ -1,11 +1,13 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useLocalSearchParams, usePreventRemove, useRouter } from 'expo-router'
+import { useState } from 'react'
 import { HOME, taskHref } from '../../../routes'
-import { NewTaskScreen } from '../../../task-edit/NewTaskScreen'
+import { confirmDiscardTask, NewTaskScreen } from '../../../task-edit/NewTaskScreen'
 
 /**
  * `/new-task?hub=&project=[&status=][&priority=][&due=][&parent=]` (in the Board tab;
  * `task-edit/routes.ts`):
- * create a task. Created, the task's screen takes its place; Cancel goes back.
+ * create a task. Created, the task's screen takes its place; Cancel goes back. With a
+ * title typed, a swipe back asks first (Cancel asks in the screen itself).
  */
 export default function NewTaskRoute() {
   const { hub, project, status, priority, due, parent } = useLocalSearchParams<{
@@ -17,7 +19,14 @@ export default function NewTaskRoute() {
     parent?: string
   }>()
   const router = useRouter()
-  const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
+  const [dirty, setDirty] = useState(false)
+  // Leaving on purpose (Cancel already asked, or the task was created) skips the question.
+  const allowLeave = usePreventRemove(dirty, ({ repeat }) => confirmDiscardTask(repeat))
+  const back = () => {
+    allowLeave()
+    if (router.canGoBack()) router.back()
+    else router.replace(HOME)
+  }
   return (
     <NewTaskScreen
       hubAddress={hub ?? ''}
@@ -26,8 +35,12 @@ export default function NewTaskRoute() {
       priority={priority ? Number(priority) : undefined}
       dueDate={due || undefined}
       parentId={parent || undefined}
-      onCreated={(hubAddress, taskId) => router.replace(taskHref(hubAddress, taskId))}
+      onCreated={(hubAddress, taskId) => {
+        allowLeave()
+        router.replace(taskHref(hubAddress, taskId))
+      }}
       onCancel={back}
+      onDirtyChange={setDirty}
     />
   )
 }

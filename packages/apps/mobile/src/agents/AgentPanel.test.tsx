@@ -7,20 +7,51 @@ import { hubEntryOf } from '../hub-session'
 import { trpcTest } from '../testing'
 import { AgentPanel, type AgentPanelProps } from './AgentPanel'
 
-/** How many times a terminal was mounted (a new process gets a fresh terminal). */
-const mockTerminal = { mounts: 0 }
+/** How many times a terminal was mounted (a new process gets a fresh terminal), what
+ *  it was asked through its handle, and the grid it reports. */
+const mockTerminal = {
+  mounts: 0,
+  calls: [] as string[],
+  grid: undefined as { cols: number; rows: number } | undefined,
+  textSize: 'readable' as 'readable' | 'fit',
+  props: null as null | Record<string, unknown>
+}
 
 // The terminal (a web view) and the chat view (the chat half's) are stand-ins here.
 jest.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ sessionId, live }: { sessionId: string; live: boolean }) => {
+  TerminalView: (props: {
+    sessionId: string
+    live: boolean
+    onHandle?: (handle: unknown) => void
+  }) => {
     const { Text: T } = jest.requireActual('react-native')
     const { useEffect } = jest.requireActual('react')
+    mockTerminal.props = props
     useEffect(() => {
       mockTerminal.mounts++
     }, [])
-    return <T testID="terminal">{`terminal ${sessionId} ${live ? 'live' : 'not running'}`}</T>
+    const { onHandle } = props
+    useEffect(() => {
+      onHandle?.({
+        grid: () => mockTerminal.grid,
+        exportText: (kind: string, how: string) => mockTerminal.calls.push(`${how} ${kind}`),
+        textSize: () => mockTerminal.textSize,
+        toggleTextSize: () => mockTerminal.calls.push('toggle text size')
+      })
+      return () => onHandle?.(null)
+    }, [onHandle])
+    return (
+      <T testID="terminal">{`terminal ${props.sessionId} ${props.live ? 'live' : 'not running'}`}</T>
+    )
   }
 }))
+
+beforeEach(() => {
+  mockTerminal.calls = []
+  mockTerminal.grid = undefined
+  mockTerminal.textSize = 'readable'
+  mockTerminal.props = null
+})
 jest.mock('../chat', () => ({
   ChatSession: (props: { hubId: string; taskId: string; tabId: string; mode: string }) => {
     const { Text: T } = jest.requireActual('react-native')
@@ -41,6 +72,7 @@ function taskOf(fields: Partial<BoardTask> = {}): BoardTask {
     needs_attention: false,
     agent_id: 'claude-code',
     provider_config: { 'claude-code': { conversationId: 'c1' } },
+    computer_id: 'mac',
     ...fields
   } as unknown as BoardTask
 }
@@ -48,7 +80,8 @@ function taskOf(fields: Partial<BoardTask> = {}): BoardTask {
 function feedOf(
   task: BoardTask,
   byId: Record<string, TerminalState>,
-  jobs: Record<string, number> = {}
+  jobs: Record<string, number> = {},
+  agents: { loaded: boolean; error: string | null } = { loaded: true, error: null }
 ): HubFeed {
   return {
     hub,
@@ -66,7 +99,7 @@ function feedOf(
       error: null,
       refreshing: false
     },
-    agents: { state: { ...EMPTY_TERMINAL_STATE, byId, jobsById: jobs }, loaded: true, error: null }
+    agents: { state: { ...EMPTY_TERMINAL_STATE, byId, jobsById: jobs }, ...agents }
   }
 }
 
@@ -83,7 +116,10 @@ const tab = (id: string, mode: string, isMain: boolean, position = 0) => ({
 })
 
 /** A hub that answers the screen's calls and records the writes, in order. */
-function backend(tabs: unknown[] = [tab('t', 'claude-code', true)]) {
+function backend(
+  tabs: unknown[] = [tab('t', 'claude-code', true)],
+  opts: { start?: () => void } = {}
+) {
   const calls: Array<[string, unknown]> = []
   const record =
     (path: string, answer: (input: unknown) => unknown = () => null) =>
@@ -108,19 +144,26 @@ function backend(tabs: unknown[] = [tab('t', 'claude-code', true)]) {
       ),
       'task.update': record('task.update'),
       'task.switchMode': record('task.switchMode'),
-      'task.startMainAgent': record('task.startMainAgent', () => started),
+      'task.startMainAgent': record('task.startMainAgent', () => {
+        opts.start?.()
+        return started
+      }),
       'task.resetConversation': record('task.resetConversation'),
       'pty.kill': record('pty.kill', () => true),
       'pty.write': record('pty.write', () => true),
       'pty.interrupt': record('pty.interrupt', () => true),
       'chat.kill': record('chat.kill'),
+      'computers.list': () => [{ id: 'mac', name: 'Mac Studio' }],
       'pty.agentsList': () => [
         { id: 'claude-code', label: 'Claude Code', enabled: true, order: 0 },
         { id: 'codex', label: 'Codex', enabled: true, order: 1 },
         { id: 'gemini', label: 'Gemini', enabled: false, order: 2 }
       ]
     },
-    subscriptions: { 'taskTerminals.onChanged': () => undefined }
+    subscriptions: {
+      'taskTerminals.onChanged': () => undefined,
+      'computers.onStatusChange': () => undefined
+    }
   })
   return { ...test, calls, paths: () => calls.map(([path]) => path) }
 }
@@ -135,7 +178,7 @@ function confirmAll() {
 function renderScreen(
   feed: HubFeed,
   b: ReturnType<typeof backend>,
-  extra: { tabId?: string; onSelectTab?: (id: string) => void } = {}
+  extra: { tabId?: string; onSelectTab?: (id: string) => void; openingKey?: string } = {}
 ) {
   return render(
     <AgentPanel
@@ -145,6 +188,7 @@ function renderScreen(
       showHub={false}
       tabId={extra.tabId}
       onSelectTab={extra.onSelectTab ?? (() => undefined)}
+      openingKey={extra.openingKey}
     />,
     { wrapper: b.wrapper }
   )
@@ -263,6 +307,105 @@ describe('AgentPanel', () => {
     await renderScreen(feedOf(taskOf(), { 't:t': 'running' }), b)
     await more('Restart')
     await waitFor(() => expect(b.paths()).toEqual(['pty.kill', 'task.startMainAgent']))
+  })
+
+  it('waits for the agents to load before saying an agent is not started (no Start for a running one)', async () => {
+    const b = backend()
+    await renderScreen(feedOf(taskOf(), {}, {}, { loaded: false, error: null }), b)
+    expect(screen.getByText('Loading…')).toBeOnTheScreen()
+    expect(screen.queryByText('Not started')).toBeNull()
+    expect(screen.queryByText('Start')).toBeNull()
+    expect(mockTerminal.props?.stateLoading).toBe(true)
+  })
+
+  it('says when the agents could not be loaded, and retries', async () => {
+    const b = backend()
+    const refetch = jest.spyOn(b.queryClient, 'refetchQueries')
+    await renderScreen(feedOf(taskOf(), {}, {}, { loaded: false, error: 'socket closed' }), b)
+    expect(screen.getByText('Couldn’t load the agent’s state.')).toBeOnTheScreen()
+    expect(screen.queryByText('Start')).toBeNull()
+    await userEvent.setup().press(screen.getByLabelText('Retry loading the agent’s state'))
+    expect(refetch).toHaveBeenCalledWith({ queryKey: ['agents', 'snapshot'] })
+  })
+
+  it('a failed action says what failed in plain words, and retries it', async () => {
+    let fail = true
+    const b = backend(undefined, {
+      start: () => {
+        if (fail) throw new Error('spawn EACCES')
+      }
+    })
+    await renderScreen(feedOf(taskOf(), { 't:t': 'dead' }), b)
+    const user = userEvent.setup()
+    await user.press(screen.getByText('Start'))
+    expect(await screen.findByText('Couldn’t start the agent.')).toBeOnTheScreen()
+    expect(screen.getByText('spawn EACCES')).toBeOnTheScreen()
+    fail = false
+    await user.press(screen.getByLabelText('Retry: Start'))
+    await waitFor(() =>
+      expect(b.paths().filter((p) => p === 'task.startMainAgent')).toHaveLength(2)
+    )
+    await waitFor(() => expect(screen.queryByText('Couldn’t start the agent.')).toBeNull())
+  })
+
+  it('starts a terminal agent at the size the phone shows it at', async () => {
+    const b = backend()
+    mockTerminal.grid = { cols: 64, rows: 40 }
+    await renderScreen(feedOf(taskOf(), { 't:t': 'dead' }), b)
+    await userEvent.setup().press(screen.getByText('Start'))
+    await waitFor(() =>
+      expect(b.calls).toEqual([['task.startMainAgent', { taskId: 't', cols: 64, rows: 40 }]])
+    )
+  })
+
+  it('tells the terminal how to start a stopped agent, and which computer it runs on', async () => {
+    const b = backend()
+    await renderScreen(feedOf(taskOf(), { 't:t': 'dead' }), b)
+    expect(mockTerminal.props?.notRunningHint).toBe('Tap Start to run it.')
+    await waitFor(() => expect(mockTerminal.props?.computerName).toBe('Mac Studio'))
+  })
+
+  it('offers Stop and Interrupt up front only while the agent works; idle, they are under ⋯', async () => {
+    const b = backend()
+    const alert = confirmAll()
+    await renderScreen(feedOf(taskOf(), { 't:t': 'idle' }), b)
+    expect(screen.queryByText('Stop')).toBeNull()
+    expect(screen.queryByText('Interrupt')).toBeNull()
+    await more('Stop')
+    expect(alert).toHaveBeenCalled()
+    await waitFor(() => expect(b.calls).toEqual([['pty.kill', { sessionId: 't:t' }]]))
+  })
+
+  it('copies or shares the terminal’s text and switches its text size from ⋯', async () => {
+    const b = backend()
+    await renderScreen(feedOf(taskOf(), { 't:t': 'running' }), b)
+    await more('Copy screen text')
+    await more('Copy all output')
+    await more('Share all output…')
+    await more('Fit text to width')
+    expect(mockTerminal.calls).toEqual(['copy screen', 'copy all', 'share all', 'toggle text size'])
+  })
+
+  it('says the provider’s name to VoiceOver as the button’s value', async () => {
+    const b = backend()
+    await renderScreen(feedOf(taskOf(), { 't:t': 'running' }), b)
+    const provider = await screen.findByLabelText('Change provider')
+    await waitFor(() => expect(provider.props.accessibilityValue).toEqual({ text: 'Claude Code' }))
+  })
+
+  it('marks the task read once per opening: a remount of the same opening keeps “Mark as unread”', async () => {
+    const b = backend()
+    const unread = feedOf(taskOf({ needs_attention: true }), { 't:t': 'idle' })
+    const first = await renderScreen(unread, b, { openingKey: 'opening-1' })
+    await waitFor(() => expect(b.paths().filter((p) => p === 'task.update')).toHaveLength(1))
+    await first.unmount()
+    // The user marked it unread, switched away and back (the panel remounted).
+    await renderScreen(unread, b, { openingKey: 'opening-1' })
+    await act(async () => undefined)
+    expect(b.paths().filter((p) => p === 'task.update')).toHaveLength(1)
+    // Opened again later: a new opening marks it read.
+    await renderScreen(unread, b, { openingKey: 'opening-2' })
+    await waitFor(() => expect(b.paths().filter((p) => p === 'task.update')).toHaveLength(2))
   })
 
   it('interrupts a terminal agent without asking', async () => {

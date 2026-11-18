@@ -140,6 +140,18 @@ describe('demo hub: tRPC', () => {
     expect(states.at(-1)).toBe('running')
   })
 
+  it('a chat’s computer is ready, even for a tab it never saw', async () => {
+    const client = clientOf(demo())
+    const known = await client.chat.availability.query({ tabId: DEMO_IDS.darkMode })
+    expect(known).toEqual({
+      state: 'ready',
+      computer: { id: 'demo-computer', name: 'MacBook Pro' }
+    })
+    // A caller asking before the tab exists (or after it is gone) is not an error.
+    const unknown = await client.chat.availability.query({ tabId: 'no-such-tab' })
+    expect(unknown.state).toBe('ready')
+  })
+
   it('creates a project, and archives a column’s tasks at once', async () => {
     const client = clientOf(demo())
     const project = await client.projects.create.mutate({

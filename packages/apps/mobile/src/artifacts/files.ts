@@ -39,7 +39,7 @@ export const deviceFileStore: ArtifactFileStore = {
       return
     }
     for (const entry of directory.list()) {
-      if (entry.name !== keep) entry.delete()
+      if (!keep(entry.name)) entry.delete()
     }
   }
 }
@@ -74,6 +74,15 @@ export function downloadArtifactFile(
   store: ArtifactFileStore = target.http ? inProcessFileStore(target.http) : deviceFileStore
 ): Promise<string> {
   return downloadArtifactFileTo(store, target, source)
+}
+
+/** Whether the downloaded file at `uri` is (still) there: the OS may purge caches. */
+export function artifactFileExists(uri: string): boolean {
+  try {
+    return new File(uri).exists
+  } catch {
+    return false
+  }
 }
 
 /** Deletes every file kept from one hub (its sign-out). */

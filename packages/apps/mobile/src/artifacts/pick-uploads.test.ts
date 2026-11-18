@@ -33,21 +33,23 @@ describe('uploadTitle', () => {
 describe('pickUploads', () => {
   beforeEach(() => jest.resetAllMocks())
 
-  it('photos: several at once, as JPEG-compatible files', async () => {
+  it('photos and videos: several at once, as compatible files', async () => {
     picker.launchImageLibraryAsync.mockResolvedValue({
       canceled: false,
       assets: [
         { uri: 'file:///tmp/a.jpg', fileName: 'IMG_1.HEIC' },
-        { uri: 'file:///tmp/b.png', fileName: 'Shot.png' }
+        { uri: 'file:///tmp/b.png', fileName: 'Shot.png' },
+        { uri: 'file:///tmp/c.mp4', fileName: 'IMG_2.MOV' }
       ]
     } as never)
     await expect(pickUploads('photos', NOW)).resolves.toEqual([
       { uri: 'file:///tmp/a.jpg', name: 'IMG_1.jpg' },
-      { uri: 'file:///tmp/b.png', name: 'Shot.png' }
+      { uri: 'file:///tmp/b.png', name: 'Shot.png' },
+      { uri: 'file:///tmp/c.mp4', name: 'IMG_2.mp4' }
     ])
     expect(picker.launchImageLibraryAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        mediaTypes: ['images'],
+        mediaTypes: ['images', 'videos'],
         allowsMultipleSelection: true,
         preferredAssetRepresentationMode: 'compatible'
       })

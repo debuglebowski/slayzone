@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useOpenTasks } from '../../../../../home/OpenTasksProvider'
 import { artifactHref } from '../../../../../artifacts/routes'
 import { useHubFeeds } from '../../../../../hub-connections'
@@ -12,7 +12,9 @@ import { segmentParam, TaskScreen } from '../../../../../task/TaskScreen'
  * `/task/<hub address>/<task id>[?segment=agent|details|artifacts][&tab=<agent tab>]`
  * (deep link `slayzone://task/<hub>/<id>`): the task's page on that hub, Agent first.
  * The shown part and agent tab live in the params, so a link opens the same view.
- * iPad: the task opens as a tab on the board instead (desktop's tab bar).
+ * iPad: a task opened wide opens as a tab on the board instead (desktop's tab bar).
+ * Only how it OPENS decides that: a page opened narrow (Split View, Slide Over) stays a
+ * page when the window later widens or rotates — a resize never navigates away.
  */
 export default function TaskRoute() {
   const { hub, id, segment, tab } = useLocalSearchParams<{
@@ -23,12 +25,13 @@ export default function TaskRoute() {
   }>()
   const router = useRouter()
   const wide = useWide()
+  const [openedWide] = useState(wide)
   const { sessions = [] } = useHubSessions()
   const { feeds } = useHubFeeds()
   const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
   const open = useOpenTasks()
   const hubId = findSession(sessions, hub)?.entry.id
-  const asTab = wide && hubId !== undefined
+  const asTab = openedWide && hubId !== undefined
   useEffect(() => {
     if (!asTab || !hubId) return
     open.open(

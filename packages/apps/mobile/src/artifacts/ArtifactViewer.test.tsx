@@ -5,19 +5,31 @@ import { pending, trpcTest } from '../testing'
 import { ArtifactViewer, type ArtifactViewerProps } from './ArtifactViewer'
 import { artifactRow, fakeArtifactsHub, versionRow } from './fake-artifacts-hub'
 import { exportArtifact } from './export/export-artifact'
-import { downloadArtifactFile } from './files'
+import { artifactFileExists, downloadArtifactFile } from './files'
 import { hubTarget } from './hub-rest'
 import { loadHtml2canvasScript, loadMermaidScript } from './page-assets'
 import { mediaPlayer } from './media-player'
 
-jest.mock('./files', () => ({ ...jest.requireActual('./files'), downloadArtifactFile: jest.fn() }))
+jest.mock('./files', () => ({
+  ...jest.requireActual('./files'),
+  downloadArtifactFile: jest.fn(),
+  artifactFileExists: jest.fn()
+}))
 // expo-video's native half is absent in Node: a stand-in player that records its
 // source, and a view that keeps its props. `mediaPlayer` is switched per test between
 // that module and null (a build without the native module).
+const mockPlayerStatus: Array<(e: { status: string }) => void> = []
 jest.mock('expo-video', () => {
   const { View } = require('react-native')
   return {
-    useVideoPlayer: (source: string) => ({ source }),
+    useVideoPlayer: (source: string) => ({
+      source,
+      status: 'loading',
+      addListener: (_event: string, listener: (e: { status: string }) => void) => {
+        mockPlayerStatus.push(listener)
+        return { remove: () => undefined }
+      }
+    }),
     VideoView: (props: object) => <View {...props} />
   }
 })
@@ -31,6 +43,7 @@ jest.mock('./page-assets', () => ({
 jest.mock('./export/export-artifact', () => ({ exportArtifact: jest.fn() }))
 
 const download = jest.mocked(downloadArtifactFile)
+const fileExists = jest.mocked(artifactFileExists)
 const runExport = jest.mocked(exportArtifact)
 const target = hubTarget({ entry: hubEntryOf('home.example'), token: 'h' })
 
@@ -60,11 +73,16 @@ const pageOf = (testID: string) =>
     source: { html?: string; uri?: string }
     javaScriptEnabled: boolean
     onMessage?: unknown
-    onShouldStartLoadWithRequest: (req: { url: string; isTopFrame: boolean }) => boolean
+    onShouldStartLoadWithRequest: (req: {
+      url: string
+      isTopFrame: boolean
+      navigationType?: string
+    }) => boolean
   }
 
 beforeEach(() => {
   download.mockReset()
+  fileExists.mockReset().mockReturnValue(true)
   runExport.mockReset()
   jest.mocked(mediaPlayer).mockReturnValue(jest.requireActual('./ArtifactMediaPlayer'))
   jest.mocked(loadMermaidScript).mockClear()
@@ -125,6 +143,8 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     expect(page.source.html).toContain('sandbox="allow-scripts"')
     expect(page.javaScriptEnabled).toBe(true)
     expect(page.onMessage).toEqual(expect.any(Function))
+    // No scheme of its own: the app's theme variant, not the phone's.
+    expect(page.source.html).toMatch(/color-scheme:(dark|light) !important/)
   })
 
   it('SVG: the drawing, and its source on Source', async () => {
@@ -162,7 +182,7 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
       target,
       expect.objectContaining({ artifact: expect.objectContaining({ id: 'a1' }), version: null })
     )
-    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+    expect(hub.callsTo('artifacts.readText')).toHaveLength(0)
     // Node lays nothing out: report the screen's size as iOS would.
     await act(async () =>
       fireEvent(screen.getByTestId('artifact-image'), 'layout', {
@@ -170,6 +190,41 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
       })
     )
     await waitFor(() => expect(screen.getByRole('button', { name: '1:1' })).toBeEnabled())
+  })
+
+  it('a downloaded file that is gone by the time it is shown again is downloaded again', async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'shot.png')],
+      versions: { a1: [versionRow('a1', 2), versionRow('a1', 1)] }
+    })
+    const onDisk = new Set<string>()
+    download.mockImplementation(async (_t, source) => {
+      const uri = source.version
+        ? 'file:///cache/a1/v-hash1/shot.png'
+        : 'file:///cache/a1/w/shot.png'
+      onDisk.add(uri)
+      return uri
+    })
+    fileExists.mockImplementation((uri) => onDisk.has(uri))
+    const { wrapper } = trpcTest(hub.backend)
+    const props: ArtifactViewerProps = {
+      target,
+      taskId: 't1',
+      artifactId: 'a1',
+      version: null,
+      onSelectVersion: jest.fn(),
+      onOpenArtifact: jest.fn()
+    }
+    const { rerender } = await render(<ArtifactViewer {...props} />, { wrapper })
+    await screen.findByTestId('artifact-image')
+    await rerender(<ArtifactViewer {...props} version={1} />)
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(2))
+    // The working copy's file went (replaced, or purged by the OS) while the version showed.
+    onDisk.delete('file:///cache/a1/w/shot.png')
+    await rerender(<ArtifactViewer {...props} version={null} />)
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(3))
+    await screen.findByTestId('artifact-image')
+    expect(download.mock.calls[2][1].version).toBeNull()
   })
 
   it('PDF: the downloaded file in the web view', async () => {
@@ -194,7 +249,35 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     }
     expect(props.player.source).toBe(`file:///cache/a1/${title}`)
     expect(props.nativeControls).toBe(true)
-    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+    expect(hub.callsTo('artifacts.readText')).toHaveLength(0)
+  })
+
+  it.each(['clip.webm', 'song.ogg', 'memo.opus'])(
+    "%s: a format iOS can't play never reaches the player: a note and Share",
+    async (title) => {
+      const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', title)] })
+      await view(hub, { artifactId: 'a1' })
+      expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
+        /^Can't play this format on iPhone/
+      )
+      expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
+      expect(download).not.toHaveBeenCalled()
+    }
+  )
+
+  it("a file the player reports it can't play: a note and Share instead of a black box", async () => {
+    download.mockResolvedValue('file:///cache/a1/clip.mov')
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'clip.mov')] })
+    mockPlayerStatus.length = 0
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-media')
+    await act(async () => {
+      for (const listener of mockPlayerStatus) listener({ status: 'error' })
+    })
+    expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
+      /^Can't play this format/
+    )
+    expect(screen.queryByTestId('artifact-media')).toBeNull()
   })
 
   it('video in a build without the native player: says so and offers Share, fetching nothing', async () => {
@@ -206,7 +289,7 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     )
     // The note's own Share, beside the header's.
     expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
-    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+    expect(hub.callsTo('artifacts.readText')).toHaveLength(0)
     expect(download).not.toHaveBeenCalled()
   })
 
@@ -218,7 +301,7 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
       expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
         /can't be shown in the app yet/
       )
-      expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+      expect(hub.callsTo('artifacts.readText')).toHaveLength(0)
       expect(download).not.toHaveBeenCalled()
     }
   )
@@ -230,6 +313,32 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     })
     await view(hub, { artifactId: 'a1' })
     await screen.findByTestId('artifact-binary')
+    // The hub said so (`readText`); the bytes never came.
+    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+  })
+
+  it('a file too large for text: says so and offers Share, without fetching it', async () => {
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'huge.log')] })
+    hub.on('artifacts.readText', () => ({ kind: 'too-large', size: 70 * 1024 * 1024 }))
+    await view(hub, { artifactId: 'a1' })
+    expect((await screen.findByTestId('artifact-too-large')).props.children.join('')).toMatch(
+      /too large to preview \(70 MB\)/
+    )
+    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
+    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+  })
+
+  it('a hub without readText: the whole file as before', async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Old hub' }
+    })
+    hub.on('artifacts.readText', () => {
+      throw new Error('No procedure found on path "artifacts.readText"')
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-markdown')
+    expect(pageOf('artifact-page-markdown').source.html).toContain('<h1>Old hub</h1>')
   })
 
   it('a deleted artifact says so', async () => {
@@ -265,8 +374,56 @@ describe('ArtifactViewer, live and interactive', () => {
     await userEvent.setup().press(screen.getByRole('button', { name: 'History' }))
     await screen.findByTestId('artifact-version-1')
     expect(screen.getByText('current')).toBeOnTheScreen()
+    // People's words, not the content hash.
+    expect(screen.getByText('Version 2')).toBeOnTheScreen()
+    expect(screen.queryByText(/hash/)).toBeNull()
+    expect(screen.getAllByText(/^Person · .* · 10 bytes$/)).toHaveLength(2)
     await userEvent.setup().press(screen.getByTestId('artifact-version-1'))
     expect(onSelectVersion).toHaveBeenCalledWith(1)
+  })
+
+  it('History closes with Done', async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' },
+      versions: { a1: [versionRow('a1', 2)] }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-markdown')
+    const user = userEvent.setup()
+    await user.press(screen.getByRole('button', { name: 'History' }))
+    await screen.findByTestId('artifact-version-2')
+    await user.press(screen.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByTestId('artifact-version-2')).toBeNull())
+  })
+
+  it('a row that failed to load says why, with Retry', async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# P' }
+    })
+    let fail = true
+    hub.on('artifacts.get', ({ id }) => {
+      if (fail) throw new Error('The hub is unreachable.')
+      return hub.state.artifacts.find((a) => a.id === id) ?? null
+    })
+    await view(hub, { artifactId: 'a1', backLabel: 'Search' })
+    await screen.findByText('The hub is unreachable.', undefined, { timeout: 5000 })
+    expect(screen.queryByRole('button', { name: 'Back to Search' })).toBeNull()
+    fail = false
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByTestId('artifact-page-markdown')
+  })
+
+  it("Back says where it goes (the caller's label)", async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# P' }
+    })
+    await view(hub, { artifactId: 'a1', backLabel: 'Search', onBack: jest.fn() })
+    await screen.findByTestId('artifact-page-markdown')
+    expect(screen.getByRole('button', { name: 'Back to Search' })).toBeOnTheScreen()
+    expect(screen.getByText('‹ Search')).toBeOnTheScreen()
   })
 
   it('shows a version when one is named, with the way back', async () => {
@@ -300,7 +457,7 @@ describe('ArtifactViewer, live and interactive', () => {
     )
   })
 
-  it('an artifact link opens that artifact; a web link opens outside', async () => {
+  it('a tapped artifact link opens that artifact; a tapped web link opens outside', async () => {
     const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined)
     const hub = fakeArtifactsHub({
       artifacts: [artifactRow('a1', 'plan.md')],
@@ -309,12 +466,20 @@ describe('ArtifactViewer, live and interactive', () => {
     const { onOpenArtifact } = await view(hub, { artifactId: 'a1' })
     await screen.findByTestId('artifact-page-markdown')
     const page = pageOf('artifact-page-markdown')
+    const tap = (url: string) => ({ url, isTopFrame: true, navigationType: 'click' })
     expect(page.onShouldStartLoadWithRequest({ url: 'about:blank', isTopFrame: true })).toBe(true)
-    expect(page.onShouldStartLoadWithRequest({ url: 'artifact:a2', isTopFrame: true })).toBe(false)
+    // Not tapped (a refresh, a redirect): nothing opens.
+    expect(
+      page.onShouldStartLoadWithRequest({
+        url: 'https://x.dev',
+        isTopFrame: true,
+        navigationType: 'other'
+      })
+    ).toBe(false)
+    expect(openURL).not.toHaveBeenCalled()
+    expect(page.onShouldStartLoadWithRequest(tap('artifact:a2'))).toBe(false)
     expect(onOpenArtifact).toHaveBeenCalledWith('a2')
-    expect(page.onShouldStartLoadWithRequest({ url: 'https://x.dev', isTopFrame: true })).toBe(
-      false
-    )
+    expect(page.onShouldStartLoadWithRequest(tap('https://x.dev'))).toBe(false)
     expect(openURL).toHaveBeenCalledWith('https://x.dev')
   })
 
@@ -333,6 +498,29 @@ describe('ArtifactViewer, live and interactive', () => {
     await waitFor(() =>
       expect(pageOf('artifact-page-html').source.html).toContain('color-scheme:dark !important')
     )
+  })
+
+  it("HTML: a colour scheme that couldn't be saved says so on its own line, not Share's", async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'report.html')],
+      content: { a1: '<p>x</p>' }
+    })
+    hub.on('artifacts.update', () => {
+      throw new Error('Read-only hub')
+    })
+    const share = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: 'sharedAction', activityType: undefined })
+    download.mockResolvedValue('file:///cache/a1/report.html')
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-html')
+    const user = userEvent.setup()
+    await user.press(screen.getByRole('button', { name: 'Colour scheme: System' }))
+    await screen.findByText('Read-only hub')
+    // Sharing (which clears its own error) leaves the scheme's error alone.
+    await user.press(screen.getByRole('button', { name: 'Share' }))
+    await waitFor(() => expect(share).toHaveBeenCalled())
+    expect(screen.getByText('Read-only hub')).toBeOnTheScreen()
   })
 })
 
@@ -473,7 +661,7 @@ describe('ArtifactViewer, Export', () => {
       })
       await view(hub, { artifactId: 'a1' })
       await screen.findByTestId('artifact-page-markdown')
-      hub.on('artifacts.readContent', () => {
+      hub.on('artifacts.readText', () => {
         throw new Error('The hub could not read the file.')
       })
       await act(async () => hub.emit('artifacts.onContentChanged', 'a1'))

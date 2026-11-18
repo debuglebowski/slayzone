@@ -54,8 +54,14 @@ export function ProjectScreen({
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
-          <Text style={styles.link}>‹ Projects</Text>
+        <Pressable
+          onPress={onBack}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          testID="project-back"
+        >
+          <Text style={styles.link}>‹ Back</Text>
         </Pressable>
       </View>
       {body}

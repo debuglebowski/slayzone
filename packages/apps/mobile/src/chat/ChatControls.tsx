@@ -1,12 +1,14 @@
 /**
  * The chat's permission mode, model and effort as three chips (desktop's chat pills);
  * a tap lists the choices in a sheet. The models are the hub's (`chat.getModels`);
- * effort shows only for a model that has it, with that model's own levels.
+ * effort shows only for a model that has it, with that model's own levels. The chips
+ * scroll sideways when they don't fit; the choices open in the app's bottom sheet.
  */
 import type { ChatModelsView } from '@slayzone/terminal-contracts'
 import { useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text } from 'react-native'
 import type { ChromeColors } from '../theme'
+import { BottomSheet } from '../ui-kit/Chrome'
 import {
   type ControlOption,
   effortLabel,
@@ -79,7 +81,14 @@ export function ChatControls({
             : null
 
   return (
-    <View style={s.bar}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={s.scroller}
+      contentContainerStyle={s.bar}
+      keyboardShouldPersistTaps="handled"
+      testID="chat-controls"
+    >
       <Chip
         label={settings.mode ? modeLabel(settings.mode) : 'Mode'}
         busy={settings.changing.mode}
@@ -112,20 +121,18 @@ export function ChatControls({
           s={s}
         />
       )}
-      <Modal
+      <BottomSheet
         visible={sheet !== null}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPicker(null)}
+        onClose={() => setPicker(null)}
+        testID="chat-control-sheet"
       >
-        <Pressable style={s.backdrop} onPress={() => setPicker(null)} accessibilityLabel="Close" />
         {sheet && (
-          <View style={s.sheet}>
+          <>
             <Text style={s.sheetTitle}>{sheet.title}</Text>
             {sheet.options.length === 0 && sheet.hint ? (
               <Text style={s.sheetHint}>{sheet.hint}</Text>
             ) : null}
-            <ScrollView>
+            <ScrollView style={s.options}>
               {sheet.options.map((o) => (
                 <Pressable
                   key={o.id}
@@ -142,10 +149,10 @@ export function ChatControls({
                 </Pressable>
               ))}
             </ScrollView>
-          </View>
+          </>
         )}
-      </Modal>
-    </View>
+      </BottomSheet>
+    </ScrollView>
   )
 }
 
@@ -181,8 +188,11 @@ function Chip({
 
 function makeStyles(t: ChromeColors) {
   return StyleSheet.create({
+    scroller: { flexGrow: 0, flexShrink: 0 },
     bar: { flexDirection: 'row', gap: 6, paddingHorizontal: 8, paddingTop: 6 },
     chip: {
+      minHeight: 32,
+      justifyContent: 'center',
       paddingHorizontal: 10,
       paddingVertical: 5,
       borderRadius: 999,
@@ -193,18 +203,7 @@ function makeStyles(t: ChromeColors) {
     },
     chipBusy: { opacity: 0.6 },
     chipText: { color: t.foreground, fontSize: 12, fontWeight: '600' },
-    backdrop: { flex: 1 },
-    sheet: {
-      maxHeight: '60%',
-      backgroundColor: t.popover,
-      borderTopLeftRadius: 14,
-      borderTopRightRadius: 14,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.border,
-      paddingHorizontal: 12,
-      paddingTop: 12,
-      paddingBottom: 28
-    },
+    options: { maxHeight: 420 },
     sheetTitle: { color: t.popoverForeground, fontSize: 15, fontWeight: '700', marginBottom: 8 },
     sheetHint: { color: t.mutedForeground, fontSize: 13, paddingHorizontal: 10, paddingBottom: 8 },
     option: { paddingVertical: 10, paddingHorizontal: 10, borderRadius: 8 },

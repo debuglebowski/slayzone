@@ -76,7 +76,7 @@ function setup(project?: BoardProject) {
       key: 'k',
       hubId: workHub.id,
       hubLabel: workHub.label,
-      task: taskOf('t1', { title: 'Ship it' }),
+      task: taskOf('t1', { title: 'Ship it', status: 'in_progress' }),
       project: PROJECT
     }
   ]
@@ -152,7 +152,18 @@ describe('ProjectDetail', () => {
     await render(ui)
     const user = userEvent.setup()
 
+    const alert = jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((_title, _message, buttons) =>
+        buttons?.find((b) => b.style === 'destructive')?.onPress?.()
+      )
     await user.press(await waitFor(() => folderRow('mini').getByText('Remove')))
+    // Asked first, naming the computer and the folder.
+    expect(alert).toHaveBeenCalledWith(
+      'Remove the folder on mac-mini?',
+      expect.stringContaining('/Users/me/site'),
+      expect.any(Array)
+    )
     await waitFor(() =>
       expect(calls).toContainEqual({
         path: 'workspace.forgetProjectPath',
@@ -203,10 +214,26 @@ describe('ProjectDetail', () => {
     expect(screen.queryByText('Change')).toBeNull()
   })
 
-  it("opens the project's tasks", async () => {
+  it("a folder's Remove asks first: Cancel removes nothing", async () => {
+    const calls = serveHub(workHub.id)
+    const { ui } = setup()
+    await render(ui)
+    const alert = jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((_title, _message, buttons) =>
+        buttons?.find((b) => b.style === 'cancel')?.onPress?.()
+      )
+    await userEvent.setup().press(await waitFor(() => folderRow('mini').getByText('Remove')))
+    expect(alert).toHaveBeenCalled()
+    expect(calls.some((c) => c.path === 'workspace.forgetProjectPath')).toBe(false)
+  })
+
+  it("opens the project's tasks, each with its status as the project names it", async () => {
     serveHub(workHub.id)
     const { ui, onOpenTask } = setup()
     await render(ui)
+    expect(screen.getByText('In Progress')).toBeOnTheScreen()
+    expect(screen.queryByText('in_progress')).toBeNull()
     await userEvent.setup().press(screen.getByText('Ship it'))
     expect(onOpenTask).toHaveBeenCalledWith(
       expect.objectContaining({ task: expect.objectContaining({ id: 't1' }) })

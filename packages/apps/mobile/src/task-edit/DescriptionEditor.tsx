@@ -9,6 +9,9 @@
  * Attach (photo library, camera, files): each file is uploaded to the task as an
  * artifact on its hub (`uploadArtifact`, top level, as desktop's paste) and linked at the
  * cursor, `[title](artifact:<id>)`; the link is saved with the text, on Done.
+ *
+ * The keyboard never covers the text: the sheet's bottom is padded by what the keyboard
+ * covers (`useKeyboardInset`), so the input ends above it and keeps the cursor in view.
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -29,6 +32,7 @@ import { ChoiceSheet } from '../computers/ChoiceSheet'
 import type { TaskRow } from '../hub-board'
 import { useHubSessions } from '../hub-sessions'
 import { type ChromeColors, useTheme } from '../theme'
+import { MODAL_ORIENTATIONS } from '../ui-kit/Chrome'
 import { useTRPC, useTRPCClient } from '../trpc'
 import {
   artifactLink,
@@ -39,6 +43,7 @@ import {
   type StoredDescription,
   type TextSelection
 } from './description'
+import { useKeyboardInset } from './keyboard-inset'
 import { messageOf } from './use-task-writes'
 
 const SOURCES: { key: UploadSource; label: string }[] = [
@@ -46,6 +51,9 @@ const SOURCES: { key: UploadSource; label: string }[] = [
   { key: 'camera', label: 'Take photo' },
   { key: 'files', label: 'Files' }
 ]
+
+/** 44pt tall header buttons that don't reach into their neighbours (16pt apart). */
+const HEADER_SLOP = { top: 12, bottom: 12, left: 8, right: 8 }
 
 const stored = (task: StoredDescription): StoredDescription => ({
   description: task.description,
@@ -59,6 +67,7 @@ export function DescriptionEditor({ row, onClose }: { row: TaskRow; onClose: () 
   const client = useTRPCClient()
   const queryClient = useQueryClient()
   const { sessions = [] } = useHubSessions()
+  const { attach: attachKeyboardInset, inset: keyboardInset } = useKeyboardInset()
   const taskId = row.task.id
 
   /** The hub's description editing started from (or the one taken with "Use theirs"). */
@@ -191,22 +200,37 @@ export function DescriptionEditor({ row, onClose }: { row: TaskRow; onClose: () 
 
   const busy = saving || uploading > 0
   return (
-    <Modal visible animationType="slide" presentationStyle="formSheet" onRequestClose={cancel}>
-      <View style={styles.sheet} testID="description-editor">
+    <Modal
+      visible
+      animationType="slide"
+      supportedOrientations={MODAL_ORIENTATIONS}
+      presentationStyle="formSheet"
+      onRequestClose={cancel}
+    >
+      <View
+        ref={attachKeyboardInset}
+        style={[styles.sheet, { paddingBottom: keyboardInset }]}
+        testID="description-editor"
+      >
         <View style={styles.header}>
-          <Pressable onPress={cancel} hitSlop={8} accessibilityRole="button">
+          <Pressable onPress={cancel} hitSlop={HEADER_SLOP} accessibilityRole="button">
             <Text style={styles.link}>Cancel</Text>
           </Pressable>
           <Text style={styles.title}>Description</Text>
           <Pressable
             onPress={() => setSourcesOpen(true)}
-            hitSlop={8}
+            hitSlop={HEADER_SLOP}
             accessibilityRole="button"
             disabled={saving}
           >
             <Text style={styles.link}>Attach</Text>
           </Pressable>
-          <Pressable onPress={done} hitSlop={8} accessibilityRole="button" disabled={busy}>
+          <Pressable
+            onPress={done}
+            hitSlop={HEADER_SLOP}
+            accessibilityRole="button"
+            disabled={busy}
+          >
             <Text style={[styles.link, styles.done, busy && styles.disabled]}>Done</Text>
           </Pressable>
         </View>
@@ -216,7 +240,7 @@ export function DescriptionEditor({ row, onClose }: { row: TaskRow; onClose: () 
               The description changed on the hub while you were editing. Done asks before replacing
               it.
             </Text>
-            <Pressable onPress={takeTheirs} hitSlop={8} accessibilityRole="button">
+            <Pressable onPress={takeTheirs} hitSlop={12} accessibilityRole="button">
               <Text style={styles.link}>Use theirs</Text>
             </Pressable>
           </View>

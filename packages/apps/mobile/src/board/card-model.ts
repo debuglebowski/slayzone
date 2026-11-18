@@ -5,7 +5,7 @@
  * its own order, Blocked, overdue (a due date before today on a task not finished).
  * Plus the attention counts the header's 🔔 and the project switcher show.
  */
-import { todayISO } from '@slayzone/tasks/board'
+import { PRIORITY_LABELS, todayISO } from '@slayzone/tasks/board'
 import type { TerminalState } from '@slayzone/terminal-contracts'
 import { ALIVE_STATES } from '@slayzone/terminal/terminal-state'
 import {
@@ -17,6 +17,7 @@ import {
 import { agentGroup } from '../agents/agent-status'
 import { mergeHubAgents, taskAgentSessions, taskIdOfSession } from '../agents/hub-agents'
 import { type BoardProject, type BoardTask, type HubFeed, rowKey } from '../hub-board'
+import { dueDayLabel } from '../task-edit/fields'
 
 /** Desktop's agent dot: amber = waits for you, green = running (dim: subagents), sky = idle. */
 export type AgentDot = 'attention' | 'running' | 'background' | 'idle' | 'error' | 'hibernated'
@@ -157,4 +158,33 @@ export function statusCategoryOf(status: string, project: BoardProject | undefin
   const column = resolveColumns(project?.columns_config).find((c) => c.id === status)
   if (!column) return { label: status, category: 'unstarted', tone: 'gray' }
   return { label: column.label, category: column.category, tone: column.color }
+}
+
+/** What a card's agent dot says, read aloud. */
+const AGENT_SPOKEN: Readonly<Record<AgentDot, string>> = {
+  attention: 'agent needs you',
+  running: 'agent running',
+  background: 'agent running in the background',
+  idle: 'agent idle',
+  error: 'agent failed',
+  hibernated: 'agent hibernated'
+}
+
+/**
+ * A card read aloud (VoiceOver): everything it shows — title, status, priority, due date
+ * (overdue said so), blocked, the sub-task count and what its agent is doing.
+ */
+export function cardAccessibilityLabel(
+  task: Pick<BoardTask, 'title' | 'priority' | 'due_date'>,
+  model: CardModel,
+  status: string,
+  today: string = todayISO()
+): string {
+  const parts = [task.title, status, PRIORITY_LABELS[task.priority] ?? `Priority ${task.priority}`]
+  if (task.due_date)
+    parts.push(`${model.overdue ? 'overdue' : 'due'} ${dueDayLabel(task.due_date, today)}`)
+  if (model.blocked) parts.push('blocked')
+  if (model.subtasks) parts.push(`${model.subtasks.done} of ${model.subtasks.total} sub-tasks done`)
+  if (model.dot) parts.push(AGENT_SPOKEN[model.dot])
+  return parts.join(', ')
 }

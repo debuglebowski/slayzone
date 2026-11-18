@@ -59,6 +59,18 @@ describe('agent lifecycle', () => {
     expect(calls).toEqual([['task.startMainAgent', { taskId: 't' }]])
   })
 
+  it('starts a terminal agent at the size the phone shows it at, when it knows it', async () => {
+    const { client, calls } = hub()
+    await startAgent(client, 't', { cols: 60, rows: 40 })
+    await restartAgent(client, terminal, { cols: 61, rows: 41 })
+    await switchAgentMode(client, 't', 'codex', { cols: 62, rows: 42 })
+    expect(calls.filter(([p]) => p === 'task.startMainAgent')).toEqual([
+      ['task.startMainAgent', { taskId: 't', cols: 60, rows: 40 }],
+      ['task.startMainAgent', { taskId: 't', cols: 61, rows: 41 }],
+      ['task.startMainAgent', { taskId: 't', cols: 62, rows: 42 }]
+    ])
+  })
+
   it('stops a terminal agent with pty.kill, a chat agent with chat.kill', async () => {
     const a = hub()
     await stopAgent(a.client, terminal)

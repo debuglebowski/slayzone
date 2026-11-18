@@ -59,4 +59,32 @@ describe('decideNavigation', () => {
     expect(decideNavigation(top('javascript:alert(1)'))).toEqual({ kind: 'block' })
     expect(decideNavigation(top('slayzone://task/x/y'))).toEqual({ kind: 'block' })
   })
+
+  it("acts on a page's link only when it was tapped (no refresh, script or form leaves the page)", () => {
+    const page = { requireTap: true }
+    const tapped = (url: string) => ({ url, isTopFrame: true, navigationType: 'click' as const })
+    expect(decideNavigation(tapped('https://x.dev'), page)).toEqual({
+      kind: 'open-external',
+      url: 'https://x.dev'
+    })
+    expect(decideNavigation(tapped('artifact:a2'), page)).toEqual({
+      kind: 'open-artifact',
+      artifactId: 'a2'
+    })
+    for (const navigationType of ['other', 'formsubmit', 'reload', 'backforward'] as const) {
+      expect(
+        decideNavigation({ url: 'https://evil.example', isTopFrame: true, navigationType }, page)
+      ).toEqual({ kind: 'block' })
+      expect(
+        decideNavigation({ url: 'artifact:a2', isTopFrame: true, navigationType }, page)
+      ).toEqual({ kind: 'block' })
+    }
+    expect(decideNavigation({ url: 'https://evil.example', isTopFrame: true }, page)).toEqual({
+      kind: 'block'
+    })
+    // The page itself still loads, however it got there.
+    expect(
+      decideNavigation({ url: 'about:blank', isTopFrame: true, navigationType: 'other' }, page)
+    ).toEqual({ kind: 'load' })
+  })
 })

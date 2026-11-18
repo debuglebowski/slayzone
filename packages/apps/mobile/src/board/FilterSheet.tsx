@@ -1,6 +1,7 @@
 import { type DueDateRange, PRIORITY_LABELS } from '@slayzone/tasks/board'
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { type ChromeColors, useTheme } from '../theme'
+import { MODAL_ORIENTATIONS } from '../ui-kit/Chrome'
 import {
   BOARD_GROUPS,
   type BoardFilter,
@@ -61,6 +62,7 @@ export function FilterSheet({
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       testID={testID}
+      hitSlop={4}
       style={[styles.chip, active && styles.chipActive]}
     >
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
@@ -83,6 +85,7 @@ export function FilterSheet({
     <Modal
       visible={visible}
       animationType="slide"
+      supportedOrientations={MODAL_ORIENTATIONS}
       presentationStyle="formSheet"
       onRequestClose={onClose}
     >
@@ -226,7 +229,10 @@ const makeStyles = (t: ChromeColors) =>
     body: { padding: 16, gap: 8 },
     label: { fontSize: 13, fontWeight: '600', color: t.mutedForeground, marginTop: 12 },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    // 36pt + 4pt hitSlop each way = 44pt (the 8pt gaps hold the slop).
     chip: {
+      minHeight: 36,
+      justifyContent: 'center',
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 16,

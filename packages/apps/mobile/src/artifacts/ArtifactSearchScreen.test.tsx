@@ -104,4 +104,25 @@ describe('ArtifactSearchScreen', () => {
       'https://home.example/api/artifacts/search?q=(&allTasks=1&regex=1&caseSensitive=1'
     )
   })
+
+  it('highlights the query in each line; dragging the results puts the keyboard away', async () => {
+    const fetch = fakeFetch(() => ({
+      status: 200,
+      body: {
+        ...reportWith('a1', 'plan.md', 4, 'the launch Plan'),
+        data: {
+          ...reportWith('a1', 'plan.md', 4, 'the launch Plan').data,
+          skippedLarge: [{ label: 'dump.log', size: 90_000_000 }]
+        }
+      }
+    }))
+    globalThis.fetch = fetch as unknown as typeof globalThis.fetch
+    await render(<ArtifactSearchScreen sessions={[home]} feeds={[]} onOpen={jest.fn()} />)
+    await userEvent.setup().type(screen.getByTestId('artifact-search-input'), 'plan')
+    await screen.findByTestId('artifact-search-result-a1')
+    expect(screen.getByTestId('artifact-search-hit').props.children).toBe('Plan')
+    expect(screen.getByTestId('artifact-search-list').props.keyboardDismissMode).toBe('on-drag')
+    // Files the hub didn't search (too large) are named, not silently left out.
+    expect(screen.getByText(/dump\.log/)).toBeOnTheScreen()
+  })
 })

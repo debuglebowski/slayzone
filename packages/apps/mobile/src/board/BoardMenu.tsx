@@ -1,6 +1,7 @@
 /**
  * The board's ⋯ (iOS's own action sheet): everything the board's toolbar used to show —
- * Filter… (with "Clear filters" while one narrows the board), Display…, the views, and
+ * Filter… ("Edit filters…" and "Clear filters" while one narrows the board), Display…,
+ * the views ("Switch to List view"; the current one says so), and
  * desktop's "Archive all" of each completed column that shows tasks (after asking). A
  * dot on ⋯ says a filter narrows the board, so it is never invisible.
  */
@@ -79,13 +80,13 @@ export function BoardMenuButton({
   const showMenu = () => {
     const entries: Entry[] = []
     if (props.canFilter) {
-      entries.push({ label: props.narrows ? 'Filter… (on)' : 'Filter…', run: props.onFilter })
+      entries.push({ label: props.narrows ? 'Edit filters…' : 'Filter…', run: props.onFilter })
       if (props.narrows) entries.push({ label: 'Clear filters', run: props.onClearFilters })
       entries.push({ label: 'Display…', run: props.onDisplay })
     }
     for (const v of props.views) {
       entries.push({
-        label: v.id === props.view ? `${v.label} view ✓` : `${v.label} view`,
+        label: v.id === props.view ? `${v.label} view (current)` : `Switch to ${v.label} view`,
         run: () => props.onView(v.id)
       })
     }

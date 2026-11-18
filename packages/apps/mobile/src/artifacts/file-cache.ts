@@ -7,9 +7,13 @@
  *
  * Kept in the caches directory (the OS may purge it) per hub and artifact, under a stamp
  * that changes whenever the content may have — the row's current version and update
- * time, plus a tick the viewer bumps when the hub says the file changed on disk (a
- * desktop autosave changes neither) — or, for a version, its content hash (immutable).
- * A stamp already on disk is reused; a new one replaces the artifact's older copies.
+ * time, the file's modification time on the hub (an edit on disk while the phone wasn't
+ * listening changes neither), plus a tick the viewer bumps when the hub says the file
+ * changed on disk — or, for a version, its content hash (immutable). A stamp already on
+ * disk is reused; a new one replaces the artifact's older copies of its kind: one working
+ * copy and one version are kept, so going back and forth between the artifact and a
+ * version finds both. A path handed out earlier may still be gone (replaced, or purged by
+ * the OS): whoever keeps one checks it is there before showing it (`useArtifactFile`).
  *
  *   <caches>/slayzone-artifacts/<hub>/<artifact id>/<stamp>/<title>
  */
@@ -36,8 +40,8 @@ export interface ArtifactFileStore {
     dir: string[],
     name: string
   ): Promise<string>
-  /** Deletes everything in `dir` except its child `keep` (null: everything, `dir` too). */
-  removeExcept(dir: string[], keep: string | null): void
+  /** Deletes every child of `dir` that `keep` refuses (null: everything, `dir` too). */
+  removeExcept(dir: string[], keep: ((name: string) => boolean) | null): void
 }
 
 export interface ArtifactFileSource {
@@ -46,6 +50,8 @@ export interface ArtifactFileSource {
   version?: { ref: number; contentHash: string } | null
   /** Bumped when the hub reports the file changed (`artifacts.onContentChanged`). */
   contentTick?: number
+  /** The working copy's modification time on the hub (`artifacts.getMtime`), if known. */
+  mtime?: number | null
 }
 
 /** A path segment from any string: no separators, nothing hidden or empty. */
@@ -57,10 +63,16 @@ const segment = (value: string): string => {
 /** A file name from a title, keeping what is legal on iOS (only `/` and `:` are not). */
 export const fileName = (title: string): string => segment(title.replace(/[/:]/g, '_'))
 
+const VERSION_STAMP = 'v-'
+const WORKING_STAMP = 'w-'
+
 export function artifactFileStamp(source: ArtifactFileSource): string {
-  if (source.version) return `v-${segment(source.version.contentHash)}`
+  if (source.version) return `${VERSION_STAMP}${segment(source.version.contentHash)}`
   const { current_version_id, updated_at } = source.artifact
-  return segment(`w-${current_version_id ?? 'none'}-${updated_at}-${source.contentTick ?? 0}`)
+  const mtime = source.mtime ?? 'x'
+  return segment(
+    `${WORKING_STAMP}${current_version_id ?? 'none'}-${updated_at}-${mtime}-${source.contentTick ?? 0}`
+  )
 }
 
 /** The status in expo-file-system's download error (`… response has status 404`). */
@@ -103,7 +115,9 @@ export async function downloadArtifactFileTo(
     }
   }
   if (uri === null) throw downloadError(target, source, firstError)
-  store.removeExcept(artifactDir, stamp)
+  // Older copies of the same kind go; the other kind's one stays.
+  const kind = stamp.startsWith(VERSION_STAMP) ? VERSION_STAMP : WORKING_STAMP
+  store.removeExcept(artifactDir, (name) => name === stamp || !name.startsWith(kind))
   return uri
 }
 

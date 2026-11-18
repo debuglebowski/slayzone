@@ -1,6 +1,14 @@
-import { act, render, screen, userEvent, waitFor, within } from '@testing-library/react-native'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  userEvent,
+  waitFor,
+  within
+} from '@testing-library/react-native'
 import type { ReactNode } from 'react'
-import { Alert, type AlertButton } from 'react-native'
+import { Alert, type AlertButton, DeviceEventEmitter } from 'react-native'
 import type { BoardData, HubFeed, TaskRow } from '../hub-board'
 import { hubEntryOf } from '../hub-session'
 import {
@@ -13,7 +21,7 @@ import {
   workHub
 } from '../hubs/testing'
 import { serveTaskHub, writes } from '../task-edit/testing'
-import { TaskPage, type TaskPageProps } from './TaskPage'
+import { TaskPage, type TaskPageProps, type TaskSegment } from './TaskPage'
 
 const mockHubs = createFakeHubs()
 jest.mock('@slayzone/transport/client', () => ({
@@ -26,7 +34,18 @@ jest.mock('../hub-connections', () => ({ useHubFeeds: () => ({ feeds: mockFeeds.
 const mockRouter = { push: jest.fn(), back: jest.fn(), canGoBack: () => true }
 jest.mock('expo-router', () => ({ useRouter: () => mockRouter }))
 // The panels beside Details have suites of their own.
-jest.mock('../agents/AgentPanel', () => ({ AgentPanel: () => null }))
+/** How often the agent panel mounted (a remount loses its draft, terminal, uploads). */
+const mockMounts = { agent: 0 }
+jest.mock('../agents/AgentPanel', () => ({
+  AgentPanel: () => {
+    const { useEffect } = jest.requireActual('react')
+    const { Text } = jest.requireActual('react-native')
+    useEffect(() => {
+      mockMounts.agent++
+    }, [])
+    return <Text>agent panel</Text>
+  }
+}))
 jest.mock('../artifacts/ArtifactsScreen', () => ({ ArtifactsScreen: () => null }))
 jest.mock('../artifacts/use-task-artifacts', () => ({
   useTaskArtifacts: () => ({ artifacts: [{ id: 'a1' }, { id: 'a2' }] })
@@ -78,20 +97,24 @@ function rowFrom(hub: typeof workHub, board: BoardData): TaskRow {
 }
 
 /** The task on `work`, with `home` signed in too (it must never see a write). */
-async function show(answers: Parameters<typeof serveTaskHub>[2] = {}, board = boardWith()) {
+async function show(
+  answers: Parameters<typeof serveTaskHub>[2] = {},
+  board = boardWith(),
+  segment: TaskSegment = 'details'
+) {
   const work = serveTaskHub(mockHubs, workHub.id, answers)
   const home = serveTaskHub(mockHubs, homeHub.id)
   mockFeeds.list = [feedOf(homeHub, boardOf({})), feedOf(workHub, board)]
   const onDeleted = jest.fn()
   const onOpenTask = jest.fn()
   const onSegment = jest.fn()
-  const props = (b: BoardData): TaskPageProps => ({
+  const props = (b: BoardData, shown: TaskSegment = segment): TaskPageProps => ({
     row: rowFrom(workHub, b),
     feed: feedOf(workHub, b),
     session: { entry: hubEntryOf(workHub.label), token: 't' } as never,
     showHub: true,
     wide: false,
-    segment: 'details',
+    segment: shown,
     onSegment,
     agentTabId: undefined,
     onSelectAgentTab: jest.fn(),
@@ -102,13 +125,17 @@ async function show(answers: Parameters<typeof serveTaskHub>[2] = {}, board = bo
   })
   const view = await render(<TaskPage {...props(board)} />)
   // The blockers load (`task.getBlockers`) settles before the test acts.
-  await waitFor(() => expect(work.some((c) => c.path === 'task.getBlockers')).toBe(true))
+  if (segment === 'details')
+    await waitFor(() => expect(work.some((c) => c.path === 'task.getBlockers')).toBe(true))
   await act(async () => undefined)
   const rerender = async (next: BoardData) => {
     mockFeeds.list = [feedOf(homeHub, boardOf({})), feedOf(workHub, next)]
     await view.rerender(<TaskPage {...props(next)} />)
   }
-  return { work, home, onDeleted, onOpenTask, onSegment, rerender }
+  const showSegment = async (next: TaskSegment) => {
+    await view.rerender(<TaskPage {...props(board, next)} />)
+  }
+  return { work, home, onDeleted, onOpenTask, onSegment, rerender, showSegment }
 }
 
 const user = () => userEvent.setup()
@@ -136,7 +163,7 @@ describe('TaskPage fields', () => {
     expect(screen.getByDisplayValue('Write spec')).toBeOnTheScreen()
     expect(screen.getByTestId('task-status')).toHaveTextContent('StatusTo do ▾')
     expect(screen.getByTestId('task-priority')).toHaveTextContent('PriorityMedium ▾')
-    expect(screen.getByTestId('task-due')).toHaveTextContent('DueDue 2999-01-02 ▾')
+    expect(screen.getByTestId('task-due')).toHaveTextContent('DueDue Jan 2, 2999 ▾')
     expect(screen.getByLabelText('Status: To do')).toBeOnTheScreen()
     expect(screen.getByText('‹ Home')).toBeOnTheScreen()
     expect(screen.getByText(workHub.label)).toBeOnTheScreen()
@@ -156,6 +183,48 @@ describe('TaskPage fields', () => {
     expect(screen.getByTestId('segment-artifacts')).toHaveTextContent('Artifacts 2')
     await user().press(screen.getByTestId('segment-agent'))
     expect(onSegment).toHaveBeenCalledWith('agent')
+  })
+
+  it('keeps the Agent mounted while Details or Artifacts show (its draft and terminal survive)', async () => {
+    mockMounts.agent = 0
+    const { showSegment, work } = await show({}, boardWith(), 'agent')
+    expect(screen.getByText('agent panel')).toBeOnTheScreen()
+    await showSegment('details')
+    await waitFor(() => expect(work.some((c) => c.path === 'task.getBlockers')).toBe(true))
+    // Hidden, not unmounted: off screen to touch and to VoiceOver.
+    expect(screen.queryByText('agent panel')).toBeNull()
+    expect(screen.getByText('agent panel', { includeHiddenElements: true })).toBeTruthy()
+    expect(screen.getByTestId('task-details')).toBeOnTheScreen()
+    await showSegment('artifacts')
+    await showSegment('agent')
+    expect(screen.getByText('agent panel')).toBeOnTheScreen()
+    expect(mockMounts.agent).toBe(1)
+  })
+
+  it('mounts a part only once it is first shown', async () => {
+    mockMounts.agent = 0
+    await show()
+    expect(screen.queryByText('agent panel', { includeHiddenElements: true })).toBeNull()
+    expect(mockMounts.agent).toBe(0)
+  })
+
+  it('the due date under the title reads as a day, not a raw date', async () => {
+    await show({}, boardWith({ due_date: '2999-01-02' }))
+    expect(screen.getByLabelText('Due Jan 2, 2999')).toHaveTextContent('Due Jan 2, 2999')
+    expect(screen.queryByText('2999-01-02')).toBeNull()
+  })
+
+  it('while the keyboard is up, the line under the title steps aside (more room to type)', async () => {
+    await show()
+    expect(screen.getByLabelText('Priority: Medium')).toBeOnTheScreen()
+    await act(async () => {
+      DeviceEventEmitter.emit('keyboardWillShow', { endCoordinates: { height: 300, screenY: 500 } })
+    })
+    expect(screen.queryByLabelText('Priority: Medium')).toBeNull()
+    await act(async () => {
+      DeviceEventEmitter.emit('keyboardWillHide', { endCoordinates: { height: 0, screenY: 844 } })
+    })
+    expect(screen.getByLabelText('Priority: Medium')).toBeOnTheScreen()
   })
 
   it('changes the status on the hub that owns the task, nowhere else', async () => {
@@ -184,11 +253,16 @@ describe('TaskPage fields', () => {
     )
   })
 
-  it('types a due date', async () => {
+  it('picks a due date on the calendar', async () => {
     const { work } = await show()
-    await pick('task-due', 'Pick a date…')
-    await user().type(screen.getByTestId('due-date-input'), '2027-03-04')
-    await user().press(screen.getByText('Set'))
+    await user().press(screen.getByTestId('task-due'))
+    await act(async () =>
+      fireEvent(
+        within(screen.getByTestId('choice-sheet')).getByTestId('due-date-calendar'),
+        'change',
+        { nativeEvent: { timestamp: new Date(2027, 2, 4).getTime() } }
+      )
+    )
     await waitFor(() =>
       expect(writes(work)).toEqual([
         { path: 'task.update', input: { id: 't1', dueDate: '2027-03-04' } }

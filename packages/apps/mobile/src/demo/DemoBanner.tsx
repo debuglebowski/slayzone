@@ -1,11 +1,12 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useHubSessions } from '../hub-sessions'
 import { type ChromeColors, useTheme } from '../theme'
+import { confirmExitDemo } from '../ui-kit/confirm'
 
 /**
  * Above every tab while the demo is open (`TabStack`): says this is sample data that
- * resets, and leaves the demo in one tap (back to the sign-in screen). Nothing outside
- * the demo.
+ * resets, and leaves the demo (back to the sign-in screen) once the user confirms — what
+ * they changed in it is discarded. Nothing outside the demo.
  */
 export function DemoBanner() {
   const { demo, exitDemo } = useHubSessions()
@@ -22,8 +23,9 @@ export function DemoBanner() {
       </Text>
       <Pressable
         testID="exit-demo"
-        onPress={exitDemo}
+        onPress={() => confirmExitDemo(exitDemo)}
         hitSlop={8}
+        style={styles.exit}
         accessibilityRole="button"
         accessibilityLabel="Exit demo"
       >
@@ -40,7 +42,8 @@ const makeStyles = (t: ChromeColors) =>
       alignItems: 'center',
       gap: 10,
       paddingHorizontal: 16,
-      paddingVertical: 8,
+      // Exit demo's 44pt sets the height.
+      paddingVertical: 0,
       backgroundColor: t.accent,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: t.border
@@ -53,5 +56,6 @@ const makeStyles = (t: ChromeColors) =>
     },
     badgeText: { fontSize: 11, fontWeight: '700', color: t.primaryForeground, letterSpacing: 0.5 },
     text: { flex: 1, fontSize: 13, color: t.accentForeground },
+    exit: { minHeight: 44, justifyContent: 'center' },
     action: { fontSize: 14, fontWeight: '600', color: t.accentForeground }
   })

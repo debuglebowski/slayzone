@@ -5,8 +5,9 @@
  * of every hub), 🔔 with how many agents wait for you (all hubs), ⋯ (`BoardMenu`: Filter…,
  * Display…, Board/List, Archive all; a dot while a filter narrows the board); then the
  * board (`ProjectBoard`: its column strip, one column at a time, swipe sideways; a
- * floating ＋: tap = a temporary task, long-press = a task in the shown column). A tapped card opens the task on its
- * own screen (`onOpenTask`).
+ * floating ＋: tap = a task in the shown column, long-press = that or an agent session).
+ * A tapped card opens the task on its own screen (`onOpenTask`). No project to show
+ * because a hub can't be reached: says so, with Retry (not "No projects yet").
  *
  * iPad (`wide`): desktop's layout — the projects rail on the left (avatars, amber
  * waiting counts), open tasks as tabs on top (the board is the first tab), every column
@@ -22,7 +23,7 @@ import { HubScope } from '@slayzone/transport/client'
 import { type ReactNode, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { AttentionSheet } from '../attention/AttentionSheet'
-import type { AgentRow } from '../agents/hub-agents'
+import { type AgentRow, tabIdOfSession } from '../agents/hub-agents'
 import { isCompletedCategory } from '@slayzone/workflow'
 import {
   type BoardFilter,
@@ -61,7 +62,7 @@ import { ProjectSwitcher } from '../projects/ProjectSwitcher'
 import type { NewTaskParams } from '../task-edit/routes'
 import { TaskPage, type TaskSegment } from '../task/TaskPage'
 import { type ChromeColors, useTheme } from '../theme'
-import { IconButton, Pill, ProjectAvatar } from '../ui-kit/Chrome'
+import { IconButton, ProjectAvatar } from '../ui-kit/Chrome'
 import { AgentDot } from '../ui-kit/TaskGlyphs'
 import { sameTask, type TaskRef } from './open-tasks'
 import { useOpenTasks } from './OpenTasksProvider'
@@ -74,8 +75,13 @@ export interface BoardHomeProps {
   wide: boolean
   onRetry: (hubId: string) => void
   onSignOut: (hubId: string) => void
-  /** Phone: a card (or a 🔔 row, `segment` agent) was tapped — its task's screen. */
-  onOpenTask: (row: Pick<TaskRow, 'hubLabel' | 'task'>, segment?: TaskSegment) => void
+  /** Phone: a card (or a 🔔 row: `segment` agent, `agentTab` the tab of the session that
+   * needs you when not the main one) was tapped — its task's screen. */
+  onOpenTask: (
+    row: Pick<TaskRow, 'hubLabel' | 'task'>,
+    segment?: TaskSegment,
+    agentTab?: string
+  ) => void
   /** The ＋ long-pressed: create a task in the shown project (and column, if one is shown). */
   onNewTask: (target: NewTaskParams) => void
   /** A project's settings (folders, computer). */
@@ -174,11 +180,17 @@ export function BoardHome(props: BoardHomeProps) {
     open.open(ref, segment ? { segment } : undefined)
   const onCard = (row: TaskRow) =>
     wide ? showTask({ hubId: row.hubId, taskId: row.task.id }) : props.onOpenTask(row)
+  // A 🔔 row opens the agent tab of the session it shows (the main tab's id is the task's).
   const onAttention = (row: AgentRow) => {
+    const tab = tabIdOfSession(row.sessionId)
+    const agentTab = tab !== row.task.id ? tab : undefined
     if (wide) {
       update({ ...kept, project: { hubId: row.hubId, projectId: row.task.project_id } })
-      showTask({ hubId: row.hubId, taskId: row.task.id }, 'agent')
-    } else props.onOpenTask(row, 'agent')
+      open.open(
+        { hubId: row.hubId, taskId: row.task.id },
+        { segment: 'agent', agentTabId: agentTab }
+      )
+    } else props.onOpenTask(row, 'agent', agentTab)
   }
 
   let board: ReactNode
@@ -188,11 +200,33 @@ export function BoardHome(props: BoardHomeProps) {
         <ActivityIndicator color={theme.foreground} testID="board-loading" />
       </View>
     )
+  } else if ((!current || !feed) && groups.some((g) => g.problem)) {
+    // No project to show because a hub can't be reached: say that, not "No projects yet".
+    const unreachable = groups.filter((g) => g.problem)
+    board = (
+      <View style={styles.center} testID="board-unreachable">
+        <Text style={styles.noteTitle}>Can't load your projects</Text>
+        <Text style={styles.noteCentered}>
+          {unreachable.map((g) => g.hub.label).join(', ')} can't be reached. Their projects show
+          here once they're back.
+        </Text>
+        <CenterButton
+          label="Retry"
+          testID="board-retry"
+          onPress={() => {
+            for (const g of unreachable) props.onRetry(g.hub.id)
+          }}
+        />
+        {groups.some((g) => !g.problem) ? (
+          <CenterButton label="＋ New project" onPress={() => setSheet('projects')} />
+        ) : null}
+      </View>
+    )
   } else if (!current || !feed) {
     board = (
       <View style={styles.center}>
         <Text style={styles.note}>No projects yet</Text>
-        <Pill label="＋ New project" onPress={() => setSheet('projects')} />
+        <CenterButton label="＋ New project" onPress={() => setSheet('projects')} />
       </View>
     )
   } else {
@@ -212,6 +246,7 @@ export function BoardHome(props: BoardHomeProps) {
           onOpen={onCard}
           onNewTask={newTask}
           onRefresh={() => props.onRetry(current.hubId)}
+          onClearFilters={() => setFilter(clearNarrowing(filter))}
         />
       </HubScope>
     )
@@ -319,7 +354,8 @@ export function BoardHome(props: BoardHomeProps) {
             style={styles.project}
             onPress={() => setSheet('projects')}
             accessibilityRole="button"
-            accessibilityLabel="Switch project"
+            accessibilityLabel={current ? `Project: ${current.project.name}` : 'Choose a project'}
+            accessibilityHint="Switches project"
             testID="project-switcher"
           >
             {current ? (
@@ -385,6 +421,7 @@ export function BoardHome(props: BoardHomeProps) {
           onPress={() => setSheet('projects')}
           accessibilityRole="button"
           accessibilityLabel="All projects"
+          hitSlop={4}
           style={styles.railAdd}
         >
           <Text style={styles.railAddText}>＋</Text>
@@ -428,7 +465,8 @@ export function BoardHome(props: BoardHomeProps) {
                   </Text>
                   <Pressable
                     onPress={() => open.close(ref)}
-                    hitSlop={8}
+                    hitSlop={6}
+                    style={styles.tabCloseButton}
                     accessibilityRole="button"
                     accessibilityLabel={`Close ${row?.task.title ?? 'task'}`}
                   >
@@ -529,5 +567,55 @@ const makeStyles = (t: ChromeColors) =>
     tabOn: { backgroundColor: t.surface3 },
     tabText: { flexShrink: 1, fontSize: 13, color: t.mutedForeground },
     tabTextOn: { color: t.foreground, fontWeight: '600' },
-    tabClose: { fontSize: 11, color: t.mutedForeground }
+    tabClose: { fontSize: 11, color: t.mutedForeground },
+    // 32pt + hitSlop = 44pt; the negative margins keep the tab its height.
+    tabCloseButton: {
+      minWidth: 32,
+      minHeight: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginVertical: -6,
+      marginRight: -8
+    },
+    noteTitle: { color: t.foreground, fontSize: 17, fontWeight: '600', textAlign: 'center' },
+    noteCentered: {
+      color: t.mutedForeground,
+      fontSize: 15,
+      textAlign: 'center',
+      paddingHorizontal: 24
+    },
+    centerButton: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 20,
+      borderRadius: 22,
+      backgroundColor: t.surface2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.border
+    },
+    centerButtonPressed: { opacity: 0.7 },
+    centerButtonText: { fontSize: 15, fontWeight: '600', color: t.foreground }
   })
+
+/** A button of the board's empty / error states (44pt tall). */
+function CenterButton({
+  label,
+  onPress,
+  testID
+}: {
+  label: string
+  onPress: () => void
+  testID?: string
+}) {
+  const styles = makeStyles(useTheme())
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      testID={testID}
+      style={({ pressed }) => [styles.centerButton, pressed && styles.centerButtonPressed]}
+    >
+      <Text style={styles.centerButtonText}>{label}</Text>
+    </Pressable>
+  )
+}

@@ -1,6 +1,15 @@
-import { render, screen, userEvent, waitFor, within } from '@testing-library/react-native'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  userEvent,
+  waitFor,
+  within
+} from '@testing-library/react-native'
 import type { TaskTemplate } from '@slayzone/task-contracts'
 import type { ReactNode } from 'react'
+import { Alert, type AlertButton } from 'react-native'
 import type { HubFeed } from '../hub-board'
 import {
   boardOf,
@@ -115,6 +124,56 @@ describe('NewTaskScreen', () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(workHub.label, 'created'))
   })
 
+  it('Return in the title creates', async () => {
+    const { work } = hubs()
+    const { onCreated } = await open()
+    await fireEvent.changeText(screen.getByTestId('new-task-title'), 'Ship it')
+    await fireEvent(screen.getByTestId('new-task-title'), 'submitEditing')
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(workHub.label, 'created'))
+    expect(creates(work)).toHaveLength(1)
+  })
+
+  it('Cancel with a typed title asks before discarding it; an empty form just leaves', async () => {
+    hubs()
+    const onDirtyChange = jest.fn()
+    const onCancel = jest.fn()
+    await render(
+      <NewTaskScreen
+        hubAddress={workHub.label}
+        projectId="wp"
+        onCreated={jest.fn()}
+        onCancel={onCancel}
+        onDirtyChange={onDirtyChange}
+      />
+    )
+    await user().press(screen.getByText('Cancel'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    await fireEvent.changeText(screen.getByTestId('new-task-title'), 'Half a thought')
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    let answer = 'Keep editing'
+    const alert = jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((_t, _m, buttons?: AlertButton[]) =>
+        buttons?.find((b) => b.text === answer)?.onPress?.()
+      )
+    await user().press(screen.getByText('Cancel'))
+    expect(alert).toHaveBeenCalledWith('Discard this task?', expect.any(String), expect.any(Array))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    answer = 'Discard'
+    await user().press(screen.getByText('Cancel'))
+    expect(onCancel).toHaveBeenCalledTimes(2)
+    alert.mockRestore()
+  })
+
+  it('fields read their name with their value (VoiceOver)', async () => {
+    hubs()
+    await open()
+    expect(screen.getByLabelText('Status: Later')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Priority: Medium')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Due: No due date')).toBeOnTheScreen()
+    expect(screen.getByLabelText('Project: Launch')).toBeOnTheScreen()
+  })
+
   it('no title: nothing to create', async () => {
     const { work } = hubs()
     await open()
@@ -137,9 +196,17 @@ describe('NewTaskScreen', () => {
     const { work } = hubs()
     await open()
     await pick('new-task-priority', 'High')
-    await pick('new-task-due', 'Pick a date…')
-    await user().type(screen.getByTestId('due-date-input'), '2027-01-02')
-    await user().press(screen.getByText('Set'))
+    // Any day: iOS's calendar, in the same sheet as the quick dates.
+    await user().press(screen.getByTestId('new-task-due'))
+    await act(async () =>
+      fireEvent(
+        within(screen.getByTestId('choice-sheet')).getByTestId('due-date-calendar'),
+        'change',
+        { nativeEvent: { timestamp: new Date(2027, 0, 2, 0, 0).getTime() } }
+      )
+    )
+    expect(screen.queryByTestId('choice-sheet')).toBeNull()
+    expect(screen.getByTestId('new-task-due')).toHaveTextContent('Due Jan 2, 2027')
     await user().type(screen.getByTestId('new-task-title'), 'x')
     await user().press(screen.getByText('Create'))
     await waitFor(() =>

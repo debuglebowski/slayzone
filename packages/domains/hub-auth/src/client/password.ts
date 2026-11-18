@@ -3,6 +3,10 @@
  * The bearer plugin returns the token in the `set-auth-token` response header; a `token`
  * field in the body is accepted too. The route is gate-exempt on the hub — it has to be
  * reachable without a credential.
+ *
+ * A refusal's `error` is a sentence for the person: a known code's (better-auth answers
+ * `{ code, message }`, the hub's own gates `{ code, error }`), else the hub's text, else
+ * the HTTP status.
  */
 import {
   AUTH_TIMEOUT_MS,
@@ -33,11 +37,39 @@ export type HubPasswordSignInResult =
       status?: number
       /** `refused`: the body's `code` (`HUB_PASSWORD_DISABLED`, `ACCOUNT_DISABLED`, …). */
       code?: string
-      /** `refused`: the body's `error` text, when it is a string. */
+      /** `refused`: the body's `error` text (the hub's gates), else its `message` (better-auth). */
       hubError?: string
       /** What to show. */
       error: string
     }
+
+/** Sentences for the refusal codes a hub's password sign-in sends. */
+const REFUSALS: Readonly<Record<string, string>> = {
+  // better-auth answers both for a wrong password and an unknown email, on purpose.
+  INVALID_EMAIL_OR_PASSWORD: 'Wrong email or password.',
+  INVALID_PASSWORD: 'Wrong email or password.',
+  USER_NOT_FOUND: 'Wrong email or password.',
+  INVALID_EMAIL: 'That is not a valid email address.',
+  EMAIL_NOT_VERIFIED:
+    'This email address is not verified yet. Check your inbox for the verification email.',
+  CREDENTIAL_ACCOUNT_NOT_FOUND:
+    'This account has no password on this hub. Sign in another way, or ask your administrator.',
+  ACCOUNT_DISABLED: 'This account is disabled on this hub. Ask your administrator.',
+  HUB_PASSWORD_DISABLED: 'This hub does not offer password sign-in.'
+}
+
+/** What to tell the person about a refusal. Pure. */
+function refusalText(
+  status: number,
+  code: string | undefined,
+  hubError: string | undefined
+): string {
+  if (code !== undefined && Object.prototype.hasOwnProperty.call(REFUSALS, code)) {
+    return REFUSALS[code]!
+  }
+  if (status === 429) return 'Too many sign-in attempts. Wait a minute, then try again.'
+  return hubError ?? `Sign-in failed (HTTP ${status})`
+}
 
 export async function signInWithPassword(
   transport: HubTransport,
@@ -61,13 +93,15 @@ export async function signInWithPassword(
   const { status } = res
   if (status >= 400) {
     const body = jsonObject(res.text)
+    const code = stringOf(body.code)
+    const hubError = stringOf(body.error) ?? stringOf(body.message)
     return {
       ok: false,
       reason: 'refused',
       status,
-      code: stringOf(body.code),
-      hubError: stringOf(body.error),
-      error: `Sign-in failed (HTTP ${status})`
+      code,
+      hubError,
+      error: refusalText(status, code, hubError)
     }
   }
   const headerToken = res.header('set-auth-token')

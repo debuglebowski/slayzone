@@ -66,13 +66,18 @@ export function findProjectRow(feed: HubFeed, projectId: string): ProjectRow | n
   return project ? rowOf(feed.hub, project) : null
 }
 
-/** A project's top-level tasks, in board order, as rows of its hub. */
+/**
+ * A project's top-level tasks, in board order, as rows of its hub. Temporary tasks (an
+ * agent session's "Terminal N", the board's ＋ long-press) are left out, as on the board.
+ */
 export function projectTasks(feed: HubFeed, projectId: string): TaskRow[] {
   const data = feed.board.data
   const project = data?.projects.find((p) => p?.id === projectId) ?? undefined
   if (!data || !project) return []
   return data.tasks
-    .filter((task) => task.project_id === projectId && task.parent_id === null)
+    .filter(
+      (task) => task.project_id === projectId && task.parent_id === null && !task.is_temporary
+    )
     .map((task) => ({
       key: rowKey(feed.hub.id, task.id),
       hubId: feed.hub.id,

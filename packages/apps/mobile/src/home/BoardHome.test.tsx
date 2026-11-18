@@ -97,6 +97,12 @@ interface Calls {
   archiveMany: unknown[]
 }
 
+/** Each served hub's test client (its query cache: what the app's Retry reloads). */
+const hubTests = new Map<
+  string,
+  { queryClient: { refetchQueries: (f: object) => Promise<void> } }
+>()
+
 function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
   const calls: Calls = {
     create: [],
@@ -111,7 +117,7 @@ function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
     if (fail === kind) throw new Error('hub said no')
     return null
   }
-  mockHubs.serve(hubId, {
+  const test = mockHubs.serve(hubId, {
     procedures: {
       'task.loadBoardData': board,
       'task.update': write('update'),
@@ -138,6 +144,7 @@ function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
       'pty.onHibernated': () => undefined
     }
   })
+  hubTests.set(hubId, test)
   return calls
 }
 
@@ -222,6 +229,24 @@ async function menu(label?: string): Promise<string[]> {
   return shown
 }
 
+/** The ＋ long-pressed (iOS's action sheet): picks the entry `label`; returns the entries. */
+async function fabMenu(label: string): Promise<string[]> {
+  let shown: string[] = []
+  let pick: ((index: number) => void) | null = null
+  const spy = jest
+    .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
+    .mockImplementation((options, callback) => {
+      shown = options.options
+      pick = callback
+    })
+  await userEvent.setup().longPress(screen.getByTestId('new-task'))
+  spy.mockRestore()
+  const index = shown.indexOf(label)
+  expect([label, index >= 0]).toEqual([label, true])
+  await act(async () => pick?.(index))
+  return shown
+}
+
 /** Writes answered and React Query's batched notifications (a 0 ms timer) delivered. */
 const settle = () =>
   act(async () => {
@@ -249,6 +274,13 @@ beforeEach(() => {
 })
 
 describe('BoardHome: the board (phone)', () => {
+  it('the project header reads the current project aloud', async () => {
+    await renderBoard({ prefs: createBoardPrefs(memory()) })
+    expect(screen.getByLabelText('Project: Site')).toBeOnTheScreen()
+    await pickWork()
+    expect(screen.getByLabelText('Project: API')).toBeOnTheScreen()
+  })
+
   it("shows the first hub's first project; the switcher switches to a project of another hub", async () => {
     await renderBoard({ prefs: createBoardPrefs(memory()) })
     expect(screen.getByText('Home task')).toBeOnTheScreen()
@@ -290,7 +322,13 @@ describe('BoardHome: the board (phone)', () => {
     expect(card.getByLabelText('0 of 1 subtasks done')).toBeOnTheScreen()
     expect(card.getByText('design')).toBeOnTheScreen()
     expect(card.getByText('Blocked')).toBeOnTheScreen()
-    expect(card.getByTestId('card-due')).toHaveTextContent('2000-01-01')
+    expect(card.getByTestId('card-due')).toHaveTextContent('Jan 1, 2000')
+    // VoiceOver reads what the card shows, not just its title.
+    expect(
+      screen.getByLabelText(
+        'Alpha, Queued, Urgent, overdue Jan 1, 2000, blocked, 0 of 1 sub-tasks done'
+      )
+    ).toBeOnTheScreen()
   })
 
   it('remembers the project, the view and its filters on the device', async () => {
@@ -299,7 +337,7 @@ describe('BoardHome: the board (phone)', () => {
     await pickWork()
     const user = userEvent.setup()
     expect(screen.queryByTestId('board-menu-dot')).toBeNull()
-    await menu('List view')
+    await menu('Switch to List view')
     await menu('Filter…')
     await user.press(screen.getByTestId('priority-1'))
     await user.press(screen.getByText('Done'))
@@ -316,7 +354,7 @@ describe('BoardHome: the board (phone)', () => {
       </HubConnections>
     )
     expect(await screen.findByText('API')).toBeOnTheScreen()
-    expect(await menu()).toContain('List view ✓')
+    expect(await menu()).toContain('List view (current)')
     expect(cardOrder('queued')).toEqual(['a'])
     expect(createBoardPrefs(storage).load().filters[rowKey(workHub.id, 'p')]?.priority).toBe(1)
   })
@@ -326,10 +364,10 @@ describe('BoardHome: the board (phone)', () => {
     createBoardPrefs(storage).save({ project: null, view: 'tree', filters: {} })
     await renderBoard({ prefs: createBoardPrefs(storage) })
     const entries = await menu()
-    expect(entries).toContain('Board view ✓')
+    expect(entries).toContain('Board view (current)')
     expect(entries.some((e) => e.startsWith('Tree'))).toBe(false)
     await pickWork()
-    await menu('List view')
+    await menu('Switch to List view')
     expect(cardOrder('queued')).toEqual(['a', 'b', 'c'])
     expect(cardOrder('doing')).toEqual(['d'])
     expect(within(screen.getByTestId('column-shipped')).getByText('Shipped')).toBeOnTheScreen()
@@ -386,6 +424,28 @@ describe('BoardHome: the board (phone)', () => {
     expect(screen.getByTestId('column-chip-doing')).toHaveTextContent('Doing 2')
   })
 
+  it("a drop on the shown column's own pill puts the card at that column's end", async () => {
+    Object.assign(rects, {
+      'project-board': { x: 0, y: 100, width: 390, height: 700 },
+      'column-queued': { x: 0, y: 140, width: 390, height: 600 },
+      'column-drop-queued': { x: 10, y: 100, width: 100, height: 30 },
+      'task-a': { x: 0, y: 180, width: 390, height: 50 },
+      'task-b': { x: 0, y: 230, width: 390, height: 50 },
+      'task-c': { x: 0, y: 280, width: 390, height: 50 }
+    })
+    await renderBoard({ prefs: createBoardPrefs(memory()) })
+    await pickWork()
+    await fireEvent(screen.getByTestId('task-a'), 'longPress', {
+      nativeEvent: { pageX: 50, pageY: 200 }
+    })
+    await settle()
+    const board = screen.getByTestId('project-board')
+    await fireEvent(board, 'responderMove', { nativeEvent: { pageX: 50, pageY: 110 } })
+    await fireEvent(board, 'responderRelease', { nativeEvent: { pageX: 50, pageY: 110 } })
+    await settle()
+    expect(cardOrder('queued')).toEqual(['b', 'c', 'a'])
+  })
+
   it("dragging a card to the screen's edge turns to the next column", async () => {
     Object.assign(rects, {
       'project-board': { x: 0, y: 100, width: 390, height: 700 },
@@ -435,12 +495,16 @@ describe('BoardHome: the board (phone)', () => {
     expect(work.update).toEqual([{ id: 'a', status: 'doing' }])
   })
 
-  it('a tap on the floating "＋" starts a temporary task in the shown project and opens it', async () => {
+  it('a long-press on the floating "＋" offers a new agent session: a temporary task, opened', async () => {
     const onNewTask = jest.fn()
     const onOpenTask = jest.fn()
     await renderBoard({ prefs: createBoardPrefs(memory()), onNewTask, onOpenTask })
     await pickWork()
-    await userEvent.setup().press(screen.getByLabelText('New session'))
+    expect(await fabMenu('New agent session')).toEqual([
+      'New task in Queued',
+      'New agent session',
+      'Cancel'
+    ])
     await settle()
     expect(work.createTask).toEqual([
       {
@@ -463,7 +527,7 @@ describe('BoardHome: the board (phone)', () => {
     const onOpenTask = jest.fn()
     await renderBoard({ prefs: createBoardPrefs(memory()), onOpenTask })
     await pickWork()
-    await userEvent.setup().press(screen.getByTestId('new-task'))
+    await fabMenu('New agent session')
     await settle()
     expect(alert).toHaveBeenCalledWith("Couldn't start a session", 'hub said no')
     expect(onOpenTask).not.toHaveBeenCalled()
@@ -471,29 +535,36 @@ describe('BoardHome: the board (phone)', () => {
     alert.mockRestore()
   })
 
-  it('a long-press on the floating "＋" creates a task in the shown project and column; no other "＋"', async () => {
+  it('a tap on the floating "＋" creates a task in the shown project and column; no other "＋"', async () => {
     const onNewTask = jest.fn()
     await renderBoard({ prefs: createBoardPrefs(memory()), onNewTask })
     await pickWork()
     const user = userEvent.setup()
     expect(screen.queryByTestId('new-task-queued')).toBeNull()
-    expect(screen.getByHintText('Long-press: New task in Queued')).toBeOnTheScreen()
-    await user.longPress(screen.getByTestId('new-task'))
+    expect(screen.getByLabelText('New task')).toBeOnTheScreen()
+    expect(
+      screen.getByHintText('Adds it to Queued. Long-press for a new agent session.')
+    ).toBeOnTheScreen()
+    await user.press(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({
       hub: workHub.label,
       project: 'p',
       status: 'queued'
     })
     await user.press(screen.getByTestId('column-chip-doing'))
-    await user.longPress(screen.getByTestId('new-task'))
+    await user.press(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({
       hub: workHub.label,
       project: 'p',
       status: 'doing'
     })
+    // Long-press offers it too.
+    await fabMenu('New task in Doing')
+    expect(onNewTask).toHaveBeenCalledTimes(3)
+    expect(work.createTask).toEqual([])
     // The list has no current column: the project's default status.
-    await menu('List view')
-    await user.longPress(screen.getByTestId('new-task'))
+    await menu('Switch to List view')
+    await user.press(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({
       hub: workHub.label,
       project: 'p',
@@ -519,9 +590,66 @@ describe('BoardHome: the board (phone)', () => {
     await userEvent.setup().press(screen.getByTestId('priority-1'))
     await userEvent.setup().press(screen.getByText('Done'))
     expect(cardOrder('queued')).toEqual(['a'])
+    expect(await menu()).toContain('Edit filters…')
     await menu('Clear filters')
     expect(screen.queryByTestId('board-menu-dot')).toBeNull()
     expect(cardOrder('queued')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('a filter that leaves nothing says so, with "Clear filters"', async () => {
+    await renderBoard({ prefs: createBoardPrefs(memory()) })
+    await pickWork()
+    await menu('Filter…')
+    // Nothing is Someday.
+    await userEvent.setup().press(screen.getByTestId('priority-5'))
+    await userEvent.setup().press(screen.getByText('Done'))
+    expect(screen.getByText('No matching tasks')).toBeOnTheScreen()
+    expect(screen.queryByText('No tasks')).toBeNull()
+    await userEvent.setup().press(screen.getByTestId('board-clear-filters'))
+    expect(screen.queryByText('No matching tasks')).toBeNull()
+    expect(cardOrder('queued')).toEqual(['a', 'b', 'c'])
+  })
+
+  it("the pull-to-refresh spinner shows for a pull only, not for the board's own reloads", async () => {
+    // Slow board loads wait here until released (all of them at once).
+    let waiting: Array<() => void> = []
+    const release = () => {
+      for (const done of waiting) done()
+      waiting = []
+    }
+    let slow = false
+    work = serve(workHub.id, () =>
+      slow
+        ? (new Promise((resolve) => {
+            waiting.push(() => resolve(workBoard()))
+          }) as never)
+        : workBoard()
+    )
+    // Retry as the app's: the hub's active queries load again.
+    const onRetry = (hubId: string) =>
+      void hubTests.get(hubId)?.queryClient.refetchQueries({ type: 'active' })
+    await renderBoard({ prefs: createBoardPrefs(memory()), onRetry })
+    await pickWork()
+    const refresher = () => screen.getByTestId('column-list-queued').props.refreshControl.props
+    const spinner = () => refresher().refreshing
+    expect(spinner()).toBe(false)
+    // A pull: spins until the board has reloaded.
+    slow = true
+    await act(async () => refresher().onRefresh())
+    await settle()
+    expect(spinner()).toBe(true)
+    await act(async () => release())
+    await settle()
+    expect(spinner()).toBe(false)
+    // A move reloads the board in the background: no spinner (the board doesn't jump).
+    await fireEvent(screen.getByTestId('task-b'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'next' }
+    })
+    await settle()
+    expect(work.update).toEqual([{ id: 'b', status: 'doing' }])
+    expect(spinner()).toBe(false)
+    await act(async () => release())
+    await settle()
   })
 
   it('Display "Show empty columns" (on by default, as desktop) hides empty columns from the strip', async () => {
@@ -592,7 +720,7 @@ describe('BoardHome: the board (phone)', () => {
 
     // The ＋ creates in the shown group: its priority (desktop's column ＋).
     await press('column-chip-p3')
-    await userEvent.setup().longPress(screen.getByTestId('new-task'))
+    await press('new-task')
     expect(onNewTask).toHaveBeenLastCalledWith({ hub: workHub.label, project: 'p', priority: 3 })
 
     // Bravo (Medium) onto the Urgent pill.
@@ -661,7 +789,7 @@ describe('BoardHome: the board (phone)', () => {
   it('the list also groups by "No groups" and "Activity"', async () => {
     await renderBoard({ prefs: createBoardPrefs(memory()) })
     await pickWork()
-    await menu('List view')
+    await menu('Switch to List view')
     await display(() => press('display-group-none'))
     expect(cardOrder('all')).toEqual(['a', 'd', 'b', 'c'])
     await display(() => press('display-group-active'))
@@ -772,7 +900,7 @@ describe('BoardHome: iPad', () => {
     await user.press(screen.getAllByTestId('rail-p')[1])
     // The board tab says the project (no title row of its own).
     await screen.findByText('⌂ API')
-    expect(await menu()).toContain('Tree view')
+    expect(await menu()).toContain('Switch to Tree view')
     await menu('Display…')
     await user.press(screen.getByTestId('display-view-tree'))
     await user.press(screen.getByText('Done'))
@@ -842,11 +970,54 @@ describe('BoardHome: 🔔 and the project switcher', () => {
     )
     expect(screen.getByLabelText('Agents, 1')).toBeOnTheScreen()
     const sheet = within(screen.getByTestId('attention-sheet'))
-    expect(sheet.getByText(`API · ${workHub.label} · Waiting for you`)).toBeOnTheScreen()
+    // The row says its project (the sheet's own suite has its wording).
+    expect(within(sheet.getByTestId('attention-row-a')).getByText(/^API/)).toBeOnTheScreen()
     await userEvent.setup().press(sheet.getByTestId('attention-row-a'))
+    // Its main tab's session: no agent tab to name.
     expect(onOpenTask).toHaveBeenCalledWith(
       expect.objectContaining({ hubId: workHub.id, task: expect.objectContaining({ id: 'a' }) }),
-      'agent'
+      'agent',
+      undefined
+    )
+  })
+
+  it('a 🔔 row of a session in another agent tab opens that tab', async () => {
+    work = serve(workHub.id, waiting)
+    const onOpenTask = jest.fn()
+    await render(
+      <OpenTasksProvider>
+        <BoardHome
+          feeds={[
+            feedOf(homeHub, homeBoard()),
+            feedOf(workHub, waiting(), {
+              agents: {
+                state: { byId: { 'a:t2': 'idle' }, hibernated: {}, lastPushedAt: {}, jobsById: {} },
+                loaded: true,
+                error: null
+              } as never
+            })
+          ]}
+          sessions={sessions}
+          wide={false}
+          onRetry={jest.fn()}
+          onSignOut={jest.fn()}
+          onOpenTask={onOpenTask}
+          onNewTask={jest.fn()}
+          onOpenProject={jest.fn()}
+          onOpenArtifact={jest.fn()}
+          prefs={createBoardPrefs(memory())}
+          sheetParam="attention"
+        />
+      </OpenTasksProvider>,
+      { wrapper: ({ children }) => <HubConnections sessions={[]}>{children}</HubConnections> }
+    )
+    await userEvent
+      .setup()
+      .press(within(screen.getByTestId('attention-sheet')).getByTestId('attention-row-a'))
+    expect(onOpenTask).toHaveBeenCalledWith(
+      expect.objectContaining({ task: expect.objectContaining({ id: 'a' }) }),
+      'agent',
+      't2'
     )
   })
 
@@ -857,6 +1028,10 @@ describe('BoardHome: 🔔 and the project switcher', () => {
     await user.press(screen.getByTestId('project-switcher'))
     await user.press(screen.getByTestId('new-project'))
     await user.type(screen.getByTestId('new-project-name'), 'Docs')
+    // Colours are read by name.
+    expect(screen.getByLabelText('Blue')).toBeSelected()
+    await user.press(screen.getByLabelText('Green'))
+    expect(screen.getByLabelText('Green')).toBeSelected()
     await user.press(screen.getByText(workHub.label))
     await user.press(screen.getByTestId('new-project-create'))
     await settle()
@@ -916,12 +1091,29 @@ describe('BoardHome: hubs', () => {
       }),
       feedOf(workHub, boardOf({}))
     ]
+    const alert = jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((_title, _message, buttons) =>
+        buttons?.find((b) => b.style === 'destructive')?.onPress?.()
+      )
     await inApp(<BoardHome {...base({ feeds, onRetry, onSignOut })} />)
-    expect(screen.getByText('No projects yet')).toBeOnTheScreen()
+    // Not "No projects yet": the projects are on the hub that can't be reached.
+    expect(screen.queryByText('No projects yet')).toBeNull()
+    expect(screen.getByText("Can't load your projects")).toBeOnTheScreen()
     const user = userEvent.setup()
-    await user.press(screen.getByText('Retry'))
+    await user.press(screen.getByTestId('board-retry'))
     expect(onRetry).toHaveBeenCalledWith(homeHub.id)
-    await user.press(screen.getByText('Sign out'))
+    onRetry.mockClear()
+    await user.press(screen.getByLabelText(`Retry ${homeHub.label}`))
+    expect(onRetry).toHaveBeenCalledWith(homeHub.id)
+    await user.press(screen.getByLabelText(`Sign out of ${homeHub.label}`))
     expect(onSignOut).toHaveBeenCalledWith(homeHub.id)
+    alert.mockRestore()
+  })
+
+  it('every hub reached and none has a project: "No projects yet"', async () => {
+    await inApp(<BoardHome {...base({ feeds: [feedOf(workHub, boardOf({}))] })} />)
+    expect(screen.getByText('No projects yet')).toBeOnTheScreen()
+    expect(screen.queryByTestId('board-unreachable')).toBeNull()
   })
 })

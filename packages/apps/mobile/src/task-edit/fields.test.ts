@@ -3,7 +3,11 @@ import { projectOf } from '../hubs/testing'
 import {
   applyTemplate,
   dueChoices,
+  dateOfDay,
+  dayOfDate,
+  dueDayLabel,
   dueLabel,
+  formatDay,
   NO_TEMPLATE,
   parseDueDate,
   PRIORITY_CHOICES,
@@ -85,8 +89,23 @@ describe('due date', () => {
     expect(dueLabel(null, '2026-10-30')).toBe('No due date')
     expect(dueLabel('2026-10-30', '2026-10-30')).toBe('Due today')
     expect(dueLabel('2026-10-31', '2026-10-30')).toBe('Due tomorrow')
-    expect(dueLabel('2026-10-29', '2026-10-30')).toBe('Overdue: 2026-10-29')
-    expect(dueLabel('2026-12-01', '2026-10-30')).toBe('Due 2026-12-01')
+    expect(dueLabel('2026-10-29', '2026-10-30')).toBe('Overdue: Oct 29')
+    expect(dueLabel('2026-12-01', '2026-10-30')).toBe('Due Dec 1')
+    expect(dueLabel('2027-01-04', '2026-10-30')).toBe('Due Jan 4, 2027')
+  })
+
+  it('writes a day the short way: month and day, the year only when not this one', () => {
+    expect(formatDay('2026-11-18', '2026-10-30')).toBe('Nov 18')
+    expect(formatDay('2025-12-31', '2026-10-30')).toBe('Dec 31, 2025')
+    // Not a date: shown as it is.
+    expect(formatDay('soon', '2026-10-30')).toBe('soon')
+  })
+
+  it("a card's due date: relative when near, else the short day", () => {
+    expect(dueDayLabel('2026-10-30', '2026-10-30')).toBe('Today')
+    expect(dueDayLabel('2026-10-31', '2026-10-30')).toBe('Tomorrow')
+    expect(dueDayLabel('2026-10-29', '2026-10-30')).toBe('Yesterday')
+    expect(dueDayLabel('2026-11-18', '2026-10-30')).toBe('Nov 18')
   })
 
   it('reads a typed date (YYYY-MM-DD, a real day)', () => {
@@ -132,5 +151,16 @@ describe('templates', () => {
     expect(
       applyTemplate({ status: 'now', priority: 3 }, t, columns, { status: false, priority: false })
     ).toEqual({ status: 'now', priority: 3 })
+  })
+})
+
+describe('calendar days', () => {
+  it('a day is that day at local midnight, and back', () => {
+    const date = dateOfDay('2027-01-02')
+    expect([date.getFullYear(), date.getMonth(), date.getDate(), date.getHours()]).toEqual([
+      2027, 0, 2, 0
+    ])
+    expect(dayOfDate(date)).toBe('2027-01-02')
+    expect(dayOfDate(new Date(2026, 11, 31, 23, 59))).toBe('2026-12-31')
   })
 })

@@ -1,5 +1,6 @@
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { type ChromeColors, useTheme } from '../theme'
+import { MODAL_ORIENTATIONS } from '../ui-kit/Chrome'
 
 export interface Choice {
   key: string
@@ -33,13 +34,14 @@ export function ChoiceSheet({
     <Modal
       visible={visible}
       animationType="slide"
+      supportedOrientations={MODAL_ORIENTATIONS}
       presentationStyle="formSheet"
       onRequestClose={onClose}
     >
       <View testID="choice-sheet" style={styles.sheet}>
         <View style={styles.header}>
           <Text style={styles.title}>{title}</Text>
-          <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button">
+          <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button">
             <Text style={styles.link}>Cancel</Text>
           </Pressable>
         </View>

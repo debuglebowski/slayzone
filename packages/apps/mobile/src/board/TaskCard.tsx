@@ -1,4 +1,4 @@
-import type { ColumnConfig } from '@slayzone/tasks/board'
+import { type ColumnConfig, todayISO } from '@slayzone/tasks/board'
 import type { Ref } from 'react'
 import {
   type AccessibilityActionEvent,
@@ -11,7 +11,8 @@ import {
 import type { BoardTask } from '../hub-board'
 import { type ChromeColors, useTheme } from '../theme'
 import { AgentDot, PriorityIcon, StatusIcon, SubtaskRing, TagPills } from '../ui-kit/TaskGlyphs'
-import type { CardModel, StatusLook } from './card-model'
+import { dueDayLabel } from '../task-edit/fields'
+import { type CardModel, cardAccessibilityLabel, type StatusLook } from './card-model'
 
 export interface CardMoves {
   /** The "Move to <next>" action. */
@@ -27,7 +28,8 @@ export interface CardMoves {
  * A task on the board — desktop's `KanbanCard` (kanban) or `KanbanListRow` (list):
  * priority icon, title (3 lines), agent dot; under it the subtask ring, the first tag
  * as a pill and the rest as dots, Blocked, the due date (red when overdue, and the card
- * gets a red border). Tap opens the task; long-press starts a drag (`onLongPress`, with
+ * gets a red border; "Today", "Tomorrow", else "Nov 18"). VoiceOver reads all of it
+ * (`cardAccessibilityLabel`). Tap opens the task; long-press starts a drag (`onLongPress`, with
  * where the finger is). Moves are accessibility actions too (VoiceOver: Move to …,
  * Move up/down).
  */
@@ -35,6 +37,7 @@ export function TaskCard({
   task,
   model,
   status,
+  statusLabel,
   meta,
   moves,
   dragging = false,
@@ -48,6 +51,8 @@ export function TaskCard({
   model: CardModel
   /** List rows show the status icon first (desktop's list row). */
   status?: StatusLook
+  /** The task's status as its column names it (read aloud with the card). */
+  statusLabel: string
   /** A line under the title (e.g. the hub, with several). */
   meta?: string | null
   moves: CardMoves
@@ -63,6 +68,7 @@ export function TaskCard({
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
+  const today = todayISO()
 
   const actions = [
     ...(moves.next ? [{ name: 'next', label: `Move to ${moves.next.label}` }] : []),
@@ -95,7 +101,7 @@ export function TaskCard({
         {task.due_date ? (
           <View style={[styles.due, model.overdue && styles.dueOver]} testID="card-due">
             <Text style={[styles.dueText, model.overdue && styles.dueTextOver]}>
-              {task.due_date}
+              {dueDayLabel(task.due_date, today)}
             </Text>
           </View>
         ) : null}
@@ -114,7 +120,7 @@ export function TaskCard({
       }
       delayLongPress={300}
       accessibilityRole="button"
-      accessibilityLabel={task.title}
+      accessibilityLabel={cardAccessibilityLabel(task, model, statusLabel, today)}
       accessibilityActions={actions}
       onAccessibilityAction={onAction}
       accessibilityState={{ selected }}

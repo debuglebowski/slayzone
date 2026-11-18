@@ -1,8 +1,17 @@
-import type { ReactNode } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import type { ReactNode, Ref } from 'react'
+import { type HostInstance, Pressable, StyleSheet, Text, View } from 'react-native'
 import { type ChromeColors, useTheme } from '../theme'
 
-/** A screen's top bar: back (phone), title and subtitle, actions on the right. */
+/** Apple's minimum touch target. */
+const MIN_TOUCH = 44
+/** A header button's drawn height; `hitSlop` takes it to {@link MIN_TOUCH}. */
+const BUTTON_HEIGHT = 32
+const BUTTON_SLOP = (MIN_TOUCH - BUTTON_HEIGHT) / 2
+
+/**
+ * A screen's top bar: back (phone), title and subtitle, actions on the right. A long
+ * title is cut in the middle, so its end (an artifact's extension) stays readable.
+ */
 export function ScreenHeader({
   title,
   subtitle,
@@ -13,6 +22,7 @@ export function ScreenHeader({
   title: string
   subtitle?: string | null
   onBack?: () => void
+  /** The screen Back goes to. */
   backLabel?: string
   actions?: ReactNode
 }) {
@@ -20,12 +30,24 @@ export function ScreenHeader({
   return (
     <View style={styles.header}>
       {onBack ? (
-        <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button">
+        <Pressable
+          onPress={onBack}
+          // The label's line is ~20pt: to 44pt each way.
+          hitSlop={{ top: 12, bottom: 12, left: 16, right: 8 }}
+          accessibilityRole="button"
+          // VoiceOver reads the label, not the chevron.
+          accessibilityLabel={backLabel === 'Back' ? 'Back' : `Back to ${backLabel}`}
+        >
           <Text style={styles.link}>‹ {backLabel}</Text>
         </Pressable>
       ) : null}
       <View style={styles.titles}>
-        <Text style={styles.title} numberOfLines={1} accessibilityRole="header">
+        <Text
+          style={styles.title}
+          numberOfLines={1}
+          ellipsizeMode="middle"
+          accessibilityRole="header"
+        >
           {title}
         </Text>
         {subtitle ? (
@@ -39,14 +61,17 @@ export function ScreenHeader({
   )
 }
 
-/** A text button for a header or toolbar. */
+/** A text button for a header or toolbar: drawn compact, touchable at 44pt. */
 export function HeaderButton({
+  ref,
   label,
   onPress,
   active = false,
   disabled = false,
   accessibilityLabel
 }: {
+  /** The button's view (an iPad action sheet's anchor). */
+  ref?: Ref<HostInstance>
   label: string
   onPress: () => void
   active?: boolean
@@ -56,9 +81,10 @@ export function HeaderButton({
   const styles = makeStyles(useTheme())
   return (
     <Pressable
+      ref={ref}
       onPress={onPress}
       disabled={disabled}
-      hitSlop={6}
+      hitSlop={BUTTON_SLOP}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ selected: active, disabled }}
@@ -90,8 +116,11 @@ const makeStyles = (t: ChromeColors) =>
     subtitle: { fontSize: 12, color: t.mutedForeground, marginTop: 1 },
     actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     button: {
-      paddingHorizontal: 9,
-      paddingVertical: 5,
+      minHeight: BUTTON_HEIGHT,
+      minWidth: BUTTON_HEIGHT,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 10,
       borderRadius: 6,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.border

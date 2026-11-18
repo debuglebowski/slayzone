@@ -16,6 +16,8 @@ export interface ChatViewValue {
   restartAgent: () => void
   /** The terminal runs this conversation: stop it there, continue here (`chat.takeOver`). */
   takeOver: () => void
+  /** The agent as a sentence names it ("Withdrawn by Codex"); default Claude. */
+  agentName?: string
 }
 
 export const ChatViewContext = createContext<ChatViewValue | null>(null)

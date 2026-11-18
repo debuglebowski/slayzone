@@ -37,9 +37,9 @@ function memoryStore(answer: (url: string) => number = () => 200) {
     removeExcept: (dir, keep) => {
       const prefix = `${dir.join('/')}/`
       for (const path of [...files.keys()]) {
-        if (path.startsWith(prefix) && (keep === null || !path.startsWith(`${prefix}${keep}/`))) {
-          files.delete(path)
-        }
+        if (!path.startsWith(prefix)) continue
+        const child = path.slice(prefix.length).split('/', 1)[0]
+        if (keep === null || !keep(child)) files.delete(path)
       }
     }
   }
@@ -60,6 +60,12 @@ describe('artifactFileStamp', () => {
       })
     ).not.toBe(a)
     expect(artifactFileStamp({ artifact, contentTick: 0 })).toBe(a)
+  })
+
+  it('changes when the file changed on the hub while nobody listened (its mtime)', () => {
+    const a = artifactFileStamp({ artifact, contentTick: 0, mtime: 1000 })
+    expect(artifactFileStamp({ artifact, contentTick: 0, mtime: 2000.5 })).not.toBe(a)
+    expect(artifactFileStamp({ artifact, contentTick: 0, mtime: 1000 })).toBe(a)
   })
 
   it('names a version by its content hash (immutable)', () => {
@@ -93,6 +99,22 @@ describe('downloadArtifactFile', () => {
     await downloadArtifactFile(home, { artifact, contentTick: 1 }, store)
     expect(requests).toHaveLength(2)
     expect(files.size).toBe(1)
+  })
+
+  it('keeps the working copy while a version is shown, and the other way round', async () => {
+    const { store, requests, files } = memoryStore()
+    const working = await downloadArtifactFile(home, { artifact, contentTick: 0 }, store)
+    const v2 = { ref: 2, contentHash: 'hash2' }
+    const version = await downloadArtifactFile(home, { artifact, version: v2 }, store)
+    expect(files.size).toBe(2)
+    // Back to the artifact, then the version again: both still there, nothing downloaded.
+    expect(await downloadArtifactFile(home, { artifact, contentTick: 0 }, store)).toBe(working)
+    expect(await downloadArtifactFile(home, { artifact, version: v2 }, store)).toBe(version)
+    expect(requests).toHaveLength(2)
+    // Another version replaces the first; the working copy stays.
+    await downloadArtifactFile(home, { artifact, version: { ref: 3, contentHash: 'hash3' } }, store)
+    expect(files.size).toBe(2)
+    expect(store.find([...working.slice(8).split('/').slice(0, -1)], 'Shot_ 1_2.png')).toBe(working)
   })
 
   it('falls back to the current version when the working copy is missing', async () => {

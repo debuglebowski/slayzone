@@ -5,15 +5,20 @@
  * was opened with, e.g. a column's "+"), priority, due date and template (the project's
  * default preselected; its status and priority fill what wasn't chosen, as desktop's
  * dialog). Creates on the hub that owns the project (`task.create`), and the hub applies
- * the template the way it does for desktop and the CLI.
+ * the template the way it does for desktop and the CLI; Return in the title creates too.
+ * Created, the task is put on its hub's board at once (the full board reloads behind) and
+ * opened. The due date: quick dates and iOS's calendar in one sheet (`DueDateSheet`).
+ * Cancel with a typed title asks first (`confirmDiscardTask`; the route asks the same
+ * on a swipe back, told by `onDirtyChange`).
  */
 import { HubScope } from '@slayzone/transport/client'
 import { todayISO } from '@slayzone/tasks/board'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/workflow'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,7 +27,7 @@ import {
   View
 } from 'react-native'
 import { ChoiceSheet } from '../computers/ChoiceSheet'
-import type { BoardProject, HubFeed } from '../hub-board'
+import type { BoardData, BoardProject, HubFeed } from '../hub-board'
 import { useHubFeeds } from '../hub-connections'
 import { hubEntryOf } from '../hub-session'
 import type { ProjectRow } from '../projects/hub-projects'
@@ -30,23 +35,29 @@ import { ProjectPicker } from '../projects/ProjectPicker'
 import { type ChromeColors, useTheme } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { createTaskInput, type NewTaskDraft } from './create'
+import { DueDateSheet } from './DueDateSheet'
 import {
   applyTemplate,
-  dueChoices,
   dueLabel,
   NO_TEMPLATE,
-  parseDueDate,
   PRIORITY_CHOICES,
   priorityLabel,
   statusChoices,
   statusLabel,
   templateChoices
 } from './fields'
-import { FieldButton, PromptSheet } from './ui'
+import { FieldButton } from './ui'
 import { messageOf } from './use-task-writes'
 
-const PICK_DATE = 'pick'
 const DEFAULT_PRIORITY = 3
+
+/** Asks before a typed task is thrown away (Cancel, or the route's swipe back). */
+export function confirmDiscardTask(onDiscard: () => void): void {
+  Alert.alert('Discard this task?', 'What you typed is not saved.', [
+    { text: 'Keep editing', style: 'cancel' },
+    { text: 'Discard', style: 'destructive', onPress: onDiscard }
+  ])
+}
 
 export interface NewTaskScreenProps {
   /** The hub's address (as in a task's route). */
@@ -61,7 +72,10 @@ export interface NewTaskScreenProps {
   /** Creates a subtask of this task (same hub and project). */
   parentId?: string
   onCreated: (hubAddress: string, taskId: string) => void
+  /** Cancel (after asking, when a title was typed). */
   onCancel: () => void
+  /** Whether leaving now would throw away a typed title (the route guards swipe back). */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 function feedOfAddress(feeds: readonly HubFeed[], address: string): HubFeed | undefined {
@@ -77,7 +91,7 @@ function feedOfAddress(feeds: readonly HubFeed[], address: string): HubFeed | un
 const projectIn = (feed: HubFeed | undefined, projectId: string): BoardProject | undefined =>
   feed?.board.data?.projects.find((p) => p?.id === projectId) ?? undefined
 
-type Open = 'project' | 'status' | 'priority' | 'due' | 'date' | 'template' | null
+type Open = 'project' | 'status' | 'priority' | 'due' | 'template' | null
 
 /** What the form starts from: the draft, and which fields the user chose. */
 interface FormState {
@@ -134,6 +148,7 @@ export function NewTaskScreen(props: NewTaskScreenProps) {
           onMoveHub={setForm}
           onCreated={props.onCreated}
           onCancel={props.onCancel}
+          onDirtyChange={props.onDirtyChange}
         />
       </HubScope>
     </View>
@@ -145,17 +160,21 @@ function NewTaskForm({
   initial,
   onMoveHub,
   onCreated,
-  onCancel
+  onCancel,
+  onDirtyChange
 }: {
   feed: HubFeed
   initial: FormState
   onMoveHub: (form: FormState) => void
   onCreated: NewTaskScreenProps['onCreated']
   onCancel: () => void
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const trpc = useTRPC()
+  const client = useTRPCClient()
+  const queryClient = useQueryClient()
   const [draft, setDraft] = useState(initial.draft)
   const [explicit, setExplicit] = useState(initial.explicit)
   const [open, setOpen] = useState<Open>(null)
@@ -167,6 +186,35 @@ function NewTaskForm({
     : undefined
   const today = todayISO()
   const set = (fields: Partial<NewTaskDraft>) => setDraft((d) => ({ ...d, ...fields }))
+  const dirty = draft.title.trim() !== ''
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
+  const cancel = () => (dirty ? confirmDiscardTask(onCancel) : onCancel())
+
+  const input = createTaskInput(draft)
+  // Creates on the scope's hub; the created task goes on that hub's board at once (the
+  // task screen finds it there) while the whole board reloads behind, then it opens.
+  const create = () => {
+    if (!input || creating) return
+    setCreating(true)
+    setError(null)
+    client.task.create
+      .mutate(input)
+      .then((task) => {
+        queryClient.setQueryData(
+          trpc.task.loadBoardData.queryKey(),
+          (board: BoardData | undefined) =>
+            board && !board.tasks.some((t) => t.id === task.id)
+              ? { ...board, tasks: [...board.tasks, task] }
+              : board
+        )
+        void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
+        onCreated(feed.hub.label, task.id)
+      })
+      .catch((err: unknown) => {
+        setCreating(false)
+        setError(`Couldn't create the task: ${messageOf(err)}`)
+      })
+  }
 
   // The project's templates (on its hub); once they arrive, its default is preselected
   // and fills status and priority (render-time: the draft is this component's).
@@ -213,18 +261,10 @@ function NewTaskForm({
     else setDraft(next)
   }
 
-  const dues = dueChoices(today)
   return (
     <>
-      <Header onCancel={onCancel}>
-        <CreateButton
-          draft={draft}
-          hubAddress={feed.hub.label}
-          creating={creating}
-          setCreating={setCreating}
-          setError={setError}
-          onCreated={onCreated}
-        />
+      <Header onCancel={cancel}>
+        <CreateButton disabled={!input} creating={creating} onCreate={create} />
       </Header>
       <ScrollView
         contentContainerStyle={styles.body}
@@ -239,6 +279,7 @@ function NewTaskForm({
           multiline
           submitBehavior="blurAndSubmit"
           returnKeyType="done"
+          onSubmitEditing={create}
           placeholder="Task title"
           placeholderTextColor={theme.mutedForeground}
           style={styles.title}
@@ -251,6 +292,7 @@ function NewTaskForm({
             <FieldButton
               testID="new-task-project"
               label={project?.name ?? 'Choose a project'}
+              accessibilityLabel={`Project: ${project?.name ?? 'none chosen'}`}
               onPress={draft.parentId ? undefined : () => setOpen('project')}
             />
           </Field>
@@ -258,6 +300,7 @@ function NewTaskForm({
             <FieldButton
               testID="new-task-status"
               label={statusLabel(draft.status, project)}
+              accessibilityLabel={`Status: ${statusLabel(draft.status, project)}`}
               onPress={() => setOpen('status')}
             />
           </Field>
@@ -265,6 +308,7 @@ function NewTaskForm({
             <FieldButton
               testID="new-task-priority"
               label={priorityLabel(draft.priority)}
+              accessibilityLabel={`Priority: ${priorityLabel(draft.priority)}`}
               onPress={() => setOpen('priority')}
             />
           </Field>
@@ -272,6 +316,7 @@ function NewTaskForm({
             <FieldButton
               testID="new-task-due"
               label={dueLabel(draft.dueDate, today)}
+              accessibilityLabel={`Due: ${dueLabel(draft.dueDate, today)}`}
               onPress={() => setOpen('due')}
             />
           </Field>
@@ -280,6 +325,7 @@ function NewTaskForm({
               <FieldButton
                 testID="new-task-template"
                 label={templateList.find((c) => c.key === draft.templateId)?.label ?? 'No template'}
+                accessibilityLabel={`Template: ${templateList.find((c) => c.key === draft.templateId)?.label ?? 'No template'}`}
                 onPress={() => setOpen('template')}
               />
             </Field>
@@ -314,16 +360,12 @@ function NewTaskForm({
         }}
         onClose={() => setOpen(null)}
       />
-      <ChoiceSheet
+      <DueDateSheet
         visible={open === 'due'}
-        title="Due date"
-        choices={[...dues, { key: PICK_DATE, label: 'Pick a date…' }]}
-        selectedKey={dues.find((d) => d.date === draft.dueDate)?.key ?? null}
-        onChoose={(key) => {
-          if (key === PICK_DATE) setOpen('date')
-          else set({ dueDate: dues.find((d) => d.key === key)?.date ?? null })
-        }}
-        onClose={() => setOpen((o) => (o === 'due' ? null : o))}
+        value={draft.dueDate}
+        today={today}
+        onChoose={(dueDate) => set({ dueDate })}
+        onClose={() => setOpen(null)}
       />
       <ChoiceSheet
         visible={open === 'template'}
@@ -333,19 +375,6 @@ function NewTaskForm({
         onChoose={chooseTemplate}
         onClose={() => setOpen(null)}
       />
-      {open === 'date' ? (
-        <PromptSheet
-          visible
-          title="Due date"
-          placeholder="YYYY-MM-DD"
-          submitLabel="Set"
-          inputTestID="due-date-input"
-          initial={draft.dueDate ?? ''}
-          validate={(text) => (parseDueDate(text) ? null : 'Type a date as YYYY-MM-DD')}
-          onSubmit={(text) => set({ dueDate: parseDueDate(text) })}
-          onClose={() => setOpen(null)}
-        />
-      ) : null}
     </>
   )
 }
@@ -354,7 +383,7 @@ function Header({ onCancel, children }: { onCancel: () => void; children?: React
   const styles = makeStyles(useTheme())
   return (
     <View style={styles.header}>
-      <Pressable onPress={onCancel} hitSlop={8} accessibilityRole="button">
+      <Pressable onPress={onCancel} hitSlop={12} accessibilityRole="button">
         <Text style={styles.link}>Cancel</Text>
       </Pressable>
       <Text style={styles.heading}>New task</Text>
@@ -367,56 +396,32 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   const styles = makeStyles(useTheme())
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      {/* The field's button reads its name with its value. */}
+      <Text style={styles.fieldLabel} accessibilityElementsHidden importantForAccessibility="no">
+        {label}
+      </Text>
       {children}
     </View>
   )
 }
 
-/** Creates on the scope's hub, waits for its board to carry the task, then opens it. */
+/** Create (the header's): `onCreate` does it; a spinner while it runs. */
 function CreateButton({
-  draft,
-  hubAddress,
+  disabled,
   creating,
-  setCreating,
-  setError,
-  onCreated
+  onCreate
 }: {
-  draft: NewTaskDraft
-  hubAddress: string
+  disabled: boolean
   creating: boolean
-  setCreating: (creating: boolean) => void
-  setError: (error: string | null) => void
-  onCreated: (hubAddress: string, taskId: string) => void
+  onCreate: () => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
-  const trpc = useTRPC()
-  const client = useTRPCClient()
-  const queryClient = useQueryClient()
-  const input = createTaskInput(draft)
-  const create = () => {
-    if (!input || creating) return
-    setCreating(true)
-    setError(null)
-    client.task.create
-      .mutate(input)
-      .then((task) =>
-        // The task screen finds the task in the board: load it before opening.
-        queryClient
-          .invalidateQueries(trpc.task.loadBoardData.queryFilter())
-          .then(() => onCreated(hubAddress, task.id))
-      )
-      .catch((err: unknown) => {
-        setCreating(false)
-        setError(`Couldn't create the task: ${messageOf(err)}`)
-      })
-  }
   return creating ? (
     <ActivityIndicator color={theme.mutedForeground} />
   ) : (
-    <Pressable onPress={create} hitSlop={8} accessibilityRole="button" disabled={!input}>
-      <Text style={[styles.link, styles.create, !input && styles.disabled]}>Create</Text>
+    <Pressable onPress={onCreate} hitSlop={12} accessibilityRole="button" disabled={disabled}>
+      <Text style={[styles.link, styles.create, disabled && styles.disabled]}>Create</Text>
     </Pressable>
   )
 }

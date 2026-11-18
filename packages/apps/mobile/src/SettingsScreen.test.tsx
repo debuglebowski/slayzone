@@ -6,6 +6,7 @@ import type { HubFeed } from './hub-board'
 import type { HubSession } from './hub-session'
 import { SettingsScreen } from './SettingsScreen'
 import { createFakeHubs, feedOf, homeHub, workHub } from './hubs/testing'
+import { watchAlerts } from './ui-kit/testing-confirm'
 
 const mockHubs = createFakeHubs()
 jest.mock('@slayzone/transport/client', () => ({
@@ -58,7 +59,7 @@ function setup() {
       }
     }
   })
-  const handlers = { onAdd: jest.fn(), onSignOut: jest.fn() }
+  const handlers = { onAdd: jest.fn(), onSignOut: jest.fn(), onRetry: jest.fn() }
   const feeds: HubFeed[] = [
     feedOf(homeHub, undefined, { connection: { status: 'open', error: null } }),
     feedOf(workHub, undefined, {
@@ -109,11 +110,38 @@ describe('SettingsScreen', () => {
     await waitFor(() => expect(work.getByText('Never connected')).toBeOnTheScreen())
   })
 
-  it('signs out of one hub', async () => {
+  it('signs out of one hub once the user confirms, naming the hub', async () => {
     const { handlers, feeds } = setup()
+    const alerts = watchAlerts()
+    await render(<SettingsScreen feeds={feeds} sessions={sessions} {...handlers} />)
+    await userEvent
+      .setup()
+      .press(hubCard(workHub).getByRole('button', { name: `Sign out of ${workHub.label}` }))
+    expect(alerts.alerts.at(-1)?.title).toBe(`Sign out of ${workHub.label}?`)
+    expect(handlers.onSignOut).not.toHaveBeenCalled()
+    alerts.press(`Sign out of ${workHub.label}`)
+    expect(handlers.onSignOut).toHaveBeenCalledWith(workHub.id)
+    alerts.restore()
+  })
+
+  it('keeps the hub when the user cancels signing out', async () => {
+    const { handlers, feeds } = setup()
+    const alerts = watchAlerts()
     await render(<SettingsScreen feeds={feeds} sessions={sessions} {...handlers} />)
     await userEvent.setup().press(hubCard(workHub).getByText('Sign out'))
-    expect(handlers.onSignOut).toHaveBeenCalledWith(workHub.id)
+    alerts.press('Cancel')
+    expect(handlers.onSignOut).not.toHaveBeenCalled()
+    alerts.restore()
+  })
+
+  it("offers Retry on a hub it can't reach, not on a connected one", async () => {
+    const { handlers, feeds } = setup()
+    await render(<SettingsScreen feeds={feeds} sessions={sessions} {...handlers} />)
+    expect(hubCard(homeHub).queryByText('Retry')).toBeNull()
+    await userEvent
+      .setup()
+      .press(hubCard(workHub).getByRole('button', { name: `Retry ${workHub.label}` }))
+    expect(handlers.onRetry).toHaveBeenCalledWith(workHub.id)
   })
 
   it('adds a hub', async () => {
@@ -125,16 +153,58 @@ describe('SettingsScreen', () => {
 })
 
 describe('SettingsScreen appearance and about', () => {
-  it('says where the theme comes from and which version this is', async () => {
+  it('says in plain words where the look comes from and which version this is', async () => {
     await render(
       <SettingsScreen
         feeds={[feedOf(homeHub, undefined)]}
         sessions={[{ entry: homeHub, token: 't-home' }]}
         onAdd={() => undefined}
         onSignOut={() => undefined}
+        onRetry={() => undefined}
       />
     )
-    expect(screen.getByText(new RegExp(`theme · from ${homeHub.label}`))).toBeOnTheScreen()
+    expect(screen.getByText(/^(Dark|Light) appearance$/)).toBeOnTheScreen()
+    expect(
+      screen.getByText(
+        `Matches the theme picked in SlayZone on your computer (Settings → Appearance) for ${homeHub.label}.`
+      )
+    ).toBeOnTheScreen()
+    expect(screen.queryByText(/paints/)).toBeNull()
     expect(screen.getByText(/^SlayZone/)).toBeOnTheScreen()
+  })
+
+  it("says the demo uses the default look, never the demo hub's address", async () => {
+    const demoHub = { ...homeHub, id: 'hub:demo', label: 'demo.invalid' }
+    await render(
+      <SettingsScreen
+        feeds={[feedOf(demoHub, undefined)]}
+        sessions={[{ entry: demoHub, token: 'demo', inProcess: {} as never }]}
+        onAdd={() => undefined}
+        onSignOut={() => undefined}
+        onRetry={() => undefined}
+      />
+    )
+    expect(screen.queryByText(/demo\.invalid/)).toBeNull()
+    expect(screen.getByText("The demo uses SlayZone's default look.")).toBeOnTheScreen()
+  })
+
+  it('asks before leaving the demo', async () => {
+    const demoHub = { ...homeHub, id: 'hub:demo', label: 'demo.invalid' }
+    const onSignOut = jest.fn()
+    const alerts = watchAlerts()
+    await render(
+      <SettingsScreen
+        feeds={[feedOf(demoHub, undefined)]}
+        sessions={[{ entry: demoHub, token: 'demo', inProcess: {} as never }]}
+        onAdd={() => undefined}
+        onSignOut={onSignOut}
+        onRetry={() => undefined}
+      />
+    )
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Exit demo' }))
+    expect(onSignOut).not.toHaveBeenCalled()
+    alerts.press('Exit demo')
+    expect(onSignOut).toHaveBeenCalledWith(demoHub.id)
+    alerts.restore()
   })
 })

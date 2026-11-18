@@ -25,7 +25,9 @@ describe('agentGroup', () => {
 
   it('orders the groups by what needs the user first', () => {
     expect(AGENT_GROUP_ORDER).toEqual(['waiting', 'error', 'running', 'hibernated', 'done'])
-    expect(AGENT_GROUP_TITLES.waiting).toBe('Waiting for you')
+    // A finished turn and a question look the same on the hub (both idle + unread):
+    // the title says what the user does next, not that the agent is blocked.
+    expect(AGENT_GROUP_TITLES.waiting).toBe('Ready for review')
   })
 })
 

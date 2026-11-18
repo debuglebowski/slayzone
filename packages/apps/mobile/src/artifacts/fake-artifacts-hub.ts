@@ -92,6 +92,15 @@ export function fakeArtifactsHub(
     'artifacts.foldersGetByTask': ({ taskId }) => state.folders.filter((f) => f.task_id === taskId),
     'artifacts.get': ({ id }) => state.artifacts.find((a) => a.id === id) ?? null,
     'artifacts.readContent': ({ id }) => state.content[id] ?? '',
+    // The hub's verdict: NUL bytes or invalid UTF-8 (read as U+FFFD here) = binary.
+    'artifacts.readText': ({ id }) => {
+      const content = state.content[id] ?? ''
+      const size = content.length
+      return content.includes('\u0000') || content.includes('\ufffd')
+        ? { kind: 'binary', size }
+        : { kind: 'text', content, size }
+    },
+    'artifacts.getMtime': ({ id }) => (state.artifacts.some((a) => a.id === id) ? 1000 : null),
     'artifacts.versionsList': ({ artifactId }) => state.versions[artifactId] ?? [],
     'artifacts.versionsRead': ({ artifactId, versionRef }) =>
       `${state.content[artifactId] ?? ''} (v${versionRef})`,

@@ -1,10 +1,10 @@
 /**
- * Choosing what to upload: photos from the library (several at once), a photo taken with
+ * Choosing what to upload: photos and videos from the library (several at once), a photo taken with
  * the camera, or files from the Files app (several, any type). Each pick is a local
  * `file://` copy plus the name the artifact gets.
  *
- * Photos come JPEG-compatible (`Compatible`: iOS converts HEIC), since desktop's
- * Chromium cannot show HEIC. A picked name keeps its base but takes the extension of the
+ * Photos and videos come in their most compatible representation (`Compatible`: iOS
+ * converts HEIC photos to JPEG), since desktop's Chromium cannot show HEIC. A picked name keeps its base but takes the extension of the
  * file actually delivered (`IMG_1.HEIC` → `IMG_1.jpg`), because the extension picks the
  * viewer everywhere. A photo without a name is named by the time, the way desktop names a
  * pasted image (`photo-2026-10-30T12-00-00-000Z.jpg` ~ `pasted-…`).
@@ -64,7 +64,7 @@ export async function pickUploads(
   switch (source) {
     case 'photos': {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ['images', 'videos'],
         allowsMultipleSelection: true,
         quality: 1,
         preferredAssetRepresentationMode:

@@ -1,5 +1,6 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { type ChromeColors, useTheme } from '../theme'
+import { MODAL_ORIENTATIONS } from '../ui-kit/Chrome'
 import type { ProjectRef, ProjectRow } from './hub-projects'
 import { ProjectList } from './ProjectList'
 import { useHubProjects } from './use-hub-projects'
@@ -27,6 +28,7 @@ export function ProjectPicker({
     <Modal
       visible={visible}
       animationType="slide"
+      supportedOrientations={MODAL_ORIENTATIONS}
       presentationStyle="formSheet"
       onRequestClose={onClose}
     >
