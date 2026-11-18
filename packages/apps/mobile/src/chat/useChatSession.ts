@@ -175,8 +175,9 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   )
   const load = useCallback(
     async (first: 'full' | 'catch-up'): Promise<void> => {
-      // A catch-up that finds the hub's log went backwards asks for a full load.
-      for (let kind = first; ; kind = 'full') {
+      // A catch-up that finds the hub's log went backwards asks for a full load;
+      // events that raced ahead of a load and show a gap ask for a catch-up.
+      for (let kind: 'full' | 'catch-up' = first; ; ) {
         const keep = kind === 'full' ? localMessages(stateRef.current) : []
         const ticket = sync.beginLoad(kind)
         if (kind === 'full') {
@@ -203,7 +204,10 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
           return
         }
         const result = sync.completeLoad(ticket, replay, keep)
-        if (result === 'reload') continue
+        if (result === 'reload' || result === 'resync') {
+          kind = result === 'reload' ? 'full' : 'catch-up'
+          continue
+        }
         if (result === 'done') {
           setLoadError(null)
           setHydrating(false)
@@ -222,8 +226,12 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     void load(kind)
   })
   const onEvent = useStableCallback((msg: ChatWireEvent) => {
+    const outcome = sync.receive(msg)
     // The log restarted elsewhere (a reset from another client): load it again.
-    if (sync.receive(msg) === 'regressed') void load('full')
+    if (outcome === 'regressed') void load('full')
+    // Missed something while connected (a dropped event, the computer restarted):
+    // read what is new — the server's current turn status with it.
+    else if (outcome === 'resync') void load('catch-up')
   })
   // The hub relays this tab only while it is not on the direct link; each switch
   // starts a subscription again, whose start catches up (`onStarted`).

@@ -23,6 +23,7 @@
     "./agents": "./src/server/agents/index.ts",
     "./reducer": "./src/shared/chat-timeline.ts",
     "./chat-lifecycle": "./src/shared/chat-lifecycle.ts",
+    "./chat-stream-position": "./src/shared/chat-stream-position.ts",
     "./chat-prompts": "./src/shared/chat-prompts.ts",
     "./chat-transcript": "./src/shared/chat-transcript.ts",
     "./chat-history": "./src/shared/chat-history-reader.ts",

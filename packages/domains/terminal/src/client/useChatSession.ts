@@ -40,6 +40,7 @@ import {
 } from '../shared/chat-timeline-checkpoint'
 import { summarizeRows, type TimelinePageSummary } from '../shared/timeline-summary'
 import { SessionReadyGate } from '../shared/chat-session-ready'
+import { ChatStreamPosition } from '../shared/chat-stream-position'
 import {
   initialState,
   reducer,
@@ -342,7 +343,7 @@ async function hydrateAndReplay({
     if (gen === genRef.current) onError(error instanceof Error ? error.message : String(error))
   } finally {
     if (gen === genRef.current) {
-      // Drain live events queued during hydration. Dedup via lastSeqRef
+      // Drain live events queued during hydration. Dedup via the stream position
       // so anything already covered by the replay buffer is skipped.
       hydratedRef.current = true
       loadedOnceRef.current = true
@@ -471,9 +472,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }, [state])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [hydrateError, setHydrateError] = useState<string | null>(null)
-  const lastSeqRef = useRef<number>(-1)
-  // Newest live event applied (live events carry their own counter; see applyLive).
-  const lastLiveRef = useRef<number>(0)
+  // Where this panel stands in the tab's stream: newest saved event, live counter,
+  // server instance (`ChatStreamPosition`, the rule mobile shares).
+  const positionRef = useRef(new ChatStreamPosition())
+  // A catch-up asked for by a live event (assigned below: it needs `applyLive`).
+  const resyncRef = useRef<() => void>(() => undefined)
   // Answers on their way to the server: the ref is the synchronous double-click
   // guard, the state drives the disabled buttons.
   const submittingRef = useRef<Set<string>>(new Set())
@@ -538,8 +541,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const applyLive = useCallback(
     (event: AgentEvent, seq: number, live?: number, at?: number): void => {
       if (live !== undefined) {
-        if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
-        lastLiveRef.current = live
+        const verdict = positionRef.current.live(event, seq, live)
+        // Missed something while connected (a dropped event, the computer
+        // restarted): read what is new — the server's current turn status with it.
+        if (verdict === 'resync') resyncRef.current()
+        if (verdict !== 'apply') return
         applyCliMetadata(event)
         pendingLiveRef.current.push(event)
         if (frameRef.current === null) {
@@ -550,8 +556,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         }
         return
       }
-      if (seq <= lastSeqRef.current) return
-      lastSeqRef.current = seq
+      if (positionRef.current.saved(seq) === 'duplicate') return
       flushLive()
       dispatch({ type: 'event', event, at, seq })
     },
@@ -566,8 +571,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       const at: Array<number | undefined> = []
       const seq: number[] = []
       for (const b of saved) {
-        if (b.seq <= lastSeqRef.current) continue
-        lastSeqRef.current = b.seq
+        if (positionRef.current.saved(b.seq) === 'duplicate') continue
         events.push(b.event)
         at.push(b.at)
         seq.push(b.seq)
@@ -630,7 +634,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const openPaged = useCallback((opened: OpenedPaged): ReadonlySet<string> => {
     const decoded = decodeTimelineState(opened.snapshot.state)
     dispatch({ type: 'restore', state: decoded })
-    lastSeqRef.current = opened.snapshot.seq
+    positionRef.current.seq = opened.snapshot.seq
     loadingPagesRef.current.clear()
     setPaging({
       pageRows: opened.snapshot.pageRows,
@@ -737,8 +741,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // runs) so we don't miss events emitted between session spawn and the
   // getBufferSince replay below. While hydrating, queue events instead of
   // dispatching — `session-spawn` (and other events from the fresh subprocess)
-  // can race ahead of getBufferSince, advance lastSeqRef, and make the replay
-  // loop's `seq > lastSeqRef` filter drop the entire historical buffer. Drained
+  // can race ahead of getBufferSince, advance the stream position, and make the
+  // replay's seq dedup drop the entire historical buffer. Drained
   // after replay. Server fan-out is global; filter by tabId here. The chat
   // event payload is the domain's own AgentEvent vocabulary (router types it as
   // `unknown` so the boundary stays vocabulary-agnostic) — cast at the seam.
@@ -771,8 +775,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // Stable: refs + dispatch only.
   const applySnapshot = useCallback(
     (events: AgentEvent[], afterSeq: number, liveSeq: number): void => {
-      if (afterSeq !== lastSeqRef.current) return
-      lastLiveRef.current = Math.max(lastLiveRef.current, liveSeq)
+      if (positionRef.current.snapshot({ afterSeq, liveSeq, events }) === 'skip') return
       for (const event of events) applyCliMetadata(event)
       if (events.length > 0) dispatch({ type: 'events', events })
     },
@@ -783,11 +786,14 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // is being set up arrives on the hub stream (seq dedupe drops the overlap).
   const [directStartedFor, setDirectStartedFor] = useState<typeof directChat>(null)
   const directLive = directChat !== null && directStartedFor === directChat
+  const hubStreamStarted = useStableCallback(() => resyncRef.current())
   // The hub relays this tab — and asks its computer for the full events — only
   // while the tab is not live on the direct link (docs/direct-link.md).
   useSubscription(
     trpc.chat.onEvent.subscriptionOptions(opts.tabId ? { tabIds: [opts.tabId] } : undefined, {
       enabled: !!opts.tabId && !directLive,
+      // Each (re)start — a reconnect drops what was sent meanwhile — catches up.
+      onStarted: hubStreamStarted,
       onData: handleEvent
     })
   )
@@ -858,6 +864,45 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     setLoadedInputs(null)
     setReopenToken((n) => n + 1)
   }, [])
+  // Read what this panel missed — the saved events after its newest and what
+  // streams now, the server's current turn status with it — without a reload:
+  // on every (re)start of the hub stream (a reconnect) and when a live event
+  // shows a gap. What streams meanwhile waits, as during a load. A server behind
+  // this panel (its log restarted, or it lost the tab) needs the full reload.
+  const catchingUpRef = useRef(false)
+  const catchUp = useStableCallback(() => {
+    // A load runs: it reads what is new itself.
+    if (!opts.tabId || !hydratedRef.current || catchingUpRef.current) return
+    const gen = genRef.current
+    const tabId = opts.tabId
+    const position = positionRef.current
+    catchingUpRef.current = true
+    hydratedRef.current = false
+    readReplayPages({ getReplay: getReplayRead }, tabId, position.seq, () => gen !== genRef.current)
+      .then((replay) => {
+        if (!replay || gen !== genRef.current) return
+        if (position.catchUpNeedsReload(replay.live)) {
+          reload()
+          return
+        }
+        applySaved(replay.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
+        applySnapshot(replay.live.events as AgentEvent[], replay.live.afterSeq, replay.live.liveSeq)
+      })
+      // Unreadable now: the availability check reloads a tab it cannot read.
+      .catch(() => undefined)
+      .finally(() => {
+        catchingUpRef.current = false
+        if (gen !== genRef.current) return
+        hydratedRef.current = true
+        const queued = liveQueueRef.current
+        liveQueueRef.current = []
+        for (const { event, seq, live, at } of queued) applyLive(event, seq, live, at)
+        flushLive()
+      })
+  })
+  useEffect(() => {
+    resyncRef.current = catchUp
+  }, [catchUp])
   // Back from the direct link to the hub: events saved between the end of the
   // direct stream and the hub's first relayed one are not on either stream, so load
   // the tab again (rare: the link dropped). Going direct needs nothing: the hub stream
@@ -903,8 +948,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     loadedTargetRef.current = targetKey
     if (loadedOnceRef.current || !sameTarget) localActionsRef.current = []
     discardPendingLive()
-    lastSeqRef.current = -1
-    lastLiveRef.current = 0
+    positionRef.current.reset()
     const inputs = {
       tabId: opts.tabId,
       taskId: opts.taskId,
@@ -1130,8 +1174,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const reset = (): void => {
     discardPendingLive()
     dispatch({ type: 'reset' })
-    lastLiveRef.current = 0
-    lastSeqRef.current = -1
+    positionRef.current.reset()
   }
 
   return {

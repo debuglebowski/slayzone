@@ -45,6 +45,19 @@ function harness() {
   }
 }
 
+const status = (epoch: string, state: 'idle' | 'running', revision = 1): AgentEvent => ({
+  kind: 'turn-status',
+  authoritative: true,
+  epoch,
+  revision,
+  state,
+  reportedState: state,
+  turnOpen: state === 'running',
+  mainTurnOpen: state === 'running',
+  pendingRequestIds: [],
+  outboxInFlight: 0
+})
+
 const replay = (
   events: Array<[number, AgentEvent]>,
   live: Partial<ChatReplay['live']> = {}
@@ -207,6 +220,55 @@ describe('ChatSync', () => {
     // A new tab instance (hub restarted): saved log intact, live counter restarted.
     const restarted = h.sync.beginLoad('catch-up')
     expect(h.sync.completeLoad(restarted, replay([], { afterSeq: 1, liveSeq: 0 }))).toBe('reload')
+  })
+
+  it('asks to resync on a live event after a saved one it never got (dropped while reconnecting)', () => {
+    const h = harness()
+    h.sync.completeLoad(h.sync.beginLoad('full'), replay([[0, userMessage('u1', 'hi')]]))
+    expect(h.sync.receive({ tabId: TAB, seq: 2, live: 1, event: delta('x') })).toBe('resync')
+    expect(h.state().live).toEqual([])
+  })
+
+  it('asks to resync on the status of another server instance (its computer restarted)', () => {
+    const h = harness()
+    h.sync.completeLoad(
+      h.sync.beginLoad('full'),
+      replay([[0, userMessage('u1', 'hi')]], { liveSeq: 9, events: [status('a', 'running')] })
+    )
+    expect(h.state().turnStatus?.state).toBe('running')
+    expect(h.sync.receive({ tabId: TAB, seq: 0, live: 1, event: status('b', 'idle') })).toBe(
+      'resync'
+    )
+  })
+
+  it('a catch-up from another instance applies its status and follows its live counter', () => {
+    const h = harness()
+    h.sync.completeLoad(
+      h.sync.beginLoad('full'),
+      replay([[0, userMessage('u1', 'hi')]], { liveSeq: 9, events: [status('a', 'running')] })
+    )
+    const ticket = h.sync.beginLoad('catch-up')
+    expect(
+      h.sync.completeLoad(
+        ticket,
+        replay([], { afterSeq: 0, liveSeq: 1, events: [status('b', 'idle')] })
+      )
+    ).toBe('done')
+    expect(h.state().turnStatus).toMatchObject({ epoch: 'b', state: 'idle' })
+    expect(h.sync.receive({ tabId: TAB, seq: 0, live: 2, event: status('b', 'running', 2) })).toBe(
+      'applied'
+    )
+    h.sync.flush()
+    expect(h.state().turnStatus).toMatchObject({ epoch: 'b', state: 'running' })
+  })
+
+  it('a load whose queued events show a gap asks to resync once live', () => {
+    const h = harness()
+    const ticket = h.sync.beginLoad('full')
+    // Raced ahead of the load: a live event after a saved one neither has.
+    h.sync.receive({ tabId: TAB, seq: 4, live: 1, event: delta('x') })
+    expect(h.sync.completeLoad(ticket, replay([[0, userMessage('u1', 'hi')]]))).toBe('resync')
+    expect(h.texts()).toEqual(['hi'])
   })
 
   it('reports a saved event older than the newest applied one (the log restarted elsewhere)', () => {

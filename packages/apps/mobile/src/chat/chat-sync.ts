@@ -28,6 +28,7 @@
  *     `receive` answers `regressed` and applies nothing; the caller reloads.
  */
 import type { AgentEvent } from '@slayzone/terminal-contracts'
+import { ChatStreamPosition } from '@slayzone/terminal/chat-stream-position'
 import type { Action } from '@slayzone/terminal/reducer'
 
 /** One `chat.onEvent` message. */
@@ -87,8 +88,8 @@ export class ChatSync {
   private gen = 0
   private loadingGen: number | null = null
   private hasLoaded = false
-  private newestSeq = -1
-  private newestLive = 0
+  /** Where this client stands in the tab's stream (the rule desktop shares). */
+  private readonly position = new ChatStreamPosition()
   private queue: ChatWireEvent[] = []
   private pendingLive: AgentEvent[] = []
   private framePending = false
@@ -105,7 +106,7 @@ export class ChatSync {
 
   /** The newest saved event applied (-1 = none). */
   get lastSeq(): number {
-    return this.newestSeq
+    return this.position.seq
   }
 
   /** A load completed (or failed) once: the next one replaces or catches up. */
@@ -127,7 +128,7 @@ export class ChatSync {
       this.discardLive()
       return { gen, kind, afterSeq: -1 }
     }
-    return { gen, kind, afterSeq: this.newestSeq }
+    return { gen, kind, afterSeq: this.position.seq }
   }
 
   /**
@@ -138,16 +139,13 @@ export class ChatSync {
     ticket: LoadTicket,
     replay: ChatReplay,
     keep: readonly LocalMessage[] = []
-  ): 'done' | 'stale' | 'reload' {
+  ): 'done' | 'stale' | 'reload' | 'resync' {
     if (ticket.gen !== this.loadingGen) return 'stale'
     if (ticket.kind === 'catch-up') {
-      if (replay.live.afterSeq < this.newestSeq || replay.live.liveSeq < this.newestLive) {
-        return 'reload'
-      }
+      if (this.position.catchUpNeedsReload(replay.live)) return 'reload'
     } else {
       if (this.hasLoaded) this.sink.dispatch({ type: 'reset' })
-      this.newestSeq = -1
-      this.newestLive = 0
+      this.position.reset()
     }
     const replayed = new Set<string>()
     for (const { seq, event } of replay.events) {
@@ -156,8 +154,7 @@ export class ChatSync {
       this.applySaved(e, seq)
     }
     // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
-    if (replay.live.afterSeq === this.newestSeq) {
-      this.newestLive = Math.max(this.newestLive, replay.live.liveSeq)
+    if (this.position.snapshot(replay.live) === 'apply') {
       if (replay.live.events.length > 0) {
         this.sink.dispatch({ type: 'events', events: replay.live.events as AgentEvent[] })
       }
@@ -170,8 +167,7 @@ export class ChatSync {
           this.sink.dispatch({ type: 'user-send-failed', id: m.id, error: m.failed })
       }
     }
-    this.goLive()
-    return 'done'
+    return this.goLive() ? 'resync' : 'done'
   }
 
   /** The load failed: go live with what this client has, applying what was queued. */
@@ -184,15 +180,18 @@ export class ChatSync {
   /**
    * One `chat.onEvent` message. `regressed`: a saved event older than the newest
    * applied one arrived while live — the log restarted elsewhere; nothing applied.
+   * `resync`: a live event shows this client missed something (a saved event, or
+   * its computer restarted: `ChatStreamPosition`) — catch up; nothing applied.
    */
-  receive(msg: ChatWireEvent): 'applied' | 'queued' | 'ignored' | 'regressed' {
+  receive(msg: ChatWireEvent): 'applied' | 'queued' | 'ignored' | 'regressed' | 'resync' {
     if (msg.tabId !== this.tabId) return 'ignored'
     if (this.loadingGen !== null) {
       this.queue.push(msg)
       return 'queued'
     }
-    if (msg.live === undefined && msg.seq <= this.newestSeq) return 'regressed'
-    return this.apply(msg) ? 'applied' : 'ignored'
+    if (msg.live === undefined && msg.seq <= this.position.seq) return 'regressed'
+    const applied = this.apply(msg)
+    return applied === true ? 'applied' : applied === false ? 'ignored' : applied
   }
 
   /** One `chat.onExit` message: the tab's process ended. */
@@ -223,8 +222,7 @@ export class ChatSync {
   resetLocal(): void {
     this.discardLive()
     this.sink.dispatch({ type: 'reset' })
-    this.newestSeq = -1
-    this.newestLive = 0
+    this.position.reset()
   }
 
   /** Nothing of a running load or a waiting frame may apply any more. */
@@ -235,21 +233,25 @@ export class ChatSync {
     this.discardLive()
   }
 
-  private goLive(): void {
+  /** Live from here; true when what raced ahead of the load shows a gap (resync). */
+  private goLive(): boolean {
     this.loadingGen = null
     this.hasLoaded = true
     const queued = this.queue
     this.queue = []
-    for (const msg of queued) this.apply(msg)
+    let resync = false
+    for (const msg of queued) if (this.apply(msg) === 'resync') resync = true
     // The loaded state is complete at once, not a frame later.
     this.flush()
+    return resync
   }
 
-  private apply(msg: ChatWireEvent): boolean {
+  private apply(msg: ChatWireEvent): boolean | 'resync' {
     const event = msg.event as AgentEvent
     if (msg.live === undefined) return this.applySaved(event, msg.seq)
-    if (msg.seq !== this.newestSeq || msg.live <= this.newestLive) return false
-    this.newestLive = msg.live
+    const verdict = this.position.live(event, msg.seq, msg.live)
+    if (verdict === 'resync') return 'resync'
+    if (verdict === 'drop') return false
     this.pendingLive.push(event)
     if (!this.framePending) {
       this.framePending = true
@@ -259,8 +261,7 @@ export class ChatSync {
   }
 
   private applySaved(event: AgentEvent, seq: number): boolean {
-    if (seq <= this.newestSeq) return false
-    this.newestSeq = seq
+    if (this.position.saved(seq) === 'duplicate') return false
     this.flush()
     this.sink.dispatch({ type: 'event', event })
     return true

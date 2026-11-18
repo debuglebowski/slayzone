@@ -79,6 +79,8 @@ let bufferLoad = -1
 const modelQueryKey = (input: unknown) => ['chat.getModels', input]
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 const subs: Record<string, ((data: unknown) => void) | null> = { event: null, exit: null }
+/** The hub stream's `onStarted` (a (re)start of the subscription: a reconnect). */
+const started: Record<string, (() => void) | undefined> = {}
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
@@ -92,8 +94,14 @@ vi.mock('@slayzone/transport/client', () => ({
     }
   }),
   useTRPCClient: () => client,
-  useSubscription: (o: { name: string; enabled: boolean; onData: (d: unknown) => void }) => {
+  useSubscription: (o: {
+    name: string
+    enabled: boolean
+    onData: (d: unknown) => void
+    onStarted?: () => void
+  }) => {
     subs[o.name] = o.enabled ? o.onData : null
+    started[o.name] = o.enabled ? o.onStarted : undefined
   },
   // No direct link unless a test sets `directLease`: everything goes through the hub.
   useDirectLease: () => ({ lease: directLease, lost: () => undefined })
@@ -1295,5 +1303,100 @@ describe('full replay in bounded pages', () => {
     await finishLoad(0, HISTORY)
     expect(replay).toHaveBeenCalledTimes(1)
     expect(texts(result)).toEqual(['one', 'two'])
+  })
+})
+
+describe('reconnect: the panel catches up with the server, never keeps a stale turn state', () => {
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0))
+    })
+  const status = (epoch: string, state: 'idle' | 'running', revision: number) => ({
+    kind: 'turn-status',
+    authoritative: true,
+    epoch,
+    revision,
+    state,
+    reportedState: state,
+    turnOpen: state === 'running',
+    mainTurnOpen: state === 'running',
+    pendingRequestIds: [],
+    outboxInFlight: 0
+  })
+  const opened: Replay = {
+    events: [
+      { seq: 0, event: userMsg('one') },
+      { seq: 1, event: userMsg('two') }
+    ],
+    live: { afterSeq: 1, liveSeq: 4, events: [status('a', 'running', 3)] }
+  }
+  const replies = (answer: Replay) => {
+    const asked: number[] = []
+    vi.spyOn(client.chat.getReplay, 'query').mockImplementation(((input: { afterSeq: number }) => {
+      asked.push(input.afterSeq)
+      return Promise.resolve(answer)
+    }) as never)
+    return asked
+  }
+
+  it('a restarted hub stream reads what was missed, the current turn status with it', async () => {
+    const { result } = setup()
+    await finishLoad(0, opened)
+    expect(result.current.inFlight).toBe(true)
+    // Away: the turn ended and a message was saved; neither reached this panel.
+    const asked = replies({
+      events: [{ seq: 2, event: userMsg('three') }],
+      live: { afterSeq: 2, liveSeq: 6, events: [status('a', 'idle', 5)] }
+    })
+    act(() => started.event?.())
+    await settle()
+    expect(asked).toEqual([1])
+    expect(texts(result)).toEqual(['one', 'two', 'three'])
+    expect(result.current.state.turnStatus).toMatchObject({ state: 'idle', revision: 5 })
+    expect(result.current.inFlight).toBe(false)
+    // Caught up, not reloaded: no reset, no loading frame.
+    expect(result.current.hydrating).toBe(false)
+    expect([...reducerActions].some((a) => a.type === 'reset')).toBe(false)
+  })
+
+  it('a status from a restarted computer (another epoch, its live counter starting over) catches up', async () => {
+    const { result } = setup()
+    await finishLoad(0, opened)
+    const asked = replies({
+      events: [],
+      live: { afterSeq: 1, liveSeq: 1, events: [status('b', 'idle', 1)] }
+    })
+    act(() => subs.event?.({ tabId: 'tab-1', seq: 1, live: 1, event: status('b', 'idle', 1) }))
+    await settle()
+    expect(asked).toEqual([1])
+    expect(result.current.state.turnStatus).toMatchObject({ epoch: 'b', state: 'idle' })
+    expect(result.current.inFlight).toBe(false)
+    // The new instance's next live event applies (its counter, not the old one's).
+    act(() => subs.event?.({ tabId: 'tab-1', seq: 1, live: 2, event: status('b', 'running', 2) }))
+    await settle()
+    expect(result.current.state.turnStatus).toMatchObject({ epoch: 'b', state: 'running' })
+  })
+
+  it('a live event after a saved event this panel never got catches up', async () => {
+    const { result } = setup()
+    await finishLoad(0, opened)
+    const asked = replies({
+      events: [{ seq: 2, event: userMsg('three') }],
+      live: { afterSeq: 2, liveSeq: 7, events: [status('a', 'running', 6)] }
+    })
+    act(() => subs.event?.({ tabId: 'tab-1', seq: 2, live: 7, event: status('a', 'running', 6) }))
+    await settle()
+    expect(asked).toEqual([1])
+    expect(texts(result)).toEqual(['one', 'two', 'three'])
+  })
+
+  it('a server behind this panel (its log restarted, or it lost the tab) reloads', async () => {
+    const { result } = setup()
+    await finishLoad(0, opened)
+    replies({ events: [], live: { afterSeq: -1, liveSeq: 0, events: [] } })
+    act(() => started.event?.())
+    await settle()
+    expect(loads).toHaveLength(2)
+    expect(result.current.hydrating).toBe(true)
   })
 })
