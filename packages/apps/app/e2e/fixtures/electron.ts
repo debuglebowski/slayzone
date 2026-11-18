@@ -422,7 +422,7 @@ async function launchElectronWithRetry(args: {
           SLAYZONE_ROOT: args.userDataDir,
           SLAYZONE_USER_DATA_DIR: args.userDataDir,
           // Run the suite with chat turn state kept in another mode
-          // (`SLAYZONE_CHAT_LIFECYCLE=authoritative pnpm test:e2e:chat`).
+          // (`SLAYZONE_CHAT_LIFECYCLE=shadow pnpm test:e2e:chat`).
           ...(process.env.SLAYZONE_CHAT_LIFECYCLE
             ? { SLAYZONE_CHAT_LIFECYCLE: process.env.SLAYZONE_CHAT_LIFECYCLE }
             : {}),

@@ -85,7 +85,7 @@ const statuses = (h: ReturnType<typeof transportHarness>) =>
 
 test('every change of the turn status is published live, with rising revisions', async () => {
   const h = transportHarness()
-  await startTab()
+  await startTab({ lifecycleMode: 'shadow' } as never)
   const f = h.fakes[0]
   await sendAndStart(f, 'u1')
   emitLine(f, sj.canUseTool('p1', 't1'))
@@ -135,6 +135,35 @@ test('SLAYZONE_CHAT_LIFECYCLE chooses the mode of sessions hydrated without one'
     await sendAndStart(h.fakes[0], 'u1')
     await until(() => statuses(h).some((s) => s.turnOpen))
     expect(statuses(h).every((s) => s.authoritative)).toBe(true)
+  } finally {
+    if (before === undefined) delete process.env.SLAYZONE_CHAT_LIFECYCLE
+    else process.env.SLAYZONE_CHAT_LIFECYCLE = before
+  }
+})
+
+test('sessions are authoritative by default (no mode, no SLAYZONE_CHAT_LIFECYCLE)', async () => {
+  const before = process.env.SLAYZONE_CHAT_LIFECYCLE
+  delete process.env.SLAYZONE_CHAT_LIFECYCLE
+  try {
+    const h = transportHarness()
+    await startTab()
+    await sendAndStart(h.fakes[0], 'u1')
+    await until(() => statuses(h).some((s) => s.turnOpen))
+    expect(statuses(h).every((s) => s.authoritative)).toBe(true)
+  } finally {
+    if (before !== undefined) process.env.SLAYZONE_CHAT_LIFECYCLE = before
+  }
+})
+
+test('SLAYZONE_CHAT_LIFECYCLE=shadow keeps the runtime as the authority', async () => {
+  const before = process.env.SLAYZONE_CHAT_LIFECYCLE
+  process.env.SLAYZONE_CHAT_LIFECYCLE = 'shadow'
+  try {
+    const h = transportHarness()
+    await startTab()
+    await sendAndStart(h.fakes[0], 'u1')
+    await until(() => statuses(h).some((s) => s.turnOpen))
+    expect(statuses(h).some((s) => s.authoritative)).toBe(false)
   } finally {
     if (before === undefined) delete process.env.SLAYZONE_CHAT_LIFECYCLE
     else process.env.SLAYZONE_CHAT_LIFECYCLE = before

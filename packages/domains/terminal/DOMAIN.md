@@ -111,10 +111,12 @@ identify their turn. Main work, pending prompts, background helpers/jobs and
 outbox admission remain independent. The existing outbox owns delivery; the model
 does not infer acknowledgement from a spinner or transcript counter.
 
-The computer's transport observes this model in `ChatLifecycleShadow`; production
-state, queueing, prompts, Stop, and UI still use the existing runtime. A session's
-`CreateChatOpts.lifecycleMode` is chosen at hydration (default
-`SLAYZONE_CHAT_LIFECYCLE`, else `shadow`; `legacy` disables observation). The
+The computer's transport runs this model in `ChatLifecycleShadow` next to the
+runtime's own state and reports every disagreement (`chat.lifecycle_shadow_*`). A
+session's `CreateChatOpts.lifecycleMode` is chosen at hydration (default
+`SLAYZONE_CHAT_LIFECYCLE`, else `authoritative`: the model is the server's turn
+status; `shadow`: the runtime's state is, the model only compared; `legacy`
+disables observation). The
 transport publishes its turn status (`turn-status`: state, reported state, turn
 open, pending prompt ids, outbox in flight) live on the chat's event stream on
 every change, with an epoch per tab instance and a rising revision; the splitter
@@ -427,7 +429,7 @@ within `idleTimeoutMs`, the session transitions to `'idle'`.
 
 DOM-free subpaths (the mobile app bundles them into React Native; `packages/apps/mobile/src/shared-logic.test.ts` imports them there):
 - `./reducer` - chat timeline reducer (`chat-timeline.ts`)
-- `./chat-lifecycle` - pure candidate lifecycle reducer and versioned snapshots (shadow migration)
+- `./chat-lifecycle` - pure lifecycle reducer and versioned snapshots (the server turn status by default)
 - `./chat-prompts` - prompt model of the timeline (`chat-prompts.ts`)
 - `./terminal-themes` - terminal colour themes
 - `./suppress-device-status` - xterm parser hooks that stop device-status / XTVERSION replies

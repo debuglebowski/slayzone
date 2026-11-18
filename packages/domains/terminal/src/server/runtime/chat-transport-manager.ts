@@ -609,10 +609,11 @@ type WatchdogVector = 'stuck-starting' | 'running-stall' | 'fatal-kill'
 
 /**
  * How a session's turn state is kept, chosen once at hydration (default:
- * `SLAYZONE_CHAT_LIFECYCLE`, else `shadow`). `shadow`: the runtime's own state is
- * the authority, the candidate model is compared alongside it. `legacy`: no
- * comparison. `authoritative`: clients take turn state from the server's
- * published status (`turn-status`), not from their transcript.
+ * `SLAYZONE_CHAT_LIFECYCLE`, else `authoritative`). `authoritative`: the
+ * lifecycle model is the server's turn status and clients take turn state from
+ * its published status (`turn-status`), not from their transcript; the runtime's
+ * own state is still compared alongside it. `shadow`: the runtime's own state is
+ * the authority, the model is compared alongside it. `legacy`: no comparison.
  */
 export type ChatLifecycleMode = 'legacy' | 'shadow' | 'authoritative'
 
@@ -620,12 +621,12 @@ const LIFECYCLE_MODES: readonly ChatLifecycleMode[] = ['legacy', 'shadow', 'auth
 
 function defaultLifecycleMode(): ChatLifecycleMode {
   const raw = process.env.SLAYZONE_CHAT_LIFECYCLE
-  if (!raw) return 'shadow'
+  if (!raw) return 'authoritative'
   if ((LIFECYCLE_MODES as readonly string[]).includes(raw)) return raw as ChatLifecycleMode
   console.warn(
-    `[chat-transport] SLAYZONE_CHAT_LIFECYCLE=${raw} is not one of ${LIFECYCLE_MODES.join(', ')}: shadow`
+    `[chat-transport] SLAYZONE_CHAT_LIFECYCLE=${raw} is not one of ${LIFECYCLE_MODES.join(', ')}: authoritative`
   )
-  return 'shadow'
+  return 'authoritative'
 }
 
 export interface CreateChatOpts {
