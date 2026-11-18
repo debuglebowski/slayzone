@@ -21,6 +21,11 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
       status: z.string().optional().describe('New status'),
       priority: z.number().min(1).max(5).optional().describe('Priority 1-5 (1=highest)'),
       assignee: z.string().nullable().optional().describe('Assignee name (null to clear)'),
+      assignee_user_id: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('Hub user id to assign (null to clear); on a hub with login'),
       due_date: z.string().nullable().optional().describe('Due date ISO string (null to clear)'),
       parent_id: z
         .string()
@@ -37,7 +42,7 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
           'With a done/canceled status: complete even while an agent of the task is mid-reply (yours included). Completion stops every agent of the task.'
         )
     },
-    async ({ task_id, due_date, parent_id, close, force, ...fields }) => {
+    async ({ task_id, due_date, parent_id, close, force, assignee_user_id, ...fields }) => {
       if (!task_id) {
         return {
           content: [
@@ -89,7 +94,13 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
       try {
         updated = await updateTaskOp(
           deps.db,
-          { id: task_id, ...fields, dueDate: due_date, parentId: parent_id },
+          {
+            id: task_id,
+            ...fields,
+            dueDate: due_date,
+            parentId: parent_id,
+            assigneeUserId: assignee_user_id
+          },
           { ipcMain: deps.taskBus ?? NOOP_TASK_BUS }
         )
       } catch (err) {

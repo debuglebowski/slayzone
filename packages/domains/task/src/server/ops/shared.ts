@@ -1059,6 +1059,10 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     fields.push('assignee = ?')
     values.push(data.assignee)
   }
+  if (data.assigneeUserId !== undefined) {
+    fields.push('assignee_user_id = ?')
+    values.push(data.assigneeUserId)
+  }
   if (data.priority !== undefined) {
     fields.push('priority = ?')
     values.push(data.priority)

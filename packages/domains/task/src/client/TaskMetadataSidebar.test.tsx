@@ -108,6 +108,7 @@ vi.mock('@slayzone/telemetry/client', () => {
 vi.mock('@slayzone/tags/client', () => ({ TagSelector: () => null }))
 vi.mock('@slayzone/projects', () => ({ ProjectSelect: () => null }))
 vi.mock('@slayzone/projects/client', () => ({ TaskSharingCard: () => null }))
+vi.mock('./AssigneeCard', () => ({ AssigneeCard: () => null }))
 vi.mock('./SnoozePicker', () => ({ SnoozePicker: () => null }))
 vi.mock('@slayzone/projects-contracts', () => ({
   isTerminalStatus: (status: string, columns?: Array<{ id: string; category?: string }>) => {

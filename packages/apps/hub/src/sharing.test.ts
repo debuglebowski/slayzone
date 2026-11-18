@@ -169,6 +169,17 @@ describe('T-100 sharing: members, roles, private tasks and grants on a real hub'
     expect(await codeOf(q(cd, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
   })
 
+  test('an editor assigns the task to a hub user; the external assignee stays', async () => {
+    raw.prepare(`UPDATE tasks SET assignee = 'linear-person' WHERE id = ?`).run(A.task)
+    await m(cb, 'task.update', { id: A.task, assigneeUserId: ids.c })
+    const task = (await q(cc, 'task.get', { id: A.task })) as {
+      assignee_user_id: string | null
+      assignee: string | null
+    }
+    expect(task.assignee_user_id).toBe(ids.c)
+    expect(task.assignee).toBe('linear-person')
+  })
+
   test('removing a member closes the project to them', async () => {
     await m(ca, 'sharing.removeProjectMember', { projectId: A.project, userId: ids.c })
     expect(await codeOf(q(cc, 'task.get', { id: A.task }))).toBe('NOT_FOUND')

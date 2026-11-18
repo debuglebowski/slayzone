@@ -17,6 +17,8 @@ export const updateTaskInputSchema = z
     title: z.string().min(1).max(200).optional(),
     description: z.string().max(10000).nullable().optional(),
     assignee: z.string().nullable().optional(),
+    // A hub user (T-100); `assignee` stays the external system's name.
+    assigneeUserId: z.string().min(1).max(200).nullable().optional(),
     status: z.string().min(1).optional(),
     priority: z.number().int().min(1).max(5).optional(),
     progress: z.number().int().min(0).max(100).optional(),

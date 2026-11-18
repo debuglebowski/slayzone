@@ -11,6 +11,7 @@ import { SnoozeProgressCard } from './SnoozeProgressCard'
 import { TagsCard } from './TagsCard'
 import { BlockedBySection } from './BlockedBySection'
 import { TaskSharingCard } from '@slayzone/projects/client'
+import { AssigneeCard } from './AssigneeCard'
 
 export { BlockerStatusIcon } from './BlockerStatusIcon'
 import { RemoteBlockersSection } from './RemoteBlockersSection'
@@ -78,6 +79,7 @@ export function TaskMetadataSidebar({
         projectDefaultComputerId={projectDefaultComputerId}
       />
       <PriorityDueDateCard task={task} onUpdate={onUpdate} />
+      <AssigneeCard task={task} onUpdate={onUpdate} />
       <SnoozeProgressCard task={task} onUpdate={onUpdate} columnsConfig={columnsConfig} />
       <TagsCard
         taskId={task.id}

@@ -731,6 +731,11 @@ export interface Task {
   description: string | null
   description_format: 'html' | 'markdown'
   assignee: string | null
+  /** The hub user assigned (T-100); `assignee` is the external system's name. */
+  assignee_user_id?: string | null
+  /** `private`: its creator and invited people only (T-100). Absent on an older hub. */
+  visibility?: 'project' | 'private'
+  created_by_user_id?: string | null
   status: TaskStatus
   priority: number // 1-5, default 3
   progress: number // 0-100, default 0
@@ -880,6 +885,8 @@ export interface UpdateTaskInput {
   title?: string
   description?: string | null
   assignee?: string | null
+  /** A hub user assigned to the task (T-100). Null clears it. */
+  assigneeUserId?: string | null
   status?: string
   priority?: number
   progress?: number
