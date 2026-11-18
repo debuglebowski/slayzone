@@ -7,7 +7,7 @@ import { MCP_ADMIN_POLICY, type AccessClass } from '../../admin-policy'
 import { getAuthGate } from '@slayzone/trpc-server'
 import { MCP_OWNER_POLICY, type HttpOwnerRule } from '../../http-owner-policy'
 import { isOwnerQuestion } from '../../owner-policy'
-import { auditOwnerDenied, firstDeniedRef, httpAccessRequest } from '../owner-scope'
+import { auditOwnerDenied, firstDeniedRef, httpAccessRequest, mcpNeedOf } from '../owner-scope'
 
 /**
  * The owner gate (T-18) for `/mcp` tools, applied at REGISTRATION like T-15's role
@@ -70,7 +70,16 @@ export function withMcpOwnerGate(
           }
           const input = args.length > 1 ? args[0] : {}
           const scope = createAccessScope(db, httpAccessRequest(userId))
-          const denied = await firstDeniedRef(db, scope, rule.ids ?? [], input)
+          const denied = await firstDeniedRef(db, scope, rule.ids ?? [], input, mcpNeedOf(rule))
+          if (denied?.reason === 'insufficient_role') {
+            auditOwnerDenied({
+              target: target_,
+              reason: 'insufficient_role',
+              actor: userId,
+              denied
+            })
+            return refusal('Your role does not allow this')
+          }
           if (denied) {
             auditOwnerDenied({ target: target_, reason: 'not_owner', actor: userId, denied })
             return refusal('Not found')

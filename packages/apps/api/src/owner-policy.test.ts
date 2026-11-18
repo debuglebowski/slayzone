@@ -151,7 +151,8 @@ describe('every id named in an object input exists in its schema', () => {
 
 // A `target` picks the computer an op runs on (`{ taskId, projectId, computerId }`).
 // Checked only by its path, user B could aim A's task: the op then ran on A's
-// computer, inside A's folders. Every id inside a target is the caller's to name.
+// computer, inside A's folders. Every id inside a target is the caller's to name —
+// as the OWNER (T-100): a member of a shared project never reaches its computer side.
 describe('a computer target is owner-checked', () => {
   const withTarget = LIVE_USER.filter((path) => {
     const inputs = PROCS[path]!._def.inputs
@@ -168,8 +169,8 @@ describe('a computer target is owner-checked', () => {
         kind: string
       }>
       for (const [at, kind] of [
-        ['target.taskId', 'task'],
-        ['target.projectId', 'project'],
+        ['target.taskId', 'taskOwner'],
+        ['target.projectId', 'projectOwner'],
         ['target.computerId', 'computer']
       ]) {
         expect(refs, `${path}: ${at}`).toContainEqual({ at, kind })

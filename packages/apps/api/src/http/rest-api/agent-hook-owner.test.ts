@@ -18,7 +18,7 @@ vi.mock('@slayzone/terminal/hub', () => ({
   }
 }))
 
-const OWNED = new Set(['project:pA', 'task:tA'])
+const OWNED = new Set(['projectOwner:pA', 'taskOwner:tA'])
 // The real module, with only the decision stubbed: everything else it exports
 // (`hubStateRoots`, used by owner-scope.ts) stays real.
 vi.mock('../../access', async (importOriginal) => ({

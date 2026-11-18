@@ -677,6 +677,7 @@ export function createComputerArtifactStorage(opts: {
             [...(data.taskId ? [data.taskId] : [])]
           )
           for (const { task_id: taskId } of tasks) {
+            if (data.taskIds && !data.taskIds.includes(taskId)) continue
             if (
               data.projectIds &&
               !(await db.get(
@@ -693,7 +694,7 @@ export function createComputerArtifactStorage(opts: {
               const owner = await chat.ownership.get(conversation_id)
               if (!owner) continue
               const remote = (await call(owner, 'searchArtifacts', [
-                { ...data, projectIds: undefined, taskId }
+                { ...data, projectIds: undefined, taskIds: undefined, taskId }
               ])) as typeof report
               report.results.push(...remote.results)
               report.skippedLarge.push(...remote.skippedLarge)

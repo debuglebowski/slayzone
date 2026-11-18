@@ -21,7 +21,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import {
   RESOURCE_KINDS,
@@ -33,6 +33,7 @@ import {
   setHubDiskComputer,
   setHubDiskTaskRoots,
   type AccessRequest,
+  type AccessRole,
   type ResourceKind
 } from './access'
 
@@ -155,7 +156,9 @@ const OF_A: Record<ResourceKind, string> = {
   computer: 'cA',
   pathTree: aWorktree,
   ownedPath: join(aRoot, 'README.md'),
-  taskMove: 'mvA'
+  taskMove: 'mvA',
+  taskOwner: 'tA',
+  projectOwner: 'pA'
 }
 
 describe('every kind: the owner, and nobody else', () => {
@@ -500,6 +503,158 @@ describe('scopes: many decisions for one request or one stream', () => {
     expect(await scope.allows(resource('task', 'tA'))).toBe(true)
     sql(`UPDATE projects SET owner_user_id = ? WHERE id = 'pA'`, A)
     invalidateAccessCache()
+  })
+})
+
+describe('sharing (T-100): members, private tasks, grants', () => {
+  // pS: A owns it; B is an edit member, C a view member. D is invited to one task.
+  const C = 'user-c'
+  const D = 'user-d'
+  const E = 'user-e'
+  // In beforeAll: the describes above run first and count A's projects.
+  beforeAll(seedSharing)
+  function seedSharing(): void {
+    sql(`INSERT INTO projects (id, name, color, owner_user_id) VALUES ('pS', 'S', '#444', ?)`, A)
+    sql(
+      `INSERT INTO project_members (project_id, user_id, role) VALUES ('pS', ?, 'edit'), ('pS', ?, 'view')`,
+      B,
+      C
+    )
+    sql(
+      `INSERT INTO tasks (id, project_id, title, created_by_user_id, visibility, parent_id) VALUES
+    ('tS', 'pS', 'shared', ?, 'project', NULL),
+    ('tSsub', 'pS', 'shared sub', ?, 'project', 'tS'),
+    ('tPriv', 'pS', 'b private', ?, 'private', NULL),
+    ('tPrivSub', 'pS', 'b private sub', ?, 'project', 'tPriv'),
+    ('tGrant', 'pS', 'granted', ?, 'project', NULL)`,
+      A,
+      B,
+      B,
+      B,
+      A
+    )
+    sql(`INSERT INTO task_grants (task_id, user_id, role) VALUES ('tGrant', ?, 'view')`, D)
+    sql(`INSERT INTO task_grants (task_id, user_id, role) VALUES ('tPriv', ?, 'edit')`, D)
+    sql(
+      `INSERT INTO task_artifacts (id, task_id, title) VALUES ('arS', 'tS', 's'), ('arOne', 'tA', 'one')`
+    )
+    sql(`INSERT INTO artifact_grants (artifact_id, user_id, role) VALUES ('arOne', ?, 'view')`, E)
+    sql(`INSERT INTO artifact_folders (id, task_id, name) VALUES ('fS', 'tS', 'f')`)
+    sql(`INSERT INTO tags (id, project_id, name) VALUES ('tagS', 'pS', 's')`)
+    sql(
+      `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES ('auS', 'pS', 's', '{}', '[]')`
+    )
+    sql(
+      `INSERT INTO terminal_tabs (id, task_id, mode, is_main, owner_user_id) VALUES
+    ('tabSa', 'tS', 'terminal', 0, ?), ('tabSb', 'tS', 'terminal', 0, ?)`,
+      A,
+      B
+    )
+    sql(
+      `INSERT INTO processes (id, task_id, project_id, label, command) VALUES ('prcS', 'tS', NULL, 'l', 'c')`
+    )
+  }
+
+  const role = (userId: string | null, kind: ResourceKind, id: string) =>
+    createAccessScope(db, req(userId)).roleOf(resource(kind, id))
+  const at = (userId: string | null, kind: ResourceKind, id: string, need: AccessRole) =>
+    canAccess(db, req(userId), resource(kind, id), need)
+
+  test('project: owner manages, members get their role, others nothing', async () => {
+    expect(await role(A, 'project', 'pS')).toBe('manage')
+    expect(await role(B, 'project', 'pS')).toBe('edit')
+    expect(await role(C, 'project', 'pS')).toBe('view')
+    expect(await role(D, 'project', 'pS')).toBeNull()
+    expect(await role(ADMIN, 'project', 'pS')).toBeNull()
+  })
+
+  test('a project-visible task: the project role; subtasks inherit', async () => {
+    for (const t of ['tS', 'tSsub']) {
+      expect(await role(A, 'task', t)).toBe('manage')
+      expect(await role(C, 'task', t)).toBe('view')
+      expect(await role(E, 'task', t)).toBeNull()
+    }
+    // The creator of a project task manages it while still a member.
+    expect(await role(B, 'task', 'tSsub')).toBe('manage')
+    expect(await role(B, 'task', 'tS')).toBe('edit')
+  })
+
+  test('a private task: creator + grantees only — the project owner gets nothing', async () => {
+    expect(await role(B, 'task', 'tPriv')).toBe('manage')
+    expect(await role(D, 'task', 'tPriv')).toBe('edit')
+    expect(await role(A, 'task', 'tPriv')).toBeNull()
+    expect(await role(C, 'task', 'tPriv')).toBeNull()
+    // Its subtask follows the root's visibility and grants.
+    expect(await role(A, 'task', 'tPrivSub')).toBeNull()
+    expect(await role(D, 'task', 'tPrivSub')).toBe('edit')
+    expect(await role(B, 'task', 'tPrivSub')).toBe('manage')
+  })
+
+  test('a task grant opens one task to a non-member, nothing else of the project', async () => {
+    expect(await role(D, 'task', 'tGrant')).toBe('view')
+    expect(await role(D, 'task', 'tS')).toBeNull()
+    expect(await role(D, 'tag', 'tagS')).toBeNull()
+  })
+
+  test('artifacts follow their task; an artifact grant opens that one artifact', async () => {
+    expect(await role(C, 'artifact', 'arS')).toBe('view')
+    expect(await role(C, 'artifactFolder', 'fS')).toBe('view')
+    expect(await role(E, 'artifact', 'arOne')).toBe('view')
+    expect(await role(E, 'task', 'tA')).toBeNull()
+    expect(await role(E, 'artifact', 'arA')).toBeNull()
+  })
+
+  test('project-scoped hub data is shared with members', async () => {
+    expect(await role(B, 'tag', 'tagS')).toBe('edit')
+    expect(await role(C, 'tag', 'tagS')).toBe('view')
+  })
+
+  test('computer-resident things and automations stay with their one owner', async () => {
+    expect(await role(A, 'tab', 'tabSa')).toBe('manage')
+    expect(await role(B, 'tab', 'tabSa')).toBeNull()
+    expect(await role(B, 'tab', 'tabSb')).toBe('manage')
+    expect(await role(A, 'tab', 'tabSb')).toBeNull()
+    expect(await role(B, 'session', 'tS:tabSb')).toBe('manage')
+    expect(await role(A, 'session', 'tS:tabSb')).toBeNull()
+    expect(await role(B, 'process', 'prcS')).toBeNull()
+    expect(await role(B, 'automation', 'auS')).toBeNull()
+    expect(await role(A, 'automation', 'auS')).toBe('manage')
+  })
+
+  test('taskOwner / projectOwner: the one owner user — members and grantees never', async () => {
+    expect(await role(A, 'taskOwner', 'tS')).toBe('manage')
+    expect(await role(B, 'taskOwner', 'tS')).toBeNull()
+    expect(await role(B, 'taskOwner', 'tSsub')).toBeNull()
+    expect(await role(B, 'taskOwner', 'tPriv')).toBe('manage')
+    expect(await role(A, 'taskOwner', 'tPriv')).toBeNull()
+    expect(await role(D, 'taskOwner', 'tGrant')).toBeNull()
+    expect(await role(A, 'projectOwner', 'pS')).toBe('manage')
+    expect(await role(B, 'projectOwner', 'pS')).toBeNull()
+  })
+
+  test('canAccess with a need: view < edit < manage', async () => {
+    expect(await at(C, 'task', 'tS', 'view')).toBe(true)
+    expect(await at(C, 'task', 'tS', 'edit')).toBe(false)
+    expect(await at(B, 'task', 'tS', 'edit')).toBe(true)
+    expect(await at(B, 'task', 'tS', 'manage')).toBe(false)
+    expect(await at(A, 'task', 'tS', 'manage')).toBe(true)
+  })
+
+  test('lists: private and ungranted tasks are cut', async () => {
+    const scope = createAccessScope(db, req(C))
+    const ids = ['tS', 'tSsub', 'tPriv', 'tPrivSub', 'tGrant']
+    expect(await scope.filter(ids, (id) => resource('task', id))).toEqual(['tS', 'tSsub', 'tGrant'])
+  })
+
+  test('accessibleProjectIds includes member projects', async () => {
+    const ids = await createAccessScope(db, req(C)).accessibleProjectIds()
+    expect(ids).toEqual(['pS'])
+  })
+
+  test('no login: manage everywhere, as before', async () => {
+    expect(await createAccessScope(db, req(null, false)).roleOf(resource('task', 'tPriv'))).toBe(
+      'manage'
+    )
   })
 })
 

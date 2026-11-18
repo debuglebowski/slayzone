@@ -240,6 +240,9 @@ export interface Owned {
   readonly ownedPath: string
   /** A move of one of the owner's tasks (its own task, so the lock blocks no other case). */
   readonly taskMove: string
+  /** The task / project as their computer side (T-100): the same rows, owner-only. */
+  readonly taskOwner: string
+  readonly projectOwner: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -267,7 +270,9 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     computer: id('computer'),
     pathTree: join(root, 'work', `${mark}_worktree`),
     ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md'),
-    taskMove: id('taskMove')
+    taskMove: id('taskMove'),
+    taskOwner: id('task'),
+    projectOwner: id('project')
   }
 }
 

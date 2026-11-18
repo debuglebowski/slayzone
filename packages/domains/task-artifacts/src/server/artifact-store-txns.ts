@@ -882,6 +882,7 @@ const implementations = {
         taskId: p.taskId,
         folderId: p.folderId,
         projectIds: p.projectIds,
+        taskIds: p.taskIds,
         titlesOnly: p.titlesOnly,
         contentOnly: p.contentOnly,
         regex: p.regex,

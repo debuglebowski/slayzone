@@ -26,12 +26,14 @@ import { TRPCError } from '@trpc/server'
 import { isObservable, observable, type Observable } from '@trpc/server/observable'
 import { getSlayzoneHomeDir } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
+import { roleAtLeast } from '@slayzone/projects/server'
 import {
   createAccessScope,
   hubStateRoots,
   isPathKind,
   requestComputerOf,
   type AccessRequest,
+  type AccessRole,
   type AccessScope,
   type OwnedResource
 } from './access'
@@ -62,13 +64,14 @@ export function accessRequestOf(ctx: Pick<TrpcContext, 'principal' | 'dataRoot'>
 
 /**
  * For a handler that aggregates (sums over rows) and so must scope its query itself:
- * the ids of the projects the caller may access, or null when nothing is restricted
- * (no login). See `SCOPED_IN_HANDLER` in owner-policy.ts.
+ * the ids of the projects the caller OWNS, or null when nothing is restricted (no
+ * login). Owned, not shared: an aggregate over a shared project would count tasks and
+ * agent runs the caller may not see (T-100). See `SCOPED_IN_HANDLER` in owner-policy.ts.
  */
 export function ownedProjectIds(
   ctx: Pick<TrpcContext, 'db' | 'principal' | 'dataRoot'>
 ): Promise<string[] | null> {
-  return createAccessScope(ctx.db, accessRequestOf(ctx)).accessibleProjectIds()
+  return createAccessScope(ctx.db, accessRequestOf(ctx)).ownedProjectIds()
 }
 
 /** The cause of an owner refusal. Never surfaced to the client (no `appCode`): the
@@ -86,7 +89,7 @@ export function isNotOwnedError(err: unknown): err is NotOwnedError {
 
 function refuse(
   path: string,
-  reason: 'not_owner' | 'ownerless' | 'owner_unclassified',
+  reason: 'not_owner' | 'ownerless' | 'owner_unclassified' | 'insufficient_role',
   resource?: OwnedResource
 ): TRPCError {
   securityEvent({
@@ -106,6 +109,10 @@ function refuse(
       code: 'FORBIDDEN',
       message: `${path} has no owner rule (owner-policy.ts)`
     })
+  }
+  // The caller can see it (a member, a grantee) — saying so reveals nothing.
+  if (reason === 'insufficient_role') {
+    return new TRPCError({ code: 'FORBIDDEN', message: 'Your role does not allow this' })
   }
   return new TRPCError({ code: 'NOT_FOUND', message: 'Not found', cause: new NotOwnedError(path) })
 }
@@ -141,11 +148,23 @@ export async function checkOwnership(opts: {
   )
   if (rule.ids && rule.ids.length > 0) {
     if (rule.needsOne && !hasOneOf(raw, rule.needsOne)) throw refuse(opts.path, 'ownerless')
+    const need = needOf(rule, opts.type)
     for (const r of resourcesIn(raw, rule)) {
-      if (!(await scope.allows(r))) throw refuse(opts.path, 'not_owner', r)
+      const role = await scope.roleOf(r)
+      if (role === null) throw refuse(opts.path, 'not_owner', r)
+      if (!roleAtLeast(role, need)) throw refuse(opts.path, 'insufficient_role', r)
     }
   }
   return { rule, scope, userId }
+}
+
+/**
+ * The role a procedure needs on every id it names (T-100): its rule's `need`, else a
+ * query or subscription reads (`view`) and a mutation changes (`edit`). An owner
+ * always has `manage`, so this only ever narrows what a member or grantee may do.
+ */
+export function needOf(rule: OwnerRule, type: 'query' | 'mutation' | 'subscription'): AccessRole {
+  return rule.need ?? (type === 'mutation' ? 'edit' : 'view')
 }
 
 /** After the handler: the result the caller may see. */

@@ -74,13 +74,13 @@ async function decide(
   if (!reporter?.userId) return { ok: false, reason: 'no_reporter' }
   if (!targets.taskId) return { ok: false, reason: 'ownerless' }
   const scope = scopeFor(db, reporter.userId)
-  const r: OwnedResource = { kind: 'task', id: targets.taskId }
+  const r: OwnedResource = { kind: 'taskOwner', id: targets.taskId }
   const warm = unadoptedWarmAgent(targets.taskId)
   if (warm) {
     if (reporter.computerId !== null && warm.computerId !== reporter.computerId) {
       return { ok: false, reason: 'not_this_computer', resource: r }
     }
-    const p: OwnedResource = { kind: 'project', id: warm.projectId }
+    const p: OwnedResource = { kind: 'projectOwner', id: warm.projectId }
     if (!(await scope.allows(p))) return { ok: false, reason: 'not_owner', resource: r }
     return { ok: true }
   }

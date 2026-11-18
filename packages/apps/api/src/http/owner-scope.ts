@@ -15,14 +15,16 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { getSlayzoneHomeDir, getStorageDir, type SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
+import { maxRole, roleAtLeast } from '@slayzone/projects/server'
 import {
   hubStateRoots,
   isPathKind,
   type AccessRequest,
+  type AccessRole,
   type AccessScope,
   type ResourceKind
 } from '../access'
-import type { HttpIdRef } from '../http-owner-policy'
+import type { HttpIdRef, HttpOwnerRule } from '../http-owner-policy'
 
 /** The facts `canAccess` needs, for a REST or MCP caller on a hub with login. */
 export function httpAccessRequest(userId: string | null): AccessRequest {
@@ -83,11 +85,18 @@ const PROJECT_OF: Partial<Record<ResourceKind, { table: string; project: string 
   },
   tag: { table: 'tags', project: 'project_id' },
   template: { table: 'task_templates', project: 'project_id' },
-  automation: { table: 'automations', project: 'project_id' }
+  automation: { table: 'automations', project: 'project_id' },
+  // The owner-only views of the same rows (T-100): same tables, decided per row.
+  taskOwner: { table: 'tasks', project: 'project_id' },
+  projectOwner: { table: 'projects', project: 'id' }
 }
 
+const OWNER_KINDS: ReadonlySet<ResourceKind> = new Set(['taskOwner', 'projectOwner'])
+
 const KIND_OF_TABLE: Record<string, ResourceKind> = Object.fromEntries(
-  Object.entries(PROJECT_OF).map(([kind, v]) => [v!.table, kind as ResourceKind])
+  Object.entries(PROJECT_OF)
+    .filter(([kind]) => !OWNER_KINDS.has(kind as ResourceKind))
+    .map(([kind, v]) => [v!.table, kind as ResourceKind])
 )
 
 /** `AND <project expr> IN (…)` for rows of `kind` (or `0` when the caller has none). */
@@ -125,6 +134,39 @@ export async function ownedProjectsClause(
 export async function ownedProjectIdsOrAll(): Promise<string[] | null> {
   const scope = currentOwnerScope()
   return scope ? scopedProjectIds(scope) : null
+}
+
+/**
+ * The ids of every task the current request may see, for a scan across tasks (artifact
+ * search's `--all-tasks`); null = unrestricted. A shared project still holds private
+ * tasks of others (T-100), so the caller's projects alone are no bound: each candidate
+ * — every task of those projects, and every task granted to the caller — is decided
+ * through the access function.
+ */
+export async function visibleTaskIdsOrAll(db: SlayzoneDb): Promise<string[] | null> {
+  const scope = currentOwnerScope()
+  if (!scope?.enforcing) return null
+  return visibleTaskIds(db, scope)
+}
+
+/** {@link visibleTaskIdsOrAll} for a given scope (enforcing). */
+export async function visibleTaskIds(db: SlayzoneDb, scope: AccessScope): Promise<string[]> {
+  const projectIds = (await scopedProjectIds(scope)) ?? []
+  const candidates = await db.all<{ id: string }>(
+    `SELECT id FROM tasks WHERE project_id IN (SELECT value FROM json_each(?))
+     UNION
+     SELECT t.id FROM tasks t WHERE t.id IN (
+       WITH RECURSIVE granted(id, depth) AS (
+         SELECT g.task_id, 0 FROM task_grants g WHERE g.user_id = ?
+         UNION ALL
+         SELECT c.id, d.depth + 1 FROM tasks c JOIN granted d ON c.parent_id = d.id WHERE d.depth < 64
+       ) SELECT id FROM granted)`,
+    [JSON.stringify(projectIds), scope.userId ?? '']
+  )
+  return scope.filter(
+    candidates.map((c) => c.id),
+    (id) => ({ kind: 'task', id })
+  )
 }
 
 // ── deciding the ids a request names ──────────────────────────────────────────
@@ -191,19 +233,31 @@ export function projectIdPrefixParam(ref: string): string {
   return ref.replace(/[\\%_]/g, (c) => `\\${c}`)
 }
 
-/** Whether the caller may use `value` the way the route reads it. */
-export async function refAllowed(
+/** How many prefix candidates a ref is decided over (a uuid prefix matches one). */
+const PREFIX_CANDIDATES = 20
+
+/**
+ * The caller's role on `value`, read the way the route reads it; null = none. A
+ * prefix or project reference is decided over the ROWS it matches inside the
+ * caller's projects — each through the access function, since a member's project
+ * still holds tasks it may not see (a private task, T-100). The best role wins: the
+ * route's own resolver then picks among rows of those same projects.
+ */
+export async function refRole(
   db: SlayzoneDb,
   scope: AccessScope,
   ref: HttpIdRef,
   value: string
-): Promise<boolean> {
+): Promise<AccessRole | null> {
   if (ref.match === 'taskSession') {
-    return !/^[^:]+:[^:]+$/.test(value) || scope.allows({ kind: ref.kind, id: value })
+    return /^[^:]+:[^:]+$/.test(value) ? scope.roleOf({ kind: ref.kind, id: value }) : 'manage'
   }
-  if (ref.match === 'exact') return scope.allows({ kind: ref.kind, id: value })
-  const source = ref.match === 'projectRef' ? PROJECT_OF.project : PROJECT_OF[ref.kind]
-  if (!source) return scope.allows({ kind: ref.kind, id: value })
+  if (ref.match === 'exact') return scope.roleOf({ kind: ref.kind, id: value })
+  const source =
+    ref.match === 'projectRef'
+      ? PROJECT_OF[ref.kind === 'projectOwner' ? 'projectOwner' : 'project']
+      : PROJECT_OF[ref.kind]
+  if (!source) return scope.roleOf({ kind: ref.kind, id: value })
   const clause = await projectClause(scope, source.project)
   const match =
     ref.match === 'projectRef'
@@ -212,34 +266,65 @@ export async function refAllowed(
           params: [value, `%${value.toLowerCase()}%`, projectIdPrefixParam(value)]
         }
       : { sql: `id LIKE ? || '%'`, params: [value] }
-  const row = await db.get(
-    `SELECT 1 FROM ${source.table} WHERE ${match.sql}${clause.sql} LIMIT 1`,
+  const rows = await db.all<{ id: string }>(
+    `SELECT id FROM ${source.table} WHERE ${match.sql}${clause.sql} LIMIT ${PREFIX_CANDIDATES}`,
     [...match.params, ...clause.params]
   )
-  return !!row
+  // Not enforcing (no login): the row exists, that is all there is to decide.
+  if (!scope.enforcing) return rows.length > 0 ? 'manage' : null
+  let best: AccessRole | null = null
+  for (const row of rows) best = maxRole(best, await scope.roleOf({ kind: ref.kind, id: row.id }))
+  return best
+}
+
+/** Whether the caller may use `value` the way the route reads it (at `need`). */
+export async function refAllowed(
+  db: SlayzoneDb,
+  scope: AccessScope,
+  ref: HttpIdRef,
+  value: string,
+  need: AccessRole = 'view'
+): Promise<boolean> {
+  return roleAtLeast(await refRole(db, scope, ref, value), need)
 }
 
 export interface DeniedRef {
   readonly ref: HttpIdRef
   /** The refused value; absent when the value was not an id at all. */
   readonly value?: string
+  /** `not_owner`: the caller cannot see it (404). `insufficient_role`: it can, but its
+   *  role is below what the route needs (403, T-100). */
+  readonly reason: 'not_owner' | 'insufficient_role'
 }
 
-/** The first id the request names that the caller may not use, or null. */
+/** The first id the request names that the caller may not use at `need`, or null. */
 export async function firstDeniedRef(
   db: SlayzoneDb,
   scope: AccessScope,
   refs: readonly HttpIdRef[],
-  raw: unknown
+  raw: unknown,
+  need: AccessRole = 'view'
 ): Promise<DeniedRef | null> {
   for (const ref of refs) {
     const { values, invalid } = idValuesAt(raw, ref.at, ref.except)
-    if (invalid) return { ref }
+    if (invalid) return { ref, reason: 'not_owner' }
     for (const value of values) {
-      if (!(await refAllowed(db, scope, ref, value))) return { ref, value }
+      const role = await refRole(db, scope, ref, value)
+      if (role === null) return { ref, value, reason: 'not_owner' }
+      if (!roleAtLeast(role, need)) return { ref, value, reason: 'insufficient_role' }
     }
   }
   return null
+}
+
+/** The role a REST route needs (T-100): its rule's, else GET reads and the rest change. */
+export function restNeedOf(rule: HttpOwnerRule, method: string): AccessRole {
+  return rule.need ?? (method.toUpperCase() === 'GET' ? 'view' : 'edit')
+}
+
+/** The role an MCP tool needs: its rule's, else `edit` (a tool may change anything). */
+export function mcpNeedOf(rule: HttpOwnerRule): AccessRole {
+  return rule.need ?? 'edit'
 }
 
 /**
@@ -248,7 +333,7 @@ export async function firstDeniedRef(
  */
 export function auditOwnerDenied(opts: {
   target: string
-  reason: 'not_owner' | 'owner_unclassified' | 'no_principal'
+  reason: 'not_owner' | 'owner_unclassified' | 'no_principal' | 'insufficient_role'
   actor?: string | null
   ip?: string | null
   route?: string | null

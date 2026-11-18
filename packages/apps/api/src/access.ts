@@ -43,7 +43,17 @@ import {
   pathFoldsCase
 } from '@slayzone/platform/computer-path'
 import { securityEvent } from '@slayzone/platform/security-log'
-import { mayAccessProject, type ProjectOwnership } from '@slayzone/projects/server'
+import {
+  accessRoleOf,
+  mayAccessProject,
+  roleAtLeast,
+  type AccessGrant,
+  type AccessRole,
+  type ProjectOwnership,
+  type SharedOwnership
+} from '@slayzone/projects/server'
+
+export type { AccessRole } from '@slayzone/projects/server'
 import { agentSessionsEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 
@@ -85,6 +95,17 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  *                  T-107): `ownedPath` for the directory, and refused when a root under
  *                  it is one the request may not touch — the hub's own state, a system
  *                  directory, or a project root of a project it may not access.
+ *
+ * SHARING (T-100) splits a task and a project in two:
+ *
+ *   task / project            the hub-resident content (fields, artifacts, tags …):
+ *                             its owner, plus the members / grantees it is shared with
+ *                             at their role.
+ *   taskOwner / projectOwner  everything of it that lives on a computer or spans
+ *                             things the caller may not see (terminals, agents, chats,
+ *                             worktrees, files, processes, exports, moves to another
+ *                             hub): its ONE owner user only — the project owner, or a
+ *                             private task's creator. Never shared.
  */
 export type ResourceKind =
   | 'project'
@@ -107,6 +128,8 @@ export type ResourceKind =
   | 'pathTree'
   | 'ownedPath'
   | 'taskMove'
+  | 'taskOwner'
+  | 'projectOwner'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -128,7 +151,9 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'computer',
   'pathTree',
   'ownedPath',
-  'taskMove'
+  'taskMove',
+  'taskOwner',
+  'projectOwner'
 ]
 
 /** The kinds whose id is a filesystem path. A path can carry a user's directory
@@ -191,8 +216,11 @@ export function hubStateRoots(
 
 /** What a resource resolved to. */
 export type Ownership =
-  /** Belongs to these projects; the request needs one of them. */
+  /** OWNER-ONLY: belongs to these projects' owners; the request must be one of them.
+   *  Computer-resident things, paths, computers, automations — never shared. */
   | { readonly status: 'projects'; readonly projects: readonly ProjectOwnership[] }
+  /** SHARED hub-resident content (T-100): its owner manages, grantees get their role. */
+  | { readonly status: 'shared'; readonly facts: SharedOwnership }
   /** Belongs to no user by design (see {@link ResourceKind}); allowed. */
   | { readonly status: 'hub-wide' }
   /** Missing, or no owner path; refused on a hub with login. */
@@ -201,13 +229,33 @@ export type Ownership =
 const NONE: Ownership = { status: 'none' }
 const HUB_WIDE: Ownership = { status: 'hub-wide' }
 
-/** THE decision, given what the resource resolved to. */
-export function decideAccess(req: AccessRequest, ownership: Ownership): boolean {
-  if (!req.authRequired) return true
-  if (!req.principal) return false
-  if (ownership.status === 'hub-wide') return true
-  if (ownership.status === 'none') return false
-  return ownership.projects.some((p) => mayAccessProject(req, p))
+/**
+ * THE decision, given what the resource resolved to: the request's role on it, or
+ * null for none. An owner (and anything hub-wide, and everything without login)
+ * manages; a sharing grantee has its role.
+ */
+export function decideRole(req: AccessRequest, ownership: Ownership): AccessRole | null {
+  if (!req.authRequired) return 'manage'
+  if (!req.principal) return null
+  switch (ownership.status) {
+    case 'hub-wide':
+      return 'manage'
+    case 'none':
+      return null
+    case 'projects':
+      return ownership.projects.some((p) => mayAccessProject(req, p)) ? 'manage' : null
+    case 'shared':
+      return accessRoleOf(req, ownership.facts)
+  }
+}
+
+/** {@link decideRole} at least `need` (default: see it at all). */
+export function decideAccess(
+  req: AccessRequest,
+  ownership: Ownership,
+  need: AccessRole = 'view'
+): boolean {
+  return roleAtLeast(decideRole(req, ownership), need)
 }
 
 // ── resolution: resource → the projects it belongs to ─────────────────────────
@@ -216,6 +264,12 @@ type OwnerRow = { owner_user_id: string | null }
 
 const projectsOf = (rows: readonly OwnerRow[]): Ownership =>
   rows.length > 0 ? { status: 'projects', projects: rows } : NONE
+
+/** Owner-only: exactly this one user (a tab's, a private task's creator …). */
+const ownerOnly = (userId: string | null): Ownership => projectsOf([{ owner_user_id: userId }])
+
+const sharedOf = (facts: SharedOwnership | null): Ownership =>
+  facts ? { status: 'shared', facts } : NONE
 
 /** One row's project, by a query selecting `owner_user_id` for a single id. */
 const viaQuery =
@@ -228,50 +282,184 @@ const viaQuery =
 const OWNER_OF_PROJECT = 'SELECT owner_user_id FROM projects WHERE id = ?'
 const OWNER_OF_TASK = `SELECT p.owner_user_id FROM tasks t JOIN projects p ON p.id = t.project_id
   WHERE t.id = ?`
-const viaTask = viaQuery(OWNER_OF_TASK)
+/** The task's PROJECT OWNER only (a move to another hub is the project owner's). */
+const viaTaskProjectOwner = viaQuery(OWNER_OF_TASK)
 
-/**
- * A terminal or chat tab. A task's MAIN tab has the task's id (`ensureMainTab`), and
- * a client names it before the row exists — so an id with no tab row is tried as a
- * task id. A uuid tab with no row matches no task: refused.
- */
-async function resolveTab(db: SlayzoneDb, id: string): Promise<Ownership> {
-  const row = await db.get<OwnerRow>(
-    `SELECT p.owner_user_id FROM terminal_tabs tt JOIN tasks t ON t.id = tt.task_id
-      JOIN projects p ON p.id = t.project_id WHERE tt.id = ?`,
-    [id]
+// ── sharing facts (T-100) ─────────────────────────────────────────────────────
+
+/** A project's owner and its members, or null when there is no such project. */
+async function projectFacts(db: SlayzoneDb, projectId: string): Promise<SharedOwnership | null> {
+  const project = await db.get<OwnerRow>(OWNER_OF_PROJECT, [projectId])
+  if (!project) return null
+  const grants = await db.all<AccessGrant>(
+    'SELECT user_id, role FROM project_members WHERE project_id = ?',
+    [projectId]
   )
-  return row ? projectsOf([row]) : viaTask(db, id)
+  return { owner_user_id: project.owner_user_id, grants }
 }
 
-/** By the project_id column of `table`. */
+/** What a task's sharing comes down to. */
+interface TaskFacts {
+  /** Who may reach the task's hub-resident content, with which role. */
+  readonly shared: SharedOwnership
+  /** The ONE user its computer-resident things fall back to when a row names none
+   *  (a legacy tab, a task process): a private task's creator, else the project owner. */
+  readonly ownerUser: string | null
+}
+
+/** The task and its ancestors (nearest first), each with its own grants (JSON). */
+const TASK_CHAIN_SQL = `
+  WITH RECURSIVE chain(id, depth) AS (
+    SELECT ?, 0
+    UNION ALL
+    SELECT t.parent_id, c.depth + 1 FROM chain c JOIN tasks t ON t.id = c.id
+     WHERE t.parent_id IS NOT NULL AND c.depth < 64
+  )
+  SELECT t.id, t.project_id, t.visibility, t.created_by_user_id,
+    (SELECT json_group_array(json_object('user_id', g.user_id, 'role', g.role))
+       FROM task_grants g WHERE g.task_id = t.id) AS grants
+  FROM chain c JOIN tasks t ON t.id = c.id ORDER BY c.depth`
+
+/**
+ * A task's sharing, decided by its ROOT task (subtasks inherit):
+ *
+ *   visibility 'project'  the project's owner manages and its members get their role;
+ *                         a member who created the task (or an ancestor) manages it.
+ *   visibility 'private'  the root's creator manages; NOBODY else from the project —
+ *                         not its owner, not its managers (they manage members, never
+ *                         task access).
+ *
+ * Either way a `task_grants` row on the task or an ancestor adds its user.
+ */
+async function taskFacts(db: SlayzoneDb, taskId: string): Promise<TaskFacts | null> {
+  const chain = await db.all<{
+    id: string
+    project_id: string
+    visibility: 'project' | 'private'
+    created_by_user_id: string | null
+    grants: string
+  }>(TASK_CHAIN_SQL, [taskId])
+  if (chain.length === 0) return null
+  const project = await projectFacts(db, chain[0].project_id)
+  if (!project) return null
+  const root = chain[chain.length - 1]
+  const taskGrants: AccessGrant[] = chain.flatMap((t) => JSON.parse(t.grants) as AccessGrant[])
+  if (root.visibility === 'private') {
+    return {
+      shared: { owner_user_id: root.created_by_user_id, grants: taskGrants },
+      ownerUser: root.created_by_user_id
+    }
+  }
+  const members = project.grants ?? []
+  const isMember = (userId: string) => members.some((m) => m.user_id === userId)
+  const creators: AccessGrant[] = []
+  for (const t of chain) {
+    if (t.created_by_user_id !== null && isMember(t.created_by_user_id))
+      creators.push({ user_id: t.created_by_user_id, role: 'manage' })
+  }
+  return {
+    shared: {
+      owner_user_id: project.owner_user_id,
+      grants: [...members, ...creators, ...taskGrants]
+    },
+    ownerUser: project.owner_user_id
+  }
+}
+
+/** A task: shared hub-resident content. */
+async function viaTask(db: SlayzoneDb, id: string): Promise<Ownership> {
+  return sharedOf((await taskFacts(db, id))?.shared ?? null)
+}
+
+/** Something of a task's that lives on a computer: its one owner user. */
+async function taskOwnerOnly(db: SlayzoneDb, taskId: string): Promise<Ownership> {
+  const facts = await taskFacts(db, taskId)
+  return facts ? ownerOnly(facts.ownerUser) : NONE
+}
+
+/**
+ * A terminal or chat tab — on a computer, so never shared: the user its row names
+ * (`owner_user_id`), else (a legacy row) the task's owner user. A task's MAIN tab has
+ * the task's id (`ensureMainTab`), and a client names it before the row exists — so
+ * an id with no tab row is tried as a task id. A uuid tab with no row matches no
+ * task: refused.
+ */
+async function resolveTab(db: SlayzoneDb, id: string): Promise<Ownership> {
+  const row = await db.get<{ owner_user_id: string | null; task_id: string }>(
+    `SELECT tt.owner_user_id, tt.task_id FROM terminal_tabs tt JOIN tasks t ON t.id = tt.task_id
+      WHERE tt.id = ?`,
+    [id]
+  )
+  if (!row) return taskOwnerOnly(db, id)
+  return row.owner_user_id !== null ? ownerOnly(row.owner_user_id) : taskOwnerOnly(db, row.task_id)
+}
+
+/** By the project_id column of `table`: OWNER-ONLY (automations run as their owner). */
 const viaProjectColumn = (table: string, column = 'project_id') =>
   viaQuery(
     `SELECT p.owner_user_id FROM ${table} x JOIN projects p ON p.id = x.${column} WHERE x.id = ?`
   )
-/** By task_id column of `table`. */
-const viaTaskColumn = (table: string) =>
-  viaQuery(`SELECT p.owner_user_id FROM ${table} x JOIN tasks t ON t.id = x.task_id
-    JOIN projects p ON p.id = t.project_id WHERE x.id = ?`)
+/** By the project_id column of `table`: shared with the project's members. */
+const viaProjectColumnShared =
+  (table: string) =>
+  async (db: SlayzoneDb, id: string): Promise<Ownership> => {
+    const row = await db.get<{ project_id: string }>(
+      `SELECT project_id FROM ${table} WHERE id = ?`,
+      [id]
+    )
+    return row ? sharedOf(await projectFacts(db, row.project_id)) : NONE
+  }
+/** By the task_id column of `table`: its task's sharing. */
+const viaTaskColumn =
+  (table: string) =>
+  async (db: SlayzoneDb, id: string): Promise<Ownership> => {
+    const row = await db.get<{ task_id: string }>(`SELECT task_id FROM ${table} WHERE id = ?`, [id])
+    return row ? viaTask(db, row.task_id) : NONE
+  }
+
+/** An artifact: its task's sharing, plus the users invited to this one artifact. */
+async function resolveArtifact(db: SlayzoneDb, id: string): Promise<Ownership> {
+  const row = await db.get<{ task_id: string }>('SELECT task_id FROM task_artifacts WHERE id = ?', [
+    id
+  ])
+  if (!row) return NONE
+  const facts = await taskFacts(db, row.task_id)
+  if (!facts) return NONE
+  const own = await db.all<AccessGrant>(
+    'SELECT user_id, role FROM artifact_grants WHERE artifact_id = ?',
+    [id]
+  )
+  return sharedOf({ ...facts.shared, grants: [...(facts.shared.grants ?? []), ...own] })
+}
 
 /**
- * A runtime session key: `taskId:tabId` names its task. Any other key (a warm-pool
- * agent nobody adopted yet) has no owner. The agent-session ledger is on the
- * computer running the agents (robustness plan §9, P0), not consulted here: a
- * runtime key never needs it.
+ * A runtime session key: `taskId:tabId` names its task and tab — something running on
+ * a computer, so its tab's one owner. Any other key (a warm-pool agent nobody adopted
+ * yet) has no owner. The agent-session ledger is on the computer running the agents
+ * (robustness plan §9, P0), not consulted here: a runtime key never needs it.
  */
 async function resolveSession(db: SlayzoneDb, id: string): Promise<Ownership> {
   const colon = id.indexOf(':')
-  return colon > 0 ? viaTask(db, id.slice(0, colon)) : NONE
+  if (colon <= 0) return NONE
+  const taskId = id.slice(0, colon)
+  const tab = await db.get<{ owner_user_id: string | null }>(
+    'SELECT owner_user_id FROM terminal_tabs WHERE id = ? AND task_id = ?',
+    [id.slice(colon + 1), taskId]
+  )
+  if (tab?.owner_user_id) {
+    return (await taskFacts(db, taskId)) ? ownerOnly(tab.owner_user_id) : NONE
+  }
+  return taskOwnerOnly(db, taskId)
 }
 
+/** A process runs on a computer: owner-only (its task's owner user, else its project's). */
 async function resolveProcess(db: SlayzoneDb, id: string): Promise<Ownership> {
   const row = await db.get<{ task_id: string | null; project_id: string | null }>(
     'SELECT task_id, project_id FROM processes WHERE id = ?',
     [id]
   )
   if (!row) return NONE
-  if (row.task_id) return viaTask(db, row.task_id)
+  if (row.task_id) return taskOwnerOnly(db, row.task_id)
   if (row.project_id) return viaQuery(OWNER_OF_PROJECT)(db, row.project_id)
   return NONE
 }
@@ -282,7 +470,7 @@ async function resolveAiConfigItem(db: SlayzoneDb, id: string): Promise<Ownershi
     [id]
   )
   if (!row) return NONE
-  return row.project_id ? viaQuery(OWNER_OF_PROJECT)(db, row.project_id) : HUB_WIDE
+  return row.project_id ? sharedOf(await projectFacts(db, row.project_id)) : HUB_WIDE
 }
 
 async function resolveProjectGroup(db: SlayzoneDb, id: string): Promise<Ownership> {
@@ -775,7 +963,7 @@ async function resolveTaskMove(db: SlayzoneDb, id: string): Promise<Ownership> {
       WHERE mt.move_id = ? LIMIT 1`,
     [id]
   )
-  if (here) return viaTask(db, here.task_id)
+  if (here) return viaTaskProjectOwner(db, here.task_id)
   // A project move (one with no task, or none left here): its project, while here.
   const project = await db.get<{ project_id: string }>(
     `SELECT m.project_id FROM task_moves m JOIN projects p ON p.id = m.project_id
@@ -791,17 +979,19 @@ async function resolveTaskMove(db: SlayzoneDb, id: string): Promise<Ownership> {
 type Resolver = (db: SlayzoneDb, id: string, req: AccessRequest) => Promise<Ownership>
 
 const RESOLVERS: Record<ResourceKind, Resolver> = {
-  project: viaQuery(OWNER_OF_PROJECT),
+  // Shared hub-resident content (T-100): owner, members, grantees.
+  project: async (db, id) => sharedOf(await projectFacts(db, id)),
   task: viaTask,
+  artifact: resolveArtifact,
+  artifactFolder: viaTaskColumn('artifact_folders'),
+  tag: viaProjectColumnShared('tags'),
+  template: viaProjectColumnShared('task_templates'),
+  testCategory: viaProjectColumnShared('test_categories'),
+  testLabel: viaProjectColumnShared('test_labels'),
+  // On a computer: one owner, never shared.
   tab: resolveTab,
   session: resolveSession,
-  artifact: viaTaskColumn('task_artifacts'),
-  artifactFolder: viaTaskColumn('artifact_folders'),
   process: resolveProcess,
-  tag: viaProjectColumn('tags'),
-  template: viaProjectColumn('task_templates'),
-  testCategory: viaProjectColumn('test_categories'),
-  testLabel: viaProjectColumn('test_labels'),
   automationRun: viaQuery(`SELECT p.owner_user_id FROM automation_runs r
     JOIN automations a ON a.id = r.automation_id JOIN projects p ON p.id = a.project_id
     WHERE r.id = ?`),
@@ -821,7 +1011,11 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
     resolvePathResource(db, id, req.hubRoots ?? [], 'nobody', null, 'hub-disk'),
   // A move to another hub: its tasks' while they are here; once they left (released),
   // whoever began it.
-  taskMove: resolveTaskMove
+  taskMove: resolveTaskMove,
+  // The computer side of a task / project, and whatever spans tasks the caller may
+  // not see: its one owner user (T-100). Never shared.
+  taskOwner: (db, id) => taskOwnerOnly(db, id),
+  projectOwner: viaQuery(OWNER_OF_PROJECT)
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */
@@ -834,17 +1028,32 @@ export function resolveOwnership(
 }
 
 /**
+ * The principal's role on a resource, or null for none. Manage when the hub has no
+ * login; otherwise {@link decideRole} on what the resource resolves to.
+ */
+export async function roleOn(
+  db: SlayzoneDb,
+  req: AccessRequest,
+  resource: OwnedResource
+): Promise<AccessRole | null> {
+  if (!req.authRequired) return 'manage'
+  if (!req.principal) return null
+  return decideRole(req, await resolveOwnership(db, req, resource))
+}
+
+/**
  * THE access function. Allowed when the hub has no login; otherwise when the
- * principal may access a project the resource belongs to (or it is hub-wide).
+ * principal's role on the resource is at least `need` (default: may see it).
  */
 export async function canAccess(
   db: SlayzoneDb,
   req: AccessRequest,
-  resource: OwnedResource
+  resource: OwnedResource,
+  need: AccessRole = 'view'
 ): Promise<boolean> {
   if (!req.authRequired) return true
   if (!req.principal) return false
-  return decideAccess(req, await resolveOwnership(db, req, resource))
+  return roleAtLeast(await roleOn(db, req, resource), need)
 }
 
 // ── scopes: many decisions for one request or one live stream ─────────────────
@@ -881,13 +1090,24 @@ function wireInvalidation(): void {
 export interface AccessScope {
   /** False when the hub has no login: every check passes without a query. */
   readonly enforcing: boolean
-  allows(resource: OwnedResource): boolean | Promise<boolean>
-  /** Every resource allowed (an empty list: true). */
-  allowsAll(resources: readonly OwnedResource[]): Promise<boolean>
-  /** The rows whose resource is allowed; a row mapped to null is dropped (ownerless). */
+  /** The request's user, or null without a principal. */
+  readonly userId: string | null
+  /** The request's role on the resource (null: none). Synchronous once decided. */
+  roleOf(resource: OwnedResource): AccessRole | null | Promise<AccessRole | null>
+  /** Role at least `need` (default: may see it). */
+  allows(resource: OwnedResource, need?: AccessRole): boolean | Promise<boolean>
+  /** Every resource allowed at `need` (an empty list: true). */
+  allowsAll(resources: readonly OwnedResource[], need?: AccessRole): Promise<boolean>
+  /** The rows whose resource may be seen; a row mapped to null is dropped (ownerless). */
   filter<T>(rows: readonly T[], toResource: (row: T) => OwnedResource | null): Promise<T[]>
-  /** Ids of every project the request may access, or null when nothing is restricted. */
+  /**
+   * Ids of every project the request may see as a whole — owned, or a member of — or
+   * null when nothing is restricted. A private task in one of them is still cut per
+   * task: a handler that aggregates over these projects must not count tasks.
+   */
   accessibleProjectIds(): Promise<string[] | null>
+  /** Ids of the projects the request OWNS (export, moves): null when unrestricted. */
+  ownedProjectIds(): Promise<string[] | null>
 }
 
 export interface AccessScopeOptions {
@@ -909,33 +1129,33 @@ export function createAccessScope(
 ): AccessScope {
   const enforcing = req.authRequired
   if (opts.ttlMs !== undefined) wireInvalidation()
-  const memo = new Map<string, { allowed: boolean; at: number }>()
-  const pending = new Map<string, Promise<boolean>>()
+  const memo = new Map<string, { role: AccessRole | null; at: number }>()
+  const pending = new Map<string, Promise<AccessRole | null>>()
   let seen = generation
 
-  const fresh = (entry: { allowed: boolean; at: number }): boolean => {
+  const fresh = (entry: { role: AccessRole | null; at: number }): boolean => {
     if (opts.ttlMs === undefined) return true
-    const ttl = entry.allowed ? opts.ttlMs : Math.min(opts.ttlMs, NEGATIVE_TTL_MS)
+    const ttl = entry.role !== null ? opts.ttlMs : Math.min(opts.ttlMs, NEGATIVE_TTL_MS)
     return Date.now() - entry.at < ttl
   }
 
-  const allows = (resource: OwnedResource): boolean | Promise<boolean> => {
-    if (!enforcing) return true
-    if (!req.principal) return false
+  const roleOf = (resource: OwnedResource): AccessRole | null | Promise<AccessRole | null> => {
+    if (!enforcing) return 'manage'
+    if (!req.principal) return null
     if (seen !== generation) {
       memo.clear()
       seen = generation
     }
     const key = `${resource.kind}\u0000${resource.id}`
     const hit = memo.get(key)
-    if (hit && fresh(hit)) return hit.allowed
+    if (hit && fresh(hit)) return hit.role
     const inflight = pending.get(key)
     if (inflight) return inflight
-    const p = canAccess(db, req, resource).then(
-      (allowed) => {
-        memo.set(key, { allowed, at: Date.now() })
+    const p = roleOn(db, req, resource).then(
+      (role) => {
+        memo.set(key, { role, at: Date.now() })
         pending.delete(key)
-        return allowed
+        return role
       },
       (err: unknown) => {
         pending.delete(key)
@@ -946,11 +1166,24 @@ export function createAccessScope(
     return p
   }
 
+  const allows = (
+    resource: OwnedResource,
+    need: AccessRole = 'view'
+  ): boolean | Promise<boolean> => {
+    if (!enforcing) return true
+    const role = roleOf(resource)
+    return role instanceof Promise
+      ? role.then((r) => roleAtLeast(r, need))
+      : roleAtLeast(role, need)
+  }
+
   return {
     enforcing,
+    userId: req.principal?.userId ?? null,
+    roleOf,
     allows,
-    async allowsAll(resources) {
-      for (const r of resources) if (!(await allows(r))) return false
+    async allowsAll(resources, need) {
+      for (const r of resources) if (!(await allows(r, need))) return false
       return true
     },
     async filter(rows, toResource) {
@@ -963,6 +1196,17 @@ export function createAccessScope(
       return out
     },
     async accessibleProjectIds() {
+      if (!enforcing) return null
+      if (!req.principal) return []
+      const rows = await db.all<{ id: string }>(
+        `SELECT id FROM projects WHERE owner_user_id = ?
+         UNION SELECT m.project_id FROM project_members m JOIN projects p ON p.id = m.project_id
+          WHERE m.user_id = ?`,
+        [req.principal.userId, req.principal.userId]
+      )
+      return rows.map((p) => p.id)
+    },
+    async ownedProjectIds() {
       if (!enforcing) return null
       if (!req.principal) return []
       const rows = await db.all<OwnerRow & { id: string }>('SELECT id, owner_user_id FROM projects')

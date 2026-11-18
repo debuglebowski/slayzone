@@ -3,7 +3,7 @@ import { getArtifactStorage } from '@slayzone/task-artifacts/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
-import { ownedProjectIdsOrAll } from '../../owner-scope'
+import { ownedProjectIdsOrAll, visibleTaskIdsOrAll } from '../../owner-scope'
 import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
@@ -103,9 +103,11 @@ export function registerArtifactsSearchRoute(app: Express, deps: RestApiDeps): v
         query,
         taskId,
         folderId,
-        // On a hub with login only the caller's projects are scanned (T-18): results,
-        // `scannedCount` and the skipped-large titles name nobody else's artifacts.
+        // On a hub with login only the caller's projects are scanned (T-18), and of
+        // those only the tasks it may see (a private task of a shared project, T-100):
+        // results, `scannedCount` and the skipped-large titles name nobody else's.
         projectIds: await ownedProjectIdsOrAll(),
+        taskIds: await visibleTaskIdsOrAll(deps.db),
         titlesOnly,
         contentOnly,
         regex: queryString(req.query.regex) != null,

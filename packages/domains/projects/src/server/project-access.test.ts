@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { mayAccessProject, mayAccessProjectId } from './project-access'
+import { accessRoleOf, mayAccessProject, mayAccessProjectId, roleAtLeast } from './project-access'
 
 const alice = { userId: 'user-alice' }
 const bob = { userId: 'user-bob' }
@@ -74,5 +74,48 @@ describe('mayAccessProjectId', () => {
     expect(await mayAccessProjectId(d, { authRequired: false, principal: null }, 'nope')).toBe(
       false
     )
+  })
+})
+
+describe('accessRoleOf (T-100: owner, members and grants)', () => {
+  const login = (principal: { userId: string } | null) => ({ authRequired: true, principal })
+  const facts = {
+    owner_user_id: alice.userId,
+    grants: [
+      { user_id: bob.userId, role: 'view' as const },
+      { user_id: bob.userId, role: 'edit' as const },
+      { user_id: 'user-carol', role: 'view' as const }
+    ]
+  }
+
+  it('no login: manage for anyone, as before', () => {
+    expect(accessRoleOf({ authRequired: false, principal: null }, facts)).toBe('manage')
+  })
+
+  it('login, no principal: nothing', () => {
+    expect(accessRoleOf(login(null), facts)).toBeNull()
+  })
+
+  it('the owner manages; a grantee gets its highest grant; others nothing', () => {
+    expect(accessRoleOf(login(alice), facts)).toBe('manage')
+    expect(accessRoleOf(login(bob), facts)).toBe('edit')
+    expect(accessRoleOf(login({ userId: 'user-carol' }), facts)).toBe('view')
+    expect(accessRoleOf(login({ userId: 'user-dave' }), facts)).toBeNull()
+  })
+
+  it('no owner: grants still decide, the owner slot opens nothing', () => {
+    expect(accessRoleOf(login(bob), { owner_user_id: null, grants: facts.grants })).toBe('edit')
+    expect(accessRoleOf(login(alice), { owner_user_id: null })).toBeNull()
+  })
+
+  it('roleAtLeast orders view < edit < manage', () => {
+    expect(roleAtLeast('manage', 'edit')).toBe(true)
+    expect(roleAtLeast('edit', 'edit')).toBe(true)
+    expect(roleAtLeast('view', 'edit')).toBe(false)
+    expect(roleAtLeast(null, 'view')).toBe(false)
+  })
+
+  it('mayAccessProject stays the OWNER check (paths, computer-resident things)', () => {
+    expect(mayAccessProject(login(bob), facts)).toBe(false)
   })
 })

@@ -54,9 +54,16 @@ export {
 export type { ProjectsMounts } from './router-mounts'
 export { handleTerminalStateChange } from './task-automation'
 export {
+  ACCESS_ROLES,
+  accessRoleOf,
   mayAccessProject,
   mayAccessProjectId,
+  maxRole,
+  roleAtLeast,
+  type AccessGrant,
+  type AccessRole,
   type ProjectAccessPrincipal,
   type ProjectAccessRequest,
-  type ProjectOwnership
+  type ProjectOwnership,
+  type SharedOwnership
 } from './project-access'

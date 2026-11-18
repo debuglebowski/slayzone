@@ -83,7 +83,9 @@ async function exportAll(db: SlayzoneDb, caller: ExportImportCaller): Promise<Sl
       dbVersion: DB_VERSION
     },
     data:
-      projectIds === null ? await wholeDatabase(db) : await ownRows(db, projectIds, caller.userId)
+      projectIds === null
+        ? await wholeDatabase(db)
+        : await ownRows(db, projectIds, caller.userId, caller.scope)
   }
 }
 
@@ -162,11 +164,19 @@ async function wholeDatabase(db: SlayzoneDb): Promise<SlayExportData> {
 async function ownRows(
   db: SlayzoneDb,
   projectIds: readonly string[],
-  userId: string | null
+  userId: string | null,
+  scope: AccessScope
 ): Promise<SlayExportData> {
   const ids = [...projectIds]
   const inProjects = `(${ids.map(() => '?').join(', ')})`
-  const ownTasks = `SELECT id FROM tasks WHERE project_id IN ${inProjects}`
+  // Only the tasks the caller may see in those projects: a shared project holds others'
+  // private ones (T-100). Decided per task through the access function.
+  const visible = await scope.filter(
+    await db.all<{ id: string }>(`SELECT id FROM tasks WHERE project_id IN ${inProjects}`, ids),
+    (t) => ({ kind: 'task', id: t.id })
+  )
+  const visibleJson = JSON.stringify(visible.map((t) => t.id))
+  const ownTasks = `SELECT value FROM json_each('${visibleJson.replaceAll("'", "''")}')`
   const ownTags = `SELECT id FROM tags WHERE project_id IN ${inProjects}`
   const all = (sql: string, params: unknown[] = ids): Promise<Row[]> =>
     db.all(sql, params) as Promise<Row[]>
@@ -180,18 +190,21 @@ async function ownRows(
     : []
   return {
     projects: await withFolders(db, await all(`SELECT * FROM projects WHERE id IN ${inProjects}`)),
-    tasks: await exportedTasks(await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`)),
+    tasks: await exportedTasks(await all(`SELECT * FROM tasks WHERE id IN (${ownTasks})`, [])),
     tags: await all(`SELECT * FROM tags WHERE project_id IN ${inProjects}`),
     task_tags: await all(
-      `SELECT * FROM task_tags WHERE task_id IN (${ownTasks}) AND tag_id IN (${ownTags})`,
-      [...ids, ...ids]
+      `SELECT * FROM task_tags WHERE task_id IN (${ownTasks}) AND tag_id IN (${ownTags})`
     ),
     task_dependencies: await all(
       `SELECT * FROM task_dependencies
         WHERE task_id IN (${ownTasks}) AND blocks_task_id IN (${ownTasks})`,
-      [...ids, ...ids]
+      []
     ),
-    terminal_tabs: await all(`SELECT * FROM terminal_tabs WHERE task_id IN (${ownTasks})`),
+    // A tab is its one owner's (T-100): only the caller's own (or a legacy unowned one).
+    terminal_tabs: await scope.filter(
+      await all(`SELECT * FROM terminal_tabs WHERE task_id IN (${ownTasks})`, []),
+      (t) => ({ kind: 'tab', id: String(t.id) })
+    ),
     // A global library item (no project) is hub-wide: every user sees it (access.ts).
     ai_config_items: await all(
       `SELECT * FROM ai_config_items WHERE project_id IS NULL OR project_id IN ${inProjects}`
@@ -205,13 +218,21 @@ async function ownRows(
   }
 }
 
-async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExportBundle> {
+async function exportProject(
+  db: SlayzoneDb,
+  projectId: string,
+  scope: AccessScope
+): Promise<SlayExportBundle> {
   const row = (await db.get('SELECT * FROM projects WHERE id = ?', [projectId])) as Row | undefined
   if (!row) throw new Error(`Project ${projectId} not found`)
   const [project] = await withFolders(db, [row])
 
+  // Only the tasks the caller may see: a shared project holds others' private ones (T-100).
   const tasks = await exportedTasks(
-    (await db.all('SELECT * FROM tasks WHERE project_id = ?', [projectId])) as Row[]
+    await scope.filter(
+      (await db.all('SELECT * FROM tasks WHERE project_id = ?', [projectId])) as Row[],
+      (t) => ({ kind: 'task', id: String(t.id) })
+    )
   )
   const taskIds = tasks.map((t) => t.id as string)
 
@@ -234,10 +255,14 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
       [...taskIds, ...taskIds]
     )) as Row[]
 
-    terminalTabs = (await db.all(
-      `SELECT * FROM terminal_tabs WHERE task_id IN (${placeholders})`,
-      taskIds
-    )) as Row[]
+    // A tab is its one owner's (T-100): only the caller's own (or a legacy unowned one).
+    terminalTabs = await scope.filter(
+      (await db.all(
+        `SELECT * FROM terminal_tabs WHERE task_id IN (${placeholders})`,
+        taskIds
+      )) as Row[],
+      (t) => ({ kind: 'tab', id: String(t.id) })
+    )
 
     // Only tags actually used by these tasks
     const tagIds = [...new Set(taskTags.map((tt) => tt.tag_id as string))]
@@ -296,7 +321,8 @@ async function importBundle(
       settings: (bundle.data.settings ?? []).filter((s) => !isMachineLocalSetting(String(s.key)))
     },
     ownerUserId: caller.userId,
-    projectIds: await caller.scope.accessibleProjectIds()
+    // An import writes: only into projects the caller OWNS (T-100), never a shared one.
+    projectIds: await caller.scope.ownedProjectIds()
   } satisfies ImportTxnParams)
   await placeImportedFolders(db, result.importedProjects ?? [])
   // Custom folders go to the computer that will hold the imported tasks' folders
@@ -368,9 +394,13 @@ async function handleExportAll(db: SlayzoneDb, caller: ExportImportCaller): Prom
   }
 }
 
-async function handleExportProject(db: SlayzoneDb, projectId: string): Promise<ExportResult> {
+async function handleExportProject(
+  db: SlayzoneDb,
+  projectId: string,
+  scope: AccessScope
+): Promise<ExportResult> {
   try {
-    const bundle = await exportProject(db, projectId)
+    const bundle = await exportProject(db, projectId, scope)
     return await doExport(bundle)
   } catch (e) {
     return { success: false, error: String(e) }
@@ -419,7 +449,7 @@ export function buildExportImportOps(
 ): ExportImportOps {
   const ops: ExportImportOps = {
     exportAll: () => handleExportAll(db, caller),
-    exportProject: (projectId: string) => handleExportProject(db, projectId),
+    exportProject: (projectId: string) => handleExportProject(db, projectId, caller.scope),
     importBundle: () => handleImport(db, caller)
   }
 
@@ -437,7 +467,7 @@ export function buildExportImportOps(
 
     ops.testExportProjectToPath = async (projectId: string, filePath: string) => {
       try {
-        const bundle = await exportProject(db, projectId)
+        const bundle = await exportProject(db, projectId, caller.scope)
         fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
         return { success: true, path: filePath }
       } catch (e) {

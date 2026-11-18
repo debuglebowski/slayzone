@@ -194,6 +194,11 @@ const LEGACY_CHAT =
 const DELIVERY =
   "hub-to-computer delivery or ownership state of the source hub's computers: the target rebuilds its own"
 export const MOVE_DROPPED_TABLES: Readonly<Record<string, string>> = {
+  // Sharing (T-100): accounts are per hub, so who a thing is shared with means nothing
+  // on the target. The mover owns what arrives; they share it again there.
+  project_members: "sharing with the source hub's accounts: users are per hub",
+  task_grants: "sharing with the source hub's accounts: users are per hub",
+  artifact_grants: "sharing with the source hub's accounts: users are per hub",
   // A project's
   automation_action_runs: 'automation run history: the automations move, their runs do not',
   processes: 'running processes belong to the source computers',

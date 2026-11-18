@@ -5800,6 +5800,72 @@ export const migrations: Migration[] = [
     up: (db) => {
       db.exec('ALTER TABLE terminal_tabs ADD COLUMN chat_font_size INTEGER')
     }
+  },
+  {
+    // Sharing on a hub with login (T-100). Who may reach hub-resident content beyond
+    // its project's owner — the decision is `access.ts`; these are its facts.
+    //   project_members  a user's role on a whole project (owner stays implicit
+    //                    in `projects.owner_user_id`, always manage).
+    //   tasks.visibility `project` (every member) | `private` (creator + grants only;
+    //                    the project owner and its managers get nothing).
+    //   tasks.created_by_user_id  a private task's owner; backfilled to the project
+    //                    owner (who created everything before members existed).
+    //   task_grants      one user invited to one task (and its subtasks).
+    //   artifact_grants  one user invited to one artifact.
+    //   tasks.assignee_user_id  a hub user; `assignee` stays the external
+    //                    (Linear/Jira/GitHub) name.
+    //   terminal_tabs.owner_user_id  the ONE user a tab (and what runs in it on a
+    //                    computer) belongs to: computer-resident things are never
+    //                    shared. Backfilled to the project owner.
+    version: 220,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE project_members (
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          user_id    TEXT NOT NULL,
+          role       TEXT NOT NULL CHECK (role IN ('view', 'edit', 'manage')),
+          added_by   TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (project_id, user_id)
+        );
+        CREATE INDEX idx_project_members_user ON project_members(user_id);
+        ALTER TABLE tasks ADD COLUMN visibility TEXT NOT NULL DEFAULT 'project'
+          CHECK (visibility IN ('project', 'private'));
+        ALTER TABLE tasks ADD COLUMN created_by_user_id TEXT;
+        ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT;
+        UPDATE tasks SET created_by_user_id =
+          (SELECT p.owner_user_id FROM projects p WHERE p.id = tasks.project_id)
+         WHERE id NOT IN (SELECT task_id FROM content_erasure_tasks);
+        CREATE TABLE task_grants (
+          task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          user_id    TEXT NOT NULL,
+          role       TEXT NOT NULL CHECK (role IN ('view', 'edit', 'manage')),
+          added_by   TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (task_id, user_id)
+        );
+        CREATE INDEX idx_task_grants_user ON task_grants(user_id);
+        CREATE TABLE artifact_grants (
+          artifact_id TEXT NOT NULL REFERENCES task_artifacts(id) ON DELETE CASCADE,
+          user_id     TEXT NOT NULL,
+          role        TEXT NOT NULL CHECK (role IN ('view', 'edit')),
+          added_by    TEXT,
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (artifact_id, user_id)
+        );
+        CREATE INDEX idx_artifact_grants_user ON artifact_grants(user_id);
+        ALTER TABLE terminal_tabs ADD COLUMN owner_user_id TEXT;
+        UPDATE terminal_tabs SET owner_user_id = (
+          SELECT p.owner_user_id FROM tasks t JOIN projects p ON p.id = t.project_id
+           WHERE t.id = terminal_tabs.task_id)
+         WHERE task_id NOT IN (SELECT task_id FROM content_erasure_tasks)
+           AND id NOT IN (SELECT tab_id FROM content_erasure_tabs);
+      `)
+      // Erased tasks and tabs are fenced against any write (content_erasure_*): their
+      // backfill is skipped — their rows are gone or going, and nobody reaches them.
+      // task_grants carries a task_id: fenced like every such table.
+      installContentErasureFences(db)
+    }
   }
 ]
 

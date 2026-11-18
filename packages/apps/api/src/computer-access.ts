@@ -83,8 +83,11 @@ export async function computerOwnerOf(db: SlayzoneDb, computerId: string): Promi
 }
 
 /**
- * Whether this computer may do `work` (a task, a project, an agent session): may its
- * OWNER access that resource? An unowned computer serves nothing on a hub with login.
+ * Whether this computer may do `work` (a task, a project, an agent session): is its
+ * OWNER the work's owner? A task or project is asked as `taskOwner` / `projectOwner`
+ * (T-100): a member of a shared project may SEE the task, but its agents never run on
+ * the member's computer, nor the member's on the owner's. An unowned computer serves
+ * nothing on a hub with login.
  */
 export async function computerServes(
   db: SlayzoneDb,
@@ -94,5 +97,16 @@ export async function computerServes(
 ): Promise<boolean> {
   if (!authRequired) return true
   const owner = await computerOwnerOf(db, computerId)
-  return canAccess(db, { authRequired, principal: owner ? { userId: owner } : null }, work)
+  return canAccess(
+    db,
+    { authRequired, principal: owner ? { userId: owner } : null },
+    ownerWork(work)
+  )
+}
+
+/** The owner-only kind of a piece of work (T-100); other kinds are owner-only already. */
+function ownerWork(work: OwnedResource): OwnedResource {
+  if (work.kind === 'task') return { kind: 'taskOwner', id: work.id }
+  if (work.kind === 'project') return { kind: 'projectOwner', id: work.id }
+  return work
 }

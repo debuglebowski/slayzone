@@ -31,7 +31,7 @@
  */
 import { currentSecurityContext } from '@slayzone/platform/security-log'
 import { settingProjectId } from '@slayzone/settings-core/server'
-import type { AccessScope, OwnedResource, ResourceKind } from './access'
+import type { AccessRole, AccessScope, OwnedResource, ResourceKind } from './access'
 import type { AccessClass } from './admin-policy'
 
 export type OwnerMark = 'id-checked' | 'list-filtered' | 'no-owned-input'
@@ -83,6 +83,13 @@ export type EventFilter = (event: unknown, state: StreamState) => unknown | Prom
 export interface OwnerRule {
   readonly mark: OwnerMark
   readonly ids?: readonly Ref[]
+  /**
+   * The role every named id needs (T-100). Unset: a query or subscription needs
+   * `view`, a mutation `edit` (`needOf` in owner-gate.ts). Set it where that default is
+   * wrong: `manage` for who-gets-in changes, `view` for a mutation that only touches
+   * the caller's own view (opening a window on a task).
+   */
+  readonly need?: AccessRole
   /** At least one of these `at`s must be present: without one the call would act on,
    *  or create, something with no owner. */
   readonly needsOne?: readonly string[]
@@ -116,16 +123,22 @@ const group = ref('projectGroup')
 const automation = ref('automation')
 const computer = ref('computer')
 const taskMove = ref('taskMove')
+/** The computer side of a task / project (T-100): its one owner user, never shared. */
+const taskOwner = ref('taskOwner')
+const projOwner = ref('projectOwner')
 
 const checked = (...ids: Ref[]): OwnerRule => ({ mark: 'id-checked', ids })
+/** A rule that needs `need` on its ids instead of the query/mutation default. */
+const needing = (need: AccessRole, rule: OwnerRule): OwnerRule => ({ ...rule, need })
 /**
  * A computer target (`{ taskId, projectId, computerId }`) picks where an op runs:
  * each of its ids is the caller's to name, or user B could aim A's task and the op
- * would run on A's computer, inside A's folders. Its path is checked as well.
+ * would run on A's computer, inside A's folders. Its path is checked as well. What
+ * runs there is the task's / project's OWNER's (T-100): sharing never opens it.
  */
-const TARGET: Ref[] = [
-  ref('task')('target.taskId'),
-  ref('project')('target.projectId'),
+const TARGET_OWNER: Ref[] = [
+  taskOwner('target.taskId'),
+  projOwner('target.projectId'),
   ref('computer')('target.computerId')
 ]
 const listed = (output: OutputFilter): OwnerRule => ({ mark: 'list-filtered', output })
@@ -236,7 +249,7 @@ const processRows: OutputFilter = async (data, scope) => {
   const out: unknown[] = []
   for (const row of data) {
     if (!isRecord(row)) continue
-    const r = res('task', row.taskId) ?? res('project', row.projectId)
+    const r = res('taskOwner', row.taskId) ?? res('projectOwner', row.projectId)
     if (r && (await scope.allows(r))) out.push(row)
   }
   return out
@@ -286,7 +299,7 @@ const board: OutputFilter = async (data, scope) => {
   if (!isRecord(data)) return data
   return {
     ...data,
-    tasks: await rows('project_id', 'project')(data.tasks, scope),
+    tasks: await rows('id', 'task')(data.tasks, scope),
     projects: await rows('id', 'project')(data.projects, scope),
     tags: await rows('project_id', 'project')(data.tags, scope),
     taskTags: await keyed('task')(data.taskTags, scope),
@@ -411,12 +424,12 @@ const on =
 
 /**
  * The event names the PATH SCOPE it was opened under (§9 Phase 7b): its task, else
- * its project. One naming neither is dropped.
+ * its project — on a computer, so their OWNER's (T-100). One naming neither is dropped.
  */
-const onScope: EventFilter = (event, ctx) =>
+const onScopeOwner: EventFilter = (event, ctx) =>
   isRecord(event) && typeof event.taskId === 'string'
-    ? on('taskId', 'task')(event, ctx)
-    : on('projectId', 'project')(event, ctx)
+    ? on('taskId', 'taskOwner')(event, ctx)
+    : on('projectId', 'projectOwner')(event, ctx)
 
 /** The event IS the id. */
 const onValue =
@@ -497,21 +510,21 @@ const IMPORT = 'creates projects owned by the caller from a bundle the hub opens
 
 // ── the policy ────────────────────────────────────────────────────────────────
 
-const taskRows = rows('project_id', 'project')
+const taskRows = rows('id', 'task')
 const chatOpts = checked(tab('tabId'), task('taskId'))
 
 export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // ── agent lifecycle / prompts / sessions / turns ──
-  'agentLifecycle.onEvent': streamed(onFirst(['taskId', 'task'], ['sessionId', 'session'])),
-  'agentPrompts.list': checked(task('taskId')),
-  'agentPrompts.onChanged': streamed(onValue('task')),
-  'agentSessions.list': checked(task('taskId')),
-  'agentSessions.onChanged': streamed(onValue('task')),
-  'agentSessions.current': checked(task('taskId')),
-  'agentSessions.recordDetected': checked(task('taskId')),
-  'agentSessions.testLedger': checked(task('taskId')),
-  'agentTurns.list': then(checked(task('taskId')), rows('task_id', 'task')),
-  'agentTurns.onChanged': streamed(on('taskId', 'task')),
+  'agentLifecycle.onEvent': streamed(onFirst(['taskId', 'taskOwner'], ['sessionId', 'session'])),
+  'agentPrompts.list': checked(taskOwner('taskId')),
+  'agentPrompts.onChanged': streamed(onValue('taskOwner')),
+  'agentSessions.list': checked(taskOwner('taskId')),
+  'agentSessions.onChanged': streamed(onValue('taskOwner')),
+  'agentSessions.current': checked(taskOwner('taskId')),
+  'agentSessions.recordDetected': checked(taskOwner('taskId')),
+  'agentSessions.testLedger': checked(taskOwner('taskId')),
+  'agentTurns.list': then(checked(taskOwner('taskId')), rows('task_id', 'taskOwner')),
+  'agentTurns.onChanged': streamed(on('taskId', 'taskOwner')),
 
   // ── AI config ──
   // Disk procedures name their PATH SCOPE (§9 Phase 7c): the project (or task) the
@@ -526,62 +539,74 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'aiConfig.listProjectSelections': checked(project('projectId')),
   'aiConfig.setProjectSelection': checked(project('projectId'), aiItem('itemId')),
   'aiConfig.removeProjectSelection': checked(project('projectId'), aiItem('itemId')),
-  'aiConfig.discoverContextFiles': checked(project('projectId'), task('taskId')),
+  'aiConfig.discoverContextFiles': checked(projOwner('projectId'), taskOwner('taskId')),
   'aiConfig.getComputerFiles': none(HUB_HOST),
-  'aiConfig.readContextFile': checked(project('projectId'), task('taskId')),
-  'aiConfig.writeContextFile': checked(project('projectId'), task('taskId')),
+  'aiConfig.readContextFile': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.writeContextFile': checked(projOwner('projectId'), taskOwner('taskId')),
   // The caller's own computer's provider folders: that computer confines the path.
   'aiConfig.deleteComputerFile': none(HUB_HOST),
   'aiConfig.createComputerFile': none(HUB_HOST),
   'aiConfig.writeComputerSkill': none(HUB_HOST),
-  'aiConfig.getContextTree': checked(project('projectId'), task('taskId')),
-  'aiConfig.loadLibraryItem': checked(project('projectId'), task('taskId'), aiItem('itemId')),
-  'aiConfig.syncLinkedFile': checked(project('projectId'), task('taskId'), aiItem('itemId')),
-  'aiConfig.unlinkFile': checked(project('projectId'), aiItem('itemId')),
-  'aiConfig.renameContextFile': checked(project('projectId'), task('taskId')),
-  'aiConfig.deleteContextFile': checked(project('projectId'), task('taskId')),
-  'aiConfig.getRootInstructions': checked(project('projectId'), task('taskId')),
+  'aiConfig.getContextTree': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.loadLibraryItem': checked(
+    projOwner('projectId'),
+    taskOwner('taskId'),
+    aiItem('itemId')
+  ),
+  'aiConfig.syncLinkedFile': checked(projOwner('projectId'), taskOwner('taskId'), aiItem('itemId')),
+  'aiConfig.unlinkFile': checked(projOwner('projectId'), aiItem('itemId')),
+  'aiConfig.renameContextFile': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.deleteContextFile': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.getRootInstructions': checked(projOwner('projectId'), taskOwner('taskId')),
   'aiConfig.getLibraryInstructions': checked(aiItem('variantId')),
   'aiConfig.saveLibraryInstructions': checked(aiItem('variantId')),
   'aiConfig.listInstructionVariants': none(LIBRARY),
   'aiConfig.getProjectInstructionVariant': checked(project('projectId')),
   'aiConfig.setProjectInstructionVariant': checked(
-    project('projectId'),
-    task('taskId'),
+    projOwner('projectId'),
+    taskOwner('taskId'),
     aiItem('variantItemId')
   ),
-  'aiConfig.saveInstructionsContent': checked(project('projectId'), task('taskId')),
-  'aiConfig.saveRootInstructions': checked(project('projectId'), task('taskId')),
-  'aiConfig.readProviderInstructions': checked(project('projectId'), task('taskId')),
-  'aiConfig.pushProviderInstructions': checked(project('projectId'), task('taskId')),
-  'aiConfig.pullProviderInstructions': checked(project('projectId'), task('taskId')),
-  'aiConfig.getProjectSkillsStatus': checked(project('projectId'), task('taskId')),
-  'aiConfig.readProviderSkill': checked(project('projectId'), task('taskId'), aiItem('itemId')),
+  'aiConfig.saveInstructionsContent': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.saveRootInstructions': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.readProviderInstructions': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.pushProviderInstructions': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.pullProviderInstructions': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.getProjectSkillsStatus': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.readProviderSkill': checked(
+    projOwner('projectId'),
+    taskOwner('taskId'),
+    aiItem('itemId')
+  ),
   // The library item's content as a provider expects it: no project file is read.
   'aiConfig.getExpectedSkillContent': checked(aiItem('itemId')),
-  'aiConfig.pullProviderSkill': checked(project('projectId'), task('taskId'), aiItem('itemId')),
+  'aiConfig.pullProviderSkill': checked(
+    projOwner('projectId'),
+    taskOwner('taskId'),
+    aiItem('itemId')
+  ),
   'aiConfig.listProviders': none(HUB_CONFIG),
   'aiConfig.toggleProvider': none(HUB_CONFIG),
-  'aiConfig.reconcileProjectSkills': checked(project('projectId'), task('taskId')),
+  'aiConfig.reconcileProjectSkills': checked(projOwner('projectId'), taskOwner('taskId')),
   'aiConfig.getProjectProviders': checked(project('projectId')),
   'aiConfig.setProjectProviders': checked(project('projectId')),
-  'aiConfig.needsSync': checked(project('projectId'), task('taskId')),
-  'aiConfig.getProjectStaleSkillCount': checked(project('projectId'), task('taskId')),
-  'aiConfig.getProjectsStaleSkillCounts': checked(project('[].projectId')),
-  'aiConfig.syncAll': checked(project('projectId'), task('taskId'), aiItem('itemId')),
-  'aiConfig.checkSyncStatus': checked(project('projectId'), task('taskId')),
-  'aiConfig.discoverMcpConfigs': checked(project('projectId'), task('taskId')),
-  'aiConfig.writeMcpServer': checked(project('projectId'), task('taskId')),
-  'aiConfig.removeMcpServer': checked(project('projectId'), task('taskId')),
+  'aiConfig.needsSync': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.getProjectStaleSkillCount': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.getProjectsStaleSkillCounts': checked(projOwner('[].projectId')),
+  'aiConfig.syncAll': checked(projOwner('projectId'), taskOwner('taskId'), aiItem('itemId')),
+  'aiConfig.checkSyncStatus': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.discoverMcpConfigs': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.writeMcpServer': checked(projOwner('projectId'), taskOwner('taskId')),
+  'aiConfig.removeMcpServer': checked(projOwner('projectId'), taskOwner('taskId')),
   'aiConfig.discoverComputerMcpConfigs': none(HUB_HOST),
   'aiConfig.writeComputerMcpServer': none(HUB_HOST),
   'aiConfig.removeComputerMcpServer': none(HUB_HOST),
   'aiConfig.checkSlayConfigured': {
-    ...checked(project('projectId'), task('taskId')),
+    ...checked(projOwner('projectId'), taskOwner('taskId')),
     needsOne: ['projectId', 'taskId']
   },
   'aiConfig.setupSlay': {
-    ...checked(project('projectId'), task('taskId')),
+    ...checked(projOwner('projectId'), taskOwner('taskId')),
     needsOne: ['projectId', 'taskId']
   },
   'aiConfig.marketplace.listRegistries': none(LIBRARY),
@@ -599,13 +624,13 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.clipboard.readFilePaths': none(HOST),
   'app.clipboard.hasFiles': none(HOST),
   'app.leaderboard.getLocalStats': listed(SCOPED_IN_HANDLER),
-  'app.exportImport.exportProject': checked(project('projectId')),
+  'app.exportImport.exportProject': needing('view', checked(project('projectId'))),
   // O-22: the caller's own projects only (export-import.ts scopes the query); the
   // whole hub is backed up at server level, never through the app.
   'app.exportImport.exportAll': listed(SCOPED_IN_HANDLER),
   'app.exportImport.testExportAllToPath': then(checked(owned('filePath')), SCOPED_IN_HANDLER),
   'app.exportImport.testExportProjectToPath': checked(project('projectId'), owned('filePath')),
-  'app.exportImport.testSetTaskParent': checked(task('taskId'), task('parentId')),
+  'app.exportImport.testSetTaskParent': checked(taskOwner('taskId'), taskOwner('parentId')),
   'app.usage.fetch': none(HOST),
   'app.usage.test': none(HOST),
   'app.files.pathExists': checked(owned('filePath')),
@@ -643,10 +668,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.auth.githubSystemSignIn': none('starts a GitHub sign-in for the caller'),
   'app.auth.onCallback': none(`${HOST} (fed only by the supervised hub's sidecar socket)`),
   'app.dialog.showOpenDialog': none(HOST),
-  'app.browserRelay.serve': checked(task('taskId')),
+  'app.browserRelay.serve': checked(taskOwner('taskId')),
   'app.browserRelay.sync': none('a browser host the caller opened (bound to its user)'),
   'app.browserRelay.reply': none('a browser host the caller opened (bound to its user)'),
-  'app.browserRelay.engaged': checked(task('taskId')),
+  'app.browserRelay.engaged': checked(taskOwner('taskId')),
   'app.browserRelay.present': none('marks the caller as a connected desktop app'),
   'app.browserRelay.progress': none('a browser host the caller opened (bound to its user)'),
   'app.floatingAgent.setEnabled': none(HOST),
@@ -662,17 +687,17 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.floatingAgent.onState': none(HOST),
   'app.floatingAgent.onSessionChanged': none(HOST),
   'app.floatingAgent.onCollapseChanged': none(HOST),
-  'app.taskWindows.open': checked(task('taskId')),
-  'app.taskWindows.close': checked(task('taskId')),
+  'app.taskWindows.open': needing('view', checked(task('taskId'))),
+  'app.taskWindows.close': needing('view', checked(task('taskId'))),
   'app.taskWindows.list': listed(ids('task')),
-  'app.taskWindows.setPrimaryActive': checked(task('taskId')),
+  'app.taskWindows.setPrimaryActive': needing('view', checked(task('taskId'))),
   'app.taskWindows.getPrimaryActive': listed(oneOrNull('task')),
-  'app.taskWindows.claimPanel': checked(task('taskId')),
-  'app.taskWindows.releasePanel': checked(task('taskId')),
-  'app.taskWindows.releaseAllForTask': checked(task('taskId')),
+  'app.taskWindows.claimPanel': needing('view', checked(task('taskId'))),
+  'app.taskWindows.releasePanel': needing('view', checked(task('taskId'))),
+  'app.taskWindows.releaseAllForTask': needing('view', checked(task('taskId'))),
   'app.taskWindows.getOwnership': checked(task('taskId')),
   'app.taskWindows.getWindowId': none(HOST),
-  'app.taskWindows.claimAndCloseOther': checked(task('taskId')),
+  'app.taskWindows.claimAndCloseOther': needing('view', checked(task('taskId'))),
   'app.taskWindows.claimSession': checked(session('sessionId')),
   // The whole list of open task windows: an update that held only other users'
   // tasks is not sent (desktop host only; a hub with login never emits it).
@@ -766,7 +791,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.testReadEvents': checked(tab('tabId')),
   'chat.testProviderConfig': checked(tab('tabId')),
   'chat.testProjection': checked(tab('tabId')),
-  'chat.testSeedPrompts': checked(task('taskId')),
+  'chat.testSeedPrompts': checked(taskOwner('taskId')),
   'chat.hydrate': chatOpts,
   'chat.start': chatOpts,
   'chat.restart': chatOpts,
@@ -804,29 +829,41 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.backgroundCommandTask': checked(tab('tabId')),
   'chat.stopSubAgent': checked(tab('tabId')),
   'chat.getInfo': checked(tab('tabId')),
-  'chat.inspectPermissions': checked(task('taskId')),
-  'chat.getMode': checked(task('taskId')),
-  'chat.getAutoEligibility': checked(task('taskId'), tab('tabId')),
+  'chat.inspectPermissions': checked(taskOwner('taskId')),
+  'chat.getMode': checked(taskOwner('taskId')),
+  'chat.getAutoEligibility': checked(taskOwner('taskId'), tab('tabId')),
   'chat.setMode': chatOpts,
-  'chat.getModel': checked(task('taskId')),
+  'chat.getModel': checked(taskOwner('taskId')),
   'chat.setModel': chatOpts,
-  'chat.getEffort': checked(task('taskId')),
+  'chat.getEffort': checked(taskOwner('taskId')),
   'chat.setEffort': chatOpts,
-  'chat.getCollaboration': checked(task('taskId')),
+  'chat.getCollaboration': checked(taskOwner('taskId')),
   'chat.setCollaboration': chatOpts,
   'chat.decidePlan': chatOpts,
-  'chat.getFastMode': checked(task('taskId')),
+  'chat.getFastMode': checked(taskOwner('taskId')),
   'chat.setFastMode': chatOpts,
   // The folder is judged on the computer, inside the named task's own folders (§9 7c).
-  'chat.listSkills': { ...checked(task('taskId'), tab('tabId')), needsOne: ['taskId', 'tabId'] },
-  'chat.listCommands': { ...checked(task('taskId'), tab('tabId')), needsOne: ['taskId', 'tabId'] },
-  'chat.listAgents': { ...checked(task('taskId'), tab('tabId')), needsOne: ['taskId', 'tabId'] },
-  'chat.listFiles': { ...checked(task('taskId'), tab('tabId')), needsOne: ['taskId', 'tabId'] },
-  'chat.bumpAutocompleteUsage': checked(task('taskId'), tab('tabId')),
-  'chat.getAutocompleteUsage': checked(task('taskId'), tab('tabId')),
-  'chat.getCliSnapshot': checked(task('taskId')),
-  'chat.getCliCommandDetails': checked(task('taskId')),
-  'chat.getModels': checked(task('taskId')),
+  'chat.listSkills': {
+    ...checked(taskOwner('taskId'), tab('tabId')),
+    needsOne: ['taskId', 'tabId']
+  },
+  'chat.listCommands': {
+    ...checked(taskOwner('taskId'), tab('tabId')),
+    needsOne: ['taskId', 'tabId']
+  },
+  'chat.listAgents': {
+    ...checked(taskOwner('taskId'), tab('tabId')),
+    needsOne: ['taskId', 'tabId']
+  },
+  'chat.listFiles': {
+    ...checked(taskOwner('taskId'), tab('tabId')),
+    needsOne: ['taskId', 'tabId']
+  },
+  'chat.bumpAutocompleteUsage': checked(taskOwner('taskId'), tab('tabId')),
+  'chat.getAutocompleteUsage': checked(taskOwner('taskId'), tab('tabId')),
+  'chat.getCliSnapshot': checked(taskOwner('taskId')),
+  'chat.getCliCommandDetails': checked(taskOwner('taskId')),
+  'chat.getModels': checked(taskOwner('taskId')),
   'chat.queue.list': checked(tab('tabId')),
   'chat.queue.push': checked(tab('tabId')),
   'chat.queue.remove': checked(tab('tabId')),
@@ -845,7 +882,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
   // A bare signal (no payload to filter): the tab named in the input is checked instead.
   'chat.threads.onChanged': checked(tab('tabId')),
-  'chat.settings.onChanged': checked(task('taskId')),
+  'chat.settings.onChanged': checked(taskOwner('taskId')),
   'chat.pinnedMessages.onChanged': checked(tab('tabId')),
   'chat.onQueueDrained': streamed(on('tabId', 'tab')),
 
@@ -853,14 +890,14 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // the caller's (so the computer is the work owner's); managing one is the owner's
   // or an admin's, decided in the handler ──
   'computers.list': none(COMPUTER),
-  'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
-  'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
-  'computers.resolveTaskComputer': checked(task('taskId')),
+  'computers.setTaskComputer': checked(taskOwner('taskId'), computer('computerId')),
+  'computers.setProjectDefaultComputer': checked(projOwner('projectId'), computer('computerId')),
+  'computers.resolveTaskComputer': checked(taskOwner('taskId')),
   // A direct-link target is a computer target (its task, and computer when named) plus
   // the one session or chat tab in it, by `target.kind`. The issuer refuses a resource
   // outside the task.
   'computers.issueDirectLink': {
-    ...checked(...TARGET, {
+    ...checked(...TARGET_OWNER, {
       pick: (raw) => {
         const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
         const r =
@@ -869,7 +906,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
             : t?.kind === 'chat'
               ? res('tab', t.tabId)
               : t?.kind === 'task'
-                ? res('task', t.taskId)
+                ? res('taskOwner', t.taskId)
                 : null
         return r ? [r] : []
       },
@@ -906,40 +943,84 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'feedback.deleteThread': none(FEEDBACK),
 
   // ── file editor + workspace (filesystem of a computer) ──
-  'fileEditor.readDir': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.readFile': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.listAllFiles': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.writeFile': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.createFile': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.createDir': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.rename': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.delete': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.copyIn': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.copy': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.gitStatus': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'fileEditor.searchFiles': checked(task('taskId'), project('projectId'), computer('computerId')),
+  'fileEditor.readDir': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.readFile': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.listAllFiles': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.writeFile': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.createFile': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.createDir': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.rename': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
+  'fileEditor.delete': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
+  'fileEditor.copyIn': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
+  'fileEditor.copy': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
+  'fileEditor.gitStatus': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'fileEditor.searchFiles': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
   'fileEditor.showInFinder': checked(owned('rootPath')),
-  'fileEditor.watch': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'workspace.listRoots': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'workspace.listDir': checked(task('taskId'), project('projectId'), computer('computerId')),
-  'workspace.mkdir': checked(task('taskId'), project('projectId'), computer('computerId')),
+  'fileEditor.watch': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
+  'workspace.listRoots': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
+  'workspace.listDir': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
+  'workspace.mkdir': checked(taskOwner('taskId'), projOwner('projectId'), computer('computerId')),
   'workspace.setAllowedRoots': checked(
-    task('taskId'),
-    project('projectId'),
+    taskOwner('taskId'),
+    projOwner('projectId'),
     computer('computerId')
   ),
   'workspace.resolveProjectPath': checked(
-    task('taskId'),
-    project('projectId'),
+    taskOwner('taskId'),
+    projOwner('projectId'),
     computer('computerId')
   ),
-  'workspace.setProjectPath': checked(task('taskId'), project('projectId'), computer('computerId')),
+  'workspace.setProjectPath': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
   'workspace.forgetProjectPath': checked(
-    task('taskId'),
-    project('projectId'),
+    taskOwner('taskId'),
+    projOwner('projectId'),
     computer('computerId')
   ),
-  'workspace.pathExists': checked(task('taskId'), project('projectId'), computer('computerId')),
+  'workspace.pathExists': checked(
+    taskOwner('taskId'),
+    projOwner('projectId'),
+    computer('computerId')
+  ),
 
   // ── history, usage ──
   'history.listForTask': checked(task('taskId')),
@@ -947,21 +1028,21 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // Records with no task have no owner and are left out of the caller's sums.
   'usageAnalytics.query': listed(SCOPED_IN_HANDLER),
   'usageAnalytics.refresh': listed(SCOPED_IN_HANDLER),
-  'usageAnalytics.taskCost': checked(task('taskId')),
+  'usageAnalytics.taskCost': checked(taskOwner('taskId')),
 
   // ── integrations ──
-  'integrations.connectGithub': checked(project('projectId')),
-  'integrations.connectLinear': checked(project('projectId')),
-  'integrations.connectJira': checked(project('projectId')),
+  'integrations.connectGithub': needing('manage', checked(project('projectId'))),
+  'integrations.connectLinear': needing('manage', checked(project('projectId'))),
+  'integrations.connectJira': needing('manage', checked(project('projectId'))),
   'integrations.getJiraTransitions': checked(task('taskId')),
   'integrations.updateConnection': none(CONNECTION),
   'integrations.listConnections': none(CONNECTION),
   'integrations.getConnectionUsage': listed(connectionUsage),
   'integrations.disconnect': none(CONNECTION),
-  'integrations.clearProjectProvider': checked(project('projectId')),
+  'integrations.clearProjectProvider': needing('manage', checked(project('projectId'))),
   'integrations.getProjectConnection': checked(project('projectId')),
-  'integrations.setProjectConnection': checked(project('projectId')),
-  'integrations.clearProjectConnection': checked(project('projectId')),
+  'integrations.setProjectConnection': needing('manage', checked(project('projectId'))),
+  'integrations.clearProjectConnection': needing('manage', checked(project('projectId'))),
   'integrations.listGithubRepositories': none(CONNECTION),
   'integrations.listGithubProjects': none(CONNECTION),
   'integrations.listGithubIssues': checked(project('projectId')),
@@ -972,7 +1053,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'integrations.listLinearProjects': none(CONNECTION),
   'integrations.listLinearIssues': checked(project('projectId')),
   'integrations.importLinearIssues': checked(project('projectId')),
-  'integrations.setProjectMapping': checked(project('projectId')),
+  'integrations.setProjectMapping': needing('manage', checked(project('projectId'))),
   'integrations.getProjectMapping': checked(project('projectId')),
   // Without a project or task it syncs every linked task on the hub.
   'integrations.syncNow': {
@@ -1041,15 +1122,15 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   },
   'processes.update': checked(
     proc('processId'),
-    project('updates.projectId'),
-    task('updates.taskId')
+    projOwner('updates.projectId'),
+    taskOwner('updates.taskId')
   ),
   'processes.stop': checked(proc('processId')),
   'processes.remove': checked(proc('processId')),
   'processes.restart': checked(proc('processId')),
-  'processes.listForTask': then(checked(task('taskId'), project('projectId')), processRows),
+  'processes.listForTask': then(checked(taskOwner('taskId'), projOwner('projectId')), processRows),
   'processes.listAll': listed(processRows),
-  'processes.removeForTask': checked(task('taskId')),
+  'processes.removeForTask': checked(taskOwner('taskId')),
   'processes.onLog': streamed(on('id', 'process')),
   'processes.onStatus': streamed(on('id', 'process')),
   'processes.onTitle': streamed(on('id', 'process')),
@@ -1060,40 +1141,40 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // The default computer is where the project's agents run and its folder lives:
   // never someone else's computer.
   'projects.create': checked(path('path'), computer('computerId')),
-  'projects.update': checked(project('id'), path('path')),
+  'projects.update': needing('manage', checked(project('id'), path('path'))),
   'projects.relocate': checked(
     project('id'),
     computer('computerId'),
     path('path'),
     path('sourcePath')
   ),
-  'projects.delete': checked(project('id')),
-  'projects.uploadIcon': checked(project('projectId'), owned('sourcePath')),
+  'projects.delete': checked(projOwner('id')),
+  'projects.uploadIcon': needing('manage', checked(project('projectId'), owned('sourcePath'))),
   'projects.reorder': checked(project('projectIds[]')),
   'projectGroups.list': listed(groups),
   'projectGroups.create': listed(groups),
-  'projectGroups.createFolderWithProjects': then(checked(project('projectIds[]')), groups),
+  'projectGroups.createFolderWithProjects': then(checked(projOwner('projectIds[]')), groups),
   'projectGroups.update': then(checked(group('id')), groups),
   'projectGroups.delete': then(checked(group('id')), groups),
-  'projectGroups.moveProject': then(checked(project('projectId'), group('groupId')), groups),
+  'projectGroups.moveProject': then(checked(projOwner('projectId'), group('groupId')), groups),
   'projectGroups.reorderTopLevel': then(
     checked({
       pick: (raw) =>
         isRecord(raw) && Array.isArray(raw.entries)
           ? raw.entries.flatMap((e) =>
               isRecord(e)
-                ? [res(e.kind === 'group' ? 'projectGroup' : 'project', e.id)].filter(
+                ? [res(e.kind === 'group' ? 'projectGroup' : 'projectOwner', e.id)].filter(
                     (r): r is OwnedResource => r !== null
                   )
                 : []
             )
           : [],
-      sample: { kind: 'project', input: (id) => ({ entries: [{ kind: 'project', id }] }) }
+      sample: { kind: 'projectOwner', input: (id) => ({ entries: [{ kind: 'project', id }] }) }
     }),
     groups
   ),
   'projectGroups.reorderProjectsInGroup': then(
-    checked(group('groupId'), project('projectIds[]')),
+    checked(group('groupId'), projOwner('projectIds[]')),
     groups
   ),
 
@@ -1118,7 +1199,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.submit': checked(session('sessionId')),
   'pty.resize': checked(session('sessionId')),
   'pty.kill': checked(session('sessionId')),
-  'pty.killTask': checked(task('taskId')),
+  'pty.killTask': checked(taskOwner('taskId')),
   'pty.touch': checked(session('sessionId')),
   'pty.interrupt': checked(session('sessionId')),
   'pty.prioritize': checked(session('sessionId')),
@@ -1143,9 +1224,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.sessionGetState': checked(session('sessionId')),
   'pty.setTheme': none(`${HUB_CONFIG}: the terminal colours answered to OSC queries`),
   // `taskId` (optional): Doctor also asks that task's computer about its node-pty install.
-  'pty.validate': checked(task('taskId')),
+  'pty.validate': checked(taskOwner('taskId')),
   'pty.setShellOverride': none(`${HUB_CONFIG}: the shell override`),
-  'pty.warmSetProjectTabCounts': checked(project('counts{}')),
+  'pty.warmSetProjectTabCounts': checked(projOwner('counts{}')),
   'pty.onData': streamed(on('sessionId', 'session')),
   'pty.onStateChange': streamed(on('sessionId', 'session')),
   'pty.onOutputAvailability': streamed(on('sessionId', 'session')),
@@ -1161,8 +1242,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.testEmitSessionDetected': checked(session('sessionId')),
   'pty.testEmitExit': checked(session('sessionId')),
   'pty.onDevServerDetected': streamed(on('sessionId', 'session')),
-  'pty.onRespawnSuggested': streamed(on('taskId', 'task')),
-  'pty.onEnsureAlive': streamed(on('taskId', 'task')),
+  'pty.onRespawnSuggested': streamed(on('taskId', 'taskOwner')),
+  'pty.onEnsureAlive': streamed(on('taskId', 'taskOwner')),
   'pty.onHibernateWarn': streamed(on('sessionId', 'session')),
   'pty.onHibernateCancelled': streamed(on('sessionId', 'session')),
   'pty.onHibernated': streamed(on('sessionId', 'session')),
@@ -1189,34 +1270,34 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
 
   // ── tasks ──
   'task.getAll': listed(taskRows),
-  'task.getByProject': checked(project('projectId')),
+  'task.getByProject': then(checked(project('projectId')), taskRows),
   'task.getSiblingBrowserUrl': checked(project('projectId')),
-  'task.getDeleted': checked(project('projectId')),
+  'task.getDeleted': then(checked(project('projectId')), taskRows),
   'task.get': checked(task('id')),
-  'task.paths': checked(task('taskIds[]')),
-  'task.testRecordPendingSpawn': checked(task('taskId')),
+  'task.paths': checked(taskOwner('taskIds[]')),
+  'task.testRecordPendingSpawn': checked(taskOwner('taskId')),
   'task.create': checked(project('projectId'), task('parentId'), template('templateId')),
   'task.getSubTasks': then(checked(task('parentId')), taskRows),
   // A worktree or base dir is judged by the computer holding the task's folders
   // (§9 7e): never inside another task's or project's folder there.
   'task.update': checked(task('id'), project('projectId'), task('parentId')),
-  'task.resetConversation': checked(task('id')),
-  'task.switchConversation': checked(task('id')),
-  'task.deleteConversation': checked(task('id')),
+  'task.resetConversation': checked(taskOwner('id')),
+  'task.switchConversation': checked(taskOwner('id')),
+  'task.deleteConversation': checked(taskOwner('id')),
   'task.updateMany': checked(task('ids[]'), project('updates.projectId'), task('updates.parentId')),
   'task.moveToProject': checked(task('taskIds[]'), project('targetProjectId')),
   'task.duplicate': checked(task('taskId'), project('targetProjectId')),
   // ── moving tasks to another hub (this hub's journal) ──
   // The target project is on the other hub: that hub checks it on import.
-  'taskMoves.copy': checked(task('taskIds[]'), project('targetProjectId')),
-  'taskMoves.copyProject': checked(project('projectId')),
-  'taskMoves.begin': checked(task('taskIds[]')),
-  'taskMoves.preview': checked(task('taskIds[]')),
-  'taskMoves.beginProject': checked(project('projectId')),
-  'taskMoves.projectPreview': checked(project('projectId')),
+  'taskMoves.copy': checked(taskOwner('taskIds[]'), project('targetProjectId')),
+  'taskMoves.copyProject': checked(projOwner('projectId')),
+  'taskMoves.begin': checked(taskOwner('taskIds[]')),
+  'taskMoves.preview': checked(taskOwner('taskIds[]')),
+  'taskMoves.beginProject': checked(projOwner('projectId')),
+  'taskMoves.projectPreview': checked(projOwner('projectId')),
   // Keyed by project id; each answer names its move, which decides.
   'taskMoves.projectRedirects': listed(redirectsByMove),
-  'taskMoves.finishLocal': checked(taskMove('id'), project('projectId')),
+  'taskMoves.finishLocal': checked(taskMove('id'), projOwner('projectId')),
   'taskMoves.resolveTarget': checked(taskMove('id')),
   'taskMoves.clearAction': checked(taskMove('id')),
   'taskMoves.get': checked(taskMove('id')),
@@ -1240,21 +1321,21 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.remoteBlockers': checked(task('taskId')),
   'taskMoves.removeRemoteBlocker': checked(task('taskId')),
   // A moved task's agent sessions: the move decides, and each names its task.
-  'taskMoves.sessionsExport': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsRead': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsReadAttachment': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsExport': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsRead': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsReadAttachment': checked(taskMove('moveId'), taskOwner('taskId')),
   'taskMoves.sessionsDiscard': checked(taskMove('moveId')),
-  'taskMoves.sessionsBegin': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsChunk': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsFinish': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsPutAttachment': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsActivate': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsImportLedger': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsRegister': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsFiles': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsFileRead': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsFilesMissing': checked(taskMove('moveId'), task('taskId')),
-  'taskMoves.sessionsFileWrite': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsBegin': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsChunk': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsFinish': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsPutAttachment': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsActivate': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsImportLedger': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsRegister': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsFiles': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsFileRead': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsFilesMissing': checked(taskMove('moveId'), taskOwner('taskId')),
+  'taskMoves.sessionsFileWrite': checked(taskMove('moveId'), taskOwner('taskId')),
   // A move's artifact bytes: the move decides (its tasks; once gone, who began it).
   'artifacts.moveManifest': checked(taskMove('moveId')),
   'artifacts.moveRead': checked(taskMove('moveId')),
@@ -1272,9 +1353,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.reorderPinned': checked(task('taskIds[]')),
   'task.setBrowserTabLocked': checked(task('taskId')),
   // Starts the task's agent where the task's computer is (placement gates that too).
-  'task.startMainAgent': checked(task('taskId')),
+  'task.startMainAgent': checked(taskOwner('taskId')),
   // Stops the task's main agent and stores the new mode.
-  'task.switchMode': checked(task('taskId')),
+  'task.switchMode': checked(taskOwner('taskId')),
   // Blockers can cross projects: the other side is filtered too.
   'task.getBlockers': then(checked(task('taskId')), taskRows),
   'task.getAllBlockedTaskIds': listed(ids('task')),
@@ -1284,8 +1365,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.setBlockers': checked(task('taskId'), task('blockerTaskIds[]')),
   'task.loadBoardData': listed(board),
   'task.loadBoardRows': listed(board),
-  'task.onChanged': streamed(on('projectId', 'project')),
-  'task.onPathsChanged': streamed(on('taskId', 'task')),
+  'task.onChanged': streamed(on('taskId', 'task')),
+  'task.onPathsChanged': streamed(on('taskId', 'taskOwner')),
 
   // ── templates, terminal tabs ──
   'template.getByProject': checked(project('projectId')),
@@ -1294,16 +1375,16 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'template.update': checked(template('id')),
   'template.delete': checked(template('id')),
   'template.setDefault': checked(project('projectId'), template('templateId')),
-  'taskTerminals.list': checked(task('taskId')),
+  'taskTerminals.list': then(checked(taskOwner('taskId')), rows('id', 'tab')),
   'taskTerminals.listHibernatedSessions': listed(ids('session')),
-  'taskTerminals.listAutoRestoreTasks': listed(ids('task')),
-  'taskTerminals.create': checked(task('taskId')),
+  'taskTerminals.listAutoRestoreTasks': listed(ids('taskOwner')),
+  'taskTerminals.create': checked(taskOwner('taskId')),
   'taskTerminals.split': checked(tab('tabId')),
   'taskTerminals.moveToGroup': checked(tab('tabId')),
   'taskTerminals.update': checked(tab('id')),
   'taskTerminals.delete': checked(tab('tabId')),
-  'taskTerminals.ensureMain': checked(task('taskId')),
-  'taskTerminals.onChanged': streamed(on('taskId', 'task')),
+  'taskTerminals.ensureMain': checked(taskOwner('taskId')),
+  'taskTerminals.onChanged': streamed(on('taskId', 'taskOwner')),
 
   // ── tests panel ──
   'testPanel.getCategories': checked(project('projectId')),
@@ -1313,7 +1394,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'testPanel.reorderCategories': checked(ref('testCategory')('ids[]')),
   'testPanel.getProfiles': none(`${HUB_CONFIG}: test profiles (a hub-wide setting)`),
   'testPanel.applyProfile': checked(project('projectId')),
-  'testPanel.scanFiles': checked(project('projectId')),
+  'testPanel.scanFiles': checked(projOwner('projectId')),
   'testPanel.getLabels': checked(project('projectId')),
   'testPanel.createLabel': checked(project('project_id')),
   'testPanel.updateLabel': checked(ref('testLabel')('id')),
@@ -1324,104 +1405,104 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'testPanel.setFileNote': checked(project('projectId')),
 
   // ── worktrees / git (a path names the repo) ──
-  'worktrees.watchStart': checked(...TARGET),
-  'worktrees.watchStop': checked(...TARGET),
-  'worktrees.isGitRepo': checked(...TARGET),
-  'worktrees.listProjectRepos': checked(project('projectId'), task('taskId')),
-  'worktrees.detectChildRepos': checked(project('projectId'), task('taskId')),
-  'worktrees.detectWorktrees': checked(...TARGET),
-  'worktrees.createWorktree': checked(project('projectId'), task('taskId')),
+  'worktrees.watchStart': checked(...TARGET_OWNER),
+  'worktrees.watchStop': checked(...TARGET_OWNER),
+  'worktrees.isGitRepo': checked(...TARGET_OWNER),
+  'worktrees.listProjectRepos': checked(projOwner('projectId'), taskOwner('taskId')),
+  'worktrees.detectChildRepos': checked(projOwner('projectId'), taskOwner('taskId')),
+  'worktrees.detectWorktrees': checked(...TARGET_OWNER),
+  'worktrees.createWorktree': checked(projOwner('projectId'), taskOwner('taskId')),
   'worktrees.onCreateWorktreePhase': none(
     "phase names for the caller's own request id; no content"
   ),
-  'worktrees.removeWorktree': checked(...TARGET),
-  'worktrees.init': checked(...TARGET),
-  'worktrees.getCurrentBranch': checked(...TARGET),
-  'worktrees.listBranches': checked(...TARGET),
-  'worktrees.checkoutBranch': checked(...TARGET),
-  'worktrees.createBranch': checked(...TARGET),
-  'worktrees.hasUncommittedChanges': checked(...TARGET),
-  'worktrees.mergeIntoParent': checked(...TARGET),
-  'worktrees.abortMerge': checked(...TARGET),
-  'worktrees.mergeWithAI': checked(...TARGET),
-  'worktrees.isMergeInProgress': checked(...TARGET),
-  'worktrees.getConflictedFiles': checked(...TARGET),
-  'worktrees.getWorkingDiff': checked(...TARGET),
-  'worktrees.stageFile': checked(...TARGET),
-  'worktrees.unstageFile': checked(...TARGET),
-  'worktrees.discardFile': checked(...TARGET),
-  'worktrees.stageAll': checked(...TARGET),
-  'worktrees.unstageAll': checked(...TARGET),
-  'worktrees.getFileDiff': checked(...TARGET),
-  'worktrees.getUntrackedFileDiff': checked(...TARGET),
-  'worktrees.getUntrackedFileDiffs': checked(...TARGET),
-  'worktrees.getFileDiffsPage': checked(...TARGET),
-  'worktrees.readGitText': checked(...TARGET),
-  'worktrees.getConflictContent': checked(...TARGET),
-  'worktrees.writeResolvedFile': checked(...TARGET),
-  'worktrees.commitFiles': checked(...TARGET),
+  'worktrees.removeWorktree': checked(...TARGET_OWNER),
+  'worktrees.init': checked(...TARGET_OWNER),
+  'worktrees.getCurrentBranch': checked(...TARGET_OWNER),
+  'worktrees.listBranches': checked(...TARGET_OWNER),
+  'worktrees.checkoutBranch': checked(...TARGET_OWNER),
+  'worktrees.createBranch': checked(...TARGET_OWNER),
+  'worktrees.hasUncommittedChanges': checked(...TARGET_OWNER),
+  'worktrees.mergeIntoParent': checked(...TARGET_OWNER),
+  'worktrees.abortMerge': checked(...TARGET_OWNER),
+  'worktrees.mergeWithAI': checked(...TARGET_OWNER),
+  'worktrees.isMergeInProgress': checked(...TARGET_OWNER),
+  'worktrees.getConflictedFiles': checked(...TARGET_OWNER),
+  'worktrees.getWorkingDiff': checked(...TARGET_OWNER),
+  'worktrees.stageFile': checked(...TARGET_OWNER),
+  'worktrees.unstageFile': checked(...TARGET_OWNER),
+  'worktrees.discardFile': checked(...TARGET_OWNER),
+  'worktrees.stageAll': checked(...TARGET_OWNER),
+  'worktrees.unstageAll': checked(...TARGET_OWNER),
+  'worktrees.getFileDiff': checked(...TARGET_OWNER),
+  'worktrees.getUntrackedFileDiff': checked(...TARGET_OWNER),
+  'worktrees.getUntrackedFileDiffs': checked(...TARGET_OWNER),
+  'worktrees.getFileDiffsPage': checked(...TARGET_OWNER),
+  'worktrees.readGitText': checked(...TARGET_OWNER),
+  'worktrees.getConflictContent': checked(...TARGET_OWNER),
+  'worktrees.writeResolvedFile': checked(...TARGET_OWNER),
+  'worktrees.commitFiles': checked(...TARGET_OWNER),
   'worktrees.analyzeConflict': none('the conflict text the caller sends; names no stored repo'),
-  'worktrees.isRebaseInProgress': checked(...TARGET),
-  'worktrees.getRebaseProgress': checked(...TARGET),
-  'worktrees.abortRebase': checked(...TARGET),
-  'worktrees.continueRebase': checked(...TARGET),
-  'worktrees.skipRebaseCommit': checked(...TARGET),
-  'worktrees.getMergeContext': checked(...TARGET),
-  'worktrees.getRecentCommits': checked(...TARGET),
-  'worktrees.getAheadBehind': checked(...TARGET),
-  'worktrees.getStatusSummary': checked(...TARGET),
+  'worktrees.isRebaseInProgress': checked(...TARGET_OWNER),
+  'worktrees.getRebaseProgress': checked(...TARGET_OWNER),
+  'worktrees.abortRebase': checked(...TARGET_OWNER),
+  'worktrees.continueRebase': checked(...TARGET_OWNER),
+  'worktrees.skipRebaseCommit': checked(...TARGET_OWNER),
+  'worktrees.getMergeContext': checked(...TARGET_OWNER),
+  'worktrees.getRecentCommits': checked(...TARGET_OWNER),
+  'worktrees.getAheadBehind': checked(...TARGET_OWNER),
+  'worktrees.getStatusSummary': checked(...TARGET_OWNER),
   'worktrees.revealInFinder': checked(owned('path')),
-  'worktrees.isDirty': checked(...TARGET),
-  'worktrees.getRemoteUrl': checked(...TARGET),
-  'worktrees.getAheadBehindUpstream': checked(...TARGET),
-  'worktrees.fetch': checked(...TARGET),
-  'worktrees.push': checked(...TARGET),
-  'worktrees.pull': checked(...TARGET),
-  'worktrees.getDefaultBranch': checked(...TARGET),
-  'worktrees.listBranchesDetailed': checked(...TARGET),
-  'worktrees.listRemoteBranches': checked(...TARGET),
-  'worktrees.getMergeBase': checked(...TARGET),
-  'worktrees.getCommitsSince': checked(...TARGET),
-  'worktrees.getCommitsBeforeRef': checked(...TARGET),
-  'worktrees.deleteBranch': checked(...TARGET),
-  'worktrees.pruneRemote': checked(...TARGET),
-  'worktrees.rebaseOnto': checked(...TARGET),
-  'worktrees.mergeFrom': checked(...TARGET),
-  'worktrees.getDiffStats': checked(...TARGET),
-  'worktrees.getWorktreeMetadata': checked(...TARGET),
-  'worktrees.getCommitDag': checked(...TARGET),
-  'worktrees.resolveChildBranches': checked(...TARGET),
-  'worktrees.resolveCopyBehavior': checked(project('projectId')),
-  'worktrees.getIgnoredFileTree': checked(...TARGET),
-  'worktrees.openIgnoredTree': checked(...TARGET),
-  'worktrees.listIgnoredTree': checked(...TARGET),
-  'worktrees.matchIgnoredTree': checked(...TARGET),
-  'worktrees.copyIgnoredFiles': checked(...TARGET),
-  'worktrees.getResolvedCommitDag': checked(...TARGET),
-  'worktrees.getResolvedForkGraph': checked(...TARGET),
-  'worktrees.getResolvedUpstreamGraph': checked(...TARGET),
-  'worktrees.getResolvedRecentCommits': checked(...TARGET),
-  'worktrees.listStashes': checked(...TARGET),
-  'worktrees.createStash': checked(...TARGET),
-  'worktrees.applyStash': checked(...TARGET),
-  'worktrees.popStash': checked(...TARGET),
-  'worktrees.dropStash': checked(...TARGET),
-  'worktrees.branchFromStash': checked(...TARGET),
-  'worktrees.getStashDiff': checked(...TARGET),
-  'worktrees.checkGhInstalled': checked(...TARGET),
-  'worktrees.hasGithubRemote': checked(...TARGET),
-  'worktrees.listOpenPrs': checked(...TARGET),
-  'worktrees.getPrByUrl': checked(...TARGET),
-  'worktrees.getPrForCheckout': checked(...TARGET),
-  'worktrees.createPr': checked(...TARGET),
-  'worktrees.getPrComments': checked(...TARGET),
-  'worktrees.addPrComment': checked(...TARGET),
-  'worktrees.mergePr': checked(...TARGET),
-  'worktrees.getPrDiff': checked(...TARGET),
-  'worktrees.getGhUser': checked(...TARGET),
-  'worktrees.editPrComment': checked(...TARGET),
-  'worktrees.onDiffChanged': streamed(onScope),
-  'worktrees.onDiffWatchFailed': streamed(onScope),
+  'worktrees.isDirty': checked(...TARGET_OWNER),
+  'worktrees.getRemoteUrl': checked(...TARGET_OWNER),
+  'worktrees.getAheadBehindUpstream': checked(...TARGET_OWNER),
+  'worktrees.fetch': checked(...TARGET_OWNER),
+  'worktrees.push': checked(...TARGET_OWNER),
+  'worktrees.pull': checked(...TARGET_OWNER),
+  'worktrees.getDefaultBranch': checked(...TARGET_OWNER),
+  'worktrees.listBranchesDetailed': checked(...TARGET_OWNER),
+  'worktrees.listRemoteBranches': checked(...TARGET_OWNER),
+  'worktrees.getMergeBase': checked(...TARGET_OWNER),
+  'worktrees.getCommitsSince': checked(...TARGET_OWNER),
+  'worktrees.getCommitsBeforeRef': checked(...TARGET_OWNER),
+  'worktrees.deleteBranch': checked(...TARGET_OWNER),
+  'worktrees.pruneRemote': checked(...TARGET_OWNER),
+  'worktrees.rebaseOnto': checked(...TARGET_OWNER),
+  'worktrees.mergeFrom': checked(...TARGET_OWNER),
+  'worktrees.getDiffStats': checked(...TARGET_OWNER),
+  'worktrees.getWorktreeMetadata': checked(...TARGET_OWNER),
+  'worktrees.getCommitDag': checked(...TARGET_OWNER),
+  'worktrees.resolveChildBranches': checked(...TARGET_OWNER),
+  'worktrees.resolveCopyBehavior': checked(projOwner('projectId')),
+  'worktrees.getIgnoredFileTree': checked(...TARGET_OWNER),
+  'worktrees.openIgnoredTree': checked(...TARGET_OWNER),
+  'worktrees.listIgnoredTree': checked(...TARGET_OWNER),
+  'worktrees.matchIgnoredTree': checked(...TARGET_OWNER),
+  'worktrees.copyIgnoredFiles': checked(...TARGET_OWNER),
+  'worktrees.getResolvedCommitDag': checked(...TARGET_OWNER),
+  'worktrees.getResolvedForkGraph': checked(...TARGET_OWNER),
+  'worktrees.getResolvedUpstreamGraph': checked(...TARGET_OWNER),
+  'worktrees.getResolvedRecentCommits': checked(...TARGET_OWNER),
+  'worktrees.listStashes': checked(...TARGET_OWNER),
+  'worktrees.createStash': checked(...TARGET_OWNER),
+  'worktrees.applyStash': checked(...TARGET_OWNER),
+  'worktrees.popStash': checked(...TARGET_OWNER),
+  'worktrees.dropStash': checked(...TARGET_OWNER),
+  'worktrees.branchFromStash': checked(...TARGET_OWNER),
+  'worktrees.getStashDiff': checked(...TARGET_OWNER),
+  'worktrees.checkGhInstalled': checked(...TARGET_OWNER),
+  'worktrees.hasGithubRemote': checked(...TARGET_OWNER),
+  'worktrees.listOpenPrs': checked(...TARGET_OWNER),
+  'worktrees.getPrByUrl': checked(...TARGET_OWNER),
+  'worktrees.getPrForCheckout': checked(...TARGET_OWNER),
+  'worktrees.createPr': checked(...TARGET_OWNER),
+  'worktrees.getPrComments': checked(...TARGET_OWNER),
+  'worktrees.addPrComment': checked(...TARGET_OWNER),
+  'worktrees.mergePr': checked(...TARGET_OWNER),
+  'worktrees.getPrDiff': checked(...TARGET_OWNER),
+  'worktrees.getGhUser': checked(...TARGET_OWNER),
+  'worktrees.editPrComment': checked(...TARGET_OWNER),
+  'worktrees.onDiffChanged': streamed(onScopeOwner),
+  'worktrees.onDiffWatchFailed': streamed(onScopeOwner),
 
   // ── `admin` procedures (T-106): management, never another user's content (O-6) ──
   'aiConfig.marketplace.addRegistry': none(LIBRARY),
@@ -1439,9 +1520,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // Reads a file on the hub host: only inside one of the caller's roots (N1).
   'app.exportImport.testImportFromPath': checked(owned('filePath')),
   // Automations are their project's: an admin manages only those in its own projects.
-  'automations.getByProject': checked(project('projectId')),
+  'automations.getByProject': checked(projOwner('projectId')),
   'automations.get': checked(automation('id')),
-  'automations.create': { ...checked(project('project_id')), needsOne: ['project_id'] },
+  'automations.create': { ...checked(projOwner('project_id')), needsOne: ['project_id'] },
   'automations.update': checked(automation('id')),
   'automations.delete': checked(automation('id')),
   'automations.toggle': checked(automation('id')),

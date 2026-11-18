@@ -27,7 +27,24 @@ import { emitTasksChanged, getAppDeps, getComputersDepsOrNull } from './app-deps
 import { accessRequestOf, ownedProjectIds } from './owner-gate'
 
 setDiagnosticsRouterDeps({
-  accessScopeFor: (ctx) => createAccessScope(ctx.db, accessRequestOf(ctx))
+  // Diagnostics events are runtime records (agents, ptys, computers): their task's or
+  // project's OWNER only, never a member of a shared one (T-100).
+  accessScopeFor: (ctx) => {
+    const scope = createAccessScope(ctx.db, accessRequestOf(ctx))
+    return {
+      enforcing: scope.enforcing,
+      allowsAll: (resources) =>
+        scope.allowsAll(
+          resources.map((r) =>
+            r.kind === 'task'
+              ? { kind: 'taskOwner', id: r.id }
+              : r.kind === 'project'
+                ? { kind: 'projectOwner', id: r.id }
+                : r
+          )
+        )
+    }
+  }
 })
 
 setFileEditorRouterDeps({

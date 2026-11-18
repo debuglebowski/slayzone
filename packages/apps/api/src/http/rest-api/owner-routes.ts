@@ -15,6 +15,7 @@ import { isOwnerQuestion } from '../../owner-policy'
 import {
   auditOwnerDenied,
   firstDeniedRef,
+  restNeedOf,
   httpAccessRequest,
   runInOwnerScope,
   type DeniedRef
@@ -111,7 +112,7 @@ export function ownerRouteGuard(
     if (!isOwnerQuestion(classes[key])) return next()
     const principal = restPrincipalOf(req)
     const audit = (
-      reason: 'not_owner' | 'owner_unclassified' | 'no_principal',
+      reason: 'not_owner' | 'owner_unclassified' | 'no_principal' | 'insufficient_role',
       denied?: DeniedRef,
       status = 404
     ) =>
@@ -147,11 +148,19 @@ export function ownerRouteGuard(
     const computerPathLookup =
       key === 'GET /api/projects/resolve-by-path' && restComputerOf(req) !== null
     if (rule.ids && rule.ids.length > 0 && !computerPathLookup) {
-      const denied = await firstDeniedRef(db, scope, rule.ids, {
-        params: req.params,
-        query: req.query,
-        body: req.body
-      })
+      const denied = await firstDeniedRef(
+        db,
+        scope,
+        rule.ids,
+        { params: req.params, query: req.query, body: req.body },
+        restNeedOf(rule, req.method)
+      )
+      if (denied?.reason === 'insufficient_role') {
+        // The caller can see it (a member, a grantee): saying so reveals nothing.
+        audit('insufficient_role', denied, 403)
+        res.status(403).json({ ok: false, error: 'Your role does not allow this' })
+        return
+      }
       if (denied) {
         audit('not_owner', denied)
         notFound(res)

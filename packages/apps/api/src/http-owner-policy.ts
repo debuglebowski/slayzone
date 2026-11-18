@@ -30,7 +30,7 @@
  *
  * @module api/http-owner-policy
  */
-import type { AccessScope, OwnedResource, ResourceKind } from './access'
+import type { AccessRole, AccessScope, OwnedResource, ResourceKind } from './access'
 import type { OwnerMark } from './owner-policy'
 
 /**
@@ -78,6 +78,11 @@ export interface HttpOwnerRule {
   readonly scopedInHandler?: string
   /** The ids are checked inside the handler, not by the gate; says how. */
   readonly checkedInHandler?: string
+  /**
+   * The role every named id needs (T-100). Unset: a REST GET needs `view`, any other
+   * method `edit`; an MCP tool `edit` (owner-scope.ts `restNeedOf` / `mcpNeedOf`).
+   */
+  readonly need?: AccessRole
   readonly why?: string
 }
 
@@ -111,8 +116,14 @@ const path = ref('path', 'exact')
 const computer = ref('computer', 'exact')
 const automation = ref('automation', 'exact')
 const automationPrefix = ref('automation', 'prefix')
+/** The computer side of a task / project (T-100): its one owner user, never shared. */
+const taskOwner = ref('taskOwner', 'exact')
+const taskOwnerPrefix = ref('taskOwner', 'prefix')
+const projectOwnerExact = ref('projectOwner', 'exact')
+const projectOwnerRef = ref('projectOwner', 'projectRef')
 
 const checked = (...ids: HttpIdRef[]): HttpOwnerRule => ({ mark: 'id-checked', ids })
+const needing = (need: AccessRole, rule: HttpOwnerRule): HttpOwnerRule => ({ ...rule, need })
 const listed = (output: HttpOutputFilter, scopedInHandler?: string): HttpOwnerRule => ({
   mark: 'list-filtered',
   output,
@@ -207,7 +218,7 @@ const dataOne =
 
 /** A process row: its task when set, else its project (`processes.list`, T-17). */
 const processRow = (row: Record<string, unknown>): OwnedResource | null =>
-  res('task', row.taskId) ?? res('project', row.projectId)
+  res('taskOwner', row.taskId) ?? res('projectOwner', row.projectId)
 
 // ── reasons for `no-owned-input` ──────────────────────────────────────────────
 
@@ -291,44 +302,44 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/auth/deep-link': none(DEEP_LINK),
 
   // ── browser panel (keyed by the task whose panel it is) ──
-  'POST /api/browser/click': checked(task('body.taskId')),
-  'GET /api/browser/content': checked(task('query.taskId')),
-  'POST /api/browser/eval': checked(task('body.taskId')),
-  'POST /api/browser/navigate': checked(task('body.taskId')),
-  'POST /api/browser/screenshot': checked(task('body.taskId')),
-  'GET /api/browser/tabs': checked(task('query.taskId')),
-  'POST /api/browser/tabs': checked(task('body.taskId')),
-  'POST /api/browser/type': checked(task('body.taskId')),
-  'GET /api/browser/url': checked(task('query.taskId')),
+  'POST /api/browser/click': checked(taskOwner('body.taskId')),
+  'GET /api/browser/content': checked(taskOwner('query.taskId')),
+  'POST /api/browser/eval': checked(taskOwner('body.taskId')),
+  'POST /api/browser/navigate': checked(taskOwner('body.taskId')),
+  'POST /api/browser/screenshot': checked(taskOwner('body.taskId')),
+  'GET /api/browser/tabs': checked(taskOwner('query.taskId')),
+  'POST /api/browser/tabs': checked(taskOwner('body.taskId')),
+  'POST /api/browser/type': checked(taskOwner('body.taskId')),
+  'GET /api/browser/url': checked(taskOwner('query.taskId')),
 
   // ── workspace files (fileEditor.readFile's marks: the scope task / project and the
   // computer it may name) ──
   'GET /api/files/raw': checked(
-    task('query.taskId'),
-    projectExact('query.projectId'),
+    taskOwner('query.taskId'),
+    projectOwnerExact('query.projectId'),
     computer('query.computerId')
   ),
 
   // ── app ──
-  'POST /api/close-task/:id': checked(task('params.id')),
+  'POST /api/close-task/:id': needing('view', checked(task('params.id'))),
   'POST /api/tasks/:id/move': {
-    ...checked(taskPrefix('params.id')),
+    ...checked(taskOwnerPrefix('params.id')),
     checkedInHandler:
       'resolveProjectRef checks local target ownership; the app checks cross-hub targets'
   },
   'POST /api/tasks/:id/copy': {
-    ...checked(taskPrefix('params.id')),
+    ...checked(taskOwnerPrefix('params.id')),
     checkedInHandler:
       'resolveProjectRef checks local target ownership; the app checks cross-hub targets'
   },
-  'POST /api/projects/:id/move': checked(projectRef('params.id')),
-  'POST /api/projects/:id/copy': checked(projectRef('params.id')),
+  'POST /api/projects/:id/move': checked(projectOwnerRef('params.id')),
+  'POST /api/projects/:id/copy': checked(projectOwnerRef('params.id')),
   'GET /api/task-moves': listed(dataRows('id', 'taskMove')),
   'GET /api/task-moves/:id': checked(taskMove('params.id')),
   'POST /api/task-moves/:id/pause': checked(taskMove('params.id')),
   'POST /api/task-moves/:id/resume': checked(taskMove('params.id')),
   'POST /api/task-moves/:id/cancel': checked(taskMove('params.id')),
-  'POST /api/open-task/:id': checked(taskPrefix('params.id')),
+  'POST /api/open-task/:id': needing('view', checked(taskPrefix('params.id'))),
   'POST /api/notify': none(SIGNAL),
   'GET /api/computers': none(COMPUTER),
   'GET /api/computers/direct-addresses': none(DIRECT_ADDRESSES),
@@ -353,12 +364,11 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   // A project's path is a registered root (access.ts `path`): pointing one at someone
   // else's directory would make it yours.
   'POST /api/projects': checked(path('body.path'), computer('body.computerId')),
-  'PATCH /api/projects/:id': checked(
-    projectRef('params.id'),
-    path('body.path'),
-    computer('body.computerId')
+  'PATCH /api/projects/:id': needing(
+    'manage',
+    checked(projectRef('params.id'), path('body.path'), computer('body.computerId'))
   ),
-  'POST /api/projects/:id/skills': checked(projectRef('params.id')),
+  'POST /api/projects/:id/skills': checked(projectOwnerRef('params.id')),
   'GET /api/projects/resolve-by-path': then(checked(path('query.path')), dataOne('id', 'project')),
 
   // ── pty (a runtime session key) ──
@@ -369,8 +379,8 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/:id/submit': checked(session('params.id')),
   'GET /api/pty/:id/wait': checked(session('params.id')),
   'POST /api/pty/:id/write': checked(session('params.id')),
-  'POST /api/pty/respawn': checked(task('body.taskId')),
-  'POST /api/pty/start': checked(task('body.taskId')),
+  'POST /api/pty/respawn': checked(taskOwner('body.taskId')),
+  'POST /api/pty/start': checked(taskOwner('body.taskId')),
   // A previous hub run's sessions still running on a computer: its owner's.
   // And the task's, when the session belongs to one (same rule as tRPC/list).
   'GET /api/pty/unattached': listed(unattachedRows),
@@ -384,37 +394,37 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   ),
 
   // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──
-  'GET /api/chat/:id/status': checked(taskPrefix('params.id'), tab('query.tab')),
-  'GET /api/chat/:id/prompts': checked(taskPrefix('params.id'), tab('query.tab')),
-  'GET /api/chat/:id/transcript': checked(taskPrefix('params.id'), tab('query.tab')),
-  'GET /api/chat/:id/wait': checked(taskPrefix('params.id'), tab('query.tab')),
-  'GET /api/chat/:id/follow': checked(taskPrefix('params.id'), tab('query.tab')),
-  'POST /api/chat/:id/send': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/prompts/:requestId': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/interrupt': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/stop': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/restart': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/kill': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/reset': checked(taskPrefix('params.id'), tab('body.tab')),
-  'GET /api/chat/:id/queue': checked(taskPrefix('params.id'), tab('query.tab')),
-  'DELETE /api/chat/:id/queue': checked(taskPrefix('params.id'), tab('query.tab')),
-  'DELETE /api/chat/:id/queue/:itemId': checked(taskPrefix('params.id'), tab('query.tab')),
-  'POST /api/chat/:id/queue/:itemId/steer': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/settings': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/fork': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/rewind': checked(taskPrefix('params.id'), tab('body.tab')),
-  'POST /api/chat/:id/handoff': checked(taskPrefix('params.id'), tab('body.tab')),
+  'GET /api/chat/:id/status': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/prompts': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/transcript': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/wait': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'GET /api/chat/:id/follow': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'POST /api/chat/:id/send': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/prompts/:requestId': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/interrupt': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/stop': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/restart': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/kill': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/reset': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'GET /api/chat/:id/queue': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'DELETE /api/chat/:id/queue': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'DELETE /api/chat/:id/queue/:itemId': checked(taskOwnerPrefix('params.id'), tab('query.tab')),
+  'POST /api/chat/:id/queue/:itemId/steer': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/settings': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/fork': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/rewind': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
+  'POST /api/chat/:id/handoff': checked(taskOwnerPrefix('params.id'), tab('body.tab')),
 
   // ── agent (a task's main agent, chat or terminal) ──
-  'GET /api/agent/:id/status': checked(taskPrefix('params.id')),
-  'POST /api/agent/:id/start': checked(taskPrefix('params.id')),
-  'POST /api/agent/:id/send': checked(taskPrefix('params.id')),
-  'GET /api/agent/:id/wait': checked(taskPrefix('params.id')),
-  'GET /api/agent/:id/read': checked(taskPrefix('params.id')),
-  'POST /api/agent/:id/interrupt': checked(taskPrefix('params.id')),
+  'GET /api/agent/:id/status': checked(taskOwnerPrefix('params.id')),
+  'POST /api/agent/:id/start': checked(taskOwnerPrefix('params.id')),
+  'POST /api/agent/:id/send': checked(taskOwnerPrefix('params.id')),
+  'GET /api/agent/:id/wait': checked(taskOwnerPrefix('params.id')),
+  'GET /api/agent/:id/read': checked(taskOwnerPrefix('params.id')),
+  'POST /api/agent/:id/interrupt': checked(taskOwnerPrefix('params.id')),
 
   // ── terminal tabs ──
-  'POST /api/tabs/create': checked(task('body.taskId')),
+  'POST /api/tabs/create': checked(taskOwner('body.taskId')),
   'POST /api/tabs/rename': checked(tab('body.id')),
   'POST /api/tabs/split': checked(tab('body.tabId')),
 
@@ -426,7 +436,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
 
   // ── tasks ──
   'GET /api/tasks': listed(
-    dataRows('project_id', 'project'),
+    dataRows('id', 'task'),
     'the SQL itself is restricted to the caller’s projects, so `limit` counts only their rows'
   ),
   'GET /api/tasks/search': listed(
@@ -474,7 +484,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'GET /api/tasks/:id/blocking': then(checked(taskPrefix('params.id')), taskRowsById),
   'POST /api/tasks/:id/done': checked(taskPrefix('params.id')),
   'GET /api/tasks/:id/progress': checked(taskPrefix('params.id')),
-  'POST /api/tasks/:id/reset-conversation': checked(taskPrefix('params.id')),
+  'POST /api/tasks/:id/reset-conversation': checked(taskOwnerPrefix('params.id')),
   'GET /api/tasks/:id/subtasks': then(checked(taskPrefix('params.id')), taskRowsById),
   'POST /api/tasks/:id/subtasks': checked(taskPrefix('params.id')),
   'DELETE /api/tasks/:id/tags': checked(taskPrefix('params.id')),
@@ -491,8 +501,8 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
 
   // ── `admin` routes (T-106): management, never another user's content (O-6) ──
   // Automations are their project's: an admin manages only those in its own projects.
-  'GET /api/automations': checked(projectRef('query.project')),
-  'POST /api/automations': checked(projectRef('body.project')),
+  'GET /api/automations': checked(projectOwnerRef('query.project')),
+  'POST /api/automations': checked(projectOwnerRef('body.project')),
   'DELETE /api/automations/:id': checked(automationPrefix('params.id')),
   'GET /api/automations/:id': checked(automationPrefix('params.id')),
   'PATCH /api/automations/:id': checked(automationPrefix('params.id')),
@@ -531,7 +541,7 @@ export const MCP_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   create_subtask: checked(task('parent_task_id')),
   create_task: checked(projectExact('projectId'), task('parentId'), template('templateId')),
   delete_task: checked(task('id')),
-  get_current_task_id: checked(task('task_id')),
+  get_current_task_id: needing('view', checked(task('task_id'))),
   unarchive_task: checked(task('id')),
   update_task: checked(task('task_id'), task('parent_id'))
 }

@@ -18,8 +18,10 @@ import type { SlayzoneDb } from '@slayzone/platform'
  *      (`apps/hub/src/ownership-backfill.ts`); one that is somehow still unowned is
  *      a gap to fix, not a project to show to every user.
  *
- * Sharing (T-100) extends rule 3 to "owner or member": add the membership facts to
- * {@link ProjectOwnership} and one clause below. Callers do not change.
+ * `mayAccessProject` is that OWNER rule — still the whole rule for what lives on a
+ * computer or a disk (paths, terminals, worktrees). Sharing (T-100) adds
+ * {@link accessRoleOf}: the same rule extended to "owner, or a member / grantee, with
+ * a role", for hub-resident content only.
  *
  * Where callers get `authRequired`: tRPC `getAuthGate()` (`@slayzone/transport`
  * app-deps), REST `deps.restAuth?.required() === true`. Both come from the
@@ -47,6 +49,66 @@ export function mayAccessProject(req: ProjectAccessRequest, project: ProjectOwne
   if (!req.authRequired) return true
   if (!req.principal) return false
   return project.owner_user_id !== null && project.owner_user_id === req.principal.userId
+}
+
+// ── roles (T-100) ─────────────────────────────────────────────────────────────
+
+/**
+ * What a principal may do with SHARED, hub-resident content (a project's tasks,
+ * artifacts, tags …). Ordered: each includes the one before.
+ *
+ *   view    read it.
+ *   edit    change it, and start its agents on one's OWN computer.
+ *   manage  also decide who else gets in (members, grants, visibility).
+ *
+ * Never consulted for computer-resident things (terminals, chats, worktrees,
+ * processes, paths) or computers: those stay with their one owner
+ * ({@link mayAccessProject}).
+ */
+export type AccessRole = 'view' | 'edit' | 'manage'
+
+export const ACCESS_ROLES: readonly AccessRole[] = ['view', 'edit', 'manage']
+
+const RANK: Record<AccessRole, number> = { view: 1, edit: 2, manage: 3 }
+
+export function roleAtLeast(role: AccessRole | null, need: AccessRole): boolean {
+  return role !== null && RANK[role] >= RANK[need]
+}
+
+export function maxRole(a: AccessRole | null, b: AccessRole | null): AccessRole | null {
+  if (a === null) return b
+  if (b === null) return a
+  return RANK[a] >= RANK[b] ? a : b
+}
+
+/** One user's role on one thing (a `project_members` / `task_grants` row). */
+export interface AccessGrant {
+  readonly user_id: string
+  readonly role: AccessRole
+}
+
+/**
+ * The sharing facts of one thing: the user who owns it (manage) and the users it is
+ * shared with. Resolution (`access.ts`) builds these per resource kind; this is the
+ * one rule that reads them.
+ */
+export interface SharedOwnership extends ProjectOwnership {
+  readonly grants?: readonly AccessGrant[]
+}
+
+/**
+ * The principal's role, or null for none. No login: manage (the desktop app's hub has
+ * one trusted operator). Login without a principal: none. Otherwise the owner manages
+ * and a grantee gets its highest grant. An admin is no exception (O-6).
+ */
+export function accessRoleOf(req: ProjectAccessRequest, facts: SharedOwnership): AccessRole | null {
+  if (!req.authRequired) return 'manage'
+  if (!req.principal) return null
+  const userId = req.principal.userId
+  if (facts.owner_user_id !== null && facts.owner_user_id === userId) return 'manage'
+  let role: AccessRole | null = null
+  for (const g of facts.grants ?? []) if (g.user_id === userId) role = maxRole(role, g.role)
+  return role
 }
 
 /** {@link mayAccessProject} for a project id. A project that does not exist: false. */

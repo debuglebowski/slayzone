@@ -16,6 +16,8 @@ const scopeOf = (allowed: string[]): AccessScope => {
   const ok = (r: OwnedResource) => allowed.includes(`${r.kind}:${r.id}`)
   return {
     enforcing: true,
+    userId: 'user-a',
+    roleOf: (r) => (ok(r) ? 'manage' : null),
     allows: ok,
     allowsAll: async (rs) => rs.every(ok),
     filter: async (rows, to) =>
@@ -23,7 +25,8 @@ const scopeOf = (allowed: string[]): AccessScope => {
         const r = to(row)
         return r !== null && ok(r)
       }),
-    accessibleProjectIds: async () => null
+    accessibleProjectIds: async () => null,
+    ownedProjectIds: async () => null
   }
 }
 // A: its computer and its own task's session. Not B's task.

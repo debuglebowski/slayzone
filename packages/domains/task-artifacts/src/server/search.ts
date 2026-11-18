@@ -48,6 +48,12 @@ export interface ArtifactSearchOptions {
    * T-18). Null/absent = every project, as before.
    */
   projectIds?: readonly string[] | null
+  /**
+   * Only artifacts of these tasks (a hub with login: the tasks the caller may see —
+   * a shared project still holds private tasks of others, T-100). Null/absent = no
+   * task restriction beyond `projectIds`.
+   */
+  taskIds?: readonly string[] | null
   titlesOnly?: boolean
   contentOnly?: boolean
   regex?: boolean
@@ -160,6 +166,10 @@ export function searchArtifacts(
         : `AND task_id IN (SELECT id FROM tasks WHERE project_id IN (${opts.projectIds.map(() => '?').join(', ')}))`
     )
     params.push(...opts.projectIds)
+  }
+  if (opts.taskIds) {
+    sqlParts.push('AND task_id IN (SELECT value FROM json_each(?))')
+    params.push(JSON.stringify(opts.taskIds))
   }
   if (opts.excludeArtifactIds?.length) {
     sqlParts.push('AND id NOT IN (SELECT value FROM json_each(?))')
