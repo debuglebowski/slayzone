@@ -67,6 +67,8 @@ import {
   useIdleTasks
 } from '@slayzone/agent-panels'
 import { AppSidebar } from '@slayzone/sidebar'
+import { SharedWithMe } from '@slayzone/projects/client'
+import { SharedArtifactDialog } from '@slayzone/task-artifacts/client'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { ConvexScope, useLeaderboardAuth } from '@slayzone/leaderboard'
 import {
@@ -182,6 +184,7 @@ export function HomeView({
   // useExplodeMode (shared @slayzone/app-shell) owns the toggle, focused cell,
   // grid ref + responsive width.
   const [zenMode, setZenMode] = useState(false)
+  const [sharedArtifactId, setSharedArtifactId] = useState<string | null>(null)
   const openTaskIds = useMemo(
     () => tabs.filter((t) => t.type === 'task').map((t) => (t as { taskId: string }).taskId),
     [tabs]
@@ -727,6 +730,18 @@ export function HomeView({
             <ConvexScope>
               <FeedbackDialog />
             </ConvexScope>
+          }
+          sharedSlot={
+            <>
+              <SharedWithMe
+                onOpenTask={openTask}
+                onOpenArtifact={(_taskId, artifactId) => setSharedArtifactId(artifactId)}
+              />
+              <SharedArtifactDialog
+                artifactId={sharedArtifactId}
+                onClose={() => setSharedArtifactId(null)}
+              />
+            </>
           }
           keyRecorder={KeyRecorder}
           sessionTaskIds={EMPTY_SESSION_IDS}

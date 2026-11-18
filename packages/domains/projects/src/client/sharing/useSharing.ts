@@ -59,10 +59,10 @@ export function useMyRole(
 
 /**
  * Keeps everything sharing decides fresh: an `onChanged` naming the caller (it gained
- * or lost something) refetches the sharing queries, the projects and the board.
- * Mount once per hub connection (the app shell).
+ * or lost something) refetches the sharing queries and the projects, then calls
+ * `onAccessChanged` (the board hook reloads the board). Mounted by `useTasksData`.
  */
-export function useSharingLiveUpdates(): void {
+export function useSharingLiveUpdates(onAccessChanged: () => void): void {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const { enabled } = useSharingStatus()
@@ -72,6 +72,7 @@ export function useSharingLiveUpdates(): void {
       onData: () => {
         void queryClient.invalidateQueries({ queryKey: trpc.sharing.pathKey() })
         void queryClient.invalidateQueries(trpc.projects.list.queryFilter())
+        onAccessChanged()
       }
     })
   )

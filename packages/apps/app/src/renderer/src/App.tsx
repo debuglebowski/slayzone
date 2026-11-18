@@ -48,8 +48,8 @@ import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { markTerminalFirst } from '@slayzone/task/client/TerminalFirstShell'
 import { buildTaskDetailSnapshot, taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import type { ProjectCreationContext } from '@slayzone/projects'
-import { SharedWithMe, useSharingLiveUpdates } from '@slayzone/projects/client'
-import { SharedArtifactDialog } from './app-shell/SharedArtifactDialog'
+import { SharedWithMe } from '@slayzone/projects/client'
+import { SharedArtifactDialog } from '@slayzone/task-artifacts/client'
 import {
   isRateLimited,
   recordTaskOpen,
@@ -266,7 +266,6 @@ function App(): React.JSX.Element {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   // A file shared with the user on its own (T-100): opened outside its task.
   const [sharedArtifactId, setSharedArtifactId] = useState<string | null>(null)
-  useSharingLiveUpdates()
   const [projectSettingsInitialTab, setProjectSettingsInitialTab] =
     useState<ProjectSettingsTab>('general')
   const [testGroupBy, setTestGroupBy] = useState<'none' | 'path' | 'label'>('none')

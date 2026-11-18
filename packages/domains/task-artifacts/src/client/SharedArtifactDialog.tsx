@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
-import { useTRPC } from '../trpc'
+import { useTRPC } from './trpc'
 
 /**
  * A file someone shared with the user on its own (T-100): they may not open its task,

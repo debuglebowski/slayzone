@@ -23,6 +23,7 @@ import { applySidebarHubOrder, partitionSidebarOrder, sidebarTopLevelRefs } from
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
 import { useBoardRefresh, type BoardRefreshTarget } from './useBoardRefresh'
+import { useSharingLiveUpdates } from '@slayzone/projects/client'
 import {
   MAX_PATCH_ROWS,
   parentIdsOf,
@@ -646,6 +647,13 @@ export function useTasksData(): UseTasksDataReturn {
     }
     await refreshTabs((rows as unknown as BoardRows).tasks)
   })
+  const reloadEverything = useStableCallback(() => {
+    void queryClient
+      .invalidateQueries(trpc.task.loadBoardData.queryFilter())
+      .then(afterFullBoardReload)
+    void loadGroups()
+    void refreshTaskScopedQueries(queryClient, null)
+  })
   const handleTasksChanged = useStableCallback((event: TasksChangedEvent | undefined) => {
     // Hubs that predate the payload send nothing: unknown scope.
     const taskIds = event?.taskIds ?? null
@@ -656,15 +664,14 @@ export function useTasksData(): UseTasksDataReturn {
         .catch(() => undefined)
       return
     }
-    void queryClient
-      .invalidateQueries(trpc.task.loadBoardData.queryFilter())
-      .then(afterFullBoardReload)
-    void loadGroups()
-    void refreshTaskScopedQueries(queryClient, null)
+    reloadEverything()
   })
   useSubscription(
     trpc.notify.onTasksChanged.subscriptionOptions(undefined, { onData: handleTasksChanged })
   )
+  // Sharing (T-100): gaining or losing a project or task changes which projects and
+  // tasks exist for this user at all, so the whole board reloads.
+  useSharingLiveUpdates(reloadEverything)
 
   // Tag CustomEvents patch local tags state directly (instant cross-component
   // sync without a board refetch). Blocked-changed re-pulls the blocked id set.
