@@ -3145,6 +3145,9 @@ export function createChatTransport(
           if (!tab.storageFailed && tab.terminalState === 'starting') transitionState(tab, 'idle')
         },
         onEvent: (p, event) => handleProcessEvent(tab, p, event),
+        // The runtime never lets a process it is stopping leave its state but to
+        // `dead` (`transitionState`); the lifecycle model hears the same.
+        onStopRequested: (p) => shadowFeed(tab, p.gen, { type: 'process-stopping' }),
         onExit: (p, code, signal, unconfirmed) =>
           handleProcessExit(tab, p, code, signal, unconfirmed),
         onStartError: (p, err) => {
