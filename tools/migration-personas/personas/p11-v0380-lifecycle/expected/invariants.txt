@@ -19,6 +19,9 @@ ok   settle: settled
 ok   settle: after use: settled
 ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 3563b77a-018e-4839-8772-fea05895b93e — 10 events kept, in order
 ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 4fbb1396-c063-442c-a65b-6a2b8cf83756 — 10 events kept, in order
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: records_state_version triggers from the old build replaced by today's
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: records_state_version triggers from the old build replaced by today's
+ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: records_state_version triggers from the old build replaced by today's
 ok   tab 3563b77a-018e-4839-8772-fea05895b93e after the upgrade: no agent started (refused: its computer idle-box is disabled; history stays readable)
 ok   tab 4fbb1396-c063-442c-a65b-6a2b8cf83756 after the upgrade: no agent started (refused: ran on ci-box's old id: that row stays, offline (v0.38 re-enroll links no successor))
 ok   tab d18ae771-20ef-47b7-bc57-726cb1f5ea56 after the upgrade: no agent started (refused: its computer old-laptop was deleted)
@@ -27,12 +30,12 @@ ok   tab f18b04be-e413-468d-bb6e-d9fc850ee0ce after the upgrade: no agent starte
 ok   tab ee5705c5-cb7b-4e69-9271-751fd7f64334 after the upgrade: no agent started (refused: archived)
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 13 (latest 13)
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 214 (latest 214)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 222 (latest 222)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 4 → 4
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 9 → 9
 ok   .slayzone/stable/hub/slayzone.data.sqlite: task_artifacts rows 5 → 5
@@ -93,7 +96,7 @@ ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)
 ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
-ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 13 (latest 13)
 ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
-ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 13 (latest 13)

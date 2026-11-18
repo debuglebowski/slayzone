@@ -1,8 +1,10 @@
-user_version 12
+user_version 13
 
 ## schema
 index agent_sessions_conversation: CREATE INDEX agent_sessions_conversation ON agent_sessions(conversation_id)
+index agent_sessions_conversation_task: CREATE INDEX agent_sessions_conversation_task ON agent_sessions(conversation_id, task_id)
 index agent_sessions_pool: CREATE INDEX agent_sessions_pool ON agent_sessions(cwd, mode) WHERE status = 'pooled'
+index agent_sessions_task_mode_owned: CREATE INDEX agent_sessions_task_mode_owned ON agent_sessions(task_id, mode, coalesce(bound_at, created_at) DESC)
 index agent_sessions_task_tab: CREATE INDEX agent_sessions_task_tab ON agent_sessions(task_id, mode, tab_id, created_at DESC)
 index agent_turns_task: CREATE INDEX agent_turns_task ON agent_turns(task_id)
 index agent_turns_worktree: CREATE INDEX agent_turns_worktree ON agent_turns(worktree_path, created_at)
@@ -33,6 +35,7 @@ table artifact_blob_gc_pending: CREATE TABLE artifact_blob_gc_pending(id INTEGER
 table artifact_blob_leases: CREATE TABLE artifact_blob_leases(id TEXT PRIMARY KEY,expires_at INTEGER NOT NULL)
 table artifact_blob_pins: CREATE TABLE artifact_blob_pins( scope TEXT NOT NULL,owner_id TEXT NOT NULL,token TEXT NOT NULL,reference_key TEXT NOT NULL, task_id TEXT NOT NULL,artifact_id TEXT NOT NULL,owner_epoch INTEGER NOT NULL, content_hash TEXT NOT NULL,size INTEGER NOT NULL, PRIMARY KEY(scope,owner_id,token,reference_key) )
 table artifact_blobs: CREATE TABLE artifact_blobs(hash TEXT PRIMARY KEY,size INTEGER NOT NULL)
+table artifact_file_commits: CREATE TABLE artifact_file_commits(operation_id TEXT PRIMARY KEY)
 table artifact_folder_tombstones: CREATE TABLE artifact_folder_tombstones(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,task_id TEXT NOT NULL)
 table artifact_folders: CREATE TABLE artifact_folders ( id TEXT PRIMARY KEY,task_id TEXT NOT NULL,parent_id TEXT REFERENCES artifact_folders(id) ON DELETE CASCADE, name TEXT NOT NULL,"order" INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT(datetime('now')) )
 table artifact_owners: CREATE TABLE artifact_owners(id TEXT PRIMARY KEY,kind TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id))
@@ -46,9 +49,12 @@ table content_erasure_offline_requests: CREATE TABLE content_erasure_offline_req
 table content_erasure_tabs: CREATE TABLE content_erasure_tabs ( tab_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id) )
 table content_erasure_tasks: CREATE TABLE content_erasure_tasks ( task_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES content_erasure_jobs(id), owner_user_id TEXT )
 table conversations: CREATE TABLE conversations ( id TEXT PRIMARY KEY, task_id TEXT NOT NULL, tab_id TEXT NOT NULL, mode TEXT NOT NULL, epoch INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','frozen','prepared','deleted')), migration_id TEXT, migration_hash TEXT )
-table events: CREATE TABLE events ( conversation_id TEXT NOT NULL REFERENCES conversations(id), seq INTEGER NOT NULL, saved_at INTEGER NOT NULL, event TEXT NOT NULL, PRIMARY KEY(conversation_id, seq) )
+table event_marker_coverage: CREATE TABLE event_marker_coverage (conversation_id TEXT PRIMARY KEY) WITHOUT ROWID
+table event_markers: CREATE TABLE event_markers ( conversation_id TEXT NOT NULL, seq INTEGER NOT NULL, kind, session_id, branch_id, message_id, PRIMARY KEY(conversation_id, seq) ) WITHOUT ROWID
+table events: CREATE TABLE events ( conversation_id TEXT NOT NULL REFERENCES conversations(id), seq INTEGER NOT NULL, saved_at INTEGER NOT NULL, event TEXT NOT NULL, blob_form INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(conversation_id, seq) )
 table item_faults: CREATE TABLE item_faults ( origin TEXT NOT NULL CHECK (origin IN ('hub','computer')), computer_id TEXT NOT NULL DEFAULT '', pass TEXT NOT NULL, item_key TEXT NOT NULL, task_id TEXT, kind TEXT NOT NULL CHECK (kind IN ('transient','structural')), fingerprint TEXT, message TEXT NOT NULL, attempts INTEGER NOT NULL, first_at INTEGER NOT NULL, last_at INTEGER NOT NULL, next_retry_at INTEGER, PRIMARY KEY (origin, computer_id, pass, item_key) )
 table legacy_conversation_history: CREATE TABLE legacy_conversation_history ( task_id TEXT NOT NULL, mode TEXT NOT NULL, ids TEXT NOT NULL, PRIMARY KEY(task_id, mode) )
+table maintenance_cursors: CREATE TABLE maintenance_cursors (id TEXT PRIMARY KEY, value TEXT NOT NULL)
 table migration_checkpoints: CREATE TABLE migration_checkpoints ( migration_id TEXT PRIMARY KEY, identity TEXT NOT NULL, value TEXT NOT NULL )
 table mode_agents: CREATE TABLE mode_agents (mode TEXT PRIMARY KEY, agent_type TEXT)
 table provider_config_seeds: CREATE TABLE provider_config_seeds ( task_id TEXT NOT NULL, mode TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(task_id,mode) )
@@ -69,6 +75,7 @@ table task_lifecycle: CREATE TABLE task_lifecycle (task_id TEXT PRIMARY KEY,stat
 table task_path_releases: CREATE TABLE task_path_releases ( task_id TEXT PRIMARY KEY, project_id TEXT, worktree_path TEXT NOT NULL, released_at INTEGER NOT NULL )
 table task_paths: CREATE TABLE task_paths ( task_id TEXT PRIMARY KEY, project_id TEXT, worktree_path TEXT, base_dir TEXT, updated_at INTEGER NOT NULL )
 table task_state_versions: CREATE TABLE task_state_versions ( task_id TEXT PRIMARY KEY, version INTEGER NOT NULL )
+table timeline_page_metadata: CREATE TABLE timeline_page_metadata ( conversation_id TEXT NOT NULL, page_id TEXT NOT NULL, summary TEXT NOT NULL, search_text TEXT NOT NULL, PRIMARY KEY(conversation_id,page_id) ) WITHOUT ROWID
 table usage_cursors: CREATE TABLE usage_cursors ( file_path TEXT PRIMARY KEY, offset INTEGER NOT NULL, modified_ms REAL NOT NULL )
 trigger artifact_blob_gc_requested: CREATE TRIGGER artifact_blob_gc_requested BEFORE INSERT ON artifact_blob_gc_pending BEGIN UPDATE artifact_blob_gc_generation SET version=version+1 WHERE id=1; END
 trigger artifact_folders_state_version_delete: CREATE TRIGGER artifact_folders_state_version_delete AFTER DELETE ON artifact_folders BEGIN INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
@@ -86,15 +93,23 @@ trigger chat_folder_owner_move: CREATE TRIGGER chat_folder_owner_move AFTER UPDA
 trigger conversations_state_version: CREATE TRIGGER conversations_state_version AFTER UPDATE ON conversations BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger erased_artifact_cannot_return: CREATE TRIGGER erased_artifact_cannot_return BEFORE INSERT ON task_artifacts WHEN EXISTS(SELECT 1 FROM content_erasure_artifacts WHERE artifact_id=NEW.id) BEGIN SELECT RAISE(ABORT,'Artifact was permanently erased'); END
 trigger erased_artifact_has_no_new_versions: CREATE TRIGGER erased_artifact_has_no_new_versions BEFORE INSERT ON artifact_versions WHEN EXISTS(SELECT 1 FROM content_erasure_artifacts WHERE artifact_id=NEW.artifact_id) BEGIN SELECT RAISE(ABORT,'Artifact was permanently erased'); END
+trigger event_marker_coverage_delete: CREATE TRIGGER event_marker_coverage_delete AFTER DELETE ON conversations BEGIN DELETE FROM event_marker_coverage WHERE conversation_id=OLD.id; END
+trigger event_marker_coverage_insert: CREATE TRIGGER event_marker_coverage_insert AFTER INSERT ON conversations BEGIN INSERT OR IGNORE INTO event_marker_coverage VALUES(NEW.id); END
+trigger event_markers_delete: CREATE TRIGGER event_markers_delete AFTER DELETE ON events BEGIN DELETE FROM event_markers WHERE conversation_id=OLD.conversation_id AND seq=OLD.seq; END
+trigger event_markers_insert: CREATE TRIGGER event_markers_insert AFTER INSERT ON events WHEN json_valid(NEW.event) AND json_extract(NEW.event,'$.kind') IN ('turn-init','conversation-branch','user-message') BEGIN INSERT OR REPLACE INTO event_markers VALUES(NEW.conversation_id,NEW.seq,json_extract(NEW.event,'$.kind'),json_extract(NEW.event,'$.sessionId'),json_extract(NEW.event,'$.conversationId'),json_extract(NEW.event,'$.id')); END
+trigger event_markers_update: CREATE TRIGGER event_markers_update AFTER UPDATE OF conversation_id,seq,event ON events BEGIN DELETE FROM event_markers WHERE conversation_id=OLD.conversation_id AND seq=OLD.seq; INSERT OR REPLACE INTO event_markers SELECT NEW.conversation_id,NEW.seq,json_extract(NEW.event,'$.kind'),json_extract(NEW.event,'$.sessionId'),json_extract(NEW.event,'$.conversationId'),json_extract(NEW.event,'$.id') WHERE json_valid(NEW.event) AND json_extract(NEW.event,'$.kind') IN ('turn-init','conversation-branch','user-message'); END
 trigger provider_configs_state_version_delete: CREATE TRIGGER provider_configs_state_version_delete AFTER DELETE ON provider_configs BEGIN INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger provider_configs_state_version_insert: CREATE TRIGGER provider_configs_state_version_insert AFTER INSERT ON provider_configs BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger provider_configs_state_version_update: CREATE TRIGGER provider_configs_state_version_update AFTER UPDATE ON provider_configs BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
-trigger records_state_version_delete: CREATE TRIGGER records_state_version_delete AFTER DELETE ON records WHEN NOT (OLD.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message') OR (OLD.kind='settings' AND (OLD.id='metadata-counter' OR OLD.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=OLD.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=OLD.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
-trigger records_state_version_insert: CREATE TRIGGER records_state_version_insert AFTER INSERT ON records WHEN NOT (NEW.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message') OR (NEW.kind='settings' AND (NEW.id='metadata-counter' OR NEW.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
-trigger records_state_version_update: CREATE TRIGGER records_state_version_update AFTER UPDATE ON records WHEN NOT (NEW.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message') OR (NEW.kind='settings' AND (NEW.id='metadata-counter' OR NEW.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger records_state_version_delete: CREATE TRIGGER records_state_version_delete AFTER DELETE ON records WHEN NOT (OLD.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message','event-blob') OR (OLD.kind='settings' AND (OLD.id='metadata-counter' OR OLD.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=OLD.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=OLD.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger records_state_version_insert: CREATE TRIGGER records_state_version_insert AFTER INSERT ON records WHEN NOT (NEW.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message','event-blob') OR (NEW.kind='settings' AND (NEW.id='metadata-counter' OR NEW.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger records_state_version_update: CREATE TRIGGER records_state_version_update AFTER UPDATE ON records WHEN NOT (NEW.kind IN ('draft','prompt','workspace','attachment','timeline','pinned-message','event-blob') OR (NEW.kind='settings' AND (NEW.id='metadata-counter' OR NEW.id GLOB 'metadata:*'))) BEGIN INSERT INTO task_state_versions(task_id,version) SELECT (SELECT task_id FROM conversations WHERE id=NEW.conversation_id),1 WHERE (SELECT task_id FROM conversations WHERE id=NEW.conversation_id) IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger task_artifacts_state_version_delete: CREATE TRIGGER task_artifacts_state_version_delete AFTER DELETE ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT OLD.task_id,1 WHERE OLD.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger task_artifacts_state_version_insert: CREATE TRIGGER task_artifacts_state_version_insert AFTER INSERT ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state_version_update AFTER UPDATE ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
+trigger timeline_page_metadata_delete: CREATE TRIGGER timeline_page_metadata_delete AFTER DELETE ON records WHEN OLD.kind='timeline' AND OLD.id GLOB 'page:*' BEGIN DELETE FROM timeline_page_metadata WHERE conversation_id=OLD.conversation_id AND page_id=OLD.id; END
+trigger timeline_page_metadata_insert: CREATE TRIGGER timeline_page_metadata_insert AFTER INSERT ON records WHEN NEW.kind='timeline' AND NEW.id GLOB 'page:*' BEGIN DELETE FROM timeline_page_metadata WHERE conversation_id=NEW.conversation_id AND page_id=NEW.id; END
+trigger timeline_page_metadata_update: CREATE TRIGGER timeline_page_metadata_update AFTER UPDATE OF conversation_id,kind,id,value ON records BEGIN DELETE FROM timeline_page_metadata WHERE OLD.kind='timeline' AND conversation_id=OLD.conversation_id AND page_id=OLD.id; DELETE FROM timeline_page_metadata WHERE NEW.kind='timeline' AND conversation_id=NEW.conversation_id AND page_id=NEW.id; END
 
 ## agent_sessions (2)
 {"id":"<new-uuid>","mode":"claude-code","cwd":null,"task_id":"2b3b3b56-c89c-49ef-ba29-3625602e05a6","tab_id":"2b3b3b56-c89c-49ef-ba29-3625602e05a6","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":<run-ms>,"bound_at":<run-ms>,"ended_at":null}
@@ -116,6 +131,8 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 ## artifact_blob_pins (0)
 
 ## artifact_blobs (0)
+
+## artifact_file_commits (0)
 
 ## artifact_folder_tombstones (0)
 
@@ -147,11 +164,22 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 {"id":"hook-inbox:2b3b3b56-c89c-49ef-ba29-3625602e05a6","task_id":"2b3b3b56-c89c-49ef-ba29-3625602e05a6","tab_id":"hook-inbox:2b3b3b56-c89c-49ef-ba29-3625602e05a6","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
 {"id":"hook-inbox:c13468fa-a7df-4935-875e-fdfd0a5b1220","task_id":"c13468fa-a7df-4935-875e-fdfd0a5b1220","tab_id":"hook-inbox:c13468fa-a7df-4935-875e-fdfd0a5b1220","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
 
+## event_marker_coverage (3)
+{"conversation_id":"__slz_settings__"}
+{"conversation_id":"hook-inbox:2b3b3b56-c89c-49ef-ba29-3625602e05a6"}
+{"conversation_id":"hook-inbox:c13468fa-a7df-4935-875e-fdfd0a5b1220"}
+
+## event_markers (0)
+
 ## events (0)
 
 ## item_faults (0)
 
 ## legacy_conversation_history (0)
+
+## maintenance_cursors (2)
+{"id":"storage-durable-prefix-v1","value":"\"<new-uuid>\""}
+{"id":"store-session","value":"{\"clean\":true,\"bootedAt\":<machine-boot-ms>}"}
 
 ## migration_checkpoints (0)
 
@@ -183,8 +211,9 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 {"conversation_id":"<new-uuid>","first_turn_at":<run-ms>}
 {"conversation_id":"<new-uuid>","first_turn_at":<run-ms>}
 
-## storage_maintenance (1)
+## storage_maintenance (2)
 {"id":"attachment-pins-v4"}
+{"id":"event-blobs-v1"}
 
 ## store_identity (1)
 {"id":1,"store_id":"<new-uuid>"}
@@ -211,6 +240,8 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 {"task_id":"2b3b3b56-c89c-49ef-ba29-3625602e05a6","version":1}
 {"task_id":"__slz_settings__","version":2}
 {"task_id":"c13468fa-a7df-4935-875e-fdfd0a5b1220","version":1}
+
+## timeline_page_metadata (0)
 
 ## usage_cursors (4)
 {"file_path":"/home/persona/.claude/projects/-home-persona-repos-app/a2d15915-1ea5-4353-a31f-7095645cf579.jsonl","offset":788,"modified_ms":1794395087000}

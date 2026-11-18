@@ -5,17 +5,18 @@ ok   settle: after use: settled
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 34020b0c-7aa4-4159-8f34-5cba6cfab6d2 — 18 events kept, in order
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 55f9849b-c816-4c7c-a898-17b54365ba7a — 10 events kept, in order
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 5cf6f330-7d02-41a3-8432-0c596f4f5b2e — 10 events kept, in order
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: records_state_version triggers from the old build replaced by today's
 ok   tab 34020b0c-7aa4-4159-8f34-5cba6cfab6d2 after the upgrade: should resume its own session 58d611fc-b3b8-4246-a40b-3efce1b72b95
 ok   tab 55f9849b-c816-4c7c-a898-17b54365ba7a after the upgrade: should resume its own session 58d611fc-b3b8-4246-a40b-3efce1b72b95
 ok   tab 5cf6f330-7d02-41a3-8432-0c596f4f5b2e after the upgrade: should resume its own session 5bfcea68-7259-4663-bcf2-8cc405c674d4
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 13 (latest 13)
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 214 (latest 214)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 222 (latest 222)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 2 → 2
 ok   .slayzone/stable/hub/slayzone.data.sqlite: every project folder is ready on a registered computer

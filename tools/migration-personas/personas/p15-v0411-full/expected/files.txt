@@ -698,6 +698,7 @@
     2026-11-18T05:05:34.062Z
 .slayzone/stable/hub/artifacts/b8be5cea-0c2f-48bb-89ba-89a1eb89d455/20c21401-0d81-433d-bec3-3e1c72841b10.md  (text)
     notes
+.slayzone/stable/hub/backups/slayzone.data.<run-time>.migration.sqlite  (database backup)
 .slayzone/stable/hub/blobs/44/4e0fffbd825e9610ff5b199485707a0c895339ae80c15cc8a8aee41b106fda  (text)
     notes
 .slayzone/stable/hub/slayzone.auth.sqlite  (database → db/.slayzone/stable/hub/slayzone.auth.sqlite.txt)
@@ -1502,6 +1503,7 @@ computers/c3/computer.state.json  (json)
         "computerId": "1d8d0e6e-caf8-4500-9ca9-3b75ab6f83ee"
       }
     }
+hubs/hub2/backups/slayzone.data.<run-time>.migration.sqlite  (database backup)
 hubs/hub2/hub.state.json  (json)
     {
       "computerTransportSecret": "aeb11da6d5a91f7766bc8ccd2e5bc0ed13a04493f79b79747f1b46da276b13e1"

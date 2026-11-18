@@ -6,12 +6,12 @@ ok   tab 1b75d394-f75b-41c3-a485-66d44494f45f after the upgrade: should resume i
 ok   tab 9d687b0c-0ed3-458b-b50b-9d1c5f44634e after the upgrade: should resume its own session f808dbab-2101-4a2e-bd0c-49d68918c10e
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 13 (latest 13)
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 214 (latest 214)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 222 (latest 222)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 2 → 2
 ok   .slayzone/stable/hub/slayzone.data.sqlite: project "Webapp" (folder /home/persona/repos/webapp) has a ready folder on local-computer
