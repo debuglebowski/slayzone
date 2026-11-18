@@ -18,7 +18,7 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.24.0",
     "zod": "^4.6.6"
   },
   "devDependencies": {

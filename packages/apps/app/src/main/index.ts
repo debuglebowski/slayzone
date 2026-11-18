@@ -3262,7 +3262,6 @@ app
 
     // Initialize Chrome extension API support for the browser panel session.
     const chromeExtensions = new ElectronChromeExtensions({
-      license: 'GPL-3.0',
       session: browserSession,
       // How extensions open, focus and close tabs (chrome.tabs.*): browser-panel tabs.
       // Without these, 1Password could not open its own sign-in page at all.

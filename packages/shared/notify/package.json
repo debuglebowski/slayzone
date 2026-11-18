@@ -16,6 +16,6 @@
     "@slayzone/settings-core": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
-    "@trpc/server": "^11.19.0"
+    "@trpc/server": "^11.24.0"
   }
 }

@@ -27,7 +27,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.24.0",
     "date-fns": "^4.4.0",
     "lucide-react": "^1.68.0",
     "zod": "^4.6.6"
