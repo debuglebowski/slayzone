@@ -1624,6 +1624,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/TerminalSplitGroup.test.tsx \
+  packages/domains/task-terminals/src/client/TerminalContainer.test.tsx \
   packages/domains/task-terminals/src/client/chat/review-integration-upgrade.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatQueue.pending.test.tsx \
   packages/domains/task-terminals/src/client/chat/attachments/useChatAttachments.test.tsx \
@@ -1784,6 +1785,7 @@ run_vitest_files "vitest (boot idle hydration)" \
   packages/domains/task-terminals/src/client/chat/chat-restoration.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
+  packages/apps/app/src/renderer/src/lib/benignWindowError.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts
 
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the
