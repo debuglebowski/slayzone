@@ -258,3 +258,19 @@ test.each(['shadow', 'authoritative'] as const)(
     expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
   }
 )
+
+// Seen on a real chat (2026-11-18): a never-started chat closed. Nothing ran, so
+// it stays `not-spawned`; the model was told its process ended and read `dead`.
+test.each(['shadow', 'authoritative'] as const)(
+  '%s: closing a chat that never started leaves it not started, and the two agree',
+  async (mode) => {
+    const records: Array<{ event: string }> = []
+    transportHarness({ deps: { diagnostic: (_t, r) => records.push(r) } })
+    await mgr.hydrateSession({ ...TAB_OPTS, lifecycleMode: mode } as never)
+    mgr.kill(TAB_OPTS.tabId)
+    await new Promise((r) => setImmediate(r))
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)?.state).toBe('not-spawned')
+    expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.snapshot.state).toBe('not-spawned')
+    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+  }
+)

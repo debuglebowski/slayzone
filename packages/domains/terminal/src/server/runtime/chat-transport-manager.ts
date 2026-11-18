@@ -4618,14 +4618,14 @@ export function createChatTransport(
     const tab = tabs.get(tabId)
     if (!tab) return
     if (tab.ended) return
-    shadowFeed(tab, tab.gen, { type: 'process-ended' })
     const proc = tab.proc
     // Pre-spawn skeleton (no process): mark ended so subsequent operations short-
-    // circuit, but no process to signal.
+    // circuit, but no process to signal — nothing ran, the state stays as it is.
     if (!proc || proc.ended) {
       tab.ended = true
       return
     }
+    shadowFeed(tab, tab.gen, { type: 'process-ended' })
     proc.kill('SIGTERM')
     const t = setTimeout(() => {
       if (!proc.ended) proc.kill('SIGKILL')
