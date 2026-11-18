@@ -617,6 +617,8 @@ test.each([false, true])(
     c.send({ id: 9002, method: 'currentTime/read', params: {} })
     await until(() => c.stdin.some((m) => m.id === 9002 && m.result !== undefined))
     await new Promise<void>((resolve) => setImmediate(resolve))
+    // A still-running request settles as an error; the status follows asynchronously.
+    if (!finished) await until(() => mgr.getTurnStatus(tab)?.state === 'error')
     expect(mgr.getTurnStatus(tab)).toMatchObject({
       state: finished ? 'idle' : 'error',
       turnOpen: false

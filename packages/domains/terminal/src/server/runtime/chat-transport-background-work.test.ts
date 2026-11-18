@@ -93,9 +93,10 @@ test('a background sub-agent outliving its turn reads background, then idle at i
   emitLine(f, sj.success('launched'))
   emitLine(f, sj.lifecycle('u1', 'completed'))
   await until(() => mgr.getChatSessionState(SESSION) === 'background')
-  // The turn itself is over: a queued message may go.
+  // The turn itself is over: a queued message may go (the gate reopens when the
+  // tab's event publication settles).
   expect(mgr.getSessionTerminalState(TAB_OPTS.tabId)).toBe('idle')
-  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
   expect(mgr.listChatSessions().find((s) => s.sessionId === SESSION)?.state).toBe('background')
 
   emitLine(f, taskNotification('a1', 'toolu_a', 'completed'))
