@@ -181,6 +181,14 @@ export async function runCommandLocked({
   const who = `${label}:${repoName()}`
   let ticket = null
   const drop = () => release({ lockDir: paths.lockDir, ticket })
+  // Ctrl-C reaches the whole foreground process group, the command included: stay alive
+  // until it exits. A SIGTERM / SIGHUP sent to this process alone is passed on. Installed
+  // before the wait handlers come off: with no listener between them, a signal during
+  // spawn() took the default action and left the lock held.
+  let child = null
+  const onRunSignal = (sig) => {
+    if (sig !== 'SIGINT') child?.kill(sig)
+  }
 
   if (skip === null) {
     ticket = enqueue({ queueDir: paths.queueDir, who })
@@ -200,24 +208,20 @@ export async function runCommandLocked({
       said = line
       await new Promise((resolve) => setTimeout(resolve, pollMs))
     }
+    for (const sig of SIGNALS) process.on(sig, onRunSignal)
     for (const sig of SIGNALS) process.off(sig, onWaitSignal)
     if (said) log(`ci-lock: ${who} has the lock`)
-  } else if (skip !== 'held') {
-    log(`ci-lock: not taking the machine-wide CI lock (${skip})`)
+  } else {
+    for (const sig of SIGNALS) process.on(sig, onRunSignal)
+    if (skip !== 'held') log(`ci-lock: not taking the machine-wide CI lock (${skip})`)
   }
 
-  const child = spawn(cmd[0], cmd.slice(1), {
+  child = spawn(cmd[0], cmd.slice(1), {
     stdio: [stdin, 'inherit', 'inherit'],
     cwd,
     env: { ...env, SLZ_CI_LOCK_HELD: '1' },
     shell: process.platform === 'win32' // pnpm / npx are .cmd shims there
   })
-  // Ctrl-C reaches the whole foreground process group, the command included: stay alive
-  // until it exits. A SIGTERM / SIGHUP sent to this process alone is passed on.
-  const onRunSignal = (sig) => {
-    if (sig !== 'SIGINT') child.kill(sig)
-  }
-  for (const sig of SIGNALS) process.on(sig, onRunSignal)
   const [code, signal] = await new Promise((resolve) => {
     child.on('error', (err) => {
       log(`ci-lock: cannot run ${cmd[0]}: ${err.message}`)
