@@ -44,7 +44,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm test:e2e:perf` | Run the `perf` group alone (wall-clock budgets — needs a quiet box; not part of `test:e2e`) |
 | `pnpm lint`      | Lint all packages              |
 
-**Machine-wide CI lock.** `pnpm test:e2e` (+ `:perf`, `:chat`) and `pnpm test:unit` (+ `:fast`) first take a FIFO lock shared with other repos' local gates (`scripts/ci-lock.mjs`; same `/tmp/ci-local.{queue,lock}` files as madacademy `ci/lock.sh`) and print who holds it while waiting. Skipped when `CI` is set; `SLZ_NO_CI_LOCK=1` opts out.
+**Machine-wide CI lock.** `pnpm test:e2e` (+ `:perf`, `:chat`) and `pnpm test:unit` (+ `:fast`) first take a FIFO lock shared with other repos' local gates (`scripts/ci-lock.mjs`; same `/tmp/ci-local.{queue,lock}` files as madacademy `ci/lock.sh`) and print who holds it while waiting. Skipped when `CI` is set; `SLZ_NO_CI_LOCK=1` opts out. Local iOS builds take it too, at `taskpolicy -c utility` (`scripts/ios-build.mjs`): `pnpm --filter @slayzone/mobile ios [expo run:ios args]` locks only the build (prebuild, pods, xcodebuild) and releases it before Metro starts; `pnpm --filter @slayzone/mobile ios:exec <cmd>` locks any other build command (`xcodebuild archive`, `pod install`). Never run bare `expo run:ios` / `xcodebuild` / `pod install`.
 
 A vitest run started directly (`npx vitest run …` anywhere) keeps at most half the cores busy: every directory with tests has a `vitest.config.ts` applying `localMaxWorkers` (`packages/shared/test-utils/vitest-workers.ts`); `SLZ_UNIT_WORKERS=<n>|all` overrides.
 

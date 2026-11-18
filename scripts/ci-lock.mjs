@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Machine-wide, first-come-first-served lock around SlayZone's heavy local test runs
- * (`pnpm test:e2e`, `test:e2e:perf`, `test:e2e:chat`, `test:unit`, `test:unit:fast`).
+ * Machine-wide, first-come-first-served lock around SlayZone's heavy local runs
+ * (`pnpm test:e2e`, `test:e2e:perf`, `test:e2e:chat`, `test:unit`, `test:unit:fast`, and
+ * iOS builds through scripts/ios-build.mjs).
  * Other repos on the same machine take the same lock (madacademy `ci/lock.sh`, its merge
  * gate), so two heavy runs never load the box at once: the later one waits its turn.
  *
@@ -161,15 +162,18 @@ const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
 const osSignals = constants.signals
 
 /**
- * Waits for the lock (unless skipped), runs `cmd` with SLZ_CI_LOCK_HELD=1, releases on
- * exit, then exits like the command did (same code, or same signal).
+ * Waits for the lock (unless skipped), runs `cmd` in `cwd` with SLZ_CI_LOCK_HELD=1,
+ * releases it when the command exits, and resolves `{ code, signal }` of the command. For a
+ * caller that keeps running after the locked part (scripts/ios-build.mjs: build locked,
+ * Metro not).
  */
-export async function runLocked({
+export async function runCommandLocked({
   label,
   cmd,
   paths = DEFAULT_PATHS,
   pollMs = POLL_MS,
   env = process.env,
+  cwd = process.cwd(),
   log = (m) => process.stderr.write(`${m}\n`)
 }) {
   const skip = skipReason(env)
@@ -203,6 +207,7 @@ export async function runLocked({
 
   const child = spawn(cmd[0], cmd.slice(1), {
     stdio: 'inherit',
+    cwd,
     env: { ...env, SLZ_CI_LOCK_HELD: '1' },
     shell: process.platform === 'win32' // pnpm / npx are .cmd shims there
   })
@@ -220,13 +225,24 @@ export async function runLocked({
     child.on('exit', (c, s) => resolve([c, s]))
   })
   drop()
+  process.off('exit', drop)
   for (const sig of SIGNALS) process.off(sig, onRunSignal)
+  return { code, signal }
+}
+
+/** Exits like a finished command did: same signal, or same code. */
+export function exitLike({ code, signal }) {
   if (signal) {
     process.kill(process.pid, signal) // no listeners left: die of it, like the command
     setTimeout(() => process.exit(128 + (osSignals[signal] ?? 0)), 1000)
     return
   }
   process.exit(code ?? 1)
+}
+
+/** {@link runCommandLocked}, then exit like the command did. */
+export async function runLocked(opts) {
+  exitLike(await runCommandLocked(opts))
 }
 
 function repoName() {
