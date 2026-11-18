@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  *
  * The web shell's streaming save targets. jsdom has no Worker, so the zip runs through
- * the same encoder inline (`createZipSink` is injectable); zip-stream.test.ts covers the
- * encoder, and the web-shell e2e group covers the real worker under the hub's CSP.
+ * the same encoder inline (`createZipSink` is injectable); task-artifacts' zip-stream.test.ts
+ * covers the encoder, and the web-shell e2e group covers the real worker under the hub's CSP.
  */
 import { unzipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

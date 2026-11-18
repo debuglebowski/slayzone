@@ -3,20 +3,47 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { unzipSync } from 'fflate'
+import { Deflate, unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
-import { createZipEncoder, crc32, fflateDeflater, mayNeedZip64 } from './zip-stream'
+import { createZipEncoder, crc32, type Deflater, mayNeedZip64 } from './zip-stream'
 
 const enc = new TextEncoder()
 
-function encode(
-  build: (z: ReturnType<typeof createZipEncoder>) => void,
+/** fflate, as the web shell deflates (any raw-DEFLATE deflater does for these tests). */
+function fflateDeflater(): Deflater {
+  let out: Uint8Array[] = []
+  const d = new Deflate({ level: 6 }, (chunk) => {
+    out.push(chunk)
+  })
+  return {
+    push(data, final) {
+      d.push(data, final)
+      const produced = out
+      out = []
+      return produced
+    }
+  }
+}
+
+/** The encoder's calls, made without awaiting each: it runs them in order. */
+interface Calls {
+  write(path: string, data: Uint8Array, size?: number): void
+  mkdir(path: string): void
+}
+
+async function encode(
+  build: (z: Calls) => void,
   opts: { forceZip64?: boolean } = {}
-): Uint8Array {
+): Promise<Uint8Array> {
   const out: Uint8Array[] = []
   const z = createZipEncoder((c) => out.push(c), { deflater: fflateDeflater, ...opts })
-  build(z)
-  z.finish()
+  const calls: Promise<void>[] = []
+  build({
+    write: (path, data, size) => calls.push(z.write(path, data, size)),
+    mkdir: (path) => calls.push(z.mkdir(path))
+  })
+  calls.push(z.finish())
+  await Promise.all(calls)
   const total = out.reduce((n, c) => n + c.byteLength, 0)
   const all = new Uint8Array(total)
   let at = 0
@@ -56,8 +83,8 @@ describe('crc32', () => {
 })
 
 describe('createZipEncoder', () => {
-  it('streams entries piece by piece into a valid archive', () => {
-    const zip = encode((z) => {
+  it('streams entries piece by piece into a valid archive', async () => {
+    const zip = await encode((z) => {
       z.mkdir('docs/empty')
       z.write('docs/a.md', enc.encode('first '))
       z.write('docs/a.md', enc.encode('second'))
@@ -75,19 +102,77 @@ describe('createZipEncoder', () => {
 
   // Review 2, M2: a finished entry is never continued — the archive would merge two
   // artifacts into one entry, or hold two entries of the same name.
-  it('refuses a path that was already written (case-insensitively)', () => {
-    expect(() =>
+  it('refuses a path that was already written (case-insensitively)', async () => {
+    await expect(
       encode((z) => {
         z.write('a.md', enc.encode('first'))
         z.write('b.md', enc.encode('other'))
         z.write('A.md', enc.encode('second'))
       })
-    ).toThrow('already written')
+    ).rejects.toThrow('already written')
   })
 
-  it('deflates text and stores what is already compressed', () => {
+  it('a refused call leaves the archive usable', async () => {
+    const out: Uint8Array[] = []
+    const z = createZipEncoder((c) => out.push(c), { deflater: fflateDeflater })
+    await z.write('a.md', enc.encode('first'))
+    await expect(z.write('A.md', enc.encode('second'))).rejects.toThrow('already written')
+    await z.write('c.md', enc.encode('third'))
+    await z.finish()
+    const files = unzipSync(new Uint8Array(Buffer.concat(out)))
+    expect(Object.keys(files).sort()).toEqual(['a.md', 'c.md'])
+    expect(new TextDecoder().decode(files['a.md'])).toBe('first')
+  })
+
+  it('an async deflater writes the same archive as a synchronous one', async () => {
+    const later = (): Deflater => {
+      const d = fflateDeflater()
+      return {
+        push: (data, final) =>
+          new Promise((resolve) => setTimeout(() => resolve(d.push(data, final)), 1))
+      }
+    }
+    const build = async (deflater: () => Deflater): Promise<Buffer> => {
+      const out: Uint8Array[] = []
+      const z = createZipEncoder((c) => out.push(c), { deflater, now: new Date(2026, 0, 2) })
+      // Not awaited one by one: the encoder runs them in call order.
+      const calls = [
+        z.write('a.txt', enc.encode('a'.repeat(5_000))),
+        z.write('a.txt', enc.encode('b'.repeat(5_000))),
+        z.mkdir('d'),
+        z.write('d/c.txt', enc.encode('c'.repeat(3_000)), 3_000),
+        z.finish()
+      ]
+      await Promise.all(calls)
+      return Buffer.concat(out)
+    }
+    const sync = await build(fflateDeflater)
+    expect((await build(later)).equals(sync)).toBe(true)
+    const files = unzipSync(new Uint8Array(sync))
+    expect(new TextDecoder().decode(files['a.txt'])).toBe('a'.repeat(5_000) + 'b'.repeat(5_000))
+  })
+
+  it('a failure breaks the archive: that call and every later one reject with it', async () => {
+    let pushes = 0
+    const failing = (): Deflater => {
+      const d = fflateDeflater()
+      return {
+        push: async (data, final) => {
+          if (++pushes === 2) throw new Error('deflate failed')
+          return d.push(data, final)
+        }
+      }
+    }
+    const z = createZipEncoder(() => undefined, { deflater: failing })
+    await z.write('a.txt', enc.encode('one'))
+    await expect(z.write('a.txt', enc.encode('two'))).rejects.toThrow('deflate failed')
+    await expect(z.write('b.txt', enc.encode('three'))).rejects.toThrow('deflate failed')
+    await expect(z.finish()).rejects.toThrow('deflate failed')
+  })
+
+  it('deflates text and stores what is already compressed', async () => {
     const text = enc.encode('a'.repeat(100_000))
-    const zip = encode((z) => {
+    const zip = await encode((z) => {
       z.write('t.txt', text)
       z.write('p.png', text)
     })
@@ -98,8 +183,8 @@ describe('createZipEncoder', () => {
 
   it.skipIf(!hasTool('python3', ['--version']))(
     'zip64 structures (as used past 4 GB) read back in a standard reader',
-    () => {
-      const zip = encode(
+    async () => {
+      const zip = await encode(
         (z) => {
           z.mkdir('d')
           z.write('d/a.txt', enc.encode('hello zip64'))
@@ -155,8 +240,8 @@ describe('createZipEncoder', () => {
       for (const [path, data] of Object.entries(files)) z.write(path, data, data.byteLength)
     }, opts)
 
-  it('a file under 4 GB: no zip64 extra in its local header, a 4-byte-size descriptor', () => {
-    const zip = build()
+  it('a file under 4 GB: no zip64 extra in its local header, a 4-byte-size descriptor', async () => {
+    const zip = await build()
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength)
     let at = 0
     const seen: string[] = []
@@ -192,9 +277,9 @@ describe('createZipEncoder', () => {
     ['zip64', { forceZip64: true }]
   ] as const)(
     'a streaming reader (libarchive: bsdtar on a pipe) reads every entry of the %s archive',
-    (_label, opts) => {
+    async (_label, opts) => {
       if (!hasTool('bsdtar', ['--version'])) return
-      withFile(build(opts), (file) => {
+      withFile(await build(opts), (file) => {
         // The archive on stdin: libarchive cannot seek, so it reads front to back
         // from the local headers alone, never the central directory.
         const list = execFileSync('/bin/sh', ['-c', 'bsdtar -tf - < "$1"', 'sh', file])
@@ -219,9 +304,9 @@ describe('createZipEncoder', () => {
   // ("only DEFLATED entries can have EXT descriptor"), which p.png is.
   it.skipIf(!hasTool('java', ['-version']))(
     "a streaming reader (Java's ZipInputStream) reads every deflated entry",
-    () => {
+    async () => {
       const deflated = names.filter((n) => n !== 'p.png')
-      const zip = encode((z) => {
+      const zip = await encode((z) => {
         z.mkdir('d')
         for (const n of deflated) if (!n.endsWith('/')) z.write(n, files[n], files[n].byteLength)
       })
@@ -254,9 +339,9 @@ describe('createZipEncoder', () => {
     ['zip64', { forceZip64: true }]
   ] as const)(
     'central-directory readers (Python zipfile, unzip -t) read every entry of the %s archive',
-    (_label, opts) => {
+    async (_label, opts) => {
       if (!hasTool('python3', ['--version'])) return
-      const report = withFile(build(opts), (file) => {
+      const report = withFile(await build(opts), (file) => {
         if (hasTool('unzip', ['-v'])) execFileSync('unzip', ['-tq', file], { stdio: 'ignore' })
         return execFileSync('python3', [
           '-I',
@@ -353,8 +438,8 @@ describe('an entry of 4 GiB or more', () => {
     return out
   }
 
-  it('is zip64 from its local header on; the entries around it stay classic', () => {
-    const headers = localHeaders(build())
+  it('is zip64 from its local header on; the entries around it stay classic', async () => {
+    const headers = localHeaders(await build())
     expect(headers.map((h) => h.name).sort()).toEqual(names)
     for (const h of headers) {
       if (h.name.startsWith('big.')) {
@@ -382,8 +467,8 @@ describe('an entry of 4 GiB or more', () => {
     }
   })
 
-  it('an entry of unknown size is laid out for any size', () => {
-    const zip = encode((z) => {
+  it('an entry of unknown size is laid out for any size', async () => {
+    const zip = await encode((z) => {
       z.write('u.txt', enc.encode('size not given'))
       z.write('k.txt', enc.encode('size given'), 10)
     })
@@ -408,8 +493,8 @@ describe('an entry of 4 GiB or more', () => {
 
   it.skipIf(process.platform !== 'darwin')(
     'macOS ditto (Archive Utility) extracts every entry, the ones after it included',
-    () => {
-      withFile(build(), (file, dir) => {
+    async () => {
+      withFile(await build(), (file, dir) => {
         const out = join(dir, 'x')
         run('ditto -x -k "$1" "$2"', file, out)
         const got = run('cd "$1" && find . -type f | sort', out).trim().split('\n')
@@ -421,9 +506,9 @@ describe('an entry of 4 GiB or more', () => {
     60_000
   )
 
-  it('a streaming reader (libarchive: bsdtar on a pipe) reads every entry', () => {
+  it('a streaming reader (libarchive: bsdtar on a pipe) reads every entry', async () => {
     if (!hasTool('bsdtar', ['--version'])) return
-    withFile(build(), (file) => {
+    withFile(await build(), (file) => {
       expect(run('bsdtar -tf - < "$1"', file).trim().split('\n').sort()).toEqual(names)
       for (const [name, data] of Object.entries(after))
         expect(
@@ -433,9 +518,9 @@ describe('an entry of 4 GiB or more', () => {
     })
   }, 60_000)
 
-  it('central-directory readers (Python zipfile, unzip -t) read every entry', () => {
+  it('central-directory readers (Python zipfile, unzip -t) read every entry', async () => {
     if (!hasTool('python3', ['--version'])) return
-    const report = withFile(build(), (file) => {
+    const report = withFile(await build(), (file) => {
       if (hasTool('unzip', ['-v'])) execFileSync('unzip', ['-tq', file], { stdio: 'ignore' })
       return execFileSync('python3', [
         '-I',

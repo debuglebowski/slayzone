@@ -30,7 +30,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "@trpc/server": "^11.19.0",
-    "archiver": "^8.0.0",
     "better-sqlite3": "^13.0.3",
     "bufferutil": "^4.1.0",
     "electron-chrome-extensions": "^4.9.0",
@@ -104,7 +103,6 @@
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.104.5",
     "@testing-library/react": "^16.3.3",
-    "@types/archiver": "^8.0.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^24.19.2",

@@ -10,6 +10,7 @@
     "./shared": "./src/shared/index.ts",
     "./export-html": "./src/shared/export-html.ts",
     "./download-plan": "./src/shared/download-plan.ts",
+    "./zip-stream": "./src/shared/zip-stream.ts",
     "./server": "./src/server/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
@@ -55,6 +56,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "fflate": "^0.8.2",
     "vitest": "^5.0.5"
   }
 }
