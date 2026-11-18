@@ -7,6 +7,7 @@ import {
   fsModuleCacheResolutionKey
 } from '../../shared/test-utils/fs-module-cache.ts'
 import { isolateFromCaller } from '../../shared/test-utils/caller-env.ts'
+import { localMaxWorkers } from '../../shared/test-utils/vitest-workers.ts'
 
 // No suite here inherits the caller's SlayZone wiring, home or hub port block (see caller-env.ts): vitest's
 // main process, before any worker forks.
@@ -29,5 +30,5 @@ export default defineConfig({
     }
   },
   // Transforms persist between runs (the compiler pass was most of these suites' time).
-  test: fsModuleCacheOptions(repoRoot, 'app')
+  test: { ...fsModuleCacheOptions(repoRoot, 'app'), maxWorkers: localMaxWorkers() }
 })
