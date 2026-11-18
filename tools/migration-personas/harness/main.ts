@@ -32,7 +32,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { homedir, hostname } from 'node:os'
+import { homedir, hostname, uptime } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import Database from 'better-sqlite3'
 import {
@@ -451,6 +451,18 @@ function tables(db: Database.Database): string[] {
 let runStartMs = 0
 let inputValues = new Set<string>()
 
+/**
+ * This machine's boot time, as the chat store records it (chat-runtime storage.ts
+ * `machineBootedAt`: `Date.now() - uptime()`, per process, so a few ms of jitter). It
+ * is the environment's, not the persona's or this run's: a value near it is masked
+ * before the run window is checked, so the token does not depend on how long ago the
+ * machine (Docker's VM) booted.
+ */
+const machineBootMs = Date.now() - uptime() * 1000
+function nearMachineBoot(ms: number): boolean {
+  return Math.abs(ms - machineBootMs) < 60_000
+}
+
 /** Created by this run: from just before it started, up to a year ahead (expiries). */
 function inWindow(ms: number): boolean {
   return ms >= runStartMs - 120_000 && ms <= runStartMs + 400 * 86_400_000
@@ -501,6 +513,7 @@ function normalize(s: string): string {
         if (known(n)) return n
         const int = n.split('.')[0]
         const ms = int.length === 13 ? Number(n) : Number(n) * 1000
+        if (int.length === 13 && nearMachineBoot(ms)) return '<machine-boot-ms>'
         return inWindow(ms) ? (int.length === 13 ? '<run-ms>' : '<run-s>') : n
       })
   )
@@ -602,6 +615,16 @@ function dumpAll(): void {
       continue
     }
     const buf = readFileSync(f)
+    // A hook journal (apps/computer hook-journal.ts) this run created that holds no
+    // events: every hook was acknowledged, the same state as no journal at all. Whether
+    // one exists only says a hook fired and was delivered before shutdown, which is
+    // timing. A journal the input already had is the persona's data and stays.
+    if (
+      /(^|\/)hooks-[a-f0-9]{16}\.json$/.test(rel) &&
+      buf.toString('utf8').trim() === '[]' &&
+      !existsSync(join(REF, rel))
+    )
+      continue
     if (/\.json$/.test(rel)) {
       try {
         const json = JSON.stringify(sortKeys(JSON.parse(buf.toString('utf8'))), null, 2)
