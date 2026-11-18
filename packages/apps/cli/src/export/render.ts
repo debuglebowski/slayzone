@@ -34,7 +34,7 @@ import {
   EXPORT_READY_EXPRESSION,
   PNG_MEASURE_EXPRESSION
 } from '@slayzone/task-artifacts/export-html'
-import { type Browser, type LaunchOptions, launchBrowser, openPage } from './cdp'
+import { type Browser, type DebugHook, type LaunchOptions, launchBrowser, openPage } from './cdp'
 
 export interface RenderOptions {
   /** The document flags itself ready asynchronously (mermaid): wait for it. */
@@ -102,7 +102,11 @@ async function poll(
  * before it was even requested). Desktop's export waits for the load event
  * (did-finish-load), which waits for every child frame; so does this, through these.
  */
-function trackChildFrames(b: Browser, sessionId: string, frameId: string): () => boolean {
+function trackChildFrames(
+  b: Browser,
+  sessionId: string,
+  frameId: string
+): { loaded: () => boolean; loading: () => string[] } {
   const loading = new Set<string>()
   b.onEvent((method, params, sid) => {
     const id = params.frameId
@@ -112,7 +116,7 @@ function trackChildFrames(b: Browser, sessionId: string, frameId: string): () =>
       loading.delete(id)
     }
   })
-  return () => loading.size === 0
+  return { loaded: () => loading.size === 0, loading: () => [...loading] }
 }
 
 /** The export document tried to load another document in its place. */
@@ -183,13 +187,15 @@ function sameDocument(current: string, to: unknown): boolean {
 async function guardDocument(
   b: Browser,
   sessionId: string,
-  frameId: string
+  frameId: string,
+  debug?: DebugHook
 ): Promise<{ committed: () => void; refused: () => boolean }> {
   let inPlace = false
   let refused = false
   /** The document's URL (`about:blank`, then whatever the history API makes it). */
   let url = 'about:blank'
-  const refuse = (url: unknown): void => {
+  const refuse = (url: unknown, via: string): void => {
+    debug?.('guard-refuse', { via, url, already: refused })
     if (refused) return
     refused = true
     b.failPage(sessionId, new DocumentNavigationError(String(url ?? '')))
@@ -199,6 +205,12 @@ async function guardDocument(
     switch (method) {
       case 'Fetch.requestPaused': {
         const requestId = params.requestId
+        debug?.('guard-request', {
+          decision: params.frameId === frameId ? 'fail' : 'continue',
+          frameId: params.frameId,
+          resourceType: params.resourceType,
+          url: (params.request as { url?: unknown } | undefined)?.url
+        })
         if (params.frameId !== frameId) {
           b.send('Fetch.continueRequest', { requestId }, sessionId).catch(() => undefined)
           return
@@ -208,7 +220,7 @@ async function guardDocument(
         b.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }, sessionId).catch(
           () => undefined
         )
-        refuse((params.request as { url?: unknown } | undefined)?.url)
+        refuse((params.request as { url?: unknown } | undefined)?.url, method)
         return
       }
       case 'Page.navigatedWithinDocument':
@@ -220,23 +232,25 @@ async function guardDocument(
         // fails the export. Only one due now — a refresh due later (a dashboard's
         // `<meta http-equiv=refresh content=60>`) is caught if and when it starts.
         if (params.frameId === frameId && params.delay === 0 && !sameDocument(url, params.url)) {
-          refuse(params.url)
+          refuse(params.url, method)
         }
         return
       case 'Page.frameRequestedNavigation':
         // Other dispositions open no document here (a popup, blocked without a
         // gesture; a download, denied). A click on an `<a download>` never gets here:
         // the page cancels it (PAGE_SCRIPT).
-        if (params.frameId === frameId && params.disposition === 'currentTab') refuse(params.url)
+        if (params.frameId === frameId && params.disposition === 'currentTab') {
+          refuse(params.url, method)
+        }
         return
       case 'Page.frameStartedNavigating':
         if (params.frameId === frameId && !SAME_DOCUMENT.has(String(params.navigationType))) {
-          refuse(params.url)
+          refuse(params.url, method)
         }
         return
       case 'Page.frameNavigated': {
         const frame = params.frame as { id?: unknown; url?: unknown } | undefined
-        if (inPlace && frame?.id === frameId) refuse(frame.url)
+        if (inPlace && frame?.id === frameId) refuse(frame.url, method)
         return
       }
     }
@@ -254,6 +268,35 @@ async function guardDocument(
   }
 }
 
+/** Diagnostics only: the page as the load wait left it (frames, document, processes). */
+async function debugPageState(
+  b: Browser,
+  sessionId: string,
+  debug: DebugHook,
+  loaded: boolean,
+  started: number,
+  loadingChildFrames: string[]
+): Promise<void> {
+  const ask = (method: string, params: Record<string, unknown>, sid?: string) =>
+    b.send(method, params, sid).catch((err: Error) => ({ error: err.message }))
+  debug('load-wait', {
+    loaded,
+    ms: Date.now() - started,
+    loadingChildFrames,
+    readyState: await evaluate(b, sessionId, 'document.readyState').catch(() => null)
+  })
+  debug('page-state', {
+    frameTree: await ask('Page.getFrameTree', {}, sessionId),
+    html: await evaluate<string>(
+      b,
+      sessionId,
+      'document.documentElement.outerHTML.slice(0, 4000)'
+    ).catch(() => null),
+    processes: await ask('SystemInfo.getProcessInfo', {}),
+    targets: await ask('Target.getTargets', {})
+  })
+}
+
 async function withPage<T>(
   executable: string,
   html: string,
@@ -262,6 +305,7 @@ async function withPage<T>(
   fn: (b: Browser, sessionId: string) => Promise<T>
 ): Promise<T> {
   const b = await launchBrowser(executable, opts.browser)
+  const debug = opts.browser?.debug
   let failed = false
   let guard: Awaited<ReturnType<typeof guardDocument>> | undefined
   try {
@@ -280,6 +324,15 @@ async function withPage<T>(
       b.send('Page.handleJavaScriptDialog', { accept: false }, sessionId).catch(() => undefined)
     })
     await b.send('Page.enable', {}, sessionId)
+    // Diagnostics only: the page's requests (and why one failed), console and browser
+    // log, and issues (a blocked local network request) reach the debug hook as events.
+    if (debug) {
+      for (const domain of ['Network', 'Log', 'Runtime', 'Audits']) {
+        await b.send(`${domain}.enable`, {}, sessionId).catch((err: Error) => {
+          debug('enable-failed', { domain, error: err.message })
+        })
+      }
+    }
     if (viewport) {
       await b.send('Emulation.setDeviceMetricsOverride', { ...viewport, mobile: false }, sessionId)
     }
@@ -289,14 +342,22 @@ async function withPage<T>(
       sessionId
     )
     const frameId = frameTree.frame.id
-    guard = await guardDocument(b, sessionId, frameId)
-    const childFramesLoaded = trackChildFrames(b, sessionId, frameId)
+    guard = await guardDocument(b, sessionId, frameId, debug)
+    const childFrames = trackChildFrames(b, sessionId, frameId)
     await b.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_SCRIPT }, sessionId)
     await evaluate(b, sessionId, PAGE_SCRIPT)
     await b.send('Page.setDocumentContent', { frameId, html }, sessionId)
     guard.committed()
     // Subresources (images in markdown) and child frames loaded, then web fonts settled.
-    await poll(b, sessionId, "document.readyState === 'complete'", 30_000, childFramesLoaded)
+    const loadStarted = Date.now()
+    const loaded = await poll(
+      b,
+      sessionId,
+      "document.readyState === 'complete'",
+      30_000,
+      childFrames.loaded
+    )
+    if (debug) await debugPageState(b, sessionId, debug, loaded, loadStarted, childFrames.loading())
     await evaluate(b, sessionId, 'document.fonts.ready.then(() => true)', true)
     if (opts.waitReady) {
       const ok = await poll(b, sessionId, EXPORT_READY_EXPRESSION, opts.readyTimeoutMs ?? 10_000)

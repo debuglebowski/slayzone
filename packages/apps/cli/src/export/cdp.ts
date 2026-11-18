@@ -159,7 +159,24 @@ export interface LaunchOptions {
    * directory inside the throwaway profile, removed with it). Tests watch their own.
    */
   downloadDir?: string
+  /**
+   * Diagnostics only (tests, CI): told the launch, every event read, the browser's
+   * stderr and what the client decides (the page's process: named or why not, its fate
+   * on each look). Set, the browser also logs to stderr. Off by default; never set by
+   * the product.
+   */
+  debug?: DebugHook
 }
+
+/** {@link LaunchOptions.debug}: `what` happened, with whatever it is known by. */
+export type DebugHook = (what: string, detail?: Record<string, unknown>) => void
+
+/** Chrome's own logging, for {@link LaunchOptions.debug}: errors and network access. */
+const DEBUG_ARGS = [
+  '--enable-logging=stderr',
+  '--v=0',
+  '--vmodule=*network_access*=2,*network_service*=1,*private_network*=2'
+]
 
 const LAUNCH_TIMEOUT_MS = 30_000
 const COMMAND_TIMEOUT_MS = 60_000
@@ -218,14 +235,13 @@ export function browserArgs(userDataDir: string, platform = process.platform): s
   if (platform === 'darwin') args.push('--use-mock-keychain')
   // Chromium refuses to start as root with its sandbox on (containers, CI).
   if (platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
-  // No crash handler: a renderer that crashes (out of memory on a huge document) should
-  // die at once, so the browser reports it and the export fails fast. On Linux,
-  // crashpad holds a crashing renderer until its handler has dumped it (a stalled
-  // handler delays the crash event by as long). A throwaway export has no use for the
-  // dump either (it would land in the person's own browser crash reports). The kernel
-  // can still hold the renderer while the system's dump handler takes its core: that
-  // one is caught by watching the page's process (see the top of this file).
-  if (platform === 'linux') args.push('--disable-crashpad-for-testing')
+  // Crashpad stays on. `--disable-crashpad-for-testing` makes Chrome's network service
+  // crash on start on Linux ("Crashing due to FD ownership violation", Chrome 157), and
+  // restart and crash again in a loop: nothing loads over the network, not even a child
+  // frame from 127.0.0.1. A crashed renderer the kernel holds while the system's dump
+  // handler takes its core is caught by watching the page's process instead (see the
+  // top of this file); crashpad itself, even with its handler stopped, did not keep the
+  // renderer from crashing on (checked on Linux, Chrome 157).
   args.push('about:blank')
   return args
 }
@@ -271,11 +287,24 @@ export function processFate(
  * profile flag every Chrome child process is started with — a pid seen from another PID
  * namespace (a browser in a Flatpak sandbox) names some other process here, which must
  * never be taken for the page's. Elsewhere a browser's pids are the system's.
+ *
+ * Chrome's zygote-forked processes — renderers among them — retitle themselves
+ * (setproctitle): `/proc/<pid>/cmdline` is then the whole command line as ONE
+ * space-joined string, the rest of the old argv zero-filled. So the flag counts as a
+ * whole NUL-separated argument or as a space-bounded token of such a title.
  */
-function ownProcess(pid: number, userDataDir: string): boolean {
-  if (process.platform !== 'linux') return true
+export function ownProcess(
+  pid: number,
+  userDataDir: string,
+  platform: NodeJS.Platform = process.platform,
+  read: ReadText = readText
+): boolean {
+  if (platform !== 'linux') return true
   try {
-    return readText(`/proc/${pid}/cmdline`).split('\0').includes(`--user-data-dir=${userDataDir}`)
+    const flag = ` --user-data-dir=${userDataDir} `
+    return read(`/proc/${pid}/cmdline`)
+      .split('\0')
+      .some((arg) => ` ${arg} `.includes(flag))
   } catch {
     return false
   }
@@ -296,6 +325,33 @@ function tracedProcess(events: unknown, targetId: string): number | undefined {
     }
   }
   return undefined
+}
+
+/** Every frame → process pair in a trace's `TracingStartedInBrowser` events (debug). */
+function tracedFrames(events: unknown): unknown[] {
+  if (!Array.isArray(events)) return []
+  return events
+    .filter((e) => (e as { name?: unknown })?.name === 'TracingStartedInBrowser')
+    .flatMap((e) => {
+      const frames = (e as { args?: { data?: { frames?: unknown } } }).args?.data?.frames
+      return Array.isArray(frames) ? frames : []
+    })
+}
+
+/** What /proc says about `pid` (debug): its state, core dump, namespaces, command. */
+function processFacts(pid: number): Record<string, unknown> {
+  if (process.platform !== 'linux') return {}
+  const facts: Record<string, unknown> = {}
+  try {
+    const status = readText(`/proc/${pid}/status`)
+    for (const key of ['Name', 'State', 'PPid', 'NSpid', 'CoreDumping', 'TracerPid']) {
+      facts[key] = status.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'))?.[1] ?? null
+    }
+    facts.cmdline = readText(`/proc/${pid}/cmdline`).split('\0').join(' ').slice(0, 300)
+  } catch (err) {
+    facts.procError = errCode(err) ?? (err as Error).message
+  }
+  return facts
 }
 
 function launchFailure(executable: string, stderr: string, cause: string): BrowserLaunchError {
@@ -339,6 +395,7 @@ export async function launchBrowser(
   const exitGraceMs = opts.exitGraceMs ?? EXIT_GRACE_MS
   const stallMs = opts.stallMs ?? STALL_MS
   const stallProbeIntervalMs = opts.stallProbeIntervalMs ?? STALL_PROBE_INTERVAL_MS
+  const debug = opts.debug
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-export-profile-'))
   // Its own process group (not on Windows): killing the group also ends whatever a
   // wrapper script (`--browser`) started, so nothing outlives `slay`.
@@ -346,10 +403,14 @@ export async function launchBrowser(
   let child: ChildProcess
   try {
     seedProfile(userDataDir, opts.downloadDir ?? path.join(userDataDir, 'downloads'))
-    child = spawn(executable, browserArgs(userDataDir), {
+    const args = browserArgs(userDataDir)
+    // Before the page URL, which `browserArgs` puts last.
+    if (debug) args.splice(-1, 0, ...DEBUG_ARGS)
+    child = spawn(executable, args, {
       stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
       detached: ownGroup
     })
+    debug?.('launch', { executable, args, pid: child.pid, userDataDir })
   } catch (err) {
     fs.rmSync(userDataDir, { recursive: true, force: true })
     throw launchFailure(executable, '', (err as Error).message)
@@ -358,6 +419,7 @@ export async function launchBrowser(
   let stderr = ''
   child.stderr?.on('data', (d: Buffer) => {
     stderr = (stderr + d.toString()).slice(-STDERR_KEEP)
+    debug?.('stderr', { text: d.toString() })
   })
   const toBrowser = child.stdio[3] as Writable
   const fromBrowser = child.stdio[4] as Readable
@@ -382,6 +444,7 @@ export async function launchBrowser(
 
   /** The page behind `sessionId` is gone: fail everything still waiting on it. */
   const failSession = (sessionId: string, err: Error): void => {
+    debug?.('page-failed', { sessionId, error: err.message, known: deadSessions.has(sessionId) })
     if (!deadSessions.has(sessionId)) deadSessions.set(sessionId, err)
     sessionTargets.delete(sessionId)
     sessionProcesses.delete(sessionId)
@@ -405,6 +468,7 @@ export async function launchBrowser(
   }
   const onEvent = (msg: CdpMessage): void => {
     const params = msg.params ?? {}
+    debug?.('event', { method: msg.method, sessionId: msg.sessionId, params })
     switch (msg.method) {
       case 'Inspector.targetCrashed':
         if (msg.sessionId) failSession(msg.sessionId, pageCrashed())
@@ -460,6 +524,7 @@ export async function launchBrowser(
 
   const exitPromise = new Promise<void>((resolve) => {
     const ended = (code: number | null, signal: NodeJS.Signals | null): void => {
+      debug?.('exit', { code, signal })
       failAll(launchFailure(executable, stderr, signal ? `signal ${signal}` : `exit code ${code}`))
       resolve()
     }
@@ -568,12 +633,14 @@ export async function launchBrowser(
     // renderer works, so the probe loop cannot be the one to look. Gone counts only on a
     // second look: a renderer that exits normally is reported by the browser first.
     const pid = sessionProcesses.get(sessionId)
+    debug?.('watch-page', { sessionId, method, pid: pid ?? null })
     let goneBefore = false
     const fate =
       pid === undefined
         ? undefined
         : setInterval(() => {
             const now = processFate(pid)
+            debug?.('process-fate', { pid, fate: now, ...processFacts(pid) })
             if (now === 'crashed' || (now === 'gone' && goneBefore)) {
               failSession(sessionId, pageCrashed())
             }
@@ -612,16 +679,25 @@ export async function launchBrowser(
 
   async function watchProcess(sessionId: string): Promise<void> {
     const targetId = sessionTargets.get(sessionId)
-    if (!targetId) return
+    if (!targetId) {
+      debug?.('watch-process', { sessionId, outcome: 'no target for the session' })
+      return
+    }
     let pid: number | undefined
+    let traced = false
     let complete: () => void = ignore
     const completed = new Promise<void>((resolve) => {
       complete = resolve
     })
     const stopListening = onEventListener((method, params, sid) => {
       if (sid !== sessionId) return
-      if (method === 'Tracing.dataCollected') pid ??= tracedProcess(params.value, targetId)
-      else if (method === 'Tracing.tracingComplete') complete()
+      if (method === 'Tracing.dataCollected') {
+        pid ??= tracedProcess(params.value, targetId)
+        if (debug) debug('trace-frames', { targetId, frames: tracedFrames(params.value) })
+      } else if (method === 'Tracing.tracingComplete') {
+        traced = true
+        complete()
+      }
     })
     let deadline: NodeJS.Timeout | undefined
     try {
@@ -641,15 +717,31 @@ export async function launchBrowser(
           deadline = setTimeout(resolve, commandTimeoutMs)
         })
       ])
-    } catch {
+    } catch (err) {
       // Unnamed: the page goes unwatched (its crash events and stall probe still apply).
+      debug?.('watch-process', {
+        sessionId,
+        outcome: 'trace failed',
+        error: (err as Error).message
+      })
     } finally {
       clearTimeout(deadline)
       stopListening()
     }
-    if (pid !== undefined && sessionTargets.has(sessionId) && ownProcess(pid, userDataDir)) {
+    const own = pid !== undefined && ownProcess(pid, userDataDir)
+    if (pid !== undefined && sessionTargets.has(sessionId) && own) {
       sessionProcesses.set(sessionId, pid)
     }
+    debug?.('watch-process', {
+      sessionId,
+      targetId,
+      traced,
+      pid: pid ?? null,
+      ownProcess: own,
+      stillAttached: sessionTargets.has(sessionId),
+      watched: sessionProcesses.has(sessionId),
+      ...(pid !== undefined && !own ? processFacts(pid) : {})
+    })
   }
 
   async function sendLong<T>(
@@ -723,7 +815,8 @@ export async function launchBrowser(
   }
 
   try {
-    await send('Browser.getVersion', {}, undefined, LAUNCH_TIMEOUT_MS)
+    const version = await send('Browser.getVersion', {}, undefined, LAUNCH_TIMEOUT_MS)
+    debug?.('version', version as Record<string, unknown>)
   } catch (err) {
     // The launch failure is what to report, not a profile left behind by it.
     await close().catch(ignore)

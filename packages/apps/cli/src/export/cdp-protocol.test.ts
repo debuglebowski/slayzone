@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
-import { CdpFrameReader, browserArgs, launchBrowser, processFate } from './cdp'
+import { CdpFrameReader, browserArgs, launchBrowser, ownProcess, processFate } from './cdp'
 import { renderPdf } from './render'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-cdp-proto-'))
@@ -34,6 +34,10 @@ afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
  * `--user-data-dir`, as Chrome's renderers do), reported by the one-shot trace's
  * `TracingStartedInBrowser`; `ON_PRINT=renderer-dies` kills it mid-print and the browser
  * says nothing (a renderer the OS holds while it dumps core: no exit, no crash event).
+ * Like Chrome's zygote-forked renderers on Linux, it retitles itself: its command line
+ * becomes one space-joined string (`/proc/<pid>/cmdline`), no longer NUL-separated. The
+ * trace comes in several `Tracing.dataCollected` chunks and only a middle one names the
+ * page's process, as Chrome's did on CI.
  */
 const FAKE = `#!/usr/bin/env node
 const fs = require('fs')
@@ -49,7 +53,18 @@ const spinOnPrint = process.env.PAGE_SPINS_ON_PRINT === '1'
 const evalDelay = Number(process.env.EVAL_DELAY_MS || 0)
 const userDataDir = process.argv.find((a) => a.startsWith('--user-data-dir='))
 const renderer = process.env.FAKE_RENDERER === '1'
-  ? require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', '--', userDataDir], { stdio: 'ignore' })
+  ? require('child_process').spawn(
+      process.execPath,
+      [
+        '-e',
+        // Chrome's title: the whole command line as one string. The script is padded so
+        // the original argv has room for it (a title never grows past that).
+        'process.title = ["/opt/google/chrome/chrome", "--type=renderer", process.argv[1], "--lang=en-US"].join(" "); setInterval(() => {}, 1000) // ' + 'x'.repeat(80),
+        '--',
+        userDataDir
+      ],
+      { stdio: 'ignore' }
+    )
   : null
 let spinning = false
 let targetGone = false
@@ -81,7 +96,10 @@ fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
         reply(m.id, {})
         if (renderer) {
           const frames = [{ frame: 't1', processId: renderer.pid }]
+          const other = [{ name: 'TracingStartedInBrowser', args: { data: { frames: [] } } }, { name: 'Other', args: {} }]
+          emit('Tracing.dataCollected', { value: other }, m.sessionId)
           emit('Tracing.dataCollected', { value: [{ name: 'TracingStartedInBrowser', args: { data: { frames } } }] }, m.sessionId)
+          emit('Tracing.dataCollected', { value: other }, m.sessionId)
         }
         emit('Tracing.tracingComplete', {}, m.sessionId)
         break
@@ -237,6 +255,52 @@ describe.skipIf(process.platform === 'win32')('a page whose renderer dies unanno
     ).rejects.toThrow(/page crashed while rendering/)
     expect(Date.now() - started).toBeLessThan(10_000)
   }, 30_000)
+})
+
+/**
+ * CI round 3: Chrome's zygote-forked processes (renderers) retitle themselves on Linux —
+ * `/proc/<pid>/cmdline` is then the whole command line as ONE space-joined string, the
+ * rest of the old argv zero-filled. Matching NUL-separated args only, the page's own
+ * renderer was taken for a stranger and never watched.
+ */
+describe('ownProcess (Linux: /proc/<pid>/cmdline)', () => {
+  const dir = '/tmp/slay-export-profile-djMy2I'
+  /** `ownProcess` of pid 42 on Linux, whose /proc/42/cmdline reads `text`. */
+  const own = (text: string, profile = dir): boolean =>
+    ownProcess(42, profile, 'linux', (p) => {
+      if (p === '/proc/42/cmdline') return text
+      throw Object.assign(new Error(`ENOENT: ${p}`), { code: 'ENOENT' })
+    })
+  const args = (...a: string[]): string => [...a, ''].join('\0')
+  test('NUL-separated args (a process that kept its argv)', () => {
+    expect(own(args('/opt/google/chrome/chrome', '--type=zygote', `--user-data-dir=${dir}`))).toBe(
+      true
+    )
+  })
+  test("one retitled string (a renderer, as on CI's runner)", () => {
+    const title = `/opt/google/chrome/chrome --type=renderer --crashpad-handler-pid=15078 --user-data-dir=${dir} --lang=en-US --num-raster-threads=2`
+    expect(own(`${title}\0\0\0\0`)).toBe(true)
+    expect(own(`/opt/google/chrome/chrome --user-data-dir=${dir}`)).toBe(true)
+  })
+  test('another profile, or one whose path merely starts like ours, is not ours', () => {
+    expect(own(args('chrome --type=renderer --user-data-dir=/tmp/slay-export-profile-x'))).toBe(
+      false
+    )
+    expect(own(`chrome --type=renderer --user-data-dir=${dir}x --lang=en`)).toBe(false)
+    expect(own(args('chrome', `--user-data-dir=${dir}/sub`))).toBe(false)
+  })
+  test('a profile path with spaces matches in either form', () => {
+    const spaced = '/tmp/my dir/slay-export-profile-x'
+    expect(own(`chrome --type=renderer --user-data-dir=${spaced} --lang=en`, spaced)).toBe(true)
+    expect(own(args('chrome', `--user-data-dir=${spaced}`), spaced)).toBe(true)
+  })
+  test("an unreadable or vanished process is not ours; elsewhere pids are the system's", () => {
+    expect(own('')).toBe(false)
+    expect(
+      ownProcess(7, dir, 'linux', () => fs.readFileSync('/nonexistent/7/cmdline', 'utf8'))
+    ).toBe(false)
+    expect(ownProcess(42, dir, 'darwin', () => '')).toBe(true)
+  })
 })
 
 describe('processFate (Linux: /proc)', () => {
@@ -453,14 +517,14 @@ describe.skipIf(process.platform === 'win32')('N5: the liveness deadline is its 
   }, 30_000)
 })
 
-// A crashed page should end its renderer at once. On Linux, Chrome's crashpad holds a
-// crashing renderer until its handler has dumped it; a stalled handler delays the crash
-// event, and with it the failed export, by as long.
+// CI round 3: `--disable-crashpad-for-testing` made Chrome 157's network service crash
+// on start on Linux ("Crashing due to FD ownership violation"), in a loop: nothing
+// loaded over the network. A crashed page is caught by watching its process instead.
 describe('browser flags', () => {
-  test('Linux runs the export browser without crashpad; other platforms keep it', () => {
-    expect(browserArgs('/p', 'linux')).toContain('--disable-crashpad-for-testing')
-    expect(browserArgs('/p', 'darwin')).not.toContain('--disable-crashpad-for-testing')
-    expect(browserArgs('/p', 'win32')).not.toContain('--disable-crashpad-for-testing')
+  test('crashpad stays on everywhere: disabling it kills the network service', () => {
+    for (const platform of ['linux', 'darwin', 'win32'] as const) {
+      expect(browserArgs('/p', platform)).not.toContain('--disable-crashpad-for-testing')
+    }
     // The page to open stays last.
     expect(browserArgs('/p', 'linux').at(-1)).toBe('about:blank')
   })
