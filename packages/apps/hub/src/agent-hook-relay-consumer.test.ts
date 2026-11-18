@@ -1,7 +1,9 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest'
-import type { RestApiDeps, TerminalStateBridge } from '@slayzone/api'
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest'
+import { setAuthGate, type RestApiDeps, type TerminalStateBridge } from '@slayzone/api'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
   attachAgentHookRelayConsumer,
+  relayAgentHook,
   type AgentHookRelayGateway
 } from './agent-hook-relay-consumer'
 
@@ -9,6 +11,7 @@ import {
 // those exactly as the transport's own agent-hook.test.ts does, so this unit
 // stays hermetic and asserts the CONSUMER wiring, not the domains.
 // A warm agent the pool still holds (booted with `taskId`, not adopted yet).
+const diagnosticSpy = vi.fn()
 const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | null>(() => null)
 // The claude agent tree is pure, so the real module is used (by path: the barrel
 // pulls in the native pty manager) — a hand-rolled fake would drift from its states.
@@ -40,7 +43,7 @@ vi.mock('@slayzone/diagnostics/server', async () => {
   return {
     diagnosticsRouter: router({}),
     setDiagnosticsRouterDeps: () => {},
-    recordDiagnosticEvent: () => {}
+    recordDiagnosticEvent: (e: { event: string }) => diagnosticSpy(e)
   }
 })
 const confirmSessionConversationSpy = vi.fn()
@@ -56,7 +59,9 @@ vi.mock('@slayzone/task/server', async () => {
     projectMovingSql: (await import('@slayzone/projects/server')).projectMovingSql,
     // api wires `task.startMainAgent`'s repo-discovery seam at load.
     setMainAgentDeps: () => {},
-    artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
+    artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`,
+    // The hook owner check's access scope invalidates on it (access.ts).
+    agentSessionsEvents: new (await import('node:events')).EventEmitter()
   }
 })
 
@@ -206,5 +211,213 @@ describe('attachAgentHookRelayConsumer', () => {
     // Not adopted yet: no terminal holds it, so nothing task-scoped runs.
     expect(findSessionSpy).not.toHaveBeenCalled()
     expect(lifecycleSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('a hook from a warm agent the hub no longer holds (its computer says `fromWarm`)', () => {
+  /** The hub's rows: computer-a is u-a's; no task row for the warm agent's pre-minted id. */
+  function hubDeps(): RestApiDeps {
+    const deps = makeDeps()
+    ;(deps as { db: unknown }).db = {
+      get: async (sql: string, params: unknown[]) =>
+        /FROM computers/.test(sql)
+          ? params[0] === 'computer-a'
+            ? { owner_user_id: 'u-a' }
+            : { owner_user_id: null }
+          : undefined,
+      all: async () => []
+    }
+    return deps
+  }
+  /** Relay one event and wait for it to be fully processed. */
+  const relayTo =
+    (deps: RestApiDeps, bridge: TerminalStateBridge) =>
+    (e: { computerId: string; payload: unknown }) =>
+      relayAgentHook(e.computerId, e.payload, deps, bridge)
+  const audit: { event: string; detail: { reason: string } }[] = []
+  const warmHook = (hookEvent: string, computerId = 'computer-a', extra: object = {}) => ({
+    computerId,
+    name: 'agent-hook',
+    payload: {
+      agentId: 'claude-code',
+      hookEvent,
+      taskId: 'pre-minted',
+      sessionId: '55555555-5555-4555-8555-555555555555',
+      ctx: { mode: 'claude-code' },
+      raw: {},
+      ...extra
+    }
+  })
+
+  beforeEach(() => {
+    findSessionSpy.mockReset().mockReturnValue(null)
+    transitionSpy.mockReset()
+    markActiveSpy.mockReset()
+    lifecycleSpy.mockReset()
+    diagnosticSpy.mockReset()
+    unadoptedWarmAgentSpy.mockReset().mockReturnValue(null)
+    confirmSessionConversationSpy.mockReset()
+    audit.length = 0
+    setSecurityLogSink((line) => audit.push(JSON.parse(line)))
+    setAuthGate(() => true)
+  })
+  afterEach(() => {
+    setSecurityLogSink()
+    setAuthGate(() => false)
+  })
+
+  test('killed: its SessionEnd (after the hub dropped the handle) is dropped quietly', async () => {
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionEnd', 'computer-a', { fromWarm: { warmId: 'warm:1' } }))
+    expect(audit.filter((l) => l.event === 'authz.denied')).toEqual([])
+    expect(lifecycleSpy).not.toHaveBeenCalled()
+    expect(transitionSpy).not.toHaveBeenCalled()
+    expect(diagnosticSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'agent_hook.warm_released' })
+    )
+  })
+
+  test('hub restart (pool empty): a surviving warm agent’s hooks are dropped quietly, nothing confirmed', async () => {
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionStart', 'computer-a', { fromWarm: { warmId: 'warm:old' } }))
+    await emit(warmHook('SessionEnd', 'computer-a', { fromWarm: { warmId: 'warm:old' } }))
+    expect(audit.filter((l) => l.event === 'authz.denied')).toEqual([])
+    expect(confirmSessionConversationSpy).not.toHaveBeenCalled()
+    expect(lifecycleSpy).not.toHaveBeenCalled()
+  })
+
+  test('the pool still holds it: its SessionStart still confirms the pooled conversation', async () => {
+    unadoptedWarmAgentSpy.mockImplementation((taskId) =>
+      taskId === 'pre-minted'
+        ? { sessionId: 'pool-1', projectId: 'p', computerId: 'computer-a' }
+        : null
+    )
+    setAuthGate(() => false)
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionStart', 'computer-a', { fromWarm: { warmId: 'warm:1' } }))
+    expect(confirmSessionConversationSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('an unowned computer reports for nobody, warm or not', async () => {
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionEnd', 'computer-unowned', { fromWarm: { warmId: 'warm:1' } }))
+    expect(audit.map((l) => l.detail.reason)).toEqual(['no_reporter'])
+  })
+
+  test('without the computer’s word, a task id with no task row is denied as unknown_task', async () => {
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionEnd'))
+    expect(audit.map((l) => l.detail.reason)).toEqual(['unknown_task'])
+  })
+
+  test('no login: a dying warm agent never drives the cold agent that took its task id', async () => {
+    setAuthGate(() => false)
+    // The claim missed: the hub killed the warm agent and cold-spawned under the same id.
+    findSessionSpy.mockReturnValue('pre-minted:pre-minted')
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionEnd', 'computer-a', { fromWarm: { warmId: 'warm:1' } }))
+    expect(transitionSpy).not.toHaveBeenCalled()
+    expect(lifecycleSpy).not.toHaveBeenCalled()
+    // The cold agent's own hooks (no claim) still drive it.
+    await emit(warmHook('UserPromptSubmit'))
+    expect(transitionSpy).toHaveBeenCalledWith(
+      'pre-minted:pre-minted',
+      'running',
+      'UserPromptSubmit'
+    )
+  })
+
+  test('a malformed claim is ignored (treated as no claim)', async () => {
+    const emit = relayTo(hubDeps(), makeBridge())
+    await emit(warmHook('SessionEnd', 'computer-a', { fromWarm: { warmId: 42 } }))
+    expect(audit.map((l) => l.detail.reason)).toEqual(['unknown_task'])
+  })
+})
+
+describe('computer restart: a warm hook journaled by the old process, replayed by the new one', () => {
+  test('still carries fromWarm and the hub drops it quietly', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { createAgentHookServer } = await import('@slayzone/computer/agent-hook-server')
+    const { WarmHookOrigins } = await import('@slayzone/computer/warm-hook-origins')
+    const { adoptHookJournal, readHookJournal, writeHookJournal } = await import(
+      '@slayzone/computer/hook-journal'
+    )
+    const runtime = mkdtempSync(join(tmpdir(), 'warm-hook-journal-'))
+    const hubUrl = 'wss://hub.example/computers'
+    try {
+      // OLD computer process: its warm agent is killed (host shutdown), and the
+      // agent's SessionEnd reaches it while the hub link is down — so it is only
+      // journaled (as session-host.ts SessionTransport.notify does).
+      const origins = new WarmHookOrigins()
+      origins.spawned('warm:1', 'pre-minted')
+      origins.ended('warm:1')
+      const journal = adoptHookJournal(runtime, hubUrl)
+      const queue: { id: string; params: unknown }[] = []
+      const server = await createAgentHookServer(
+        {
+          dialer: {
+            notify: (_method: string, params?: unknown) => {
+              queue.push({ id: `e${queue.length}`, params })
+              writeHookJournal(journal, queue)
+              return true
+            }
+          },
+          config: {
+            hubUrl,
+            name: 'old',
+            allowedRoots: [runtime],
+            capabilities: ['pty']
+          },
+          log: () => {}
+        } as never,
+        undefined,
+        (hook) => origins.originOf(hook)
+      )
+      await fetch(server.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agentId: 'claude-code',
+          ctx: { v: 1, agentId: 'claude-code', taskId: 'pre-minted', warmId: 'warm:1' },
+          raw: { hook_event_name: 'SessionEnd', session_id: 's-1' }
+        })
+      })
+      await server.close()
+
+      // NEW computer process: reads the journal and delivers after reconnect.
+      const replayed = readHookJournal(runtime, adoptHookJournal(runtime, hubUrl))
+      expect(replayed).toHaveLength(1)
+      const params = replayed[0]!.params as { name: string; payload: Record<string, unknown> }
+      expect(params.payload.fromWarm).toEqual({ warmId: 'warm:1' })
+
+      // The hub (with login, pool empty) receives it.
+      findSessionSpy.mockReset().mockReturnValue('pre-minted:pre-minted')
+      transitionSpy.mockReset()
+      lifecycleSpy.mockReset()
+      unadoptedWarmAgentSpy.mockReset().mockReturnValue(null)
+      const audit: { event: string }[] = []
+      setSecurityLogSink((line) => audit.push(JSON.parse(line)))
+      setAuthGate(() => true)
+      try {
+        const deps = makeDeps()
+        ;(deps as { db: unknown }).db = {
+          get: async (sql: string) =>
+            /FROM computers/.test(sql) ? { owner_user_id: 'u-a' } : undefined,
+          all: async () => []
+        }
+        expect(params.name).toBe('agent-hook')
+        expect(await relayAgentHook('computer-a', params.payload, deps, makeBridge())).toBe('ok')
+      } finally {
+        setSecurityLogSink()
+        setAuthGate(() => false)
+      }
+      expect(audit.filter((l) => l.event === 'authz.denied')).toEqual([])
+      expect(lifecycleSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+    } finally {
+      rmSync(runtime, { recursive: true, force: true })
+    }
   })
 })

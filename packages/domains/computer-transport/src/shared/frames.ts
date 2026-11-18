@@ -464,6 +464,17 @@ export type ComputerEventParams = z.infer<typeof computerEventParamsSchema>
 export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
 
 /**
+ * The computer's own statement on a relayed `agent-hook` event's payload: the hook
+ * came from a WARM (pre-booted, not yet adopted) agent this computer holds or held,
+ * keyed by its `warmId`. The hub may have forgotten that agent — it drops its handle
+ * before the kill, and a restart forgets the whole pool — and drops such a hook
+ * quietly rather than as a refused access (agent-hook-owner.ts). Set only by the
+ * relaying computer, never taken from the agent's envelope.
+ */
+export const agentHookFromWarmSchema = z.object({ warmId: z.string().min(1).max(200) })
+export type AgentHookFromWarm = z.infer<typeof agentHookFromWarmSchema>
+
+/**
  * `ComputerEventParams.name` for what a pty's output SAYS, detected on the computer
  * (`@slayzone/terminal/pty-detection` `PtyOutputDetector`): activity, an honored
  * error, a prompt, the OSC title, first-seen dev-server URLs, a conversation id.

@@ -30,6 +30,12 @@ import { hookReporterMayTouch, type HookReporter } from './agent-hook-owner'
 export type { TerminalStateBridge } from './types'
 export type { HookReporter } from './agent-hook-owner'
 
+/** What the relaying computer says about a hook (see `processAgentHook`). */
+export interface HookOrigin {
+  /** The warm agent it came from (relay `fromWarm.warmId`). */
+  readonly warmId?: string
+}
+
 /**
  * Per-session claude agent TREE (see `@slayzone/terminal/server` → agent-tree.ts).
  *
@@ -439,6 +445,11 @@ async function validTab(
  * `reporter`: who reports the event — the REST principal, or the owner of the
  * computer that relayed it. Read only on a hub with login, where it is required.
  *
+ * `origin`: what the RELAYING COMPUTER says about the event, never read from the
+ * envelope — `warmId` when it came from a warm agent that computer holds or held
+ * unadopted (computer-transport `agentHookFromWarmSchema`). The REST route never
+ * passes it.
+ *
  * Hot path: hooks fire 5-20× per turn (PreToolUse + PostToolUse per tool). Must
  * stay cheap. The ONLY DB write is the once-per-session `SessionStart`
  * conversation-id capture for the capture agents (see `persistConversationId`) —
@@ -449,7 +460,8 @@ export async function processAgentHook(
   body: unknown,
   deps: RestApiDeps,
   bridge: TerminalStateBridge | undefined,
-  reporter?: HookReporter
+  reporter?: HookReporter,
+  origin?: HookOrigin
 ): Promise<'ok' | 'unknown' | 'bad' | 'denied' | 'unavailable'> {
   const parsed = PayloadSchema.safeParse(body)
   if (!parsed.success) return 'bad'
@@ -470,7 +482,12 @@ export async function processAgentHook(
   // desktop app's hub skips the check.
   if (
     getAuthGate() &&
-    !(await hookReporterMayTouch(deps.db, reporter, { taskId: hook.taskId }, hook.hookEvent))
+    !(await hookReporterMayTouch(
+      deps.db,
+      reporter,
+      { taskId: hook.taskId, ...(origin?.warmId ? { warmId: origin.warmId } : {}) },
+      hook.hookEvent
+    ))
   ) {
     return 'denied'
   }
@@ -491,6 +508,22 @@ export async function processAgentHook(
         /* best-effort — pool conversation capture never blocks the hook */
       }
     }
+    return 'ok'
+  }
+
+  if (origin?.warmId) {
+    // A warm agent the pool no longer holds — dropped before the kill whose
+    // SessionEnd this is, or forgotten by a hub restart. Its task id is the pool's,
+    // never a task's: a cold agent may already run under it (a claim that missed),
+    // and these hooks must not drive that one. Nothing to do.
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'agent_hook.warm_released',
+      taskId: hook.taskId,
+      message: hook.hookEvent,
+      payload: { warmId: origin.warmId, computerId: reporter?.computerId ?? null }
+    })
     return 'ok'
   }
 

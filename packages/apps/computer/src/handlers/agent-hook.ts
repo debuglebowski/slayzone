@@ -7,7 +7,8 @@ import {
 } from '@slayzone/terminal-contracts'
 import {
   AGENT_HOOK_EVENT_NAME,
-  ComputerNotificationMethods
+  ComputerNotificationMethods,
+  type AgentHookFromWarm
 } from '@slayzone/computer-transport/shared'
 import type { HandlerContext } from './types'
 
@@ -32,7 +33,14 @@ export interface AgentHookServer {
  */
 export function createAgentHookServer(
   ctx: HandlerContext,
-  onHook?: (hook: ResolvedAgentHook) => unknown | Promise<unknown>
+  onHook?: (hook: ResolvedAgentHook) => unknown | Promise<unknown>,
+  /**
+   * The warm (unadopted) process this computer holds that `hook` came from, or null
+   * (pty handlers' `warmHookOrigin`). Relayed as `fromWarm`: the hub may have forgotten
+   * that agent (killed it, or restarted), and drops such a hook quietly. Computed here,
+   * before the event is journaled, so a replay after reconnect still carries it.
+   */
+  warmOriginOf?: (hook: ResolvedAgentHook) => string | null
 ): Promise<AgentHookServer> {
   const server = http.createServer((req, res) => {
     // Only the hook path + POST are meaningful; everything else is a fast 404.
@@ -84,9 +92,11 @@ export function createAgentHookServer(
       if (!res.writableEnded && !res.destroyed)
         res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
       try {
+        const warmId = warmOriginOf?.(hook) ?? null
+        const fromWarm: AgentHookFromWarm | null = warmId ? { warmId } : null
         ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: AGENT_HOOK_EVENT_NAME,
-          payload: sanitizeAgentHook(hook)
+          payload: { ...sanitizeAgentHook(hook), ...(fromWarm ? { fromWarm } : {}) }
         })
       } catch {
         ctx.log('agent-hook relay failed')

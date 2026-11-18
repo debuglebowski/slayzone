@@ -1,6 +1,6 @@
-import type { RestApiDeps, TerminalStateBridge } from '@slayzone/api'
+import type { HookOrigin, RestApiDeps, TerminalStateBridge } from '@slayzone/api'
 import { getAuthGate, processAgentHook } from '@slayzone/api'
-import { AGENT_HOOK_EVENT_NAME } from '@slayzone/computer-transport/shared'
+import { AGENT_HOOK_EVENT_NAME, agentHookFromWarmSchema } from '@slayzone/computer-transport/shared'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 
 /**
@@ -69,6 +69,20 @@ export function attachAgentHookRelayConsumer(
   })
 }
 
+/**
+ * What the computer itself says about the event: `fromWarm` (computer-transport
+ * `agentHookFromWarmSchema`) when it came from a warm agent the computer holds or
+ * held unadopted. A malformed claim counts as none.
+ */
+function originOf(payload: unknown): HookOrigin | undefined {
+  const claim =
+    payload && typeof payload === 'object'
+      ? (payload as { fromWarm?: unknown }).fromWarm
+      : undefined
+  const parsed = agentHookFromWarmSchema.safeParse(claim)
+  return parsed.success ? { warmId: parsed.data.warmId } : undefined
+}
+
 /** One relayed envelope, reported as the computer's owner on a hub with login. */
 export async function relayAgentHook(
   computerId: string,
@@ -76,9 +90,10 @@ export async function relayAgentHook(
   deps: RestApiDeps,
   bridge: TerminalStateBridge | undefined
 ): ReturnType<typeof processAgentHook> {
-  if (!getAuthGate()) return processAgentHook(payload, deps, bridge)
+  const origin = originOf(payload)
+  if (!getAuthGate()) return processAgentHook(payload, deps, bridge, undefined, origin)
   const owner = await computerOwnerOf(deps.db, computerId)
   return runWithSecurityContext({ actor: owner, ip: null, route: 'computer agent-hook' }, () =>
-    processAgentHook(payload, deps, bridge, { userId: owner, computerId })
+    processAgentHook(payload, deps, bridge, { userId: owner, computerId }, origin)
   )
 }

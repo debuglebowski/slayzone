@@ -2049,3 +2049,73 @@ it.each(['kill', 'dispose'] as const)(
     pty.disposeAll()
   }
 )
+
+describe('warm hook origin (whose hook is a warm agent’s)', () => {
+  const HOOK_CTX = JSON.stringify({ v: 1, agentId: 'claude-code', taskId: 'boot-task' })
+  async function warmUp(warmId = 'warm:1') {
+    const { ctx } = makeCtx()
+    const child = controlledPty(9101)
+    const spawnPty = vi.fn((() => child.proc) as typeof nodePty.spawn)
+    const pty = createPtyHandlers(ctx, undefined, { spawnPty })
+    await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
+      warmId,
+      command: 'cat',
+      cwd: process.cwd(),
+      env: { SLAYZONE_AGENT_HOOK_CONTEXT: HOOK_CTX }
+    })
+    return { pty, child, spawnPty }
+  }
+  const hook = (over: { warmId?: string; taskId?: string } = {}) => ({
+    warmId: 'warm:1',
+    taskId: 'boot-task',
+    ...over
+  })
+
+  it('stamps the warm process id into the agent’s hook context', async () => {
+    const { pty, spawnPty } = await warmUp()
+    try {
+      const env = (spawnPty.mock.calls[0]![2] as { env: Record<string, string> }).env
+      expect(JSON.parse(env.SLAYZONE_AGENT_HOOK_CONTEXT!)).toMatchObject({
+        taskId: 'boot-task',
+        warmId: 'warm:1'
+      })
+    } finally {
+      pty.disposeAll()
+    }
+  })
+
+  it('a live unadopted warm agent (e.g. one that outlived a hub restart) is warm', async () => {
+    const { pty } = await warmUp()
+    try {
+      expect(pty.warmHookOrigin(hook())).toBe('warm:1')
+      // Another task id, or another process, is not.
+      expect(pty.warmHookOrigin(hook({ taskId: 'someone-else' }))).toBeNull()
+      expect(pty.warmHookOrigin(hook({ warmId: 'warm:2' }))).toBeNull()
+    } finally {
+      pty.disposeAll()
+    }
+  })
+
+  it('a killed warm agent stays warm for its SessionEnd, which fires after the kill', async () => {
+    const { pty, child } = await warmUp()
+    const killed = Promise.resolve(pty.handlers['pty.warmKill']({ warmId: 'warm:1' }))
+    child.exit()
+    await killed
+    expect(pty.warmHookOrigin(hook())).toBe('warm:1')
+  })
+
+  it('an adopted one is its task’s: not warm, also after it exits', async () => {
+    const { pty, child } = await warmUp()
+    await pty.handlers['pty.warmAdopt']({ warmId: 'warm:1', sessionId: 'task:tab' })
+    expect(pty.warmHookOrigin(hook())).toBeNull()
+    child.exit()
+    expect(pty.warmHookOrigin(hook())).toBeNull()
+  })
+
+  it('computer shutdown (host restart): warm agents killed by dispose stay warm for their last hooks', async () => {
+    const { pty } = await warmUp()
+    pty.disposeAll()
+    expect(pty.warmHookOrigin(hook())).toBe('warm:1')
+  })
+})

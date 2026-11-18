@@ -23,7 +23,16 @@ import { httpAccessRequest } from '../owner-scope'
  *     agent booted with the id of a task created later, if ever, so the task may not
  *     exist. Such an agent belongs to the project it was warmed for, on the computer
  *     holding it — the relaying computer must be that one;
+ *   - or the relaying computer says the event came from a warm agent it holds or held
+ *     unadopted (`warmId`, the relay's `fromWarm` — never the envelope's) and the pool
+ *     no longer holds it: the hub dropped it before the kill whose `SessionEnd` this
+ *     is, or a restart emptied the pool. It touches nothing (processAgentHook drops
+ *     it), and its reporter is that computer's owner — let through without an audit
+ *     line. Not a weaker check: nothing is processed for it. Over REST (no computer)
+ *     the claim is ignored;
  *   - no task id: nothing to attribute it to → dropped.
+ * A denied task id with no task row is logged as `unknown_task`, not `not_owner`: no
+ * one else owns it.
  * An unowned computer reports for nobody. A hub without login checks nothing (the
  * desktop app's hub — byte-identical to before).
  *
@@ -43,6 +52,8 @@ export interface HookReporter {
 /** What a resolved hook names. */
 export interface HookTargets {
   readonly taskId?: string
+  /** The relaying computer's warm-origin claim (`fromWarm.warmId`), if any. */
+  readonly warmId?: string
 }
 
 /** Decisions are reused for a few seconds per reporter: hooks fire many times a turn. */
@@ -84,8 +95,11 @@ async function decide(
     if (!(await scope.allows(p))) return { ok: false, reason: 'not_owner', resource: r }
     return { ok: true }
   }
-  if (!(await scope.allows(r))) return { ok: false, reason: 'not_owner', resource: r }
-  return { ok: true }
+  if (targets.warmId && reporter.computerId !== null) return { ok: true }
+  if (await scope.allows(r)) return { ok: true }
+  // Deny path only (off the hot path): say whether the task exists at all.
+  const row = await db.get<{ x: number }>('SELECT 1 AS x FROM tasks WHERE id = ?', [targets.taskId])
+  return { ok: false, reason: row ? 'not_owner' : 'unknown_task', resource: r }
 }
 
 /**

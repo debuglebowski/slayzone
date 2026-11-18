@@ -325,6 +325,8 @@ export interface HubRequestDispatch {
    *  (the port is ephemeral, resolved async after the dispatch is built). The
    *  ctx is shared by reference, so pty spawns issued after this see the URL. */
   captureAgentHook(hook: import('@slayzone/terminal-contracts').ResolvedAgentHook): Promise<void>
+  /** The warm (unadopted) process a hook came from, or null (warm-hook-origins.ts). */
+  warmHookOrigin(hook: import('@slayzone/terminal-contracts').ResolvedAgentHook): string | null
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
@@ -734,6 +736,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     setAgentHookUrl,
     hubDisconnected,
     captureAgentHook: chat.captureHook,
+    warmHookOrigin: (hook) => pty.warmHookOrigin(hook),
     isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork(),
     ownedPids: () => [...pty.ownedPids(), ...proc.ownedPids(), ...chat.ownedPids()]
   }
@@ -1095,7 +1098,11 @@ export function startComputer(
     // Its ephemeral port binds async; feed the URL into the dispatch so ptys
     // spawned after the bind overlay it into the agent env. Best-effort — a bind
     // failure only degrades remote hooks, it does not stop exec.
-    const agentHookReady = createAgentHookServer({ dialer, config, log }, dispatch.captureAgentHook)
+    const agentHookReady = createAgentHookServer(
+      { dialer, config, log },
+      dispatch.captureAgentHook,
+      dispatch.warmHookOrigin
+    )
       .then((srv) => {
         dispatch.setAgentHookUrl(srv.url)
         return srv

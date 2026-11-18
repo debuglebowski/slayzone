@@ -14,6 +14,13 @@ export interface ResolvedAgentHook {
   cwd?: string
   raw?: unknown
   releaseChannel?: string
+  /**
+   * The computer's key for the warm (pre-booted) process that fired this hook, stamped
+   * into the context at warm spawn (`stampWarmHookContext`). Agent-supplied, so only
+   * the computer that stamped it may act on it — it is never relayed to the hub
+   * (`sanitizeAgentHook`); the computer asserts warm origin itself instead.
+   */
+  warmId?: string
 }
 const record = (v: unknown): Record<string, unknown> | undefined =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
@@ -52,7 +59,39 @@ export function resolveAgentHook(input: unknown): ResolvedAgentHook | null {
     source: str(raw?.source),
     cwd: str(body.cwd) ?? str(raw?.cwd),
     raw: raw ?? body.raw,
-    releaseChannel: str(ctx?.releaseChannel)
+    releaseChannel: str(ctx?.releaseChannel),
+    warmId: str(ctx?.warmId)
+  }
+}
+
+/** The env var carrying the opaque hook identity blob (see mcp-env.ts). */
+const HOOK_CONTEXT_ENV = 'SLAYZONE_AGENT_HOOK_CONTEXT'
+
+/**
+ * Stamp a warm process's id (`warmId`) into its hook identity blob, so the computer
+ * running it can tell its hooks from those of any later process booted with the
+ * same task id (a warm agent killed at claim is replaced by a cold one under that id).
+ * Returns the env with the stamp — the input is not mutated — and the task id the
+ * agent boots with. No context (a hook-incapable mode) or a malformed one: the env is
+ * returned as given and nothing can be attributed.
+ */
+export function stampWarmHookContext<E extends Record<string, string> | undefined>(
+  env: E,
+  warmId: string
+): { env: E; bootTaskId?: string } {
+  const blob = env?.[HOOK_CONTEXT_ENV]
+  if (!blob) return { env }
+  let ctx: Record<string, unknown> | undefined
+  try {
+    ctx = record(JSON.parse(blob))
+  } catch {
+    return { env }
+  }
+  if (!ctx) return { env }
+  const bootTaskId = str(ctx.taskId)
+  return {
+    env: { ...env, [HOOK_CONTEXT_ENV]: JSON.stringify({ ...ctx, warmId }) },
+    ...(bootTaskId ? { bootTaskId } : {})
   }
 }
 /** Preserve lifecycle facts. Prompt text, tool arguments and tool output stay local. */

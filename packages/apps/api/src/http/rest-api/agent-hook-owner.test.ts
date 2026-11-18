@@ -30,7 +30,12 @@ vi.mock('../../access', async (importOriginal) => ({
 
 const { hookReporterMayTouch } = await import('./agent-hook-owner')
 
-const db = {} as never
+/** Task rows the hub has (the access decision itself is stubbed above). */
+const TASK_ROWS = new Set(['tA', 'tB'])
+const db = {
+  get: async (sql: string, params: unknown[]) =>
+    /FROM tasks/.test(sql) && TASK_ROWS.has(params[0] as string) ? { x: 1 } : undefined
+} as never
 const A = { userId: 'u-a', computerId: 'comp-a' }
 const lines: { event: string; detail: { reason: string } }[] = []
 
@@ -87,8 +92,39 @@ describe('whose a hook event is', () => {
     expect(await may({ userId: 'u-a', computerId: null }, { taskId: 'reserved-1' })).toBe(true)
   })
 
-  test('a task id no task and no warm agent has: dropped', async () => {
+  test('a task id no task and no warm agent has: dropped, as an unknown task — not as someone else’s', async () => {
     expect(await may(A, { taskId: 'nobody-has-this' })).toBe(false)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.detail.reason).toBe('unknown_task')
+  })
+
+  test('another user’s existing task is still not_owner', async () => {
+    expect(await may(A, { taskId: 'tB' })).toBe(false)
+    expect(lines[0]!.detail.reason).toBe('not_owner')
+  })
+
+  test('a warm agent the pool no longer holds (killed, or a hub restart), vouched for by its computer: quiet', async () => {
+    expect(await may(A, { taskId: 'pre-minted', warmId: 'warm:1' })).toBe(true)
+    expect(lines).toHaveLength(0)
+  })
+
+  test('a warm claim is only the relaying computer’s to make', async () => {
+    // Over REST there is no computer to vouch: the claim is ignored.
+    expect(
+      await may({ userId: 'u-a', computerId: null }, { taskId: 'pre-minted', warmId: 'w' })
+    ).toBe(false)
+    expect(lines[0]!.detail.reason).toBe('unknown_task')
+    lines.length = 0
+    // An unowned computer reports for nobody, warm or not.
+    expect(
+      await may({ userId: null, computerId: 'comp-x' }, { taskId: 'pre-minted', warmId: 'w' })
+    ).toBe(false)
+    expect(lines[0]!.detail.reason).toBe('no_reporter')
+  })
+
+  test('a warm agent the pool still holds is decided as before, claim or not', async () => {
+    placements.set('reserved-2', { projectId: 'pB', computerId: 'comp-a' })
+    expect(await may(A, { taskId: 'reserved-2', warmId: 'warm:x' })).toBe(false)
     expect(lines[0]!.detail.reason).toBe('not_owner')
   })
 })

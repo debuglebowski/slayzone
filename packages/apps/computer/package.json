@@ -7,7 +7,10 @@
   "types": "./src/main.ts",
   "exports": {
     ".": "./src/main.ts",
-    "./cli-relay": "./src/cli-relay.ts"
+    "./cli-relay": "./src/cli-relay.ts",
+    "./agent-hook-server": "./src/handlers/agent-hook.ts",
+    "./warm-hook-origins": "./src/warm-hook-origins.ts",
+    "./hook-journal": "./src/hook-journal.ts"
   },
   "bin": {
     "slayzone-computer": "./dist/bin.cjs"

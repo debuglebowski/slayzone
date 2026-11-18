@@ -54,6 +54,7 @@ export function globalAgentPanelSessionId(projectId: string, index: number): str
 export {
   resolveAgentHook,
   sanitizeAgentHook,
+  stampWarmHookContext,
   agentHookPrompt,
   type ResolvedAgentHook,
   type HookAgentId

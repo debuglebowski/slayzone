@@ -89,6 +89,37 @@ describe('createAgentHookServer (computer loopback relay)', () => {
     }
   })
 
+  it('says when a hook came from a warm agent it holds (fromWarm), never forwarding the agent’s own claim', async () => {
+    const { notifies, ctx } = makeCtx()
+    const asked: unknown[] = []
+    const server = await createAgentHookServer(ctx, undefined, (hook) => {
+      asked.push(hook)
+      return hook.warmId === 'warm:1' ? 'warm:1' : null
+    })
+    try {
+      const hook = (warmId: string) =>
+        JSON.stringify({
+          ctx: { v: 1, taskId: 'boot-task', agentId: 'claude-code', warmId },
+          raw: { hook_event_name: 'SessionEnd' },
+          agentId: 'claude-code'
+        })
+      await post(server.url, hook('warm:1'))
+      await post(server.url, hook('warm:forged'))
+      const relayed = notifies.filter((n) => n.method === 'event')
+      expect(relayed).toHaveLength(2)
+      expect(relayed[0]!.params.payload).toMatchObject({
+        taskId: 'boot-task',
+        hookEvent: 'SessionEnd',
+        fromWarm: { warmId: 'warm:1' }
+      })
+      expect(relayed[1]!.params.payload).not.toHaveProperty('fromWarm')
+      expect(JSON.stringify(relayed)).not.toContain('warm:forged')
+      expect(asked[0]).toMatchObject({ warmId: 'warm:1', taskId: 'boot-task' })
+    } finally {
+      await server.close()
+    }
+  })
+
   it('acknowledges empty hooks without relaying arbitrary bodies', async () => {
     const { notifies, ctx } = makeCtx()
     const server = await createAgentHookServer(ctx)

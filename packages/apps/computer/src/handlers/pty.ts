@@ -82,6 +82,7 @@ import { createCliVersionProbe } from '../cli-version'
 import { restoredPrefix, type PtyHistory, type PtyHistoryTracker } from '../pty-history'
 import { spawnCwd } from '../path-jail'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
+import { WarmHookOrigins } from '../warm-hook-origins'
 import {
   analyzePtyInput,
   DEFAULT_SESSION_ID_COMMAND,
@@ -89,7 +90,7 @@ import {
   RingBuffer,
   SESSION_ERROR_WINDOW_MS
 } from '@slayzone/terminal/pty-detection'
-import type { BufferSinceResult } from '@slayzone/terminal-contracts'
+import { stampWarmHookContext, type BufferSinceResult } from '@slayzone/terminal-contracts'
 import { pageChunks } from '@slayzone/transport/direct'
 import {
   createSpawnAdmission,
@@ -289,6 +290,11 @@ export interface PtyHandlers {
   /** Kill every live pty (called on computer shutdown). */
   disposeAll(): void
   /**
+   * The warm (unadopted) process a hook came from, or null — so the relay can tell
+   * the hub, which may no longer know it (see warm-hook-origins.ts).
+   */
+  warmHookOrigin(hook: { warmId?: string; taskId?: string }): string | null
+  /**
    * The hub connection went away: drop spawns still waiting for a slot. Their
    * replies can no longer be delivered, and the hub settles each lost spawn on
    * reconnect against `pty.list` — re-sending it if nothing holds it — so a start
@@ -361,6 +367,7 @@ export function createPtyHandlers(
   /** The hub's terminal theme, as last pushed (`pty.setTheme`); new pipelines start with it. */
   let theme: PtyTheme | undefined
   const tombstones = new ExitTombstones()
+  const warmOrigins = new WarmHookOrigins()
   const admission = options.admission ?? createSpawnAdmission()
   // node-pty loads at the first spawn: a missing one fails terminals, not the computer.
   const spawnPty = options.spawnPty ?? spawnNodePty
@@ -759,6 +766,7 @@ export function createPtyHandlers(
     // A warm session dying before adoption is the computer's business: the hub
     // holds no session for it. It re-warms on its own reconcile.
     if (session.warm) {
+      warmOrigins.ended(session.id)
       ctx.log('warm pty exited before adoption', { warmId: session.id })
       return
     }
@@ -1173,8 +1181,12 @@ export function createPtyHandlers(
 
   function startWarm(params: PtyWarmSpawnParams, cols?: number, rows?: number): PtySession {
     const shell = params.computerShell ? resolveUserShell() : params.command
+    // The agent's hooks carry this process's key, so they stay attributable to it
+    // after the hub has forgotten it (see warm-hook-origins.ts).
+    const { env, bootTaskId } = stampWarmHookContext(params.env, params.warmId)
     const session = spawnSession(params.warmId, {
       ...params,
+      ...(env ? { env } : {}),
       command: shell,
       args: params.computerShell ? getShellStartupArgs(shell) : params.args,
       ...(cols !== undefined ? { cols } : {}),
@@ -1185,6 +1197,7 @@ export function createPtyHandlers(
     // spawned directly so the shell's rc init (PATH, toolchain shims) has already
     // run — the whole point of warming.
     if (params.postSpawnCommand) session.proc.write(`${params.postSpawnCommand}\r`)
+    warmOrigins.spawned(params.warmId, bootTaskId)
     ctx.log('warm pty spawned', {
       warmId: params.warmId,
       pid: session.proc.pid
@@ -1345,6 +1358,7 @@ export function createPtyHandlers(
       )
     }
     sessions.delete(params.warmId)
+    warmOrigins.adopted(params.warmId)
     session.id = params.sessionId
     session.taskId = params.taskId
     delete session.warm
@@ -1711,6 +1725,9 @@ export function createPtyHandlers(
     for (const record of starts.values()) record.cancelled = true
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
+      // Its exit is never finalized (the map is cleared below), yet its last hooks
+      // may still reach this process before it stops listening.
+      if (session.warm) warmOrigins.ended(sessionId)
       endDirectWatchers(session, 'disposed')
       // Output still waiting for its throttled write is saved before the process goes.
       session.history?.flushSync()
@@ -1840,6 +1857,7 @@ export function createPtyHandlers(
     },
     handlers,
     disposeAll,
+    warmHookOrigin: (hook) => warmOrigins.originOf(hook),
     dropQueued
   }
 }
