@@ -29,6 +29,9 @@ export { ArtifactShareDialog } from './sharing/ArtifactShareDialog'
 export { SharedWithMe } from './sharing/SharedWithMe'
 export {
   ROLE_LABEL,
+  useBoardRoles,
+  useCanEdit,
+  useIsTaskViewOnly,
   useDirectory,
   useMyRole,
   useSharingLiveUpdates,

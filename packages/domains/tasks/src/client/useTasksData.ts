@@ -23,7 +23,7 @@ import { applySidebarHubOrder, partitionSidebarOrder, sidebarTopLevelRefs } from
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
 import { useBoardRefresh, type BoardRefreshTarget } from './useBoardRefresh'
-import { useSharingLiveUpdates } from '@slayzone/projects/client'
+import { useBoardRoles, useSharingLiveUpdates } from '@slayzone/projects/client'
 import {
   MAX_PATCH_ROWS,
   parentIdsOf,
@@ -672,6 +672,9 @@ export function useTasksData(): UseTasksDataReturn {
   // Sharing (T-100): gaining or losing a project or task changes which projects and
   // tasks exist for this user at all, so the whole board reloads.
   useSharingLiveUpdates(reloadEverything)
+  // Which of these tasks the user may only view (T-100): one request for the board.
+  const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks])
+  useBoardRoles(taskIds)
 
   // Tag CustomEvents patch local tags state directly (instant cross-component
   // sync without a board refetch). Blocked-changed re-pulls the blocked id set.

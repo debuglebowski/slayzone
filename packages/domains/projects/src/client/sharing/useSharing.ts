@@ -1,7 +1,8 @@
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
-import { useTRPC } from '../trpc'
+import { useTRPC, useTRPCClient } from '../trpc'
 
 export type AccessRole = 'view' | 'edit' | 'manage'
 
@@ -58,6 +59,22 @@ export function useMyRole(
 }
 
 /**
+ * Whether the caller may change a resource (T-100): false only once its role is known
+ * to be View. True without login and while the role loads, so nothing flashes read-only
+ * for its owner; the hub refuses a View member's write either way.
+ */
+export function useCanEdit(kind: 'project' | 'task' | 'artifact', id: string | null | undefined) {
+  const trpc = useTRPC()
+  const { enabled } = useSharingStatus()
+  const q = useQuery({
+    ...trpc.sharing.myRoles.queryOptions({ resources: id ? [{ kind, id }] : [] }),
+    enabled: enabled && !!id
+  })
+  if (!enabled || !id || !q.data) return true
+  return q.data[`${kind}:${id}`] !== 'view'
+}
+
+/**
  * Keeps everything sharing decides fresh: an `onChanged` naming the caller (it gained
  * or lost something) refetches the sharing queries and the projects, then calls
  * `onAccessChanged` (the board hook reloads the board). Mounted by `useTasksData`.
@@ -99,4 +116,53 @@ export function useRunsAgentsHere(taskId: string | null | undefined): boolean {
   })
   if (!enabled || !taskId || !q.data) return true
   return q.data[`taskOwner:${taskId}`] != null
+}
+
+/**
+ * The caller's roles on every task of the board, in ONE request (T-100): each card and
+ * menu reads its own from this cache ({@link useIsTaskViewOnly}) instead of asking
+ * per task. Under `sharing`, so an access change refetches it with the rest.
+ */
+const BOARD_ROLES_KEY = [['sharing', 'boardRoles']] as const
+
+/** Keep the board's role cache for `taskIds`. Mounted by the board hook. */
+export function useBoardRoles(taskIds: readonly string[]): void {
+  const client = useTRPCClient()
+  const queryClient = useQueryClient()
+  const { enabled } = useSharingStatus()
+  const idsRef = useRef(taskIds)
+  const signature = taskIds.join(',')
+  useEffect(() => {
+    idsRef.current = taskIds
+  })
+  useQuery({
+    queryKey: BOARD_ROLES_KEY,
+    queryFn: () =>
+      idsRef.current.length === 0
+        ? Promise.resolve({} as Record<string, string | null>)
+        : client.sharing.myRoles.query({
+            resources: idsRef.current.map((id) => ({ kind: 'task' as const, id }))
+          }),
+    enabled
+  })
+  // A different set of tasks: ask again (the key stays one, so every card's reader
+  // keeps reading the same cache).
+  useEffect(() => {
+    if (enabled) void queryClient.invalidateQueries({ queryKey: BOARD_ROLES_KEY })
+  }, [enabled, signature, queryClient])
+}
+
+/**
+ * Whether the board's role cache says the caller may only view this task. Reads the
+ * cache only (never fetches, never re-renders unless this task's answer changes).
+ */
+export function useIsTaskViewOnly(taskId: string): boolean {
+  const queryClient = useQueryClient()
+  return useSyncExternalStore(
+    (onChange) => queryClient.getQueryCache().subscribe(onChange),
+    () =>
+      queryClient.getQueryData<Record<string, string | null>>(BOARD_ROLES_KEY)?.[
+        `task:${taskId}`
+      ] === 'view'
+  )
 }

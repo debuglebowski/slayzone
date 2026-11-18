@@ -59,4 +59,6 @@ export interface RichTextEditorProps {
   onOpenLink?: (href: string, target: LinkOpenTarget) => void
   /** Cmd+S / Ctrl+S handler installed on the editor DOM. */
   onSave?: () => void
+  /** Shows the document without letting anyone change it (a View member, T-100). */
+  readOnly?: boolean
 }

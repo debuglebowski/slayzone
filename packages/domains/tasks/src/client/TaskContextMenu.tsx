@@ -56,6 +56,7 @@ import {
   Bell
 } from 'lucide-react'
 import { useTrack } from '@slayzone/telemetry/client'
+import { useIsTaskViewOnly } from '@slayzone/projects/client'
 import { useCrossHubMoveTargets } from './useCrossHubMoveTargets'
 import { format } from 'date-fns'
 import {
@@ -88,6 +89,8 @@ interface TaskContextMenuProps {
   onTogglePin?: () => void
   /** When true (agent idle + task already read), renders a "Mark as unread" item. */
   canMarkUnread?: boolean
+  /** The user may only view this task (T-100): the menu offers copying, nothing else. */
+  readOnly?: boolean
   children: React.ReactNode
 }
 
@@ -115,8 +118,11 @@ export function TaskContextMenu({
   isPinned,
   onTogglePin,
   canMarkUnread,
+  readOnly: readOnlyProp = false,
   children
 }: TaskContextMenuProps): React.JSX.Element {
+  const viewOnly = useIsTaskViewOnly(task.id)
+  const readOnly = readOnlyProp || viewOnly
   const { trackTask } = useTrack()
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -220,6 +226,32 @@ export function TaskContextMenu({
     } as Partial<Task>)
     setCommentDialogOpen(false)
     setBlockedComment('')
+  }
+
+  const copyMenu = (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>
+        <Copy className="mr-2 size-3.5" />
+        Copy
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        <ContextMenuItem onSelect={handleCopyTitle}>Title</ContextMenuItem>
+        <ContextMenuItem onSelect={handleCopyLink}>Link</ContextMenuItem>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  )
+
+  // A task the user may only view (T-100): nothing here changes it.
+  if (readOnly) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent className="w-60" data-testid="task-context-menu-view-only">
+          <ContextMenuLabel className="text-xs text-muted-foreground">View only</ContextMenuLabel>
+          {copyMenu}
+        </ContextMenuContent>
+      </ContextMenu>
+    )
   }
 
   return (
@@ -464,17 +496,7 @@ export function TaskContextMenu({
             Duplicate…
           </ContextMenuItem>
 
-          {/* Copy submenu */}
-          <ContextMenuSub>
-            <ContextMenuSubTrigger>
-              <Copy className="mr-2 size-3.5" />
-              Copy
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent>
-              <ContextMenuItem onSelect={handleCopyTitle}>Title</ContextMenuItem>
-              <ContextMenuItem onSelect={handleCopyLink}>Link</ContextMenuItem>
-            </ContextMenuSubContent>
-          </ContextMenuSub>
+          {copyMenu}
 
           <ContextMenuSeparator />
 

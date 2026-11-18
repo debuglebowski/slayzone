@@ -20,6 +20,8 @@ export interface ArtifactsPanelProps {
   onOpenUrl?: (url: string) => void
   /** Share one file with people (T-100). Absent: no Share entry (a hub without login). */
   onShareArtifact?: (artifact: { id: string; title: string }) => void
+  /** A View member's panel (T-100): files open and download, nothing changes them. */
+  readOnly?: boolean
 }
 
 export type ArtifactViewMode = 'preview' | 'split' | 'raw'

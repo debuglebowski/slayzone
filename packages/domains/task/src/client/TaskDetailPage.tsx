@@ -207,6 +207,7 @@ import { TaskSettingsPanel } from './TaskSettingsPanel'
 import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
 import {
   ArtifactShareDialog,
+  useCanEdit,
   useMyRole,
   useRunsAgentsHere,
   useSharingStatus
@@ -978,6 +979,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // on their own computer (T-100); one who may only view it runs none.
   const taskRole = useMyRole('task', task?.id)
   const canRunOwnAgents = taskRole === 'edit' || taskRole === 'manage'
+  // A View member (T-100) sees the task as it is: nothing on the page offers an edit.
+  const canEdit = useCanEdit('task', task?.id)
   const [sharingArtifact, setSharingArtifact] = useState<{ id: string; title: string } | null>(null)
   const pendingArtifactRef = useRef<string | null>(null)
   const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
@@ -1939,7 +1942,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     modes,
     hasConversationId: !!task && !!getConversationIdForMode(task),
     hasDescription: !!descriptionValue,
-    canRenameInline: !compact && !zenMode,
+    canRenameInline: !compact && !zenMode && canEdit,
     onTaskUpdated: handleTaskUpdate,
     onTagsChange: handleTagsChange,
     onMoveToProject: (id, mode = 'move') => {
@@ -2063,7 +2066,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         // the grid in full-height mode (collapsible, shares space via the
         // water-fill). Body is shared via this const.
         const detailsBody = (
-          <>
+          <fieldset disabled={!canEdit} className="contents" data-testid="task-details">
             <TaskMetadataSidebar
               task={task}
               tags={tags}
@@ -2202,7 +2205,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 </div>
               </div>
             </div>
-          </>
+          </fieldset>
         )
         // Layout tier from the panel's resolved width: 1 column (stacked, as
         // before), 2 (Description | cards + Details), 3 (Description | cards |
@@ -2291,7 +2294,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       setDescriptionValue(md)
                     }}
                     onBlur={handleDescriptionSave}
-                    placeholder="Add description..."
+                    placeholder={canEdit ? 'Add description...' : ''}
+                    readOnly={!canEdit}
                     testId="task-description-editor"
                     variant="inline"
                     fontFamily={notesFontFamily}
@@ -2393,14 +2397,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           />
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setAddingSubTask(true)}
-                          className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
-                        >
-                          <Plus className="size-3" />
-                          Add subtask
-                        </button>
+                        canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setAddingSubTask(true)}
+                            className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
+                          >
+                            <Plus className="size-3" />
+                            Add subtask
+                          </button>
+                        )
                       )}
                     </div>
                   </SortableContext>
@@ -2623,14 +2629,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 !task.is_temporary && 'cursor-text'
               )}
               onDoubleClick={
-                task.is_temporary
+                task.is_temporary || !canEdit
                   ? undefined
                   : (e) => {
                       e.stopPropagation()
                       setEditingTitle(true)
                     }
               }
-              title={task.is_temporary ? undefined : 'Double-click to rename'}
+              title={task.is_temporary || !canEdit ? undefined : 'Double-click to rename'}
               data-testid="compact-title"
             >
               {task.is_temporary ? 'Scratch terminal' : task.title}
@@ -2761,12 +2767,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 </div>
               ) : (
                 <div className="flex items-center gap-2 shrink-0">
-                  <TaskStatusMenu
-                    task={task}
-                    project={project}
-                    statusOptions={statusOptions}
-                    onTaskUpdate={handleTaskUpdate}
-                  />
+                  <fieldset disabled={!canEdit} className="contents">
+                    <TaskStatusMenu
+                      task={task}
+                      project={project}
+                      statusOptions={statusOptions}
+                      onTaskUpdate={handleTaskUpdate}
+                    />
+                  </fieldset>
                   <div className="inline-grid items-center min-w-[2ch]">
                     <span className="invisible col-start-1 row-start-1 text-2xl font-bold whitespace-pre">
                       {titleValue || ' '}
@@ -2777,14 +2785,27 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       onChange={(e) => setTitleValue(e.target.value)}
                       onBlur={handleTitleSave}
                       onKeyDown={handleTitleKeyDown}
-                      onClick={() => setEditingTitle(true)}
-                      readOnly={!editingTitle}
+                      onClick={() => canEdit && setEditingTitle(true)}
+                      readOnly={!editingTitle || !canEdit}
                       className={cn(
                         'col-start-1 row-start-1 text-2xl font-bold bg-transparent border-none outline-none w-full',
-                        !editingTitle && 'cursor-pointer'
+                        !editingTitle && canEdit && 'cursor-pointer'
                       )}
                     />
                   </div>
+                  {!canEdit && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
+                          data-testid="task-view-only"
+                        >
+                          View only
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>You can see this task but not change it.</TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
               )}
 
@@ -3780,11 +3801,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         taskId={task.id}
                         isResizing={isResizing}
                         initialActiveArtifactId={task.active_artifact_id}
-                        onActiveArtifactIdChange={handleActiveArtifactIdChange}
+                        // The open file and sidebar are saved on the task: a View member's
+                        // stay local (T-100).
+                        onActiveArtifactIdChange={
+                          canEdit ? handleActiveArtifactIdChange : undefined
+                        }
                         initialSidebarState={task.artifacts_sidebar}
-                        onSidebarStateChange={handleArtifactsSidebarChange}
+                        onSidebarStateChange={canEdit ? handleArtifactsSidebarChange : undefined}
                         onOpenUrl={openDevServerInBrowser}
                         onShareArtifact={sharing.enabled ? setSharingArtifact : undefined}
+                        readOnly={!canEdit}
                       />
                     </Activity>
                     {sharingArtifact && (
@@ -4126,6 +4152,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           value={descriptionValue}
           onChange={setDescriptionValue}
           onSave={handleDescriptionSave}
+          readOnly={!canEdit}
           fontFamily={notesFontFamily}
           readability={notesReadability}
           width={notesWidth}

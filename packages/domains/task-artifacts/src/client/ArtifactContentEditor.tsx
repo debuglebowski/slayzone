@@ -250,7 +250,8 @@ export function ArtifactContentEditor({
   searchRegex,
   onSearchMatchCountChange,
   onOpenUrl,
-  onDownload
+  onDownload,
+  readOnly = false
 }: {
   artifact: TaskArtifact
   /** The task's artifacts (a video's same-named `.srt`/`.vtt` become its subtitles). */
@@ -273,6 +274,8 @@ export function ArtifactContentEditor({
   onOpenUrl?: (url: string) => void
   /** Save the file elsewhere: offered where the artifact is not shown as text. */
   onDownload?: () => void
+  /** Shown, never changed (a View member, T-100). */
+  readOnly?: boolean
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
@@ -691,6 +694,7 @@ export function ArtifactContentEditor({
             className="flex-1 min-h-0"
             value={content ?? ''}
             onChange={handleChange}
+            readOnly={readOnly}
             placeholder="Write markdown..."
             readability={effectiveReadability}
             width={effectiveWidth}
@@ -717,6 +721,7 @@ export function ArtifactContentEditor({
                 ref={splitCodeRef}
                 value={content ?? ''}
                 onChange={handleChange}
+                readOnly={readOnly}
                 fileExt={fileExt}
                 version={editorReloadVersion}
                 searchQuery={searchQuery}
@@ -790,6 +795,7 @@ export function ArtifactContentEditor({
             <SearchableCodeView
               value={content ?? ''}
               onChange={handleChange}
+              readOnly={readOnly}
               fileExt={fileExt}
               version={editorReloadVersion}
               searchQuery={searchQuery}
@@ -823,6 +829,7 @@ export function ArtifactContentEditor({
         <SearchableCodeView
           value={content ?? ''}
           onChange={handleChange}
+          readOnly={readOnly}
           fileExt={fileExt}
           version={editorReloadVersion}
           searchQuery={searchQuery}

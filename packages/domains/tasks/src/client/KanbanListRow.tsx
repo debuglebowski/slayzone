@@ -20,6 +20,7 @@ import {
 import { AlertCircle, AlarmClockOff, Check, GitMerge, Link2 } from 'lucide-react'
 import { useSessionBackgroundJobs, useSessionState } from '@slayzone/terminal'
 import { formatSnoozeTimeLeft } from './KanbanListView.utils'
+import { useIsTaskViewOnly } from '@slayzone/projects/client'
 
 function PriorityBar({ priority }: { priority: number }): React.JSX.Element {
   return (
@@ -69,7 +70,10 @@ export interface ListRowProps {
 }
 
 export function SortableListRow(props: ListRowProps): React.JSX.Element {
-  const { task, disableDrag } = props
+  const { task } = props
+  // A task the user may only view (T-100) does not move.
+  const viewOnly = useIsTaskViewOnly(task.id)
+  const disableDrag = props.disableDrag || viewOnly
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     disabled: disableDrag

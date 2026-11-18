@@ -48,6 +48,8 @@ type CreatingState = { parentFolderId: string | null; type: 'file' | 'folder' } 
 type RenamingState = { id: string; type: 'artifact' | 'folder' } | null
 
 interface TreeSidebarProps {
+  /** A View member's tree (T-100): browse, open, copy and download — never change. */
+  readOnly?: boolean
   /** Share one file with people (T-100); absent: no Share entry. */
   onShareArtifact?: (artifact: { id: string; title: string }) => void
   artifacts: TaskArtifact[]
@@ -113,6 +115,7 @@ interface TreeSidebarProps {
  */
 export function TreeSidebar(props: TreeSidebarProps) {
   const {
+    readOnly = false,
     onShareArtifact,
     artifacts,
     folders,
@@ -256,42 +259,55 @@ export function TreeSidebar(props: TreeSidebarProps) {
                     </button>
                   </ContextMenuTrigger>
                   <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
-                    <ContextMenuItem
-                      onSelect={() => {
-                        inputTakesFocusRef.current = true
-                        setCreating({ parentFolderId: folder.id, type: 'file' })
-                      }}
-                    >
-                      <FilePlus className="size-3 mr-2" /> New Artifact
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      onSelect={() => {
-                        inputTakesFocusRef.current = true
-                        setCreating({ parentFolderId: folder.id, type: 'folder' })
-                      }}
-                    >
-                      <FolderPlus className="size-3 mr-2" /> New Folder
-                    </ContextMenuItem>
-                    {(clipboard || osHasFiles) && (
+                    {!readOnly && (
                       <>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            inputTakesFocusRef.current = true
+                            setCreating({ parentFolderId: folder.id, type: 'file' })
+                          }}
+                        >
+                          <FilePlus className="size-3 mr-2" /> New Artifact
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            inputTakesFocusRef.current = true
+                            setCreating({ parentFolderId: folder.id, type: 'folder' })
+                          }}
+                        >
+                          <FolderPlus className="size-3 mr-2" /> New Folder
+                        </ContextMenuItem>
+                        {(clipboard || osHasFiles) && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onSelect={() => void handleArtifactPaste(folder.id)}>
+                              <ClipboardPaste className="size-3 mr-2" /> Paste
+                              <ContextMenuShortcut>
+                                {formatKeysForDisplay('mod+v')}
+                              </ContextMenuShortcut>
+                            </ContextMenuItem>
+                          </>
+                        )}
                         <ContextMenuSeparator />
-                        <ContextMenuItem onSelect={() => void handleArtifactPaste(folder.id)}>
-                          <ClipboardPaste className="size-3 mr-2" /> Paste
-                          <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
+                        <ContextMenuItem onSelect={() => startRenameFolder(folder)}>
+                          <Pencil className="size-3 mr-2" /> Rename
                         </ContextMenuItem>
                       </>
                     )}
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onSelect={() => startRenameFolder(folder)}>
-                      <Pencil className="size-3 mr-2" /> Rename
-                    </ContextMenuItem>
                     <ContextMenuItem onSelect={() => downloadFolder(folder.id)}>
                       <Download className="size-3 mr-2" /> Download
                     </ContextMenuItem>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem variant="destructive" onSelect={() => deleteFolder(folder.id)}>
-                      <Trash2 className="size-3 mr-2" /> Delete
-                    </ContextMenuItem>
+                    {!readOnly && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          variant="destructive"
+                          onSelect={() => deleteFolder(folder.id)}
+                        >
+                          <Trash2 className="size-3 mr-2" /> Delete
+                        </ContextMenuItem>
+                      </>
+                    )}
                   </ContextMenuContent>
                 </ContextMenu>
               </div>
@@ -336,7 +352,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
                             'opacity-50'
                         )}
                         onClick={(e) => handleArtifactClick(e, artifact.id)}
-                        draggable={!isRenaming}
+                        draggable={!isRenaming && !readOnly}
                         onDragStart={handleArtifactDragStart(artifact.id)}
                       >
                         <div className="flex w-full items-center gap-1.5 min-w-0">
@@ -375,66 +391,76 @@ export function TreeSidebar(props: TreeSidebarProps) {
                       </button>
                     </ContextMenuTrigger>
                     <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
-                      <ContextMenuItem
-                        onSelect={() => handleArtifactCut(getEffectiveArtifactIds(artifact.id))}
-                      >
-                        <Scissors className="size-3 mr-2" /> Cut
-                        <ContextMenuShortcut>{formatKeysForDisplay('mod+x')}</ContextMenuShortcut>
-                      </ContextMenuItem>
+                      {!readOnly && (
+                        <ContextMenuItem
+                          onSelect={() => handleArtifactCut(getEffectiveArtifactIds(artifact.id))}
+                        >
+                          <Scissors className="size-3 mr-2" /> Cut
+                          <ContextMenuShortcut>{formatKeysForDisplay('mod+x')}</ContextMenuShortcut>
+                        </ContextMenuItem>
+                      )}
                       <ContextMenuItem
                         onSelect={() => handleArtifactCopy(getEffectiveArtifactIds(artifact.id))}
                       >
                         <Copy className="size-3 mr-2" /> Copy
                         <ContextMenuShortcut>{formatKeysForDisplay('mod+c')}</ContextMenuShortcut>
                       </ContextMenuItem>
-                      {(clipboard || osHasFiles) && (
-                        <ContextMenuItem
-                          onSelect={() => void handleArtifactPaste(artifact.folder_id)}
-                        >
-                          <ClipboardPaste className="size-3 mr-2" /> Paste
-                          <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
-                        </ContextMenuItem>
-                      )}
-                      <ContextMenuItem
-                        onSelect={() =>
-                          void handleArtifactDuplicate(getEffectiveArtifactIds(artifact.id))
-                        }
-                      >
-                        <CopyPlus className="size-3 mr-2" /> Duplicate
-                        <ContextMenuShortcut>{formatKeysForDisplay('mod+d')}</ContextMenuShortcut>
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        onSelect={() => startRenameArtifact(artifact)}
-                        disabled={selectedIds.size > 1 && selectedIds.has(artifact.id)}
-                      >
-                        <Pencil className="size-3 mr-2" /> Rename
-                      </ContextMenuItem>
-                      {moveToFolders.length > 0 && (
-                        <ContextMenuSub>
-                          <ContextMenuSubTrigger>
-                            <ArrowRight className="size-3 mr-2" /> Move to
-                          </ContextMenuSubTrigger>
-                          <ContextMenuSubContent>
-                            {artifact.folder_id && (
-                              <ContextMenuItem
-                                onSelect={() => moveArtifactToFolder(artifact.id, null)}
-                              >
-                                Root
-                              </ContextMenuItem>
-                            )}
-                            {moveToFolders
-                              .filter((f) => f.id !== artifact.folder_id)
-                              .map((f) => (
-                                <ContextMenuItem
-                                  key={f.id}
-                                  onSelect={() => moveArtifactToFolder(artifact.id, f.id)}
-                                >
-                                  {f.path}
-                                </ContextMenuItem>
-                              ))}
-                          </ContextMenuSubContent>
-                        </ContextMenuSub>
+                      {!readOnly && (
+                        <>
+                          {(clipboard || osHasFiles) && (
+                            <ContextMenuItem
+                              onSelect={() => void handleArtifactPaste(artifact.folder_id)}
+                            >
+                              <ClipboardPaste className="size-3 mr-2" /> Paste
+                              <ContextMenuShortcut>
+                                {formatKeysForDisplay('mod+v')}
+                              </ContextMenuShortcut>
+                            </ContextMenuItem>
+                          )}
+                          <ContextMenuItem
+                            onSelect={() =>
+                              void handleArtifactDuplicate(getEffectiveArtifactIds(artifact.id))
+                            }
+                          >
+                            <CopyPlus className="size-3 mr-2" /> Duplicate
+                            <ContextMenuShortcut>
+                              {formatKeysForDisplay('mod+d')}
+                            </ContextMenuShortcut>
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem
+                            onSelect={() => startRenameArtifact(artifact)}
+                            disabled={selectedIds.size > 1 && selectedIds.has(artifact.id)}
+                          >
+                            <Pencil className="size-3 mr-2" /> Rename
+                          </ContextMenuItem>
+                          {moveToFolders.length > 0 && (
+                            <ContextMenuSub>
+                              <ContextMenuSubTrigger>
+                                <ArrowRight className="size-3 mr-2" /> Move to
+                              </ContextMenuSubTrigger>
+                              <ContextMenuSubContent>
+                                {artifact.folder_id && (
+                                  <ContextMenuItem
+                                    onSelect={() => moveArtifactToFolder(artifact.id, null)}
+                                  >
+                                    Root
+                                  </ContextMenuItem>
+                                )}
+                                {moveToFolders
+                                  .filter((f) => f.id !== artifact.folder_id)
+                                  .map((f) => (
+                                    <ContextMenuItem
+                                      key={f.id}
+                                      onSelect={() => moveArtifactToFolder(artifact.id, f.id)}
+                                    >
+                                      {f.path}
+                                    </ContextMenuItem>
+                                  ))}
+                              </ContextMenuSubContent>
+                            </ContextMenuSub>
+                          )}
+                        </>
                       )}
                       <ContextMenuSeparator />
                       {onShareArtifact && (
@@ -480,15 +506,19 @@ export function TreeSidebar(props: TreeSidebarProps) {
                           </ContextMenuSubContent>
                         </ContextMenuSub>
                       )}
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        variant="destructive"
-                        onSelect={() =>
-                          void handleDeleteSelected(getEffectiveArtifactIds(artifact.id))
-                        }
-                      >
-                        <Trash2 className="size-3 mr-2" /> Delete
-                      </ContextMenuItem>
+                      {!readOnly && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem
+                            variant="destructive"
+                            onSelect={() =>
+                              void handleDeleteSelected(getEffectiveArtifactIds(artifact.id))
+                            }
+                          >
+                            <Trash2 className="size-3 mr-2" /> Delete
+                          </ContextMenuItem>
+                        </>
+                      )}
                     </ContextMenuContent>
                   </ContextMenu>
                 </div>
@@ -537,29 +567,33 @@ export function TreeSidebar(props: TreeSidebarProps) {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
-        <ContextMenuItem
-          onSelect={() => {
-            inputTakesFocusRef.current = true
-            setCreating({ parentFolderId: null, type: 'file' })
-          }}
-        >
-          <FilePlus className="size-3 mr-2" /> New Artifact
-        </ContextMenuItem>
-        <ContextMenuItem
-          onSelect={() => {
-            inputTakesFocusRef.current = true
-            setCreating({ parentFolderId: null, type: 'folder' })
-          }}
-        >
-          <FolderPlus className="size-3 mr-2" /> New Folder
-        </ContextMenuItem>
-        {(clipboard || osHasFiles) && (
+        {!readOnly && (
           <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => void handleArtifactPaste(null)}>
-              <ClipboardPaste className="size-3 mr-2" /> Paste
-              <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
+            <ContextMenuItem
+              onSelect={() => {
+                inputTakesFocusRef.current = true
+                setCreating({ parentFolderId: null, type: 'file' })
+              }}
+            >
+              <FilePlus className="size-3 mr-2" /> New Artifact
             </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                inputTakesFocusRef.current = true
+                setCreating({ parentFolderId: null, type: 'folder' })
+              }}
+            >
+              <FolderPlus className="size-3 mr-2" /> New Folder
+            </ContextMenuItem>
+            {(clipboard || osHasFiles) && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => void handleArtifactPaste(null)}>
+                  <ClipboardPaste className="size-3 mr-2" /> Paste
+                  <ContextMenuShortcut>{formatKeysForDisplay('mod+v')}</ContextMenuShortcut>
+                </ContextMenuItem>
+              </>
+            )}
           </>
         )}
         {artifacts.length > 0 && (

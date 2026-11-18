@@ -26,6 +26,8 @@ interface DescriptionDialogProps {
   onArtifactClick?: (artifactId: string) => void
   onUploadImages?: (files: File[]) => Promise<Array<{ id: string; title: string }>>
   onOpenLink?: (href: string, target: LinkOpenTarget) => void
+  /** Shown, never changed (a View member, T-100). */
+  readOnly?: boolean
 }
 
 function getWordCount(editor: Editor | null): number {
@@ -47,6 +49,7 @@ export function DescriptionDialog({
   value,
   onChange,
   onSave,
+  readOnly = false,
   fontFamily,
   readability,
   width,
@@ -109,6 +112,7 @@ export function DescriptionDialog({
           placeholder="Write your description..."
           className="flex-1 min-h-0"
           testId="task-description-editor-fullscreen"
+          readOnly={readOnly}
           autoFocus
           editorRef={editorRef}
           onReady={handleEditorReady}

@@ -1,4 +1,4 @@
-import { useCallback, type ComponentProps } from 'react'
+import { useCallback, useEffect, type ComponentProps } from 'react'
 import { editorViewCtx } from '@milkdown/core'
 import { callCommand } from '@milkdown/utils'
 import { cn } from '@slayzone/ui'
@@ -45,7 +45,8 @@ export function RichTextEditor({
   htmlResolveSrc,
   htmlOnLinkClick,
   onOpenLink,
-  onSave
+  onSave,
+  readOnly = false
 }: RichTextEditorProps) {
   const {
     containerRef,
@@ -74,6 +75,14 @@ export function RichTextEditor({
   })
 
   const rootRef = useClickToFocus(editorInstanceRef, editorReady)
+
+  // Read only: the document shows, nothing edits it (ProseMirror `editable`). Re-set
+  // on every (re)build — a hidden tab's editor is rebuilt when shown.
+  useEffect(() => {
+    const editor = editorInstanceRef.current
+    if (!editorReady || !editor) return
+    editor.ctx.get(editorViewCtx).setProps({ editable: () => !readOnly })
+  }, [editorInstanceRef, editorReady, readOnly])
 
   useEditorSearch(
     editorInstanceRef,
@@ -110,7 +119,7 @@ export function RichTextEditor({
       spellCheck={spellcheck !== false}
       ref={rootRef}
     >
-      {showToolbar && editorReady && (
+      {showToolbar && editorReady && !readOnly && (
         <EditorToolbar formatState={formatState} onCommand={handleCommand} />
       )}
       <div ref={containerRef} className="mk-doc-scroll" />

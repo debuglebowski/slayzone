@@ -20,6 +20,7 @@ import {
 import {
   EditorState,
   Compartment,
+  type Extension,
   StateField,
   StateEffect,
   RangeSetBuilder
@@ -215,6 +216,13 @@ export interface SearchableCodeViewProps {
   placeholder?: string
   minimap?: boolean
   viewHandleRef?: MutableRefObject<EditorView | null>
+  /** Shown, never changed (a View member, T-100). */
+  readOnly?: boolean
+}
+
+/** Read only: no edits by any route (state), and no caret or typing (view). */
+function readOnlyExt(readOnly: boolean): Extension {
+  return readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []
 }
 
 export interface SearchableCodeViewHandle {
@@ -236,7 +244,8 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
       fontSize = 12,
       placeholder,
       minimap,
-      viewHandleRef
+      viewHandleRef,
+      readOnly = false
     },
     ref
   ) {
@@ -274,6 +283,7 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
 
     const themeComp = useRef(new Compartment())
     const minimapComp = useRef(new Compartment())
+    const readOnlyComp = useRef(new Compartment())
     // Set from the text as loaded (mount, disk reload), never while typing, so
     // the layout does not flip under the caret mid-edit.
     const wrapComp = useRef(new Compartment())
@@ -287,7 +297,7 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
     // Values the view is created from, read as of creation without making
     // them re-create it: theme + minimap are reconfigured live via compartments
     // below, value is the initial doc.
-    const readInitial = useEffectEvent(() => ({ value, themeExt, minimap }))
+    const readInitial = useEffectEvent(() => ({ value, themeExt, minimap, readOnly }))
 
     // Create editor on mount / language / size-theme change
     useEffect(() => {
@@ -316,6 +326,7 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
         themeComp.current.of(initial.themeExt),
         cmScrollbarTheme,
         minimapComp.current.of(initial.minimap ? buildMinimapExt() : []),
+        readOnlyComp.current.of(readOnlyExt(initial.readOnly)),
         sizeTheme,
         searchField,
         searchDecorations(searchField),
@@ -368,6 +379,13 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
       if (!view) return
       view.dispatch({ effects: [themeComp.current.reconfigure(themeExt)] })
     }, [themeExt])
+
+    // Reconfigure read-only at runtime
+    useEffect(() => {
+      const view = viewRef.current
+      if (!view) return
+      view.dispatch({ effects: [readOnlyComp.current.reconfigure(readOnlyExt(readOnly))] })
+    }, [readOnly])
 
     // Reconfigure minimap at runtime
     useEffect(() => {

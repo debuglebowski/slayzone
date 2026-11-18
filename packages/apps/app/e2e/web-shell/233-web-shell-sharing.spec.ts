@@ -46,6 +46,8 @@ interface Hub {
   base: string
   root: string
   owner: Owner
+  /** Everything the hub has written so far (its security log included). */
+  output: () => string
   stop: () => Promise<void>
 }
 
@@ -66,8 +68,13 @@ async function spawnLoginHub(): Promise<Hub> {
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
-  proc.stdout?.on('data', () => undefined)
-  proc.stderr?.on('data', () => undefined)
+  let output = ''
+  proc.stdout?.on('data', (chunk: Buffer) => {
+    output += chunk.toString()
+  })
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    output += chunk.toString()
+  })
   const stop = (): Promise<void> =>
     new Promise<void>((resolve) => {
       if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
@@ -85,7 +92,7 @@ async function spawnLoginHub(): Promise<Hub> {
       const o = JSON.parse(fs.readFileSync(path.join(root, 'hub.owner.json'), 'utf8')) as Owner
       return o.token && o.email && o.password ? o : null
     }, 'bootstrap owner')
-    return { base, root, owner, stop }
+    return { base, root, owner, output: () => output, stop }
   } catch (err) {
     await stop()
     throw err
@@ -202,12 +209,43 @@ test.describe('web shell sharing — two people, one login hub', () => {
       await expect(memberPage.getByText('Secret Task')).toHaveCount(0, { timeout: 20_000 })
       await expect(memberPage.getByText('Open Task').first()).toBeVisible()
 
+      // On the board the task is view only too: its menu offers copying, nothing else.
+      await memberPage.getByText('Open Task').first().click({ button: 'right' })
+      await expect(memberPage.getByTestId('task-context-menu-view-only')).toBeVisible()
+      await memberPage.keyboard.press('Escape')
+
       // View only: the task opens, but the agent pane offers nothing to run.
       await memberPage.getByText('Open Task').first().click()
       await expect(
         memberPage.getByTestId('agent-pane-not-yours').filter({ visible: true })
       ).toBeVisible({ timeout: 20_000 })
       await expect(memberPage.getByText('You can view this task').first()).toBeVisible()
+      // …and the task itself reads as view only: nothing on it offers an edit.
+      await expect(memberPage.getByTestId('task-view-only').filter({ visible: true })).toBeVisible()
+      await expect(
+        memberPage
+          .getByTestId('task-description-editor')
+          .filter({ visible: true })
+          .locator('[contenteditable]')
+          .first()
+      ).toHaveAttribute('contenteditable', 'false')
+      await expect(
+        memberPage
+          .getByTestId('task-project-field')
+          .filter({ visible: true })
+          .getByRole('combobox')
+          .first()
+      ).toBeDisabled()
+      // The owner's own task page has no such limits.
+      await expect(ownerPage.getByTestId('task-view-only')).toHaveCount(0)
+      // Opening it wrote nothing the member may not write: the hub refused no call of
+      // theirs for want of a role (each would be an error toast).
+      await memberPage.waitForTimeout(1_500)
+      const refused = hub
+        .output()
+        .split('\n')
+        .filter((line) => line.includes('"authz.denied"') && line.includes('insufficient_role'))
+      expect(refused).toEqual([])
     } finally {
       await ownerContext.close()
       await memberContext.close()

@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger
 } from '@slayzone/ui'
 import { cn, getColumnStatusStyle } from '@slayzone/ui'
+import { useIsTaskViewOnly } from '@slayzone/projects/client'
 
 interface SortableKanbanCardProps {
   task: Task
@@ -59,7 +60,7 @@ function SortableKanbanCard({
   columns,
   onTaskClick,
   onContextMenu,
-  disableDrag,
+  disableDrag: disableDragProp,
   cardProperties,
   isBlocked,
   isFocused,
@@ -84,6 +85,9 @@ function SortableKanbanCard({
   activeAgentTaskIds,
   onShutdownAgent
 }: SortableKanbanCardProps): React.JSX.Element {
+  // A task the user may only view (T-100) does not move.
+  const viewOnly = useIsTaskViewOnly(task.id)
+  const disableDrag = disableDragProp || viewOnly
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     disabled: disableDrag

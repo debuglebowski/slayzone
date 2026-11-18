@@ -138,7 +138,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       initialSidebarState,
       onSidebarStateChange,
       onOpenUrl,
-      onShareArtifact
+      onShareArtifact,
+      readOnly = false
     },
     ref
   ) {
@@ -403,10 +404,12 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       ref,
       () => ({
         selectArtifact: (id: string) => setSelectedId(id),
-        createArtifact: () => setCreating({ parentFolderId: null, type: 'file' }),
+        createArtifact: () => {
+          if (!readOnly) setCreating({ parentFolderId: null, type: 'file' })
+        },
         toggleSearch: () => setSidebarMode((m) => (m === 'search' ? 'tree' : 'search'))
       }),
-      [setSelectedId]
+      [setSelectedId, readOnly]
     )
 
     // --- Inline create/rename handlers ---
@@ -623,6 +626,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
         }
         return
       }
+      // A View member's panel (T-100): copying out is all; nothing below changes files.
+      if (readOnly) return
       if (meta && e.key === 'x') {
         const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
         if (ids.length) {
@@ -690,7 +695,14 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
           setDragOver(true)
         }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={handleFileDrop}
+        onDrop={
+          readOnly
+            ? (e) => {
+                e.preventDefault()
+                setDragOver(false)
+              }
+            : handleFileDrop
+        }
         onDragEnd={handleDragEnd}
         onKeyDown={handlePanelKeyDown}
       >
@@ -1098,6 +1110,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 />
               ) : (
                 <TreeSidebar
+                  readOnly={readOnly}
                   onShareArtifact={onShareArtifact}
                   artifacts={artifacts}
                   folders={folders}
@@ -1151,50 +1164,52 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   downloadAsHtml={downloadAsHtml}
                 />
               )}
-              <div className="flex items-center gap-1.5 px-2 py-2 border-t border-border shrink-0 overflow-hidden">
-                <Button
-                  data-testid="artifacts-new-btn"
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    '!h-7 text-[10px] flex-1 min-w-0',
-                    sidebarWidth < 180 ? 'px-0 justify-center' : 'px-2'
-                  )}
-                  onClick={() => setCreating({ parentFolderId: null, type: 'file' })}
-                  title="New file"
-                >
-                  <FilePlus className="size-3 shrink-0" />
-                  {sidebarWidth >= 180 && <span className="ml-1 truncate">New</span>}
-                </Button>
-                <Button
-                  data-testid="artifacts-folder-btn"
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    '!h-7 text-[10px] flex-1 min-w-0',
-                    sidebarWidth < 180 ? 'px-0 justify-center' : 'px-2'
-                  )}
-                  onClick={() => setCreating({ parentFolderId: null, type: 'folder' })}
-                  title="New folder"
-                >
-                  <FolderPlus className="size-3 shrink-0" />
-                  {sidebarWidth >= 180 && <span className="ml-1 truncate">Folder</span>}
-                </Button>
-                <Button
-                  data-testid="artifacts-upload-btn"
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    '!h-7 text-[10px] flex-1 min-w-0',
-                    sidebarWidth < 180 ? 'px-0 justify-center' : 'px-2'
-                  )}
-                  onClick={handleUpload}
-                  title="Upload file"
-                >
-                  <Upload className="size-3 shrink-0" />
-                  {sidebarWidth >= 180 && <span className="ml-1 truncate">Upload</span>}
-                </Button>
-              </div>
+              {!readOnly && (
+                <div className="flex items-center gap-1.5 px-2 py-2 border-t border-border shrink-0 overflow-hidden">
+                  <Button
+                    data-testid="artifacts-new-btn"
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      '!h-7 text-[10px] flex-1 min-w-0',
+                      sidebarWidth < 180 ? 'px-0 justify-center' : 'px-2'
+                    )}
+                    onClick={() => setCreating({ parentFolderId: null, type: 'file' })}
+                    title="New file"
+                  >
+                    <FilePlus className="size-3 shrink-0" />
+                    {sidebarWidth >= 180 && <span className="ml-1 truncate">New</span>}
+                  </Button>
+                  <Button
+                    data-testid="artifacts-folder-btn"
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      '!h-7 text-[10px] flex-1 min-w-0',
+                      sidebarWidth < 180 ? 'px-0 justify-center' : 'px-2'
+                    )}
+                    onClick={() => setCreating({ parentFolderId: null, type: 'folder' })}
+                    title="New folder"
+                  >
+                    <FolderPlus className="size-3 shrink-0" />
+                    {sidebarWidth >= 180 && <span className="ml-1 truncate">Folder</span>}
+                  </Button>
+                  <Button
+                    data-testid="artifacts-upload-btn"
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      '!h-7 text-[10px] flex-1 min-w-0',
+                      sidebarWidth < 180 ? 'px-0 justify-center' : 'px-2'
+                    )}
+                    onClick={handleUpload}
+                    title="Upload file"
+                  >
+                    <Upload className="size-3 shrink-0" />
+                    {sidebarWidth >= 180 && <span className="ml-1 truncate">Upload</span>}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1258,6 +1273,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   onSearchMatchCountChange={setFindMatchCount}
                   onOpenUrl={onOpenUrl}
                   onDownload={() => void downloadFile(selectedArtifact.id)}
+                  readOnly={readOnly}
                 />
               </>
             ) : (
