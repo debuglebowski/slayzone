@@ -52,7 +52,7 @@
     "bufferutil": "^4.1.0",
     "node-pty": "^1.1.0",
     "superjson": "^2.2.6",
-    "ws": "^8.22.0"
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
@@ -62,6 +62,6 @@
     "@types/node": "^24.19.2",
     "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }

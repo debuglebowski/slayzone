@@ -59,7 +59,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.104.5",
+    "@tanstack/react-query": "^5.105.3",
     "@trpc/server": "^11.19.0",
     "@xterm/addon-fit": "0.12.0-beta.311",
     "@xterm/addon-search": "0.17.0-beta.310",
@@ -68,7 +68,7 @@
     "@xterm/addon-webgl": "0.20.0-beta.309",
     "@xterm/headless": "6.1.0-beta.313",
     "@xterm/xterm": "6.1.0-beta.315",
-    "lucide-react": "^1.61.0",
+    "lucide-react": "^1.68.0",
     "node-pty": "^1.1.0",
     "zod": "^4.6.6",
     "zustand": "^5.0.16"

@@ -8,7 +8,7 @@
     ".": "./index.mjs"
   },
   "dependencies": {
-    "@babel/core": "^8.0.7",
+    "@babel/core": "^8.1.0",
     "@babel/eslint-parser": "^8.0.7"
   }
 }

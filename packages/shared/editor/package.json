@@ -13,22 +13,22 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@milkdown/core": "^7.22.3",
-    "@milkdown/ctx": "^7.22.3",
-    "@milkdown/plugin-history": "^7.22.3",
-    "@milkdown/plugin-indent": "^7.22.3",
-    "@milkdown/plugin-listener": "^7.22.3",
-    "@milkdown/preset-commonmark": "^7.22.3",
-    "@milkdown/preset-gfm": "^7.22.3",
-    "@milkdown/prose": "^7.22.3",
-    "@milkdown/utils": "^7.22.3",
+    "@milkdown/core": "^7.23.0",
+    "@milkdown/ctx": "^7.23.0",
+    "@milkdown/plugin-history": "^7.23.0",
+    "@milkdown/plugin-indent": "^7.23.0",
+    "@milkdown/plugin-listener": "^7.23.0",
+    "@milkdown/preset-commonmark": "^7.23.0",
+    "@milkdown/preset-gfm": "^7.23.0",
+    "@milkdown/prose": "^7.23.0",
+    "@milkdown/utils": "^7.23.0",
     "@slayzone/markdown": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "dompurify": "^3.4.17",
     "remark-frontmatter": "^5.0.0",
     "unified": "^11.0.5",
-    "unist-util-visit": "^5.1.0"
+    "unist-util-visit": "^5.2.0"
   },
   "peerDependencies": {
     "react": "^19.3.1",
@@ -42,6 +42,6 @@
     "jsdom": "^30.1.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }
