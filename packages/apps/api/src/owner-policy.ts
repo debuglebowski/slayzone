@@ -1274,6 +1274,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'settings.setTheme': none(HOST),
 
   // ── sharing (T-100): reading who is in needs `view`; every change `manage` ──
+  'sharing.status': none("whether the hub has login, and the caller's own id"),
   'sharing.directory': none(
     "the hub's enabled accounts (id, name, email): whom one can share with — listed to every user by design (T-100)"
   ),

@@ -658,6 +658,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'settings.onThemeChanged': 'user',
   'settings.set': 'user',
   'settings.setTheme': 'user',
+  'sharing.status': 'user',
   'sharing.directory': 'user',
   'sharing.myRoles': 'user',
   'sharing.projectMembers': 'user',

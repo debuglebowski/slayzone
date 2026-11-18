@@ -22,3 +22,16 @@ export {
 } from './useProjectLockGuard'
 export { ProjectLockPopover } from './ProjectLockPopover'
 export { ProjectLockScreen } from './ProjectLockScreen'
+// Sharing (T-100): members, task visibility/grants, single-file shares.
+export { MembersTab } from './sharing/MembersTab'
+export { TaskSharingCard } from './sharing/TaskSharingCard'
+export { ArtifactShareDialog } from './sharing/ArtifactShareDialog'
+export { SharedWithMe } from './sharing/SharedWithMe'
+export {
+  ROLE_LABEL,
+  useDirectory,
+  useMyRole,
+  useSharingLiveUpdates,
+  useSharingStatus,
+  type AccessRole
+} from './sharing/useSharing'

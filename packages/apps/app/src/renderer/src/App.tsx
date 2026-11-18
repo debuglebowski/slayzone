@@ -48,6 +48,8 @@ import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { markTerminalFirst } from '@slayzone/task/client/TerminalFirstShell'
 import { buildTaskDetailSnapshot, taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import type { ProjectCreationContext } from '@slayzone/projects'
+import { SharedWithMe, useSharingLiveUpdates } from '@slayzone/projects/client'
+import { SharedArtifactDialog } from './app-shell/SharedArtifactDialog'
 import {
   isRateLimited,
   recordTaskOpen,
@@ -262,6 +264,9 @@ function App(): React.JSX.Element {
   const deletingTask = useDialogStore((s) => s.deletingTask)
   const createProjectOpen = useDialogStore((s) => s.createProjectOpen)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
+  // A file shared with the user on its own (T-100): opened outside its task.
+  const [sharedArtifactId, setSharedArtifactId] = useState<string | null>(null)
+  useSharingLiveUpdates()
   const [projectSettingsInitialTab, setProjectSettingsInitialTab] =
     useState<ProjectSettingsTab>('general')
   const [testGroupBy, setTestGroupBy] = useState<'none' | 'path' | 'label'>('none')
@@ -1435,6 +1440,18 @@ function App(): React.JSX.Element {
               <ConvexScope>
                 <FeedbackDialog />
               </ConvexScope>
+            }
+            sharedSlot={
+              <>
+                <SharedWithMe
+                  onOpenTask={(taskId) => openTask(taskId)}
+                  onOpenArtifact={(_taskId, artifactId) => setSharedArtifactId(artifactId)}
+                />
+                <SharedArtifactDialog
+                  artifactId={sharedArtifactId}
+                  onClose={() => setSharedArtifactId(null)}
+                />
+              </>
             }
             keyRecorder={KeyRecorder}
             sessionTaskIds={activeAgentTaskIds}

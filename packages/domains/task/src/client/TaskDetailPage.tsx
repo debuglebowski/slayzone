@@ -205,6 +205,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
+import { ArtifactShareDialog, useSharingStatus } from '@slayzone/projects/client'
 import { useSharedCardHeights } from './useSharedCardHeights'
 import {
   SortableSubTask,
@@ -965,6 +966,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
   const browserPanelRef = useRef<BrowserPanelHandle>(null)
   const artifactsPanelRef = useRef<ArtifactsPanelHandle>(null)
+  // Sharing one file with people (T-100); only on a hub with login.
+  const sharing = useSharingStatus()
+  const [sharingArtifact, setSharingArtifact] = useState<{ id: string; title: string } | null>(null)
   const pendingArtifactRef = useRef<string | null>(null)
   const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
     artifactsPanelRef.current = handle
@@ -3753,8 +3757,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         initialSidebarState={task.artifacts_sidebar}
                         onSidebarStateChange={handleArtifactsSidebarChange}
                         onOpenUrl={openDevServerInBrowser}
+                        onShareArtifact={sharing.enabled ? setSharingArtifact : undefined}
                       />
                     </Activity>
+                    {sharingArtifact && (
+                      <ArtifactShareDialog
+                        artifactId={sharingArtifact.id}
+                        title={sharingArtifact.title}
+                        open
+                        onOpenChange={(open) => !open && setSharingArtifact(null)}
+                        onMoved={(newId) => {
+                          setSharingArtifact((a) => (a ? { ...a, id: newId } : a))
+                          artifactsPanelRef.current?.selectArtifact(newId)
+                        }}
+                      />
+                    )}
                   </Suspense>
                 )}
               </div>

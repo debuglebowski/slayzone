@@ -19,6 +19,8 @@ import {
   type IntegrationsSettingsTabProps
 } from './ProjectSettingsTabs'
 import { TasksGeneralTab } from './TasksGeneralTab'
+import { MembersTab } from './sharing/MembersTab'
+import { useSharingStatus } from './sharing/useSharing'
 
 interface ProjectSettingsDialogProps {
   project: Project | null
@@ -35,6 +37,7 @@ interface ProjectSettingsDialogProps {
     | 'repos'
     | 'integrations'
     | 'tests'
+    | 'members'
     | 'templates'
   groupBy?: 'none' | 'path' | 'label'
   onGroupByChange?: (value: 'none' | 'path' | 'label') => void
@@ -70,10 +73,12 @@ export function ProjectSettingsDialog({
     | 'worktrees'
     | 'repos'
     | 'templates'
+    | 'members'
     | 'integrations'
     | 'tests'
   >('general')
   const lookupStatusSyncLock = useStatusSyncLockLookup()
+  const sharing = useSharingStatus()
   const detectedRepos = useProjectDetectedRepos(
     open ? defaultProjectRoot(project) : null,
     project?.id
@@ -138,7 +143,9 @@ export function ProjectSettingsDialog({
     { key: 'worktrees', label: 'Worktrees' },
     ...(detectedRepos.length > 0 ? [{ key: 'repos' as const, label: 'Repositories' }] : []),
     { key: 'tests', label: 'Tests' },
-    { key: 'integrations' as const, label: 'Integrations' }
+    { key: 'integrations' as const, label: 'Integrations' },
+    // Only on a hub with login: there are other people to share with (T-100).
+    ...(sharing.enabled ? [{ key: 'members' as const, label: 'Members' }] : [])
   ]
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -210,6 +217,8 @@ export function ProjectSettingsDialog({
           )}
 
           {activeTab === 'tasks/tags' && project && <RegisteredTagsTab projectId={project.id} />}
+
+          {activeTab === 'members' && project && <MembersTab project={project} />}
 
           {activeTab === 'templates' && project && renderTemplatesTab?.(project.id)}
 

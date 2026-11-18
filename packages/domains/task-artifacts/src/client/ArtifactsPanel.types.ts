@@ -18,6 +18,8 @@ export interface ArtifactsPanelProps {
   onSidebarStateChange?: (state: Required<ArtifactsSidebarState>) => void
   /** Open a URL in the task's in-app browser (⌘-clicked links). */
   onOpenUrl?: (url: string) => void
+  /** Share one file with people (T-100). Absent: no Share entry (a hub without login). */
+  onShareArtifact?: (artifact: { id: string; title: string }) => void
 }
 
 export type ArtifactViewMode = 'preview' | 'split' | 'raw'

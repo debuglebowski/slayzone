@@ -10,6 +10,7 @@ import { PriorityDueDateCard } from './PriorityDueDateCard'
 import { SnoozeProgressCard } from './SnoozeProgressCard'
 import { TagsCard } from './TagsCard'
 import { BlockedBySection } from './BlockedBySection'
+import { TaskSharingCard } from '@slayzone/projects/client'
 
 export { BlockerStatusIcon } from './BlockerStatusIcon'
 import { RemoteBlockersSection } from './RemoteBlockersSection'
@@ -96,6 +97,8 @@ export function TaskMetadataSidebar({
         setAddBlockerSearch={setAddBlockerSearch}
       />
       <RemoteBlockersSection taskId={task.id} />
+      {/* Who besides its owner sees the task (T-100); nothing on a hub without login. */}
+      <TaskSharingCard taskId={task.id} />
     </div>
   )
 }

@@ -33,10 +33,10 @@ export type SharingRouterDeps = {
 // Unwired (a unit harness, a hub without login): nobody but the owner, nothing to move.
 let deps: SharingRouterDeps = {
   roleOf: async () => null,
-  invalidate: () => {},
-  tasksChanged: () => {},
-  onTaskShared: () => {},
-  onProjectShared: () => {},
+  invalidate: () => undefined,
+  tasksChanged: () => undefined,
+  onTaskShared: () => undefined,
+  onProjectShared: () => undefined,
   promoteArtifact: async (id) => id
 }
 

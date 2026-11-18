@@ -754,6 +754,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'settings.setTheme': 'read',
   // ── sharing (T-100): who else may reach a project, task or artifact. Reading it is
   // the board's reads; changing who gets in is a task write (the owner gate needs manage). ──
+  'sharing.status': 'read',
   'sharing.directory': 'read',
   'sharing.myRoles': 'read',
   'sharing.projectMembers': 'read',

@@ -7,6 +7,7 @@ import {
   FolderPlus,
   ClipboardPaste,
   Pencil,
+  Share2,
   Download,
   Trash2,
   Scissors,
@@ -47,6 +48,8 @@ type CreatingState = { parentFolderId: string | null; type: 'file' | 'folder' } 
 type RenamingState = { id: string; type: 'artifact' | 'folder' } | null
 
 interface TreeSidebarProps {
+  /** Share one file with people (T-100); absent: no Share entry. */
+  onShareArtifact?: (artifact: { id: string; title: string }) => void
   artifacts: TaskArtifact[]
   folders: ArtifactFolder[]
   selectedId: string | null
@@ -110,6 +113,7 @@ interface TreeSidebarProps {
  */
 export function TreeSidebar(props: TreeSidebarProps) {
   const {
+    onShareArtifact,
     artifacts,
     folders,
     selectedId,
@@ -433,6 +437,16 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         </ContextMenuSub>
                       )}
                       <ContextMenuSeparator />
+                      {onShareArtifact && (
+                        <ContextMenuItem
+                          onSelect={() =>
+                            onShareArtifact({ id: artifact.id, title: artifact.title })
+                          }
+                          disabled={selectedIds.size > 1 && selectedIds.has(artifact.id)}
+                        >
+                          <Share2 className="size-3 mr-2" /> Share…
+                        </ContextMenuItem>
+                      )}
                       <ContextMenuItem onSelect={() => handleCopyPath(artifact.id)}>
                         <Copy className="size-3 mr-2" /> Copy Path
                       </ContextMenuItem>

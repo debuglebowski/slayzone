@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
-import { publicProcedure, router, type TrpcContext } from '@slayzone/trpc-server'
+import { getAuthGate, publicProcedure, router, type TrpcContext } from '@slayzone/trpc-server'
 import { getHubAdminDeps } from '@slayzone/content-erasure/router'
 import { ACCESS_ROLES, type AccessRole } from './project-access'
 import { getSharingRouterDeps } from './sharing-router-deps'
@@ -95,6 +95,14 @@ async function subtreeOf(ctx: TrpcContext, taskId: string): Promise<string[]> {
 }
 
 export const sharingRouter = router({
+  /**
+   * Whether sharing applies on this hub — only one with login has users to share
+   * with (without it, everything is the one operator's) — and who the caller is.
+   */
+  status: publicProcedure.query(({ ctx }) => ({
+    enabled: getAuthGate() && !!ctx.principal,
+    userId: ctx.principal?.userId ?? null
+  })),
   /** Every enabled account of the hub (id, name, email): whom one can share with. */
   directory: publicProcedure.query(async () => directory()),
 

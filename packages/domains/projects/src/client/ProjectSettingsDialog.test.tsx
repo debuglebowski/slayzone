@@ -20,6 +20,10 @@ function useMountLog(name: string): void {
 // result while its query client and hub client stay the same.
 const lookup = vi.fn((projectId: string) => Promise.resolve(locks[projectId] ?? null))
 
+vi.mock('./sharing/useSharing', () => ({
+  useSharingStatus: () => ({ enabled: false, userId: null })
+}))
+vi.mock('./sharing/MembersTab', () => ({ MembersTab: () => null }))
 vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: { isPlaywright: () => isPlaywright }
 }))

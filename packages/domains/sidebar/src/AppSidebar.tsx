@@ -52,6 +52,8 @@ interface AppSidebarProps {
   convexConfigured?: boolean
   /** App-supplied feedback entry, rendered in the footer when convex is configured. */
   feedbackSlot?: ReactNode
+  /** App-supplied list of tasks and files shared with the user (T-100), above the footer. */
+  sharedSlot?: ReactNode
   /** App-supplied renderless KeyRecorder, threaded to the shortcuts dialog. */
   keyRecorder: KeyRecorderComponent
   /** Task ids with an active agent session — always pass the tree filter. */
@@ -182,6 +184,7 @@ export function AppSidebar({
   onSetWindowButtonVisibility,
   convexConfigured,
   feedbackSlot,
+  sharedSlot,
   keyRecorder,
   sessionTaskIds,
   idleByProject,
@@ -326,6 +329,7 @@ export function AppSidebar({
             })}
           </SidebarGroupContent>
         </SidebarGroup>
+        {sharedSlot && <SidebarGroup className="shrink-0 pt-0">{sharedSlot}</SidebarGroup>}
       </SidebarContent>
       <SidebarFooter className={cn('py-4 gap-3', !compactFooter && 'border-t border-border/60')}>
         {statusSlot}

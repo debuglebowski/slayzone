@@ -137,7 +137,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       onActiveArtifactIdChange,
       initialSidebarState,
       onSidebarStateChange,
-      onOpenUrl
+      onOpenUrl,
+      onShareArtifact
     },
     ref
   ) {
@@ -1097,6 +1098,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 />
               ) : (
                 <TreeSidebar
+                  onShareArtifact={onShareArtifact}
                   artifacts={artifacts}
                   folders={folders}
                   selectedId={selectedId}
