@@ -47,9 +47,17 @@ const counter = new Database(':memory:')
 counter.loadExtension(extension)
 assert.throws(() => new Database(':memory:'), /Native SQLite constructor refused/)
 const control = (sql: string) => (counter.prepare(sql).get() as { n: number }).n
-const until = async (test: () => boolean) => {
-  const deadline = Date.now() + 8000
+// Fails after 8 s without the condition. With `progress`, the 8 s restart whenever it
+// grows: a throughput wait (event burst) fails on a stall, not on host load.
+const until = async (test: () => boolean, progress?: () => number) => {
+  let deadline = Date.now() + 8000,
+    seen = progress?.()
   while (!test()) {
+    const now = progress?.()
+    if (now !== seen) {
+      seen = now
+      deadline = Date.now() + 8000
+    }
     assert(Date.now() < deadline, 'native network deadline')
     await new Promise((r) => setTimeout(r, 5))
   }
@@ -131,7 +139,8 @@ async function connected(hubScope: string) {
       if (JSON.parse(data.toString()).method === C.heartbeat) heartbeats++
     })
   )
-  let completedBursts = 0
+  let completedBursts = 0,
+    savedEvents = 0
   hub.gateway.events.on('event', (ev) => {
     if (ev.name !== 'chat-runtime') return
     const p = ev.payload as {
@@ -139,6 +148,7 @@ async function connected(hubScope: string) {
       live?: number
       event?: { kind?: string; text?: string }
     }
+    if (p?.type === 'event' && p.live === undefined) savedEvents++
     if (p?.type === 'event' && p.live === undefined && p.event?.text === '1199:' + 'é'.repeat(1024))
       completedBursts++
   })
@@ -206,14 +216,26 @@ async function connected(hubScope: string) {
   dialer.start()
   computerId = (await ready).computerId
   assert.equal(hub.gateway.listComputers()[0].chatProcessControls, true)
-  const request = (method: string, params: unknown, scoped = true, timeoutMs = 2000) =>
-    runWithSecurityContext(
+  // A number is the bound this proof asserts (default: answers within 2 s even while a
+  // native fence blocks; a call that waits on the fence never answers). 'hub' is the
+  // gateway's own production deadline, for cold work the proof does not bound: a
+  // hub's first chat call boots its runtime (worker, bundle, SQLite), measured >2 s
+  // under host load.
+  const request = (
+    method: string,
+    params: unknown,
+    scoped = true,
+    timeout: number | 'hub' = 2000
+  ) => {
+    const timeoutMs = timeout === 'hub' ? undefined : timeout
+    return runWithSecurityContext(
       { actor: 'native-fixture', ip: '127.0.0.1', route: 'native controls' },
       () =>
         scoped
           ? runInPathScope(scope, () => hub.gateway.request(computerId!, method, params, timeoutMs))
           : hub.gateway.request(computerId!, method, params, timeoutMs)
     )
+  }
   return {
     hub,
     computerId,
@@ -222,6 +244,7 @@ async function connected(hubScope: string) {
     request,
     beats: () => heartbeats,
     completedBursts: () => completedBursts,
+    savedEvents: () => savedEvents,
     async close() {
       await dialer.stop()
       await dispatch.dispose()
@@ -240,6 +263,7 @@ async function run() {
     publicLosslessEvents: number | undefined
   try {
     const infos: Array<{ spawnId: string; pid: number }> = []
+    // Setup is cold (runtime boot, provider spawn) and outside any fence: 'hub' deadline.
     for (const [index, h] of [a, b].entries()) {
       await h.request(
         M.chatRequest,
@@ -247,7 +271,8 @@ async function run() {
           kind: 'taskPaths',
           value: { op: 'set', taskId: 't', projectId: null, baseDir: root, at: 1 }
         },
-        false
+        false,
+        'hub'
       )
       await h.request(
         M.chatRequest,
@@ -269,30 +294,41 @@ async function run() {
             }
           }
         },
-        false
+        false,
+        'hub'
       )
       infos.push(
-        (await h.request(M.chatRequest, {
-          kind: 'invoke',
-          value: {
-            route: { id: 'c', epoch: 1 },
-            target: 'ops',
-            method: 'start',
-            operationId: 'start',
-            args: [{ taskId: 't', tabId: 'tab', mode, cwd: root }]
-          }
-        })) as { spawnId: string; pid: number }
+        (await h.request(
+          M.chatRequest,
+          {
+            kind: 'invoke',
+            value: {
+              route: { id: 'c', epoch: 1 },
+              target: 'ops',
+              method: 'start',
+              operationId: 'start',
+              args: [{ taskId: 't', tabId: 'tab', mode, cwd: root }]
+            }
+          },
+          true,
+          'hub'
+        )) as { spawnId: string; pid: number }
       )
-      await h.request(M.chatRequest, { kind: 'relay.watch', all: true, tabIds: [] })
-      await h.request(M.procSpawn, {
-        sessionId: 'same-id',
-        spawnId: 'one',
-        taskId: 't',
-        command: process.execPath,
-        args: ['-e', 'setInterval(()=>{},1000)'],
-        cwd: root,
-        env: { ELECTRON_RUN_AS_NODE: '1' }
-      })
+      await h.request(M.chatRequest, { kind: 'relay.watch', all: true, tabIds: [] }, true, 'hub')
+      await h.request(
+        M.procSpawn,
+        {
+          sessionId: 'same-id',
+          spawnId: 'one',
+          taskId: 't',
+          command: process.execPath,
+          args: ['-e', 'setInterval(()=>{},1000)'],
+          cwd: root,
+          env: { ELECTRON_RUN_AS_NODE: '1' }
+        },
+        true,
+        'hub'
+      )
     }
     control('SELECT block_sync(1) n')
     let acknowledged = false,
@@ -386,7 +422,7 @@ async function run() {
     const blockedHeartbeats = [a.beats() - beats[0], b.beats() - beats[1]]
     control('SELECT block_sync(0) n')
     await Promise.all(pending)
-    await until(() => a.completedBursts() > firstBurst)
+    await until(() => a.completedBursts() > firstBurst, a.savedEvents)
     // Read through the normal network history API, after its accepted spool
     // prefix drains. Every provider byte becomes the original ordered event.
     const page = (await a.request(
@@ -440,16 +476,25 @@ async function run() {
         if (req.kind === 'control.prepare') wires.push({ kind: 'ACK', ...(result as object) })
         return result
       }
-      let bootstrapGate: Promise<void> | undefined
+      let bootstrapGate: Promise<void> | undefined, onParked: (() => void) | undefined
+      // Holds a public control at its durable step. `parked` resolves once the relay
+      // waits here: its prepare ACK and initial lease renewal have both returned, so
+      // no control frame is in flight on the socket.
       const holdBootstrap = () => {
         let release!: () => void
         bootstrapGate = new Promise<void>((r) => {
           release = r
         })
+        const parked = new Promise<void>((r) => {
+          onParked = r
+        })
         publicGates.push(release)
-        return () => {
-          bootstrapGate = undefined
-          release()
+        return {
+          parked,
+          resume() {
+            bootstrapGate = undefined
+            release()
+          }
         }
       }
       const relay = createHubChatRelay({
@@ -463,7 +508,10 @@ async function run() {
         resolveComputer: async () => a.computerId,
         defaultComputer: async () => a.computerId,
         bootstrap: async (owner) => {
-          await bootstrapGate
+          if (bootstrapGate) {
+            onParked?.()
+            await bootstrapGate
+          }
           return {
             identity: {
               id: owner.id,
@@ -800,11 +848,12 @@ async function run() {
       )
       // A public interrupt already ACKed for gen1 must never stop gen2 later.
       phase = 'replacement'
-      const resume = holdBootstrap(),
+      const replacementHold = holdBootstrap(),
         cut = wires.length
       const replacing = caller.interrupt(opts)
       void replacing.catch(() => undefined)
-      await until(() => wires.slice(cut).some((w) => w.kind === 'ACK'))
+      await replacementHold.parked
+      assert(wires.slice(cut).some((w) => w.kind === 'ACK'))
       infos[0] = (await a.request(M.chatRequest, {
         kind: 'invoke',
         value: {
@@ -816,7 +865,7 @@ async function run() {
         }
       })) as (typeof infos)[number]
       const replacementAcks = readFileSync(join(root, 'ack-a'), 'utf8')
-      resume()
+      replacementHold.resume()
       await assert.rejects(replacing, /stale|generation|mismatch|unconfirmed/i)
       assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), replacementAcks)
       await assert.rejects(a.request(M.chatRequest, controlRequest), /generation/i)
@@ -880,7 +929,7 @@ async function run() {
       control('SELECT block_sync(0) n')
       await burstFence
       await bursting
-      await until(() => a.completedBursts() > publicBurst)
+      await until(() => a.completedBursts() > publicBurst, a.savedEvents)
       const burstPage = await caller.getBufferSince({
         tabId: 'tab',
         afterSeq: afterBurstSeq,
@@ -902,17 +951,20 @@ async function run() {
       // Disconnect cancels only the uncommitted preparation; a new authenticated
       // connection cannot inherit its control token or replay it on a later turn.
       phase = 'reconnect'
-      const reconnectResume = holdBootstrap(),
+      const reconnectHold = holdBootstrap(),
         reconnectCut = wires.length
       const reconnecting = caller.interrupt(opts)
       void reconnecting.catch(() => undefined)
-      await until(() => wires.slice(reconnectCut).some((w) => w.kind === 'ACK'))
+      // Not merely ACKed: a renewal still on the old socket fails as a transport
+      // close, before the token can reach the new connection this case proves.
+      await reconnectHold.parked
+      assert(wires.slice(reconnectCut).some((w) => w.kind === 'ACK'))
       await a.dialer.stop()
       const ready = a.dialer.events.once('connected')
       a.dialer.start()
       await ready
       const reconnectedAcks = readFileSync(join(root, 'ack-a'), 'utf8')
-      reconnectResume()
+      reconnectHold.resume()
       await assert.rejects(reconnecting, /stale|mismatch|unconfirmed/i)
       assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), reconnectedAcks)
       await caller.interrupt(opts)
@@ -981,15 +1033,16 @@ async function run() {
       await ownership.register({ ...deleted, computerId: a.computerId })
       const deleteOpts = { ...opts, tabId: deleted.tabId }
       await caller.start(deleteOpts)
-      const deleteResume = holdBootstrap(),
+      const deleteHold = holdBootstrap(),
         deleteCut = wires.length
       const deleting = caller.interrupt(deleteOpts)
       void deleting.catch(() => undefined)
-      await until(() => wires.slice(deleteCut).some((w) => w.kind === 'ACK'))
+      await deleteHold.parked
+      assert(wires.slice(deleteCut).some((w) => w.kind === 'ACK'))
       await a.request(M.chatRequest, { kind: 'conversation.delete', identity: deleted })
       await ownership.deleteConversation(deleted.id)
       const deletedAcks = readFileSync(join(root, 'ack-a'), 'utf8')
-      deleteResume()
+      deleteHold.resume()
       await assert.rejects(deleting, /deleted|stale|ownership|mismatch/i)
       assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), deletedAcks)
     }
