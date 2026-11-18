@@ -684,7 +684,7 @@ run_harness scripts/ci/turbo-cache-prune.test.mjs
 # madacademy ci/lock.sh: same queue/lock files, FIFO, stale cleanup, release on signals.
 run_harness scripts/ci-lock.test.mjs
 # iOS builds (`pnpm --filter @slayzone/mobile ios`, `ios:exec`) take that lock for the build
-# only, at utility QoS; Metro runs after release.
+# only, at utility QoS; Metro runs outside it.
 run_harness scripts/ios-build.test.mjs
 # `pnpm lint:theme` (Tailwind sources): every class-bearing module a theme-css shell renders
 # sits under an @source path, else its classes are never generated (MediaView bg-popover/90).

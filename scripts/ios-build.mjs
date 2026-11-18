@@ -10,23 +10,24 @@
  *
  * `run` is `expo run:ios` with only the build inside the lock — a dev session keeps Metro
  * running for hours and must not hold the queue:
- *   1. locked + utility: `expo run:ios --no-bundler --output <tmp>` (prebuild, pod install,
- *      xcodebuild, install). On a simulator it also opens the app, which shows "no dev
- *      server" for the moment until step 2 relaunches it.
- *   2. unlocked: `expo run:ios --binary <tmp>/<App>.app` with the caller's args: installs the
- *      built app (no xcodebuild), starts Metro, opens the app on it, stays interactive.
- * With `--no-bundler` or `--device generic` there is no step 2 (no dev server wanted); with
- * `--binary`, `--unstable-rebundle` or `--help` there is no build, so nothing is locked.
- * A bare `-d` (pick a device) asks in both steps.
+ *   1. unlocked: this app's Metro (`expo start --dev-client`) on a free port (8081 first, or
+ *      `--port`), in the foreground: its keys work, it outlives the build.
+ *   2. locked + utility, once Metro answers: `expo run:ios --port <that port>` (prebuild,
+ *      pod install, xcodebuild, install, open). expo sees this app's Metro on the port, so it
+ *      starts none and opens the app on it — never on another checkout's Metro.
+ * Step 2 reads no keys (Metro has them): name the device (`-d <name|udid>`), a bare `-d`
+ * cannot ask. With `--no-bundler` or `--device generic` only step 2 runs (no dev server
+ * wanted); with `--binary`, `--unstable-rebundle` or `--help` nothing builds, so expo runs
+ * as is, unlocked.
  *
  * `exec` runs any other build command locked + utility (xcodebuild archive, pod install).
  * Lock skipped when CI is set or SLZ_NO_CI_LOCK=1, as for every ci-lock user.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { createServer } from 'node:net'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { exitLike, runCommandLocked } from './ci-lock.mjs'
 
@@ -69,40 +70,53 @@ function withoutOption(args, names, takesValue) {
 }
 
 /**
- * The `expo` argv of each phase of `run`. `build`: locked, `serve`: unlocked after it; either
- * may be null. `outputDir` is where the build copies the app when the caller gave no --output.
+ * What `run` starts, as `expo` argv: `direct` (expo as is, nothing built: unlocked), or
+ * `build` (locked) with `metro` (this app's dev server, started first; null when none is
+ * wanted). `port` is the free Metro port found by the caller; the caller's `--port` wins.
  */
-export function planRun(args, outputDir) {
+export function planRun(args, port) {
   const noBuild =
     args.includes('--help') ||
     args.includes('-h') ||
     args.includes('--unstable-rebundle') || // re-bundles the installed app, no xcodebuild
     optionValue(args, ['--binary']) !== undefined
-  if (noBuild) {
-    return { build: null, serve: ['run:ios', ...args], outputDir: null }
-  }
+  if (noBuild) return { direct: ['run:ios', ...args], build: null, metro: null }
   const device = optionValue(args, ['--device', '-d'])
   if (args.includes('--no-bundler') || device === 'generic') {
-    return { build: ['run:ios', ...args], serve: null, outputDir: null }
+    return { direct: null, build: ['run:ios', ...args], metro: null }
   }
-  const userOutput = optionValue(args, ['--output', '-o'])
-  const out = typeof userOutput === 'string' ? userOutput : outputDir
-  // --port only names the dev server (and expo refuses it with --no-bundler).
-  const buildArgs = withoutOption(args, ['--port', '-p'], true)
-  const build = ['run:ios', ...buildArgs, '--no-bundler']
-  if (typeof userOutput !== 'string') build.push('--output', out)
-  // Step 2 builds nothing (--binary): every other option keeps its meaning there.
-  const serveArgs = withoutOption(args, ['--output', '-o'], true)
-  return { build, serve: ['run:ios', ...serveArgs], outputDir: out }
+  const p = String(explicitPort(args) ?? port)
+  return {
+    direct: null,
+    build: ['run:ios', ...withoutOption(args, ['--port', '-p'], true), '--port', p],
+    metro: ['start', '--dev-client', '--port', p]
+  }
 }
 
-/** The newest `*.app` in `dir` (the build copies exactly one into a fresh dir). */
-export function builtApp(dir) {
-  const apps = readdirSync(dir)
-    .filter((n) => n.endsWith('.app'))
-    .map((n) => join(dir, n))
-    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
-  return apps[0] ?? null
+/** The caller's `--port` / `-p`, else null. */
+export function explicitPort(args) {
+  const v = optionValue(args, ['--port', '-p'])
+  return typeof v === 'string' ? Number(v) : null
+}
+
+/** Env of the build: the app compiled against this Metro's port. */
+export function buildEnv(env, port) {
+  return { ...env, RCT_METRO_PORT: String(port) }
+}
+
+/** True when nothing listens on `port` (expo's own test: bind on all interfaces). */
+function portFree(port) {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.once('error', () => resolve(false))
+    server.listen(port, () => server.close(() => resolve(true)))
+  })
+}
+
+/** The first free port from `start` up (expo would ask; step 2 cannot). */
+export async function firstFreePort(start, isFree = portFree) {
+  for (let port = start; port < start + 100; port++) if (await isFree(port)) return port
+  throw new Error(`ios-build: no free port in ${start}-${start + 99}`)
 }
 
 /** `expo` CLI as the mobile app resolves it (hoisted: no `.bin/expo` in the app's dir). */
@@ -111,28 +125,38 @@ function expoCommand() {
   return [process.execPath, join(dirname(pkg), 'bin', 'cli')]
 }
 
-/** Runs `cmd` unlocked in the foreground; Ctrl-C goes to it, this waits for its exit. */
-function runForeground(cmd, { cwd }) {
+/** Spawns `cmd` in the foreground; `done` resolves `{ code, signal }` when it exits. */
+function start(cmd, { cwd }) {
   const child = spawn(cmd[0], cmd.slice(1), { stdio: 'inherit', cwd })
-  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP']
-  const onSignal = (sig) => {
-    if (sig !== 'SIGINT') child.kill(sig)
-  }
-  for (const sig of signals) process.on(sig, onSignal)
-  return new Promise((resolve) => {
+  const done = new Promise((resolve) => {
     child.on('error', (err) => {
       process.stderr.write(`ios-build: cannot run ${cmd[0]}: ${err.message}\n`)
       resolve({ code: 127, signal: null })
     })
-    child.on('exit', (code, signal) => {
-      for (const sig of signals) process.off(sig, onSignal)
-      resolve({ code, signal })
-    })
+    child.on('exit', (code, signal) => resolve({ code, signal }))
   })
+  return { child, done }
 }
 
-function lockedBuild(cmd, cwd) {
-  return runCommandLocked({ label: 'ios-build', cmd: atUtilityQos(cmd), cwd })
+/** Resolves true once Metro on `port` answers /status, false if `exited` comes first. */
+async function metroReady(port, exited) {
+  let gone = false
+  exited.then(() => {
+    gone = true
+  })
+  while (!gone) {
+    const ok = await fetch(`http://127.0.0.1:${port}/status`, { signal: AbortSignal.timeout(2000) })
+      .then((r) => r.text())
+      .then((t) => t.includes('packager-status:running'))
+      .catch(() => false)
+    if (ok) return true
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  return false
+}
+
+function lockedBuild(cmd, cwd, { stdin = 'inherit', env = process.env } = {}) {
+  return runCommandLocked({ label: 'ios-build', cmd: atUtilityQos(cmd), cwd, stdin, env })
 }
 
 async function main(argv) {
@@ -144,29 +168,33 @@ async function main(argv) {
   }
   if (mode !== 'run') usage()
 
-  const tmp = mkdtempSync(join(tmpdir(), 'slz-ios-build-'))
-  const cleanup = () => rmSync(tmp, { recursive: true, force: true })
-  process.on('exit', cleanup) // backstop; a signal exit skips it, so finish() cleans first
-  const finish = (r) => {
-    cleanup()
-    exitLike(r)
-  }
-  const plan = planRun(rest, tmp)
   const expo = expoCommand()
-  if (plan.build) {
-    const r = await lockedBuild([...expo, ...plan.build], MOBILE_DIR)
-    if (r.signal || r.code !== 0 || !plan.serve) return finish(r)
+  const port =
+    explicitPort(rest) ?? (await firstFreePort(Number(process.env.RCT_METRO_PORT) || 8081))
+  const plan = planRun(rest, port)
+  if (plan.direct) return exitLike(await start([...expo, ...plan.direct], { cwd: MOBILE_DIR }).done)
+  if (!plan.metro) return exitLike(await lockedBuild([...expo, ...plan.build], MOBILE_DIR))
+
+  const metro = start([...expo, ...plan.metro], { cwd: MOBILE_DIR })
+  process.on('exit', () => metro.child.kill()) // backstop: never leave Metro behind
+  // Ctrl-C reaches Metro (same process group): wait for it. SIGTERM / SIGHUP: pass on.
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(sig, () => sig !== 'SIGINT' && metro.child.kill(sig))
   }
-  const serve = [...expo, ...plan.serve]
-  if (plan.outputDir) {
-    const app = builtApp(resolve(MOBILE_DIR, plan.outputDir)) // expo ran in MOBILE_DIR
-    if (!app) {
-      process.stderr.write(`ios-build: the build left no .app in ${plan.outputDir}\n`)
-      return finish({ code: 1, signal: null })
-    }
-    serve.push('--binary', app)
+  if (!(await metroReady(port, metro.done))) return exitLike(await metro.done)
+  // Metro owns the terminal's keys; the build reads none.
+  // The app's Metro port is compiled in from RCT_METRO_PORT (React-Core); expo sets it only
+  // for a Metro it starts itself, so without it the app would load whatever runs on 8081.
+  const built = await lockedBuild([...expo, ...plan.build], MOBILE_DIR, {
+    stdin: 'ignore',
+    env: buildEnv(process.env, port)
+  })
+  if (built.signal || built.code !== 0) {
+    metro.child.kill('SIGTERM')
+    await metro.done
+    return exitLike(built)
   }
-  finish(await runForeground(serve, { cwd: MOBILE_DIR }))
+  exitLike(await metro.done)
 }
 
 function usage() {

@@ -162,7 +162,7 @@ const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
 const osSignals = constants.signals
 
 /**
- * Waits for the lock (unless skipped), runs `cmd` in `cwd` with SLZ_CI_LOCK_HELD=1,
+ * Waits for the lock (unless skipped), runs `cmd` in `cwd` (stdin: `stdin`) with SLZ_CI_LOCK_HELD=1,
  * releases it when the command exits, and resolves `{ code, signal }` of the command. For a
  * caller that keeps running after the locked part (scripts/ios-build.mjs: build locked,
  * Metro not).
@@ -174,6 +174,7 @@ export async function runCommandLocked({
   pollMs = POLL_MS,
   env = process.env,
   cwd = process.cwd(),
+  stdin = 'inherit',
   log = (m) => process.stderr.write(`${m}\n`)
 }) {
   const skip = skipReason(env)
@@ -206,7 +207,7 @@ export async function runCommandLocked({
   }
 
   const child = spawn(cmd[0], cmd.slice(1), {
-    stdio: 'inherit',
+    stdio: [stdin, 'inherit', 'inherit'],
     cwd,
     env: { ...env, SLZ_CI_LOCK_HELD: '1' },
     shell: process.platform === 'win32' // pnpm / npx are .cmd shims there

@@ -1,54 +1,43 @@
 /**
  * Tests for scripts/ios-build.mjs — iOS builds inside the machine-wide CI lock: which part
- * of `expo run:ios` runs locked (the build) and which runs after the lock is released (Metro),
+ * of `expo run:ios` runs locked (the build) and which runs outside the lock (Metro),
  * and the utility-QoS wrapper. The lock itself is covered by ci-lock.test.mjs.
  *
  * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
-import { afterEach, expect, test } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { atUtilityQos, builtApp, planRun } from './ios-build.mjs'
+import { expect, test } from 'vitest'
+import { atUtilityQos, buildEnv, explicitPort, firstFreePort, planRun } from './ios-build.mjs'
 
-const OUT = '/tmp/slz-ios-build-x'
-
-test('default run: build locked without Metro, then the built app served unlocked', () => {
-  expect(planRun([], OUT)).toEqual({
-    build: ['run:ios', '--no-bundler', '--output', OUT],
-    serve: ['run:ios'],
-    outputDir: OUT
+test('default run: Metro on the free port first, then the build pointed at it, locked', () => {
+  expect(planRun([], 8082)).toEqual({
+    direct: null,
+    build: ['run:ios', '--port', '8082'],
+    metro: ['start', '--dev-client', '--port', '8082']
   })
 })
 
-test('device and configuration reach both steps', () => {
-  const plan = planRun(['-d', 'iPhone 16', '--configuration', 'Release'], OUT)
+test('build options reach the build only', () => {
+  const plan = planRun(['-d', 'iPhone 16', '--configuration', 'Release'], 8081)
   expect(plan.build).toEqual([
     'run:ios',
     '-d',
     'iPhone 16',
     '--configuration',
     'Release',
-    '--no-bundler',
-    '--output',
-    OUT
+    '--port',
+    '8081'
   ])
-  expect(plan.serve).toEqual(['run:ios', '-d', 'iPhone 16', '--configuration', 'Release'])
+  expect(plan.metro).toEqual(['start', '--dev-client', '--port', '8081'])
 })
 
-test('--port goes to the Metro step only (expo refuses it with --no-bundler)', () => {
-  for (const port of [['--port', '8082'], ['-p', '8082'], ['--port=8082']]) {
-    const plan = planRun(port, OUT)
-    expect(plan.build).toEqual(['run:ios', '--no-bundler', '--output', OUT])
-    expect(plan.serve).toEqual(['run:ios', ...port])
+test("the caller's --port wins over the found one, for both", () => {
+  for (const port of [['--port', '8090'], ['-p', '8090'], ['--port=8090']]) {
+    expect(explicitPort(port)).toBe(8090)
+    const plan = planRun(port, 8081)
+    expect(plan.build).toEqual(['run:ios', '--port', '8090'])
+    expect(plan.metro).toEqual(['start', '--dev-client', '--port', '8090'])
   }
-})
-
-test("the caller's --output is where the build goes, and stays out of the Metro step", () => {
-  const plan = planRun(['--output', 'dist/ios'], OUT)
-  expect(plan.build).toEqual(['run:ios', '--output', 'dist/ios', '--no-bundler'])
-  expect(plan.serve).toEqual(['run:ios'])
-  expect(plan.outputDir).toBe('dist/ios')
+  expect(explicitPort(['-d', 'X'])).toBeNull()
 })
 
 test('no dev server wanted (--no-bundler, generic device): build only, locked', () => {
@@ -58,27 +47,25 @@ test('no dev server wanted (--no-bundler, generic device): build only, locked', 
     ['-d', 'generic'],
     ['--device=generic']
   ]) {
-    expect(planRun(args, OUT)).toEqual({
-      build: ['run:ios', ...args],
-      serve: null,
-      outputDir: null
-    })
+    expect(planRun(args, 8081)).toEqual({ direct: null, build: ['run:ios', ...args], metro: null })
   }
 })
 
-test('no build (--binary, --unstable-rebundle, --help): nothing locked', () => {
+test('no build (--binary, --unstable-rebundle, --help): expo as is, nothing locked', () => {
   for (const args of [
     ['--binary', 'x.app'],
     ['--unstable-rebundle', '-d', 'X'],
     ['--help'],
     ['-h']
   ]) {
-    expect(planRun(args, OUT)).toEqual({
-      build: null,
-      serve: ['run:ios', ...args],
-      outputDir: null
-    })
+    expect(planRun(args, 8081)).toEqual({ direct: ['run:ios', ...args], build: null, metro: null })
   }
+})
+
+test("firstFreePort: skips busy ports (another checkout's Metro on 8081)", async () => {
+  const busy = new Set([8081, 8082])
+  expect(await firstFreePort(8081, async (p) => !busy.has(p))).toBe(8083)
+  await expect(firstFreePort(8081, async () => false)).rejects.toThrow('no free port')
 })
 
 test('builds run at utility QoS on macOS, never background', () => {
@@ -97,15 +84,9 @@ test('builds run at utility QoS on macOS, never background', () => {
   ])
 })
 
-let dir
-afterEach(() => dir && rmSync(dir, { recursive: true, force: true }))
-
-test('builtApp: the newest .app in the output dir, null when none', () => {
-  dir = mkdtempSync(join(tmpdir(), 'ios-build-test-'))
-  expect(builtApp(dir)).toBeNull()
-  mkdirSync(join(dir, 'Old.app'))
-  mkdirSync(join(dir, 'SlayZone.app'))
-  mkdirSync(join(dir, 'notes'))
-  utimesSync(join(dir, 'Old.app'), 1, 1)
-  expect(builtApp(dir)).toBe(join(dir, 'SlayZone.app'))
+test('the build compiles the Metro port into the app (else it loads whatever runs on 8081)', () => {
+  expect(buildEnv({ PATH: '/bin', RCT_METRO_PORT: '8081' }, 8083)).toEqual({
+    PATH: '/bin',
+    RCT_METRO_PORT: '8083'
+  })
 })
