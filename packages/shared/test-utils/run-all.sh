@@ -958,6 +958,8 @@ run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
 # The agent-session ledger on the computer (§9): per-tab scope, resets/deletions
 # as delivered intents, one task per provider session, the spawn lifecycle.
 run_harness packages/domains/chat-runtime/src/server/session-ledger.test.ts
+# T-100: a personal workspace's computer is only tracked, never handed the creator's rows.
+run_harness packages/domains/chat-runtime/src/server/hub-session-ledger-personal.test.ts
 run_harness packages/domains/chat-runtime/src/server/agent-turns.test.ts
 run_harness packages/domains/chat-runtime/src/server/prompts.test.ts
 run_harness packages/domains/chat-runtime/src/server/event-markers.test.ts

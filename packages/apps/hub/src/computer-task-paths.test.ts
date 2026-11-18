@@ -15,6 +15,7 @@ import { createComputerDataHandoff } from './computer-data-handoff'
 import { createTaskPathRequestGate } from './task-path-request-gate'
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
+import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import {
   createComputerTaskPaths,
   readComputerTaskRoots,
@@ -470,4 +471,45 @@ test("E: a live inherit with the parent's holder not recorded goes to the parent
   ])
   expect(await f.onComputer('pc', ['child'])).toEqual([])
   expect([f.holder('parent'), f.holder('child')]).toEqual(['pc2', 'pc2'])
+})
+
+test("T-100: a member's own paths live on the member's computer; the creator's are untouched", async () => {
+  const f = await fixture()
+  // A owns the project, created t1 and runs it on pc; B (an editor) works on it on pc2.
+  f.h.db.exec(`UPDATE computers SET owner_user_id='userA' WHERE id='pc';
+    UPDATE computers SET owner_user_id='userB' WHERE id='pc2';
+    UPDATE projects SET owner_user_id='userA' WHERE id='p';
+    UPDATE tasks SET created_by_user_id='userA' WHERE id='t1';
+    INSERT INTO project_members(project_id,user_id,role) VALUES('p','userB','edit');
+    INSERT INTO task_workspaces(task_id,user_id,computer_id) VALUES('t1','userB','pc2');`)
+  const as = <T>(actor: string, fn: () => Promise<T>) =>
+    runWithSecurityContext({ actor, ip: null, route: 'test' }, fn)
+  await as('userA', () => f.paths.apply('t1', { worktreePath: W('a-wt') }))
+  await as('userB', () => f.paths.apply('t1', { worktreePath: W('b-wt') }))
+  expect(await f.onComputer('pc', ['t1'])).toEqual([
+    expect.objectContaining({ taskId: 't1', worktreePath: W('a-wt') })
+  ])
+  expect(await f.onComputer('pc2', ['t1'])).toEqual([
+    expect.objectContaining({ taskId: 't1', worktreePath: W('b-wt') })
+  ])
+  // Each reads their own.
+  expect(await as('userA', () => f.paths.read(['t1']))).toEqual({
+    t1: { state: 'ok', worktreePath: W('a-wt'), baseDir: null }
+  })
+  expect(await as('userB', () => f.paths.read(['t1']))).toEqual({
+    t1: { state: 'ok', worktreePath: W('b-wt'), baseDir: null }
+  })
+  // B's holder is B's workspace's; the task row (A's) still names pc.
+  expect(
+    f.h.db.prepare("SELECT worktree_computer_id FROM task_workspaces WHERE user_id='userB'").get()
+  ).toEqual({ worktree_computer_id: 'pc2' })
+  expect(f.h.db.prepare("SELECT worktree_computer_id FROM tasks WHERE id='t1'").get()).toEqual({
+    worktree_computer_id: 'pc'
+  })
+  // A hub writer acting for B stages nothing of B's onto the task (the creator's rows).
+  await as('userB', () => f.paths.changed('t1', { op: 'clear' }))
+  expect(f.staged()).toEqual([])
+  expect(await f.onComputer('pc', ['t1'])).toEqual([
+    expect.objectContaining({ worktreePath: W('a-wt') })
+  ])
 })
