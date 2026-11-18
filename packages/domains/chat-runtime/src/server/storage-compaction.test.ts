@@ -332,6 +332,9 @@ describe('rebuild', () => {
 
   test('no write is lost: writes during copy, catch-up and right before the window', async () => {
     const { store } = seeded()
+    // The deletes below target seeded rows only: past them, `seq=n` would hit this
+    // test's own `live` appends once a slow rebuild lets `n` pass the seed.
+    const lastSeeded = store.read(identity.id, -1).at(-1)!.seq
     let n = 0
     const write = () => {
       n++
@@ -341,7 +344,11 @@ describe('rebuild', () => {
         db.prepare('INSERT INTO test_nopk VALUES(?)').run(`v${n}`)
         db.prepare('INSERT INTO test_auto(v) VALUES(?)').run(`v${n}`)
         db.prepare("DELETE FROM test_auto WHERE v='a'").run()
-        db.prepare('DELETE FROM events WHERE conversation_id=? AND seq=?').run(identity.id, n)
+        db.prepare('DELETE FROM events WHERE conversation_id=? AND seq=? AND seq<=?').run(
+          identity.id,
+          n,
+          lastSeeded
+        )
       })
     }
     const timer = setInterval(write, 2)
