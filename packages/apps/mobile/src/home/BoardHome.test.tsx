@@ -973,15 +973,13 @@ describe('BoardHome: 🔔 and the project switcher', () => {
     // The row says its project (the sheet's own suite has its wording).
     expect(within(sheet.getByTestId('attention-row-a')).getByText(/^API/)).toBeOnTheScreen()
     await userEvent.setup().press(sheet.getByTestId('attention-row-a'))
-    // Its main tab's session: no agent tab to name.
     expect(onOpenTask).toHaveBeenCalledWith(
       expect.objectContaining({ hubId: workHub.id, task: expect.objectContaining({ id: 'a' }) }),
-      'agent',
-      undefined
+      'agent'
     )
   })
 
-  it('a 🔔 row of a session in another agent tab opens that tab', async () => {
+  it("a 🔔 row of a session in another agent tab opens the task's main agent (no agent tabs)", async () => {
     work = serve(workHub.id, waiting)
     const onOpenTask = jest.fn()
     await render(
@@ -1016,8 +1014,7 @@ describe('BoardHome: 🔔 and the project switcher', () => {
       .press(within(screen.getByTestId('attention-sheet')).getByTestId('attention-row-a'))
     expect(onOpenTask).toHaveBeenCalledWith(
       expect.objectContaining({ task: expect.objectContaining({ id: 'a' }) }),
-      'agent',
-      't2'
+      'agent'
     )
   })
 

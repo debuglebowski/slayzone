@@ -3,7 +3,7 @@
  *
  * Phone: the page is the conversation. A compact nav bar — ‹ back to the board, the
  * title (one line) with the agent under it ("<provider> · <state>"; a tap opens the
- * agent menu: provider, agent tabs, every action), Start while the agent offers it, and
+ * agent menu: provider, every action), Start while the agent offers it, and
  * ⓘ, which opens Details / Artifacts as a sheet (`TaskInfoSheet`, its own route: the
  * page stays mounted under it, so a draft, a running terminal or an upload survive) —
  * then the agent, full height (the chat, its controls one model pill in the composer;
@@ -60,9 +60,6 @@ export interface TaskPageProps {
   onSegment: (segment: TaskSegment) => void
   /** Phone: open the Details / Artifacts sheet on that part. */
   onOpenInfo?: (segment: InfoSegment) => void
-  /** The agent tab shown; undefined = the main one. */
-  agentTabId: string | undefined
-  onSelectAgentTab: (tabId: string) => void
   /** Back to the board; absent = no back (an iPad tab). */
   onBack?: () => void
   onDeleted: () => void
@@ -93,8 +90,6 @@ function PhonePage(props: TaskPageProps) {
           feed={props.feed}
           row={row}
           showHub={props.showHub}
-          tabId={props.agentTabId}
-          onSelectTab={props.onSelectAgentTab}
           nav={(agent) => <NavBar {...props} agent={agent} />}
         />
       </ChatUploadTargetContext.Provider>
@@ -245,8 +240,6 @@ function WidePage(props: TaskPageProps) {
               feed={props.feed}
               row={{ ...row, task: writes.task }}
               showHub={props.showHub}
-              tabId={props.agentTabId}
-              onSelectTab={props.onSelectAgentTab}
             />
           </View>
           <View style={[styles.pane, styles.sidePane]} testID="pane-side">

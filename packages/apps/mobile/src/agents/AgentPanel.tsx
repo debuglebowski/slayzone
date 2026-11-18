@@ -1,9 +1,9 @@
 /**
- * A task's agents — the Agent panel of the task page (desktop's Agent panel): the
- * task's terminal tabs (`taskTerminals.list`, live via `taskTerminals.onChanged`;
- * the main tab is created when the task has none yet, as desktop does on open), the
- * selected tab's agent — a chat tab in the chat view (`ChatSession`), any other in
- * the terminal (`TerminalView`) — its state, and what can be done with it (Start,
+ * A task's agent — the Agent panel of the task page (desktop's Agent panel). The app
+ * shows a task's MAIN agent only, never its other agent tabs: the main tab
+ * (`taskTerminals.list`, live via `taskTerminals.onChanged`; created when the task has
+ * none yet, as desktop does on open) — a chat in the chat view (`ChatSession`), any
+ * other in the terminal (`TerminalView`) — its state, and what can be done with it (Start,
  * Interrupt, Stop, Restart, Reset, provider; `lifecycle.ts`; destructive ones ask
  * first; a failed one says what failed and offers Retry). Interrupt and Stop are up
  * front only while the agent works; idle, they are under ⋯ with the rest. A terminal's
@@ -14,19 +14,14 @@
  *
  * On the phone's task page (`nav`) the panel has no bar of its own: the page's nav bar
  * shows the agent (`AgentNav`: provider, state, Start while offered) and opens the
- * agent menu, which holds everything the bar, ⋯ and the tab strip offer — the
- * provider, the agent tabs, every action — and a chat's mode / model / effort are one
- * model pill in its composer.
+ * agent menu, which holds everything the bar and ⋯ offer — the provider, every
+ * action — and a chat's mode / model / effort are one model pill in its composer.
  *
  * Rendered inside the HubScope of the hub that owns the task (`feed`'s hub): every
  * call here goes to that hub.
  */
 import type { HubFeed, TaskRow } from '../hub-board'
-import {
-  getModeLabel,
-  getTabLabel,
-  numberDuplicateLabels
-} from '@slayzone/task-terminals/tab-label'
+import { getModeLabel } from '@slayzone/task-terminals/tab-label'
 import {
   isAliveTerminalState,
   isChatSupported,
@@ -36,7 +31,7 @@ import { computerName } from '@slayzone/computers/labels'
 import { workComputerId } from '@slayzone/projects-contracts/placements'
 import { useSubscription } from '@slayzone/transport/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -61,7 +56,6 @@ import { AGENT_SNAPSHOT_QUERY_KEY } from './use-hub-agent-sessions'
 import {
   type AgentTarget,
   interruptAgent,
-  isMainTab,
   resetAgent,
   restartAgent,
   startAgent,
@@ -76,9 +70,6 @@ export interface AgentPanelProps {
   row: TaskRow
   /** Several hubs are signed in: say which one this is. */
   showHub: boolean
-  /** The tab to show; undefined = the main tab. */
-  tabId: string | undefined
-  onSelectTab: (tabId: string) => void
   /**
    * Names this opening of the task (stable while the page that opened it stays open):
    * the task is marked read once per opening, however often the panel remounts.
@@ -87,7 +78,7 @@ export interface AgentPanelProps {
   openingKey?: string
   /**
    * The phone's task page: its nav bar, drawn by the page from what the panel hands it
-   * (`AgentNav`). The panel then has no bar, ⋯ or tab strip of its own — all of it is
+   * (`AgentNav`). The panel then has no bar or ⋯ of its own — all of it is
    * in the agent menu the nav opens — and a chat's controls are one model pill.
    * Omitted (iPad): the panel's own bar.
    */
@@ -96,20 +87,20 @@ export interface AgentPanelProps {
 
 /** What the page's nav bar shows of the agent, and what it can do from there. */
 export interface AgentNav {
-  /** The provider (main tab), or the tab's own label. */
+  /** The provider. */
   provider: string
   /** Its state and what else to know ("Idle · Unread"). */
   status: string
   dot: AgentDotKind | null
   /** An action runs, or the agents' states are still loading. */
   busy: boolean
-  /** Opens the agent menu: provider, agent tabs, every action. */
+  /** Opens the agent menu: provider, every action. */
   openMenu: () => void
   /** Start, up front while offered (the agent isn't running); null otherwise. */
   start: (() => void) | null
 }
 
-/** A tab as `taskTerminals.list` returns it. */
+/** A tab as `taskTerminals.list` returns it (the main one: the only one shown). */
 type Tab = RouterOutputs['taskTerminals']['list'][number]
 
 /**
@@ -161,16 +152,7 @@ class TerminalSlot {
 /** A pill's 30pt, reaching the 44pt a finger needs. */
 const PILL_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 }
 
-export function AgentPanel({
-  hubId,
-  feed,
-  showHub,
-  tabId,
-  onSelectTab,
-  row,
-  openingKey,
-  nav
-}: AgentPanelProps) {
+export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: AgentPanelProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const trpc = useTRPC()
@@ -215,12 +197,8 @@ export function AgentPanel({
       client.task.update.mutate({ id: taskId, needsAttention: false }).catch(() => undefined)
   }, [opening, unread, client, taskId])
 
-  const tabs = useMemo<Tab[]>(
-    () => [...(tabRows ?? [])].sort((a, b) => a.position - b.position),
-    [tabRows]
-  )
   // Until the tabs load, the main tab (its id is the task's; its mode the task's).
-  const main: Tab = tabs.find((t) => t.isMain) ?? {
+  const main: Tab = tabRows?.find((t) => t.isMain) ?? {
     id: taskId,
     taskId,
     groupId: taskId,
@@ -232,10 +210,9 @@ export function AgentPanel({
     agentState: 'new',
     chatFontSize: null
   }
-  const selected = tabs.find((t) => t.id === tabId) ?? main
-  const target: AgentTarget = { taskId, tabId: selected.id, mode: selected.mode }
-  const chat = isChatSupported(selected.mode)
-  const sessionId = sessionIdOf(taskId, selected.id)
+  const target: AgentTarget = { taskId, tabId: main.id, mode: main.mode }
+  const chat = isChatSupported(main.mode)
+  const sessionId = sessionIdOf(taskId, main.id)
   const state: TerminalState | undefined = feed.agents.state.byId[sessionId]
   const jobs = feed.agents.state.jobsById[sessionId] ?? 0
   // Until the first snapshot is in, no state means "not known yet", not "not started".
@@ -244,7 +221,6 @@ export function AgentPanel({
   const live = state !== undefined && isAliveTerminalState(state)
   const working = state !== undefined && WORKING.has(state)
   const restarts = useRestarts(state)
-  const onMain = isMainTab(target)
   const [terminal] = useState(() => new TerminalSlot())
   /** The grid to start a terminal agent at (the terminal's area); chat: none. */
   const size = () => (chat ? undefined : terminal.get()?.grid())
@@ -323,8 +299,6 @@ export function AgentPanel({
   if (showHub) statusParts.push(feed.hub.label)
   const dot = agentDotOf(state, unread)
 
-  const tabLabels = numberDuplicateLabels(new Map(tabs.map((t) => [t.id, getTabLabel(t)])))
-
   const actions: Array<{
     name: string
     /** Its words in the agent menu (phone), when not its name. */
@@ -334,7 +308,7 @@ export function AgentPanel({
     more?: boolean
   }> = []
   // Nothing to act on until the agent's state is known.
-  if (onMain && !live && loaded)
+  if (!live && loaded)
     actions.push({
       name: 'Start',
       onPress: () => run('Start', () => startAgent(client, taskId, size()))
@@ -359,7 +333,7 @@ export function AgentPanel({
           () => stopAgent(client, target)
         )
     })
-  if (onMain && live)
+  if (live)
     actions.push({
       name: 'Restart',
       more: true,
@@ -371,19 +345,18 @@ export function AgentPanel({
           () => restartAgent(client, target, size())
         )
     })
-  if (onMain)
-    actions.push({
-      name: 'Reset',
-      label: 'New conversation',
-      more: true,
-      onPress: () =>
-        confirmThen(
-          'Reset',
-          'Start a new conversation?',
-          'The agent stops and starts fresh; this conversation is left behind.',
-          () => resetAgent(client, target, size())
-        )
-    })
+  actions.push({
+    name: 'Reset',
+    label: 'New conversation',
+    more: true,
+    onPress: () =>
+      confirmThen(
+        'Reset',
+        'Start a new conversation?',
+        'The agent stops and starts fresh; this conversation is left behind.',
+        () => resetAgent(client, target, size())
+      )
+  })
   if (!chat) {
     actions.push(
       {
@@ -412,9 +385,7 @@ export function AgentPanel({
   const inline = actions.filter((a) => !a.more)
   const more = actions.filter((a) => a.more)
   const start = actions.find((a) => a.name === 'Start')
-  const providerLabel = onMain
-    ? modeLabel(task.agent_id)
-    : (tabLabels.get(selected.id) ?? modeLabel(selected.mode))
+  const providerLabel = modeLabel(task.agent_id)
   const providers = (modesQ.data ?? []).filter((m) => m.enabled).sort((a, b) => a.order - b.order)
 
   const problems = (
@@ -483,8 +454,8 @@ export function AgentPanel({
         <ChatSession
           hubId={hubId}
           taskId={taskId}
-          tabId={selected.id}
-          mode={selected.mode}
+          tabId={main.id}
+          mode={main.mode}
           {...(nav ? { controls: 'pill' as const } : {})}
         />
       ) : (
@@ -496,7 +467,7 @@ export function AgentPanel({
           live={live}
           stateLoading={!loaded}
           computerName={taskComputer}
-          notRunningHint={onMain ? 'Tap Start to run it.' : undefined}
+          notRunningHint="Tap Start to run it."
         />
       )}
     </View>
@@ -514,11 +485,9 @@ export function AgentPanel({
         expanded?: boolean
         /** A choice under the row above (a provider under Provider). */
         nested?: boolean
-        /** Offered while an action runs (switching tabs is not one). */
-        alwaysEnabled?: boolean
       } = {}
     ) => {
-      const disabled = !opts.alwaysEnabled && busy !== null
+      const disabled = busy !== null
       return (
         <Pressable
           key={key}
@@ -571,13 +540,11 @@ export function AgentPanel({
                 {statusParts.join(' · ')}
               </Text>
             </View>
-            {onMain
-              ? row('provider', 'Provider', () => setMenuProviders((v) => !v), {
-                  value: modeLabel(task.agent_id),
-                  expanded: menuProviders
-                })
-              : null}
-            {onMain && menuProviders
+            {row('provider', 'Provider', () => setMenuProviders((v) => !v), {
+              value: modeLabel(task.agent_id),
+              expanded: menuProviders
+            })}
+            {menuProviders
               ? providers.map((m) =>
                   row(`mode-${m.id}`, m.label, () => switchTo(m.id), {
                     selected: m.id === task.agent_id,
@@ -585,20 +552,6 @@ export function AgentPanel({
                   })
                 )
               : null}
-            {tabs.length > 1 ? (
-              <>
-                <Text style={[styles.pickerTitle, styles.menuSection]}>Agents</Text>
-                {tabs.map((t) =>
-                  row(
-                    `tab-${t.id}`,
-                    tabLabels.get(t.id) ?? getTabLabel(t),
-                    close(() => onSelectTab(t.id)),
-                    { selected: t.id === selected.id, alwaysEnabled: true }
-                  )
-                )}
-                <View style={styles.menuSection} />
-              </>
-            ) : null}
             {actions.map((a) =>
               row(a.name, a.label ?? a.name, close(a.onPress), { destructive: a.destructive })
             )}
@@ -613,24 +566,18 @@ export function AgentPanel({
       <View style={styles.bar}>
         <View style={styles.identity}>
           {dot ? <AgentDot kind={dot} /> : <View style={styles.noDot} />}
-          {onMain ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Change provider"
-              accessibilityValue={{ text: modeLabel(task.agent_id) }}
-              onPress={() => setPicking(true)}
-              disabled={busy !== null}
-              style={styles.provider}
-            >
-              <Text style={styles.mode} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-                {modeLabel(task.agent_id)} ▾
-              </Text>
-            </Pressable>
-          ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change provider"
+            accessibilityValue={{ text: modeLabel(task.agent_id) }}
+            onPress={() => setPicking(true)}
+            disabled={busy !== null}
+            style={styles.provider}
+          >
             <Text style={styles.mode} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-              {modeLabel(selected.mode)}
+              {modeLabel(task.agent_id)} ▾
             </Text>
-          )}
+          </Pressable>
           <Text
             style={styles.statusText}
             numberOfLines={2}
@@ -683,24 +630,6 @@ export function AgentPanel({
         ) : null}
       </View>
       {problems}
-      {tabs.length > 1 ? (
-        <ScrollView horizontal style={styles.tabs} contentContainerStyle={styles.tabsContent}>
-          {tabs.map((t) => (
-            <Pressable
-              key={t.id}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: t.id === selected.id }}
-              onPress={() => onSelectTab(t.id)}
-              hitSlop={PILL_HIT_SLOP}
-              style={[styles.tab, t.id === selected.id && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, t.id === selected.id && styles.tabTextActive]}>
-                {tabLabels.get(t.id)}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
       {body}
       <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">
         {more.map((a) => (
@@ -788,17 +717,6 @@ const makeStyles = (t: ChromeColors) =>
     problemDetail: { color: t.mutedForeground, fontSize: 12 },
     dismiss: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
     dismissText: { fontSize: 14, color: t.mutedForeground },
-    tabs: { flexGrow: 0 },
-    tabsContent: { paddingHorizontal: 12, gap: 6, paddingBottom: 8 },
-    tab: {
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 8,
-      backgroundColor: t.surface2
-    },
-    tabActive: { backgroundColor: t.surface3 },
-    tabText: { fontSize: 13, color: t.mutedForeground },
-    tabTextActive: { color: t.foreground, fontWeight: '600' },
     body: { flex: 1 },
     pickerTitle: {
       fontSize: 11,
@@ -830,6 +748,5 @@ const makeStyles = (t: ChromeColors) =>
       borderTopColor: t.border
     },
     menuValue: { flexShrink: 1, fontSize: 15, color: t.mutedForeground, marginLeft: 'auto' },
-    menuNested: { paddingLeft: 16 },
-    menuSection: { paddingTop: 14 }
+    menuNested: { paddingLeft: 16 }
   })

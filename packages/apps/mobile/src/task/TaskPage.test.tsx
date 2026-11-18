@@ -140,8 +140,6 @@ async function show({
     showHub: true,
     wide,
     segment: shown,
-    agentTabId: undefined,
-    onSelectAgentTab: jest.fn(),
     onOpenTask: jest.fn(),
     onOpenArtifact: jest.fn(),
     ...handlers

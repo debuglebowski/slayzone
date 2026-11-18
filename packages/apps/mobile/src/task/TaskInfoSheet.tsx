@@ -78,7 +78,11 @@ function Sheet(props: TaskInfoSheetProps) {
     ) : null
 
   return (
-    <View style={styles.sheet} testID="task-info-sheet">
+    // One native view (`collapsable={false}`): react-native-screens' formSheet looks for a
+    // scroll view among the sheet content's top native views and resizes it to the whole
+    // sheet. Flattened, this view's children — Details' ScrollView among them — would be
+    // those top views, and Details would be drawn over the title and segments.
+    <View style={styles.sheet} collapsable={false} testID="task-info-sheet">
       <TitleBlock
         row={row}
         writes={writes}

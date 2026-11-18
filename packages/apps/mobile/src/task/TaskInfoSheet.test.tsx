@@ -198,6 +198,13 @@ describe('TaskInfoSheet fields', () => {
     expect(screen.queryByTestId('task-details', { includeHiddenElements: true })).toBeNull()
   })
 
+  it("mounts as one native view, so the sheet can't find (and resize) the Details scroll view", async () => {
+    // react-native-screens' formSheet resizes a scroll view it finds among the sheet
+    // content's top native views to the whole sheet — over the title and segments.
+    await show()
+    expect(screen.getByTestId('task-info-sheet')).toHaveProp('collapsable', false)
+  })
+
   it('Done closes the sheet', async () => {
     const { onClose } = await show()
     await user().press(screen.getByLabelText('Done'))
