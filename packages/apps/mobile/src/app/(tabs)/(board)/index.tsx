@@ -29,13 +29,8 @@ export default function BoardRoute() {
       wide={wide}
       onRetry={retry}
       onSignOut={signOut}
-      onOpenTask={(row, segment, tab) =>
-        router.push(
-          taskHref(row.hubLabel, row.task.id, {
-            ...(segment ? { segment } : {}),
-            ...(tab ? { tab } : {})
-          })
-        )
+      onOpenTask={(row, segment) =>
+        router.push(taskHref(row.hubLabel, row.task.id, segment ? { segment } : {}))
       }
       onNewTask={(target) => router.push(newTaskHref(target))}
       onOpenProject={(hubLabel, projectId) => router.push(projectHref(hubLabel, projectId))}

@@ -32,14 +32,14 @@ jest.mock('./hub-connections', () => ({
   useHubFeeds: () => ({ feeds: mockFeeds.list, retry: () => undefined, clientFor: () => null })
 }))
 // The task page writes to its hub (`task/TaskPage.test.tsx` tests it): here which task,
-// which part and which agent tab a route opens, and whether it is the wide layout.
+// which part a route opens, and whether it is the wide layout.
 jest.mock('./task/TaskPage', () => ({
   ...jest.requireActual('./task/TaskPage'),
   TaskPage: (p: import('./task/TaskPage').TaskPageProps) => {
     const { Pressable, Text } = jest.requireActual('react-native')
     return (
       <>
-        <Text>{`task page ${p.row.hubLabel} ${p.row.task.id} ${p.segment} ${p.agentTabId ?? 'main'}${p.wide ? ' wide' : ''}`}</Text>
+        <Text>{`task page ${p.row.hubLabel} ${p.row.task.id} ${p.segment}${p.wide ? ' wide' : ''}`}</Text>
         {p.onBack ? (
           <Pressable onPress={p.onBack}>
             <Text>stand-in back</Text>
@@ -287,7 +287,7 @@ describe('routing', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
     signedIn()
     await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
-    await screen.findByText('task page home.example t0 agent main')
+    await screen.findByText('task page home.example t0 agent')
     const deprecated = warn.mock.calls.filter((args) => String(args[0]).includes('deprecated'))
     warn.mockRestore()
     expect(deprecated).toEqual([])
@@ -300,7 +300,7 @@ describe('routing', () => {
       await userEvent.setup().press(await screen.findByText('Write spec'))
       expect(screen).toHavePathname('/task/home.example/t0')
       expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
-      expect(tab('board').getByText('task page home.example t0 agent main')).toBeOnTheScreen()
+      expect(tab('board').getByText('task page home.example t0 agent')).toBeOnTheScreen()
       await userEvent.setup().press(tab('board').getByText('stand-in back'))
       expect(screen).toHavePathname('/')
     })
@@ -317,7 +317,7 @@ describe('routing', () => {
       expect(screen).toHavePathnameWithParams('/task/home.example/t0/info?segment=details')
       await user.press(screen.getByText('stand-in done'))
       expect(screen).toHavePathname('/task/home.example/t0')
-      expect(screen.getByText('task page home.example t0 agent main')).toBeOnTheScreen()
+      expect(screen.getByText('task page home.example t0 agent')).toBeOnTheScreen()
     })
 
     it('a task deleted from its sheet: the sheet and the page go, back to where it was opened', async () => {
@@ -391,13 +391,13 @@ describe('routing', () => {
     it('a task opens in the Board tab, above the board (phone)', async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: link('slayzone://task/home.example/t0') })
-      expect(await screen.findByText('task page home.example t0 agent main')).toBeOnTheScreen()
+      expect(await screen.findByText('task page home.example t0 agent')).toBeOnTheScreen()
       expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
       await userEvent.setup().press(tab('board').getByText('stand-in back'))
       expect(screen).toHavePathname('/')
     })
 
-    it("a task link naming Details or Artifacts opens the page with that part's sheet over it (phone)", async () => {
+    it("a task link naming Details or Artifacts opens the page with that part's sheet over it (phone); an agent tab it names is ignored", async () => {
       signedIn()
       await renderRouter(ROUTES, {
         initialUrl: link('slayzone://task/home.example/t0?segment=details&tab=side')
@@ -406,25 +406,24 @@ describe('routing', () => {
       expect(screen).toHavePathnameWithParams('/task/home.example/t0/info?segment=details')
       await userEvent.setup().press(screen.getByText('stand-in done'))
       expect(screen).toHavePathnameWithParams('/task/home.example/t0?segment=agent&tab=side')
-      expect(screen.getByText('task page home.example t0 agent side')).toBeOnTheScreen()
+      expect(screen.getByText('task page home.example t0 agent')).toBeOnTheScreen()
     })
 
-    it("an older agent link opens the task's Agent, with the agent tab it names", async () => {
+    it("an older agent link opens the task's main agent (the agent tab it names is ignored)", async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: link('slayzone://agent/home.example/t0?tab=side') })
-      expect(await screen.findByText('task page home.example t0 agent side')).toBeOnTheScreen()
+      expect(await screen.findByText('task page home.example t0 agent')).toBeOnTheScreen()
       expect(screen).toHaveSegments(['(tabs)', '(board)', 'task', '[hub]', '[id]'])
+      expect(screen).toHavePathnameWithParams('/task/home.example/t0?segment=agent')
     })
 
     it('on an iPad, a task link opens the task as a tab on the board', async () => {
       tablet()
       signedIn()
       await renderRouter(ROUTES, {
-        initialUrl: link('slayzone://task/home.example/t0?segment=artifacts')
+        initialUrl: link('slayzone://task/home.example/t0?segment=artifacts&tab=side')
       })
-      expect(
-        await screen.findByText('task page home.example t0 artifacts main wide')
-      ).toBeOnTheScreen()
+      expect(await screen.findByText('task page home.example t0 artifacts wide')).toBeOnTheScreen()
       expect(screen).toHavePathname('/')
       expect(tab('board').getByTestId('open-tab-task-t0')).toBeOnTheScreen()
     })
@@ -441,7 +440,7 @@ describe('routing', () => {
     signedIn()
     await renderRouter(ROUTES, { initialUrl: '/' })
     await userEvent.setup().press(await tab('board').findByText('Write spec'))
-    expect(await screen.findByText('task page home.example t0 details main wide')).toBeOnTheScreen()
+    expect(await screen.findByText('task page home.example t0 details wide')).toBeOnTheScreen()
     await userEvent.setup().press(tab('board').getByTestId('open-tab-board'))
     expect(tab('board').queryByText(/task page/)).toBeNull()
   })

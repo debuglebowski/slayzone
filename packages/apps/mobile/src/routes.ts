@@ -18,11 +18,12 @@
  * Detail screens push onto the tab they were opened from (the tab bar stays); a deep
  * link opens them in the Board tab, above the board:
  *
- *   /task/<hub>/<id>       a task (`?segment=agent|details|artifacts`, `&tab=<agent tab>`;
- *                          a phone opens Details / Artifacts as the sheet below)
+ *   /task/<hub>/<id>       a task (`?segment=agent|details|artifacts`; a phone opens
+ *                          Details / Artifacts as the sheet below; its agent is the
+ *                          task's main one — an older link's `&tab=` is ignored)
  *   /task/<hub>/<id>/info  the phone's Details / Artifacts sheet over the task's page
  *                          (`?segment=details|artifacts`)
- *   /agent/<hub>/<id>      older link: the task's Agent (`?tab=<tab id>`)
+ *   /agent/<hub>/<id>      older link: the task's Agent (its `?tab=` is ignored)
  *   /projects/<hub>/<id>   a project's settings (`projects/routes.ts`)
  *   /artifacts/<hub>/…     a task's artifacts (`artifacts/routes.ts`)
  *
@@ -38,17 +39,14 @@ export const ADD_HUB = '/add-hub'
 
 const segment = (value: string): string => encodeURIComponent(value)
 
-/** A task's page; `segment`: the part shown (phone), `tab`: an agent tab not the main one. */
+/** A task's page; `segment`: the part shown (phone). */
 export function taskHref(
   hubAddress: string,
   taskId: string,
-  options: { segment?: 'agent' | 'details' | 'artifacts'; tab?: string } = {}
+  options: { segment?: 'agent' | 'details' | 'artifacts' } = {}
 ): string {
   const path = `/task/${segment(hubAddress)}/${segment(taskId)}`
-  const query = (['segment', 'tab'] as const)
-    .flatMap((key) => (options[key] ? [`${key}=${segment(options[key])}`] : []))
-    .join('&')
-  return query ? `${path}?${query}` : path
+  return options.segment ? `${path}?segment=${options.segment}` : path
 }
 
 /** The phone's Details / Artifacts sheet of a task, on `part`. */

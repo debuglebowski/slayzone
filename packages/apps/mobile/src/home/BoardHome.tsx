@@ -23,7 +23,7 @@ import { HubScope } from '@slayzone/transport/client'
 import { type ReactNode, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { AttentionSheet } from '../attention/AttentionSheet'
-import { type AgentRow, tabIdOfSession } from '../agents/hub-agents'
+import type { AgentRow } from '../agents/hub-agents'
 import { isCompletedCategory } from '@slayzone/workflow'
 import {
   type BoardFilter,
@@ -75,13 +75,8 @@ export interface BoardHomeProps {
   wide: boolean
   onRetry: (hubId: string) => void
   onSignOut: (hubId: string) => void
-  /** Phone: a card (or a 🔔 row: `segment` agent, `agentTab` the tab of the session that
-   * needs you when not the main one) was tapped — its task's screen. */
-  onOpenTask: (
-    row: Pick<TaskRow, 'hubLabel' | 'task'>,
-    segment?: TaskSegment,
-    agentTab?: string
-  ) => void
+  /** Phone: a card (or a 🔔 row: `segment` agent) was tapped — its task's screen. */
+  onOpenTask: (row: Pick<TaskRow, 'hubLabel' | 'task'>, segment?: TaskSegment) => void
   /** The ＋ long-pressed: create a task in the shown project (and column, if one is shown). */
   onNewTask: (target: NewTaskParams) => void
   /** A project's settings (folders, computer). */
@@ -180,17 +175,13 @@ export function BoardHome(props: BoardHomeProps) {
     open.open(ref, segment ? { segment } : undefined)
   const onCard = (row: TaskRow) =>
     wide ? showTask({ hubId: row.hubId, taskId: row.task.id }) : props.onOpenTask(row)
-  // A 🔔 row opens the agent tab of the session it shows (the main tab's id is the task's).
+  // A 🔔 row opens its task's agent — the main one, whichever session it shows (the app
+  // shows no agent tabs).
   const onAttention = (row: AgentRow) => {
-    const tab = tabIdOfSession(row.sessionId)
-    const agentTab = tab !== row.task.id ? tab : undefined
     if (wide) {
       update({ ...kept, project: { hubId: row.hubId, projectId: row.task.project_id } })
-      open.open(
-        { hubId: row.hubId, taskId: row.task.id },
-        { segment: 'agent', agentTabId: agentTab }
-      )
-    } else props.onOpenTask(row, 'agent', agentTab)
+      open.open({ hubId: row.hubId, taskId: row.task.id }, { segment: 'agent' })
+    } else props.onOpenTask(row, 'agent')
   }
 
   let board: ReactNode
@@ -490,8 +481,6 @@ export function BoardHome(props: BoardHomeProps) {
             wide
             segment={activeTab.segment}
             onSegment={(segment) => open.setView(activeRef, { segment })}
-            agentTabId={activeTab.agentTabId}
-            onSelectAgentTab={(agentTabId) => open.setView(activeRef, { agentTabId })}
             onDeleted={() => open.close(activeRef)}
             onOpenTask={(taskId) => showTask({ hubId: activeRef.hubId, taskId })}
             onOpenArtifact={(artifactId, version) =>

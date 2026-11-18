@@ -10,9 +10,10 @@ import { useHideTabBar } from '../../../../../tab-bar'
 import { segmentParam, TaskScreen } from '../../../../../task/TaskScreen'
 
 /**
- * `/task/<hub address>/<task id>[?segment=agent|details|artifacts][&tab=<agent tab>]`
- * (deep link `slayzone://task/<hub>/<id>`): the task's page on that hub, Agent first.
- * The shown part and agent tab live in the params, so a link opens the same view.
+ * `/task/<hub address>/<task id>[?segment=agent|details|artifacts]`
+ * (deep link `slayzone://task/<hub>/<id>`): the task's page on that hub, Agent first —
+ * the task's main agent (the app shows no agent tabs; an older link's `&tab=` is
+ * ignored). The shown part lives in the params, so a link opens the same view.
  * Phone: the page is the conversation, the app's tab bar hidden while it shows; its ⓘ
  * opens Details / Artifacts as a sheet over it (`./[id]/info`) — and so does a link
  * naming either, its `segment` handed over to the sheet.
@@ -21,11 +22,10 @@ import { segmentParam, TaskScreen } from '../../../../../task/TaskScreen'
  * page when the window later widens or rotates — a resize never navigates away.
  */
 export default function TaskRoute() {
-  const { hub, id, segment, tab } = useLocalSearchParams<{
+  const { hub, id, segment } = useLocalSearchParams<{
     hub: string
     id: string
     segment?: string
-    tab?: string
   }>()
   const router = useRouter()
   // This route's own navigation: its params are the ones set (see the link below).
@@ -52,12 +52,9 @@ export default function TaskRoute() {
   }, [linkedInfo, hub, id, router, navigation])
   useEffect(() => {
     if (!asTab || !hubId) return
-    open.open(
-      { hubId, taskId: id },
-      { segment: segment === 'artifacts' ? 'artifacts' : 'details', agentTabId: tab || undefined }
-    )
+    open.open({ hubId, taskId: id }, { segment: segment === 'artifacts' ? 'artifacts' : 'details' })
     router.replace(HOME)
-  }, [asTab, hubId, id, segment, tab, open, router])
+  }, [asTab, hubId, id, segment, open, router])
   if (asTab) return null
   return (
     <TaskScreen
@@ -67,10 +64,8 @@ export default function TaskRoute() {
       feeds={feeds}
       wide={wide}
       segment={segmentParam(segment)}
-      agentTabId={tab || undefined}
       onSegment={(next) => router.setParams({ segment: next })}
       onOpenInfo={(part) => router.push(taskInfoHref(hub, id, part))}
-      onSelectAgentTab={(next) => router.setParams({ tab: next })}
       onBack={back}
       onOpenTask={(taskId) => router.push(taskHref(hub, taskId))}
       onOpenArtifact={(artifactId, version) =>

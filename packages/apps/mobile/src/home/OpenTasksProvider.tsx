@@ -2,7 +2,7 @@
  * The tasks open as tabs on an iPad (`open-tasks.ts`), kept for the whole signed-in app
  * (`app/(tabs)/_layout.tsx`): the board's tab bar shows them, and a task link — a deep
  * link, a search result — opens its task as a tab there, as desktop does. Each tab keeps
- * the part shown (Details / Artifacts beside the agent) and its agent tab.
+ * the part shown (Details / Artifacts beside the agent).
  */
 import { createContext, type ReactNode, useContext, useState } from 'react'
 import { rowKey } from '../hub-board'
@@ -11,7 +11,6 @@ import { closeTask, openTask, type OpenTasks, type TaskRef } from './open-tasks'
 
 export interface TabView {
   segment: TaskSegment
-  agentTabId: string | undefined
 }
 
 export interface OpenTasksValue extends OpenTasks {
@@ -23,7 +22,7 @@ export interface OpenTasksValue extends OpenTasks {
   setView: (ref: TaskRef, view: Partial<TabView>) => void
 }
 
-const DEFAULT_VIEW: TabView = { segment: 'details', agentTabId: undefined }
+const DEFAULT_VIEW: TabView = { segment: 'details' }
 const OpenTasksContext = createContext<OpenTasksValue | null>(null)
 
 export function useOpenTasks(): OpenTasksValue {

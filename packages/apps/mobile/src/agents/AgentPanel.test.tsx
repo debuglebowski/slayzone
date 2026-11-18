@@ -189,7 +189,7 @@ function confirmAll() {
 function renderScreen(
   feed: HubFeed,
   b: ReturnType<typeof backend>,
-  extra: { tabId?: string; onSelectTab?: (id: string) => void; openingKey?: string } = {}
+  extra: { openingKey?: string } = {}
 ) {
   return render(
     <AgentPanel
@@ -197,8 +197,6 @@ function renderScreen(
       feed={feed}
       row={findTaskRow(feed, 't')!}
       showHub={false}
-      tabId={extra.tabId}
-      onSelectTab={extra.onSelectTab ?? (() => undefined)}
       openingKey={extra.openingKey}
     />,
     { wrapper: b.wrapper }
@@ -237,14 +235,7 @@ describe('AgentPanel', () => {
     )
     const next = feedOf(taskOf({ needs_attention: true, title: 'Fix login!' }), { 't:t': 'idle' })
     await view.rerender(
-      <AgentPanel
-        hubId={hub.id}
-        feed={next}
-        row={findTaskRow(next, 't')!}
-        showHub={false}
-        tabId={undefined}
-        onSelectTab={() => undefined}
-      />
+      <AgentPanel hubId={hub.id} feed={next} row={findTaskRow(next, 't')!} showHub={false} />
     )
     await act(async () => undefined)
     expect(b.paths().filter((p) => p === 'task.update')).toHaveLength(1)
@@ -272,9 +263,7 @@ describe('AgentPanel', () => {
       hubId: hub.id,
       feed,
       row: findTaskRow(feed, 't')!,
-      showHub: false,
-      tabId: undefined,
-      onSelectTab: () => undefined
+      showHub: false
     })
     const view = await renderScreen(feedOf(taskOf(), { 't:t': 'running' }), b)
     await view.rerender(<AgentPanel {...props(feedOf(taskOf(), { 't:t': 'idle' }))} />)
@@ -445,22 +434,13 @@ describe('AgentPanel', () => {
     )
   })
 
-  it("lists the task's tabs and opens another", async () => {
-    const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
-    const onSelectTab = jest.fn()
-    await renderScreen(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b, { onSelectTab })
-    // Desktop's tab labels: the main tab by its provider, another by "Terminal".
-    expect(await screen.findByText('Claude Code')).toBeOnTheScreen()
-    await userEvent.setup().press(screen.getByText('Terminal'))
-    expect(onSelectTab).toHaveBeenCalledWith('side')
-  })
-
-  it('shows the tab the route names', async () => {
-    const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
-    await renderScreen(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b, {
-      tabId: 'side'
-    })
-    expect(await screen.findByText('terminal t:side live')).toBeOnTheScreen()
+  it("shows the main agent only: no strip of the task's other agent tabs", async () => {
+    const b = backend([tab('side', 'terminal', false, 0), tab('t', 'claude-code', true, 1)])
+    await renderScreen(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b)
+    expect(await screen.findByText('terminal t:t live')).toBeOnTheScreen()
+    await waitFor(() => expect(screen.getByText('Claude Code ▾')).toBeOnTheScreen())
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(screen.queryByText('Terminal')).toBeNull()
   })
 
   it('creates the main tab when the task has none yet (as desktop does on open)', async () => {
@@ -492,19 +472,13 @@ function NavStub({ agent }: { agent: AgentNav }) {
   )
 }
 
-function renderPage(
-  feed: HubFeed,
-  b: ReturnType<typeof backend>,
-  extra: { tabId?: string; onSelectTab?: (id: string) => void } = {}
-) {
+function renderPage(feed: HubFeed, b: ReturnType<typeof backend>) {
   return render(
     <AgentPanel
       hubId={hub.id}
       feed={feed}
       row={findTaskRow(feed, 't')!}
       showHub={false}
-      tabId={extra.tabId}
-      onSelectTab={extra.onSelectTab ?? (() => undefined)}
       nav={(agent) => <NavStub agent={agent} />}
     />,
     { wrapper: b.wrapper }
@@ -519,7 +493,7 @@ async function agentMenu(label: string) {
 }
 
 describe('AgentPanel on the phone task page (its bar is the nav bar)', () => {
-  it('hands the nav its provider and state; no bar, ⋯ or tab strip of its own', async () => {
+  it('hands the nav its provider and state; no bar or ⋯ of its own', async () => {
     const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
     await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }, { 't:t': 2 }), b)
     await waitFor(() =>
@@ -612,16 +586,15 @@ describe('AgentPanel on the phone task page (its bar is the nav bar)', () => {
     )
   })
 
-  it("lists the task's agent tabs in the menu and opens another", async () => {
+  it("the agent menu lists no agent tabs: the task's main agent only", async () => {
     const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
-    const onSelectTab = jest.fn()
-    await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b, { onSelectTab })
+    await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b)
+    expect(await screen.findByText('terminal t:t live')).toBeOnTheScreen()
     await userEvent.setup().press(screen.getByText('open agent menu'))
-    await waitFor(() =>
-      expect(within(screen.getByTestId('agent-menu')).getByText('Terminal')).toBeOnTheScreen()
-    )
-    await agentMenu('Terminal')
-    expect(onSelectTab).toHaveBeenCalledWith('side')
+    const menu = within(screen.getByTestId('agent-menu'))
+    await waitFor(() => expect(menu.getByText('Provider')).toBeOnTheScreen())
+    expect(menu.queryByText('Agents')).toBeNull()
+    expect(menu.queryByText('Terminal')).toBeNull()
   })
 
   it("a chat's controls are one model pill (in the composer)", async () => {
