@@ -1806,9 +1806,17 @@ export function createChatTransport(
       // turns parked nothing: the tab stays idle (its helper reads `background`).
       // A withdrawn prompt does not end the turn it parked: the CLI goes on
       // (or ends it) — the turn stays open until its end (`result` …).
+      // The TUI's "No" ends the turn at its `interrupted` marker (emitted right
+      // after the answer), not at the answer itself.
       const parkedTurn = tab.promptParkedTurn
+      const deniedWithInterrupt =
+        event.kind === 'permission-resolved' &&
+        event.decision.behavior === 'deny' &&
+        Boolean(event.decision.interrupt)
       if (
-        (event.kind === 'permission-resolved' && tab.pendingPrompts.size === 0) ||
+        (event.kind === 'permission-resolved' &&
+          tab.pendingPrompts.size === 0 &&
+          !deniedWithInterrupt) ||
         event.kind === 'result' ||
         event.kind === 'interrupted' ||
         event.kind === 'process-exit'
@@ -1818,7 +1826,7 @@ export function createChatTransport(
         event.kind === 'permission-resolved' &&
         parkedTurn &&
         tab.pendingPrompts.size === 0 &&
-        !(event.decision.behavior === 'deny' && event.decision.interrupt)
+        !deniedWithInterrupt
       ) {
         transitionState(tab, 'running')
         // Watched again from here (the open tool's own bound applies).

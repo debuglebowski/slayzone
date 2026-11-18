@@ -3,7 +3,8 @@
  * Claude Code follows the CLI's measured protocol (2.1.326): a written message is
  * `queued`, then `started` (with its replay) once no turn runs; a turn ends with
  * its result, then `completed`; an interrupt ends it with an aborted result and
- * `cancelled`; a turn the CLI starts by itself has no `started`; a queued
+ * `cancelled` (so does the user's "No" on a prompt: deny + interrupt); a turn
+ * the CLI starts by itself has no `started`; a queued
  * message can be withdrawn (`cancel_async_message`). The host sends, stops,
  * answers prompts and respawns at random points.
  *
@@ -55,7 +56,7 @@ class Agent {
 
   constructor(readonly f: FakeChild) {
     f.answer('interrupt', () => {
-      setImmediate(() => this.interrupted())
+      setImmediate(() => this.abort())
       return { success: { still_queued: [] } }
     })
     f.answer('cancel_async_message', (req) => {
@@ -152,7 +153,8 @@ class Agent {
     this.next()
   }
 
-  private interrupted(): void {
+  /** The turn aborts: an interrupt, or the user's "No" (deny + interrupt) on its prompt. */
+  abort(): void {
     if (!this.turn) return
     const owner = this.turn.owner
     for (const id of this.prompts) emitLine(this.f, sj.cancel(id))
@@ -201,6 +203,19 @@ async function run(seed: number, mode: 'shadow' | 'authoritative'): Promise<void
           requestId: id,
           decision: { behavior: 'allow', updatedInput: {} }
         })
+      },
+      async () => {
+        // "No" (deny + interrupt: the CLI aborts the turn) or "No, and tell it
+        // what to do instead" (deny with feedback: the turn goes on).
+        const id = pick([...agent.prompts])
+        if (!id) return
+        agent.prompts.delete(id)
+        const interrupt = random() < 0.7
+        mgr.respondToPermissionRequest(TAB, {
+          requestId: id,
+          decision: { behavior: 'deny', message: 'no', ...(interrupt ? { interrupt: true } : {}) }
+        })
+        if (interrupt) setImmediate(() => agent.abort())
       },
       async () => {
         await mgr.stopTurn(TAB, {

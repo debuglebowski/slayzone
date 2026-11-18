@@ -81,3 +81,34 @@ test('output while a prompt waits does not reopen the turn', async () => {
   await wait(20)
   expect(mgr.getSessionTerminalState(TAB_OPTS.tabId)).toBe('idle')
 })
+
+test('"No" on a prompt of a self-started turn ends it at its interrupted marker', async () => {
+  const h = transportHarness()
+  await startTab()
+  const f = h.fakes[0]
+  await finishFirstTurn(f)
+
+  // The CLI starts a turn by itself and parks it on a prompt.
+  emitLine(f, sj.init('sess'))
+  emitLine(f, streamStart)
+  emitLine(f, sj.toolUse('tu_w', 'Write'))
+  emitLine(f, sj.canUseTool('r_w', 'tu_w'))
+  await until(() => mgr.isSessionAwaitingUserInput(TAB_OPTS.tabId))
+  expect(mgr.isTurnOpen(TAB_OPTS.tabId)).toBe(true)
+
+  // The answer and the `interrupted` marker after it: the turn ends at the
+  // marker, for the runtime and the lifecycle model alike (the strict check).
+  mgr.respondToPermissionRequest(TAB_OPTS.tabId, {
+    requestId: 'r_w',
+    decision: { behavior: 'deny', message: 'no', interrupt: true }
+  })
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+  expect(mgr.isSessionAwaitingUserInput(TAB_OPTS.tabId)).toBe(false)
+  expect(mgr.isTurnOpen(TAB_OPTS.tabId)).toBe(false)
+
+  // The CLI's own end of the aborted turn changes nothing.
+  emitLine(f, sj.aborted('aborted_tools'))
+  await mgr.__flushEventsForTests(TAB_OPTS.tabId)
+  expect(mgr.isTurnOpen(TAB_OPTS.tabId)).toBe(false)
+  expect(mgr.getSessionTerminalState(TAB_OPTS.tabId)).toBe('idle')
+})
