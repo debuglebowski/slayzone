@@ -5866,6 +5866,45 @@ export const migrations: Migration[] = [
       // task_grants carries a task_id: fenced like every such table.
       installContentErasureFences(db)
     }
+  },
+  {
+    // Whose a tab is (T-100), for the tabs no request creates: a chat thread is its
+    // parent tab's; a tab a computer's chat runs in is that computer's owner's —
+    // whichever of the tab and its ownership row lands first. A tab named by a
+    // request (`createTabRow`) carries its owner already. Erased tabs and tasks are
+    // never touched (their fences would abort the insert that fired this).
+    version: 221,
+    up: (db) => {
+      const live = `AND id NOT IN (SELECT tab_id FROM content_erasure_tabs)
+          AND task_id NOT IN (SELECT task_id FROM content_erasure_tasks)`
+      db.exec(`
+        CREATE TRIGGER terminal_tabs_owner_from_thread_parent AFTER INSERT ON chat_threads
+        BEGIN
+          UPDATE terminal_tabs SET owner_user_id =
+            (SELECT p.owner_user_id FROM terminal_tabs p WHERE p.id = NEW.parent_tab_id)
+           WHERE id = NEW.id AND owner_user_id IS NULL ${live};
+        END;
+        CREATE TRIGGER terminal_tabs_owner_from_chat_computer AFTER INSERT ON chat_ownership
+        WHEN NEW.computer_id IS NOT NULL
+        BEGIN
+          UPDATE terminal_tabs SET owner_user_id =
+            (SELECT c.owner_user_id FROM computers c WHERE c.id = NEW.computer_id)
+           WHERE id = NEW.tab_id AND owner_user_id IS NULL ${live};
+        END;
+        CREATE TRIGGER terminal_tabs_owner_on_insert AFTER INSERT ON terminal_tabs
+        WHEN NEW.owner_user_id IS NULL AND (
+          EXISTS (SELECT 1 FROM chat_threads WHERE id = NEW.id)
+          OR EXISTS (SELECT 1 FROM chat_ownership WHERE tab_id = NEW.id AND computer_id IS NOT NULL))
+        BEGIN
+          UPDATE terminal_tabs SET owner_user_id = COALESCE(
+            (SELECT p.owner_user_id FROM chat_threads th JOIN terminal_tabs p ON p.id = th.parent_tab_id
+              WHERE th.id = NEW.id),
+            (SELECT c.owner_user_id FROM chat_ownership o JOIN computers c ON c.id = o.computer_id
+              WHERE o.tab_id = NEW.id AND o.state <> 'deleted' ORDER BY o.epoch DESC LIMIT 1))
+           WHERE id = NEW.id ${live};
+        END;
+      `)
+    }
   }
 ]
 

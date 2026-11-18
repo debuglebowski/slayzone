@@ -1,5 +1,6 @@
 import { tabsEvents } from './events'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { currentSecurityContext } from '@slayzone/platform/security-log'
 import { parseAgentState, type AgentState } from '@slayzone/terminal-contracts'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
 import { clampChatFontSize } from '../shared/chat-font-size'
@@ -22,6 +23,8 @@ export interface TabRow {
   created_at: string
   agent_state: string
   chat_font_size: number | null
+  /** The one user the tab (and what runs in it) belongs to (T-100); null: the task's. */
+  owner_user_id?: string | null
 }
 
 export function rowToTab(row: TabRow): TerminalTab {
@@ -128,10 +131,10 @@ export async function createTabRow(
   const now = new Date().toISOString()
   await db
     .prepare(`
-    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-    VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at, owner_user_id)
+    VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
   `)
-    .run(id, input.taskId, label, mode, position, id, now)
+    .run(id, input.taskId, label, mode, position, id, now, currentSecurityContext()?.actor ?? null)
 
   return {
     id,
@@ -204,10 +207,10 @@ export async function splitTabRow(db: SlayzoneDb, tabId: string): Promise<Termin
   const now = new Date().toISOString()
   await db
     .prepare(`
-    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-    VALUES (?, ?, NULL, 'terminal', 0, ?, ?, ?)
+    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at, owner_user_id)
+    VALUES (?, ?, NULL, 'terminal', 0, ?, ?, ?, ?)
   `)
-    .run(id, target.task_id, position, groupId, now)
+    .run(id, target.task_id, position, groupId, now, target.owner_user_id ?? null)
 
   return {
     id,
