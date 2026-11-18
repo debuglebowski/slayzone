@@ -115,7 +115,19 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
     )
     manifest.taskIds = unique([
       ...manifest.taskIds,
-      ...oldTasks.filter((id) => !reassigned.has(id))
+      ...oldTasks.filter((id) => !reassigned.has(id)),
+      // Their private tasks in projects of others (T-100): theirs alone, subtasks and all.
+      ...rows<{ id: string }>(
+        db,
+        `WITH RECURSIVE priv(id, depth) AS (
+           SELECT id, 0 FROM tasks
+            WHERE parent_id IS NULL AND visibility = 'private' AND created_by_user_id = ?
+           UNION ALL
+           SELECT t.id, p.depth + 1 FROM tasks t JOIN priv p ON t.parent_id = p.id
+            WHERE p.depth < 64)
+         SELECT id FROM priv`,
+        scope.userId
+      ).map((r) => r.id)
     ])
   }
   for (const id of [...manifest.taskIds, ...manifest.projectIds]) assertPathSafeId(id, 'erasureId')
@@ -467,8 +479,13 @@ function commit(db: Database, p: { id: string }): ErasureManifest {
     )
     // Durable consumers (including backups and independently owned copies) own
     // their pins. Deleting a source artifact must never release another consumer.
-    if (m.scope.kind === 'user')
+    if (m.scope.kind === 'user') {
       db.prepare('DELETE FROM user_settings WHERE user_id=?').run(m.scope.userId)
+      // What others shared with them (T-100): the account is gone from every share.
+      for (const table of ['project_members', 'task_grants', 'artifact_grants'])
+        if (exists(db, table))
+          db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(m.scope.userId)
+    }
     const removed = new Set([...m.taskIds, ...m.projectIds])
     function scrub(value: unknown): unknown {
       if (typeof value === 'string' && removed.has(value)) return undefined

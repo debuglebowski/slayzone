@@ -666,3 +666,29 @@ test('an unrelated unreadable working-copy journal never blocks an erasure', asy
   expect(existsSync(alices)).toBe(false)
   expect(existsSync(unrelated)).toBe(true)
 })
+
+test("an erased account takes its private tasks in others' projects and leaves every share (T-100)", async () => {
+  const { h, root } = await fixture()
+  const run = (sql: string): void => void h.db.prepare(sql).run()
+  // Alice is a member of Bob's project, with a private task (and subtask) there, a
+  // task grant and an artifact grant on Bob's.
+  run(`INSERT INTO project_members(project_id,user_id,role) VALUES('project-bob','alice','edit')`)
+  run(`INSERT INTO tasks(id,project_id,title,visibility,created_by_user_id)
+    VALUES('alice-private','project-bob','alice in bob','private','alice')`)
+  run(`INSERT INTO tasks(id,project_id,parent_id,title)
+    VALUES('alice-private-sub','project-bob','alice-private','sub')`)
+  run(`INSERT INTO task_grants(task_id,user_id,role) VALUES('task-bob','alice','view')`)
+  run(`INSERT INTO artifact_grants(artifact_id,user_id,role) VALUES('artifact-bob','alice','view')`)
+  const report = await eraseContent(h.slayDb, root, { kind: 'user', userId: 'alice' })
+  expect(report.state).toBe('complete')
+  expect(
+    h.db.prepare(`SELECT id FROM tasks WHERE id IN ('alice-private','alice-private-sub')`).all()
+  ).toEqual([])
+  for (const table of ['project_members', 'task_grants', 'artifact_grants'])
+    expect(h.db.prepare(`SELECT * FROM ${table} WHERE user_id='alice'`).all()).toEqual([])
+  // Bob's own task and project stay.
+  expect(h.db.prepare("SELECT title FROM tasks WHERE id='task-bob'").get()).toEqual({
+    title: 'bob title'
+  })
+  expect(h.db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+})
