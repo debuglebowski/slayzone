@@ -25,6 +25,7 @@
     "./chat-long-session": "./chat-long-session/index.ts",
     "./known-bug": "./known-bug.ts",
     "./fixture-reaper": "./fixture-reaper.ts",
-    "./canary-inputs": "./canary-inputs.ts"
+    "./canary-inputs": "./canary-inputs.ts",
+    "./native-watcher": "./native-watcher.ts"
   }
 }
