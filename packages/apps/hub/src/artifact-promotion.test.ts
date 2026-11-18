@@ -62,7 +62,7 @@ const computerStore = (): ArtifactStore => {
                 author_id: 'claude',
                 created_at: '',
                 parent_id: null
-              }) satisfies ArtifactVersion
+              }) as unknown as ArtifactVersion
           )
       if (key === 'resolveArtifactVersion')
         return async (_db: unknown, d: { artifactId: string; versionRef: number }) => {
