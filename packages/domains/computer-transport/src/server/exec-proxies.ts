@@ -450,6 +450,17 @@ export type ComputerWork = {
  */
 export type ComputerWorkGate = (computerId: string, work: ComputerWork) => Promise<void>
 
+/**
+ * The work a spawn is for: its session (`<taskId>:<tabId>`) — the tab's one owner, so
+ * a shared task's member runs it on their own computer and the task's creator on
+ * theirs (T-100), whoever (or nothing) asks. Any other key: its task.
+ */
+function spawnWork(spec: { sessionId: string; taskId: string }): ComputerWork {
+  return spec.sessionId.startsWith(`${spec.taskId}:`)
+    ? { kind: 'session', id: spec.sessionId }
+    : { kind: 'task', id: spec.taskId }
+}
+
 // ===========================================================================
 // Detach / reattach across a dropped computer connection: ./detach-controller.ts
 // ===========================================================================
@@ -1576,7 +1587,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // synchronously (pty-manager's local path needs that); the spawn request — and
         // any input written meanwhile — waits behind it, and a refusal rejects
         // `whenSpawned` without anything reaching the computer.
-        const admitted = gate ? gate(computerId, { kind: 'task', id: spec.taskId }) : null
+        const admitted = gate ? gate(computerId, spawnWork(spec)) : null
         // A continuing spawn's buffer already holds the previous process's frames:
         // sealed until the reply says where its seqs resume, or a backfill from -1
         // would deliver that scrollback a second time.
@@ -2530,7 +2541,7 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
       const computerId = resolveComputerId(spec)
       if (computerId == null) throw new NoComputerAvailableError(`chat agent ${spec.binaryName}`)
       queuedOn.set(spec.sessionId, computerId)
-      if (gate) await gate(computerId, { kind: 'task', id: spec.taskId })
+      if (gate) await gate(computerId, spawnWork(spec))
 
       const procHandle = channel.spawnRouted(
         {

@@ -104,7 +104,7 @@ export interface PtySpawnLookups {
    */
   resolveComputerId(
     taskId: string,
-    context?: { mode?: string; conversationId?: string | null }
+    context?: { mode?: string; conversationId?: string | null; sessionId?: string }
   ): Promise<string | null>
   /**
    * The computer a project's work runs on when no task says otherwise (the

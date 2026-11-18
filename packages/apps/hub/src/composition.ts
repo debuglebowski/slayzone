@@ -997,7 +997,22 @@ export function composeServer(opts: {
     // Hand the task's remaining hub rows (computer-only data, §9) to the computer
     // before an agent of the task starts there: a resume must never miss them.
     resolveComputerId: async (taskId, context) => {
-      const computerId = await computerChat.resolvePtyComputer(taskId, context)
+      // A session's tab is ONE user's (T-100): the hub's own spawn of it (a restart, a
+      // wake, a restore — no acting user) resolves as that user, onto their computer.
+      const tabOwner =
+        !currentSecurityContext()?.actor && context?.sessionId?.startsWith(`${taskId}:`)
+          ? ((
+              await db.get<{ owner_user_id: string | null }>(
+                'SELECT owner_user_id FROM terminal_tabs WHERE id = ? AND task_id = ?',
+                [context.sessionId.slice(taskId.length + 1), taskId]
+              )
+            )?.owner_user_id ?? null)
+          : null
+      const computerId = tabOwner
+        ? await runWithSecurityContext({ actor: tabOwner, ip: null, route: 'pty-respawn' }, () =>
+            computerChat.resolvePtyComputer(taskId, context)
+          )
+        : await computerChat.resolvePtyComputer(taskId, context)
       // The hub's remaining rows, its session intents and the task's one-time tab
       // recovery reach that computer before any resume is decided there.
       if (computerId) await sessionLedger().prepare(taskId, computerId)

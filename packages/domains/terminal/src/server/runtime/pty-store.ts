@@ -392,7 +392,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
           resolveComputerId: (taskId) =>
             lookups.resolveComputerId(taskId, {
               mode: modeId,
-              conversationId: opts.existingConversationId
+              conversationId: opts.existingConversationId,
+              sessionId: opts.sessionId
             })
         }),
       signal
