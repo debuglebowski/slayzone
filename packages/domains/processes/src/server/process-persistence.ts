@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { currentSecurityContext } from '@slayzone/platform/security-log'
 
 /** Raw row shape of the `processes` table (snake_case, SQLite integer booleans). */
 export interface ProcessRow {
@@ -52,12 +53,24 @@ export function createDbProcessPersistence(db: SlayzoneDb): ProcessPersistence {
       return db.prepare('SELECT * FROM processes ORDER BY created_at').all<ProcessRow>()
     },
     insert(p: PersistedProcess): Promise<void> {
-      return db
-        .prepare(
-          'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)'
-        )
-        .run(p.id, p.projectId, p.taskId, p.label, p.command, p.cwd, p.autoRestart ? 1 : 0)
-        .then(() => undefined)
+      return (
+        db
+          .prepare(
+            'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          // Whose it is (T-100): the user who made it — it runs on their computer.
+          .run(
+            p.id,
+            p.projectId,
+            p.taskId,
+            p.label,
+            p.command,
+            p.cwd,
+            p.autoRestart ? 1 : 0,
+            currentSecurityContext()?.actor ?? null
+          )
+          .then(() => undefined)
+      )
     },
     update(p: PersistedProcess): Promise<void> {
       return db

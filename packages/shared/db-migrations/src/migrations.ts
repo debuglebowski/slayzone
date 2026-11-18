@@ -5929,6 +5929,14 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_task_workspaces_user ON task_workspaces(user_id);
         CREATE INDEX idx_task_workspaces_computer ON task_workspaces(computer_id);
         CREATE INDEX idx_task_workspaces_holder ON task_workspaces(worktree_computer_id);
+        -- A process runs on ONE user's computer: theirs alone, like a tab. Backfilled
+        -- to its task's creator, else its project's owner.
+        ALTER TABLE processes ADD COLUMN owner_user_id TEXT;
+        UPDATE processes SET owner_user_id = COALESCE(
+          (SELECT COALESCE(t.created_by_user_id, p.owner_user_id) FROM tasks t
+             JOIN projects p ON p.id = t.project_id WHERE t.id = processes.task_id),
+          (SELECT p.owner_user_id FROM projects p WHERE p.id = processes.project_id))
+         WHERE task_id IS NULL OR task_id NOT IN (SELECT task_id FROM content_erasure_tasks);
       `)
       // task_workspaces carries a task_id: fenced like every such table.
       installContentErasureFences(db)

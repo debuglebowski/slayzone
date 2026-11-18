@@ -199,6 +199,8 @@ export const MOVE_DROPPED_TABLES: Readonly<Record<string, string>> = {
   project_members: "sharing with the source hub's accounts: users are per hub",
   task_grants: "sharing with the source hub's accounts: users are per hub",
   artifact_grants: "sharing with the source hub's accounts: users are per hub",
+  task_workspaces:
+    "other users' personal workspaces (computer, folders) on the source hub's computers: users are per hub",
   // A project's
   automation_action_runs: 'automation run history: the automations move, their runs do not',
   processes: 'running processes belong to the source computers',

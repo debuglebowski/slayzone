@@ -266,13 +266,13 @@ describe('createDbProcessPersistence', () => {
     expect(calls[0]).toEqual({ sql: 'SELECT * FROM processes ORDER BY created_at', params: [] })
   })
 
-  test('insert runs the exact pre-seam INSERT', async () => {
+  test('insert runs the pre-seam INSERT, plus whose the process is (T-100)', async () => {
     await persistenceOverDb.insert(p)
     expect(calls[1].sql).toBe(
-      'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
   })
-  test('insert binds params in column order (project_id before task_id, autoRestart→1)', () => {
+  test('insert binds params in column order (project_id before task_id, autoRestart→1, no actor→null)', () => {
     expect(calls[1].params).toEqual([
       'the-id',
       'the-project',
@@ -280,7 +280,8 @@ describe('createDbProcessPersistence', () => {
       'the-label',
       'the-cmd',
       '/the/cwd',
-      1
+      1,
+      null
     ])
   })
 

@@ -136,8 +136,15 @@ describe('T-100 sharing: members, roles, private tasks and grants on a real hub'
     const asked = { resources: [{ kind: 'taskOwner', id: A.task }] }
     expect(await q(cb, 'sharing.myRoles', asked)).toEqual({ [`taskOwner:${A.task}`]: null })
     expect(await q(ca, 'sharing.myRoles', asked)).toEqual({ [`taskOwner:${A.task}`]: 'manage' })
-    expect(await codeOf(q(cb, 'taskTerminals.list', { taskId: A.task }))).toBe('NOT_FOUND')
+    // B (edit) runs the task on B's own computer: B's tab list holds none of A's tabs.
+    const bTabs = (await q(cb, 'taskTerminals.list', { taskId: A.task })) as { id: string }[]
+    expect(bTabs.map((t) => t.id)).not.toContain(A.tab)
+    expect(JSON.stringify(bTabs)).not.toContain(A.mark)
     expect(await codeOf(q(cb, 'pty.getBuffer', { sessionId: A.session }))).toBe('NOT_FOUND')
+    // C (view) may not start anything of its own.
+    expect(await codeOf(m(cc, 'taskTerminals.create', { taskId: A.task, mode: 'terminal' }))).toBe(
+      'FORBIDDEN'
+    )
     expect(await codeOf(q(ca, 'taskTerminals.list', { taskId: A.task }))).toBe('OK')
   })
 

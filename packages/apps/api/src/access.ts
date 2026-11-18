@@ -462,11 +462,19 @@ async function resolveSession(db: SlayzoneDb, id: string): Promise<Ownership> {
 
 /** A process runs on a computer: owner-only (its task's owner user, else its project's). */
 async function resolveProcess(db: SlayzoneDb, id: string): Promise<Ownership> {
-  const row = await db.get<{ task_id: string | null; project_id: string | null }>(
-    'SELECT task_id, project_id FROM processes WHERE id = ?',
-    [id]
-  )
+  const row = await db.get<{
+    task_id: string | null
+    project_id: string | null
+    owner_user_id: string | null
+  }>('SELECT task_id, project_id, owner_user_id FROM processes WHERE id = ?', [id])
   if (!row) return NONE
+  // The user who made it (T-100), while its task or project is still here.
+  if (row.owner_user_id !== null && (row.task_id || row.project_id)) {
+    const here = row.task_id
+      ? await taskFacts(db, row.task_id)
+      : await projectFacts(db, row.project_id as string)
+    return here ? ownerOnly(row.owner_user_id) : NONE
+  }
   if (row.task_id) return taskOwnerOnly(db, row.task_id)
   if (row.project_id) return viaQuery(OWNER_OF_PROJECT)(db, row.project_id)
   return NONE

@@ -169,8 +169,8 @@ describe('a computer target is owner-checked', () => {
         kind: string
       }>
       for (const [at, kind] of [
-        ['target.taskId', 'taskOwner'],
-        ['target.projectId', 'projectOwner'],
+        ['target.taskId', 'taskRunner'],
+        ['target.projectId', 'projectRunner'],
         ['target.computerId', 'computer']
       ]) {
         expect(refs, `${path}: ${at}`).toContainEqual({ at, kind })
