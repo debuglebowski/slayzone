@@ -610,3 +610,48 @@ test('a self-started turn racing a written message keeps its own ownership', asy
   expect(shadow.mismatches).toBe(0)
   expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
 })
+
+// Seen on a real chat (2026-11-18 13:24): the CLI started a turn by itself
+// (a finished background task) just as a message was written; it took the
+// message into that turn (`started` inside it) and ended it with one result.
+test.each(['shadow', 'authoritative'] as const)(
+  '%s: a message taken into a self-started turn ends with that turn',
+  async (mode) => {
+    const records: Array<{ event: string; payload?: unknown }> = []
+    const h = transportHarness({ deps: { diagnostic: (_t, r) => records.push(r) } })
+    await startTab({ lifecycleMode: mode } as never)
+    const c = new Contract(h, h.fakes[0])
+    await c.metadata()
+    await c.start()
+    await c.finish()
+    // The self-started turn is already streaming when the message is written.
+    emitLine(c.child, sj.init('contract-session'))
+    emitLine(c.child, {
+      type: 'stream_event',
+      event: { type: 'message_start', message: { id: 'self' } }
+    })
+    await flush()
+    await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+      id: 'joined',
+      content: [{ type: 'text', text: 'next' }]
+    })
+    await c.child.written((m) => m.type === 'user' && m.uuid === 'joined')
+    emitLine(c.child, sj.lifecycle('joined', 'queued'))
+    emitLine(c.child, sj.toolUse('self-tool'))
+    emitLine(c.child, sj.lifecycle('joined', 'started'))
+    emitLine(c.child, {
+      type: 'user',
+      isReplay: true,
+      uuid: 'joined',
+      message: { content: 'next' }
+    })
+    emitLine(c.child, sj.text('reply', { id: 'self-reply' }))
+    emitLine(c.child, sj.lifecycle('joined', 'completed'))
+    emitLine(c.child, sj.success())
+    await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.turnOpen === false)
+    await flush()
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+    expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
+    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+  }
+)

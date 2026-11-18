@@ -299,6 +299,10 @@ export function reduceChatLifecycle(
       if (value.phase !== 'dead' && value.phase !== 'not-spawned') value = turnEnded(value, true)
       break
     case 'turn-start':
+      // A message written while a turn the agent started by itself runs does not
+      // replace it: the agent takes the message into that turn or starts it after
+      // that turn's result (`turn-started`). Its delivery keeps the turn open.
+      if (signal.origin === 'user' && value.main?.origin === 'agent') break
       if (value.phase !== 'dead' && value.phase !== 'not-spawned' && value.phase !== 'starting') {
         value = {
           ...value,
