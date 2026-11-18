@@ -46,6 +46,9 @@ run_harness packages/shared/test-utils/fixture-reaper.test.ts
 # Leak guard: a file that leaves processes running in its own temp dirs fails, and they
 # are killed (fixture-guard.ts, installed for every harness file by harness-setup.ts).
 run_harness packages/shared/test-utils/fixture-guard.test.ts
+# Worker cap for a direct vitest run (half the cores locally): every directory with vitest
+# tests has a config applying it, since vitest reads a config only from where it starts.
+run_harness packages/shared/test-utils/vitest-workers.test.ts
 
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/

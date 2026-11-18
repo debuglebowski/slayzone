@@ -1,3 +1,4 @@
+import { localMaxWorkers } from './packages/shared/test-utils/vitest-workers.ts'
 import base from './packages/shared/test-utils/vitest.harness.config'
 export default {
   ...base,
@@ -5,6 +6,6 @@ export default {
     ...base.test,
     exclude: ['**/node_modules/**', '**/dist/**'],
     globalSetup: [],
-    maxWorkers: 2
+    maxWorkers: localMaxWorkers(2)
   }
 }

@@ -46,6 +46,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 
 **Machine-wide CI lock.** `pnpm test:e2e` (+ `:perf`, `:chat`) and `pnpm test:unit` (+ `:fast`) first take a FIFO lock shared with other repos' local gates (`scripts/ci-lock.mjs`; same `/tmp/ci-local.{queue,lock}` files as madacademy `ci/lock.sh`) and print who holds it while waiting. Skipped when `CI` is set; `SLZ_NO_CI_LOCK=1` opts out.
 
+A vitest run started directly (`npx vitest run …` anywhere) keeps at most half the cores busy: every directory with tests has a `vitest.config.ts` applying `localMaxWorkers` (`packages/shared/test-utils/vitest-workers.ts`); `SLZ_UNIT_WORKERS=<n>|all` overrides.
+
 **Installs: never `--ignore-scripts` in the main checkout.** A plain `pnpm install` is safe while the dev app runs. Skipping scripts leaves node-pty's `spawn-helper` at mode 644, so every agent in the dev app fails with "The computer couldn't start the agent." (`posix_spawnp failed.`). If an install did skip them (`node_modules/.modules.yaml` `pendingBuilds` not empty), run `pnpm rebuild --pending && node scripts/postinstall.js` at the repo root (`rebuild --pending` alone left `spawn-helper` at 644 under pnpm 12).
 
 ## Dev Env Flags
