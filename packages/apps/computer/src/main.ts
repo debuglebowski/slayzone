@@ -8,10 +8,7 @@ import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
 import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
 import { createPtyHistory, ptyHistoryDir } from './pty-history'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
-import {
-  chatProcessControlSchema,
-  chatControlPreparationSchema
-} from '@slayzone/chat-runtime/shared'
+import { assertChatControlScope, isChatControlRequest } from './chat-control-scope'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
  * exec node. The transport, enrollment, heartbeats, and reconnect logic live in
@@ -583,11 +580,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
           : undefined
     // The path scope the hub authorized (§9 Phase 7b): every path judged while this
     // request is served must lie inside that task's / project's own folders here.
-    const control =
-      method === HubToComputerMethods.chatRequest &&
-      ['control', 'control.prepare', 'control.cancel', 'control.renew'].includes(
-        String((params as { kind?: unknown } | null)?.kind)
-      )
+    const control = method === HubToComputerMethods.chatRequest && isChatControlRequest(params)
     const independent = storeIndependentControls.has(method) || control
     const scope = independent ? undefined : actor.pathScope
     const scoped =
@@ -642,17 +635,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       throw err
     }
     try {
-      if (control) {
-        const request =
-          (params as { kind: string }).kind === 'control'
-            ? chatProcessControlSchema.parse(params)
-            : chatControlPreparationSchema.parse(params)
-        if (actor.pathScope?.kind !== 'task' || actor.pathScope.taskId !== request.identity.taskId)
-          throw new RpcError(
-            ComputerTransportErrorCodes.refusedByComputer,
-            'Chat control task scope mismatch'
-          )
-      }
+      if (control) assertChatControlScope(actor, params)
       if (
         method === HubToComputerMethods.ptySpawn ||
         method === HubToComputerMethods.ptyWarmSpawn ||

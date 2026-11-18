@@ -2,6 +2,13 @@ import { randomUUID, createHash } from 'node:crypto'
 import { TypedEmitter } from '@slayzone/platform/events'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
+  currentPathScope,
+  pathScopeFor,
+  runInPathScope,
+  UnknownScopeError,
+  type WirePathScope
+} from '@slayzone/platform/path-scope'
+import {
   assertChatTabStateScope,
   isChatSupported,
   type ChatTabStateScope,
@@ -126,6 +133,13 @@ export function createHubChatRelay(opts: {
   chatControlInvocations?(computerId: string): boolean
   /** Caller-minted cancellation identity and renewable uncommitted request lease. */
   chatControlLeases?(computerId: string): boolean
+  /**
+   * May the CALLER (the request's security context) control this owner's live chat?
+   * Resolves to allow, throws to refuse. Asked before the relay stamps the owner
+   * task's path scope on a control frame, so the relay never lends its own authority
+   * to a caller (no confused deputy). Absent: every control is refused (fail closed).
+   */
+  authorizeControl?(owner: HubChatOwnership): Promise<void>
   /** Owner lifetime: do not inherit an already-aborted caller's request ALS. Keep actor/path scope. */
   controlCleanupRequest?: ChatComputerRequest
   controlSignal?(): AbortSignal | undefined
@@ -187,6 +201,32 @@ export function createHubChatRelay(opts: {
     onSuperseded: opts.onProviderTransitionSuperseded
   })
   const folderDeletions = createChatFolderDeletions(db)
+  /**
+   * The caller may control `owner`'s live chat, or this throws. The relay stamps the
+   * owner task's path scope on every control frame (`controlScope`) — its own
+   * authority, so the caller is authorized for that owner first. No authorizer wired:
+   * refused (fail closed).
+   */
+  const authorizeControl = async (owner: HubChatOwnership): Promise<void> => {
+    if (!opts.authorizeControl) throw new Error('Chat control has no caller authorization')
+    await opts.authorizeControl(owner)
+  }
+  /**
+   * The path scope every control frame for `owner` carries: its task's. A computer
+   * admits a control only under the task it names (computer `chat-control-scope`), and
+   * no caller opens one for it (a CLI agent switch, the desktop Stop). A caller already
+   * scoped elsewhere (another task, a project) is refused: a scope is never widened.
+   */
+  const controlScope = async (owner: HubChatOwnership): Promise<WirePathScope> => {
+    const ambient = currentPathScope()
+    if (ambient && (ambient.kind !== 'task' || ambient.taskId !== owner.taskId))
+      throw new Error('Chat control caller scope names another task than the chat owner')
+    // Already the owner task's, as the caller's router authorized it: kept verbatim.
+    if (ambient) return ambient
+    const scope = await pathScopeFor(db, { taskId: owner.taskId })
+    if (scope?.kind !== 'task') throw new UnknownScopeError('task', owner.taskId)
+    return scope
+  }
   const events = new TypedEmitter<ChatEventMap>(),
     queueEvents = new TypedEmitter<ChatQueueEventMap>()
   const sessionMirror = new Map<
@@ -1309,7 +1349,9 @@ export function createHubChatRelay(opts: {
     let admission: QueueAdmission | undefined
     let renewal: ReturnType<typeof setInterval> | undefined
     let renewing = false
-    let preparedControl: { token: string; owner: HubChatOwnership; active: boolean } | undefined
+    let preparedControl:
+      | { token: string; owner: HubChatOwnership; scope: WirePathScope; active: boolean }
+      | undefined
     let controlRenewal: ReturnType<typeof setInterval> | undefined,
       controlRenewing = false,
       controlError: unknown
@@ -1318,10 +1360,17 @@ export function createHubChatRelay(opts: {
       aborted: Promise<never> | undefined
     const controlWait = <T>(work: Promise<T>): Promise<T> =>
       aborted ? Promise.race([work, aborted]) : work
+    // Every control frame runs in the owner task's scope, explicitly per frame: interval
+    // renewals and owner cleanup run outside the caller's async context.
+    const sendControl = (
+      via: ChatComputerRequest,
+      control: NonNullable<typeof preparedControl>,
+      frame: object
+    ) => runInPathScope(control.scope, () => via(control.owner.computerId!, frame))
     const renewControl = async () => {
       if (!preparedControl?.active) return
       const { token, owner: o } = preparedControl
-      return (opts.stopRequest ?? opts.request)(o.computerId!, {
+      return sendControl(opts.stopRequest ?? opts.request, preparedControl, {
         kind: 'control.renew',
         token,
         identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
@@ -1330,11 +1379,15 @@ export function createHubChatRelay(opts: {
     const cancelControl = async () => {
       if (!preparedControl) return
       const { token, owner: o } = preparedControl
-      await (opts.controlCleanupRequest ?? opts.stopRequest ?? opts.request)(o.computerId!, {
-        kind: 'control.cancel',
-        token,
-        identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
-      })
+      await sendControl(
+        opts.controlCleanupRequest ?? opts.stopRequest ?? opts.request,
+        preparedControl,
+        {
+          kind: 'control.cancel',
+          token,
+          identity: { id: o.id, taskId: o.taskId, tabId: o.tabId, mode: o.mode, epoch: o.epoch }
+        }
+      )
     }
 
     const queueControl = (name: string, values: unknown[], id: string = randomUUID()) => {
@@ -1362,6 +1415,8 @@ export function createHubChatRelay(opts: {
           opts.chatControlLeases?.(existing.computerId) === true &&
           opts.chatRuntimeReady?.(existing.computerId) !== false
         ) {
+          // The caller first: the scope stamped below is the relay's authority.
+          await authorizeControl(existing)
           await opts.gate?.(existing.computerId, existing.taskId)
           const call = parseChatInvocation({
             route: { id: existing.id, epoch: existing.epoch },
@@ -1380,8 +1435,13 @@ export function createHubChatRelay(opts: {
           )
             throw new Error('Chat stop ownership mismatch')
           // Known before any RPC await: timeout, caller abort and a lost/late
-          // response all retain the same authorized cancellation identity.
-          preparedControl = { owner: existing, token: randomUUID(), active: false }
+          // response all retain the same authorized cancellation identity and scope.
+          preparedControl = {
+            owner: existing,
+            token: randomUUID(),
+            scope: await controlScope(existing),
+            active: false
+          }
           abortSignal = opts.controlSignal?.()
           if (abortSignal) {
             aborted = new Promise<never>((_yes, no) => {
@@ -1394,7 +1454,7 @@ export function createHubChatRelay(opts: {
           }
           const result = chatPreparedControlSchema.parse(
             await controlWait(
-              (opts.stopRequest ?? opts.request)(existing.computerId, {
+              sendControl(opts.stopRequest ?? opts.request, preparedControl, {
                 kind: 'control.prepare',
                 token: preparedControl.token,
                 identity: {

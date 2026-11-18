@@ -472,7 +472,9 @@ async function run() {
       const request = async (_pc: string, raw: unknown) => {
         const req = raw as (typeof wires)[number]
         wires.push(req)
-        const result = await a.request(M.chatRequest, raw, true, r1Case ? 30000 : 8000)
+        // Unscoped, like every production caller (CLI agent switch, desktop Stop): the
+        // relay itself stamps the owner task's scope on its control frames.
+        const result = await a.request(M.chatRequest, raw, false, r1Case ? 30000 : 8000)
         if (req.kind === 'control.prepare') wires.push({ kind: 'ACK', ...(result as object) })
         return result
       }
@@ -505,6 +507,9 @@ async function run() {
         chatControlInvocations: () => true,
         chatControlLeases: () => true,
         chatRuntimeReady: () => true,
+        authorizeControl: async () => {
+          // The proof's one caller is the authorized owner.
+        },
         resolveComputer: async () => a.computerId,
         defaultComputer: async () => a.computerId,
         bootstrap: async (owner) => {

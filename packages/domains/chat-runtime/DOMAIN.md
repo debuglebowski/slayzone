@@ -10,6 +10,17 @@ Main checks admission and binding again after the real provider/physical ACK.
 Ownership changes, close, task admission fences and owner failure reject stale
 controls. No filesystem permission snapshot is cached for this path.
 
+The matching task scope comes from the hub relay, not its callers: no caller (CLI
+agent switch `PATCH /api/tasks/:id`, desktop Stop `chat.kill`/`chat.abortAndPop`)
+opens a path scope, and before 2026-11-18 every control frame was refused with
+`Chat control task scope mismatch`. `hub-relay.ts` first asks `authorizeControl(owner)`
+(hub `chat-control-authority.ts`: `canAccess` on the chat's `tab` at `edit`, the
+`chat.kill` gate's decision; no authorizer = refused), then `controlScope(owner)`
+stamps the owner task's scope on every `control.prepare|renew|cancel` frame,
+explicitly per frame (interval renewals and owner cleanup run outside the caller's
+context). A caller already scoped to another task or a project is refused, never
+widened. The computer's check is `chat-control-scope.ts` (`assertChatControlScope`).
+
 Its `{acknowledged, spawnId, scope:'provider'|'process'}` is transient control
 acknowledgement. It does not claim that history, prompt/queue edits or a command
 receipt committed. Existing `invoke` operations retain their durable acceptance

@@ -1,6 +1,7 @@
 import { type ByteRangePage, collectByteRanges } from '@slayzone/platform/bounded-reads'
 import { currentRequestAbort, runWithRequestAbort } from '@slayzone/platform/request-abort'
 import { withUploadedBytes } from './computer-uploads'
+import { createChatControlAuthorizer } from './chat-control-authority'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
@@ -150,6 +151,11 @@ export function createComputerChatServices(opts: {
   chatRuntimeReady?(computerId: string): boolean
   chatControlInvocations?(computerId: string): boolean
   chatControlLeases?(computerId: string): boolean
+  /**
+   * May the caller control this owner's live chat (relay `authorizeControl`)? Default:
+   * `createChatControlAuthorizer` — the access decision the `chat.kill` gate makes.
+   */
+  authorizeControl?(owner: HubChatOwnership): Promise<void>
   /** Authorized owner cleanup must run outside caller abort ALS, retaining security/path scope. */
   controlCleanupRequest?: ChatComputerRequest
   controlSignal?(): AbortSignal | undefined
@@ -958,6 +964,9 @@ export function createComputerChatServices(opts: {
   const relay = createHubChatRelay({
     ...opts,
     controlSignal: opts.controlSignal ?? currentRequestAbort,
+    // The caller is authorized for the chat's owner before the relay stamps its task
+    // scope on a control frame (no confused deputy).
+    authorizeControl: opts.authorizeControl ?? createChatControlAuthorizer(opts.db),
     // Owner cleanup takes the stop-control route its prepare/renew took
     // (`stopRequest`), only outside the caller's abort ALS: an aborted caller
     // must not refuse its own cancel locally. Security/path scope is kept.

@@ -74,6 +74,7 @@ test.each([undefined, false, true, 'legacy', 'idle'])(
         chatControlInvocations: () =>
           capability === true || capability === 'legacy' || capability === 'idle',
         chatControlLeases: () => capability === true || capability === 'idle',
+        authorizeControl: async () => {},
         bootstrap: async (owner: HubChatOwnership) => {
           entering()
           await held
@@ -1210,6 +1211,7 @@ test.each(['before', 'during'])(
         controlSignal: () => callerAbort.getStore(),
         chatControlInvocations: () => true,
         chatControlLeases: () => true,
+        authorizeControl: async () => {},
         resolveComputer: async () => 'pc',
         defaultComputer: async () => 'pc',
         bootstrap: async () => {
@@ -1267,3 +1269,172 @@ test.each(['before', 'during'])(
     }
   }
 )
+
+/**
+ * Chat controls carry the OWNER task's path scope (task 3ee12d11). The computer
+ * admits a control frame only under its task's scope (computer `chat-control-scope`);
+ * no production caller opens one (a CLI agent switch, the desktop Stop button), so
+ * the relay stamps it itself — after authorizing the caller for that owner.
+ */
+async function controlRelay(opts: {
+  authorizeControl?: (owner: HubChatOwnership) => Promise<void>
+  available?: boolean
+}) {
+  const h = await createTestHarness()
+  h.db.exec(
+    "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO projects(id,name,color) VALUES('q','Q','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO tasks(id,project_id,title) VALUES('other','q','O'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+  )
+  const ownership = createChatOwnershipStore(h.slayDb)
+  await ownership.register({
+    id: 'c',
+    taskId: 'task',
+    tabId: 'tab',
+    mode: 'claude-chat',
+    computerId: 'pc',
+    epoch: 1
+  })
+  const frames: Array<{ kind: string; scope: unknown }> = []
+  const request: ChatComputerRequest = async (_pc, raw) => {
+    const r = raw as { kind: string; token?: string; value?: { identity?: unknown } }
+    frames.push({ kind: r.kind, scope: currentPathScope() })
+    if (r.kind === 'control.prepare')
+      return opts.available === false
+        ? { available: false }
+        : {
+            available: true,
+            token: r.token,
+            spawnId: 'spawn',
+            acknowledged: true,
+            pendingDurability: true
+          }
+    if (r.kind === 'control.renew' || r.kind === 'control.cancel') return { ok: true }
+    if (r.kind === 'bootstrap') return { ok: true, identity: r.value?.identity }
+    if (r.kind === 'pendingMetadata') return []
+    return { popped: false, text: null, id: null, content: null }
+  }
+  const relay = createHubChatRelay({
+    db: h.slayDb,
+    ownership,
+    request,
+    stopRequest: request,
+    chatControlInvocations: () => true,
+    chatControlLeases: () => true,
+    ...(opts.authorizeControl ? { authorizeControl: opts.authorizeControl } : {}),
+    bootstrap: async (owner: HubChatOwnership) => ({
+      identity: owner,
+      projectId: 'p',
+      cwd: '/tmp',
+      revision: 1,
+      providerConfig: {},
+      defaultFlags: null,
+      env: {}
+    }),
+    resolveComputer: async () => 'pc',
+    defaultComputer: async () => 'pc',
+    migrate: async () => {
+      throw new Error('unexpected migration')
+    },
+    onSessionsChanged: () => {}
+  })
+  const call = (method: 'interrupt' | 'abortAndPop' | 'kill' | 'remove'): Promise<unknown> =>
+    Promise.resolve(
+      method === 'kill' || method === 'remove'
+        ? relay.ops[method]('tab')
+        : relay.ops[method]({ taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: '/tmp' })
+    )
+  const controlFrames = () => frames.filter((f) => f.kind.startsWith('control'))
+  return { h, frames, controlFrames, call }
+}
+
+const allow = async () => {}
+
+test.each(['interrupt', 'abortAndPop', 'kill', 'remove'] as const)(
+  '%s: every control frame carries the owner task scope with no caller scope (CLI, desktop Stop)',
+  async (method) => {
+    const { h, controlFrames, call } = await controlRelay({ authorizeControl: allow })
+    try {
+      await call(method).catch(() => undefined)
+      const control = controlFrames()
+      expect(control.map((f) => f.kind)).toEqual(
+        expect.arrayContaining(['control.prepare', 'control.renew', 'control.cancel'])
+      )
+      for (const frame of control)
+        expect(frame.scope).toMatchObject({ kind: 'task', taskId: 'task', projectId: 'p' })
+    } finally {
+      h.cleanup()
+    }
+  }
+)
+
+test('a control whose prepare is not available still sends no unscoped frame', async () => {
+  const { h, controlFrames, call } = await controlRelay({
+    authorizeControl: allow,
+    available: false
+  })
+  try {
+    await call('kill').catch(() => undefined)
+    expect(controlFrames().length).toBeGreaterThan(0)
+    for (const frame of controlFrames())
+      expect(frame.scope).toMatchObject({ kind: 'task', taskId: 'task' })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a caller scoped to the owner task keeps working', async () => {
+  const { h, controlFrames, call } = await controlRelay({ authorizeControl: allow })
+  try {
+    await runInPathScope({ kind: 'task', taskId: 'task', projectId: 'p' }, () =>
+      call('interrupt')
+    ).catch(() => undefined)
+    expect(controlFrames().length).toBeGreaterThan(0)
+    for (const frame of controlFrames())
+      expect(frame.scope).toMatchObject({ kind: 'task', taskId: 'task' })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test.each([
+  ['another task', { kind: 'task' as const, taskId: 'other', projectId: 'q' }],
+  ['a project', { kind: 'project' as const, projectId: 'p' }]
+])(
+  'a caller scoped to %s is refused before any control frame (never widened)',
+  async (_name, scope) => {
+    const { h, controlFrames, call } = await controlRelay({ authorizeControl: allow })
+    try {
+      await expect(runInPathScope(scope, () => call('kill'))).rejects.toThrow(/another task/)
+      expect(controlFrames()).toEqual([])
+    } finally {
+      h.cleanup()
+    }
+  }
+)
+
+test('a caller the authorizer refuses for the owner sends zero control frames (no confused deputy)', async () => {
+  const denied = new Error('caller may not control this chat')
+  const seen: HubChatOwnership[] = []
+  const { h, frames, call } = await controlRelay({
+    authorizeControl: async (owner) => {
+      seen.push(owner)
+      throw denied
+    }
+  })
+  try {
+    await expect(call('kill')).rejects.toBe(denied)
+    expect(seen.map((o) => [o.taskId, o.tabId])).toEqual([['task', 'tab']])
+    expect(frames).toEqual([])
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a relay with no control authorizer refuses controls (fail closed), zero frames', async () => {
+  const { h, frames, call } = await controlRelay({})
+  try {
+    await expect(call('interrupt')).rejects.toThrow(/no caller authorization/)
+    expect(frames).toEqual([])
+  } finally {
+    h.cleanup()
+  }
+})

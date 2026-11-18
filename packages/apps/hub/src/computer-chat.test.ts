@@ -14,6 +14,10 @@ import { currentRequestAbort, runWithRequestAbort } from '@slayzone/platform/req
 import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
 import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
+import type { SlayzoneDb } from '@slayzone/platform'
+import type { HubChatOwnership } from '@slayzone/chat-runtime/server'
+import { assertChatControlScope, isChatControlRequest } from '../../computer/src/chat-control-scope'
+import { ChatControlForbiddenError, createChatControlAuthorizer } from './chat-control-authority'
 
 test.each(['before', 'during'])(
   'default gateway owner cleanup escapes %s caller abort, retaining actor and task scope',
@@ -829,5 +833,142 @@ test('A: task files on a removed computer are refused with the removal, and noth
     expect(before).toMatchObject({ reserved: 0, stores: 0 })
   } finally {
     h.cleanup()
+  }
+})
+
+/**
+ * Task 3ee12d11: `slay tasks update B --agent …` (REST `PATCH /api/tasks/B`, from task
+ * A's terminal) and the desktop Stop button open no path scope. Over the real gateway
+ * and dialer, the computer's own control check (`assertChatControlScope`) must admit
+ * every control frame — the relay stamps the owner task's scope — and the production
+ * default authorizer must refuse a caller who may not control that chat, before any
+ * frame leaves the hub.
+ */
+async function controlOverGateway(
+  caller: { actor: string | null },
+  /** Default: none passed — the services' production default authorizer. */
+  authorizer?: (db: SlayzoneDb) => (owner: HubChatOwnership) => Promise<void>
+) {
+  const h = await createTestHarness()
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-control-scope-'))
+  const hub = await startLoopbackHub()
+  // The computer's real chat runtime; its dispatcher's control check in front of it.
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
+    stateDir: dir,
+    hubScope: 'hub',
+    computerId: () => 'pc',
+    getProjectPaths: () => null,
+    ctx: {
+      config: {
+        hubUrl: 'ws://hub/computers',
+        name: 'test',
+        allowedRoots: [realpathSync(tmpdir())],
+        capabilities: ['proc']
+      },
+      dialer: { notify: () => true },
+      log: () => {}
+    }
+  })
+  const frames: Array<{ kind: string; pathScope: unknown; refused?: string }> = []
+  const dialer = new HubDialer({
+    url: hub.url,
+    identity: {
+      name: 'cli-agent-switch',
+      platform: `${process.platform}-${process.arch}`,
+      version: 'test',
+      capabilities: [],
+      chatControlInvocations: true,
+      chatControlLeases: true
+    },
+    credentialStore: createMemoryCredentialStore(),
+    joinToken: 'jt-valid',
+    onHubRequest: async (method, raw, actor) => {
+      expect(method).toBe(M.chatRequest)
+      const frame: (typeof frames)[number] = {
+        kind: (raw as { kind: string }).kind,
+        pathScope: (actor as { pathScope?: unknown }).pathScope
+      }
+      frames.push(frame)
+      if (isChatControlRequest(raw)) {
+        try {
+          assertChatControlScope(actor as never, raw)
+        } catch (error) {
+          frame.refused = (error as Error).message
+          throw error
+        }
+      }
+      return pc.request(raw)
+    }
+  })
+  dialer.start()
+  const { computerId } = await dialer.events.once('connected')
+  h.db.exec(
+    "INSERT INTO projects(id,name,color,owner_user_id) VALUES('p','P','#000','user-owner'); INSERT INTO tasks(id,project_id,title) VALUES('task-a','p','A'); INSERT INTO tasks(id,project_id,title) VALUES('task-b','p','B'); INSERT INTO terminal_tabs(id,task_id,mode,position,owner_user_id) VALUES('tab-b','task-b','claude-chat',0,'user-owner')"
+  )
+  const services = createComputerChatServices({
+    db: h.slayDb,
+    legacyData: {
+      ...createDbChatDataOps(h.slayDb, taskSessionStore),
+      buildMcpEnv: async () => ({})
+    },
+    attachments: { read: async () => new Uint8Array() },
+    request: (id, request) => hub.gateway.request(id, M.chatRequest, request),
+    chatControlInvocations: (id) =>
+      hub.gateway.listComputers().find((c) => c.computerId === id)?.chatControlInvocations === true,
+    chatControlLeases: (id) =>
+      hub.gateway.listComputers().find((c) => c.computerId === id)?.chatControlLeases === true,
+    resolveComputer: async () => computerId,
+    defaultComputer: async () => computerId,
+    retentionDays: 2,
+    hasLiveTask: async () => false,
+    ...(authorizer ? { authorizeControl: authorizer(h.slayDb) } : {})
+  })
+  // Task B's chat opened on the computer, idle, never messaged (2nd repro, 4428d08c).
+  await services.relay.ops.getTabState('tab-b')
+  expect(await services.ownership.forTab('tab-b')).toMatchObject({ state: 'active', computerId })
+  // The exact call `switchMainAgentMode` makes for a chat main agent, from REST.
+  const kill = () =>
+    runWithSecurityContext(
+      { actor: caller.actor, ip: null, route: 'PATCH /api/tasks/task-b' },
+      () => services.relay.ops.kill('tab-b')
+    )
+  const controlFrames = () => frames.filter((f) => isChatControlRequest({ kind: f.kind }))
+  const close = async () => {
+    await dialer.stop()
+    await hub.close()
+    await pc.close()
+    h.cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+  return { frames, controlFrames, kill, close }
+}
+
+test('CLI agent switch of another task: control frames carry its task scope and the computer admits them', async () => {
+  const { controlFrames, kill, close } = await controlOverGateway({ actor: null })
+  try {
+    expect(currentPathScope()).toBeUndefined()
+    await kill()
+    const control = controlFrames()
+    expect(control.map((f) => f.kind)).toContain('control.prepare')
+    for (const frame of control) {
+      expect(frame.refused).toBeUndefined()
+      expect(frame.pathScope).toMatchObject({ kind: 'task', taskId: 'task-b', projectId: 'p' })
+    }
+  } finally {
+    await close()
+  }
+})
+
+test('login hub: a caller who may not control the chat sends zero frames to the computer', async () => {
+  const { controlFrames, kill, close } = await controlOverGateway(
+    { actor: 'user-stranger' },
+    (db) => createChatControlAuthorizer(db, () => true)
+  )
+  try {
+    await expect(kill()).rejects.toBeInstanceOf(ChatControlForbiddenError)
+    expect(controlFrames()).toEqual([])
+  } finally {
+    await close()
   }
 })
