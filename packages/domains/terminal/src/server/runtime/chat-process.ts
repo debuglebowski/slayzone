@@ -45,6 +45,8 @@ export interface ChatProcessHooks {
   onStale?(proc: ChatProcess, event: AgentEvent): void
   /** The driver read a switched-to conversation's past (`ChatDriverContext.addHistory`). */
   onHistory?(proc: ChatProcess, events: AgentEvent[]): void
+  /** The host asked it to stop (first `kill`): from now on it only ends. */
+  onStopRequested?(proc: ChatProcess): void
 }
 
 export interface ChatProcessOptions {
@@ -491,7 +493,14 @@ export class ChatProcess implements OutboxProcess {
   }
 
   kill(signal: string): void {
-    this.stopRequested = true
+    if (!this.stopRequested) {
+      this.stopRequested = true
+      try {
+        this.hooks.onStopRequested?.(this)
+      } catch {
+        /* an observer never prevents the stop */
+      }
+    }
     try {
       this.handle.kill(signal)
     } catch {

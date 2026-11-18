@@ -2,8 +2,9 @@
 // hub only serves the bytes, in bounded pieces (`artifacts.readBytesChunk`); the
 // renderer streams them here and main writes them, so a download lands on the
 // person's own disk whether the hub is local or remote, and no size has to fit in
-// memory. A zip is compressed by archiver on zlib's thread pool: off the UI and off
-// main's event loop. Reached over `app:save-target-*`.
+// memory. A zip is laid out by the shared streaming encoder every host uses
+// (@slayzone/task-artifacts/zip-stream) and deflated by Node's zlib on its thread
+// pool: off the UI and off main's event loop. Reached over `app:save-target-*`.
 import {
   constants as fsConstants,
   createWriteStream,
@@ -15,13 +16,13 @@ import {
 import { access, link, lstat, open, rename, unlink, type FileHandle } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { basename, dirname, extname, join } from 'path'
-import { PassThrough, type Writable } from 'stream'
+import type { Writable } from 'stream'
 import { once } from 'events'
+import { createDeflateRaw, type DeflateRaw } from 'zlib'
 import { BrowserWindow, app, dialog, shell } from 'electron'
-import { ZipArchive } from 'archiver'
 import { containedPath } from '@slayzone/platform/safe-path'
 import { numberedName } from '@slayzone/task-artifacts/download-plan'
-import { type EntryWidth, entryWidth, writeZip64Entries } from './zip64-entries'
+import { createZipEncoder, type Deflater } from '@slayzone/task-artifacts/zip-stream'
 import type {
   HostSaveResult,
   SaveTargetOpenResult,
@@ -80,32 +81,6 @@ function newPathGuard(): (path: string) => void {
     started.add(key)
   }
 }
-
-/** Already compressed: stored as is, not deflated again. */
-const STORED = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.avif',
-  '.heic',
-  '.pdf',
-  '.zip',
-  '.gz',
-  '.tgz',
-  '.bz2',
-  '.xz',
-  '.7z',
-  '.rar',
-  '.mp3',
-  '.mp4',
-  '.m4a',
-  '.mov',
-  '.webm',
-  '.mkv',
-  '.woff2'
-])
 
 /**
  * Where a file is written until it is complete: a hidden sibling, renamed into place
@@ -513,18 +488,48 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
   }
 }
 
+/**
+ * Raw DEFLATE on zlib's thread pool, for the shared zip encoder: compression stays off
+ * main's event loop. Each stream is in `live` until it has ended, so a failed or
+ * cancelled zip can destroy it.
+ */
+function zlibDeflater(live: Set<DeflateRaw>): Deflater {
+  const z = createDeflateRaw({ level: 6 })
+  live.add(z)
+  // Errors reach the push in flight (its callback or `once`); never an unhandled event.
+  z.on('error', ignore)
+  let out: Uint8Array[] = []
+  z.on('data', (chunk: Buffer) => out.push(chunk))
+  return {
+    async push(data, final) {
+      if (final) {
+        const ended = once(z, 'end')
+        z.end(data.byteLength ? data : undefined)
+        await ended
+        live.delete(z)
+      } else {
+        await new Promise<void>((resolve, reject) =>
+          z.write(data, (err) => (err ? reject(err) : resolve()))
+        )
+      }
+      // What zlib has produced so far, in order; the rest comes with a later push.
+      const produced = out
+      out = []
+      return produced
+    }
+  }
+}
+
 /** One zip archive, each entry streamed in; zip64 is used when a size needs it. */
 async function zipTarget(
   filePath: string,
   reveal: boolean,
-  openOutput: (path: string) => Writable
+  openOutput: (path: string) => Writable,
+  now: Date
 ): Promise<Target> {
   const partial = partialPath(filePath)
   const output = openOutput(partial)
-  const archive = new ZipArchive({ zlib: { level: 9 } })
-  /** Each entry's width, from the size the client declared with its first piece. */
-  const widths = new Map<string, EntryWidth>()
-  writeZip64Entries(archive, (name) => widths.get(name) ?? 'unknown')
+  const deflaters = new Set<DeflateRaw>()
   let failure: Error | null = null
   let rejectFailed: (err: Error) => void = ignore
   /** Rejects once the zip has failed: every wait races it, so none hangs. */
@@ -532,55 +537,59 @@ async function zipTarget(
     rejectFailed = reject
   })
   failed.catch(ignore)
-  let current: { path: string; stream: PassThrough } | null = null
-  // A failed output unpipes the archive, so a deflating entry would never drain
-  // again: the failure ends the entry stream and every wait at once.
+  // A failed output never drains again, and a deflate in flight would never be read:
+  // the failure ends every deflate stream and every wait at once.
   const fail = (err: Error): void => {
     if (failure) return
     failure = err
     rejectFailed(err)
-    current?.stream.destroy()
+    for (const z of deflaters) z.destroy()
+    deflaters.clear()
   }
   const settle = <T>(p: Promise<T>): Promise<T> => Promise.race([p, failed])
-  archive.on('error', fail)
-  archive.on('warning', fail)
   output.on('error', fail)
-  archive.pipe(output)
+  const encoder = createZipEncoder(
+    (chunk) => {
+      if (!failure) output.write(chunk)
+    },
+    { deflater: () => zlibDeflater(deflaters), now }
+  )
   const startPath = newPathGuard()
+  let current: string | null = null
   const check = (): void => {
     if (failure) throw failure
   }
-  const finishCurrent = (): void => {
-    current?.stream.end()
-    current = null
+  /** One encoder call, then the output's backpressure; a failure ends both waits. */
+  const step = async (call: Promise<void>): Promise<void> => {
+    await settle(call).catch((err: unknown) => {
+      // The encoder's own failure (zlib, a size passed wrong) fails the zip.
+      fail(err instanceof Error ? err : new Error(String(err)))
+      throw failure
+    })
+    if (output.writableNeedDrain) await settle(once(output, 'drain'))
+    check()
   }
   return {
     async write(path, data, size) {
       check()
-      if (current?.path !== path) {
+      if (current !== path) {
         startPath(path)
-        finishCurrent()
-        const stream = new PassThrough()
-        const store = STORED.has(extname(path).toLowerCase())
-        widths.set(path, entryWidth(size, store))
-        archive.append(stream, { name: path, store })
-        current = { path, stream }
+        current = path
       }
-      if (!current.stream.write(data)) await settle(once(current.stream, 'drain'))
-      check()
+      await step(encoder.write(path, data, size))
     },
     async mkdir(path) {
       check()
-      finishCurrent()
-      archive.append(Buffer.alloc(0), { name: `${path.replace(/\/+$/, '')}/` })
+      current = null
+      await step(encoder.mkdir(path))
     },
     async close() {
       check()
-      finishCurrent()
+      await step(encoder.finish())
       const written = once(output, 'close')
-      // A failure while finalizing rejects both; the caller learns it through `failed`.
+      // A failure while ending rejects both; the caller learns it through `failed`.
       written.catch(ignore)
-      await settle(archive.finalize())
+      output.end()
       await settle(written)
       check()
       await rename(partial, filePath)
@@ -588,17 +597,15 @@ async function zipTarget(
     },
     async abort() {
       fail(new Error('The download was cancelled'))
-      archive.abort()
       // The stream may still be opening the file: unlink only once it is closed, or
       // the late open would bring the file back.
-      const closed = output.closed ? Promise.resolve() : once(output, 'close').then(ignore)
+      const closed = output.closed ? Promise.resolve() : once(output, 'close').then(ignore, ignore)
       output.destroy()
       await closed
       await unlink(partial).catch(ignore)
     },
     abortNow() {
       fail(new Error('The download was cancelled'))
-      archive.abort()
       // A file still being opened would reappear after the unlink: unlink again once
       // the output has closed (in case the process lives that long).
       if (!output.closed) output.once('close', () => unlinkNow(partial))
@@ -635,6 +642,8 @@ export interface CommitFs {
 export interface SaveTargetsOptions {
   /** Where a zip's bytes go; a test injects a failing disk here. */
   openZipOutput?: (path: string) => Writable
+  /** The time a zip's entries carry; a test pins it. */
+  now?: () => Date
   commitFs?: CommitFs
 }
 
@@ -656,11 +665,13 @@ export class SaveTargets {
    */
   private readonly targets = new Map<string, Entry>()
   private readonly openZipOutput: (path: string) => Writable
+  private readonly now: () => Date
   private readonly commitFs: CommitFs
 
   constructor(options: SaveTargetsOptions = {}) {
     everyTargets.add(this)
     this.openZipOutput = options.openZipOutput ?? ((p) => createWriteStream(p))
+    this.now = options.now ?? (() => new Date())
     this.commitFs = options.commitFs ?? { link, copyTo: copyInto }
   }
 
@@ -736,7 +747,7 @@ export class SaveTargets {
       if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
       target =
         req.kind === 'zip'
-          ? await zipTarget(picked.filePath, req.reveal === true, this.openZipOutput)
+          ? await zipTarget(picked.filePath, req.reveal === true, this.openZipOutput, this.now())
           : await fileTarget(picked.filePath, req.reveal === true)
     }
     const targetId = randomUUID()

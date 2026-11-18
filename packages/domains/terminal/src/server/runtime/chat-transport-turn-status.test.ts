@@ -217,3 +217,44 @@ test('authoritative: the queue drains when the model reads the turn as over', as
   await until(() => kicks.length > 0)
   mgr.registerChatQueueDrainer(() => {})
 })
+
+// Seen on a real chat (2026-11-18): a respawn requested while the first process
+// was still starting. The runtime never lets a process it is stopping read as
+// ready; the model must not either, or the tab reads `idle` until the new one runs.
+test.each(['shadow', 'authoritative'] as const)(
+  '%s: a process replaced while it starts never reads as ready, and the two agree',
+  async (mode) => {
+    const records: Array<{ event: string }> = []
+    let hold: (() => void) | null = null
+    const h = transportHarness({
+      exitOnKill: false,
+      deps: { diagnostic: (_t, r) => records.push(r) },
+      onFake: (f, i) => {
+        if (i === 0) {
+          // Its spawn is held until the respawn has asked it to stop.
+          const emit = f.emitter.emit.bind(f.emitter)
+          f.emitter.emit = ((name: string, ...args: unknown[]) => {
+            if (name !== 'spawn') return emit(name, ...args)
+            hold = () => emit(name, ...args)
+            return true
+          }) as typeof f.emitter.emit
+        }
+      }
+    })
+    await mgr.hydrateSession({ ...TAB_OPTS, lifecycleMode: mode } as never)
+    void mgr.ensureSpawned(TAB_OPTS.tabId)
+    await until(() => hold !== null)
+    const respawned = mgr.respawn(TAB_OPTS.tabId, { ...TAB_OPTS })
+    await until(() => h.fakes[0].kills.length > 0)
+    hold!()
+    await mgr.__flushEventsForTests(TAB_OPTS.tabId)
+    await new Promise((r) => setImmediate(r))
+    expect(mgr.getTurnStatus(TAB_OPTS.tabId)?.state).toBe('starting')
+    expect(statuses(h).some((s) => s.state === 'idle')).toBe(false)
+    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+    h.fakes[0].emitter.emit('exit', null, 'SIGTERM')
+    await respawned
+    await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.state === 'idle')
+    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+  }
+)

@@ -559,7 +559,9 @@ export async function startSessionHost(
         if (transport.peer === peer) {
           transport.peer = undefined
           transport.hubOnline = false
-          transport.events.emit('disconnected', { reason: 'connector detached' })
+          transport.events.emit('disconnected', {
+            reason: `connector detached (${peer.closeReason() ?? 'closed'})`
+          })
         }
       }
     })

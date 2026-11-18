@@ -1,7 +1,7 @@
 import { connect, createServer, type AddressInfo, type Server, type Socket } from 'node:net'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   COMPUTER_FRAME_MAX_BYTES,
@@ -50,7 +50,10 @@ describe('local link frame limit (connector ↔ session host)', () => {
     frameLimitBytes: number | null = LIMIT
   ): Promise<{ client: LocalPeer; server: () => LocalPeer | undefined }> {
     const dir = mkdtempSync(join(tmpdir(), 'slz-fl-'))
-    const endpoint = join(dir, 's.sock')
+    // Windows has no filesystem unix sockets: `listen` on a %TEMP% path is EACCES.
+    // Use a named pipe there, as the product's hostEndpoint does.
+    const endpoint =
+      process.platform === 'win32' ? `\\\\.\\pipe\\${basename(dir)}` : join(dir, 's.sock')
     let serverPeer: LocalPeer | undefined
     const server: Server = createServer((socket) => {
       serverPeer = socketPeer(socket, {

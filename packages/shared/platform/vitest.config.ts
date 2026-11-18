@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { configDefaults, defineConfig } from 'vitest/config'
 import { isolateFromCaller } from '../test-utils/caller-env.ts'
+import { localMaxWorkers } from '../test-utils/vitest-workers.ts'
 
 // No suite here inherits the caller's SlayZone wiring, home or hub port block (see caller-env.ts): vitest's
 // main process, before any worker forks.
@@ -51,6 +52,7 @@ for (const file of electronHarnessFiles) {
 
 export default defineConfig({
   test: {
+    maxWorkers: localMaxWorkers(),
     exclude: [...configDefaults.exclude, ...electronHarnessFiles]
   }
 })

@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  failWatcherNatively,
+  trackWatcher,
+  watcherIsOpen
+} from '@slayzone/test-utils/native-watcher'
+import {
   FS_READ_BYTES_MAX_CHUNK,
   HubToComputerMethods,
   ComputerNotificationMethods,
@@ -462,15 +467,12 @@ describe('createFsHandlers — watch lifecycle', () => {
   }, 20_000)
 
   it('recovers an identical watch retry after an actual native runtime error', async () => {
-    type NativeWatcher = nativeFs.FSWatcher & {
-      _handle: { onchange(status: number, event: string, path: string): void } | null
-    }
     const notify = vi.fn<ComputerDialer['notify']>(() => true)
     const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
     const actualWatch = (await vi.importActual<typeof import('node:fs')>('node:fs')).watch
-    const opened: NativeWatcher[] = []
+    const opened: nativeFs.FSWatcher[] = []
     const watching = vi.spyOn(nativeFs, 'watch').mockImplementation((...args) => {
-      const watcher = Reflect.apply(actualWatch, nativeFs, args) as NativeWatcher
+      const watcher = trackWatcher(Reflect.apply(actualWatch, nativeFs, args) as nativeFs.FSWatcher)
       opened.push(watcher)
       return watcher
     })
@@ -478,11 +480,12 @@ describe('createFsHandlers — watch lifecycle', () => {
       handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
       await untilWatching(notify, 'w1')
       expect(opened).toHaveLength(1)
-      // Node's actual negative native-status branch closes the real handle and
-      // emits EIO without a close event. No successful callback is fabricated.
-      expect(opened[0]._handle).not.toBeNull()
-      opened[0]._handle!.onchange(-5, 'rename', dir)
-      expect(opened[0]._handle).toBeNull()
+      // Node's actual runtime-error branch for this platform's watcher (native:
+      // negative status closes the handle, EIO, no close event; Linux recursive:
+      // failed rescan emits EIO). No successful callback is fabricated.
+      expect(watcherIsOpen(opened[0])).toBe(true)
+      failWatcherNatively(opened[0], dir)
+      expect(watcherIsOpen(opened[0])).toBe(false)
       expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
       expect(opened).toHaveLength(2)
       await untilWatching(notify, 'w1')

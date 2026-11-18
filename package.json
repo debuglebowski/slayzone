@@ -41,8 +41,8 @@
     "lint:theme": "bash scripts/lint-theme.sh && node scripts/check-tailwind-sources.mjs",
     "format": "biome format --write .",
     "check": "biome check --write .",
-    "test:unit": "bash packages/shared/test-utils/run-all.sh",
-    "test:unit:fast": "SLZ_UNIT_WORKERS=all bash packages/shared/test-utils/run-all.sh",
+    "test:unit": "node scripts/ci-lock.mjs test:unit -- bash packages/shared/test-utils/run-all.sh",
+    "test:unit:fast": "SLZ_UNIT_WORKERS=all node scripts/ci-lock.mjs test:unit:fast -- bash packages/shared/test-utils/run-all.sh",
     "test:unit:registered": "SLZ_UNIT_DRY=1 bash packages/shared/test-utils/run-all.sh",
     "test:review-regressions": "node packages/shared/test-utils/review-regressions.mjs",
     "test:chat:perf": "npx tsx packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts",
@@ -85,6 +85,6 @@
     "node": ">=24.21.0",
     "pnpm": ">=12.12.1"
   },
-  "version": "0.40.0",
+  "version": "0.41.1",
   "packageManager": "pnpm@12.12.1+sha512.b7f98934c0b1f29a65f5da52f2d7f994e7faad573ffdddea1497fb4dcb5aec051590ee7c7d95a38172b4bfae103a5b83edf2ee866e11731c2cafa96063610ac5"
 }

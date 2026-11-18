@@ -18,8 +18,8 @@ import path from 'path'
 // in bounded pieces (`artifacts.readBytesChunk`) or the content (`readContent`) over
 // tRPC, then hands them to its OWN host — `window.api.app.saveTarget*` (streamed) /
 // `exportArtifact` → preload → main, which shows the dialog and writes (a zip is built
-// there by archiver; export renders offscreen) — so they work the same against a
-// remote hub.
+// there by the shared zip encoder, deflated by zlib; export renders offscreen) — so
+// they work the same against a remote hub.
 //
 // Downloads are driven through the artifact panel's real menus: the folder tree,
 // zip and dialogs all run as they do for a person.

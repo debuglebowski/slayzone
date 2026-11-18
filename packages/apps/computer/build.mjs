@@ -58,7 +58,11 @@ const options = {
   format: 'cjs',
   target: 'node20',
   sourcemap: true,
-  define: { __SLAYZONE_COMPUTER_VERSION__: JSON.stringify(pkg.version) },
+  define: {
+    __SLAYZONE_COMPUTER_VERSION__: JSON.stringify(pkg.version),
+    // CJS has no import.meta; point it at the bundle's own file URL (set in banner).
+    'import.meta.url': '__slayzoneImportMetaUrl'
+  },
   plugins: [
     rawImportPlugin,
     // Fails the build if an external would not resolve where the computer runs.
@@ -77,7 +81,10 @@ const options = {
   // node-datachannel (WebRTC, docs/direct-link.md) is native too, and optional at
   // runtime: without it the computer offers no WebRTC (rtc-runtime.ts).
   external: ['node-pty', 'better-sqlite3', 'node-datachannel', 'bufferutil', 'utf-8-validate'],
-  banner: { js: '#!/usr/bin/env node' },
+  // Shebang must stay the first line.
+  banner: {
+    js: "#!/usr/bin/env node\nconst __slayzoneImportMetaUrl = require('node:url').pathToFileURL(__filename).href;"
+  },
   logLevel: 'info',
   // Exact input list for the dev watcher.
   metafile: true

@@ -101,6 +101,12 @@ export interface LocalPeer {
   socket: Socket
   rpc: DuplexRpc
   close(): void
+  /**
+   * Why the link ended, once it has: which side closed it, or the frame/parse/
+   * delivery fault that made this side drop it. Undefined while it is open. The
+   * link's faults are otherwise silent — this is what makes a lost link diagnosable.
+   */
+  closeReason(): string | undefined
 }
 export function socketPeer(
   socket: Socket,
@@ -131,6 +137,12 @@ export function socketPeer(
   const frameLimit = handlers.frameLimitBytes ?? COMPUTER_FRAME_MAX_BYTES
   /** UTF-8 bytes of the frame being received (the decoder's unterminated tail). */
   let bytes = 0
+  let closeReason: string | undefined
+  /** End the link from this side; the first reason recorded is the one reported. */
+  const drop = (reason: string): void => {
+    closeReason ??= reason
+    socket.destroy()
+  }
   const rpc = new DuplexRpc({
     label: 'computer-local',
     maxFrameBytes: frameLimit,
@@ -161,13 +173,15 @@ export function socketPeer(
                   err instanceof Error ? err.message : 'local request failed'
                 )
         )
-        .catch(() => {
+        .catch((err: unknown) => {
           rpc.dispose('local response could not be delivered')
-          socket.destroy()
+          drop(
+            `response to ${method} could not be delivered: ${err instanceof Error ? err.message : String(err)}`
+          )
         })
     },
     onNotification: handlers.notify,
-    onParseError: () => socket.destroy()
+    onParseError: () => drop('received an unparseable frame')
   })
   socket.setEncoding('utf8')
   socket.on('data', (chunk: string) => {
@@ -178,20 +192,31 @@ export function socketPeer(
     // the unterminated tail is tracked incrementally.
     for (const line of lines) {
       if (line.length * 3 > limit && Buffer.byteLength(line) > limit) {
-        socket.destroy()
+        drop(`received a frame over the ${limit}-byte limit`)
         return
       }
     }
     bytes = lines.length ? Buffer.byteLength(decoder.partial) : bytes + Buffer.byteLength(chunk)
     if (bytes > limit) {
-      socket.destroy()
+      drop(`received an unterminated frame over the ${limit}-byte limit`)
       return
     }
     for (const line of lines) rpc.handleLine(line)
   })
-  socket.on('close', () => rpc.dispose('local connection closed'))
-  socket.on('error', () => rpc.dispose('local connection failed'))
-  return { socket, rpc, close: () => socket.destroy() }
+  socket.on('close', () => {
+    closeReason ??= 'closed by the peer'
+    rpc.dispose('local connection closed')
+  })
+  socket.on('error', (err) => {
+    closeReason ??= `socket error: ${err.message}`
+    rpc.dispose('local connection failed')
+  })
+  return {
+    socket,
+    rpc,
+    close: () => drop('closed by this side'),
+    closeReason: () => closeReason
+  }
 }
 export async function connectLocal(
   endpoint: string,

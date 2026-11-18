@@ -175,6 +175,46 @@ describe('zip target', () => {
   })
 })
 
+// One zip encoder for every host (@slayzone/task-artifacts/zip-stream): the desktop
+// writes the archive the web shell's encoder writes. Byte for byte on entries whose
+// bytes do not depend on the deflate implementation (stored types, folders), with a
+// 4 GiB+ entry and one of unknown size among them.
+test("the desktop zip is the shared encoder's archive, byte for byte", async () => {
+  const { createZipEncoder } = await import('@slayzone/task-artifacts/zip-stream')
+  const now = new Date(2026, 0, 2, 3, 4, 6)
+  const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+  const steps: Array<
+    [op: 'mkdir', path: string] | [op: 'write', path: string, data: Uint8Array, size?: number]
+  > = [
+    ['mkdir', 'd'],
+    ['write', 'd/a.png', png, png.byteLength],
+    ['write', 'big.mp4', png, 5_000_000_000],
+    ['write', 'big.mp4', png, 5_000_000_000],
+    ['write', 'u.pdf', png]
+  ]
+  const t = new SaveTargets({ now: () => now })
+  picked.file = path.join(root, 'same.zip')
+  const opened = await t.open(SENDER, null, { kind: 'zip', fileName: 'same.zip', title: 't' })
+  if (!opened.ok) throw new Error('not opened')
+  for (const [op, p, data, size] of steps)
+    if (op === 'mkdir') await t.mkdir(SENDER, opened.targetId, p)
+    else await t.write(SENDER, opened.targetId, p, data, size)
+  expect(await t.close(SENDER, opened.targetId)).toEqual({ ok: true })
+
+  const expected: Uint8Array[] = []
+  const z = createZipEncoder((c) => expected.push(c), {
+    deflater: () => {
+      throw new Error('nothing here is deflated')
+    },
+    now
+  })
+  for (const [op, p, data, size] of steps)
+    if (op === 'mkdir') await z.mkdir(p)
+    else await z.write(p, data, size)
+  await z.finish()
+  expect(fs.readFileSync(picked.file).equals(Buffer.concat(expected))).toBe(true)
+})
+
 // Review 2, M2: a path already written and finished is never continued by another
 // entry — the planner makes paths unique; the host refuses rather than append.
 describe('a repeated path is refused, never appended to', () => {

@@ -46,6 +46,9 @@ run_harness packages/shared/test-utils/fixture-reaper.test.ts
 # Leak guard: a file that leaves processes running in its own temp dirs fails, and they
 # are killed (fixture-guard.ts, installed for every harness file by harness-setup.ts).
 run_harness packages/shared/test-utils/fixture-guard.test.ts
+# Worker cap for a direct vitest run (half the cores locally): every directory with vitest
+# tests has a config applying it, since vitest reads a config only from where it starts.
+run_harness packages/shared/test-utils/vitest-workers.test.ts
 
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
@@ -677,6 +680,9 @@ run_harness scripts/check-task-computer-resolver.test.mjs
 run_harness scripts/check-tsconfig-hermetic.test.mjs
 # CI's Turborepo typecheck cache keeps only the current run's entries before it is saved.
 run_harness scripts/ci/turbo-cache-prune.test.mjs
+# Machine-wide CI lock around heavy local runs (`pnpm test:e2e`, `test:unit`), shared with
+# madacademy ci/lock.sh: same queue/lock files, FIFO, stale cleanup, release on signals.
+run_harness scripts/ci-lock.test.mjs
 # `pnpm lint:theme` (Tailwind sources): every class-bearing module a theme-css shell renders
 # sits under an @source path, else its classes are never generated (MediaView bg-popover/90).
 run_harness scripts/check-tailwind-sources.test.mjs
@@ -1630,6 +1636,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/TerminalSplitGroup.test.tsx \
+  packages/domains/task-terminals/src/client/TerminalContainer.test.tsx \
   packages/domains/task-terminals/src/client/chat/review-integration-upgrade.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatQueue.pending.test.tsx \
   packages/domains/task-terminals/src/client/chat/attachments/useChatAttachments.test.tsx \
@@ -1790,6 +1797,7 @@ run_vitest_files "vitest (boot idle hydration)" \
   packages/domains/task-terminals/src/client/chat/chat-restoration.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \
   packages/apps/app/src/renderer/src/lib/bootTimings.test.ts \
+  packages/apps/app/src/renderer/src/lib/benignWindowError.test.ts \
   packages/domains/task/src/client/taskPaneEvents.test.ts
 
 # The account-role gate (T-15): tRPC + REST + MCP classification and refusals, and the

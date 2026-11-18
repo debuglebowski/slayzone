@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
+import { type FileHandle, lstat, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -514,6 +514,7 @@ test('private inline publication preserves binary, dedup, mutable/locked and his
 
 test('stale physical owner context and replaced source identity reject without accepting a receipt', async () => {
   const f = await fixture()
+  let held: FileHandle | undefined
   try {
     const p = client(f.runtime),
       source = await stage(f.runtime, 'stale', 1)
@@ -547,8 +548,12 @@ test('stale physical owner context and replaced source identity reject without a
     expect(stale.outcome).toMatchObject({ kind: 'not-committed', receipt: 'absent' })
     expect(await f.runtime.storage.receipt('c', 'stale')).toBeNull()
     const original = source.reserve.getMockImplementation()!
+    // Hold the original open across its replacement: ext4 recycles a freed inode at
+    // once, so rm + create could hand back the same dev/ino (same size, same byte),
+    // making the "replacement" the identical file rather than a replaced identity.
     source.reserve.mockImplementation(async (...args) => {
       const lease = await original(...args)
+      held = await open(source.grant.path, 'r')
       await rm(source.grant.path)
       await writeFile(source.grant.path, Buffer.from([7]))
       return lease
@@ -559,6 +564,7 @@ test('stale physical owner context and replaced source identity reject without a
     })
     expect(await f.runtime.storage.receipt('c', 'stale')).toBeNull()
   } finally {
+    await held?.close()
     await f.close()
   }
 })

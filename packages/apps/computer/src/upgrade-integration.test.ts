@@ -699,3 +699,57 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
   reloaded.close()
   expect(JSON.parse(readFileSync(configPath, 'utf8')).autoUpgrade).toBe(false)
 }, 60000)
+
+it('a connector that loses its session-host link exits and the supervisor brings the computer back', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'computer-host-link-lost-'))
+  cleanups.push(() =>
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  )
+  symlinkSync(
+    dirname(dirname(require.resolve('node-pty/package.json'))),
+    join(root, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  )
+  const source = readFileSync(resolve(import.meta.dirname, '../dist/bin.cjs'), 'utf8')
+  const entry = join(root, 'current.cjs')
+  writeFileSync(entry, source.replace(/\b((?:var )?COMPUTER_VERSION) = [^;]+;/, '$1 = "1.0.0";'))
+  const server = http.createServer((_req, res) =>
+    res.end(JSON.stringify({ ok: true, version: '1.0.0' }))
+  )
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())))
+  const hub = await startLoopbackHub({ floodLimits: false }, { server })
+  cleanups.push(() => hub.close())
+  const { port } = server.address() as AddressInfo
+  const config = {
+    hubUrl: `ws://127.0.0.1:${port}/computers`,
+    name: 'host-link-lost',
+    allowedRoots: [root],
+    capabilities: ['fs'],
+    joinToken: 'jt-valid'
+  }
+  writeFileSync(join(root, 'computer.config.json'), JSON.stringify({ allowedRoots: [root] }))
+  const supervisor = await superviseUpgrades(config, { version: '1.0.0', entry }, root, vi.fn(), {
+    probationMs: 0,
+    intervalMs: 200
+  })
+  cleanups.push(() => supervisor.stop(true))
+  await eventually(() => expect(hub.gateway.listUsableComputers()).toHaveLength(1))
+  const id = hub.gateway.listComputers()[0].computerId
+  const disconnected = hub.gateway.events.once('computer-disconnected')
+
+  // The host drops the connector's local link (any silent fault on that socket ends
+  // the same way). Nothing else changes: host, supervisor and hub all stay up.
+  const { hostControl } = await import('./session-host')
+  const control = await hostControl(root)
+  cleanups.push(() => control.close())
+  await control.rpc.request('reserve', { hubUrl: config.hubUrl })
+  await disconnected
+
+  await eventually(() => {
+    const live = hub.gateway.listUsableComputers()
+    expect(live).toHaveLength(1)
+    expect(live[0].computerId).toBe(id)
+  })
+  expect(hub.auth.enrollCalls).toHaveLength(1)
+}, 30_000)

@@ -29,6 +29,8 @@ interface Value {
   readonly helpers: ReadonlyMap<string, boolean>
   readonly jobs: ReadonlyMap<string, boolean>
   readonly inFlight: number
+  /** The host is stopping this process: its phase only moves to `dead` now. */
+  readonly stopping: boolean
 }
 
 export interface ChatLifecycle {
@@ -46,6 +48,7 @@ export type ChatLifecycleSignal =
   | { type: 'process-start'; conversationId: string | null }
   | { type: 'process-ready' }
   | { type: 'process-ended' }
+  | { type: 'process-stopping' }
   | { type: 'process-error' }
   | { type: 'turn-start'; turnId: string; origin: 'user' | 'agent' }
   | { type: 'turn-cancel'; turnId?: string }
@@ -93,7 +96,8 @@ export function createChatLifecycle(tabId: string): ChatLifecycle {
       prompts: new Set(),
       helpers: new Map(),
       jobs: new Map(),
-      inFlight: 0
+      inFlight: 0,
+      stopping: false
     }
   }
 }
@@ -272,7 +276,11 @@ export function reduceChatLifecycle(
       tabId: state.tabId,
       generation: input.generation,
       revision: input.revision,
-      value: { ...ended(state.value, 'starting'), conversationId: signal.conversationId }
+      value: {
+        ...ended(state.value, 'starting'),
+        conversationId: signal.conversationId,
+        stopping: false
+      }
     }
   }
   if (input.generation !== state.generation) return state
@@ -283,6 +291,9 @@ export function reduceChatLifecycle(
       break
     case 'process-ended':
       value = ended(value, 'dead')
+      break
+    case 'process-stopping':
+      if (!value.stopping) value = { ...value, stopping: true }
       break
     case 'process-error':
       if (value.phase !== 'dead' && value.phase !== 'not-spawned') value = turnEnded(value, true)
@@ -315,6 +326,9 @@ export function reduceChatLifecycle(
       value = eventValue(state, signal)
       break
   }
+  // A process being stopped only ends: nothing it still says moves its phase.
+  if (state.value.stopping && value.phase !== 'dead' && value.phase !== state.value.phase)
+    value = { ...value, phase: state.value.phase }
   return { ...state, revision: input.revision, value }
 }
 
@@ -342,7 +356,9 @@ export function chatLifecycleSnapshot(state: ChatLifecycle) {
     outboxInFlight: v.inFlight,
     backgroundHelpers,
     backgroundJobs: [...v.jobs.values()].filter(Boolean).length,
-    readyForMessage: v.phase === 'idle' && v.main === null && !v.prompts.size && v.inFlight === 0
+    // A process being stopped takes no message (the next one will).
+    readyForMessage:
+      v.phase === 'idle' && v.main === null && !v.prompts.size && v.inFlight === 0 && !v.stopping
   }
 }
 

@@ -1834,7 +1834,11 @@ class CodexChatSession implements ChatSessionDriver {
       const clientId = typeof item.clientId === 'string' ? item.clientId : null
       if (clientId && this.steered.delete(clientId)) {
         this.emit(ctx, { kind: 'user-replay', uuid: clientId })
-      } else if (clientId && params.turnId && (!params.threadId || params.threadId === this.threadId)) {
+      } else if (
+        clientId &&
+        params.turnId &&
+        (!params.threadId || params.threadId === this.threadId)
+      ) {
         this.correlateTurn(params.turnId, clientId)
       }
       return

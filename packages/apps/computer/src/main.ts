@@ -194,6 +194,12 @@ export interface ComputerHandle {
   isIdle(): boolean
   setHookDirectory(hub: string, directory: string): void
   /**
+   * Connector only: settles with the reason when its session-host link closes
+   * without the connector having asked. The connector cannot recover from that by
+   * itself — its process must exit so the upgrade supervisor relaunches it.
+   */
+  hostLost?: Promise<string>
+  /**
    * The direct link's identity once its listener has settled (bound, or failed):
    * the address clients dial and whether WebRTC offers are answered. Values, not
    * functions: a session host hands them to its connector over JSON-RPC.

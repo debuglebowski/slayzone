@@ -31,7 +31,8 @@ Local only (Docker, no network). Never part of CI.
 | `p10-v0380-worktrees` | v0.38.0 (schema v194) | task worktrees + base dirs on local + build-box: auto-created (custom base path), hand-linked, inherited by subtasks, done/archived holders, cleared to NULL and '' |
 | `p12-v0372-full` | v0.37.2 (schema v193) | skipped v0.38.0: p05's setup on v0.37.2, plus Codex chats on every computer; chat stores with v0.37's out-of-date triggers |
 | `p13-v0390-full` | v0.39.0 (schema v214) | p05's setup on v0.39.0 |
-| `p14-v0400-full` | v0.40.0 (schema v217) | p05's setup on v0.40.0, the release current users upgrade from |
+| `p14-v0400-full` | v0.40.0 (schema v217) | p05's setup on v0.40.0 |
+| `p15-v0411-full` | v0.41.1 (schema v219) | p05's setup on v0.41.1, the release current users upgrade from |
 
 The harness image links today's hub/computer bundles at the `.deb` install paths
 (`/opt/SlayZone/resources/...`): v0.38+ computers record that path as the release their
@@ -92,7 +93,8 @@ The upgraded machine has the scripted `claude` and `codex` installed.
 
 Normalization replaces values this run creates with stable tokens: `<new-uuid>` for
 UUIDs not present in the input, `<run-ms>` / `<run-s>` / `<run-time>` for wall-clock
-times. Logs and the user's own git repos are not dumped.
+times, `<machine-boot-ms>` for the machine's boot time (the chat store's
+`store-session`). Logs and the user's own git repos are not dumped.
 
 ## Adding a persona
 

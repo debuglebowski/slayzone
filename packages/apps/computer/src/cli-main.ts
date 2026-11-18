@@ -533,6 +533,14 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => gracefulStop('received SIGTERM, stopping'))
   if (workerBoot)
     process.on('disconnect', () => gracefulStop('upgrade supervisor exited, stopping'))
+  // A connector whose session-host link closed serves nothing and never reconnects
+  // by itself; its supervisor relaunches only a worker that EXITED. Exit non-zero
+  // (bounded: a leftover handle must not keep it alive, idle and disconnected).
+  void handle.hostLost?.then((reason) => {
+    process.exitCode = 1
+    setTimeout(() => process.exit(1), SUPERVISED_STOP_DEADLINE_MS).unref()
+    gracefulStop(`session host link lost (${reason}), exiting for the supervisor to relaunch`)
+  })
 
   // A supervised computer must never outlive the app that spawned it. See
   // @slayzone/platform/parent-watch for the signals and why each is needed.

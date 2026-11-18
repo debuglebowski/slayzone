@@ -321,7 +321,7 @@ test.each(['unregistered', 'legacy', 'copying'] as const)(
       }
       // Restoring before locator creation adopts the original prepared identity;
       // no orphan remains to block native admission.
-      expect(() => f.assertTaskActive('task')).not.toThrow()
+      await expect(f.assertTaskActive('task')).resolves.toBeUndefined()
       expect(tabStores).toHaveLength(1)
     } finally {
       restored?.close()

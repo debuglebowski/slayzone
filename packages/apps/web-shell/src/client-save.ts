@@ -12,8 +12,9 @@ import type {
   SaveTargetOpenResult,
   SaveTargetRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
+import { createZipEncoder } from '@slayzone/task-artifacts/zip-stream'
 import { saveBlob } from './artifact-export'
-import { createZipEncoder, fflateDeflater } from './zip-stream'
+import { fflateDeflater } from './fflate-deflater'
 
 /** A message to the zip worker; one at a time, each answered by a {@link ZipWorkerReply}. */
 export type ZipWorkerRequest =
@@ -107,9 +108,9 @@ export function workerZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
 export function inlineZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
   const encoder = createZipEncoder(onOut, { deflater: fflateDeflater })
   return {
-    write: async (path, data, size) => encoder.write(path, data, size),
-    mkdir: async (path) => encoder.mkdir(path),
-    finish: async () => encoder.finish(),
+    write: (path, data, size) => encoder.write(path, data, size),
+    mkdir: (path) => encoder.mkdir(path),
+    finish: () => encoder.finish(),
     dispose: () => undefined
   }
 }

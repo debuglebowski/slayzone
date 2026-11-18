@@ -7,6 +7,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
+import {
+  failWatcherNatively,
+  trackWatcher,
+  watcherIsOpen
+} from '@slayzone/test-utils/native-watcher'
 import { closeAllFileWatchers, subscribeFileWatcher, type FileWatchEvent } from './watcher'
 
 vi.mock('node:fs', async (original) => {
@@ -35,15 +40,12 @@ test('a file named "..." does not stop the watch', async () => {
   })
 }, 12_000)
 
-type NativeWatcher = nativeFs.FSWatcher & {
-  _handle: { onchange(status: number, event: string, path: string): void } | null
-}
 async function observeNative() {
   const actualWatch = (await vi.importActual<typeof import('node:fs')>('node:fs')).watch
-  const opened: NativeWatcher[] = []
-  const closed = new Set<NativeWatcher>()
+  const opened: nativeFs.FSWatcher[] = []
+  const closed = new Set<nativeFs.FSWatcher>()
   vi.spyOn(nativeFs, 'watch').mockImplementation((...args) => {
-    const watcher = Reflect.apply(actualWatch, nativeFs, args) as NativeWatcher
+    const watcher = trackWatcher(Reflect.apply(actualWatch, nativeFs, args) as nativeFs.FSWatcher)
     opened.push(watcher)
     watcher.on('close', () => closed.add(watcher))
     return watcher
@@ -83,9 +85,9 @@ test('runtime-error recovery keeps existing owners and rejects stale native life
   const stopB = subscribeFileWatcher(root, (event) => b.push(event))
   await ready(root, a)
   expect(opened).toHaveLength(1)
-  expect(opened[0]._handle).not.toBeNull()
-  opened[0]._handle!.onchange(-5, 'rename', root)
-  expect(opened[0]._handle).toBeNull()
+  expect(watcherIsOpen(opened[0])).toBe(true)
+  failWatcherNatively(opened[0], root)
+  expect(watcherIsOpen(opened[0])).toBe(false)
   const stopC = subscribeFileWatcher(root, (event) => c.push(event))
   expect(opened).toHaveLength(2)
   await ready(root, c)
@@ -104,7 +106,7 @@ test('runtime-error recovery keeps existing owners and rejects stale native life
   stopC()
   stopA()
   stopA()
-  expect(opened[1]._handle).not.toBeNull()
+  expect(watcherIsOpen(opened[1])).toBe(true)
   writeFileSync(join(root, 'survivor.txt'), 'only the remaining owner')
   await vi.waitFor(() => expect(changes(b, 'survivor.txt')).toHaveLength(1), { timeout: 5000 })
   expect(changes(a, 'survivor.txt')).toEqual([])
@@ -123,7 +125,7 @@ test('a stale disposer after closeAll cannot remove the same listener from a fre
   const stop = subscribeFileWatcher(root, listener)
   expect(opened).toHaveLength(2)
   oldStop()
-  expect(opened[1]._handle).not.toBeNull()
+  expect(watcherIsOpen(opened[1])).toBe(true)
   await ready(root, seen)
   writeFileSync(join(root, 'fresh.txt'), 'one change on the replacement entry')
   await vi.waitFor(() => expect(changes(seen, 'fresh.txt')).toHaveLength(1), { timeout: 5000 })
@@ -138,12 +140,12 @@ test('a disposer owns only its subscription when the same listener resubscribes 
   const listener = (event: FileWatchEvent) => seen.push(event)
   const oldStop = subscribeFileWatcher(root, listener)
   await ready(root, seen)
-  opened[0]._handle!.onchange(-5, 'rename', root)
+  failWatcherNatively(opened[0], root)
   const stop = subscribeFileWatcher(root, listener)
   expect(opened).toHaveLength(2)
   oldStop()
   oldStop()
-  expect(opened[1]._handle).not.toBeNull()
+  expect(watcherIsOpen(opened[1])).toBe(true)
   await ready(root, seen)
   writeFileSync(join(root, 'same-listener.txt'), 'one write for the surviving subscription')
   await vi.waitFor(() => expect(changes(seen, 'same-listener.txt')).toHaveLength(1), {

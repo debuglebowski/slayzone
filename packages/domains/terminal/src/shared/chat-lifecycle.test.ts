@@ -320,3 +320,24 @@ test('an explicit replacement start retires an abandoned request without waiting
   m.feed({ type: 'turn-start', turnId: 'B', origin: 'user' })
   expect(m.event(result(), 'A')).toMatchObject({ state: 'running', main: { id: 'B' } })
 })
+
+test('a process being stopped only ends: nothing it says moves its phase but to dead', () => {
+  let state = createChatLifecycle('tab')
+  let revision = 0
+  const feed = (signal: ChatLifecycleSignal, generation = state.generation) => {
+    state = reduceChatLifecycle(state, { tabId: 'tab', generation, revision: ++revision, signal })
+    return chatLifecycleSnapshot(state)
+  }
+  feed({ type: 'process-start', conversationId: 'c' }, 1)
+  expect(feed({ type: 'process-ready' })).toMatchObject({ readyForMessage: true })
+  feed({ type: 'process-start', conversationId: 'c' }, 2)
+  expect(feed({ type: 'process-stopping' })).toMatchObject({ readyForMessage: false })
+  expect(feed({ type: 'process-ready' })).toMatchObject({ state: 'starting' })
+  expect(feed({ type: 'turn-start', turnId: 'T', origin: 'user' })).toMatchObject({
+    state: 'starting'
+  })
+  expect(feed({ type: 'process-ended' })).toMatchObject({ state: 'dead' })
+  // The next process is not stopping.
+  feed({ type: 'process-start', conversationId: 'c' }, 3)
+  expect(feed({ type: 'process-ready' })).toMatchObject({ state: 'idle' })
+})

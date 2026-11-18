@@ -519,7 +519,10 @@ test('a turn that runs before its start reply is owned through its userMessage c
   setup([handshake('corr-thread', (method) => (method === 'turn/start' ? 'hang' : undefined))])
   await open('tab-corr', null)
   const c = h.children[0]
-  mgr.dispatchUserMessage('tab-corr', { id: 'corr-message', content: [{ type: 'text', text: 'hi' }] })
+  mgr.dispatchUserMessage('tab-corr', {
+    id: 'corr-message',
+    content: [{ type: 'text', text: 'hi' }]
+  })
   await until(() => c.requests('turn/start').length === 1)
   expect(c.requests('turn/start')[0]).toMatchObject({ clientUserMessageId: 'corr-message' })
   c.send({ method: 'turn/started', params: { threadId: 'corr-thread', turn: { id: 'corr-turn' } } })

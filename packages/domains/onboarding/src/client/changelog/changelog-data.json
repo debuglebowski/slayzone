@@ -1,5 +1,87 @@
 [
   {
+    "version": "0.41.1",
+    "date": "2026-11-18",
+    "tagline": "Watch, listen, relocate",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Relocate a project folder",
+        "description": "Move a project's folder to a new place, or point the project at a folder you already moved, from project settings; tasks and history stay with the project."
+      },
+      {
+        "category": "feature",
+        "title": "Copy tasks to another project",
+        "description": "The move dialog gains a Copy mode: tasks are copied to the chosen project as new tasks and the originals stay in place."
+      },
+      {
+        "category": "feature",
+        "title": "Video, audio and more artifact viewers",
+        "description": "Artifacts now play video and audio with seeking and .srt/.vtt subtitles, and preview diffs/patches, zip contents and fonts."
+      },
+      {
+        "category": "feature",
+        "title": "Chat font size",
+        "description": "Set a chat font size in Settings, or adjust a single chat from its tab bar and save it as the default."
+      },
+      {
+        "category": "feature",
+        "title": "Reclaim chat storage",
+        "description": "Settings → Backup shows chat storage size and reclaims free space in the background."
+      },
+      {
+        "category": "feature",
+        "title": "Group blocked tasks",
+        "description": "An optional sidebar tree section collects blocked tasks."
+      },
+      {
+        "category": "improvement",
+        "title": "Crashed agents resume",
+        "description": "An agent that dies unexpectedly is resumed with its conversation instead of leaving a bare shell."
+      },
+      {
+        "category": "improvement",
+        "title": "Cmd+Click close shuts down the agent",
+        "description": "Cmd+Click a tab's close button to also stop its agent."
+      },
+      {
+        "category": "improvement",
+        "title": "Huge diffs and folders load in pages",
+        "description": "Git diff panels page very large diffs (with Load rest of diff), and the Copy files dialog opens big ignored folders like node_modules on expand."
+      },
+      {
+        "category": "improvement",
+        "title": "Smoother long chats",
+        "description": "Chat history loads in pages and chat storage work runs off the main thread, so long sessions stay responsive."
+      },
+      {
+        "category": "fix",
+        "title": "No freeze on binary or huge artifacts",
+        "description": "Binary and very large artifacts show a no-preview card instead of freezing the window or being overwritten, and very long lines no longer stall the code view."
+      },
+      {
+        "category": "fix",
+        "title": "Saved artifacts never overwrite",
+        "description": "Downloading artifacts never overwrites existing files; repeated names get a (2) suffix."
+      },
+      {
+        "category": "fix",
+        "title": "Chats don't reload on split or group switch",
+        "description": "Splitting, unsplitting and switching tab groups no longer reloads chats or reattaches terminals."
+      },
+      {
+        "category": "fix",
+        "title": "Stop keeps streamed output",
+        "description": "Text an agent streamed before you pressed Stop stays in the chat, and background subagents no longer reopen a finished turn."
+      },
+      {
+        "category": "fix",
+        "title": "HTML preview flash",
+        "description": "HTML artifact previews no longer flash white before rendering."
+      }
+    ]
+  },
+  {
     "version": "0.40.0",
     "date": "2026-11-13",
     "tagline": "Tasks on the move",
