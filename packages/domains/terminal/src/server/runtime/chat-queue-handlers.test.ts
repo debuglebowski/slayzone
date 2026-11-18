@@ -55,6 +55,8 @@ import { chatQueueEvents, createChatQueueOps, drainChatQueue, HOLD_MS } from './
 import type { ChatQueueData } from './chat-queue-data'
 import type { AttachmentLookup } from './chat-attachment-guard'
 import type { SlayzoneDb } from '@slayzone/platform'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 /** An in-memory queue with the real store's semantics (held head → no pop). */
 function memoryQueue(): ChatQueueData {

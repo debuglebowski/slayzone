@@ -1117,6 +1117,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-agent-tu
 run_harness packages/domains/terminal/src/server/runtime/chat-lifecycle-contract.test.ts
 run_harness packages/domains/terminal/src/shared/chat-lifecycle.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-lifecycle-shadow.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-lifecycle-strict.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-background-work.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-history.test.ts
 run_harness packages/domains/terminal/src/server/runtime/cli-version.test.ts

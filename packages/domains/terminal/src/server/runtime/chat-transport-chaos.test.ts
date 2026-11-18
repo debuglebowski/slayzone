@@ -14,6 +14,8 @@ import type { AgentEvent } from '@slayzone/terminal-contracts'
 import * as mgr from './chat-transport-manager'
 import { chatWriteError, type ChatDisposable, type ChatProcHandle } from './chat-proc-handle'
 import { initialState, reducer } from '../../shared/chat-timeline'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 // ---- seeded PRNG (mulberry32) ----
 function prng(seed: number): () => number {

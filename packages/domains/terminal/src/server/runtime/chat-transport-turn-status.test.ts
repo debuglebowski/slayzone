@@ -8,6 +8,7 @@ import { afterEach, expect, test } from 'vitest'
 import { reduceChatLifecycle } from '../../shared/chat-lifecycle'
 import * as mgr from './chat-transport-manager'
 import {
+  allowLifecycleDisagreement,
   emitLine,
   sendAndStart,
   sj,
@@ -152,6 +153,7 @@ const stuckRunning: typeof reduceChatLifecycle = (state, input) => {
 }
 
 async function finishedTurn(mode: 'shadow' | 'authoritative') {
+  allowLifecycleDisagreement()
   const h = transportHarness()
   mgr.__setLifecycleReducerForTests(stuckRunning)
   await startTab({ lifecycleMode: mode } as never)
@@ -185,6 +187,7 @@ test('shadow: the runtime stays the status; the model is only compared', async (
 })
 
 test('authoritative: a model that fails hands the status back to the runtime', async () => {
+  allowLifecycleDisagreement()
   const h = transportHarness()
   mgr.__setLifecycleReducerForTests((state, input) => {
     if (input.signal.type === 'event' && input.signal.event.kind === 'result')

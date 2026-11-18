@@ -11,6 +11,8 @@ import type { ChildProcess } from 'node:child_process'
 import * as mgr from './chat-transport-manager'
 import { agentStarts } from './agent-starts'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

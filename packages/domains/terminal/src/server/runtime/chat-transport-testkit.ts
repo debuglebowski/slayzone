@@ -10,6 +10,9 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import * as mgr from './chat-transport-manager'
+// Every suite using the kit fails on a lifecycle disagreement.
+import './chat-lifecycle-strict-testkit'
+export { allowLifecycleDisagreement } from './chat-lifecycle-strict-testkit'
 
 /** Answer to one host control request: a success payload, an error, or none at all. */
 export type ControlAnswer =

@@ -195,7 +195,17 @@ function eventValue(
     }
     case 'result': {
       if (actor.type === 'child') return v
-      if (actor.turnId && actor.turnId !== (v.main?.execution?.turnId ?? v.main?.id)) return v
+      // An end owns the main turn when it names the turn's bound execution or,
+      // before any is bound (a fast turn that ended before its id reply), the
+      // turn's own request.
+      if (actor.turnId && v.main) {
+        const bound = v.main.execution?.turnId
+        const messageId = event.execution?.messageId
+        const own = bound
+          ? actor.turnId === bound
+          : actor.turnId === v.main.id || messageId === v.main.id
+        if (!own) return v
+      }
       const aborted = v.main?.stopping || event.terminalReason?.startsWith('aborted')
       return turnEnded(v, event.isError && !aborted)
     }
@@ -205,7 +215,11 @@ function eventValue(
       }
       return turnEnded(v, false)
     case 'user-message-popped':
-      return !event.id || v.main?.id === event.id ? turnEnded(v, false) : v
+      // Stop took the message back: its turn is being stopped, and ends at the
+      // CLI's end of it (`result` / `interrupted` / `turn-cancel`), not now.
+      return v.main && (!event.id || v.main.id === event.id)
+        ? { ...v, main: { ...v.main, stopping: true } }
+        : v
     case 'sub-agent': {
       const known = v.helpers.get(event.toolUseId)
       const backgrounded = known === true || event.backgrounded === true
@@ -330,9 +344,13 @@ export function reduceChatLifecycle(
       value = eventValue(state, signal)
       break
   }
-  // A process being stopped only ends: nothing it still says moves its phase.
-  if (state.value.stopping && value.phase !== 'dead' && value.phase !== state.value.phase)
-    value = { ...value, phase: state.value.phase }
+  // A process being stopped only ends: nothing it still says moves its phase or
+  // opens a turn (the runtime ignores it the same way).
+  if (state.value.stopping) {
+    if (value.phase !== 'dead' && value.phase !== state.value.phase)
+      value = { ...value, phase: state.value.phase }
+    if (!state.value.main && value.main) value = { ...value, main: null }
+  }
   return { ...state, revision: input.revision, value }
 }
 
@@ -360,9 +378,9 @@ export function chatLifecycleSnapshot(state: ChatLifecycle) {
     outboxInFlight: v.inFlight,
     backgroundHelpers,
     backgroundJobs: [...v.jobs.values()].filter(Boolean).length,
-    // A process being stopped takes no message (the next one will).
-    readyForMessage:
-      v.phase === 'idle' && v.main === null && !v.prompts.size && v.inFlight === 0 && !v.stopping
+    // The turn side of queue readiness; the transport's own gates (respawn,
+    // closing, storage…) apply on top of it in every mode.
+    readyForMessage: v.phase === 'idle' && v.main === null && !v.prompts.size && v.inFlight === 0
   }
 }
 

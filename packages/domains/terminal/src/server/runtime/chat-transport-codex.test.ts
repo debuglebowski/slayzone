@@ -18,6 +18,8 @@ import type { ChatQueueData } from './chat-queue-data'
 import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { chatTranscriptFromEvents, formatChatTranscript } from '../../shared/chat-transcript'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 type Json = Record<string, unknown>
 /** Answer to one request: a result, a JSON-RPC error, or nothing (hang). */

@@ -97,6 +97,15 @@ function runtimeMayChange(signal: ChatLifecycleSignal): boolean {
   }
 }
 
+/** Test seam: sees every report before the session's own sink (`chat-lifecycle-strict-testkit.ts`). */
+const reportObservers = new Set<(record: LifecycleShadowReport) => void>()
+export function __observeLifecycleReports(
+  observe: (record: LifecycleShadowReport) => void
+): () => void {
+  reportObservers.add(observe)
+  return () => reportObservers.delete(observe)
+}
+
 export class ChatLifecycleShadow {
   private state: ChatLifecycle
   private revision = 0
@@ -122,6 +131,13 @@ export class ChatLifecycleShadow {
   }
 
   private emit(record: LifecycleShadowReport): void {
+    for (const observe of reportObservers) {
+      try {
+        observe(record)
+      } catch {
+        /* an observer never affects chat */
+      }
+    }
     try {
       this.options.report(record)
     } catch {

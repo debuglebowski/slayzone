@@ -18,6 +18,8 @@ import { getPtyBackend, setPtyBackend, type PtyBackend } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import { childProcessToHandle, createLocalChatBackend } from './chat-proc-handle'
 import * as chat from './chat-transport-manager'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 async function refused(fn: () => unknown): Promise<unknown> {
   try {

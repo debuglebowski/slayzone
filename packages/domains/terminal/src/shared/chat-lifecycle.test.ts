@@ -331,13 +331,30 @@ test('a process being stopped only ends: nothing it says moves its phase but to 
   feed({ type: 'process-start', conversationId: 'c' }, 1)
   expect(feed({ type: 'process-ready' })).toMatchObject({ readyForMessage: true })
   feed({ type: 'process-start', conversationId: 'c' }, 2)
-  expect(feed({ type: 'process-stopping' })).toMatchObject({ readyForMessage: false })
+  feed({ type: 'process-stopping' })
   expect(feed({ type: 'process-ready' })).toMatchObject({ state: 'starting' })
   expect(feed({ type: 'turn-start', turnId: 'T', origin: 'user' })).toMatchObject({
-    state: 'starting'
+    state: 'starting',
+    turnOpen: false
   })
   expect(feed({ type: 'process-ended' })).toMatchObject({ state: 'dead' })
   // The next process is not stopping.
   feed({ type: 'process-start', conversationId: 'c' }, 3)
   expect(feed({ type: 'process-ready' })).toMatchObject({ state: 'idle' })
+})
+
+test('a fast turn that ended before its id was bound is still its request’s end', () => {
+  const m = model()
+  m.feed({ type: 'turn-start', turnId: 'm1', origin: 'user' })
+  const end = {
+    ...result(),
+    execution: { turnId: 'native-1', source: 'provider' as const, messageId: 'm1' }
+  }
+  expect(m.event(end)).toMatchObject({ state: 'idle', main: null })
+  m.feed({ type: 'turn-start', turnId: 'm2', origin: 'user' })
+  const other = {
+    ...result(),
+    execution: { turnId: 'native-0', source: 'provider' as const, messageId: 'm0' }
+  }
+  expect(m.event(other)).toMatchObject({ state: 'running', main: { id: 'm2' } })
 })

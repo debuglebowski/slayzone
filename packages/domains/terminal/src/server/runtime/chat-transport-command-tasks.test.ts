@@ -11,6 +11,8 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import * as mgr from './chat-transport-manager'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 interface Fake {
   args: string[]

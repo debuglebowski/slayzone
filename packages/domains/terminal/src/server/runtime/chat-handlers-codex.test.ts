@@ -15,6 +15,8 @@ import {
   createSlayzoneDbAdapter,
   createTestHarness
 } from '../../../../../shared/test-utils/ipc-harness.js'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 const MODELS: ChatModelInfo[] = [
   {

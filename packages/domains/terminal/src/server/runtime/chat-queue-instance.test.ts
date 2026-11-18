@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest'
 import { createChatTransport } from './chat-transport-manager'
 import { createChatQueueRuntime } from './chat-queue-handlers'
+// Fails the test on a lifecycle model / runtime disagreement.
+import './chat-lifecycle-strict-testkit'
 
 test('queue notifications stay inside their hub runtime', () => {
   const a = createChatQueueRuntime(createChatTransport())

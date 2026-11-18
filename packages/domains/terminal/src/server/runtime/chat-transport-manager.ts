@@ -2805,7 +2805,7 @@ export function createChatTransport(
                 outboxInFlight: tab.outbox.inFlight(),
                 backgroundHelpers: work.subAgents,
                 backgroundJobs: work.jobs,
-                readyForMessage: queueGateOpen(tab) && runtimeReadyForMessage(tab),
+                readyForMessage: runtimeReadyForMessage(tab),
                 seq: tab.log.lastSeq,
                 live: tab.liveSeq
               }
@@ -3146,8 +3146,10 @@ export function createChatTransport(
         },
         onEvent: (p, event) => handleProcessEvent(tab, p, event),
         // The runtime never lets a process it is stopping leave its state but to
-        // `dead` (`transitionState`); the lifecycle model hears the same.
-        onStopRequested: (p) => shadowFeed(tab, p.gen, { type: 'process-stopping' }),
+        // `dead` (`transitionState`), checked when each event is applied — so
+        // output still being published when the stop came is already too late.
+        // The lifecycle model hears the stop at once, ahead of that output.
+        onStopRequested: (p) => tab.shadow?.feed(p.gen, { type: 'process-stopping' }),
         onExit: (p, code, signal, unconfirmed) =>
           handleProcessExit(tab, p, code, signal, unconfirmed),
         onStartError: (p, err) => {

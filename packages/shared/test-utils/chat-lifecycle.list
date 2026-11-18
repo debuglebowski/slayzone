@@ -23,3 +23,4 @@ packages/domains/terminal/src/server/agents/codex/codex-chat-session.test.ts
 packages/domains/terminal/src/server/agents/codex/codex-protocol-drift.test.ts
 packages/domains/terminal/src/server/agents/codex/codex-server-requests.test.ts
 packages/domains/terminal/src/shared/chat-timeline-checkpoint.test.ts
+packages/domains/terminal/src/server/runtime/chat-lifecycle-strict.test.ts
