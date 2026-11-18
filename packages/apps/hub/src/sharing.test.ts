@@ -133,6 +133,9 @@ describe('T-100 sharing: members, roles, private tasks and grants on a real hub'
   })
 
   test("what lives on a computer stays the owner's: members never reach A's terminals", async () => {
+    const asked = { resources: [{ kind: 'taskOwner', id: A.task }] }
+    expect(await q(cb, 'sharing.myRoles', asked)).toEqual({ [`taskOwner:${A.task}`]: null })
+    expect(await q(ca, 'sharing.myRoles', asked)).toEqual({ [`taskOwner:${A.task}`]: 'manage' })
     expect(await codeOf(q(cb, 'taskTerminals.list', { taskId: A.task }))).toBe('NOT_FOUND')
     expect(await codeOf(q(cb, 'pty.getBuffer', { sessionId: A.session }))).toBe('NOT_FOUND')
     expect(await codeOf(q(ca, 'taskTerminals.list', { taskId: A.task }))).toBe('OK')

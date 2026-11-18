@@ -114,7 +114,9 @@ export const sharingRouter = router({
     .input(
       z.object({
         resources: z
-          .array(z.object({ kind: z.enum(['project', 'task', 'artifact']), id: z.string() }))
+          .array(
+            z.object({ kind: z.enum(['project', 'task', 'artifact', 'taskOwner']), id: z.string() })
+          )
           .max(500)
       })
     )

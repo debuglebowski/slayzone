@@ -42,7 +42,10 @@ export function useDirectory(enabled: boolean) {
 }
 
 /** The caller's own role on one resource; null while loading or without access. */
-export function useMyRole(kind: 'project' | 'task' | 'artifact', id: string | null | undefined) {
+export function useMyRole(
+  kind: 'project' | 'task' | 'artifact' | 'taskOwner',
+  id: string | null | undefined
+) {
   const trpc = useTRPC()
   const { enabled } = useSharingStatus()
   const q = useQuery({
@@ -77,4 +80,22 @@ export function useSharingLiveUpdates(): void {
 /** A mutation failure as a toast (FORBIDDEN carries its own plain message). */
 export function toastError(err: unknown): void {
   toast.error(err instanceof Error ? err.message : String(err))
+}
+
+/**
+ * Whether the task's agents and terminals are the caller's (T-100): they run on the
+ * task owner's computers only — a member sees the task, never another person's
+ * terminal. True without login, and while unknown (nothing flashes for an owner).
+ */
+export function useRunsAgentsHere(taskId: string | null | undefined): boolean {
+  const trpc = useTRPC()
+  const { enabled } = useSharingStatus()
+  const q = useQuery({
+    ...trpc.sharing.myRoles.queryOptions({
+      resources: taskId ? [{ kind: 'taskOwner', id: taskId }] : []
+    }),
+    enabled: enabled && !!taskId
+  })
+  if (!enabled || !taskId || !q.data) return true
+  return q.data[`taskOwner:${taskId}`] != null
 }

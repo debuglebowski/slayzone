@@ -9,7 +9,7 @@ export type SharingRouterDeps = {
   /** The caller's role on a resource (null: none, or it does not exist). */
   roleOf: (
     ctx: TrpcContext,
-    resource: { kind: 'project' | 'task' | 'artifact'; id: string }
+    resource: { kind: 'project' | 'task' | 'artifact' | 'taskOwner'; id: string }
   ) => Promise<AccessRole | null>
   /** Who-may-see-what changed: every live access decision is made again. */
   invalidate: () => void

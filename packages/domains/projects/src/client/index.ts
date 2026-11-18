@@ -33,5 +33,6 @@ export {
   useMyRole,
   useSharingLiveUpdates,
   useSharingStatus,
+  useRunsAgentsHere,
   type AccessRole
 } from './sharing/useSharing'

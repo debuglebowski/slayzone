@@ -205,7 +205,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
-import { ArtifactShareDialog, useSharingStatus } from '@slayzone/projects/client'
+import { ArtifactShareDialog, useRunsAgentsHere, useSharingStatus } from '@slayzone/projects/client'
 import { useSharedCardHeights } from './useSharedCardHeights'
 import {
   SortableSubTask,
@@ -968,6 +968,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const artifactsPanelRef = useRef<ArtifactsPanelHandle>(null)
   // Sharing one file with people (T-100); only on a hub with login.
   const sharing = useSharingStatus()
+  const runsAgentsHere = useRunsAgentsHere(task?.id)
   const [sharingArtifact, setSharingArtifact] = useState<{ id: string; title: string } | null>(null)
   const pendingArtifactRef = useRef<string | null>(null)
   const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
@@ -3084,7 +3085,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       : { flex: 1, order: panelOrderIdx.terminal ?? 0 }
                 }
               >
-                {ownership.hasOtherOwner('terminal') ? (
+                {!runsAgentsHere ? (
+                  // A shared task (T-100): its agents and terminals are its owner's,
+                  // on the owner's computers — never shown to a member.
+                  <div
+                    className="flex h-full w-full items-center justify-center p-6"
+                    data-testid="agent-pane-not-yours"
+                  >
+                    <div className="max-w-sm space-y-2 text-center">
+                      <TerminalIcon className="mx-auto size-10 text-muted-foreground/60" />
+                      <div className="text-sm font-medium text-muted-foreground">
+                        This task's agents run on its owner's computer
+                      </div>
+                      <div className="text-xs text-muted-foreground/70">
+                        You can read and change the task and its files. Terminals and chats stay
+                        with the person running them.
+                      </div>
+                    </div>
+                  </div>
+                ) : ownership.hasOtherOwner('terminal') ? (
                   <PanelOwnerStub
                     panelLabel="Agent"
                     icon={TerminalIcon}
