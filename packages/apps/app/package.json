@@ -18,14 +18,14 @@
     "build:linux": "npm run build && electron-builder --linux",
     "typecheck": "tsgo --noEmit -p tsconfig.node.json && tsgo --noEmit -p tsconfig.web.json && tsgo --noEmit -p tsconfig.e2e.json",
     "test:agent-hooks": "vitest run --root ../../.. --config packages/apps/app/vitest.config.ts --exclude \"**/.claude/worktrees/**\" packages/apps/app/src/main/agent-hooks packages/apps/api/src/http/rest-api/agent-hook.test.ts",
-    "test:e2e": "bash e2e-parallel.sh",
+    "test:e2e": "node ../../../scripts/ci-lock.mjs test:e2e -- bash e2e-parallel.sh",
     "test:e2e:serial": "npx playwright test --config playwright.config.ts",
     "test:e2e:headed": "npx playwright test --config playwright.config.ts --headed",
     "test:e2e:loop": "bash e2e-loop.sh",
     "test:e2e:loop:stop": "bash e2e-loop.sh --stop-on-fail",
-    "test:e2e:parallel": "bash e2e-parallel.sh",
-    "test:e2e:perf": "npx playwright test --config playwright.config.ts e2e/perf/",
-    "test:e2e:chat": "npx playwright test --config playwright.config.ts e2e/chat/"
+    "test:e2e:parallel": "node ../../../scripts/ci-lock.mjs test:e2e -- bash e2e-parallel.sh",
+    "test:e2e:perf": "node ../../../scripts/ci-lock.mjs test:e2e:perf -- npx playwright test --config playwright.config.ts e2e/perf/",
+    "test:e2e:chat": "node ../../../scripts/ci-lock.mjs test:e2e:chat -- npx playwright test --config playwright.config.ts e2e/chat/"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
