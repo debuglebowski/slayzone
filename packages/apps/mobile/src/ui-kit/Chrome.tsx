@@ -182,7 +182,8 @@ export function sheetDismissed(dy: number, vy: number): boolean {
 }
 
 /** Whether the keyboard is up (iOS reports it before it moves: no jump). */
-function useKeyboardUp(): boolean {
+/** Whether the software keyboard is up (from when it starts to move in, iOS). */
+export function useKeyboardUp(): boolean {
   const [up, setUp] = useState(false)
   useEffect(() => {
     const ios = Platform.OS === 'ios'

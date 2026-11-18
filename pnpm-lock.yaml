@@ -1108,6 +1108,9 @@ importers:
       expo-file-system:
         specifier: ~58.0.13
         version: 58.0.13(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))
+      expo-glass-effect:
+        specifier: ~58.0.5
+        version: 58.0.5(expo@58.0.21)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)
       expo-image-picker:
         specifier: ~58.0.10
         version: 58.0.10(expo@58.0.21)

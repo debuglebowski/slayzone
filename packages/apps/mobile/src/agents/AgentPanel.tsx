@@ -12,10 +12,11 @@
  * Opening it marks the task read, as opening it on desktop does — once per opening
  * (`openingKey`, `opening-reads.ts`), so "Mark as unread" survives a remount.
  *
- * On the phone's task page (`nav`) the panel has no bar of its own: the page's nav bar
- * shows the agent (`AgentNav`: provider, state, Start while offered) and opens the
- * agent menu, which holds everything the bar and ⋯ offer — the provider, every
- * action — and a chat's mode / model / effort are one model pill in its composer.
+ * On the phone's task page (`phone`) the panel draws no chrome of its own: it hands the
+ * page the agent (`AgentNav`: provider, state, Start / Stop while offered, every
+ * action, the providers, a chat's mode / model / effort) and its body (the chat or the
+ * terminal), and the page lays out both — its status island and agent card show the
+ * agent, a chat's composer sits on the page's tab bar.
  *
  * Rendered inside the HubScope of the hub that owns the task (`feed`'s hub): every
  * call here goes to that hub.
@@ -32,17 +33,10 @@ import { workComputerId } from '@slayzone/projects-contracts/placements'
 import { useSubscription } from '@slayzone/transport/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
-} from 'react-native'
-import { ChatSession } from '../chat'
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ChatSession, type ChatChrome } from '../chat'
 import { useHubComputers } from '../computers/use-hub-computers'
+import { ChromeInsets } from '../task/task-chrome'
 import { TerminalView, type TerminalViewHandle } from '../terminal/TerminalView'
 import { type ChromeColors, useTheme } from '../theme'
 import { type RouterOutputs, useTRPC, useTRPCClient } from '../trpc'
@@ -77,27 +71,57 @@ export interface AgentPanelProps {
    */
   openingKey?: string
   /**
-   * The phone's task page: its nav bar, drawn by the page from what the panel hands it
-   * (`AgentNav`). The panel then has no bar or ⋯ of its own — all of it is
-   * in the agent menu the nav opens — and a chat's controls are one model pill.
+   * The phone's task page: it lays out the page from the agent (`AgentNav`) and the
+   * agent's body (the chat or the terminal, to be kept mounted). The panel then draws
+   * no bar, ⋯ or menu of its own, and a chat's controls are the page's (`controls`).
    * Omitted (iPad): the panel's own bar.
    */
-  nav?: (agent: AgentNav) => ReactNode
+  phone?: (agent: AgentNav, body: ReactNode) => ReactNode
 }
 
-/** What the page's nav bar shows of the agent, and what it can do from there. */
+/** Something to do with the agent (the agent card lists them). */
+export interface AgentAction {
+  /** What it is (`Start`, `Stop`, `Copy screen text` …); stable, for keys. */
+  name: string
+  /** Its words. */
+  label: string
+  destructive?: boolean
+  /** `lifecycle`: start, stop and the like; `terminal`: the terminal's text. */
+  kind: 'lifecycle' | 'terminal'
+  onPress: () => void
+}
+
+/** What the phone's task page shows of the agent, and what it can do with it. */
 export interface AgentNav {
   /** The provider. */
   provider: string
   /** Its state and what else to know ("Idle · Unread"). */
   status: string
+  /** Its state in a word or two (desktop's words: "Active", "Idle" …), or why not known. */
+  stateLabel: string
   dot: AgentDotKind | null
+  /** It works (starting, running, subagents): Stop is up front. */
+  working: boolean
+  /** A chat's agent waits for the user's answer. */
+  waiting: boolean
   /** An action runs, or the agents' states are still loading. */
   busy: boolean
-  /** Opens the agent menu: provider, every action. */
-  openMenu: () => void
   /** Start, up front while offered (the agent isn't running); null otherwise. */
   start: (() => void) | null
+  /** Stop (asks first), up front while the agent works; null otherwise. */
+  stop: (() => void) | null
+  /** Everything that can be done with it, Start and Stop included. */
+  actions: AgentAction[]
+  /** The providers to switch to (the task's first), and the switch (asks first). */
+  providers: ReadonlyArray<{ id: string; label: string }>
+  providerId: string
+  switchProvider: (id: string) => void
+  /** A chat's mode / model / effort (null: a terminal, or not loaded yet). */
+  controls: ChatChrome | null
+  /** The agent card opens: what its actions say is read now (the terminal's text size). */
+  onOpen: () => void
+  /** What failed (loading the state, an action), with Retry; null when nothing did. */
+  problems: ReactNode
 }
 
 /** A tab as `taskTerminals.list` returns it (the main one: the only one shown). */
@@ -152,7 +176,7 @@ class TerminalSlot {
 /** A pill's 30pt, reaching the 44pt a finger needs. */
 const PILL_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 }
 
-export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: AgentPanelProps) {
+export function AgentPanel({ hubId, feed, showHub, row, openingKey, phone }: AgentPanelProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const trpc = useTRPC()
@@ -235,6 +259,8 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
     modesQ.data?.find((m) => m.id === mode)?.label ?? getModeLabel(mode)
 
   const [busy, setBusy] = useState<string | null>(null)
+  // A chat's controls and whether it waits for the user (the phone page shows them).
+  const [chatChrome, setChatChrome] = useState<ChatChrome | null>(null)
   const [actionError, setActionError] = useState<{
     name: string
     detail: string
@@ -242,13 +268,12 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
   } | null>(null)
   const [picking, setPicking] = useState(false)
   const [menu, setMenu] = useState(false)
-  // The agent menu (phone): its provider list folded out.
-  const [menuProviders, setMenuProviders] = useState(false)
-  // The terminal's text size when ⋯ opened: what its switch offers is the other one.
+  // The terminal's text size when ⋯ (or the agent card) opened: what its switch offers
+  // is the other one.
   const [menuTextSize, setMenuTextSize] = useState<'readable' | 'fit'>('readable')
+  const readTextSize = (): void => setMenuTextSize(terminal.get()?.textSize() ?? 'readable')
   const openMenu = (): void => {
-    setMenuTextSize(terminal.get()?.textSize() ?? 'readable')
-    setMenuProviders(false)
+    readTextSize()
     setMenu(true)
   }
 
@@ -275,7 +300,6 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
 
   const switchTo = (mode: string): void => {
     setPicking(false)
-    setMenu(false)
     if (mode === task.agent_id) return
     confirmThen(
       'Switch',
@@ -285,6 +309,13 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
     )
   }
 
+  const stateLabel = state
+    ? agentStateLabel(state)
+    : loadError
+      ? 'Couldn’t load'
+      : loaded
+        ? 'Not started'
+        : 'Loading…'
   const statusParts = [
     state
       ? agentStateLabel(state)
@@ -301,8 +332,10 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
 
   const actions: Array<{
     name: string
-    /** Its words in the agent menu (phone), when not its name. */
+    /** Its words in the agent card (phone), when not its name. */
     label?: string
+    /** One of the terminal's own (its text): the agent card lists them apart. */
+    terminal?: boolean
     destructive?: boolean
     onPress: () => void
     more?: boolean
@@ -362,21 +395,25 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
       {
         name: 'Copy screen text',
         more: true,
+        terminal: true,
         onPress: () => terminal.get()?.exportText('screen', 'copy')
       },
       {
         name: 'Copy all output',
         more: true,
+        terminal: true,
         onPress: () => terminal.get()?.exportText('all', 'copy')
       },
       {
         name: 'Share all output…',
         more: true,
+        terminal: true,
         onPress: () => terminal.get()?.exportText('all', 'share')
       },
       {
         name: menuTextSize === 'fit' ? 'Readable text size' : 'Fit text to width',
         more: true,
+        terminal: true,
         onPress: () => terminal.get()?.toggleTextSize()
       }
     )
@@ -456,108 +493,53 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, nav }: Agent
           taskId={taskId}
           tabId={main.id}
           mode={main.mode}
-          {...(nav ? { controls: 'pill' as const } : {})}
+          {...(phone ? { controls: 'page' as const, onChrome: setChatChrome } : {})}
         />
       ) : (
-        <TerminalView
-          onHandle={terminal.attach}
-          key={`${sessionId}#${restarts}`}
-          sessionId={sessionId}
-          taskId={taskId}
-          live={live}
-          stateLoading={!loaded}
-          computerName={taskComputer}
-          notRunningHint="Tap Start to run it."
-        />
+        <ChromeInsets>
+          <TerminalView
+            onHandle={terminal.attach}
+            key={`${sessionId}#${restarts}`}
+            sessionId={sessionId}
+            taskId={taskId}
+            live={live}
+            stateLoading={!loaded}
+            computerName={taskComputer}
+            notRunningHint="Tap Start to run it."
+          />
+        </ChromeInsets>
       )}
     </View>
   )
 
-  if (nav) {
-    const row = (
-      key: string,
-      label: string,
-      onPress: () => void,
-      opts: {
-        destructive?: boolean
-        value?: string
-        selected?: boolean
-        expanded?: boolean
-        /** A choice under the row above (a provider under Provider). */
-        nested?: boolean
-      } = {}
-    ) => {
-      const disabled = busy !== null
-      return (
-        <Pressable
-          key={key}
-          accessibilityRole="button"
-          accessibilityLabel={label}
-          {...(opts.value !== undefined ? { accessibilityValue: { text: opts.value } } : {})}
-          accessibilityState={{
-            disabled,
-            ...(opts.selected !== undefined ? { selected: opts.selected } : {}),
-            ...(opts.expanded !== undefined ? { expanded: opts.expanded } : {})
-          }}
-          disabled={disabled}
-          onPress={onPress}
-          style={[styles.menuRow, opts.nested && styles.menuNested]}
-        >
-          <Text style={[styles.pickerText, opts.destructive && styles.destructive]}>{label}</Text>
-          {opts.value !== undefined ? (
-            <Text style={styles.menuValue} numberOfLines={1}>
-              {opts.value} {opts.expanded ? '⌄' : '›'}
-            </Text>
-          ) : null}
-          {opts.selected ? <Text style={styles.pickerText}>✓</Text> : null}
-        </Pressable>
-      )
-    }
-    const close = (then: () => void) => () => {
-      setMenu(false)
-      then()
-    }
-    return (
-      <View style={styles.screen}>
-        {nav({
-          provider: providerLabel,
-          status: statusParts.join(' · '),
-          dot,
-          busy: busy !== null || (!loaded && !loadError),
-          openMenu,
-          start: start && busy === null ? start.onPress : null
-        })}
-        {problems}
-        {body}
-        <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">
-          <ScrollView style={styles.menuScroll}>
-            <View style={styles.menuHead} accessible>
-              {dot ? <AgentDot kind={dot} /> : <View style={styles.noDot} />}
-              <Text style={styles.mode} numberOfLines={1}>
-                {providerLabel}
-              </Text>
-              <Text style={styles.statusText} numberOfLines={2}>
-                {statusParts.join(' · ')}
-              </Text>
-            </View>
-            {row('provider', 'Provider', () => setMenuProviders((v) => !v), {
-              value: modeLabel(task.agent_id),
-              expanded: menuProviders
-            })}
-            {menuProviders
-              ? providers.map((m) =>
-                  row(`mode-${m.id}`, m.label, () => switchTo(m.id), {
-                    selected: m.id === task.agent_id,
-                    nested: true
-                  })
-                )
-              : null}
-            {actions.map((a) =>
-              row(a.name, a.label ?? a.name, close(a.onPress), { destructive: a.destructive })
-            )}
-          </ScrollView>
-        </BottomSheet>
-      </View>
+  if (phone) {
+    const stop = actions.find((a) => a.name === 'Stop')
+    return phone(
+      {
+        provider: providerLabel,
+        status: statusParts.join(' · '),
+        stateLabel,
+        dot,
+        working,
+        waiting: chat && (chatChrome?.waiting ?? false),
+        busy: busy !== null || (!loaded && !loadError),
+        start: start && busy === null ? start.onPress : null,
+        stop: working && stop && busy === null ? stop.onPress : null,
+        actions: actions.map((a) => ({
+          name: a.name,
+          label: a.label ?? a.name,
+          ...(a.destructive ? { destructive: true } : {}),
+          kind: a.terminal ? 'terminal' : 'lifecycle',
+          onPress: a.onPress
+        })),
+        providers: providers.map((m) => ({ id: m.id, label: m.label })),
+        providerId: task.agent_id,
+        switchProvider: switchTo,
+        controls: chat ? chatChrome : null,
+        onOpen: readTextSize,
+        problems: loadError || actionError ? problems : null
+      },
+      body
     )
   }
 
@@ -733,20 +715,5 @@ const makeStyles = (t: ChromeColors) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: t.border
     },
-    pickerText: { fontSize: 16, color: t.foreground },
-    destructive: { color: t.destructive },
-    menuScroll: { flexGrow: 0 },
-    menuHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 12 },
-    menuRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      minHeight: 48,
-      paddingVertical: 12,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.border
-    },
-    menuValue: { flexShrink: 1, fontSize: 15, color: t.mutedForeground, marginLeft: 'auto' },
-    menuNested: { paddingLeft: 16 }
+    pickerText: { fontSize: 16, color: t.foreground }
   })

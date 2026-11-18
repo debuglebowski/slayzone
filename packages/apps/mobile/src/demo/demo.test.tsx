@@ -100,10 +100,10 @@ async function openFromBell(title: string) {
   return board
 }
 
-/** The task page's ⓘ: its Details / Artifacts sheet, on Details. */
+/** The task page's Details tab. */
 async function openDetails(board: ReturnType<typeof tab>) {
-  await press(board.getByLabelText('Details and artifacts'))
-  await board.findByTestId('task-info-sheet')
+  await press(board.getByTestId('tab-details'))
+  await board.findByTestId('task-details')
 }
 
 describe('the demo', () => {
@@ -170,7 +170,7 @@ describe('the demo', () => {
     // Under the sheet's title and in the Tags section.
     expect(board.getAllByText('feature').length).toBeGreaterThan(0)
 
-    await press(board.getByTestId('segment-artifacts'))
+    await press(board.getByTestId('tab-artifacts'))
     expect(await board.findByTestId(`artifact-row-${DEMO_IDS.planArtifact}`)).toBeOnTheScreen()
     expect(board.getByTestId(`artifact-row-${DEMO_IDS.screenshotArtifact}`)).toBeOnTheScreen()
     expect(board.getByTestId(`artifact-folder-${DEMO_IDS.notesFolder}`)).toBeOnTheScreen()

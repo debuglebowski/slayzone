@@ -8,7 +8,9 @@
  *
  * In a screen too short for all of it (the keyboard is up), the `/` menu and the queue
  * shrink and scroll; the input row never does, so it stays above the keyboard.
- * `accessory` sits in the input row before Stop / Send (the phone task page's model pill).
+ * `floating` (the phone task page): the input row is a glass capsule — the page's tab
+ * bar's accessory, its width and material — between the page's insets, over the
+ * content instead of on a bar of its own.
  */
 import {
   userMessageAttachments,
@@ -29,6 +31,7 @@ import {
 } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { BottomSheet } from '../ui-kit/Chrome'
+import { Glass } from '../ui-kit/Glass'
 import { attachmentLabel, queuedFiles, queuedLabel } from './attachments'
 import type { SlashItem } from './slash-menu'
 import { MONO, useThemedStyles } from './styles'
@@ -56,7 +59,7 @@ export function Composer({
   placeholder,
   cliLabel = 'Claude Code',
   attach = null,
-  accessory = null
+  floating = null
 }: {
   composer: ChatComposer
   queued: readonly QueuedChatMessage[]
@@ -76,8 +79,11 @@ export function Composer({
   cliLabel?: string
   /** ＋: attach a photo; null = not offered. */
   attach?: ChatAttach | null
-  /** Drawn in the input row before Stop / Send (the model pill); null = none. */
-  accessory?: ReactNode
+  /**
+   * The input row as a floating glass capsule between these insets (pt); `keyboardUp`:
+   * it sits on the keyboard (a gap under it). Null = a bar across the screen.
+   */
+  floating?: { start: number; end: number; keyboardUp: boolean } | null
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
   const [attachSheet, setAttachSheet] = useState(false)
@@ -106,7 +112,21 @@ export function Composer({
   const listed = new Set(queued.map((q) => q.id))
   const unconfirmed = (composer.pendingQueuedMessages ?? []).filter((e) => !listed.has(e.id))
   return (
-    <View style={s.wrap} testID="chat-composer">
+    <View
+      style={
+        floating
+          ? [
+              s.floatingWrap,
+              {
+                marginLeft: floating.start,
+                marginRight: floating.end,
+                paddingBottom: floating.keyboardUp ? 8 : 0
+              }
+            ]
+          : s.wrap
+      }
+      testID="chat-composer"
+    >
       {composer.menu && (
         <FlatList
           testID="slash-menu"
@@ -261,13 +281,13 @@ export function Composer({
           ))}
         </View>
       )}
-      <View style={s.inputRow}>
+      <InputRow floating={floating !== null} s={s}>
         {attach ? (
           <Pressable
             onPress={() => setAttachSheet(true)}
             disabled={disabled}
             hitSlop={BUTTON_SLOP}
-            style={[s.button, s.plus, disabled && s.off]}
+            style={[s.button, floating ? s.plusFloating : s.plus, disabled && s.off]}
             accessibilityRole="button"
             accessibilityLabel="Attach a photo"
             accessibilityState={{ disabled, busy: attach.uploading > 0 }}
@@ -287,11 +307,10 @@ export function Composer({
           placeholderTextColor={theme.mutedForeground}
           multiline
           editable={!disabled}
-          style={s.input}
+          style={floating ? s.inputFloating : s.input}
           accessibilityLabel="Message"
           autoCorrect
         />
-        {accessory}
         {inFlight && (
           <Pressable
             onPress={stop}
@@ -314,7 +333,7 @@ export function Composer({
         >
           <Text style={s.sendText}>↑</Text>
         </Pressable>
-      </View>
+      </InputRow>
       {attach ? (
         <BottomSheet
           visible={attachSheet}
@@ -337,6 +356,27 @@ export function Composer({
           </Pressable>
         </BottomSheet>
       ) : null}
+    </View>
+  )
+}
+
+/** The input row: a plain row, or (floating) a glass capsule. */
+function InputRow({
+  floating,
+  s,
+  children
+}: {
+  floating: boolean
+  s: ReturnType<typeof makeStyles>
+  children: ReactNode
+}) {
+  return floating ? (
+    <Glass style={[s.inputRow, s.capsule]} testID="chat-input-row">
+      {children}
+    </Glass>
+  ) : (
+    <View style={s.inputRow} testID="chat-input-row">
+      {children}
     </View>
   )
 }
@@ -379,6 +419,25 @@ function makeStyles(t: ChromeColors) {
       paddingTop: 6,
       paddingBottom: 8
     },
+    floatingWrap: { flexShrink: 1, paddingTop: 6 },
+    capsule: {
+      minHeight: 50,
+      borderRadius: 25,
+      alignItems: 'center',
+      paddingHorizontal: 5,
+      paddingVertical: 5
+    },
+    inputFloating: {
+      flex: 1,
+      minHeight: 40,
+      maxHeight: 160,
+      color: t.foreground,
+      paddingHorizontal: 6,
+      paddingTop: 10,
+      paddingBottom: 10,
+      fontSize: 16
+    },
+    plusFloating: { backgroundColor: 'transparent' },
     menu: {
       maxHeight: 240,
       flexShrink: 1,

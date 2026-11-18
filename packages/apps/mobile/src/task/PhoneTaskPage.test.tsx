@@ -1,6 +1,9 @@
 /**
- * The phone's Details / Artifacts sheet (the task page's ⓘ): the task's fields, its ⋯
- * actions, sub-tasks, tags, blockers — every write to the hub that owns the task.
+ * The phone's task page around its agent (`PhoneTaskPage`): the floating top bar and
+ * status island, the agent card (the agent's controls, the task's actions), the tab
+ * bar, and the Details and Artifacts tabs — the task's fields, sub-tasks, tags,
+ * blockers — every write to the hub that owns the task. The agent panel has a suite of
+ * its own (`AgentPanel.test.tsx`): here it is a stand-in handing the page an agent.
  */
 import {
   act,
@@ -13,6 +16,7 @@ import {
 } from '@testing-library/react-native'
 import type { ReactNode } from 'react'
 import { Alert, type AlertButton } from 'react-native'
+import type { AgentNav, AgentPanelProps } from '../agents/AgentPanel'
 import type { BoardData, HubFeed, TaskRow } from '../hub-board'
 import { hubEntryOf } from '../hub-session'
 import {
@@ -25,7 +29,7 @@ import {
   workHub
 } from '../hubs/testing'
 import { serveTaskHub, writes } from '../task-edit/testing'
-import { type InfoSegment, TaskInfoSheet, type TaskInfoSheetProps } from './TaskInfoSheet'
+import { TaskPage, type TaskPageProps, type TaskSegment } from './TaskPage'
 
 const mockHubs = createFakeHubs()
 jest.mock('@slayzone/transport/client', () => ({
@@ -48,6 +52,78 @@ jest.mock('../artifacts/use-task-artifacts', () => ({
   useTaskArtifacts: () => ({ artifacts: [{ id: 'a1' }, { id: 'a2' }] })
 }))
 jest.mock('../computers/TaskComputer', () => ({ TaskComputer: () => null }))
+
+/** The agent the stand-in panel hands the page, and how often the panel mounted. */
+const mockAgent = { nav: null as AgentNav | null, mounts: 0 }
+function agentNav(fields: Partial<AgentNav> = {}): AgentNav {
+  return {
+    provider: 'Claude Chat',
+    status: 'Idle · Unread',
+    stateLabel: 'Idle',
+    dot: 'attention',
+    working: false,
+    waiting: false,
+    busy: false,
+    start: null,
+    stop: null,
+    actions: [
+      { name: 'Restart', label: 'Restart', kind: 'lifecycle', onPress: jest.fn() },
+      { name: 'Reset', label: 'New conversation', kind: 'lifecycle', onPress: jest.fn() },
+      {
+        name: 'Stop',
+        label: 'Stop agent',
+        kind: 'lifecycle',
+        destructive: true,
+        onPress: jest.fn()
+      }
+    ],
+    providers: [
+      { id: 'claude-chat', label: 'Claude Chat' },
+      { id: 'codex-chat', label: 'Codex Chat' }
+    ],
+    providerId: 'claude-chat',
+    switchProvider: jest.fn(),
+    controls: null,
+    onOpen: jest.fn(),
+    problems: null,
+    ...fields
+  }
+}
+jest.mock('../agents/AgentPanel', () => ({
+  AgentPanel: (props: AgentPanelProps) => {
+    const { useEffect } = jest.requireActual('react')
+    const { Text } = jest.requireActual('react-native')
+    useEffect(() => {
+      mockAgent.mounts++
+    }, [])
+    const { useTaskChrome } = jest.requireActual('./task-chrome')
+    // The agent's body: what the page's chrome tells it, and its timeline's scroll.
+    function Body() {
+      const chrome = useTaskChrome()
+      const { Pressable } = jest.requireActual('react-native')
+      return (
+        <>
+          <Text>agent body</Text>
+          <Text testID="chrome">
+            {`top ${chrome.top} bottom ${chrome.bottom} composer ${chrome.composer.start}/${chrome.composer.bottom}`}
+          </Text>
+          {[0, 400, 300, 100].map((offset) => (
+            <Pressable key={offset} onPress={() => chrome.onTimelineScroll(offset)}>
+              <Text>{`scroll ${offset}`}</Text>
+            </Pressable>
+          ))}
+        </>
+      )
+    }
+    return props.phone?.(mockAgent.nav!, <Body />) ?? null
+  }
+}))
+jest.mock('../chat/ChatControls', () => ({
+  ChatControls: (props: { variant?: string; mode: string }) => {
+    const { Text } = jest.requireActual('react-native')
+    return <Text>{`chat controls ${props.variant} ${props.mode}`}</Text>
+  }
+}))
 
 const COLUMNS = [
   { id: 'todo', label: 'To do', color: 'col-blue', position: 0, category: 'unstarted' as const },
@@ -97,40 +173,43 @@ function rowFrom(hub: typeof workHub, board: BoardData): TaskRow {
 async function show(
   answers: Parameters<typeof serveTaskHub>[2] = {},
   board = boardWith(),
-  segment: InfoSegment = 'details'
+  segment: TaskSegment = 'details',
+  agent: Partial<AgentNav> = {}
 ) {
   const work = serveTaskHub(mockHubs, workHub.id, answers)
   const home = serveTaskHub(mockHubs, homeHub.id)
   mockFeeds.list = [feedOf(homeHub, boardOf({})), feedOf(workHub, board)]
+  mockAgent.nav = agentNav(agent)
   const onDeleted = jest.fn()
   const onOpenTask = jest.fn()
   const onSegment = jest.fn()
-  const onClose = jest.fn()
-  const props = (b: BoardData, shown: InfoSegment = segment): TaskInfoSheetProps => ({
+  const onBack = jest.fn()
+  const props = (b: BoardData, shown: TaskSegment = segment): TaskPageProps => ({
     row: rowFrom(workHub, b),
     feed: feedOf(workHub, b),
     session: { entry: hubEntryOf(workHub.label), token: 't' } as never,
     showHub: true,
+    wide: false,
     segment: shown,
     onSegment,
-    onClose,
+    onBack,
     onDeleted,
     onOpenTask,
     onOpenArtifact: jest.fn()
   })
-  const view = await render(<TaskInfoSheet {...props(board)} />)
+  const view = await render(<TaskPage {...props(board)} />)
   // The blockers load (`task.getBlockers`) settles before the test acts.
   if (segment === 'details')
     await waitFor(() => expect(work.some((c) => c.path === 'task.getBlockers')).toBe(true))
   await act(async () => undefined)
   const rerender = async (next: BoardData) => {
     mockFeeds.list = [feedOf(homeHub, boardOf({})), feedOf(workHub, next)]
-    await view.rerender(<TaskInfoSheet {...props(next)} />)
+    await view.rerender(<TaskPage {...props(next)} />)
   }
-  const showSegment = async (next: InfoSegment) => {
-    await view.rerender(<TaskInfoSheet {...props(board, next)} />)
+  const showSegment = async (next: TaskSegment) => {
+    await view.rerender(<TaskPage {...props(board, next)} />)
   }
-  return { work, home, onDeleted, onOpenTask, onSegment, onClose, rerender, showSegment }
+  return { work, home, onDeleted, onOpenTask, onSegment, onBack, rerender, showSegment }
 }
 
 const user = () => userEvent.setup()
@@ -150,9 +229,10 @@ function answerAlert(label: string) {
 beforeEach(() => {
   jest.restoreAllMocks()
   mockRouter.push.mockClear()
+  mockAgent.mounts = 0
 })
 
-describe('TaskInfoSheet fields', () => {
+describe("the Details tab: the task's fields", () => {
   it("shows the task's fields: title, status in its project's words, priority, due date, project, hub", async () => {
     await show({}, boardWith({ due_date: '2999-01-02' }))
     expect(screen.getByDisplayValue('Write spec')).toBeOnTheScreen()
@@ -173,14 +253,6 @@ describe('TaskInfoSheet fields', () => {
     )
   })
 
-  it('switches between Details and Artifacts (with how many)', async () => {
-    const { onSegment } = await show()
-    expect(screen.queryByTestId('segment-agent')).toBeNull()
-    expect(screen.getByTestId('segment-artifacts')).toHaveTextContent('Artifacts 2')
-    await user().press(screen.getByTestId('segment-artifacts'))
-    expect(onSegment).toHaveBeenCalledWith('artifacts')
-  })
-
   it('keeps Details mounted while Artifacts shows (an edit in progress survives)', async () => {
     const { showSegment } = await show()
     await showSegment('artifacts')
@@ -196,19 +268,6 @@ describe('TaskInfoSheet fields', () => {
     await show({}, boardWith(), 'artifacts')
     expect(screen.getByText('artifact list')).toBeOnTheScreen()
     expect(screen.queryByTestId('task-details', { includeHiddenElements: true })).toBeNull()
-  })
-
-  it("mounts as one native view, so the sheet can't find (and resize) the Details scroll view", async () => {
-    // react-native-screens' formSheet resizes a scroll view it finds among the sheet
-    // content's top native views to the whole sheet — over the title and segments.
-    await show()
-    expect(screen.getByTestId('task-info-sheet')).toHaveProp('collapsable', false)
-  })
-
-  it('Done closes the sheet', async () => {
-    const { onClose } = await show()
-    await user().press(screen.getByLabelText('Done'))
-    expect(onClose).toHaveBeenCalled()
   })
 
   it('the due date under the title reads as a day, not a raw date', async () => {
@@ -288,13 +347,13 @@ describe('TaskInfoSheet fields', () => {
   })
 })
 
-/** Opens the ⋯ menu, then presses `label` in it. */
+/** Opens the agent card from the status island, then presses `label` in it. */
 async function menu(label: string) {
-  await user().press(screen.getByTestId('task-menu'))
-  await user().press(within(screen.getByTestId('task-menu-sheet')).getByText(label))
+  await user().press(screen.getByTestId('status-island'))
+  await user().press(within(screen.getByTestId('agent-card')).getByText(label))
 }
 
-describe('TaskInfoSheet ⋯: archive and delete', () => {
+describe("the agent card: the task's actions (archive, delete …)", () => {
   it('archives after asking', async () => {
     const { work } = await show()
     const alert = answerAlert('Archive')
@@ -330,8 +389,8 @@ describe('TaskInfoSheet ⋯: archive and delete', () => {
 
   it('a regular task has no Keep as task', async () => {
     await show()
-    await user().press(screen.getByTestId('task-menu'))
-    expect(within(screen.getByTestId('task-menu-sheet')).queryByText('Keep as task')).toBeNull()
+    await user().press(screen.getByTestId('status-island'))
+    expect(within(screen.getByTestId('agent-card')).queryByText('Keep as task')).toBeNull()
   })
 
   it('deletes after asking, then leaves', async () => {
@@ -362,7 +421,7 @@ describe('TaskInfoSheet ⋯: archive and delete', () => {
   })
 })
 
-describe('TaskInfoSheet sub-tasks', () => {
+describe('the Details tab: sub-tasks', () => {
   it('lists the sub-tasks and opens one', async () => {
     const { onOpenTask } = await show()
     expect(screen.getByText('Sub-tasks · 0/1')).toBeOnTheScreen()
@@ -406,7 +465,7 @@ describe('TaskInfoSheet sub-tasks', () => {
   })
 })
 
-describe('TaskInfoSheet tags', () => {
+describe('the Details tab: tags', () => {
   it("offers the project's tags and toggles one", async () => {
     const { work } = await show()
     // In the sheet's header and in the Details list.
@@ -423,7 +482,7 @@ describe('TaskInfoSheet tags', () => {
   })
 })
 
-describe('TaskInfoSheet blockers', () => {
+describe('the Details tab: blockers', () => {
   it('lists blockers, removes one', async () => {
     const { work } = await show({
       'task.getBlockers': () => [taskOf('other', { title: 'Other work' })]
@@ -475,5 +534,162 @@ describe('TaskInfoSheet blockers', () => {
         input: { id: 't1', isBlocked: false, blockedComment: null }
       })
     )
+  })
+})
+
+describe('the top bar and the status island', () => {
+  it('back, the title (a tap shows Details), the island with the agent’s state', async () => {
+    const { onBack, onSegment } = await show({}, boardWith(), 'agent')
+    expect(screen.getByText('agent body')).toBeOnTheScreen()
+    expect(screen.getByTestId('task-title')).toHaveTextContent('Write spec')
+    expect(screen.getByTestId('task-title').props.numberOfLines).toBe(1)
+    expect(screen.getByTestId('status-island-label')).toHaveTextContent('Idle')
+    await user().press(screen.getByLabelText('Write spec'))
+    expect(onSegment).toHaveBeenCalledWith('details')
+    await user().press(screen.getByLabelText('Back to Home'))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('says “Needs you” while a chat waits for the user', async () => {
+    await show({}, boardWith(), 'agent', { waiting: true })
+    expect(screen.getByTestId('status-island-label')).toHaveTextContent('Needs you')
+    expect(screen.getByTestId('status-island').props.accessibilityLabel).toBe(
+      'Claude Chat: needs you'
+    )
+  })
+
+  it('Start is in the island while offered; Stop while the agent works', async () => {
+    const start = jest.fn()
+    await show({}, boardWith(), 'agent', { start })
+    expect(screen.queryByLabelText('Stop the agent')).toBeNull()
+    await user().press(screen.getByLabelText('Start the agent'))
+    expect(start).toHaveBeenCalled()
+  })
+
+  it('Stop is in the island while the agent works', async () => {
+    const stop = jest.fn()
+    await show({}, boardWith(), 'agent', { stop, working: true, stateLabel: 'Active' })
+    expect(screen.queryByLabelText('Start the agent')).toBeNull()
+    await user().press(screen.getByLabelText('Stop the agent'))
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it('says what failed under the bar', async () => {
+    const { Text } = jest.requireActual('react-native')
+    await show({}, boardWith(), 'agent', { problems: <Text>Couldn’t start the agent.</Text> })
+    expect(screen.getByText('Couldn’t start the agent.')).toBeOnTheScreen()
+  })
+})
+
+describe('the agent card (the island opened)', () => {
+  it('shows the agent and everything to do with it; an action closes the card, then runs', async () => {
+    await show({}, boardWith(), 'agent')
+    await user().press(screen.getByTestId('status-island'))
+    expect(mockAgent.nav!.onOpen).toHaveBeenCalled()
+    const card = within(screen.getByTestId('agent-card'))
+    expect(card.getByTestId('agent-card-provider')).toHaveTextContent('Claude Chat')
+    expect(card.getByTestId('agent-card-status')).toHaveTextContent('Idle · Unread')
+    for (const label of ['Restart', 'New conversation', 'Stop agent', 'Provider', 'Archive'])
+      expect(card.getByText(label)).toBeOnTheScreen()
+    await user().press(card.getByText('New conversation'))
+    expect(mockAgent.nav!.actions[1]!.onPress).toHaveBeenCalled()
+    expect(screen.queryByTestId('agent-card')).toBeNull()
+  })
+
+  it('Provider folds out the providers; one is picked', async () => {
+    await show({}, boardWith(), 'agent')
+    await user().press(screen.getByTestId('status-island'))
+    const card = within(screen.getByTestId('agent-card'))
+    expect(card.queryByTestId('agent-card-providers')).toBeNull()
+    await user().press(card.getByLabelText('Provider'))
+    await user().press(within(card.getByTestId('agent-card-providers')).getByText('Codex Chat'))
+    expect(mockAgent.nav!.switchProvider).toHaveBeenCalledWith('codex-chat')
+  })
+
+  it("a chat's mode, model and effort are tiles in the card (none in the composer)", async () => {
+    await show({}, boardWith(), 'agent', {
+      controls: { mode: 'claude-chat', settings: {}, models: {}, waiting: false } as never
+    })
+    await user().press(screen.getByTestId('status-island'))
+    expect(
+      within(screen.getByTestId('agent-card')).getByText('chat controls tiles claude-chat')
+    ).toBeOnTheScreen()
+  })
+
+  it("a terminal's text actions are listed apart", async () => {
+    await show({}, boardWith(), 'agent', {
+      controls: null,
+      actions: [
+        {
+          name: 'Copy screen text',
+          label: 'Copy screen text',
+          kind: 'terminal',
+          onPress: jest.fn()
+        }
+      ]
+    })
+    await user().press(screen.getByTestId('status-island'))
+    const card = within(screen.getByTestId('agent-card'))
+    expect(card.getByText('Terminal')).toBeOnTheScreen()
+    expect(card.getByText('Copy screen text')).toBeOnTheScreen()
+  })
+})
+
+describe('the tab bar', () => {
+  it('Agent · Details · Artifacts (with how many); a tap shows one', async () => {
+    const { onSegment } = await show({}, boardWith(), 'agent')
+    expect(screen.getByTestId('tab-agent')).toHaveTextContent('Agent')
+    expect(screen.getByTestId('tab-agent')).toBeSelected()
+    expect(screen.getByTestId('tab-artifacts')).toHaveTextContent('Artifacts 2')
+    await user().press(screen.getByTestId('tab-artifacts'))
+    expect(onSegment).toHaveBeenCalledWith('artifacts')
+  })
+
+  it('marks the Agent tab while the agent needs the user and another tab shows', async () => {
+    await show()
+    expect(screen.getByTestId('tab-agent').props.accessibilityLabel).toBe('Agent, needs you')
+  })
+
+  it('keeps the agent mounted whatever tab shows (its draft and terminal survive)', async () => {
+    const { showSegment } = await show({}, boardWith(), 'agent')
+    await showSegment('details')
+    expect(screen.queryByText('agent body')).toBeNull()
+    expect(screen.getByText('agent body', { includeHiddenElements: true })).toBeTruthy()
+    await showSegment('artifacts')
+    await showSegment('agent')
+    expect(screen.getByText('agent body')).toBeOnTheScreen()
+    expect(mockAgent.mounts).toBe(1)
+  })
+})
+
+describe('compact bars while reading back', () => {
+  it('reading back in the chat makes the bars compact; back at the newest they return', async () => {
+    await show({}, boardWith(), 'agent')
+    expect(screen.getByTestId('chrome')).toHaveTextContent('top 56 bottom 74 composer 16/74')
+    await user().press(screen.getByText('scroll 400'))
+    expect(screen.queryByTestId('task-title')).toBeNull()
+    expect(screen.queryByTestId('task-tabs')).toBeNull()
+    expect(screen.getByTestId('task-tabs-compact')).toBeOnTheScreen()
+    // The composer sits beside the tab bar's one button.
+    expect(screen.getByTestId('chrome')).toHaveTextContent('top 44 bottom 66 composer 78/6')
+    await user().press(screen.getByText('scroll 300'))
+    expect(screen.getByTestId('task-tabs-compact')).toBeOnTheScreen()
+    await user().press(screen.getByText('scroll 0'))
+    expect(screen.getByTestId('task-title')).toBeOnTheScreen()
+    expect(screen.getByTestId('task-tabs')).toBeOnTheScreen()
+  })
+
+  it('the compact button brings the tab bar back', async () => {
+    await show({}, boardWith(), 'agent')
+    await user().press(screen.getByText('scroll 400'))
+    await user().press(screen.getByTestId('task-tabs-compact'))
+    expect(screen.getByTestId('task-tabs')).toBeOnTheScreen()
+  })
+
+  it('scrolling back towards the newest by a good way brings them back too', async () => {
+    await show({}, boardWith(), 'agent')
+    await user().press(screen.getByText('scroll 400'))
+    await user().press(screen.getByText('scroll 100'))
+    expect(screen.getByTestId('task-tabs')).toBeOnTheScreen()
   })
 })

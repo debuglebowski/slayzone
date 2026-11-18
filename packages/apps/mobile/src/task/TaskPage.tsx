@@ -1,13 +1,12 @@
 /**
  * One task, managed entirely from here — desktop's task page.
  *
- * Phone: the page is the conversation. A compact nav bar — ‹ back to the board, the
- * title (one line) with the agent under it ("<provider> · <state>"; a tap opens the
- * agent menu: provider, every action), Start while the agent offers it, and
- * ⓘ, which opens Details / Artifacts as a sheet (`TaskInfoSheet`, its own route: the
- * page stays mounted under it, so a draft, a running terminal or an upload survive) —
- * then the agent, full height (the chat, its controls one model pill in the composer;
- * or the terminal).
+ * Phone (`PhoneTaskPage`): the page is the agent — the chat or the terminal, full height
+ * — under a floating glass top bar (‹ back, the title, the status island: the agent's
+ * state, Stop / Start, a tap opening the agent card with the agent's controls and the
+ * task's actions) and over a floating tab bar (Agent · Details · Artifacts, the part
+ * shown in the route's `segment`), a chat's composer on it. The app's own tab bar is
+ * hidden meanwhile (the route).
  *
  * iPad (`wide`): the header — ‹ back, ⋯ (mark unread, archive, delete), the status icon
  * (tap: change status), the title (edit in place), priority, tags and due date under it
@@ -21,7 +20,7 @@ import type { HubSession } from '../hub-session'
 import { HubScope } from '@slayzone/transport/client'
 import { type ReactNode, useMemo, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
-import { type AgentNav, AgentPanel } from '../agents/AgentPanel'
+import { AgentPanel } from '../agents/AgentPanel'
 import { hubTarget } from '../artifacts/hub-rest'
 import { ArtifactsScreen } from '../artifacts/ArtifactsScreen'
 import { useTaskArtifacts } from '../artifacts/use-task-artifacts'
@@ -30,7 +29,7 @@ import type { HubFeed, TaskRow } from '../hub-board'
 import { useFieldSheets } from '../task-edit/TaskFields'
 import { useTaskWrites } from '../task-edit/use-task-writes'
 import { type ChromeColors, useTheme } from '../theme'
-import { AgentDot } from '../ui-kit/TaskGlyphs'
+import { PhoneTaskPage } from './PhoneTaskPage'
 import {
   artifactsLabel,
   DetailsPanel,
@@ -43,7 +42,7 @@ import {
 
 export type TaskSegment = 'agent' | 'details' | 'artifacts'
 export const TASK_SEGMENTS: readonly TaskSegment[] = ['agent', 'details', 'artifacts']
-/** The parts of the phone's Details / Artifacts sheet (and the iPad's right pane). */
+/** The parts of the iPad's right pane. */
 export type InfoSegment = Exclude<TaskSegment, 'agent'>
 export const INFO_SEGMENTS: readonly InfoSegment[] = ['details', 'artifacts']
 
@@ -55,11 +54,9 @@ export interface TaskPageProps {
   showHub: boolean
   /** iPad: Agent and Details side by side. */
   wide: boolean
-  /** iPad: the part shown in the right pane (`agent`: Details). */
+  /** The part shown: phone, the tab; iPad, the right pane's (`agent`: Details). */
   segment: TaskSegment
   onSegment: (segment: TaskSegment) => void
-  /** Phone: open the Details / Artifacts sheet on that part. */
-  onOpenInfo?: (segment: InfoSegment) => void
   /** Back to the board; absent = no back (an iPad tab). */
   onBack?: () => void
   onDeleted: () => void
@@ -77,10 +74,12 @@ export function TaskPage(props: TaskPageProps) {
   )
 }
 
-/** Phone: the nav bar, then the agent. */
+/** Phone: the agent, the floating chrome around it, Details and Artifacts as tabs. */
 function PhonePage(props: TaskPageProps) {
   const { row } = props
   const styles = makeStyles(useTheme())
+  const writes = useTaskWrites(row.task)
+  const fields = useFieldSheets(row, writes)
   const uploadTarget = useMemo(() => hubTarget(props.session), [props.session])
   return (
     <View style={styles.screen} testID="task-page">
@@ -88,98 +87,14 @@ function PhonePage(props: TaskPageProps) {
         <AgentPanel
           hubId={row.hubId}
           feed={props.feed}
-          row={row}
+          row={{ ...row, task: writes.task }}
           showHub={props.showHub}
-          nav={(agent) => <NavBar {...props} agent={agent} />}
+          phone={(agent, body) => (
+            <PhoneTaskPage page={props} agent={agent} body={body} writes={writes} fields={fields} />
+          )}
         />
       </ChatUploadTargetContext.Provider>
-    </View>
-  )
-}
-
-/** A nav-bar button: 44pt, a glyph in a circle. */
-const NAV_BUTTON = 44
-/** The nav bar's words grow with Dynamic Type, but not past what one line holds. */
-const NAV_MAX_SCALE = 1.3
-
-function NavBar({ row, onBack, onOpenInfo, agent }: TaskPageProps & { agent: AgentNav }) {
-  const theme = useTheme()
-  const styles = makeStyles(theme)
-  const line = `${agent.provider} · ${agent.status}`
-  const project = row.project?.name ?? 'the board'
-  return (
-    <View style={styles.nav}>
-      {onBack ? (
-        <Pressable
-          onPress={onBack}
-          accessibilityRole="button"
-          accessibilityLabel={`Back to ${project}`}
-          style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.navGlyph} maxFontSizeMultiplier={NAV_MAX_SCALE}>
-            ‹
-          </Text>
-        </Pressable>
-      ) : (
-        <View style={styles.navSpacer} />
-      )}
-      <Pressable
-        onPress={agent.openMenu}
-        accessibilityRole="button"
-        accessibilityLabel={`${row.task.title}, ${line}`}
-        accessibilityHint="Opens the agent menu."
-        style={({ pressed }) => [styles.navTitle, pressed && styles.pressed]}
-      >
-        <Text
-          testID="task-title"
-          style={styles.title}
-          numberOfLines={1}
-          maxFontSizeMultiplier={NAV_MAX_SCALE}
-        >
-          {row.task.title}
-        </Text>
-        <View style={styles.agentLine}>
-          {agent.dot ? <AgentDot kind={agent.dot} size={7} /> : null}
-          <Text
-            testID="task-agent-line"
-            style={styles.agentText}
-            numberOfLines={1}
-            maxFontSizeMultiplier={NAV_MAX_SCALE}
-          >
-            {line}
-          </Text>
-          <Text style={styles.agentText} maxFontSizeMultiplier={NAV_MAX_SCALE}>
-            ⌄
-          </Text>
-        </View>
-      </Pressable>
-      {agent.start ? (
-        <Pressable
-          onPress={agent.start}
-          accessibilityRole="button"
-          accessibilityLabel="Start the agent"
-          style={({ pressed }) => [styles.start, pressed && styles.pressed]}
-        >
-          <Text style={styles.startText} maxFontSizeMultiplier={NAV_MAX_SCALE}>
-            Start
-          </Text>
-        </Pressable>
-      ) : null}
-      {onOpenInfo ? (
-        <Pressable
-          onPress={() => onOpenInfo('details')}
-          accessibilityRole="button"
-          accessibilityLabel="Details and artifacts"
-          testID="task-info"
-          style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.infoGlyph} maxFontSizeMultiplier={NAV_MAX_SCALE}>
-            ⓘ
-          </Text>
-        </Pressable>
-      ) : (
-        <View style={styles.navSpacer} />
-      )}
+      {fields.sheets}
     </View>
   )
 }
@@ -295,42 +210,6 @@ const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.background },
     flex: { flex: 1 },
-    pressed: { opacity: 0.6 },
-    nav: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: 6,
-      minHeight: NAV_BUTTON + 4,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: t.border
-    },
-    navButton: {
-      width: NAV_BUTTON,
-      height: NAV_BUTTON,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: NAV_BUTTON / 2
-    },
-    navSpacer: { width: NAV_BUTTON },
-    navGlyph: { fontSize: 30, lineHeight: 34, color: t.primary, fontWeight: '400' },
-    infoGlyph: { fontSize: 22, color: t.primary },
-    navTitle: {
-      flex: 1,
-      minHeight: NAV_BUTTON,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 4
-    },
-    title: { fontSize: 16, fontWeight: '600', color: t.foreground },
-    agentLine: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%' },
-    agentText: { flexShrink: 1, fontSize: 12, color: t.mutedForeground },
-    start: {
-      minHeight: NAV_BUTTON,
-      justifyContent: 'center',
-      paddingHorizontal: 12
-    },
-    startText: { fontSize: 15, fontWeight: '600', color: t.primary },
     header: {
       flexDirection: 'row',
       alignItems: 'center',

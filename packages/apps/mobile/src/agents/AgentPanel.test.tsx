@@ -1,7 +1,8 @@
 import type { TerminalState } from '@slayzone/terminal-contracts'
 import { EMPTY_TERMINAL_STATE } from '@slayzone/terminal/terminal-state'
 import { act, render, screen, userEvent, waitFor, within } from '@testing-library/react-native'
-import { Alert, Pressable, Text } from 'react-native'
+import type { ReactNode } from 'react'
+import { Alert, Pressable, Text, View } from 'react-native'
 import { type BoardData, type BoardTask, findTaskRow, type HubFeed } from '../hub-board'
 import { hubEntryOf } from '../hub-session'
 import { trpcTest } from '../testing'
@@ -59,8 +60,14 @@ jest.mock('../chat', () => ({
     tabId: string
     mode: string
     controls?: string
+    onChrome?: (chrome: unknown) => void
   }) => {
     const { Text: T } = jest.requireActual('react-native')
+    const { useEffect: effect } = jest.requireActual('react')
+    // A chat that waits for the user's answer, its controls handed to the page.
+    effect(() => {
+      props.onChrome?.({ mode: props.mode, settings: {}, models: {}, waiting: true })
+    }, [props.onChrome, props.mode])
     return (
       <>
         <T testID="chat">{`chat ${props.hubId} ${props.taskId} ${props.tabId} ${props.mode}`}</T>
@@ -455,19 +462,40 @@ describe('AgentPanel', () => {
   })
 })
 
-/** The phone task page's nav bar, as a stand-in: what the panel hands it. */
-function NavStub({ agent }: { agent: AgentNav }) {
+/** The phone task page, as a stand-in: what the panel hands it, the body under it. */
+function PageStub({ agent, body }: { agent: AgentNav; body: ReactNode }) {
   return (
     <>
-      <Text testID="nav">{`${agent.provider} · ${agent.status}${agent.busy ? ' · busy' : ''}`}</Text>
-      <Pressable accessibilityRole="button" onPress={agent.openMenu}>
-        <Text>open agent menu</Text>
-      </Pressable>
+      <Text testID="page-agent">{`${agent.provider} · ${agent.stateLabel} · ${agent.status}${agent.busy ? ' · busy' : ''}${agent.waiting ? ' · waiting' : ''}${agent.controls ? ' · controls' : ''}`}</Text>
       {agent.start ? (
         <Pressable accessibilityRole="button" onPress={agent.start}>
-          <Text>nav start</Text>
+          <Text>page start</Text>
         </Pressable>
       ) : null}
+      {agent.stop ? (
+        <Pressable accessibilityRole="button" onPress={agent.stop}>
+          <Text>page stop</Text>
+        </Pressable>
+      ) : null}
+      <View testID="page-actions">
+        {agent.actions.map((a) => (
+          <Pressable key={a.name} accessibilityRole="button" onPress={a.onPress}>
+            <Text>{`${a.label} (${a.kind}${a.destructive ? ', destructive' : ''})`}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View testID="page-providers">
+        {agent.providers.map((p) => (
+          <Pressable
+            key={p.id}
+            accessibilityRole="button"
+            onPress={() => agent.switchProvider(p.id)}
+          >
+            <Text>{p.id === agent.providerId ? `${p.label} ✓` : p.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {body}
     </>
   )
 }
@@ -479,54 +507,49 @@ function renderPage(feed: HubFeed, b: ReturnType<typeof backend>) {
       feed={feed}
       row={findTaskRow(feed, 't')!}
       showHub={false}
-      nav={(agent) => <NavStub agent={agent} />}
+      phone={(agent, body) => <PageStub agent={agent} body={body} />}
     />,
     { wrapper: b.wrapper }
   )
 }
 
-/** Opens the agent menu from the nav bar, then presses `label` in it. */
-async function agentMenu(label: string) {
-  const user = userEvent.setup()
-  await user.press(screen.getByText('open agent menu'))
-  await user.press(within(screen.getByTestId('agent-menu')).getByText(label))
+/** Presses the action labelled `label` (as the stand-in writes it). */
+async function action(label: string) {
+  await userEvent.setup().press(within(screen.getByTestId('page-actions')).getByText(label))
 }
 
-describe('AgentPanel on the phone task page (its bar is the nav bar)', () => {
-  it('hands the nav its provider and state; no bar or ⋯ of its own', async () => {
+describe('AgentPanel on the phone task page (the page draws the agent)', () => {
+  it('hands the page its provider and state, and its body; no bar or ⋯ of its own', async () => {
     const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
     await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }, { 't:t': 2 }), b)
     await waitFor(() =>
-      expect(screen.getByTestId('nav')).toHaveTextContent(
-        'Claude Code · Active · 2 background jobs'
+      expect(screen.getByTestId('page-agent')).toHaveTextContent(
+        'Claude Code · Active · Active · 2 background jobs'
       )
     )
     expect(screen.queryByLabelText('More agent actions')).toBeNull()
     expect(screen.queryByLabelText('Change provider')).toBeNull()
-    expect(screen.queryByText('Stop')).toBeNull()
-    expect(screen.queryByText('Terminal')).toBeNull()
+    expect(screen.queryByTestId('agent-menu')).toBeNull()
     expect(await screen.findByText('terminal t:t live')).toBeOnTheScreen()
   })
 
-  it('every action is in the agent menu; Stop asks first', async () => {
+  it('hands over every action, the terminal’s apart; Stop asks first', async () => {
     const b = backend()
     const alert = confirmAll()
     await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
-    await userEvent.setup().press(screen.getByText('open agent menu'))
-    const menu = within(screen.getByTestId('agent-menu'))
+    const actions = within(screen.getByTestId('page-actions'))
     for (const label of [
-      'Provider',
-      'Interrupt',
-      'Stop agent',
-      'Restart',
-      'New conversation',
-      'Copy screen text',
-      'Copy all output',
-      'Share all output…',
-      'Fit text to width'
+      'Interrupt (lifecycle)',
+      'Stop agent (lifecycle, destructive)',
+      'Restart (lifecycle)',
+      'New conversation (lifecycle)',
+      'Copy screen text (terminal)',
+      'Copy all output (terminal)',
+      'Share all output… (terminal)',
+      'Fit text to width (terminal)'
     ])
-      expect(menu.getByText(label)).toBeOnTheScreen()
-    await userEvent.setup().press(menu.getByText('Stop agent'))
+      expect(actions.getByText(label)).toBeOnTheScreen()
+    await action('Stop agent (lifecycle, destructive)')
     expect(alert).toHaveBeenCalled()
     await waitFor(() => expect(b.calls).toEqual([['pty.kill', { sessionId: 't:t' }]]))
   })
@@ -535,49 +558,59 @@ describe('AgentPanel on the phone task page (its bar is the nav bar)', () => {
     const b = backend()
     confirmAll()
     await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
-    await agentMenu('New conversation')
+    await action('New conversation (lifecycle)')
     await waitFor(() =>
       expect(b.paths()).toEqual(['pty.kill', 'task.resetConversation', 'task.startMainAgent'])
     )
-    await agentMenu('Restart')
+    await action('Restart (lifecycle)')
     await waitFor(() => expect(b.paths().slice(3)).toEqual(['pty.kill', 'task.startMainAgent']))
   })
 
-  it("the terminal's copy, share and text size are in the menu", async () => {
+  it("the terminal's copy, share and text size work from the page", async () => {
     const b = backend()
     await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
-    await agentMenu('Copy screen text')
-    await agentMenu('Copy all output')
-    await agentMenu('Share all output…')
-    await agentMenu('Fit text to width')
+    await action('Copy screen text (terminal)')
+    await action('Copy all output (terminal)')
+    await action('Share all output… (terminal)')
+    await action('Fit text to width (terminal)')
     expect(mockTerminal.calls).toEqual(['copy screen', 'copy all', 'share all', 'toggle text size'])
   })
 
-  it('Start stays up front (in the nav) while offered, and in the menu', async () => {
+  it('Start is up front while offered', async () => {
     const b = backend()
     await renderPage(feedOf(taskOf(), { 't:t': 'dead' }), b)
-    await userEvent.setup().press(await screen.findByText('nav start'))
+    expect(screen.queryByText('page stop')).toBeNull()
+    await userEvent.setup().press(await screen.findByText('page start'))
     await waitFor(() => expect(b.calls).toEqual([['task.startMainAgent', { taskId: 't' }]]))
   })
 
-  it('no Start up front while the agent runs', async () => {
-    const b = backend()
-    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
-    await screen.findByText('terminal t:t live')
-    expect(screen.queryByText('nav start')).toBeNull()
-  })
-
-  it('switches the provider from the menu (after asking)', async () => {
+  it('Stop is up front while the agent works (asking first); no Start then', async () => {
     const b = backend()
     confirmAll()
     await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
-    const user = userEvent.setup()
-    await user.press(screen.getByText('open agent menu'))
-    const menu = within(screen.getByTestId('agent-menu'))
-    await user.press(menu.getByLabelText('Provider'))
-    await waitFor(() => expect(menu.getByText('Codex')).toBeOnTheScreen())
-    expect(menu.queryByText('Gemini')).toBeNull()
-    await user.press(menu.getByText('Codex'))
+    await screen.findByText('terminal t:t live')
+    expect(screen.queryByText('page start')).toBeNull()
+    await userEvent.setup().press(screen.getByText('page stop'))
+    await waitFor(() => expect(b.calls).toEqual([['pty.kill', { sessionId: 't:t' }]]))
+  })
+
+  it('idle, Stop is not up front (it is among the actions)', async () => {
+    const b = backend()
+    await renderPage(feedOf(taskOf(), { 't:t': 'idle' }), b)
+    await screen.findByText('terminal t:t live')
+    expect(screen.queryByText('page stop')).toBeNull()
+    expect(screen.getByText('Stop agent (lifecycle, destructive)')).toBeOnTheScreen()
+  })
+
+  it('switches the provider among the enabled ones (after asking)', async () => {
+    const b = backend()
+    confirmAll()
+    await renderPage(feedOf(taskOf(), { 't:t': 'running' }), b)
+    const providers = within(screen.getByTestId('page-providers'))
+    await waitFor(() => expect(providers.getByText('Codex')).toBeOnTheScreen())
+    expect(providers.getByText('Claude Code ✓')).toBeOnTheScreen()
+    expect(providers.queryByText('Gemini')).toBeNull()
+    await userEvent.setup().press(providers.getByText('Codex'))
     await waitFor(() =>
       expect(b.calls).toEqual([
         ['task.switchMode', { taskId: 't', mode: 'codex' }],
@@ -586,27 +619,26 @@ describe('AgentPanel on the phone task page (its bar is the nav bar)', () => {
     )
   })
 
-  it("the agent menu lists no agent tabs: the task's main agent only", async () => {
-    const b = backend([tab('t', 'claude-code', true), tab('side', 'terminal', false, 1)])
-    await renderPage(feedOf(taskOf(), { 't:t': 'running', 't:side': 'idle' }), b)
-    expect(await screen.findByText('terminal t:t live')).toBeOnTheScreen()
-    await userEvent.setup().press(screen.getByText('open agent menu'))
-    const menu = within(screen.getByTestId('agent-menu'))
-    await waitFor(() => expect(menu.getByText('Provider')).toBeOnTheScreen())
-    expect(menu.queryByText('Agents')).toBeNull()
-    expect(menu.queryByText('Terminal')).toBeNull()
-  })
-
-  it("a chat's controls are one model pill (in the composer)", async () => {
+  it("a chat's controls go to the page, and whether it waits for the user", async () => {
     const b = backend([tab('t', 'claude-chat', true)])
     await renderPage(feedOf(taskOf({ agent_id: 'claude-chat' }), { 't:t': 'idle' }), b)
-    expect(await screen.findByText('chat controls pill')).toBeOnTheScreen()
+    expect(await screen.findByText('chat controls page')).toBeOnTheScreen()
+    await waitFor(() =>
+      expect(screen.getByTestId('page-agent')).toHaveTextContent(/· waiting · controls$/)
+    )
+  })
+
+  it('a terminal has no chat controls and never waits', async () => {
+    const b = backend()
+    await renderPage(feedOf(taskOf(), { 't:t': 'idle' }), b)
+    await screen.findByText('terminal t:t live')
+    expect(screen.getByTestId('page-agent')).not.toHaveTextContent(/waiting|controls/)
   })
 
   it('in the panel (iPad) the chat keeps its chips', async () => {
     const b = backend([tab('t', 'claude-chat', true)])
     await renderScreen(feedOf(taskOf({ agent_id: 'claude-chat' }), { 't:t': 'idle' }), b)
     await screen.findByTestId('chat')
-    expect(screen.queryByText('chat controls pill')).toBeNull()
+    expect(screen.queryByText(/chat controls/)).toBeNull()
   })
 })

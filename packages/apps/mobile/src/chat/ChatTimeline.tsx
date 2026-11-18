@@ -10,6 +10,11 @@
  * scrolled up, the rows in view stay put and a ↓ pill jumps back to the newest. What the
  * user opened stays open when the list recycles a row; a long press on a message offers
  * to copy or share it.
+ *
+ * Under a floating bar (the phone task page's top bar, `topInset`) the rows scroll under
+ * it and the oldest stops below it; how far the list is from its newest row is reported
+ * as it scrolls (`onScrollFromNewest`: the page makes its bars compact while the user
+ * reads back).
  */
 import { type ChatTimelineState, deriveLoadingLabel } from '@slayzone/terminal/reducer'
 import { useCallback, useMemo, useRef, useState } from 'react'
@@ -44,25 +49,38 @@ export function ChatTimeline({
   state,
   hydrating,
   working,
-  emptyText
+  emptyText,
+  topInset = 0,
+  onScrollFromNewest
 }: {
   state: ChatTimelineState
   hydrating: boolean
   /** A turn runs and the agent is not waiting for the user. */
   working: boolean
   emptyText: string
+  /** How far a bar floating over the list's top reaches into it (pt). */
+  topInset?: number
+  /** The list scrolled: how far it is from its newest row (pt). */
+  onScrollFromNewest?: (offset: number) => void
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
   const list = useRef<FlatList<Row>>(null)
   const [away, setAway] = useState(false)
-  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const far = e.nativeEvent.contentOffset.y > PILL_OFFSET
-    setAway((prev) => (prev === far ? prev : far))
-  }, [])
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Inverted: the offset grows from the newest row (0) back into the history.
+      const offset = e.nativeEvent.contentOffset.y
+      const far = offset > PILL_OFFSET
+      setAway((prev) => (prev === far ? prev : far))
+      onScrollFromNewest?.(offset)
+    },
+    [onScrollFromNewest]
+  )
   const jumpToLatest = useCallback(() => {
     list.current?.scrollToOffset({ offset: 0, animated: true })
     setAway(false)
-  }, [])
+    onScrollFromNewest?.(0)
+  }, [onScrollFromNewest])
   // The message a long press picked: its actions, then (Select text) its own screen.
   const [actionsFor, setActionsFor] = useState<string | null>(null)
   const [reading, setReading] = useState<string | null>(null)
@@ -118,7 +136,7 @@ export function ChatTimeline({
   }
   if (rows.length === 0 && !label) {
     return (
-      <View style={s.center}>
+      <View style={[s.center, { paddingTop: topInset }]}>
         <Text style={s.empty}>{emptyText}</Text>
       </View>
     )
@@ -147,6 +165,9 @@ export function ChatTimeline({
             ) : undefined
           }
           contentContainerStyle={s.content}
+          // Inverted, the list's footer is its top: the oldest row stops below the bar.
+          ListFooterComponent={topInset > 0 ? <View style={{ height: topInset }} /> : undefined}
+          scrollIndicatorInsets={topInset > 0 ? { bottom: topInset } : undefined}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           maintainVisibleContentPosition={MVCP}

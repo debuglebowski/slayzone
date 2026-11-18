@@ -2,8 +2,10 @@
  * A full chat view for one chat tab (`claude-chat` / `codex-chat`) of a task, built on
  * desktop's shared chat logic, not its DOM components: the timeline (desktop's reducer),
  * the composer with the `/` menu and the queue, the "waiting for you" dock, the mode /
- * model / effort chips (or, `controls="pill"`, one model pill in the composer), and the
- * background jobs. Rendered inside the `HubScope` of the
+ * model / effort chips (or, `controls="page"`, none: the page shows them, `onChrome`),
+ * and the background jobs.
+ * On the phone's task page (`useTaskChrome`) the timeline scrolls under the page's top
+ * bar and the composer floats on its tab bar. Rendered inside the `HubScope` of the
  * hub that owns the task (every call goes to that hub).
  *
  * First the tab's folder is resolved (`useChatCwd`): the hub keys a chat tab by it, so
@@ -14,6 +16,7 @@ import { useHubId } from '@slayzone/transport/client'
 import {
   chatCapabilitiesForMode,
   chatAvailabilityMessage,
+  type ChatModelsView,
   chatProviderForMode,
   type PermissionDecision
 } from '@slayzone/terminal-contracts'
@@ -33,6 +36,7 @@ import {
   useState
 } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { useTaskChrome } from '../task/task-chrome'
 import type { ChromeColors } from '../theme'
 import { BackgroundJobs } from './BackgroundJobs'
 import { ChatControls } from './ChatControls'
@@ -50,25 +54,40 @@ import { useChatCwd } from './useChatCwd'
 import { useChatQueue } from './useChatQueue'
 import { type ChatTarget, useChatSession } from './useChatSession'
 import { useChatModels } from './useChatModels'
-import { useChatSettings } from './useChatSettings'
+import { type ChatSettings, useChatSettings } from './useChatSettings'
+
+/** What a chat hands the page that shows its controls (`controls="page"`). */
+export interface ChatChrome {
+  /** The chat's agent mode (`claude-chat`, `codex-chat`). */
+  mode: string
+  settings: ChatSettings
+  models: ChatModelsView
+  /** The agent waits for the user's answer (a permission, a question, a plan). */
+  waiting: boolean
+}
 import { useSlashCommands } from './useSlashCommands'
+import { useStableCallback } from './useStableCallback'
 
 export function ChatSession({
   hubId,
   taskId,
   tabId,
   mode,
-  controls = 'chips'
+  controls = 'chips',
+  onChrome
 }: {
   hubId: string
   taskId: string
   tabId: string
   mode: string
   /**
-   * The mode / model / effort controls: `chips`, a row above the timeline; `pill`, the
-   * model alone in the composer (the rest behind its long press) — the phone task page.
+   * The mode / model / effort controls: `chips`, a row above the timeline; `page`,
+   * none — the page shows them from what `onChrome` hands it (the phone task page's
+   * agent card).
    */
-  controls?: 'chips' | 'pill'
+  controls?: 'chips' | 'page'
+  /** `controls="page"`: the chat's controls and whether it waits, whenever they change. */
+  onChrome?: (chrome: ChatChrome | null) => void
 }): JSX.Element {
   const { s, theme } = useThemedStyles(makeStyles)
   // Fail loud when mounted in another hub's scope: every call would go to that hub.
@@ -116,13 +135,23 @@ export function ChatSession({
           key={JSON.stringify([tabId, mode, cwd.cwd])}
           target={{ tabId, taskId, mode, cwd: cwd.cwd, providerFlagsOverride: null }}
           controls={controls}
+          {...(onChrome ? { onChrome } : {})}
         />
       )
   }
 }
 
-function ChatView({ target, controls }: { target: ChatTarget; controls: 'chips' | 'pill' }) {
+function ChatView({
+  target,
+  controls,
+  onChrome
+}: {
+  target: ChatTarget
+  controls: 'chips' | 'page'
+  onChrome?: (chrome: ChatChrome | null) => void
+}) {
   const { s } = useThemedStyles(makeStyles)
+  const chrome = useTaskChrome()
   const caps = chatCapabilitiesForMode(target.mode)
   const provider = chatProviderForMode(target.mode)
   const notice = useNotice()
@@ -263,13 +292,55 @@ function ChatView({ target, controls }: { target: ChatTarget; controls: 'chips' 
   const keyboard = useKeyboardOverlap(rootRef)
 
   const awaitingUser = caps.promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
+
+  // The page shows the controls: hand them over when what they show changes — a value
+  // the tiles show, not the settings object's identity (new every render).
+  const { changing } = settings
+  const shown = [
+    target.mode,
+    settings.mode,
+    settings.model,
+    settings.effort,
+    settings.collaboration,
+    settings.autoEligible,
+    settings.autoOptedIn,
+    changing.mode,
+    changing.model,
+    changing.effort,
+    changing.collaboration,
+    awaitingUser
+  ].join('\u0000')
+  const handOver = useStableCallback(() =>
+    onChrome?.({ mode: target.mode, settings, models, waiting: awaitingUser })
+  )
+  useEffect(() => {
+    handOver()
+  }, [handOver, shown, models])
+  useEffect(() => () => onChrome?.(null), [onChrome])
+  const agentName = provider.agent
+  const placeholder = chrome
+    ? session.inFlight
+      ? `Queue for ${agentName}…`
+      : state.timeline.length > 0
+        ? `Reply to ${agentName}…`
+        : `Message ${agentName}…`
+    : session.inFlight
+      ? 'Queue a message…'
+      : 'Message'
   return (
     <ChatViewContext.Provider value={view}>
       <LiveBlockStoreContext.Provider value={liveStore}>
         <View
           ref={rootRef}
           onLayout={keyboard.onLayout}
-          style={[s.root, keyboard.bottom > 0 && { paddingBottom: keyboard.bottom }]}
+          style={[
+            s.root,
+            keyboard.bottom > 0
+              ? { paddingBottom: keyboard.bottom }
+              : chrome
+                ? { paddingBottom: chrome.composer.bottom }
+                : null
+          ]}
           testID="chat-session"
         >
           {controls === 'chips' && (
@@ -281,6 +352,9 @@ function ChatView({ target, controls }: { target: ChatTarget; controls: 'chips' 
             hydrating={session.hydrating}
             working={session.inFlight && !awaitingUser}
             emptyText="Send a message to start."
+            {...(chrome
+              ? { topInset: chrome.top, onScrollFromNewest: chrome.onTimelineScroll }
+              : {})}
           />
           {codexPlanReview && (
             <CodexPlanPrompt
@@ -359,19 +433,18 @@ function ChatView({ target, controls }: { target: ChatTarget; controls: 'chips' 
             withdrawSteered={caps.withdrawSteered}
             cliLabel={provider.product}
             attach={attach}
-            accessory={
-              controls === 'pill' ? (
-                <ChatControls
-                  mode={target.mode}
-                  settings={settings}
-                  models={models}
-                  variant="pill"
-                />
-              ) : null
-            }
             inFlight={session.inFlight}
             disabled={session.hydrating || ended}
-            placeholder={session.inFlight ? 'Queue a message…' : 'Message'}
+            placeholder={placeholder}
+            {...(chrome
+              ? {
+                  floating: {
+                    start: chrome.composer.start,
+                    end: chrome.composer.end,
+                    keyboardUp: chrome.keyboardUp
+                  }
+                }
+              : {})}
           />
         </View>
       </LiveBlockStoreContext.Provider>

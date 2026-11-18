@@ -4,13 +4,13 @@
  * effort shows only for a model that has it, with that model's own levels. The chips
  * scroll sideways when they don't fit; the choices open in the app's bottom sheet.
  *
- * `pill` (the phone's task page, in the composer): the model alone, as one pill — a
- * tap picks the model; a long press (VoiceOver: its actions) lists the permission mode,
- * effort and collaboration mode, each opening its choices in the same sheet.
+ * `tiles` (the phone task page's agent card): every control as a tile — its name over
+ * its value — a tap folding its choices out under the tiles, in the card (the card is
+ * a pop-up of its own: a sheet could not open over it); a second tap folds them away.
  */
 import type { ChatModelsView } from '@slayzone/terminal-contracts'
 import { useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { BottomSheet } from '../ui-kit/Chrome'
 import {
@@ -27,8 +27,6 @@ import { useThemedStyles } from './styles'
 import type { ChatSettings } from './useChatSettings'
 
 type Picker = 'mode' | 'model' | 'effort' | 'collaboration'
-/** What a long press on the pill opens: every control but the model, by name. */
-type Opened = Picker | 'settings'
 
 export function ChatControls({
   mode,
@@ -39,11 +37,13 @@ export function ChatControls({
   mode: string
   settings: ChatSettings
   models: ChatModelsView
-  /** `chips`: the row of chips; `pill`: the model alone, the rest behind a long press. */
-  variant?: 'chips' | 'pill'
+  /**
+   * `chips`: the row of chips; `tiles`: every control as a tile (the agent card).
+   */
+  variant?: 'chips' | 'tiles'
 }) {
   const { s } = useThemedStyles(makeStyles)
-  const [picker, setPicker] = useState<Opened | null>(null)
+  const [picker, setPicker] = useState<Picker | null>(null)
   const showEffort = !!settings.model && models.supportsEffort(settings.model)
   const effortLevels = settings.model ? models.effortLevels(settings.model) : undefined
 
@@ -51,7 +51,7 @@ export function ChatControls({
   const modelText = modelChipLabel(models, settings.model)
   const effortText = effortLabel(settings.effort, effortLevels)
   const collaborationText = settings.collaboration === 'plan' ? 'Plan' : 'Default'
-  /** The controls behind the pill's long press, in the chips' order (the model first). */
+  /** Every control, in the chips' order (the model first): the tiles. */
   const controls: Array<{ picker: Picker; label: string; value: string; busy: boolean }> = [
     { picker: 'model', label: 'Model', value: modelText, busy: settings.changing.model },
     { picker: 'mode', label: 'Permission mode', value: modeText, busy: settings.changing.mode },
@@ -125,27 +125,6 @@ export function ChatControls({
       onClose={() => setPicker(null)}
       testID="chat-control-sheet"
     >
-      {picker === 'settings' ? (
-        <>
-          <Text style={s.sheetTitle}>Chat settings</Text>
-          {controls.map((o) => (
-            <Pressable
-              key={o.picker}
-              onPress={() => setPicker(o.picker)}
-              style={s.settingRow}
-              accessibilityRole="button"
-              accessibilityLabel={o.label}
-              accessibilityValue={{ text: o.value }}
-            >
-              <Text style={s.optionLabel}>{o.label}</Text>
-              <Text style={s.settingValue} numberOfLines={1}>
-                {o.value}
-                {o.busy ? '…' : ''} ›
-              </Text>
-            </Pressable>
-          ))}
-        </>
-      ) : null}
       {sheet && (
         <>
           <Text style={s.sheetTitle}>{sheet.title}</Text>
@@ -174,37 +153,61 @@ export function ChatControls({
     </BottomSheet>
   )
 
-  if (variant === 'pill') {
-    const busy = controls.some((o) => o.busy)
-    const actions = controls.filter((o) => o.picker !== 'model')
+  if (variant === 'tiles') {
     return (
-      <>
-        <Pressable
-          testID="chat-model-pill"
-          onPress={() => setPicker('model')}
-          onLongPress={() => setPicker('settings')}
-          hitSlop={PILL_SLOP}
-          style={[s.pill, busy && s.chipBusy]}
-          accessibilityRole="button"
-          accessibilityLabel={`Model: ${modelText}`}
-          accessibilityHint="Long press for the permission mode and effort."
-          accessibilityActions={[
-            { name: 'activate' },
-            ...actions.map((o) => ({ name: o.picker, label: o.label }))
-          ]}
-          onAccessibilityAction={(e) => {
-            const name = e.nativeEvent.actionName
-            const hit = actions.find((o) => o.picker === name)
-            setPicker(hit ? hit.picker : 'model')
-          }}
-        >
-          <Text style={s.pillText} numberOfLines={1} maxFontSizeMultiplier={PILL_MAX_SCALE}>
-            {modelText}
-            {busy ? '…' : ''} ▾
-          </Text>
-        </Pressable>
-        {choices}
-      </>
+      <View style={s.tilesWrap}>
+        <View style={s.tiles} testID="chat-control-tiles">
+          {controls.map((o) => {
+            const open = picker === o.picker
+            return (
+              <Pressable
+                key={o.picker}
+                onPress={() => setPicker(open ? null : o.picker)}
+                style={({ pressed }) => [
+                  s.tile,
+                  open && s.tileOpen,
+                  (o.busy || pressed) && s.chipBusy
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={o.label}
+                accessibilityValue={{ text: o.value }}
+                accessibilityState={{ expanded: open }}
+                testID={`chat-control-${o.picker}`}
+              >
+                <Text style={s.tileLabel} numberOfLines={1}>
+                  {TILE_LABELS[o.picker]}
+                </Text>
+                <Text style={s.tileValue} numberOfLines={2}>
+                  {o.value}
+                  {o.busy ? '…' : ''}
+                </Text>
+              </Pressable>
+            )
+          })}
+        </View>
+        {sheet ? (
+          <View style={s.inlineChoices} testID="chat-control-choices">
+            {sheet.options.length === 0 && sheet.hint ? (
+              <Text style={s.sheetHint}>{sheet.hint}</Text>
+            ) : null}
+            {sheet.options.map((o) => (
+              <Pressable
+                key={o.id}
+                onPress={() => {
+                  setPicker(null)
+                  sheet.pick(o.id)
+                }}
+                style={[s.option, o.id === sheet.value && s.optionOn]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: o.id === sheet.value }}
+              >
+                <Text style={s.optionLabel}>{o.label}</Text>
+                {o.description ? <Text style={s.optionDescription}>{o.description}</Text> : null}
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
     )
   }
 
@@ -256,10 +259,13 @@ export function ChatControls({
 
 type Styles = ReturnType<typeof makeStyles>
 
-/** The pill (40pt tall, beside Send) reaches 44pt to a finger. */
-const PILL_SLOP = { top: 2, bottom: 2, left: 2, right: 2 }
-/** The pill's words grow with Dynamic Type, but not past what the composer's row holds. */
-const PILL_MAX_SCALE = 1.3
+/** A tile's name: short, as a tile is a third of the card wide. */
+const TILE_LABELS: Readonly<Record<Picker, string>> = {
+  model: 'Model',
+  mode: 'Mode',
+  effort: 'Effort',
+  collaboration: 'Collaboration'
+}
 
 function Chip({
   label,
@@ -305,29 +311,22 @@ function makeStyles(t: ChromeColors) {
       maxWidth: 170
     },
     chipBusy: { opacity: 0.6 },
-    pill: {
-      height: 40,
-      maxWidth: 120,
+    tilesWrap: { gap: 6 },
+    tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    tileOpen: { backgroundColor: t.accent },
+    inlineChoices: { borderRadius: 14, backgroundColor: t.surface2, padding: 4 },
+    tile: {
+      flexGrow: 1,
+      flexBasis: 90,
+      minHeight: 48,
       justifyContent: 'center',
-      paddingHorizontal: 12,
-      borderRadius: 20,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.border,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 14,
       backgroundColor: t.surface2
     },
-    pillText: { color: t.foreground, fontSize: 13, fontWeight: '600' },
-    settingRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      minHeight: 48,
-      paddingVertical: 12,
-      paddingHorizontal: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.border
-    },
-    settingValue: { flexShrink: 1, color: t.mutedForeground, fontSize: 15 },
+    tileLabel: { color: t.mutedForeground, fontSize: 11, fontWeight: '500' },
+    tileValue: { color: t.foreground, fontSize: 13, fontWeight: '600' },
     chipText: { color: t.foreground, fontSize: 12, fontWeight: '600' },
     options: { maxHeight: 420 },
     sheetTitle: { color: t.popoverForeground, fontSize: 15, fontWeight: '700', marginBottom: 8 },

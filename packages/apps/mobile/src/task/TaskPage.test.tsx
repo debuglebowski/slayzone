@@ -1,7 +1,7 @@
 import { act, render, screen, userEvent, waitFor, within } from '@testing-library/react-native'
 import type { ReactNode } from 'react'
 import { Alert, type AlertButton } from 'react-native'
-import type { AgentNav, AgentPanelProps } from '../agents/AgentPanel'
+import type { AgentPanelProps } from '../agents/AgentPanel'
 import type { BoardData, HubFeed, TaskRow } from '../hub-board'
 import { hubEntryOf } from '../hub-session'
 import {
@@ -26,23 +26,10 @@ const mockFeeds: { list: HubFeed[] } = { list: [] }
 jest.mock('../hub-connections', () => ({ useHubFeeds: () => ({ feeds: mockFeeds.list }) }))
 const mockRouter = { push: jest.fn(), back: jest.fn(), canGoBack: () => true }
 jest.mock('expo-router', () => ({ useRouter: () => mockRouter }))
-// The panels have suites of their own (`AgentPanel.test.tsx`, `TaskInfoSheet.test.tsx`).
-/**
- * How often the agent panel mounted (a remount loses its draft, terminal, uploads), the
- * props it got last, and what it hands the phone's nav bar.
- */
-const mockAgent = {
-  mounts: 0,
-  props: null as AgentPanelProps | null,
-  nav: {
-    provider: 'Claude Chat',
-    status: 'Idle · Unread',
-    dot: 'idle',
-    busy: false,
-    openMenu: jest.fn(),
-    start: null
-  } as AgentNav
-}
+// The panels have suites of their own (`AgentPanel.test.tsx`, `PhoneTaskPage.test.tsx`:
+// the phone's page around the agent).
+/** How often the agent panel mounted (a remount loses its draft, terminal, uploads), and the props it got last. */
+const mockAgent = { mounts: 0, props: null as AgentPanelProps | null }
 jest.mock('../agents/AgentPanel', () => ({
   AgentPanel: (props: AgentPanelProps) => {
     const { useEffect } = jest.requireActual('react')
@@ -51,12 +38,7 @@ jest.mock('../agents/AgentPanel', () => ({
     useEffect(() => {
       mockAgent.mounts++
     }, [])
-    return (
-      <>
-        {props.nav?.(mockAgent.nav)}
-        <Text>agent panel</Text>
-      </>
-    )
+    return <Text>agent panel</Text>
   }
 }))
 jest.mock('../artifacts/ArtifactsScreen', () => ({
@@ -129,7 +111,6 @@ async function show({
   mockFeeds.list = [feedOf(homeHub, boardOf({})), feedOf(workHub, board)]
   const handlers = {
     onSegment: jest.fn(),
-    onOpenInfo: jest.fn(),
     onBack: jest.fn(),
     onDeleted: jest.fn()
   }
@@ -167,66 +148,13 @@ beforeEach(() => {
   mockRouter.push.mockClear()
   mockAgent.mounts = 0
   mockAgent.props = null
-  mockAgent.nav = { ...mockAgent.nav, busy: false, start: null, openMenu: jest.fn() }
 })
 
-describe('TaskPage on a phone: the page is the conversation', () => {
-  it('a nav bar (back, the title, the agent under it), then the agent — no segments, no field line', async () => {
+describe('TaskPage on a phone', () => {
+  it('the page lays itself out around the agent (`PhoneTaskPage`), with the task as edited', async () => {
     await show()
-    expect(screen.getByLabelText('Back to Home')).toBeOnTheScreen()
-    expect(screen.getByTestId('task-title')).toHaveTextContent('Write spec')
-    expect(screen.getByTestId('task-agent-line')).toHaveTextContent('Claude Chat · Idle · Unread')
-    expect(screen.getByText('agent panel')).toBeOnTheScreen()
-    expect(screen.queryByTestId('segment-agent')).toBeNull()
-    expect(screen.queryByTestId('segment-details')).toBeNull()
-    expect(screen.queryByLabelText('Priority: Medium')).toBeNull()
-    expect(screen.queryByDisplayValue('Write spec')).toBeNull()
-  })
-
-  it('the title is one line', async () => {
-    await show()
-    expect(screen.getByTestId('task-title').props.numberOfLines).toBe(1)
-  })
-
-  it("the agent's bar is the nav bar; a chat's controls are its composer's model pill", async () => {
-    await show()
-    expect(mockAgent.props?.nav).toBeInstanceOf(Function)
-  })
-
-  it('tapping the title opens the agent menu', async () => {
-    await show()
-    const title = screen.getByLabelText('Write spec, Claude Chat · Idle · Unread')
-    expect(title.props.accessibilityHint).toBe('Opens the agent menu.')
-    await user().press(title)
-    expect(mockAgent.nav.openMenu).toHaveBeenCalled()
-  })
-
-  it('Start stays up front while the agent offers it', async () => {
-    const start = jest.fn()
-    mockAgent.nav = { ...mockAgent.nav, start }
-    await show()
-    await user().press(screen.getByLabelText('Start the agent'))
-    expect(start).toHaveBeenCalled()
-  })
-
-  it('ⓘ opens Details and Artifacts as a sheet', async () => {
-    const { onOpenInfo } = await show()
-    await user().press(screen.getByLabelText('Details and artifacts'))
-    expect(onOpenInfo).toHaveBeenCalledWith('details')
-  })
-
-  it('back goes back', async () => {
-    const { onBack } = await show()
-    await user().press(screen.getByLabelText('Back to Home'))
-    expect(onBack).toHaveBeenCalled()
-  })
-
-  it('the agent stays mounted (its draft and terminal survive)', async () => {
-    const { showSegment } = await show()
-    await showSegment('details')
-    await showSegment('agent')
-    expect(screen.getByText('agent panel')).toBeOnTheScreen()
-    expect(mockAgent.mounts).toBe(1)
+    expect(mockAgent.props?.phone).toBeInstanceOf(Function)
+    expect(mockAgent.props?.row.task.title).toBe('Write spec')
   })
 })
 
@@ -238,7 +166,7 @@ describe('TaskPage on an iPad (wide): Agent and Details side by side', () => {
     expect(screen.getByLabelText('Priority: Medium')).toBeOnTheScreen()
     expect(screen.getByTestId('pane-agent')).toBeOnTheScreen()
     expect(screen.getByTestId('task-details')).toBeOnTheScreen()
-    expect(mockAgent.props?.nav).toBeUndefined()
+    expect(mockAgent.props?.phone).toBeUndefined()
     expect(screen.getByTestId('segment-artifacts')).toHaveTextContent('Artifacts 2')
     await user().press(screen.getByTestId('segment-artifacts'))
     expect(onSegment).toHaveBeenCalledWith('artifacts')

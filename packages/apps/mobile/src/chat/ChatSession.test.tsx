@@ -14,8 +14,10 @@ import {
   within
 } from '@testing-library/react-native'
 import { Alert, DeviceEventEmitter, StyleSheet } from 'react-native'
+import { type TaskChrome, TaskChromeProvider } from '../task/task-chrome'
 import { trpcTest } from '../testing'
-import { ChatSession } from './ChatSession'
+import { ChatControls } from './ChatControls'
+import { type ChatChrome, ChatSession } from './ChatSession'
 import { ChatUploadTargetContext } from './ChatUploadTarget'
 import { type FakeHub, fakeHub } from './fake-hub'
 
@@ -44,7 +46,7 @@ jest.mock('./attach-files', () => {
 const TAB = 'task-1'
 const TASK = 'task-1'
 
-async function open(hub: FakeHub, mode = 'claude-chat', controls?: 'chips' | 'pill') {
+async function open(hub: FakeHub, mode = 'claude-chat', controls?: 'chips') {
   const { wrapper } = trpcTest(hub.backend)
   await render(
     <ChatSession
@@ -679,7 +681,41 @@ describe('ChatSession: controls', () => {
   })
 })
 
-describe('ChatSession: controls as one model pill (phone task page)', () => {
+/** The phone task page's chrome, as a chat on it sees it. */
+function pageChrome(fields: Partial<TaskChrome> = {}): TaskChrome {
+  return {
+    top: 56,
+    bottom: 74,
+    composer: { bottom: 74, start: 16, end: 16 },
+    keyboardUp: false,
+    onTimelineScroll: jest.fn(),
+    ...fields
+  }
+}
+
+/** The chat as the phone task page shows it: what it hands the page, and the page's chrome. */
+async function openOnPage(hub: FakeHub, mode = 'claude-chat', chrome = pageChrome()) {
+  const { wrapper } = trpcTest(hub.backend)
+  const handed: { last: ChatChrome | null } = { last: null }
+  await render(
+    <TaskChromeProvider value={chrome}>
+      <ChatSession
+        hubId="hub-1"
+        taskId={TASK}
+        tabId={TAB}
+        mode={mode}
+        controls="page"
+        onChrome={(c) => {
+          handed.last = c
+        }}
+      />
+    </TaskChromeProvider>,
+    { wrapper }
+  )
+  return { handed, chrome }
+}
+
+describe('ChatSession on the phone task page', () => {
   const CODEX_LISTED = [
     {
       id: 'gpt-6-luna',
@@ -694,69 +730,81 @@ describe('ChatSession: controls as one model pill (phone task page)', () => {
     }
   ]
 
-  it('one model pill in the composer, no chip row; a tap picks the model', async () => {
+  it('no controls of its own: it hands them to the page, with whether it waits', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
-    hub.on('chat.getModels', () => CODEX_LISTED)
-    hub.on('chat.getModel', () => 'gpt-6-luna')
-    await open(hub, 'codex-chat', 'pill')
-    const composer = within(await screen.findByTestId('chat-composer'))
-    const pill = await composer.findByLabelText('Model: GPT-6 Luna')
+    const { handed } = await openOnPage(hub)
+    await screen.findByTestId('chat-composer')
     expect(screen.queryByTestId('chat-controls')).toBeNull()
-    expect(screen.queryByLabelText(/^Permission mode:/)).toBeNull()
-    await userEvent.setup().press(pill)
-    const sheet = within(screen.getByTestId('chat-control-sheet'))
-    expect(sheet.getByText('Model')).toBeOnTheScreen()
-    expect(sheet.getByText('GPT-6 Luna')).toBeOnTheScreen()
+    expect(screen.queryByLabelText(/^Model: /)).toBeNull()
+    await waitFor(() => expect(handed.last).toMatchObject({ mode: 'claude-chat', waiting: false }))
+    expect(handed.last?.settings.mode).toBe('auto-accept')
   })
 
-  it('a long press opens the permission mode and effort; one is changed from there', async () => {
-    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
-    await open(hub, 'claude-chat', 'pill')
-    const pill = await screen.findByLabelText(/^Model: /)
-    await act(async () => fireEvent(pill, 'longPress'))
-    const sheet = within(screen.getByTestId('chat-control-sheet'))
-    const mode = sheet.getByLabelText('Permission mode')
-    expect(mode.props.accessibilityValue).toEqual({ text: 'Auto-accept edits' })
-    expect(sheet.getByLabelText('Effort')).toBeOnTheScreen()
-    await userEvent.setup().press(mode)
-    await userEvent.setup().press(screen.getByText('Plan mode'))
-    await waitFor(() =>
-      expect(hub.callsTo('chat.setMode')).toEqual([
-        expect.objectContaining({ tabId: TAB, chatMode: 'plan' })
-      ])
-    )
-  })
-
-  it('VoiceOver: the pill says how to reach mode and effort, and offers them as actions', async () => {
-    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
-    await open(hub, 'claude-chat', 'pill')
-    const pill = await screen.findByLabelText(/^Model: /)
-    expect(pill.props.accessibilityHint).toMatch(/permission mode and effort/i)
-    expect(pill.props.accessibilityActions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'mode', label: 'Permission mode' }),
-        expect.objectContaining({ name: 'effort', label: 'Effort' })
-      ])
-    )
-    await act(async () =>
-      fireEvent(pill, 'accessibilityAction', { nativeEvent: { actionName: 'mode' } })
-    )
-    expect(within(screen.getByTestId('chat-control-sheet')).getByText('Plan mode')).toBeTruthy()
-  })
-
-  it('Codex: the collaboration mode is with mode and effort', async () => {
+  it('the controls the page shows change the chat: a model tile opens the models', async () => {
     const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
     hub.on('chat.getModels', () => CODEX_LISTED)
     hub.on('chat.getModel', () => 'gpt-6-luna')
     hub.on('chat.getEffort', () => 'ultra')
-    await open(hub, 'codex-chat', 'pill')
-    const pill = await screen.findByLabelText('Model: GPT-6 Luna')
-    await act(async () => fireEvent(pill, 'longPress'))
-    const sheet = within(screen.getByTestId('chat-control-sheet'))
-    await waitFor(() =>
-      expect(sheet.getByLabelText('Effort').props.accessibilityValue).toEqual({ text: 'Ultra' })
+    const { handed } = await openOnPage(hub, 'codex-chat')
+    await waitFor(() => expect(handed.last?.settings.model).toBe('gpt-6-luna'))
+    const c = handed.last!
+    const { wrapper } = trpcTest(hub.backend)
+    await render(
+      <ChatControls mode={c.mode} settings={c.settings} models={c.models} variant="tiles" />,
+      { wrapper }
     )
-    expect(sheet.getByLabelText('Collaboration mode')).toBeOnTheScreen()
+    const tiles = within(screen.getByTestId('chat-control-tiles'))
+    expect(tiles.getByLabelText('Model').props.accessibilityValue).toEqual({ text: 'GPT-6 Luna' })
+    expect(tiles.getByLabelText('Effort').props.accessibilityValue).toEqual({ text: 'Ultra' })
+    expect(tiles.getByLabelText('Collaboration mode')).toBeOnTheScreen()
+    // The choices fold out in place (the card is a pop-up: no sheet can open over it).
+    await userEvent.setup().press(tiles.getByLabelText('Effort'))
+    expect(screen.queryByTestId('chat-control-sheet')).toBeNull()
+    await userEvent
+      .setup()
+      .press(within(screen.getByTestId('chat-control-choices')).getByText('Low'))
+    expect(screen.queryByTestId('chat-control-choices')).toBeNull()
+    await waitFor(() =>
+      expect(hub.callsTo('chat.setEffort')).toEqual([
+        expect.objectContaining({ tabId: TAB, chatEffort: 'low' })
+      ])
+    )
+  })
+
+  it('the composer floats between the page’s insets as a glass capsule, naming the agent', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await openOnPage(hub)
+    const composer = await screen.findByTestId('chat-composer')
+    expect(StyleSheet.flatten(composer.props.style)).toMatchObject({
+      marginLeft: 16,
+      marginRight: 16
+    })
+    expect(screen.getByTestId('chat-input')).toHaveProp('placeholder', 'Message Claude…')
+    // Its root keeps the composer above the page's tab bar.
+    expect(StyleSheet.flatten(screen.getByTestId('chat-session').props.style)).toMatchObject({
+      paddingBottom: 74
+    })
+  })
+
+  it('a Codex chat names Codex in the composer', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    await openOnPage(hub, 'codex-chat')
+    await screen.findByTestId('chat-composer')
+    expect(screen.getByTestId('chat-input')).toHaveProp('placeholder', 'Message Codex…')
+  })
+
+  it('tells the page how far the timeline is from the newest message as it scrolls', async () => {
+    const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+    const { chrome } = await openOnPage(hub)
+    await screen.findByText('Send a message to start.')
+    await hubSends(hub, [
+      { kind: 'user-message', id: 'm1', text: 'Hello', content: [{ type: 'text', text: 'Hello' }] }
+    ] as AgentEvent[])
+    const timeline = await screen.findByTestId('chat-timeline')
+    await act(async () =>
+      fireEvent.scroll(timeline, { nativeEvent: { contentOffset: { y: 420 } } })
+    )
+    expect(chrome.onTimelineScroll).toHaveBeenCalledWith(420)
   })
 })
 

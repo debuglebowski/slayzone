@@ -4,24 +4,11 @@ import { findTaskRow, type HubFeed, type TaskRow } from '../hub-board'
 import type { HubSession } from '../hub-session'
 import { findSession } from '../routes'
 import { type ChromeColors, useTheme } from '../theme'
-import { TaskInfoSheet } from './TaskInfoSheet'
-import {
-  INFO_SEGMENTS,
-  type InfoSegment,
-  type TaskPageProps,
-  TASK_SEGMENTS,
-  TaskPage,
-  type TaskSegment
-} from './TaskPage'
+import { type TaskPageProps, TASK_SEGMENTS, TaskPage, type TaskSegment } from './TaskPage'
 
 /** A route's `segment` param; anything else = the Agent (what a task opens on). */
 export function segmentParam(value: string | undefined): TaskSegment {
   return TASK_SEGMENTS.includes(value as TaskSegment) ? (value as TaskSegment) : 'agent'
-}
-
-/** The sheet route's `segment` param; anything else = Details. */
-export function infoSegmentParam(value: string | undefined): InfoSegment {
-  return INFO_SEGMENTS.includes(value as InfoSegment) ? (value as InfoSegment) : 'details'
 }
 
 interface Located {
@@ -98,49 +85,6 @@ export function TaskScreen({
       onBack={onBack}
       backLabel="‹ Board"
       show={(found) => <TaskPage {...found} {...page} onBack={onBack} onDeleted={onBack} />}
-    />
-  )
-}
-
-/** The task a route names, as the phone's Details / Artifacts sheet (`TaskInfoSheet`). */
-export function TaskInfoScreen({
-  hubAddress,
-  taskId,
-  sessions,
-  feeds,
-  segment,
-  onSegment,
-  onClose,
-  onDeleted,
-  onOpenTask,
-  onOpenArtifact
-}: Located & {
-  segment: InfoSegment
-  onSegment: (segment: InfoSegment) => void
-  onClose: () => void
-  onDeleted: () => void
-  onOpenTask: (taskId: string) => void
-  onOpenArtifact: (artifactId: string, version: number | null) => void
-}) {
-  return (
-    <LocatedTask
-      hubAddress={hubAddress}
-      taskId={taskId}
-      sessions={sessions}
-      feeds={feeds}
-      onBack={onClose}
-      backLabel="Done"
-      show={(found) => (
-        <TaskInfoSheet
-          {...found}
-          segment={segment}
-          onSegment={onSegment}
-          onClose={onClose}
-          onDeleted={onDeleted}
-          onOpenTask={onOpenTask}
-          onOpenArtifact={onOpenArtifact}
-        />
-      )}
     />
   )
 }

@@ -1,5 +1,5 @@
 import { hubEntryOf } from './hub-session'
-import { findSession, taskHref, taskInfoHref } from './routes'
+import { findSession, taskHref } from './routes'
 
 describe('routes', () => {
   it('names a task by its hub address and id (deep link slayzone://task/<hub>/<id>)', () => {
@@ -14,12 +14,6 @@ describe('routes', () => {
     )
     expect(taskHref('127.0.0.1:8788', 't1', { segment: 'artifacts' })).toBe(
       '/task/127.0.0.1%3A8788/t1?segment=artifacts'
-    )
-  })
-
-  it("names the phone's Details / Artifacts sheet of a task, on its part", () => {
-    expect(taskInfoHref('127.0.0.1:8788', 't1', 'artifacts')).toBe(
-      '/task/127.0.0.1%3A8788/t1/info?segment=artifacts'
     )
   })
 

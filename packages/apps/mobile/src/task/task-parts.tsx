@@ -8,7 +8,8 @@
  * - `PartSegments`: the segmented control between the parts shown (Details, Artifacts —
  *   with how many);
  * - `DetailsPanel`: desktop's Settings panel — description, sub-tasks, the details list;
- * - `TaskMenu`: the task's ⋯ (keep a temporary task, mark unread, archive, delete);
+ * - `TaskMenu`: the task's ⋯ (keep a temporary task, mark unread, archive, delete) —
+ *   its items (`useTaskMenuItems`) are the phone's agent card's Task section too;
  * - `KeptPart`: a part kept mounted while another is shown.
  */
 import { keepScratchTaskInput, todayISO } from '@slayzone/tasks/board'
@@ -107,15 +108,18 @@ export function TitleBlock({
   feed,
   showHub,
   openField,
-  trailing
+  trailing,
+  flush = false
 }: {
   row: TaskRow
   writes: TaskWrites
   feed: HubFeed
   showHub: boolean
   openField: (field: TaskField) => void
-  /** Beside the title, at its end (the sheet's ⋯ and Done). */
+  /** Beside the title, at its end (the iPad header's ⋯). */
   trailing?: ReactNode
+  /** Inside a padded panel (the phone's Details tab): no side padding of its own. */
+  flush?: boolean
 }) {
   const styles = makeStyles(useTheme())
   const { task } = writes
@@ -123,7 +127,7 @@ export function TitleBlock({
   const model = cardModel(feed, task, row.project)
   const due = task.due_date ? dueLabel(task.due_date, todayISO()) : null
   return (
-    <View style={styles.titleBlock}>
+    <View style={[styles.titleBlock, flush && styles.flush]}>
       <View style={styles.titleRow}>
         <Pressable
           onPress={() => openField('status')}
@@ -169,13 +173,19 @@ export function TitleBlock({
   )
 }
 
+/** The Details panel's padding, and the room under its last card. */
+const DETAILS_PAD = 14
+const DETAILS_END = 48
+
 /** Desktop's Settings panel: description, sub-tasks, then the details list. */
 export function DetailsPanel({
   row,
   feed,
   writes,
   openField,
-  onOpenTask
+  onOpenTask,
+  header,
+  insets
 }: {
   row: TaskRow
   feed: HubFeed
@@ -183,6 +193,10 @@ export function DetailsPanel({
   openField: (field: TaskField) => void
   /** A sub-task was tapped. */
   onOpenTask: (taskId: string) => void
+  /** Scrolls with the panel, above its cards (the phone's Details tab: the title block). */
+  header?: ReactNode
+  /** Bars floating over the panel's top and bottom (pt): its scroll clears them. */
+  insets?: { top: number; bottom: number }
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -207,11 +221,19 @@ export function DetailsPanel({
   return (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={styles.details}
+      contentContainerStyle={[
+        styles.details,
+        insets && {
+          paddingTop: DETAILS_PAD + insets.top,
+          paddingBottom: DETAILS_END + insets.bottom
+        }
+      ]}
+      scrollIndicatorInsets={insets ? { top: insets.top, bottom: insets.bottom } : undefined}
       keyboardShouldPersistTaps="handled"
       automaticallyAdjustKeyboardInsets
       testID="task-details"
     >
+      {header}
       <View style={ui.card}>
         <DescriptionSection row={shownRow} />
       </View>
@@ -245,6 +267,44 @@ export function DetailsPanel({
   )
 }
 
+/** One of the task's actions (⋯): its words, what it does, whether it destroys. */
+export interface TaskMenuItem {
+  label: string
+  onPress: () => void
+  destructive?: boolean
+}
+
+/** The task's actions: keep a temporary task, mark unread, archive / unarchive, delete. */
+export function useTaskMenuItems(
+  writes: TaskWrites,
+  /** The task's project's columns ("Keep as task" moves it to the first started one). */
+  columns: ColumnConfig[] | null | undefined,
+  onDeleted: () => void
+): TaskMenuItem[] {
+  const client = useTRPCClient()
+  const actions = useTaskActions(writes, onDeleted)
+  const items: TaskMenuItem[] = []
+  if (writes.task.is_temporary)
+    items.push({
+      label: 'Keep as task',
+      onPress: () =>
+        void writes.run(() =>
+          client.task.update.mutate(keepScratchTaskInput(writes.task.id, columns))
+        )
+    })
+  if (!writes.task.needs_attention)
+    items.push({
+      label: 'Mark as unread',
+      onPress: () =>
+        void writes.run(() =>
+          client.task.update.mutate({ id: writes.task.id, needsAttention: true })
+        )
+    })
+  items.push({ label: actions.archived ? 'Unarchive' : 'Archive', onPress: actions.toggleArchive })
+  items.push({ label: 'Delete', onPress: actions.remove, destructive: true })
+  return items
+}
+
 export function TaskMenu({
   visible,
   writes,
@@ -261,43 +321,24 @@ export function TaskMenu({
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
-  const client = useTRPCClient()
-  const actions = useTaskActions(writes, onDeleted)
-  const item = (label: string, onPress: () => void, destructive = false) => (
-    <Pressable
-      key={label}
-      accessibilityRole="button"
-      onPress={() => {
-        onClose()
-        onPress()
-      }}
-      style={styles.menuRow}
-    >
-      <Text style={[styles.menuText, destructive && styles.menuDestructive]}>{label}</Text>
-    </Pressable>
-  )
+  const items = useTaskMenuItems(writes, columns, onDeleted)
   return (
     <BottomSheet visible={visible} onClose={onClose} testID="task-menu-sheet">
-      {writes.task.is_temporary
-        ? item(
-            'Keep as task',
-            () =>
-              void writes.run(() =>
-                client.task.update.mutate(keepScratchTaskInput(writes.task.id, columns))
-              )
-          )
-        : null}
-      {writes.task.needs_attention
-        ? null
-        : item(
-            'Mark as unread',
-            () =>
-              void writes.run(() =>
-                client.task.update.mutate({ id: writes.task.id, needsAttention: true })
-              )
-          )}
-      {item(actions.archived ? 'Unarchive' : 'Archive', actions.toggleArchive)}
-      {item('Delete', actions.remove, true)}
+      {items.map((item) => (
+        <Pressable
+          key={item.label}
+          accessibilityRole="button"
+          onPress={() => {
+            onClose()
+            item.onPress()
+          }}
+          style={styles.menuRow}
+        >
+          <Text style={[styles.menuText, item.destructive && styles.menuDestructive]}>
+            {item.label}
+          </Text>
+        </Pressable>
+      ))}
     </BottomSheet>
   )
 }
@@ -379,7 +420,8 @@ const makeStyles = (t: ChromeColors) =>
     segmentOn: { backgroundColor: t.surface3 },
     segmentText: { fontSize: 13, fontWeight: '600', color: t.mutedForeground },
     segmentTextOn: { color: t.foreground },
-    details: { padding: 14, gap: 12, paddingBottom: 48 },
+    details: { padding: DETAILS_PAD, gap: 12, paddingBottom: DETAILS_END },
+    flush: { paddingHorizontal: 2 },
     detailsCard: { gap: 6 },
     subsection: {
       borderTopWidth: StyleSheet.hairlineWidth,
