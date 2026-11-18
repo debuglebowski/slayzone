@@ -20,6 +20,10 @@ export class ClaudeTurnAttribution {
   private current: AgentExecution | undefined
   /** The CLI reports `command_lifecycle`: it, not the host's write, starts executions. */
   private lifecycle = false
+  /** Written while a self-started turn ran (no lifecycle seen yet): it starts after that turn. */
+  private pending: string | undefined
+  /** That message's turn begins once the self-started turn's end was emitted (`settle`). */
+  private startAfter: string | undefined
   private readonly tools = new Map<string, AgentExecution>()
   private readonly parents = new Map<string, string>()
   private readonly helpers = new Map<string, boolean>()
@@ -34,6 +38,11 @@ export class ClaudeTurnAttribution {
   begin(messageId?: string, joinCurrent = false): void {
     // Its `started` begins (or joins) the execution; nothing is known before.
     if (this.lifecycle && messageId) return
+    // The CLI started a turn by itself: the message waits for that turn's end.
+    if (messageId && !joinCurrent && this.current && !this.current.messageId) {
+      this.pending = messageId
+      return
+    }
     if (this.current && (!messageId || joinCurrent || this.current.messageId === messageId)) return
     this.current = {
       turnId: messageId ?? randomUUID(),
@@ -46,9 +55,12 @@ export class ClaudeTurnAttribution {
   /** `command_lifecycle started`: a message taken while a turn runs joins it. */
   private started(messageId: string): void {
     if (this.current) {
-      // The process's first write began it before the CLI showed it reports lifecycle.
-      if (this.current.messageId === messageId)
+      // The process's first write began it before the CLI showed it reports
+      // lifecycle: it is CLI-bounded now, and the host hears so.
+      if (this.current.messageId === messageId && this.current.source !== 'lifecycle') {
         this.current = { ...this.current, source: 'lifecycle' }
+        this.emitStart({ kind: 'turn-started', execution: { ...this.current } })
+      }
       return
     }
     this.current = { turnId: messageId, source: 'lifecycle', messageId }
@@ -71,6 +83,7 @@ export class ClaudeTurnAttribution {
     ) {
       if (event.kind === 'command-lifecycle') {
         this.lifecycle = true
+        this.pending = undefined
         if (event.state === 'started') this.started(event.commandUuid)
         if (event.state === 'cancelled' && this.current?.messageId === event.commandUuid) {
           this.current = undefined
@@ -173,8 +186,17 @@ export class ClaudeTurnAttribution {
       this.current = undefined
       for (const [id, backgrounded] of this.helpers) if (!backgrounded) this.helpers.delete(id)
       this.clearFinishedTools()
+      this.startAfter = this.pending
+      this.pending = undefined
     }
     return owned
+  }
+
+  /** Call after emitting an attributed event: begins a turn its end released. */
+  settle(): void {
+    const next = this.startAfter
+    this.startAfter = undefined
+    if (next) this.begin(next)
   }
 
   private clearFinishedTools(): void {

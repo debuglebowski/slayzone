@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { afterEach, expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 const roots: string[] = [],
   runtimes: Array<ReturnType<typeof createComputerChatRuntime>> = []
 afterEach(async () => {

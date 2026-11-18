@@ -211,6 +211,9 @@ function eventValue(
     }
     case 'interrupted':
       if (event.reason === 'stop-request') {
+        // A turn parked on a prompt reads as over at once (nothing runs); a
+        // running one is stopping until the CLI's end of it.
+        if (v.phase === 'idle' && v.prompts.size) return turnEnded(v, false)
         return { ...v, prompts: new Set(), main: v.main ? { ...v.main, stopping: true } : null }
       }
       return turnEnded(v, false)
@@ -317,6 +320,9 @@ export function reduceChatLifecycle(
       // replace it: the agent takes the message into that turn or starts it after
       // that turn's result (`turn-started`). Its delivery keeps the turn open.
       if (signal.origin === 'user' && value.main?.origin === 'agent') break
+      // Nor one the CLI itself bounds (`lifecycle`): the message starts at its
+      // own `started`, after the running turn's end.
+      if (signal.origin === 'user' && value.main?.execution?.source === 'lifecycle') break
       if (value.phase !== 'dead' && value.phase !== 'not-spawned' && value.phase !== 'starting') {
         value = {
           ...value,

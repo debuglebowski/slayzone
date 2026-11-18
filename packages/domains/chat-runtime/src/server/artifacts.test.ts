@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { chatAttachmentSchema } from '../shared/protocol'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 test('chat uploads remain computer-local, support editing, and seal historical versions', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'chat-upload-')),

@@ -22,3 +22,17 @@ test('every transport test file fails on a lifecycle disagreement', () => {
     })
   expect(missing).toEqual([])
 })
+
+test('every chat-runtime test file that runs a chat transport fails on a lifecycle disagreement', () => {
+  const runtimeDir = fileURLToPath(new URL('../../../../chat-runtime/src/server/', import.meta.url))
+  const missing = readdirSync(runtimeDir)
+    .filter((f) => f.endsWith('.test.ts'))
+    .filter((f) => {
+      const src = readFileSync(runtimeDir + f, 'utf8')
+      return (
+        /createComputerChatRuntime|openComputerChatRuntime|chat-transport-manager/.test(src) &&
+        !src.includes('chat-lifecycle-strict-testkit')
+      )
+    })
+  expect(missing).toEqual([])
+})

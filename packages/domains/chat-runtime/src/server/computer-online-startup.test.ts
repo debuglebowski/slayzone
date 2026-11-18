@@ -12,6 +12,8 @@ import Database from 'better-sqlite3'
 import { afterEach, expect, test, vi, type MockInstance } from 'vitest'
 import { openComputerChatRuntime } from './computer-online-runtime'
 import { chatStorageDigest } from './storage-digest'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const workerPath = fileURLToPath(new URL('../../../../apps/computer/dist/bin.cjs', import.meta.url))
 type Captured = {

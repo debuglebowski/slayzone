@@ -13,6 +13,8 @@ import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createComputerChatRuntime } from './computer-runtime'
 import { createChatLifecycle } from './hub-lifecycle'
 import { createChatOwnershipStore } from './hub-ownership'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 type State = 'active' | 'paused' | 'deleted'
 type Harness = Awaited<ReturnType<typeof createTestHarness>>

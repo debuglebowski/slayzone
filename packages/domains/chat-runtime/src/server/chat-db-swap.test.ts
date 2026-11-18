@@ -25,6 +25,8 @@ import { agentTurnsStore } from './agent-turns'
 import { createComputerChatRuntime } from './computer-runtime'
 import { openChatStorage, type ChatStorage } from './storage'
 import { usageCursorStore } from './usage-cursors'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const roots: string[] = []
 const stores: ChatStorage[] = []

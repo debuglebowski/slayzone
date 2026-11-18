@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import type { ChatTabTransition } from '../shared'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 test('review: a delayed committed transition cannot quiesce the replacement provider on its reused tab', async () => {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'review-transition-replay-'))

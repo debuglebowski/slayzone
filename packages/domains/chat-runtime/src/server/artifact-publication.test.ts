@@ -12,6 +12,8 @@ import type {
   PublicationSourceGrant,
   PublicationSettlement
 } from './artifact-publication-protocol'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const workerPath = fileURLToPath(new URL('../../../../apps/computer/dist/bin.cjs', import.meta.url))
 const route = { id: 'c', epoch: 1 }

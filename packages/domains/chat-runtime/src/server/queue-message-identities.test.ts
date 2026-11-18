@@ -5,6 +5,8 @@ import { afterEach, expect, test, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import type { ChatQueuePushOptions } from '@slayzone/terminal/runtime'
 import { createComputerChatRuntime } from './computer-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const roots: string[] = []
 const runtimes: ReturnType<typeof createComputerChatRuntime>[] = []

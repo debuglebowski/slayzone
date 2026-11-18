@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, vi } from 'vitest'
 import type { PreparedChatControl } from '@slayzone/terminal/runtime'
 import { openComputerChatRuntime } from './computer-online-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 const identity = { id: 'c', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 }
 const workerPath = fileURLToPath(new URL('../../../../apps/computer/dist/bin.cjs', import.meta.url))
 const call = (operationId: string) => ({

@@ -7,6 +7,8 @@ import Database from 'better-sqlite3'
 import { artifactsTxns } from '@slayzone/task-artifacts/db'
 import { createComputerChatRuntime } from './computer-runtime'
 import { captureArtifactWorkingFiles } from './artifact-backup'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const sha = (bytes: string) => createHash('sha256').update(bytes).digest('hex')
 const identity = {

@@ -171,7 +171,10 @@ describe('command_lifecycle boundaries', () => {
     expect(owner(s, text('a-late'))?.messageId).toBe('A')
     expect(owner(s, result('result-A', 0))?.messageId).toBe('A')
     s.attribute(lifecycle('A', 'cancelled'))
-    expect(starts.filter((e) => e.kind === 'turn-started')).toHaveLength(1)
+    // B has not started: no turn of its own before its `started`.
+    expect(
+      starts.filter((e) => e.kind === 'turn-started' && e.execution.messageId === 'B')
+    ).toHaveLength(0)
     s.attribute(lifecycle('B', 'started'))
     expect(starts.at(-1)).toMatchObject({
       kind: 'turn-started',
@@ -220,4 +223,28 @@ describe('command_lifecycle boundaries', () => {
     s.attribute(lifecycle('S', 'started'))
     expect(owner(s, text('s1'))).toMatchObject({ turnId: 'S', messageId: 'S' })
   })
+})
+
+test('a message written while a self-started turn runs (no lifecycle seen yet) starts after that turn', () => {
+  const starts: AgentEvent[] = []
+  const s = new ClaudeTurnAttribution((e) => starts.push(e))
+  const text = (t: string): AgentEvent => ({ kind: 'assistant-text', messageId: t, text: t })
+  const self = s.attribute(text('on my own'))?.execution
+  expect(self?.messageId).toBeUndefined()
+  s.begin('m1')
+  expect(s.attribute(text('still mine'))?.execution?.turnId).toBe(self?.turnId)
+  expect(s.attribute(result('self-end', 0))?.execution?.turnId).toBe(self?.turnId)
+  s.settle()
+  expect(starts.at(-1)).toMatchObject({ kind: 'turn-started', execution: { messageId: 'm1' } })
+  expect(s.attribute(text('answer'))?.execution?.messageId).toBe('m1')
+})
+
+test('a first write begun before lifecycle was seen is announced as CLI-bounded at its started', () => {
+  const starts: AgentEvent[] = []
+  const s = new ClaudeTurnAttribution((e) => starts.push(e))
+  s.begin('m1')
+  expect(starts.at(-1)).toMatchObject({ execution: { turnId: 'm1', source: 'ordered' } })
+  s.attribute({ kind: 'command-lifecycle', commandUuid: 'm1', state: 'queued' })
+  s.attribute({ kind: 'command-lifecycle', commandUuid: 'm1', state: 'started' })
+  expect(starts.at(-1)).toMatchObject({ execution: { turnId: 'm1', source: 'lifecycle' } })
 })

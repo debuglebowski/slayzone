@@ -13,6 +13,8 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
 import { createChatRetention } from './retention'
 import { TIMELINE_DROP_STEP_BYTES } from './storage'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const roots: string[] = []
 const closers: Array<() => unknown> = []

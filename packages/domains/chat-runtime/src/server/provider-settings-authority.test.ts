@@ -14,6 +14,8 @@ import { afterEach, expect, test } from 'vitest'
 import type { ChatBootstrap } from './local-data'
 import { createComputerChatRuntime } from './computer-runtime'
 import type { ChatMetadataUpdate } from './local-data'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const dirs: string[] = []
 const runtimes: ReturnType<typeof createComputerChatRuntime>[] = []

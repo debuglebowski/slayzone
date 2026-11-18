@@ -506,3 +506,55 @@ test('Stop after the message is written but before the CLI starts it: given back
   expect(h.savedKinds().filter((k) => k === 'interrupted')).toHaveLength(0)
   expect(mgr.__getOutboxStateForTests(TAB_OPTS.tabId, 'u2')).toBe('cancelled')
 })
+
+// Found by chat-lifecycle-fuzz: a Stop that took back a started turn's message
+// (before any output) left that turn's identity bound, so everything the process
+// said afterwards read as the old turn's late output and was dropped — a later
+// turn's text never saved and the tab stuck running.
+test('after Stop takes back a started message, the next turns are saved and end', async () => {
+  const h = transportHarness()
+  await startTab()
+  const f = h.fakes[0]
+  f.answer('interrupt', () => {
+    setImmediate(() => {
+      emitLine(f, sj.aborted())
+      emitLine(f, sj.lifecycle('u1', 'cancelled'))
+    })
+    return { success: { still_queued: [] } }
+  })
+  await sendAndStart(f, 'u1')
+  expect(await stop(true)).toMatchObject({ popped: true, id: 'u1' })
+  await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.turnOpen === false)
+
+  // The CLI starts a turn by itself (a finished background task).
+  emitLine(f, sj.init('s'))
+  emitLine(f, sj.text('on my own', { id: 'self' }))
+  await until(() => h.saved().some((e) => e.kind === 'assistant-text' && e.text === 'on my own'))
+  emitLine(f, sj.success())
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+
+  await sendAndStart(f, 'u2')
+  emitLine(f, sj.text('answer to u2', { id: 'u2-reply' }))
+  emitLine(f, sj.success())
+  emitLine(f, sj.lifecycle('u2', 'completed'))
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+  expect(h.saved().some((e) => e.kind === 'assistant-text' && e.text === 'answer to u2')).toBe(true)
+  expect(mgr.__getOutboxStateForTests(TAB_OPTS.tabId, 'u2')).toBe('answered')
+})
+
+// Found by chat-lifecycle-fuzz: after a respawn cut a turn, Stop took its message
+// back and armed "discard that turn" on the new process, which never got the
+// message — so the next turn the CLI started by itself was discarded instead.
+test('Stop taking back a message the current process never got discards nothing', async () => {
+  const h = transportHarness()
+  await startTab()
+  await sendAndStart(h.fakes[0], 'u1')
+  await mgr.respawn(TAB_OPTS.tabId, { ...TAB_OPTS })
+  const f = h.fakes.at(-1)!
+  await stop(true)
+  emitLine(f, sj.init('s'))
+  emitLine(f, sj.text('on my own', { id: 'self' }))
+  emitLine(f, sj.success())
+  await until(() => h.saved().some((e) => e.kind === 'assistant-text' && e.text === 'on my own'))
+  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
+})

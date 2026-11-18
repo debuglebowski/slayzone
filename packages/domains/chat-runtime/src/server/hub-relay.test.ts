@@ -13,6 +13,8 @@ import { createHubChatRelay } from './hub-relay'
 import { applyComputerRetirements } from './hub-retirements'
 import { computerStanding } from '@slayzone/computers/server'
 import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 test.each([undefined, false, true, 'legacy', 'idle'])(
   'public abort prepares only with host continuation capability (%s), then awaits durable pop result',

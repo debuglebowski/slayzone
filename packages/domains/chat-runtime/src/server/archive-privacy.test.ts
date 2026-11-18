@@ -23,6 +23,8 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { startCompactionWorker, type CompactionWorkerFactory } from './compaction-worker-host'
 import { openComputerChatRuntime } from './computer-online-runtime'
 import { createChatStoreFaults } from './computer-store-faults'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const roots: string[] = []
 const runtimes: ReturnType<typeof createComputerChatRuntime>[] = []

@@ -297,10 +297,10 @@ export class ChatOutbox {
    * Where a message got to: `sent` once its write began (the CLI may have it),
    * `started` once the CLI reported its turn started. Null: unknown id.
    */
-  reach(id: string): { sent: boolean; started: boolean } | null {
+  reach(id: string): { sent: boolean; started: boolean; gen: number | null } | null {
     const entry = this.entries.get(id)
     if (!entry) return null
-    return { sent: entry.gen !== null, started: entry.cli === 'started' }
+    return { sent: entry.gen !== null, started: entry.cli === 'started', gen: entry.gen }
   }
 
   /** Accepted messages whose writes have not begun; Stop records their cancellation. */

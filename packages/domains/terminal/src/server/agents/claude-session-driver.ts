@@ -167,6 +167,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
   private emitOwned(event: AgentEvent): void {
     const owned = this.ownership.attribute(event)
     if (owned) this.ctx?.emit(owned)
+    this.ownership.settle()
   }
   /** In-flight `control_request` promises, keyed by request_id. */
   private readonly pendingControl = new Map<string, PendingControl>()
@@ -295,6 +296,7 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     }
 
     this.ctx?.emit(ev)
+    this.ownership.settle()
   }
 
   handleControlLine(line: string): boolean {

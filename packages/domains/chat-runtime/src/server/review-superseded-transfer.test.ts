@@ -5,6 +5,8 @@ import { expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { encodeTransfer } from './transfers'
 import type { ChatMigrationSnapshot } from '../shared'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 test('review: activation removes superseded pre-upgrade partial transfer payloads for its exact owner', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'review-superseded-transfer-'))

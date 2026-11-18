@@ -19,6 +19,8 @@ import {
   type StorageCompactionOptions,
   type StorageCompaction
 } from './storage-compaction'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const roots: string[] = []
 const stores: ChatStorage[] = []

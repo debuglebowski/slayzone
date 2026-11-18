@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 // Review-only probes: temporary state, real SQLite, no provider processes.
 // Red assertions state required durability/privacy invariants.

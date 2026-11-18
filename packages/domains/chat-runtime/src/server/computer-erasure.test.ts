@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 test('computer erasure verifies local history, originals and sealed files while preserving another task', async () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'computer-erasure-'))

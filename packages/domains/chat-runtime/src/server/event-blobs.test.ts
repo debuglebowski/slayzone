@@ -12,6 +12,8 @@ import { openChatStorage, CHAT_BLOB_CHUNK_BYTES } from './storage'
 import { encodeTransfer } from './transfers'
 import { createComputerChatRuntime } from './computer-runtime'
 import { createChatRetention } from './retention'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const roots: string[] = []
 const closers: Array<() => unknown> = []

@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { openChatStorage, CHAT_STORAGE_SCHEMA_VERSION } from './storage'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 // Audit-only regression probes. Faults target disposable files / real SQLite.
 // Assertions describe the required invariant, so confirmed defects remain red.

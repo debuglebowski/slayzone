@@ -18,6 +18,8 @@ import {
 } from '@slayzone/platform/bounded-reads'
 import { BlobStore } from '@slayzone/task-artifacts/storage'
 import { createComputerChatRuntime } from './computer-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const dirs: string[] = []
 const runtimes: Array<ReturnType<typeof createComputerChatRuntime>> = []

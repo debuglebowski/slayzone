@@ -16,6 +16,8 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { encodeTransfer } from './transfers'
 import { openChatStorage } from './storage'
 import { createChatBackups } from './backups'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const dirs: string[] = []
 const runtimes: ReturnType<typeof createComputerChatRuntime>[] = []

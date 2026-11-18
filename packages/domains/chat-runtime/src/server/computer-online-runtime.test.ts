@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { expect, test, vi } from 'vitest'
 import { openComputerChatRuntime } from './computer-online-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const workerPath = fileURLToPath(new URL('../../../../apps/computer/dist/bin.cjs', import.meta.url))
 const bootstrap = {

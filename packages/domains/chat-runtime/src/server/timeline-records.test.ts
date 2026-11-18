@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { openChatStorage, TIMELINE_DROP_STEP_BYTES } from './storage'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const stores: ReturnType<typeof openChatStorage>[] = []
 const roots: string[] = []

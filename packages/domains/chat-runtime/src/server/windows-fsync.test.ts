@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { emulateWindowsFsync } from '../../../../shared/test-utils/windows-fsync'
 import { createComputerChatRuntime } from './computer-runtime'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 // FlushFileBuffers needs a writable handle; read-only opens made these file syncs EPERM on Windows.
 test('Windows flush semantics: computer artifact writes, backup and restore all complete', async () => {

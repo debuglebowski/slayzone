@@ -1429,7 +1429,10 @@ export function createChatTransport(
 
   function runtimeTurnOpen(tab: ChatTab): boolean {
     return (
-      tab.terminalState === 'running' || tab.pendingPrompts.size > 0 || tab.outbox.inFlight() > 0
+      tab.terminalState === 'running' ||
+      tab.pendingPrompts.size > 0 ||
+      tab.promptParkedTurn ||
+      tab.outbox.inFlight() > 0
     )
   }
 
@@ -1485,7 +1488,10 @@ export function createChatTransport(
 
   function runtimeReadyForMessage(tab: ChatTab): boolean {
     return (
-      tab.terminalState === 'idle' && tab.pendingPrompts.size === 0 && tab.outbox.inFlight() === 0
+      tab.terminalState === 'idle' &&
+      tab.pendingPrompts.size === 0 &&
+      !tab.promptParkedTurn &&
+      tab.outbox.inFlight() === 0
     )
   }
 
@@ -1679,6 +1685,14 @@ export function createChatTransport(
     shadowBacklog.delete(tab)
     for (const observe of backlog) if (tab.shadow) observe(tab.shadow)
   }
+  /**
+   * The host ends the tab's process (kill, failed start, shutdown): the runtime
+   * reads `dead` at once, so the lifecycle model hears it at once too — ahead of
+   * output still being published, which can no longer move either of them.
+   */
+  function processEnded(tab: ChatTab): void {
+    tab.shadow?.feed(tab.gen, { type: 'process-ended' })
+  }
   function shadowFeed(tab: ChatTab, generation: number, signal: ChatLifecycleSignal): void {
     observeLifecycle(tab, (shadow) => shadow.feed(generation, signal))
   }
@@ -1790,8 +1804,16 @@ export function createChatTransport(
       // runs. The TUI's plain "No" (deny + interrupt) ends the turn instead — its
       // `result` settles the state. A background helper's prompt answered between
       // turns parked nothing: the tab stays idle (its helper reads `background`).
+      // A withdrawn prompt does not end the turn it parked: the CLI goes on
+      // (or ends it) — the turn stays open until its end (`result` …).
       const parkedTurn = tab.promptParkedTurn
-      if (tab.pendingPrompts.size === 0) tab.promptParkedTurn = false
+      if (
+        (event.kind === 'permission-resolved' && tab.pendingPrompts.size === 0) ||
+        event.kind === 'result' ||
+        event.kind === 'interrupted' ||
+        event.kind === 'process-exit'
+      )
+        tab.promptParkedTurn = false
       if (
         event.kind === 'permission-resolved' &&
         parkedTurn &&
@@ -1990,11 +2012,12 @@ export function createChatTransport(
       if (proc.execution && proc.execution.turnId !== event.execution.turnId) return
       proc.execution = { ...event.execution }
       shadowEvent(tab, proc.gen, event)
-      // The CLI started the written message after an earlier turn ended ahead of
-      // it (a self-started one): the message's turn runs from here.
+      // The CLI started a written message after the turn running when it was
+      // written ended: the message's turn runs from here.
       if (
-        event.execution.source === 'lifecycle' &&
-        event.execution.messageId === proc.expectedMessageId &&
+        event.execution.messageId &&
+        // A steered message's pickup decides that itself (`pickUpSteer`).
+        !tab.steers.has(event.execution.messageId) &&
         tab.terminalState !== 'running' &&
         tab.pendingPrompts.size === 0
       ) {
@@ -2109,6 +2132,11 @@ export function createChatTransport(
       if (shown.kind === 'result' || shown.kind === 'interrupted') {
         proc.discardTurn = false
         proc.lateTurnOf = null
+        // Its identity ends with it, as any turn's does (below): the next turn is
+        // not this one's late output.
+        if (proc.execution) proc.lastEndedExecution = proc.execution.turnId
+        proc.execution = null
+        proc.expectedMessageId = null
         proc.openTools.clear()
         tab.outbox.onResult(proc.gen)
         tab.pendingPrompts.clear()
@@ -2368,7 +2396,10 @@ export function createChatTransport(
    * its stop flags stay.
    */
   function markTurnStarted(tab: ChatTab, messageId: string, interruptsAtWrite?: number): void {
-    if (tab.proc) {
+    // A turn the CLI itself bounds (`command_lifecycle`) keeps running: a message
+    // written meanwhile is queued by the CLI and starts at its own `started`
+    // (`turn-started`), so the running turn's output stays its own.
+    if (tab.proc && tab.proc.execution?.source !== 'lifecycle') {
       tab.proc.expectedMessageId = messageId
       tab.proc.execution = null
     }
@@ -2382,6 +2413,12 @@ export function createChatTransport(
       }
     }
     deps.userInputTracker.mark(stateKey(tab))
+    // A prompt still waits on the user: the tab keeps reading "needs you" (the
+    // agent takes the message after it); answering it resumes the turn.
+    if (tab.pendingPrompts.size > 0) {
+      tab.promptParkedTurn = true
+      return
+    }
     transitionState(tab, 'running')
     tab.watchdogLastProgress = Date.now()
     armWatchdog(tab)
@@ -2565,7 +2602,7 @@ export function createChatTransport(
   /** The agent could not be started: visible error, `dead`, waiting messages failed. */
   function failStart(tab: ChatTab, err: unknown): void {
     if (tab.closed) return
-    shadowFeed(tab, tab.gen, { type: 'process-ended' })
+    processEnded(tab)
     const error = err instanceof Error ? err : new Error(String(err))
     const code = isChatSpawnError(error) ? error.code : 'spawn-failed'
     routeHostEvent(tab, {
@@ -4005,7 +4042,10 @@ export function createChatTransport(
     proc.interruptIssued = true
     noteStopping(proc)
     if (popped) {
-      if (reach?.sent !== false) proc.discardTurn = true
+      // Only a message this process received can still have a turn here: one
+      // already settled, or sent to a process since replaced, has none to drop.
+      const turnMayCome = popped.id ? reach?.sent === true && reach.gen === proc.gen : true
+      if (turnMayCome) proc.discardTurn = true
       if (popped.id && reach?.sent && !reach.started) proc.lateTurnOf = popped.id
     } else {
       tab.turnInterrupted = true
@@ -4627,7 +4667,7 @@ export function createChatTransport(
       tab.ended = true
       return
     }
-    shadowFeed(tab, tab.gen, { type: 'process-ended' })
+    processEnded(tab)
     proc.kill('SIGTERM')
     const t = setTimeout(() => {
       if (!proc.ended) proc.kill('SIGKILL')
@@ -4942,7 +4982,7 @@ export function createChatTransport(
   }
 
   function forceFinalizeForShutdown(tab: ChatTab): void {
-    shadowFeed(tab, tab.gen, { type: 'process-ended' })
+    processEnded(tab)
     clearWatchdog(tab)
     tab.ended = true
     const proc = tab.proc

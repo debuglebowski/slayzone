@@ -6,6 +6,8 @@ import type { ChatPinnedMessage } from '@slayzone/terminal-contracts'
 import Database from 'better-sqlite3'
 import { createComputerChatRuntime } from './computer-runtime'
 import { bumpTaskStateVersion, openChatStorage } from './storage'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const NATIVE = '33333333-4444-4555-8666-777777777777'
 

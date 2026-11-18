@@ -18,6 +18,8 @@ import { createUploadStaging } from './upload-staging'
 import { PublicationNotAdmittedError } from './artifact-publication-protocol'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { eraseContent } from '@slayzone/content-erasure/server'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 type Route = { id: string; epoch: number }
 const alice = { id: 'alice', epoch: 1 },

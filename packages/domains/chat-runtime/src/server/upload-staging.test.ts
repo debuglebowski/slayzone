@@ -13,6 +13,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { createUploadStaging } from './upload-staging'
+// Fails the test on a lifecycle model / runtime disagreement.
+import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
 const dirs: string[] = []
 const stores: ReturnType<typeof createUploadStaging>[] = []
