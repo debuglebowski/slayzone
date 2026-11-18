@@ -26,6 +26,9 @@ module.exports = {
     ...rest
   ],
   setupFiles: ['<rootDir>/jest.setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup-after-env.js'],
+  // Room for findBy/waitFor's 5s wait on a cold transform cache (jest.setup-after-env.js).
+  testTimeout: 15_000,
   // Tests live beside the modules they test; routes (src/app) hold none.
   roots: ['<rootDir>/src'],
   // Crawl `roots` with node, not watchman: watchman watches from the repository root
