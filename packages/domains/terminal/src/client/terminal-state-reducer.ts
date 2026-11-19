@@ -165,12 +165,17 @@ export function hydrate(
  * a push newer than the fetch keep its fresher value instead of being stomped by the
  * (now-stale) snapshot. Omit it for callers without a fetch-start time (the
  * freshness check is skipped).
+ *
+ * `complete: false`: the list lacks what a hub that did not answer holds, so a
+ * session's absence says nothing — nothing is marked dead, no job count dropped;
+ * the sessions it lists are still adopted.
  */
 export function reconcile(
   s: TerminalStateData,
   sessions: readonly SessionInfoLite[],
   hibernatedIds?: readonly string[],
-  dispatchedAt?: number
+  dispatchedAt?: number,
+  { complete = true }: { complete?: boolean } = {}
 ): TerminalStatePatch {
   // A push (state-change/exit) newer than the moment this reconcile's
   // fetch was dispatched carries information the fetch's snapshot
@@ -233,7 +238,7 @@ export function reconcile(
   // Skip hibernated: it's absent-but-asleep, not dead. (We never clear a
   // marker here — only positive alive evidence in Pass 1 clears it — so a
   // DB-write lag right after hibernate can't flicker 💤 off.)
-  for (const sid of Object.keys(byId)) {
+  for (const sid of complete ? Object.keys(byId) : []) {
     if (hibernated[sid]) continue
     if (ALIVE_STATES.has(byId[sid]) && !present.has(sid) && !isStale(sid)) {
       byId[sid] = 'dead'
@@ -245,7 +250,7 @@ export function reconcile(
   // sid it doesn't contradict a fresher push for (absent = none).
   const jobsById = { ...s.jobsById }
   const listedJobs = new Map(sessions.map((x) => [x.sessionId, x.backgroundJobs ?? 0]))
-  for (const sid of new Set([...Object.keys(jobsById), ...listedJobs.keys()])) {
+  for (const sid of new Set([...(complete ? Object.keys(jobsById) : []), ...listedJobs.keys()])) {
     if (isStale(sid)) continue
     const want = listedJobs.get(sid) ?? 0
     if ((jobsById[sid] ?? 0) === want) continue

@@ -55,7 +55,8 @@ export interface TerminalStateStore extends TerminalStateData {
   reconcile: (
     sessions: SessionInfoLite[],
     hibernatedIds?: readonly string[],
-    dispatchedAt?: number
+    dispatchedAt?: number,
+    opts?: { complete?: boolean }
   ) => void
   /** Imperative read (non-reactive callers); default 'starting'. */
   getSessionState: (sessionId: string) => TerminalState
@@ -81,8 +82,8 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
 
     hydrate: (sessions) => set((s) => hydrate(s, sessions)),
 
-    reconcile: (sessions, hibernatedIds, dispatchedAt) =>
-      set((s) => reconcile(s, sessions, hibernatedIds, dispatchedAt)),
+    reconcile: (sessions, hibernatedIds, dispatchedAt, opts) =>
+      set((s) => reconcile(s, sessions, hibernatedIds, dispatchedAt, opts)),
 
     getSessionState: (sessionId) => sessionStateOf(get(), sessionId)
   }))
@@ -170,16 +171,19 @@ async function pullReconcile(): Promise<void> {
     // byte-identical. Per-hub failures are swallowed so one down hub doesn't
     // block reconcile for the others.
     const clients = listHubClients()
+    // A hub that did not answer lists nothing: its sessions are not gone (a
+    // brief outage must not turn every dot "dead") — the reconcile is partial.
+    let complete = true
     const perHub = await Promise.all(
       (clients.length > 0 ? clients.map((c) => c.client) : [getTrpcClient()]).map((c) =>
-        c.pty.sessionList.query().catch(
-          () =>
-            [] as Array<{
-              sessionId: string
-              state: string
-              backgroundJobs?: number
-            }>
-        )
+        c.pty.sessionList.query().catch(() => {
+          complete = false
+          return [] as Array<{
+            sessionId: string
+            state: string
+            backgroundJobs?: number
+          }>
+        })
       )
     )
     const sessions = perHub.flat()
@@ -191,7 +195,8 @@ async function pullReconcile(): Promise<void> {
         backgroundJobs: s.backgroundJobs
       })),
       hibernatedIds,
-      dispatchedAt
+      dispatchedAt,
+      { complete }
     )
   } catch {
     // Best-effort; the next trigger retries (also covers the tRPC-client-not-yet-
@@ -215,6 +220,9 @@ export function useWireTerminalStateStore(): void {
 
   useSubscription(
     trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      // A (re)start — a reconnect drops the changes pushed meanwhile — re-reads
+      // the authoritative list.
+      onStarted: () => void pullReconcile(),
       onData: ({ sessionId, newState }) =>
         store().applyStateChange(sessionId, newState as TerminalState)
     })

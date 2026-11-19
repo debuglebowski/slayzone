@@ -65,3 +65,22 @@ test('reconcile: a push newer than the fetch wins over its snapshot', () => {
   s = apply(s, reconcile(s, [], [], 100))
   expect(sessionStateOf(s, 'a:a')).toBe('dead')
 })
+
+test('a partial list (a hub did not answer) marks nothing dead and keeps job counts it lacks', () => {
+  let s: TerminalStateData = EMPTY_TERMINAL_STATE
+  s = apply(s, reconcile(s, [{ sessionId: 'a:a', state: 'running', backgroundJobs: 2 }]))
+  expect(sessionStateOf(s, 'a:a')).toBe('running')
+  // The hub holding a:a failed to answer: its absence says nothing.
+  s = apply(s, reconcile(s, [], undefined, undefined, { complete: false }))
+  expect(sessionStateOf(s, 'a:a')).toBe('running')
+  expect(s.jobsById['a:a']).toBe(2)
+  // A session it did list is still adopted.
+  s = apply(
+    s,
+    reconcile(s, [{ sessionId: 'a:a', state: 'idle' }], undefined, undefined, { complete: false })
+  )
+  expect(sessionStateOf(s, 'a:a')).toBe('idle')
+  // A complete list converges as before.
+  s = apply(s, reconcile(s, []))
+  expect(sessionStateOf(s, 'a:a')).toBe('dead')
+})
