@@ -32,7 +32,8 @@ Local only (Docker, no network). Never part of CI.
 | `p12-v0372-full` | v0.37.2 (schema v193) | skipped v0.38.0: p05's setup on v0.37.2, plus Codex chats on every computer; chat stores with v0.37's out-of-date triggers |
 | `p13-v0390-full` | v0.39.0 (schema v214) | p05's setup on v0.39.0 |
 | `p14-v0400-full` | v0.40.0 (schema v217) | p05's setup on v0.40.0 |
-| `p15-v0411-full` | v0.41.1 (schema v219) | p05's setup on v0.41.1, the release current users upgrade from |
+| `p15-v0411-full` | v0.41.1 (schema v219) | p05's setup on v0.41.1 |
+| `p16-v0420-full` | v0.42.0 (schema v223) | p05's setup on v0.42.0, the release current users upgrade from |
 
 The harness image links today's hub/computer bundles at the `.deb` install paths
 (`/opt/SlayZone/resources/...`): v0.38+ computers record that path as the release their
