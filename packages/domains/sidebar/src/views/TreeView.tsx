@@ -903,8 +903,16 @@ export function TreeView({
         // Find next root in newGroupKey AFTER source's new idx — used to
         // translate root-only insertion idx into moveTask's status-filtered
         // targetIndex (which counts subtasks too).
+        //
+        // newGroupKey's OWN header sits below the source only in the
+        // first-header fallback above (source at flat idx 0, header next).
+        // Step over it: the source lands at the TOP of that group — what the
+        // pre-slide shows (gap opens above the header) and what the subtask
+        // path does (`rootOnlyMoveIdx` = 0). Stopping at it sent root sources
+        // to the END of the group instead.
         let nextRootId: string | null = null
         for (let i = newSourceIdx + 1; i < newFlatIds.length; i++) {
+          if (newFlatIsHeader[i] && newFlatGroupOfRow[i] === newGroupKey) continue
           if (newFlatIsHeader[i]) break
           if (newFlatGroupOfRow[i] !== newGroupKey) break
           nextRootId = newFlatIds[i]

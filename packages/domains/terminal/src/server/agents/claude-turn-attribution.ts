@@ -85,7 +85,15 @@ export class ClaudeTurnAttribution {
         this.lifecycle = true
         this.pending = undefined
         if (event.state === 'started') this.started(event.commandUuid)
-        if (event.state === 'cancelled' && this.current?.messageId === event.commandUuid) {
+        // Its message is done: `cancelled`, or `completed` without ever `started`
+        // (a message the CLI already had — sent again after a respawn — runs no
+        // turn). A turn that did start keeps its execution past `completed`: its
+        // result can still follow.
+        if (
+          this.current?.messageId === event.commandUuid &&
+          (event.state === 'cancelled' ||
+            (event.state === 'completed' && this.current.source !== 'lifecycle'))
+        ) {
           this.current = undefined
           this.clearFinishedTools()
         }

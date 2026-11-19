@@ -736,8 +736,15 @@ describe('ChatSession on the phone task page', () => {
     await screen.findByTestId('chat-composer')
     expect(screen.queryByTestId('chat-controls')).toBeNull()
     expect(screen.queryByLabelText(/^Model: /)).toBeNull()
-    await waitFor(() => expect(handed.last).toMatchObject({ mode: 'claude-chat', waiting: false }))
-    expect(handed.last?.settings.mode).toBe('auto-accept')
+    // The permission mode comes with the session state, which can land after the first
+    // hand-off (mode null until then): wait for the hand-off that carries it.
+    await waitFor(() =>
+      expect(handed.last).toMatchObject({
+        mode: 'claude-chat',
+        waiting: false,
+        settings: { mode: 'auto-accept' }
+      })
+    )
   })
 
   it('the controls the page shows change the chat: a model tile opens the models', async () => {

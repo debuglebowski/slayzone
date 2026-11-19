@@ -635,15 +635,32 @@ async function writeLine(event) {
   log('stdout', { line })
 }
 
-async function emit(raw) {
-  const event = substitute(raw)
-  // Like the CLI: every assistant line carries the uuid of its session record,
-  // and no two records share one — a scripted uuid played again (a reused
-  // `defaultTurn`, a resumed conversation) gets a new one.
-  if (event?.type === 'assistant' && event.message) {
+/** The last `result_index` this process sent (the CLI numbers its results from 0). */
+let lastResultIndex = -1
+
+/**
+ * What the CLI guarantees of every line it writes: no two records share a uuid
+ * (a scripted uuid played again — a reused `defaultTurn`, a replayed turn, a
+ * resumed conversation — gets a new one; the first play keeps the scripted one),
+ * and a process numbers its results upward (`result_index`, when the line has one).
+ * A replay echo (`isReplay`) carries its message's uuid on purpose: kept.
+ */
+function identify(event) {
+  if (!event || typeof event !== 'object' || event.isReplay === true) return event
+  const recorded = event.type === 'assistant' && event.message
+  if (recorded || typeof event.uuid === 'string') {
     if (typeof event.uuid !== 'string' || recordUuids.has(event.uuid)) event.uuid = randomUUID()
     recordUuids.add(event.uuid)
   }
+  if (event.type === 'result' && Number.isSafeInteger(event.result_index)) {
+    if (event.result_index <= lastResultIndex) event.result_index = lastResultIndex + 1
+    lastResultIndex = event.result_index
+  }
+  return event
+}
+
+async function emit(raw) {
+  const event = identify(substitute(raw))
   // A stopped sub-agent's scripted end: the CLI sends none.
   if (!taskSim.noteEmitted(event)) return
   trackTools(event)
@@ -658,7 +675,7 @@ async function emit(raw) {
 
 /** Write one event as two raw chunks, split inside its first multi-byte character. */
 async function emitSplit(raw, gapMs) {
-  const event = substitute(raw)
+  const event = identify(substitute(raw))
   trackTools(event)
   recordEmitted(event)
   const line = JSON.stringify(event)

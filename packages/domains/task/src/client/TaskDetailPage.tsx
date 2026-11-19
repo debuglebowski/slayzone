@@ -3319,7 +3319,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                     return (
                                       <ContextMenuRadioItem key={mode.id} value={mode.id}>
                                         <span className="flex items-center gap-2">
-                                          <ModeIcon className="size-3.5" />
+                                          {/* Decorative: the provider logos carry an SVG
+                                              <title>, which would name the item twice
+                                              ("Codex Codex"). The label says it. */}
+                                          <span aria-hidden="true" className="flex">
+                                            <ModeIcon className="size-3.5" />
+                                          </span>
                                           {getModeLabel(mode)}
                                         </span>
                                       </ContextMenuRadioItem>

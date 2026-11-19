@@ -75,14 +75,19 @@ export default defineConfig(({ mode }) => {
       // port selection needed at all).
     },
     resolve: {
-      alias: {
-        // The ONLY alias this shell needs. Deliberately NOT propagating
-        // chromium-shell's `'@' → packages/renderer-app/src` — nothing in
-        // renderer-app's own source uses a bare `@/...` import (verified:
-        // its own tsconfig.json has no such alias either), so that entry in
-        // the fork's config is a dead path this shell must not inherit.
-        'convex/_generated': resolve(root, 'convex/_generated')
-      }
+      alias: [
+        // Deliberately NOT propagating chromium-shell's `'@' →
+        // packages/renderer-app/src` — nothing in renderer-app's own source uses a
+        // bare `@/...` import (verified: its own tsconfig.json has no such alias
+        // either), so that entry in the fork's config is a dead path this shell
+        // must not inherit.
+        { find: 'convex/_generated', replacement: resolve(root, 'convex/_generated') },
+        // Every bare `zod` import goes through the module that turns zod's eval
+        // probe off, so it runs before any schema is built (src/zod-jitless.ts).
+        // Exact match: a string `find` would also capture `zod/v4`, which that
+        // module imports.
+        { find: /^zod$/, replacement: resolve(__dirname, 'src/zod-jitless.ts') }
+      ]
     },
     build: {
       // Lands directly in the hub's own served-assets directory — no copy

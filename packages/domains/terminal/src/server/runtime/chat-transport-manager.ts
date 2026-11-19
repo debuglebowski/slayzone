@@ -3223,8 +3223,10 @@ export function createChatTransport(
 
   /**
    * Replace a tab's process: stop the current one (SIGTERM, wait; SIGKILL after
-   * the grace; give up after a second grace — its output is dropped either way),
-   * then start the next generation with `nextOpts`. The tab's history, outbox and
+   * the grace; give up after a second grace), then start the next generation with
+   * `nextOpts`. What the old one writes until it exits is stored as its tail,
+   * before the next generation starts; it drives nothing, and nothing after its
+   * exit (or the give-up) counts. The tab's history, outbox and
    * queue carry over; nothing is re-read from the DB. Messages the old process had
    * not confirmed are re-sent to the new one.
    *
@@ -3258,7 +3260,8 @@ export function createChatTransport(
     const run = (async (): Promise<void> => {
       const old = tab.proc
       if (old && !old.ended) {
-        // From here on nothing it says counts; its exit is swallowed.
+        // From here on it drives nothing and its exit is swallowed; its output
+        // until it exits is kept as its tail (`retiring`).
         old.retiring = true
         clearWatchdog(tab)
         const outcome = await old.stop(2000, 2000)
