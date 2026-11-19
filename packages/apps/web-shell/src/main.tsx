@@ -1,7 +1,8 @@
 // Web shell entry. Install window.api BEFORE the renderer module graph
 // evaluates (mirrors chromium-shell's main.tsx — @slayzone/settings' module-
 // eval read of `window.api` must happen after this assignment), then boot.
-// zod-jitless first: it must run before any module builds a zod schema.
+// zod-jitless: the bundle's `zod` (vite.config.ts alias), so every schema module already
+// depends on it; imported here too so the eval probe is off even before any schema.
 import './zod-jitless'
 import './main.css'
 import { createRoot } from 'react-dom/client'

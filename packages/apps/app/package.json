@@ -29,10 +29,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.24.0",
     "better-sqlite3": "^13.0.3",
     "bufferutil": "^4.1.0",
-    "electron-chrome-extensions": "^4.9.0",
+    "electron-chrome-extensions": "^4.10.0",
     "electron-chrome-web-store": "^0.13.0",
     "electron-updater": "^6.8.11",
     "express": "^5.3.0",

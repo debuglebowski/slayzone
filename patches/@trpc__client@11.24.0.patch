@@ -1,8 +1,8 @@
-diff --git a/dist/wsLink-Bm5LKL6z.mjs b/dist/wsLink-Bm5LKL6z.mjs
-index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15d6689c7b 100644
---- a/dist/wsLink-Bm5LKL6z.mjs
-+++ b/dist/wsLink-Bm5LKL6z.mjs
-@@ -457,6 +457,21 @@ var WsClient = class {
+diff --git a/dist/wsLink-BTxcQ23Z.mjs b/dist/wsLink-BTxcQ23Z.mjs
+index ffdd1a936889e5e75e562a70e6854b299b631fa1..8221620357785285f6a0d8142588c31db672fcbc 100644
+--- a/dist/wsLink-BTxcQ23Z.mjs
++++ b/dist/wsLink-BTxcQ23Z.mjs
+@@ -463,6 +463,21 @@ var WsClient = class {
  			}));
  			return this.reconnecting;
  		}
@@ -24,7 +24,7 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  	}
  	/**
  	* Closes the WebSocket connection and stops managing requests.
-@@ -464,6 +479,7 @@ var WsClient = class {
+@@ -470,6 +485,7 @@ var WsClient = class {
  	*/
  	async close() {
  		this.allowReconnect = false;
@@ -32,7 +32,7 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  		this.inactivityTimeout.stop();
  		const requestsToAwait = [];
  		for (const request of this.requestManager.getRequests()) if (request.message.method === "subscription") request.callbacks.complete();
-@@ -521,7 +537,25 @@ var WsClient = class {
+@@ -530,8 +546,25 @@ var WsClient = class {
  	get connection() {
  		return backwardCompatibility(this.activeConnection);
  	}
@@ -52,13 +52,13 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
 +		});
 +	}
  	reconnect(closedError) {
-+		if (!this.allowReconnect) return;
+ 		if (!this.allowReconnect) return;
 +		// Latest socket requiring replacement, even while an older retry loop sleeps.
 +		this.reconnectFrom = this.activeConnection.ws;
  		this.connectionState.next({
  			type: "state",
  			state: "connecting",
-@@ -530,11 +564,21 @@ var WsClient = class {
+@@ -540,12 +573,23 @@ var WsClient = class {
  		if (this.reconnecting) return;
  		const tryReconnect = async (attemptIndex) => {
  			try {
@@ -67,7 +67,6 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  				if (this.allowReconnect) {
 -					await this.activeConnection.close();
 -					await this.activeConnection.open();
--					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
 +					const conn = this.activeConnection;
 +					const reopenedMeanwhile = conn.isOpen() && conn.ws !== this.reconnectFrom;
 +					// Join a query's attempt; preserve a socket that already satisfied the intent.
@@ -80,21 +79,24 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
 +					}
 +					// A new server reconnect can arrive while open() is completing.
 +					if (this.allowReconnect && conn.ws === this.reconnectFrom) return tryReconnect(0);
++					// Upstream 11.24: a socket that opened resets the rejected-connection backoff.
+ 					this.connectionAttemptIndex = attemptIndex;
+-					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
 +					if (this.allowReconnect) this.resendPendingOnce();
  				}
  				this.reconnecting = null;
  			} catch (_unused) {
-@@ -544,7 +588,9 @@ var WsClient = class {
- 		this.reconnecting = tryReconnect(0);
+@@ -556,7 +600,9 @@ var WsClient = class {
  	}
  	setupWebSocketListeners(ws) {
+ 		this.connectionRejected = false;
 +		// Superseded sockets must never mutate current state, requests or replay cursors.
  		const handleCloseOrError = (cause) => {
 +			if (ws !== this.activeConnection.ws) return;
  			const reqs = this.requestManager.getPendingRequests();
  			for (const { message, callbacks } of reqs) {
  				if (message.method === "subscription") continue;
-@@ -556,6 +602,7 @@ var WsClient = class {
+@@ -568,6 +614,7 @@ var WsClient = class {
  			}
  		};
  		ws.addEventListener("open", () => {
@@ -102,7 +104,7 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  			run(async () => {
  				var _this$callbacks$onOpe, _this$callbacks;
  				if (this.lazyMode) this.inactivityTimeout.start();
-@@ -571,6 +618,7 @@ var WsClient = class {
+@@ -583,6 +630,7 @@ var WsClient = class {
  			});
  		});
  		ws.addEventListener("message", ({ data }) => {
@@ -110,7 +112,7 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  			this.inactivityTimeout.reset();
  			if (["PING", "PONG"].includes(data)) return;
  			const incomingMessage = this.encoder.decode(data);
-@@ -581,6 +629,7 @@ var WsClient = class {
+@@ -594,6 +642,7 @@ var WsClient = class {
  			this.handleResponseMessage(incomingMessage);
  		});
  		ws.addEventListener("close", (event) => {
@@ -118,7 +120,7 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  			var _this$callbacks$onClo, _this$callbacks2;
  			handleCloseOrError(event);
  			(_this$callbacks$onClo = (_this$callbacks2 = this.callbacks).onClose) === null || _this$callbacks$onClo === void 0 || _this$callbacks$onClo.call(_this$callbacks2, event);
-@@ -590,6 +639,7 @@ var WsClient = class {
+@@ -603,6 +652,7 @@ var WsClient = class {
  			}));
  		});
  		ws.addEventListener("error", (event) => {
@@ -126,11 +128,11 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15
  			var _this$callbacks$onErr, _this$callbacks3;
  			handleCloseOrError(event);
  			(_this$callbacks$onErr = (_this$callbacks3 = this.callbacks).onError) === null || _this$callbacks$onErr === void 0 || _this$callbacks$onErr.call(_this$callbacks3, event);
-diff --git a/dist/wsLink-CKAsNP9P.cjs b/dist/wsLink-CKAsNP9P.cjs
-index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7e575d8e8 100644
---- a/dist/wsLink-CKAsNP9P.cjs
-+++ b/dist/wsLink-CKAsNP9P.cjs
-@@ -457,6 +457,21 @@ var WsClient = class {
+diff --git a/dist/wsLink-C25l36Jd.cjs b/dist/wsLink-C25l36Jd.cjs
+index d1091900fe824cb03651b52795f8c5a595773a9a..0cf432fae46f271baf3df58b0761f03aa0b55ceb 100644
+--- a/dist/wsLink-C25l36Jd.cjs
++++ b/dist/wsLink-C25l36Jd.cjs
+@@ -463,6 +463,21 @@ var WsClient = class {
  			}));
  			return this.reconnecting;
  		}
@@ -152,7 +154,7 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  	}
  	/**
  	* Closes the WebSocket connection and stops managing requests.
-@@ -464,6 +479,7 @@ var WsClient = class {
+@@ -470,6 +485,7 @@ var WsClient = class {
  	*/
  	async close() {
  		this.allowReconnect = false;
@@ -160,7 +162,7 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  		this.inactivityTimeout.stop();
  		const requestsToAwait = [];
  		for (const request of this.requestManager.getRequests()) if (request.message.method === "subscription") request.callbacks.complete();
-@@ -521,7 +537,25 @@ var WsClient = class {
+@@ -530,8 +546,25 @@ var WsClient = class {
  	get connection() {
  		return backwardCompatibility(this.activeConnection);
  	}
@@ -180,13 +182,13 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
 +		});
 +	}
  	reconnect(closedError) {
-+		if (!this.allowReconnect) return;
+ 		if (!this.allowReconnect) return;
 +		// Latest socket requiring replacement, even while an older retry loop sleeps.
 +		this.reconnectFrom = this.activeConnection.ws;
  		this.connectionState.next({
  			type: "state",
  			state: "connecting",
-@@ -530,11 +564,21 @@ var WsClient = class {
+@@ -540,12 +573,23 @@ var WsClient = class {
  		if (this.reconnecting) return;
  		const tryReconnect = async (attemptIndex) => {
  			try {
@@ -195,7 +197,6 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  				if (this.allowReconnect) {
 -					await this.activeConnection.close();
 -					await this.activeConnection.open();
--					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
 +					const conn = this.activeConnection;
 +					const reopenedMeanwhile = conn.isOpen() && conn.ws !== this.reconnectFrom;
 +					// Join a query's attempt; preserve a socket that already satisfied the intent.
@@ -208,21 +209,24 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
 +					}
 +					// A new server reconnect can arrive while open() is completing.
 +					if (this.allowReconnect && conn.ws === this.reconnectFrom) return tryReconnect(0);
++					// Upstream 11.24: a socket that opened resets the rejected-connection backoff.
+ 					this.connectionAttemptIndex = attemptIndex;
+-					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
 +					if (this.allowReconnect) this.resendPendingOnce();
  				}
  				this.reconnecting = null;
  			} catch (_unused) {
-@@ -544,7 +588,9 @@ var WsClient = class {
- 		this.reconnecting = tryReconnect(0);
+@@ -556,7 +600,9 @@ var WsClient = class {
  	}
  	setupWebSocketListeners(ws) {
+ 		this.connectionRejected = false;
 +		// Superseded sockets must never mutate current state, requests or replay cursors.
  		const handleCloseOrError = (cause) => {
 +			if (ws !== this.activeConnection.ws) return;
  			const reqs = this.requestManager.getPendingRequests();
  			for (const { message, callbacks } of reqs) {
  				if (message.method === "subscription") continue;
-@@ -556,6 +602,7 @@ var WsClient = class {
+@@ -568,6 +614,7 @@ var WsClient = class {
  			}
  		};
  		ws.addEventListener("open", () => {
@@ -230,7 +234,7 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  			(0, _trpc_server_unstable_core_do_not_import.run)(async () => {
  				var _this$callbacks$onOpe, _this$callbacks;
  				if (this.lazyMode) this.inactivityTimeout.start();
-@@ -571,6 +618,7 @@ var WsClient = class {
+@@ -583,6 +630,7 @@ var WsClient = class {
  			});
  		});
  		ws.addEventListener("message", ({ data }) => {
@@ -238,7 +242,7 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  			this.inactivityTimeout.reset();
  			if (["PING", "PONG"].includes(data)) return;
  			const incomingMessage = this.encoder.decode(data);
-@@ -581,6 +629,7 @@ var WsClient = class {
+@@ -594,6 +642,7 @@ var WsClient = class {
  			this.handleResponseMessage(incomingMessage);
  		});
  		ws.addEventListener("close", (event) => {
@@ -246,7 +250,7 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  			var _this$callbacks$onClo, _this$callbacks2;
  			handleCloseOrError(event);
  			(_this$callbacks$onClo = (_this$callbacks2 = this.callbacks).onClose) === null || _this$callbacks$onClo === void 0 || _this$callbacks$onClo.call(_this$callbacks2, event);
-@@ -590,6 +639,7 @@ var WsClient = class {
+@@ -603,6 +652,7 @@ var WsClient = class {
  			}));
  		});
  		ws.addEventListener("error", (event) => {
@@ -254,11 +258,11 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7
  			var _this$callbacks$onErr, _this$callbacks3;
  			handleCloseOrError(event);
  			(_this$callbacks$onErr = (_this$callbacks3 = this.callbacks).onError) === null || _this$callbacks$onErr === void 0 || _this$callbacks$onErr.call(_this$callbacks3, event);
-diff --git a/dist/wsLink-DoiyfDgJ.d.cts b/dist/wsLink-DoiyfDgJ.d.cts
-index 64f6ff2a15d836b7137065ee2558fb692d3113c1..67924e88e5ee4c4398d96cdef3f8d1a6dbdf7c66 100644
---- a/dist/wsLink-DoiyfDgJ.d.cts
-+++ b/dist/wsLink-DoiyfDgJ.d.cts
-@@ -117,6 +117,8 @@ declare class WsClient {
+diff --git a/dist/wsLink-CPkrJOns.d.cts b/dist/wsLink-CPkrJOns.d.cts
+index cb238af0eee1dff93ac721b2ef1092484713aae9..2a81957e2fcd88443c792157bf87f1f13220b620 100644
+--- a/dist/wsLink-CPkrJOns.d.cts
++++ b/dist/wsLink-CPkrJOns.d.cts
+@@ -125,6 +125,8 @@ declare class WsClient {
     * the connection state accordingly.
     */
    private open;
@@ -267,11 +271,11 @@ index 64f6ff2a15d836b7137065ee2558fb692d3113c1..67924e88e5ee4c4398d96cdef3f8d1a6
    /**
     * Closes the WebSocket connection and stops managing requests.
     * Ensures all outgoing and pending requests are properly finalized.
-diff --git a/dist/wsLink-U8pJ7LD2.d.mts b/dist/wsLink-U8pJ7LD2.d.mts
-index 642b6b88f6fc7bebd4635034bf30a933e4678552..da60a571d8dda079b2d41b5bebd230a27af07041 100644
---- a/dist/wsLink-U8pJ7LD2.d.mts
-+++ b/dist/wsLink-U8pJ7LD2.d.mts
-@@ -117,6 +117,8 @@ declare class WsClient {
+diff --git a/dist/wsLink-h46RumcH.d.mts b/dist/wsLink-h46RumcH.d.mts
+index e77d72c044182f5f0a1fb066d912856cd0b115f2..32c15b688521c85d0471df70305559998f5a021c 100644
+--- a/dist/wsLink-h46RumcH.d.mts
++++ b/dist/wsLink-h46RumcH.d.mts
+@@ -125,6 +125,8 @@ declare class WsClient {
     * the connection state accordingly.
     */
    private open;

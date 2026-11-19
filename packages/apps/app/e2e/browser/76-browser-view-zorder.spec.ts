@@ -208,13 +208,13 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     // off-window view's native host ignores setBounds) and the page was
     // `hidden` (rAF stopped) — agents got empty dashboards.
     // Isolated from the real task's panel: own task id, and a web-panel view in
-    // an in-memory partition (own renderer process; browser-tab kind would be
-    // registered with the extension system, which requires the shared session).
-    // Same manager bounds path as a browser tab.
+    // the web-panel partition (browser-tab kind would be registered with the
+    // extension system). Main refuses any partition that is not a browser-panel
+    // one (isBrowserPanelPartition). Same manager bounds path as a browser tab.
     const viewId = (await testInvoke(mainWindow, 'browser:create-view', {
       taskId: 'park-size-probe-task',
       tabId: 'park-size-probe',
-      partition: 'park-size-probe',
+      partition: 'persist:web-panels',
       url: await getTestUrl('/'),
       bounds: { x: 0, y: 0, width: 1, height: 1 },
       kind: 'web-panel'

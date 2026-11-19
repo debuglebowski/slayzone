@@ -213,6 +213,19 @@ describe('command_lifecycle boundaries', () => {
     s.attribute(lifecycle('A', 'completed'))
   })
 
+  test('a message the CLI completes without a turn (already in the conversation) ends its execution', () => {
+    // A respawn sends an unconfirmed message again; the CLI already had it, so it
+    // acks it `completed` at once and runs no turn: no `started`, no result.
+    const s = new ClaudeTurnAttribution(() => {})
+    s.begin('A') // the process's first write: no lifecycle seen yet
+    s.attribute(lifecycle('A', 'completed'))
+    s.begin('B')
+    s.attribute(lifecycle('B', 'queued'))
+    s.attribute(lifecycle('B', 'started'))
+    expect(owner(s, text('b1'))).toMatchObject({ turnId: 'B', messageId: 'B' })
+    expect(owner(s, result('result-B', 0))?.messageId).toBe('B')
+  })
+
   test('a steer the CLI starts after the turn ended gets its own execution', () => {
     const s = new ClaudeTurnAttribution(() => {})
     s.begin('A')

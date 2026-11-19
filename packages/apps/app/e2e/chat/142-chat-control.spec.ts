@@ -102,7 +102,7 @@ test.describe('Chat control', () => {
     expect(t.epoch.runs()).toHaveLength(1)
   })
 
-  test('a respawn mid-turn: late output of the replaced process never reaches the history', async ({
+  test('a respawn mid-turn: the tail of the replaced process lands before the next process, never over it', async ({
     chat
   }) => {
     const t = await chat.openTask({
@@ -151,15 +151,23 @@ test.describe('Chat control', () => {
     // Let any late write land before reading the store.
     await t.page.waitForTimeout(500)
 
-    // Audit #3 (a replaced process's late events overwrite the new one's rows via
-    // INSERT OR REPLACE) does NOT reproduce end to end: chat always spawns through
-    // a computer, which re-spawns under the same session id and drops the replaced
-    // child's output (apps/computer handlers/proc.ts `procs.get(id) !== session`),
-    // both right after SIGTERM and later. This guards that; plan 1.1's hub-side
-    // generation gate remains defence in depth.
-    const texts = (await t.events()).map((e) => String(e.event.text ?? ''))
-    expect(texts.filter((x) => x.includes('LATE-'))).toEqual([])
-    expect(texts).toContain('after respawn')
-    expect(texts).toContain('GEN2: after respawn')
+    // Audit #3: a replaced process's late events overwrote the new one's rows
+    // (INSERT OR REPLACE). The replacement starts only once the old process has
+    // exited and its output is stored: the tail it wrote while draining is kept
+    // (terminal DOMAIN.md: "replacement/close retains the final tail"), all of it
+    // before the next process's spawn, once, in order; nothing of it after that.
+    const rows = await t.events()
+    const spawns = rows.filter((r) => r.event.kind === 'session-spawn').map((r) => r.seq)
+    expect(spawns).toHaveLength(2)
+    const next = spawns[1]
+    const text = (r: (typeof rows)[number]) => String(r.event.text ?? '')
+    const late = rows.filter((r) => text(r).includes('LATE-'))
+    expect(late.map(text)).toEqual([0, 1, 2, 3].map((i) => `LATE-${i} from the replaced process`))
+    expect(late.every((r) => r.seq < next)).toBe(true)
+    const after = rows.filter((r) => r.seq > next)
+    expect(after.some((r) => text(r).includes('LATE-'))).toBe(false)
+    expect(after.map(text)).toContain('after respawn')
+    expect(after.map(text)).toContain('GEN2: after respawn')
+    expect(after.some((r) => r.event.kind === 'result')).toBe(true)
   })
 })

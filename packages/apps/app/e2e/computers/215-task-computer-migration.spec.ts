@@ -72,6 +72,9 @@ async function fixture(startAgent = false) {
     git(sourceRepo, 'init', '-q')
     git(sourceRepo, 'config', 'user.name', 'Migration Test')
     git(sourceRepo, 'config', 'user.email', 'migration@example.test')
+    // A developer's global signing (1Password GPG) fails without a desktop prompt.
+    git(sourceRepo, 'config', 'commit.gpgsign', 'false')
+    git(sourceRepo, 'config', 'tag.gpgsign', 'false')
     fs.writeFileSync(path.join(sourceRepo, 'tracked.txt'), 'base\n')
     git(sourceRepo, 'add', '.')
     git(sourceRepo, 'commit', '-qm', 'base')

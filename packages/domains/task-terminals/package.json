@@ -43,7 +43,7 @@
     "@slayzone/workflow": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
     "@tanstack/virtual-core": "3.19.11",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.24.0",
     "diff": "^9.0.0",
     "fzf": "^0.5.2",
     "lucide-react": "^1.68.0",

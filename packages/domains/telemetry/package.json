@@ -22,7 +22,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.24.0",
     "posthog-js": "^1.445.5"
   },
   "peerDependencies": {

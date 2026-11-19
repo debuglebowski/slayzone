@@ -886,6 +886,27 @@ describe('fake-claude — conversation control (chat A, as CLI 2.1.312)', () => 
     expect(new Set(uuids).size).toBe(3)
   })
 
+  it('a scripted turn played again sends new uuids on every line, and results numbered upward', async () => {
+    // A reused `defaultTurn` (or a replayed recorded turn) must not repeat a line
+    // the CLI already sent: the app drops a result it has seen as a duplicate.
+    const recorded = { ...ev.result({ text: 'done' }), result_index: 0 }
+    fake.setScenario({
+      processes: [{ defaultTurn: [step.emit(ev.init(), ev.text('hi'), recorded)] }]
+    })
+    const p = start()
+    p.send(user('one'))
+    await p.waitFor(isResult)
+    p.send(user('two'))
+    await p.waitFor(() => p.lines.filter(isResult).length === 2)
+    const sent = p.lines.filter((e) => e.type === 'result' || e.type === 'system')
+    const uuids = sent.map((e) => e.uuid)
+    expect(uuids).toHaveLength(4)
+    expect(new Set(uuids).size).toBe(4)
+    // The first play keeps the scripted uuid.
+    expect(sent.filter(isResult)[0].uuid).toBe(recorded.uuid)
+    expect(sent.filter(isResult).map((e) => e.result_index)).toEqual([0, 1])
+  })
+
   it('a fork writes nothing before its first message (2.1.312, chat-a check R3b)', async () => {
     const seeded = writeSessionFile({
       configDir,

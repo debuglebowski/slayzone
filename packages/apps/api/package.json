@@ -50,7 +50,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
-    "@trpc/server": "^11.19.0",
+    "@trpc/server": "^11.24.0",
     "better-sqlite3": "^13.0.3",
     "bufferutil": "^4.1.0",
     "express": "^5.3.0",

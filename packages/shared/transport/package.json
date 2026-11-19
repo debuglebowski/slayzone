@@ -22,9 +22,9 @@
     "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
-    "@trpc/client": "^11.19.0",
-    "@trpc/server": "^11.19.0",
-    "@trpc/tanstack-react-query": "^11.19.0",
+    "@trpc/client": "^11.24.0",
+    "@trpc/server": "^11.24.0",
+    "@trpc/tanstack-react-query": "^11.24.0",
     "superjson": "^2.2.6",
     "zod": "^4.6.6",
     "zustand": "^5.0.16"

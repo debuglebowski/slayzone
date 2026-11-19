@@ -230,6 +230,13 @@ export async function switchAgent(page: Page, mode: AgentId): Promise<void> {
     }
   }
 
+  // The menu may still be open (opened, but no item matched): a Radix menu left
+  // open keeps pointer-events off <body>, so every later click in the spec fails.
+  if (menuOpen) {
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menuitemradio').first()).toBeHidden()
+  }
+
   // Fallback: ContextMenu fixture is flaky in some scenarios. Reproduce the
   // semantics of `handleModeChange` directly — kill the main PTY (if any),
   // clear all conversationIds, set the new mode, force a refresh. End-state
