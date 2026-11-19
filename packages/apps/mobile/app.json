@@ -10,6 +10,7 @@
     "updates": { "enabled": false },
     "ios": {
       "bundleIdentifier": "zone.slay.app",
+      "appleTeamId": "DRAYKWYC94",
       "buildNumber": "4",
       "supportsTablet": true,
       "infoPlist": {
