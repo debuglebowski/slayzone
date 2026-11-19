@@ -202,6 +202,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       timeline,
       inFlight,
       hydrating,
+      reconnecting,
       loadError,
       hydrateError,
       reload,
@@ -970,6 +971,10 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           hydrating={hydrating}
                           isEmpty={isEmpty}
                           inFlight={inFlight}
+                          reconnecting={
+                            reconnecting ||
+                            (storage.status !== null && !chatComputerCanStart(storage.status.state))
+                          }
                           stopping={composer.stopping}
                           awaitingUser={
                             promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)

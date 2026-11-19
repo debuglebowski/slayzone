@@ -49,6 +49,7 @@ export function ChatTimeline({
   state,
   hydrating,
   working,
+  reconnecting = false,
   emptyText,
   topInset = 0,
   onScrollFromNewest
@@ -57,6 +58,8 @@ export function ChatTimeline({
   hydrating: boolean
   /** A turn runs and the agent is not waiting for the user. */
   working: boolean
+  /** Not in step with the hub: the turn state is the last known one, so it says so. */
+  reconnecting?: boolean
   emptyText: string
   /** How far a bar floating over the list's top reaches into it (pt). */
   topInset?: number
@@ -125,7 +128,11 @@ export function ChatTimeline({
   const last = rows[0]?.item
   const tailStreaming =
     (last?.kind === 'text' || last?.kind === 'thinking') && last.stream === 'open'
-  const label = working && !tailStreaming ? (deriveLoadingLabel(state) ?? 'Working…') : null
+  const label = reconnecting
+    ? 'Reconnecting…'
+    : working && !tailStreaming
+      ? (deriveLoadingLabel(state) ?? 'Working…')
+      : null
 
   if (hydrating) {
     return (

@@ -73,6 +73,11 @@ export interface ChatTimelineProps {
   hydrating: boolean
   isEmpty: boolean
   inFlight: boolean
+  /**
+   * Not in step with the server (reconnecting, catching up, its computer away):
+   * the turn state is the last known one, so the indicator says so instead.
+   */
+  reconnecting?: boolean
   /** Stop was pressed and the turn has not closed yet: the indicator says so. */
   stopping?: boolean
   /** The agent is waiting on the user (a prompt) — no "working" indicator then. */
@@ -118,6 +123,7 @@ export function ChatTimeline({
   hydrating,
   isEmpty,
   inFlight,
+  reconnecting = false,
   stopping = false,
   awaitingUser,
   appearance,
@@ -153,6 +159,8 @@ export function ChatTimeline({
     (tail?.kind === 'text' || (tail?.kind === 'thinking' && appearance.chatShowThinking)) &&
     tail.stream === 'open'
   const loadingLabel = stopping ? 'Stopping…' : (deriveLoadingLabel(state) ?? 'Waiting for agent…')
+  // Not "working" nor "done": unknown until the panel is in step again.
+  const reconnectingLabel = 'Reconnecting…'
   const activityAppearance = useMemo(
     () => ({
       chatShowActivities: appearance.chatShowActivities,
@@ -183,7 +191,7 @@ export function ChatTimeline({
     (item: TimelineItem, index: number) => {
       const turn = activityTurns?.get(item)
       if (turn) {
-        const showWorking = turn.active && !awaitingUser
+        const showWorking = turn.active && !awaitingUser && !reconnecting
         if ((turn.final && item.kind === 'text') || item.kind === 'interrupted') {
           return (
             <AssistantAnswer
@@ -242,6 +250,7 @@ export function ChatTimeline({
     [
       activityTurns,
       awaitingUser,
+      reconnecting,
       loadingLabel,
       rowOf,
       activityAppearance,
@@ -313,10 +322,19 @@ export function ChatTimeline({
                       rowOf={rowOf}
                       renderRow={renderRow}
                     />
-                    {inFlight && !awaitingUser && !tailStreaming && !hasActiveTurn && (
-                      <div className="relative">
-                        <TypingIndicator label={loadingLabel} />
+                    {reconnecting ? (
+                      <div className="relative" data-testid="chat-reconnecting">
+                        <TypingIndicator label={reconnectingLabel} />
                       </div>
+                    ) : (
+                      inFlight &&
+                      !awaitingUser &&
+                      !tailStreaming &&
+                      !hasActiveTurn && (
+                        <div className="relative">
+                          <TypingIndicator label={loadingLabel} />
+                        </div>
+                      )
                     )}
                   </div>
                 )}

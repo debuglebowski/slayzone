@@ -81,6 +81,8 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 const subs: Record<string, ((data: unknown) => void) | null> = { event: null, exit: null }
 /** The hub stream's `onStarted` (a (re)start of the subscription: a reconnect). */
 const started: Record<string, (() => void) | undefined> = {}
+/** What `useSubscription` reports (`connecting`: tRPC is reconnecting the socket). */
+let streamStatus: 'connecting' | 'pending' = 'pending'
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
@@ -102,6 +104,7 @@ vi.mock('@slayzone/transport/client', () => ({
   }) => {
     subs[o.name] = o.enabled ? o.onData : null
     started[o.name] = o.enabled ? o.onStarted : undefined
+    return { status: o.enabled ? streamStatus : 'idle' }
   },
   // No direct link unless a test sets `directLease`: everything goes through the hub.
   useDirectLease: () => ({ lease: directLease, lost: () => undefined })
@@ -293,6 +296,7 @@ const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
   r.current.timeline.flatMap((it) => (it?.kind === 'user-text' ? [it.text] : []))
 
 afterEach(() => {
+  streamStatus = 'pending'
   vi.restoreAllMocks()
   cleanup()
   queryClient.clear()
@@ -1388,6 +1392,41 @@ describe('reconnect: the panel catches up with the server, never keeps a stale t
     await settle()
     expect(asked).toEqual([1])
     expect(texts(result)).toEqual(['one', 'two', 'three'])
+  })
+
+  it('says it is reconnecting while the stream is down and while it catches up, not before', async () => {
+    const { result, rerender } = setup()
+    await finishLoad(0, opened)
+    expect(result.current.reconnecting).toBe(false)
+    // The routine catch-up when the stream first starts is not shown.
+    const answer = deferred<Replay>()
+    vi.spyOn(client.chat.getReplay, 'query').mockImplementation((() => answer.promise) as never)
+    act(() => started.event?.())
+    expect(result.current.reconnecting).toBe(false)
+    await act(async () =>
+      answer.resolve({ events: [], live: { afterSeq: 1, liveSeq: 4, events: [] } })
+    )
+    await settle()
+    // The socket drops: tRPC reconnects it.
+    streamStatus = 'connecting'
+    rerender({ cwd: '/repo' })
+    expect(result.current.reconnecting).toBe(true)
+    // Back: the catch-up runs, still not in step until it lands.
+    streamStatus = 'pending'
+    const back = deferred<Replay>()
+    vi.spyOn(client.chat.getReplay, 'query').mockImplementation((() => back.promise) as never)
+    rerender({ cwd: '/repo' })
+    act(() => started.event?.())
+    expect(result.current.reconnecting).toBe(true)
+    await act(async () =>
+      back.resolve({
+        events: [],
+        live: { afterSeq: 1, liveSeq: 6, events: [status('a', 'idle', 5)] }
+      })
+    )
+    await settle()
+    expect(result.current.reconnecting).toBe(false)
+    expect(result.current.inFlight).toBe(false)
   })
 
   it('a server behind this panel (its log restarted, or it lost the tab) reloads', async () => {

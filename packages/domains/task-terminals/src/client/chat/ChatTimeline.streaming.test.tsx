@@ -143,13 +143,15 @@ function Harness({
   onReady,
   grouped = false,
   hydrating = false,
-  availability = null
+  availability = null,
+  reconnecting = false
 }: {
   initial: ChatTimelineState
   onReady: (d: Dispatch) => void
   grouped?: boolean
   hydrating?: boolean
   availability?: ChatAvailability | null
+  reconnecting?: boolean
 }) {
   const [state, dispatch] = useReducer(reducer, initial)
   const inFlight = terminal.isTurnOpen(state)
@@ -224,6 +226,7 @@ function Harness({
             hydrating={hydrating}
             isEmpty={false}
             inFlight={inFlight}
+            reconnecting={reconnecting}
             awaitingUser={false}
             appearance={grouped ? appearanceDefaults : ({ chatWidth: 'narrow' } as never)}
             items={groupedView?.rows ?? (state.timeline as TimelineItem[])}
@@ -423,4 +426,30 @@ describe('a stream delta re-renders only the row that streams', () => {
       expect(document.querySelector('[data-chat-text]')?.textContent).toBe('Hello world')
     }
   })
+})
+
+describe("reconnecting: the last known turn state is not shown as the server's", () => {
+  for (const grouped of [false, true]) {
+    it(`says it is reconnecting instead of working (${grouped ? 'activity view' : 'flat'})`, () => {
+      const client = new QueryClient()
+      const initial = longSession(1)
+      const view = (reconnecting: boolean) => (
+        <QueryClientProvider client={client}>
+          <Harness
+            initial={initial}
+            onReady={() => {}}
+            grouped={grouped}
+            reconnecting={reconnecting}
+          />
+        </QueryClientProvider>
+      )
+      const { rerender } = render(view(false))
+      // A turn is open (the last message has no answer): the panel shows it works.
+      expect(screen.queryByText('Reconnecting…')).toBeNull()
+      expect(screen.queryAllByText(/Waiting for agent|Thinking/).length).toBeGreaterThan(0)
+      rerender(view(true))
+      expect(screen.getAllByText('Reconnecting…')).toHaveLength(1)
+      expect(screen.queryAllByText(/Waiting for agent/)).toHaveLength(0)
+    })
+  }
 })

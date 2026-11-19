@@ -155,3 +155,34 @@ describe('ChatTimeline', () => {
     expect(viewer.getByText(/line 40/).props.selectable).toBe(true)
   })
 })
+
+describe('reconnecting', () => {
+  it('says it is reconnecting instead of working: the turn state is the last known one', async () => {
+    const { wrapper } = trpcTest(fakeHub({ tabId: 't1', taskId: 't1' }).backend)
+    const view1 = await render(
+      <ChatViewContext.Provider value={view}>
+        <ChatTimeline
+          state={stateOf([answer(0, 'hi')])}
+          hydrating={false}
+          working
+          emptyText="Empty"
+        />
+      </ChatViewContext.Provider>,
+      { wrapper }
+    )
+    expect(await screen.findByText('Working…')).toBeTruthy()
+    await view1.rerender(
+      <ChatViewContext.Provider value={view}>
+        <ChatTimeline
+          state={stateOf([answer(0, 'hi')])}
+          hydrating={false}
+          working
+          reconnecting
+          emptyText="Empty"
+        />
+      </ChatViewContext.Provider>
+    )
+    expect(screen.getByText('Reconnecting…')).toBeTruthy()
+    expect(screen.queryByText('Working…')).toBeNull()
+  })
+})

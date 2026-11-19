@@ -84,6 +84,8 @@ export interface UseChatSessionResult {
   inFlight: boolean
   /** True until the initial buffer replay resolves (on mount / tab reopen). */
   hydrating: boolean
+  /** Loaded, but reconnecting or catching up: the turn state shown is the last known one. */
+  reconnecting: boolean
   loadError: string | null
   /**
    * The tab's chat session could not be opened (`chat.hydrate` rejected). History
@@ -475,8 +477,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // Where this panel stands in the tab's stream: newest saved event, live counter,
   // server instance (`ChatStreamPosition`, the rule mobile shares).
   const positionRef = useRef(new ChatStreamPosition())
-  // A catch-up asked for by a live event (assigned below: it needs `applyLive`).
-  const resyncRef = useRef<() => void>(() => undefined)
+  // A catch-up (assigned below: it needs `applyLive`). `shown`: the panel says it is
+  // reconnecting meanwhile (not for the routine one when the stream first starts).
+  const resyncRef = useRef<(shown: boolean) => void>(() => undefined)
   // Answers on their way to the server: the ref is the synchronous double-click
   // guard, the state drives the disabled buttons.
   const submittingRef = useRef<Set<string>>(new Set())
@@ -544,7 +547,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         const verdict = positionRef.current.live(event, seq, live)
         // Missed something while connected (a dropped event, the computer
         // restarted): read what is new — the server's current turn status with it.
-        if (verdict === 'resync') resyncRef.current()
+        if (verdict === 'resync') resyncRef.current(true)
         if (verdict !== 'apply') return
         applyCliMetadata(event)
         pendingLiveRef.current.push(event)
@@ -786,10 +789,16 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // is being set up arrives on the hub stream (seq dedupe drops the overlap).
   const [directStartedFor, setDirectStartedFor] = useState<typeof directChat>(null)
   const directLive = directChat !== null && directStartedFor === directChat
-  const hubStreamStarted = useStableCallback(() => resyncRef.current())
+  // The hub stream was down since the panel loaded (`connecting`: tRPC reconnects).
+  const streamDroppedRef = useRef(false)
+  const hubStreamStarted = useStableCallback(() => {
+    const dropped = streamDroppedRef.current
+    streamDroppedRef.current = false
+    resyncRef.current(dropped)
+  })
   // The hub relays this tab — and asks its computer for the full events — only
   // while the tab is not live on the direct link (docs/direct-link.md).
-  useSubscription(
+  const hubStream = useSubscription(
     trpc.chat.onEvent.subscriptionOptions(opts.tabId ? { tabIds: [opts.tabId] } : undefined, {
       enabled: !!opts.tabId && !directLive,
       // Each (re)start — a reconnect drops what was sent meanwhile — catches up.
@@ -870,13 +879,15 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // shows a gap. What streams meanwhile waits, as during a load. A server behind
   // this panel (its log restarted, or it lost the tab) needs the full reload.
   const catchingUpRef = useRef(false)
-  const catchUp = useStableCallback(() => {
+  const [resyncing, setResyncing] = useState(false)
+  const catchUp = useStableCallback((shown: boolean) => {
     // A load runs: it reads what is new itself.
     if (!opts.tabId || !hydratedRef.current || catchingUpRef.current) return
     const gen = genRef.current
     const tabId = opts.tabId
     const position = positionRef.current
     catchingUpRef.current = true
+    if (shown) setResyncing(true)
     hydratedRef.current = false
     readReplayPages({ getReplay: getReplayRead }, tabId, position.seq, () => gen !== genRef.current)
       .then((replay) => {
@@ -892,6 +903,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       .catch(() => undefined)
       .finally(() => {
         catchingUpRef.current = false
+        setResyncing(false)
         if (gen !== genRef.current) return
         hydratedRef.current = true
         const queued = liveQueueRef.current
@@ -930,6 +942,12 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     setLoadedInputs(null)
   }
   const hydrating = loadedInputs === null || inputsChanged(loadedInputs, loadInputs)
+  // The hub stream is reconnecting (the direct link, while live, has its own loss
+  // handling: a reload).
+  const streamDown = !!opts.tabId && !directLive && hubStream.status === 'connecting'
+  useEffect(() => {
+    if (streamDown && !hydrating) streamDroppedRef.current = true
+  }, [streamDown, hydrating])
 
   useEffect(() => {
     const gen = ++genRef.current
@@ -1184,6 +1202,12 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),
     hydrating,
+    /**
+     * Loaded, but not in step with the server right now: its stream is
+     * reconnecting, or catching up with what it missed. The turn state shown is
+     * the last known one, not the server's.
+     */
+    reconnecting: !hydrating && (streamDown || resyncing),
     loadError,
     hydrateError,
     reload,

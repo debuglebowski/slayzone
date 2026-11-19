@@ -62,6 +62,8 @@ export interface ChatSessionApi {
   inFlight: boolean
   /** No load has finished yet (the first paint waits for the history). */
   hydrating: boolean
+  /** Loaded, but reconnecting or catching up: the turn state shown is the last known one. */
+  reconnecting: boolean
   /** Why the last load failed; null = it did not. */
   loadError: string | null
   /** Load the whole history again. */
@@ -173,7 +175,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     () => chatViaDirect(trpcClient, direct?.client ?? null, directLost),
     [trpcClient, direct, directLost]
   )
-  const load = useCallback(
+  const loadOnce = useCallback(
     async (first: 'full' | 'catch-up'): Promise<void> => {
       // A catch-up that finds the hub's log went backwards asks for a full load;
       // events that raced ahead of a load and show a gap ask for a catch-up.
@@ -217,6 +219,16 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     },
     [sync, sessionReady, trpcClient, chatIo, tabId, taskId, mode, cwd, providerFlagsOverride]
   )
+  // A catch-up runs: the turn state shown is the last known one until it lands.
+  const [catchingUp, setCatchingUp] = useState(false)
+  const load = useCallback(
+    (first: 'full' | 'catch-up'): Promise<void> => {
+      if (first !== 'catch-up') return loadOnce(first)
+      setCatchingUp(true)
+      return loadOnce(first).finally(() => setCatchingUp(false))
+    },
+    [loadOnce]
+  )
 
   // The subscription's handlers: fixed identities, run the latest code (they read refs).
   const onStarted = useStableCallback(() => {
@@ -235,7 +247,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   })
   // The hub relays this tab only while it is not on the direct link; each switch
   // starts a subscription again, whose start catches up (`onStarted`).
-  useSubscription(
+  const hubStream = useSubscription(
     trpc.chat.onEvent.subscriptionOptions(
       { tabIds: [tabId] },
       { enabled: !direct, onStarted, onData: onEvent }
@@ -347,6 +359,10 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     // Working: the user's turn, or one Claude Code started by itself (desktop's rule).
     inFlight: isTurnOpen(state),
     hydrating,
+    // Loaded, but not in step with the hub: its stream reconnects (tRPC
+    // `connecting`), or a catch-up reads what was missed. The turn state shown
+    // is the last known one, not the server's.
+    reconnecting: !hydrating && ((!direct && hubStream.status === 'connecting') || catchingUp),
     loadError,
     reload,
     submittingPrompts,

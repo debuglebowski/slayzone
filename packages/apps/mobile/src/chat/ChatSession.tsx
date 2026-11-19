@@ -351,6 +351,7 @@ function ChatView({
             state={state}
             hydrating={session.hydrating}
             working={session.inFlight && !awaitingUser}
+            reconnecting={session.reconnecting}
             emptyText="Send a message to start."
             {...(chrome
               ? { topInset: chrome.top, onScrollFromNewest: chrome.onTimelineScroll }
