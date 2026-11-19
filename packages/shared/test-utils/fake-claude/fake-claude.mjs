@@ -595,7 +595,7 @@ logStart()
 // --- step interpreter ---------------------------------------------------------
 
 /** Command tasks (`task` step + task control requests): fake-claude-tasks.mjs. */
-const taskSim = createTaskSim({ emit, writeLine, sleep, log, runSteps, Aborted })
+const taskSim = createTaskSim({ emit, writeLine, sleep, log, runSteps, agentTurn, Aborted })
 
 function substitute(value) {
   if (typeof value === 'string') {
@@ -827,6 +827,42 @@ async function runSteps(steps, signal) {
   }
 }
 
+/**
+ * Run one turn the way the CLI does: an `interrupt` meanwhile aborts it and the
+ * CLI reacts (`onInterrupt`, else the recorded reaction). Returns whether it was
+ * interrupted. A user's turn, or one the CLI starts by itself (`agentTurn`).
+ */
+async function runTurn(steps) {
+  const abort = new AbortController()
+  turnAbort = abort
+  turnRunning = true
+  let interrupted = false
+  try {
+    await runSteps(steps, abort.signal)
+  } catch (err) {
+    if (!(err instanceof Aborted)) throw err
+    interrupted = true
+    await runSteps(script.onInterrupt ?? defaultInterruptSteps(), null)
+  } finally {
+    // A turn started meanwhile owns the state now.
+    if (turnAbort === abort) {
+      turnRunning = false
+      openToolUses.clear()
+    }
+  }
+  return interrupted
+}
+
+/**
+ * The CLI's own turn (after a background command exited): interruptible like a
+ * user's — the CLI's `interrupt` aborts whichever turn runs. While a user's turn
+ * runs, its steps play alongside it, as before (not interruptible).
+ */
+async function agentTurn(steps) {
+  if (turnRunning) await runSteps(steps, null)
+  else await runTurn(steps)
+}
+
 /** Default reaction to an interrupt — mirrors the real CLI (2.1.312; interrupt-tool / interrupt-text transcripts). */
 function defaultInterruptSteps() {
   const steps = []
@@ -1022,19 +1058,7 @@ async function main() {
       if (acks) await lifecycle(uuid, 'completed')
       continue
     }
-    turnAbort = new AbortController()
-    turnRunning = true
-    let interrupted = false
-    try {
-      await runSteps(steps, turnAbort.signal)
-    } catch (err) {
-      if (!(err instanceof Aborted)) throw err
-      interrupted = true
-      await runSteps(script.onInterrupt ?? defaultInterruptSteps(), null)
-    } finally {
-      turnRunning = false
-      openToolUses.clear()
-    }
+    const interrupted = await runTurn(steps)
     if (acks) await lifecycle(uuid, interrupted ? 'cancelled' : 'completed')
   }
   exit(script.exitCodeOnStdinEnd ?? 0)

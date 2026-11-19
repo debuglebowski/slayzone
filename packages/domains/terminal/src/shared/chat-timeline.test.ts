@@ -3067,6 +3067,27 @@ describe('composer: attachments + CLI command details', () => {
     })
   })
 
+  test('an imported user message (conversation history) keeps its attachments', () => {
+    const s = reducer(initialState(), {
+      type: 'event',
+      event: {
+        kind: 'user-message',
+        id: 'm1',
+        text: 'what colour?',
+        history: true,
+        content: [
+          { type: 'attachment', attachment: file },
+          { type: 'text', text: 'what colour?' }
+        ]
+      }
+    })
+    expect(rowsOf(s)[0]).toMatchObject({
+      kind: 'user-text',
+      delivery: 'answered',
+      attachments: [file]
+    })
+  })
+
   test('the optimistic bubble shows them at once, and keeps them when confirmed', () => {
     const content = [{ type: 'attachment' as const, attachment: file }]
     let s = reducer(initialState(), { type: 'user-sent', id: 'm1', text: '', content })
@@ -3894,5 +3915,61 @@ describe('server turn status', () => {
     let s = reducer(initialState(), { type: 'event', event: status(true) })
     s = reducer(s, { type: 'event', event: { kind: 'process-exit', code: 1, signal: null } })
     expect(isTurnOpen(s)).toBe(false)
+  })
+
+  /** Saved events folded with and without the live statuses between them. */
+  const foldBoth = (
+    saved: AgentEvent[],
+    liveAfter: Map<number, AgentEvent>
+  ): [ChatTimelineState, ChatTimelineState] => {
+    let replay = initialState({ agentStartedTurns: true })
+    let live = initialState({ agentStartedTurns: true })
+    saved.forEach((event, i) => {
+      replay = reducer(replay, { type: 'event', event })
+      live = reducer(live, { type: 'event', event })
+      const after = liveAfter.get(i)
+      if (after) live = reducer(live, { type: 'event', event: after })
+    })
+    return [replay, live]
+  }
+  const kinds = (s: ChatTimelineState) => rowsOf(s).map((i) => i.kind)
+
+  test('the transcript folds the same with or without the live status (Stop: one marker)', () => {
+    // A prompt's "No" (deny + interrupt): the persisted marker closes the turn, the
+    // CLI's aborted result follows while the server still reports the turn open.
+    const saved: AgentEvent[] = [
+      userMsg('build it', 'u1'),
+      { kind: 'interrupted' },
+      abortedResult()
+    ]
+    const [replay, live] = foldBoth(
+      saved,
+      new Map([
+        [0, status(true)],
+        [1, status(true, { revision: 2 })]
+      ])
+    )
+    expect(kinds(live)).toEqual(kinds(replay))
+    expect(rowsOf(live).filter((i) => i.kind === 'interrupted')).toHaveLength(1)
+  })
+
+  test('a status still open does not keep a closed agent-started turn open in the transcript', () => {
+    const saved: AgentEvent[] = [ev.text('m1', 'working on it'), { kind: 'interrupted' }]
+    const [replay, live] = foldBoth(saved, new Map([[0, status(true)]]))
+    expect(kinds(live)).toEqual(kinds(replay))
+    expect(live.agentTurnOpen).toBe(false)
+    expect(live.turnsClosed).toBe(replay.turnsClosed)
+  })
+
+  test('a status closing the turn before its saved end does not count a closed turn twice', () => {
+    const saved: AgentEvent[] = [userMsg('hi', 'u1'), ev.text('m1', 'hello'), ev.turnResult()]
+    const [replay, live] = foldBoth(
+      saved,
+      new Map([
+        [0, status(true)],
+        [1, status(false, { revision: 2 })]
+      ])
+    )
+    expect(live.turnsClosed).toBe(replay.turnsClosed)
   })
 })

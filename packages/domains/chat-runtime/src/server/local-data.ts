@@ -1069,6 +1069,16 @@ export function createLocalChatData(
         const outcome = store.appendAt(i.id, i.epoch, seq, event, at)
         if (outcome === 'inserted' && event.kind === 'user-message' && !event.history && event.id)
           recordQueueHandoff(tabId, event.id, messageContent(event.text, event.content), at)
+        // A message's files, by its id, outside its history: a reset clears the
+        // history, and the provider's own copy of the conversation (Codex's
+        // thread, imported again) names the message but not its files
+        // (`loadUserMessageContent`). Kept as first saved.
+        if (outcome === 'inserted' && event.kind === 'user-message' && event.id) {
+          const files = userMessageAttachments(event.content ?? [])
+          const key = `attachment-message:${event.id}`
+          if (files.length > 0 && store.getRecord(i.id, 'settings', key) === null)
+            set(tabId, 'settings', key, files)
+        }
         if (
           outcome === 'inserted' &&
           event.kind === 'user-message' &&

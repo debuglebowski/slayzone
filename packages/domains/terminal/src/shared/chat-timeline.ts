@@ -920,7 +920,7 @@ function reduceAction(state: ChatTimelineState, action: QueuedAction): ChatTimel
  */
 function countClosedTurn(prev: ChatTimelineState, next: ChatTimelineState): ChatTimelineState {
   const closed =
-    (isTurnOpen(prev) && !isTurnOpen(next)) ||
+    (transcriptTurnOpen(prev) && !transcriptTurnOpen(next)) ||
     next.resultCount > prev.resultCount ||
     (prev.agentTurnOpen && !next.agentTurnOpen)
   return closed ? { ...next, turnsClosed: next.turnsClosed + 1 } : next
@@ -1142,7 +1142,7 @@ function applyAction(state: ChatTimelineState, action: SingleAction): ChatTimeli
       // identity guard, so `sessionEnded` stays false. Locally we balance
       // resultCount against userMessagesSent so `isInFlight` drops, and append
       // a marker item so the timeline shows where the turn was cut.
-      if (!isTurnOpen(state)) return state
+      if (!transcriptTurnOpen(state)) return state
       const item: TimelineItem = { kind: 'interrupted', timestamp: Date.now() }
       return {
         ...state,
@@ -1341,7 +1341,8 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           kind: 'user-text',
           text: event.text,
           timestamp: ts,
-          ...(event.id ? { id: event.id, delivery: 'answered' as const } : {})
+          ...(event.id ? { id: event.id, delivery: 'answered' as const } : {}),
+          ...attachmentsOf(event.content)
         }
         return { ...state, ...withUserRow(state, item) }
       }
@@ -1423,10 +1424,10 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // A stopped turn stopped again (it ran on before the CLI read the first
       // Stop) moves its one marker after the work it did meanwhile.
       const stoppedAgain =
-        !isTurnOpen(state) &&
+        !transcriptTurnOpen(state) &&
         (event.reason === undefined || event.reason === 'stop-request') &&
         workedSinceStop(state)
-      if (!isTurnOpen(state) && !stoppedAgain) return state
+      if (!transcriptTurnOpen(state) && !stoppedAgain) return state
       const item: TimelineItem = {
         kind: 'interrupted',
         timestamp: ts,
@@ -2043,7 +2044,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // Codex's interrupted result). Keep the boundary visible even when result
       // metadata is hidden, and don't promote progress text into a final answer.
       // A persisted Stop already closed the turn and supplied its marker.
-      if (stopped && isTurnOpen(state)) {
+      if (stopped && transcriptTurnOpen(state)) {
         nextTimeline.splice(nextTimeline.length - 1, 0, { kind: 'interrupted', timestamp: ts })
       }
       return {
@@ -2975,6 +2976,17 @@ export function isInFlight(state: ChatTimelineState): boolean {
 export function isTurnOpen(state: ChatTimelineState): boolean {
   const status = state.turnStatus
   if (status?.authoritative) return status.mainTurnOpen && !state.sessionEnded
+  return transcriptTurnOpen(state)
+}
+
+/**
+ * Whether the TRANSCRIPT has a turn open: a user's turn without its end, or an
+ * agent-started one. What folding saved events decides on (where a turn's marker
+ * goes, which end closes it, the turn identity) — never the live server status
+ * (`isTurnOpen`): the status is not saved and reaches a viewer at its own moment,
+ * so a replay would fold the same events differently than a live view did.
+ */
+function transcriptTurnOpen(state: ChatTimelineState): boolean {
   return isInFlight(state) || state.agentTurnOpen
 }
 
@@ -3580,7 +3592,7 @@ function dropActiveShells(
 
 /** The open turn's identity (`turnsClosed`), null when none is open. */
 function openTurn(state: ChatTimelineState): number | null {
-  return isTurnOpen(state) ? state.turnsClosed : null
+  return transcriptTurnOpen(state) ? state.turnsClosed : null
 }
 
 /**

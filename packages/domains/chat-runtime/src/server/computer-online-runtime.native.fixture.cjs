@@ -70,7 +70,9 @@ const bootstrap = {
       })
     await until(() => !!control('SELECT sync_blocked() n').n)
     assert.equal(published, false)
-    assert.equal(events.length, 0)
+    // No SAVED event reaches a client before its row commits. Live events (the turn
+    // status a tab publishes on hydrate) carry a live counter and are never rows.
+    assert.equal(events.filter((a) => a[3] === undefined).length, 0)
     control('SELECT block_sync(0)')
     await writing
     const rows = await runtime.storage.read('c', -1)

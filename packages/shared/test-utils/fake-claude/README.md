@@ -236,7 +236,7 @@ Chat always spawns with `--include-partial-messages`, so the real CLI streams ev
 | Spec | Effect |
 |---|---|
 | foreground (default) | `task_started` after `startAfterMs` (default 300; the real CLI waits ~3 s, and a command done by then never becomes a task); output chunks appear at `atMs`; at `endAtMs`: `task_notification completed`, then the tool_result with the whole output. The step blocks until then. |
-| `background: true` | `background_tasks_changed` + `task_started {is_backgrounded:true}` + tool_result "Command running in background with ID: …" at once; the step returns. At `endAtMs`: `task_updated {status:'completed'}` + `task_notification` + `background_tasks_changed`, then `afterBackgroundExit` steps (the CLI's own follow-up turn). |
+| `background: true` | `background_tasks_changed` + `task_started {is_backgrounded:true}` + tool_result "Command running in background with ID: …" at once; the step returns. At `endAtMs`: `task_updated {status:'completed'}` + `task_notification` + `background_tasks_changed`, then `afterBackgroundExit` steps (the CLI's own follow-up turn; an `interrupt` aborts it like a user's turn — `onInterrupt` or the recorded reaction — unless a user turn is running). |
 
 The fake answers the app's task control requests itself:
 

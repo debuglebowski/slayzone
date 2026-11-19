@@ -317,7 +317,10 @@ vi.mock('@slayzone/transport/client', () => {
   }
 })
 
-vi.mock('@tanstack/react-query', () => {
+// Hooks stubbed; pure helpers (hashKey, QueryClient, …) stay real — modules the page
+// imports call them at module scope.
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
   // Stable singletons — fresh objects per render would churn dep arrays and loop.
   const mutation = {
     mutate: vi.fn(),
@@ -339,6 +342,7 @@ vi.mock('@tanstack/react-query', () => {
     getQueryData: vi.fn()
   }
   return {
+    ...actual,
     useMutation: () => mutation,
     useQuery: () => query,
     useQueryClient: () => queryClient

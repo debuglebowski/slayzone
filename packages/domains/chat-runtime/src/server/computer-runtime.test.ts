@@ -666,3 +666,37 @@ test('user message lookup (Codex history import) reads only the wanted messages,
   // The loop ran between the windows (24 MB is several 4 MiB windows).
   expect(ticks).toBeGreaterThan(3)
 })
+
+test("a message's attachments outlive a reset of its history (Codex history import names them)", async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  const text = 'a private note'
+  const file = r.attachments.put(
+    'tab-a',
+    {
+      artifactId: 'note',
+      name: 'note.txt',
+      kind: 'text',
+      mediaType: 'text/plain',
+      size: Buffer.byteLength(text)
+    },
+    Buffer.from(text)
+  )
+  await r.local.data.persistChatEvent(
+    'tab-a',
+    0,
+    {
+      kind: 'user-message',
+      id: 'm1',
+      text: 'describe it',
+      content: [
+        { type: 'attachment', attachment: file },
+        { type: 'text', text: 'describe it' }
+      ]
+    },
+    1
+  )
+  await r.local.data.clearChatEventsForTab('tab-a')
+  const found = await r.local.data.loadUserMessageContent!('task-a', ['m1'])
+  expect(found.get('m1')).toEqual([{ type: 'attachment', attachment: file }])
+})

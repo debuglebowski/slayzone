@@ -5,7 +5,7 @@
  * there), swaps the file in, and the chat stays readable and writable.
  */
 import { clickSettings, resetApp } from '../fixtures/electron'
-import { expect, test } from '../fixtures/chat'
+import { expect, savedTurnResult, test } from '../fixtures/chat'
 
 const MiB = 1024 * 1024
 
@@ -20,7 +20,11 @@ test('chat storage: free space is reclaimed from Settings and the chat stays rea
     title: 'Chat storage compaction',
     spawn: 'on-send',
     scenario: { processes: [] },
-    seedEvents: [{ kind: 'assistant-text', messageId: 'kept', text: marker }]
+    // A finished turn: a saved answer shows as one (not as a turn still running).
+    seedEvents: [
+      { kind: 'assistant-text', messageId: 'kept', text: marker },
+      savedTurnResult(marker)
+    ]
   })
   await expect(t.panel.getByText(marker, { exact: true })).toBeVisible()
 
@@ -60,7 +64,7 @@ test('chat storage: free space is reclaimed from Settings and the chat stays rea
     (tabId) =>
       window.getTrpcVanillaClient().chat.testSeedEvents.mutate({
         tabId,
-        fromSeq: 1,
+        fromSeq: 2,
         events: [{ kind: 'assistant-text', messageId: 'after', text: 'written after the swap' }]
       }),
     t.tabId

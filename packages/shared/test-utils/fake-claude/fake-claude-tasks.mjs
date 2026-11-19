@@ -42,6 +42,7 @@ const OUTPUT_WINDOW_BYTES = 8192
  *   sleep: (ms: number, signal: AbortSignal | null) => Promise<void>,
  *   log: (kind: string, data: object) => void,
  *   runSteps: (steps: object[] | undefined, signal: AbortSignal | null) => Promise<void>,
+ *   agentTurn: (steps: object[]) => Promise<void>,
  *   Aborted: new () => Error
  * }} io
  */
@@ -133,7 +134,7 @@ export function createTaskSim(io) {
     await updated(t, { status: 'completed', end_time: Date.now() })
     await notification(t, 'completed')
     await backgroundList()
-    if (t.spec.afterBackgroundExit) await io.runSteps(t.spec.afterBackgroundExit, null)
+    if (t.spec.afterBackgroundExit) await io.agentTurn(t.spec.afterBackgroundExit)
   }
 
   /** Run the `task` step. Returns when the turn may go on (exit, or backgrounded). */

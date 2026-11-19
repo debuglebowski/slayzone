@@ -2899,8 +2899,13 @@ export function createChatTransport(
           throw new ChatTransportError(`${tab.backend.displayName} is not running.`)
         return proc
       },
+      // The model's count of messages on their way: every change, also a message
+      // just taken (queued until its write) — the queue's readiness reads it.
+      onInFlightChange: (inFlight) => {
+        shadowFeed(tab, tab.gen, { type: 'outbox', inFlight })
+        publishStatus(tab)
+      },
       onChange: ({ id, state, error }) => {
-        shadowFeed(tab, tab.gen, { type: 'outbox', inFlight: tab.outbox.inFlight() })
         publishStatus(tab)
         const event: AgentEvent = {
           kind: 'user-message-delivery',

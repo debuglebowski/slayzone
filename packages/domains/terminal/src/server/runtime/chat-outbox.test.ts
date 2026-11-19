@@ -105,6 +105,59 @@ test('awaits beforeWriting without sending a withdrawn message', async () => {
   outbox.dispose()
 })
 
+test('every change of the in-flight count is reported, the first one at accept (before the write)', async () => {
+  // A queue drain asks "ready?" between taking a message and writing it (the
+  // write waits for its workspace baseline): the count must already say 1.
+  const p = proc(1)
+  let release!: () => void
+  const counts: number[] = []
+  const outbox = new ChatOutbox({
+    current: () => p,
+    ensureReady: async () => p,
+    onChange: () => {},
+    onWriting: () => {},
+    onInFlightChange: (n) => counts.push(n),
+    beforeWriting: () =>
+      new Promise<void>((r) => {
+        release = r
+      })
+  })
+  outbox.accept(msg('one'))
+  expect(p.sent).toEqual([])
+  expect(counts).toEqual([1])
+  release()
+  await flush()
+  outbox.onLifecycle(1, 'one', 'completed')
+  expect(counts).toEqual([1, 0])
+  outbox.dispose()
+})
+
+test('a retried message and a delivered one the crash closes move the reported count', async () => {
+  const p = proc(1)
+  const counts: number[] = []
+  const outbox = new ChatOutbox({
+    current: () => p,
+    ensureReady: async () => p,
+    onChange: () => {},
+    onWriting: () => {},
+    onInFlightChange: (n) => counts.push(n)
+  })
+  p.fail = () => chatWriteError('not-delivered', 'closed')
+  outbox.accept(msg('a'))
+  await flush()
+  expect(outbox.state('a')).toBe('failed')
+  expect(counts).toEqual([1, 0])
+  p.fail = null
+  outbox.retry('a')
+  await flush()
+  outbox.onLifecycle(1, 'a', 'started')
+  expect(counts).toEqual([1, 0, 1])
+  outbox.onProcessEnded(1, { resend: false })
+  expect(outbox.inFlight()).toBe(0)
+  expect(counts).toEqual([1, 0, 1, 0])
+  outbox.dispose()
+})
+
 beforeEach(() => {
   vi.useFakeTimers()
 })

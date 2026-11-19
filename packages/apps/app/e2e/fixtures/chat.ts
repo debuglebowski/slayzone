@@ -93,6 +93,34 @@ export interface ChatHarness {
  * expected outcome (green); once the bug is fixed the test "unexpectedly passes",
  * which Playwright reports as a failure — delete the knownBug() call then.
  */
+/**
+ * A saved turn's end (`seedEvents`), its answer `text`: seeded history that ends
+ * with it reads as finished, as a real conversation's does — without it the last
+ * turn has no end, which a chat shows as cut off, not as an answer.
+ */
+export function savedTurnResult(text: string): Record<string, unknown> {
+  return {
+    kind: 'result',
+    subtype: 'success',
+    isError: false,
+    durationMs: 1,
+    durationApiMs: 1,
+    numTurns: 1,
+    totalCostUsd: 0,
+    stopReason: null,
+    terminalReason: null,
+    text,
+    modelUsage: {},
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0
+    },
+    permissionDenials: []
+  }
+}
+
 export function knownBug(opts: { audit?: string; fixedBy: string; what: string }): void {
   const id = opts.audit ? `audit ${opts.audit}` : 'found by P0'
   test.info().annotations.push({

@@ -69,6 +69,13 @@ export interface OutboxDeps {
   /** The current process once ready — starting one if needed. Rejects with why it could not. */
   ensureReady(): Promise<OutboxProcess>
   onChange(change: OutboxStateChange): void
+  /**
+   * How many messages are in flight (`inFlight()`), whenever that changed — also
+   * where no delivery state is recorded: a message taken (`queued`, before its
+   * write), retried, or closed by its process's end. Before the `onChange` of a
+   * change that has one.
+   */
+  onInFlightChange?(inFlight: number): void
   /** A message is being written to the agent: its turn starts now. */
   onWriting(id: string): void
   /**
@@ -148,6 +155,8 @@ export class ChatOutbox {
   private readonly lifecycleMissingReported = new Set<number>()
   private readonly retryWindowMs: number
   private readonly retryBaseMs: number
+  /** The count last told `onInFlightChange`. */
+  private reportedInFlight = 0
 
   constructor(private readonly deps: OutboxDeps) {
     this.retryWindowMs = deps.retryWindowMs ?? DEFAULT_RETRY_WINDOW_MS
@@ -167,6 +176,7 @@ export class ChatOutbox {
       linkDownSince: null,
       retryTimer: null
     })
+    this.reportInFlight()
     this.queue.push(msg.id)
     this.pump()
     return 'queued'
@@ -211,6 +221,7 @@ export class ChatOutbox {
     entry.gen = null
     entry.written = false
     entry.linkDownSince = null
+    this.reportInFlight()
     this.queue.push(id)
     this.pump()
     return true
@@ -384,6 +395,7 @@ export class ChatOutbox {
       }
     }
     if (resend) this.queue.sort((a, b) => this.order(a) - this.order(b))
+    this.reportInFlight()
   }
 
   /**
@@ -414,6 +426,7 @@ export class ChatOutbox {
       if (state === 'queued') this.set(entry, 'failed', RESTART_LOSS)
       else if (state === 'delivered') entry.state = 'cancelled'
     }
+    this.reportInFlight()
   }
 
   dispose(): void {
@@ -576,6 +589,14 @@ export class ChatOutbox {
   private set(entry: Entry, state: UserMessageDeliveryState, error?: string): void {
     if (entry.state === state) return
     entry.state = state
+    this.reportInFlight()
     this.deps.onChange({ id: entry.message.id, state, ...(error ? { error } : {}) })
+  }
+
+  private reportInFlight(): void {
+    const n = this.inFlight()
+    if (n === this.reportedInFlight) return
+    this.reportedInFlight = n
+    this.deps.onInFlightChange?.(n)
   }
 }

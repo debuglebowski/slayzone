@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { cliRoot, supervisedHubRoot, resetApp } from '../fixtures/electron'
-import { expect, test } from '../fixtures/chat'
+import { expect, savedTurnResult, test } from '../fixtures/chat'
 
 function matchingFiles(root: string, marker: string): string[] {
   const found: string[] = []
@@ -36,7 +36,11 @@ test('history, draft and new attachment bytes stay on computer across its restar
     title: 'Computer storage privacy',
     spawn: 'on-send',
     scenario: { processes: [] },
-    seedEvents: [{ kind: 'assistant-text', messageId: 'saved', text: history }]
+    // A finished turn: a saved answer shows as one (not as a turn still running).
+    seedEvents: [
+      { kind: 'assistant-text', messageId: 'saved', text: history },
+      savedTurnResult(history)
+    ]
   })
   await expect(t.panel.getByText(history, { exact: true })).toBeVisible()
   await t.panel
