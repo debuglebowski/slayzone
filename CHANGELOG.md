@@ -1,6 +1,106 @@
 # Changelog
 
 
+## v0.42.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.41.1...v0.42.0)
+
+### 🚀 Enhancements
+
+- **access:** T-100 sharing core — project members, private tasks, task/artifact grants, roles ([8ff179197](https://github.com/debuglebowski/slayzone/commit/8ff179197))
+- **sharing:** Sharing router — members, task visibility/grants, artifact grants, directory ([6c7d76c63](https://github.com/debuglebowski/slayzone/commit/6c7d76c63))
+- **sharing:** Shared artifacts move to the hub ([19f153583](https://github.com/debuglebowski/slayzone/commit/19f153583))
+- **sharing:** Erasing an account erases its private tasks in shared projects and its shares ([3fee028a4](https://github.com/debuglebowski/slayzone/commit/3fee028a4))
+- **sharing:** Sharing UI — Members tab, task sharing card, file share, shared with me ([ce9a1b62c](https://github.com/debuglebowski/slayzone/commit/ce9a1b62c))
+- **sharing:** Assign a task to a hub user ([8646dea1e](https://github.com/debuglebowski/slayzone/commit/8646dea1e))
+- **sharing:** Members see why a shared task's agent pane is empty ([9e2361500](https://github.com/debuglebowski/slayzone/commit/9e2361500))
+- **sharing:** Every tab records the one user it belongs to ([6a0d67640](https://github.com/debuglebowski/slayzone/commit/6a0d67640))
+- **test:** Heavy local runs take machine-wide CI lock ([0955c5734](https://github.com/debuglebowski/slayzone/commit/0955c5734))
+- **test:** Cap direct vitest runs at half the cores ([a82e4c692](https://github.com/debuglebowski/slayzone/commit/a82e4c692))
+- **test:** Heavy local runs take machine-wide CI lock ([96e3cd5c8](https://github.com/debuglebowski/slayzone/commit/96e3cd5c8))
+- **test:** Cap direct vitest runs at half the cores ([f9f4e4e8e](https://github.com/debuglebowski/slayzone/commit/f9f4e4e8e))
+- **sharing:** A user's request only reaches that user's own computers ([5f2026810](https://github.com/debuglebowski/slayzone/commit/5f2026810))
+- **sharing:** Personal workspaces — each user runs a task on their own computer ([b61443f61](https://github.com/debuglebowski/slayzone/commit/b61443f61))
+- **sharing:** Personal workspaces carry their own folders and branch ([80fe83c42](https://github.com/debuglebowski/slayzone/commit/80fe83c42))
+- **sharing:** Members may run a shared task's work on their own computers ([a329f96e5](https://github.com/debuglebowski/slayzone/commit/a329f96e5))
+- **sharing:** Spawns go to the computer of the tab's owner ([f0fbbf877](https://github.com/debuglebowski/slayzone/commit/f0fbbf877))
+- **sharing:** Members start their own agents in a shared task's agent pane ([18e0dab60](https://github.com/debuglebowski/slayzone/commit/18e0dab60))
+- **sharing:** Lifecycle of members' own runtime ([deda57df4](https://github.com/debuglebowski/slayzone/commit/deda57df4))
+- **mobile:** IOS builds take machine-wide CI lock ([71226ed8a](https://github.com/debuglebowski/slayzone/commit/71226ed8a))
+- **mobile:** Chat-first task page with info sheet ([a51fa1756](https://github.com/debuglebowski/slayzone/commit/a51fa1756))
+- **sharing:** View-only task page, files and board for View members ([17befba25](https://github.com/debuglebowski/slayzone/commit/17befba25))
+- **mobile:** Task page with floating glass top bar, status island and tab bar ([261259e30](https://github.com/debuglebowski/slayzone/commit/261259e30))
+- **computers:** Migrate a full task between computers ([7bf094ff0](https://github.com/debuglebowski/slayzone/commit/7bf094ff0))
+- **chat:** Lifecycle model is the server's turn status by default ([9f8dd1d2e](https://github.com/debuglebowski/slayzone/commit/9f8dd1d2e))
+- **chat:** A tab instance publishes its turn status on hydrate ([e62b330fc](https://github.com/debuglebowski/slayzone/commit/e62b330fc))
+- **chat:** Reconnect recovery — panels catch up with the server's state ([9269295ea](https://github.com/debuglebowski/slayzone/commit/9269295ea))
+- **transport:** Keepalive pings on the hub socket ([cc3ca86ae](https://github.com/debuglebowski/slayzone/commit/cc3ca86ae))
+- **chat:** Panels say "Reconnecting…" instead of a stale turn state ([b43e32877](https://github.com/debuglebowski/slayzone/commit/b43e32877))
+
+### 🔥 Performance
+
+- **task:** Board-tasks readers O(1) per board patch ([ef27c8314](https://github.com/debuglebowski/slayzone/commit/ef27c8314))
+- **projects:** View-only readers share one cache listener ([98c7f64e7](https://github.com/debuglebowski/slayzone/commit/98c7f64e7))
+
+### 🩹 Fixes
+
+- **export:** Keep crashpad on Linux; watch retitled renderers ([2322bdb39](https://github.com/debuglebowski/slayzone/commit/2322bdb39))
+- **chat:** Lifecycle model hears a process stop request ([79c61f108](https://github.com/debuglebowski/slayzone/commit/79c61f108))
+- **computer:** Shim import.meta.url in CJS bundle ([75fa4c955](https://github.com/debuglebowski/slayzone/commit/75fa4c955))
+- **chat:** Restored chat waits for its computer instead of failing ([146f9bf48](https://github.com/debuglebowski/slayzone/commit/146f9bf48))
+- **chat:** Closing a never-started chat leaves the model not started ([e9122a4b6](https://github.com/debuglebowski/slayzone/commit/e9122a4b6))
+- **mobile:** UI/UX review fixes before test users ([e5fdee3b3](https://github.com/debuglebowski/slayzone/commit/e5fdee3b3))
+- **chat:** Message written during a self-started turn doesn't replace it ([c60909e7a](https://github.com/debuglebowski/slayzone/commit/c60909e7a))
+- **hub:** Drop warm-agent hooks quietly, not as not_owner ([acb5601a1](https://github.com/debuglebowski/slayzone/commit/acb5601a1))
+- **mobile:** Ios build opens app on its own Metro ([bf33fdef5](https://github.com/debuglebowski/slayzone/commit/bf33fdef5))
+- **mobile:** Ios build opens app on its own Metro ([a96447094](https://github.com/debuglebowski/slayzone/commit/a96447094))
+- **chat:** Retry after a failed agent start ([2337c132a](https://github.com/debuglebowski/slayzone/commit/2337c132a))
+- **chat:** Hub stamps owner task scope on chat controls ([88c7c7f50](https://github.com/debuglebowski/slayzone/commit/88c7c7f50))
+- **sharing:** Board reloads on access change; web shell gets Shared with me ([ac5436779](https://github.com/debuglebowski/slayzone/commit/ac5436779))
+- **mobile:** Info sheet content no longer covers title ([d1cb0fc31](https://github.com/debuglebowski/slayzone/commit/d1cb0fc31))
+- **sharing:** Members' agent turns and git diffs reach them live ([a19aa287e](https://github.com/debuglebowski/slayzone/commit/a19aa287e))
+- **chat:** Randomized lifecycle tests; fixes they found ([c7431d295](https://github.com/debuglebowski/slayzone/commit/c7431d295))
+- **deps:** Hono 4.13.16, @hono/node-server 2.1.6, node-forge 1.4.3 ([f962da4cf](https://github.com/debuglebowski/slayzone/commit/f962da4cf))
+- **task:** Isolate per-member worktree cleanup ([5286e15f0](https://github.com/debuglebowski/slayzone/commit/5286e15f0))
+- **computers:** Task-move CI regressions ([a6f7f620d](https://github.com/debuglebowski/slayzone/commit/a6f7f620d))
+- **ci-lock:** No handler gap while spawning the command ([0acef0156](https://github.com/debuglebowski/slayzone/commit/0acef0156))
+- **chat:** "No" on a self-started turn's prompt ends it at its interrupted marker ([2b9ea34b4](https://github.com/debuglebowski/slayzone/commit/2b9ea34b4))
+- **terminal:** Tab dots survive a hub outage and re-sync on reconnect ([210ea44ff](https://github.com/debuglebowski/slayzone/commit/210ea44ff))
+- Green e2e + unit suites ([393e9d742](https://github.com/debuglebowski/slayzone/commit/393e9d742))
+- **chat:** Lifecycle-model regressions in 6 chat e2e specs ([445649b06](https://github.com/debuglebowski/slayzone/commit/445649b06))
+
+### 💅 Refactors
+
+- **mobile:** Show main agent only, drop agent tabs ([da539b6fc](https://github.com/debuglebowski/slayzone/commit/da539b6fc))
+- **chat:** Lifecycle model is the only mode — drop shadow/legacy ([d64c5dcb9](https://github.com/debuglebowski/slayzone/commit/d64c5dcb9))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.41.1 ([44e0f97bf](https://github.com/debuglebowski/slayzone/commit/44e0f97bf))
+
+### ✅ Tests
+
+- **sharing:** Type the stand-in version rows ([d12d97f48](https://github.com/debuglebowski/slayzone/commit/d12d97f48))
+- **sharing:** Register the sharing and artifact-promotion suites ([f63d3f234](https://github.com/debuglebowski/slayzone/commit/f63d3f234))
+- **export:** CI diagnostics for the 3 Linux-only render failures ([b8d278934](https://github.com/debuglebowski/slayzone/commit/b8d278934))
+- Drop stale web-shell zip-stream registration (moved to task-artifacts) ([7434b207d](https://github.com/debuglebowski/slayzone/commit/7434b207d))
+- **sharing:** Members' paths stay on their own computer; personal computers only tracked ([88129c8a4](https://github.com/debuglebowski/slayzone/commit/88129c8a4))
+- **migrations:** V0.41.1 persona ([782302ac0](https://github.com/debuglebowski/slayzone/commit/782302ac0))
+- **computer:** Deflake network-controls native fixture ([4a9c03058](https://github.com/debuglebowski/slayzone/commit/4a9c03058))
+- **personas:** Update snapshots to v222 ([4c932d091](https://github.com/debuglebowski/slayzone/commit/4c932d091))
+- **e2e:** Sharing between two people on a login hub ([6b9a68b15](https://github.com/debuglebowski/slayzone/commit/6b9a68b15))
+- **chat:** Every transport test fails on a lifecycle disagreement; fix them ([71b1ea493](https://github.com/debuglebowski/slayzone/commit/71b1ea493))
+- Register 2 unlisted tests ([33c0d4fee](https://github.com/debuglebowski/slayzone/commit/33c0d4fee))
+- **mobile:** 5s async wait for cold-cache CI renders ([3a06a779a](https://github.com/debuglebowski/slayzone/commit/3a06a779a))
+- **chat:** Compaction no-write-lost test deletes only seeded rows ([be0bf7f48](https://github.com/debuglebowski/slayzone/commit/be0bf7f48))
+- **chat:** Wait for async status/queue gate in 2 flaky tests ([6627816af](https://github.com/debuglebowski/slayzone/commit/6627816af))
+- **chat:** E2e — hub killed mid-turn: "Reconnecting…", then server state, no reload ([03f37c31d](https://github.com/debuglebowski/slayzone/commit/03f37c31d))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Ubuntu
+
 ## v0.41.1
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.41.0...v0.41.1)

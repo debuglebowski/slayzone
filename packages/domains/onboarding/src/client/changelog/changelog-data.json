@@ -1,5 +1,32 @@
 [
   {
+    "version": "0.42.0",
+    "date": "2026-11-19",
+    "tagline": "Steadier chats",
+    "items": [
+      {
+        "category": "improvement",
+        "title": "Chats recover from connection drops",
+        "description": "When the connection to the background service drops, chats show \"Reconnecting…\" and then catch up with the agent's real state, and tab status dots re-sync instead of turning dead."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster large boards",
+        "description": "Task changes no longer re-check every task on the board, keeping big boards responsive."
+      },
+      {
+        "category": "fix",
+        "title": "Background agent turns stay intact",
+        "description": "A message sent while the agent is working on its own (e.g. a finished background task) no longer replaces that turn or leaves it stuck running, and answering No to its prompt ends it cleanly."
+      },
+      {
+        "category": "fix",
+        "title": "Agent start fixes",
+        "description": "Restored chats wait until the agent can start instead of stacking error toasts, Retry works after a failed start, and closing a never-started chat no longer marks it ended."
+      }
+    ]
+  },
+  {
     "version": "0.41.1",
     "date": "2026-11-18",
     "tagline": "Watch, listen, relocate",
