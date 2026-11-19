@@ -9,7 +9,7 @@
  * answers prompts and respawns at random points.
  *
  * Every step is checked by the strict lifecycle check (the model and the runtime
- * must agree), in both lifecycle modes; every run must end settled and ready.
+ * must agree); every run must end settled and ready.
  */
 import { afterEach, expect, test } from 'vitest'
 import * as mgr from './chat-transport-manager'
@@ -172,9 +172,9 @@ async function settle(): Promise<void> {
   await mgr.__flushEventsForTests(TAB)
 }
 
-async function run(seed: number, mode: 'shadow' | 'authoritative'): Promise<void> {
+async function run(seed: number): Promise<void> {
   const h: TransportHarness = transportHarness()
-  await startTab({ lifecycleMode: mode } as never)
+  await startTab()
   const random = seeded(seed)
   let agent = new Agent(h.fakes[0])
   let sent = 0
@@ -261,13 +261,9 @@ async function run(seed: number, mode: 'shadow' | 'authoritative'): Promise<void
   })
 }
 
-test.each(
-  (['shadow', 'authoritative'] as const).flatMap((mode) =>
-    Array.from({ length: 48 }, (_, i) => ({ mode, seed: 0xc4a7 + i }))
-  )
-)(
-  'randomized host and agent actions: model and runtime agree ($mode, seed $seed)',
-  async ({ mode, seed }) => {
-    await run(seed, mode)
+test.each(Array.from({ length: 96 }, (_, i) => ({ seed: 0xc4a7 + i })))(
+  'randomized host and agent actions: model and runtime agree (seed $seed)',
+  async ({ seed }) => {
+    await run(seed)
   }
 )

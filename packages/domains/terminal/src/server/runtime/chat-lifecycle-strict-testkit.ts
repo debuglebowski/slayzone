@@ -1,7 +1,7 @@
 /**
  * Every test that drives the chat transport fails when the lifecycle model and
  * the runtime disagree (`chat.lifecycle_shadow_*`), or when the model gives up.
- * The model becomes the authority (`authoritative`), so any disagreement in a
+ * The model is the authority, so any disagreement in a
  * test is a bug in one of them. A test that causes one on purpose (a broken or
  * deliberately different model) says so with `allowLifecycleDisagreement()`.
  * Imported by `chat-transport-testkit.ts`; `chat-lifecycle-strict.test.ts`

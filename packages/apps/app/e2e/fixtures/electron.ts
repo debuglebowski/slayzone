@@ -421,11 +421,6 @@ async function launchElectronWithRetry(args: {
           // (ROOT itself is stripped by the app's own env reads, this is not).
           SLAYZONE_ROOT: args.userDataDir,
           SLAYZONE_USER_DATA_DIR: args.userDataDir,
-          // Run the suite with chat turn state kept in another mode
-          // (`SLAYZONE_CHAT_LIFECYCLE=shadow pnpm test:e2e:chat`).
-          ...(process.env.SLAYZONE_CHAT_LIFECYCLE
-            ? { SLAYZONE_CHAT_LIFECYCLE: process.env.SLAYZONE_CHAT_LIFECYCLE }
-            : {}),
           // Always-on boot tracing in e2e — cheap (~30 console.log per launch)
           // and lets profiling specs read the timeline from boot.log. We use
           // a file sink (not stdout) because Playwright's stdio capture races

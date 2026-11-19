@@ -1,6 +1,6 @@
 /**
- * Observer, and in `authoritative` mode the source of the session's published
- * status (`authority`). Compares at a microtask boundary after synchronous lifecycle,
+ * The session's lifecycle model: the source of its published status
+ * (`authority`), checked against the runtime's own state. Compares at a microtask boundary after synchronous lifecycle,
  * outbox and prompt updates settle. Failures disable the observer, never chat.
  * Reports are capped per process and contain counts/flags, not event payloads,
  * message/turn/prompt ids, commands, paths, or provider error text.
@@ -272,9 +272,8 @@ export class ChatLifecycleShadow {
   }
 
   /**
-   * The model's current status, for a session that runs it as the authority
-   * (`authoritative` mode); null once it failed or closed — the runtime's own
-   * status applies again.
+   * The model's current status (the session's); null once it failed or closed —
+   * the runtime's own status applies again.
    */
   authority(): ChatLifecycleSnapshot | null {
     if (this.disabled || this.closed) return null

@@ -268,13 +268,10 @@ class Contract {
   }
 }
 
-/** `authoritative`: the lifecycle model is the server's status; the runtime agrees with it. */
-type Mode = 'shadow' | 'authoritative'
-const MODES: Mode[] = ['shadow', 'authoritative']
-
-async function contract(mode: Mode = 'shadow'): Promise<Contract> {
+/** The lifecycle model is the server's status; the runtime agrees with it. */
+async function contract(): Promise<Contract> {
   const h = transportHarness()
-  await startTab({ lifecycleMode: mode } as never)
+  await startTab()
   const c = new Contract(h, h.fakes[0])
   await c.metadata()
   return c
@@ -304,13 +301,12 @@ function interleave<T>(left: T[], right: T[]): T[][] {
 }
 
 test.each(
-  MODES.flatMap((mode) =>
-    interleave(['main end', 'next start', 'next end'], ['child tool', 'child end']).map(
-      (order) => ({ name: `${mode}: ${order.join(' → ')}`, order, mode })
-    )
-  )
-)('all parent/child race orderings: $name', async ({ order, mode }) => {
-  const c = await contract(mode)
+  interleave(['main end', 'next start', 'next end'], ['child tool', 'child end']).map((order) => ({
+    name: order.join(' → '),
+    order
+  }))
+)('all parent/child race orderings: $name', async ({ order }) => {
+  const c = await contract()
   await c.start()
   await c.launch()
   const [helper] = c.helpers
@@ -366,19 +362,6 @@ test('replaced process cannot overwrite a new turn with late tools, prompts, or 
   await c.check('late events from replaced process')
   expect(c.h.broadcasts).toHaveLength(before)
   await c.finish()
-})
-
-test('legacy mode disables the observer for the whole session without changing behavior', async () => {
-  const h = transportHarness()
-  await mgr.hydrateSession({ ...TAB_OPTS, lifecycleMode: 'legacy' })
-  await mgr.ensureSpawned(TAB_OPTS.tabId)
-  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)).toBeNull()
-  await sendAndStart(h.fakes[0], 'legacy-user')
-  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'running', turnOpen: true })
-  emitLine(h.fakes[0], sj.success())
-  emitLine(h.fakes[0], sj.lifecycle('legacy-user', 'completed'))
-  await until(() => mgr.isReadyForQueuedMessage(TAB_OPTS.tabId))
-  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)).toBeNull()
 })
 
 test('answering a background-only prompt leaves the closed main turn idle', async () => {
@@ -525,52 +508,56 @@ function seeded(seed: number): () => number {
   }
 }
 
-test.each(
-  MODES.flatMap((mode) => Array.from({ length: 64 }, (_, i) => ({ seed: 0x51a700 + i, mode })))
-)('generated lifecycle orderings preserve contract ($mode, seed $seed)', async ({ seed, mode }) => {
-  const c = await contract(mode)
-  const random = seeded(seed)
-  for (let i = 0; i < 64; i++) {
-    const choices: Array<() => Promise<void>> = [() => c.metadata(), () => c.check('reload replay')]
-    // A queued message cannot start while a prompt waits (the drainer is gated).
-    if (!c.open && !c.prompts.size) choices.push(() => c.start())
-    // A background helper may ask while the main turn is closed.
-    if (!c.open && c.helpers.size) choices.push(() => c.ask())
-    if (c.open) {
-      choices.push(
-        () => c.progress(),
-        () => c.ask()
-      )
-      if (c.helpers.size < 3) choices.push(() => c.launch())
-      if (!c.prompts.size) choices.push(() => c.finish())
+test.each(Array.from({ length: 128 }, (_, i) => ({ seed: 0x51a700 + i })))(
+  'generated lifecycle orderings preserve contract (seed $seed)',
+  async ({ seed }) => {
+    const c = await contract()
+    const random = seeded(seed)
+    for (let i = 0; i < 64; i++) {
+      const choices: Array<() => Promise<void>> = [
+        () => c.metadata(),
+        () => c.check('reload replay')
+      ]
+      // A queued message cannot start while a prompt waits (the drainer is gated).
+      if (!c.open && !c.prompts.size) choices.push(() => c.start())
+      // A background helper may ask while the main turn is closed.
+      if (!c.open && c.helpers.size) choices.push(() => c.ask())
+      if (c.open) {
+        choices.push(
+          () => c.progress(),
+          () => c.ask()
+        )
+        if (c.helpers.size < 3) choices.push(() => c.launch())
+        if (!c.prompts.size) choices.push(() => c.finish())
+      }
+      if (c.prompts.size) {
+        const ids = [...c.prompts]
+        const id = ids[Math.floor(random() * ids.length)]
+        choices.push(
+          () => c.answer(id),
+          () => c.withdraw(id)
+        )
+      }
+      if (c.helpers.size) {
+        const ids = [...c.helpers]
+        const id = ids[Math.floor(random() * ids.length)]
+        choices.push(
+          () => c.childProgress(id),
+          () => c.finishHelper(id)
+        )
+      }
+      if (c.completedHelpers.length) {
+        const id = c.completedHelpers[Math.floor(random() * c.completedHelpers.length)]
+        choices.push(() => c.finishHelper(id))
+      }
+      await choices[Math.floor(random() * choices.length)]()
     }
-    if (c.prompts.size) {
-      const ids = [...c.prompts]
-      const id = ids[Math.floor(random() * ids.length)]
-      choices.push(
-        () => c.answer(id),
-        () => c.withdraw(id)
-      )
-    }
-    if (c.helpers.size) {
-      const ids = [...c.helpers]
-      const id = ids[Math.floor(random() * ids.length)]
-      choices.push(
-        () => c.childProgress(id),
-        () => c.finishHelper(id)
-      )
-    }
-    if (c.completedHelpers.length) {
-      const id = c.completedHelpers[Math.floor(random() * c.completedHelpers.length)]
-      choices.push(() => c.finishHelper(id))
-    }
-    await choices[Math.floor(random() * choices.length)]()
+    for (const id of [...c.prompts]) await c.answer(id)
+    if (c.open) await c.finish()
+    for (const id of [...c.helpers]) await c.finishHelper(id)
+    await c.check(`seed ${seed} fully settled`)
   }
-  for (const id of [...c.prompts]) await c.answer(id)
-  if (c.open) await c.finish()
-  for (const id of [...c.helpers]) await c.finishHelper(id)
-  await c.check(`seed ${seed} fully settled`)
-})
+)
 
 // Measured on Claude Code 2.1.326 (`command_lifecycle` + `--replay-user-messages`):
 // a turn the CLI starts by itself after a background task has no `started`, and its
@@ -614,44 +601,41 @@ test('a self-started turn racing a written message keeps its own ownership', asy
 // Seen on a real chat (2026-11-18 13:24): the CLI started a turn by itself
 // (a finished background task) just as a message was written; it took the
 // message into that turn (`started` inside it) and ended it with one result.
-test.each(['shadow', 'authoritative'] as const)(
-  '%s: a message taken into a self-started turn ends with that turn',
-  async (mode) => {
-    const records: Array<{ event: string; payload?: unknown }> = []
-    const h = transportHarness({ deps: { diagnostic: (_t, r) => records.push(r) } })
-    await startTab({ lifecycleMode: mode } as never)
-    const c = new Contract(h, h.fakes[0])
-    await c.metadata()
-    await c.start()
-    await c.finish()
-    // The self-started turn is already streaming when the message is written.
-    emitLine(c.child, sj.init('contract-session'))
-    emitLine(c.child, {
-      type: 'stream_event',
-      event: { type: 'message_start', message: { id: 'self' } }
-    })
-    await flush()
-    await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
-      id: 'joined',
-      content: [{ type: 'text', text: 'next' }]
-    })
-    await c.child.written((m) => m.type === 'user' && m.uuid === 'joined')
-    emitLine(c.child, sj.lifecycle('joined', 'queued'))
-    emitLine(c.child, sj.toolUse('self-tool'))
-    emitLine(c.child, sj.lifecycle('joined', 'started'))
-    emitLine(c.child, {
-      type: 'user',
-      isReplay: true,
-      uuid: 'joined',
-      message: { content: 'next' }
-    })
-    emitLine(c.child, sj.text('reply', { id: 'self-reply' }))
-    emitLine(c.child, sj.lifecycle('joined', 'completed'))
-    emitLine(c.child, sj.success())
-    await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.turnOpen === false)
-    await flush()
-    expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
-    expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
-    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
-  }
-)
+test('a message taken into a self-started turn ends with that turn', async () => {
+  const records: Array<{ event: string; payload?: unknown }> = []
+  const h = transportHarness({ deps: { diagnostic: (_t, r) => records.push(r) } })
+  await startTab()
+  const c = new Contract(h, h.fakes[0])
+  await c.metadata()
+  await c.start()
+  await c.finish()
+  // The self-started turn is already streaming when the message is written.
+  emitLine(c.child, sj.init('contract-session'))
+  emitLine(c.child, {
+    type: 'stream_event',
+    event: { type: 'message_start', message: { id: 'self' } }
+  })
+  await flush()
+  await mgr.dispatchUserMessage(TAB_OPTS.tabId, {
+    id: 'joined',
+    content: [{ type: 'text', text: 'next' }]
+  })
+  await c.child.written((m) => m.type === 'user' && m.uuid === 'joined')
+  emitLine(c.child, sj.lifecycle('joined', 'queued'))
+  emitLine(c.child, sj.toolUse('self-tool'))
+  emitLine(c.child, sj.lifecycle('joined', 'started'))
+  emitLine(c.child, {
+    type: 'user',
+    isReplay: true,
+    uuid: 'joined',
+    message: { content: 'next' }
+  })
+  emitLine(c.child, sj.text('reply', { id: 'self-reply' }))
+  emitLine(c.child, sj.lifecycle('joined', 'completed'))
+  emitLine(c.child, sj.success())
+  await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.turnOpen === false)
+  await flush()
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
+  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
+  expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+})

@@ -78,14 +78,13 @@ test('a prompt parks the turn: idle state, but the turn stays open with its requ
 
 // The server's turn status also travels to clients, live, on the chat's event
 // stream (`turn-status`): ordered with the rows it describes, kept for a viewer
-// attaching later. Authoritative only when this computer runs
-// `SLAYZONE_CHAT_LIFECYCLE=authoritative` (or the session was hydrated so).
+// attaching later. Always authoritative: clients take turn state from it.
 const statuses = (h: ReturnType<typeof transportHarness>) =>
   h.broadcasts.flatMap((b) => (b.event.kind === 'turn-status' ? [b.event] : []))
 
 test('every change of the turn status is published live, with rising revisions', async () => {
   const h = transportHarness()
-  await startTab({ lifecycleMode: 'shadow' } as never)
+  await startTab()
   const f = h.fakes[0]
   await sendAndStart(f, 'u1')
   emitLine(f, sj.canUseTool('p1', 't1'))
@@ -97,7 +96,7 @@ test('every change of the turn status is published live, with rising revisions',
 
   const seen = statuses(h)
   expect(h.broadcasts.filter((b) => b.event.kind === 'turn-status').every((b) => b.live)).toBe(true)
-  expect(seen.every((s) => s.authoritative === false)).toBe(true)
+  expect(seen.every((s) => s.authoritative === true)).toBe(true)
   expect(new Set(seen.map((s) => s.epoch)).size).toBe(1)
   const revisions = seen.map((s) => s.revision)
   expect(revisions).toEqual([...revisions].sort((a, b) => a - b))
@@ -127,61 +126,9 @@ test('a freshly hydrated tab already carries its status: a viewer never guesses 
   expect(status[0]).toMatchObject({ state: 'not-spawned', turnOpen: false, revision: 1 })
 })
 
-test('an authoritative session publishes authoritative status', async () => {
-  const h = transportHarness()
-  await startTab({ lifecycleMode: 'authoritative' } as never)
-  await sendAndStart(h.fakes[0], 'u1')
-  await until(() => statuses(h).some((s) => s.turnOpen))
-  expect(statuses(h).every((s) => s.authoritative)).toBe(true)
-})
-
-test('SLAYZONE_CHAT_LIFECYCLE chooses the mode of sessions hydrated without one', async () => {
-  const before = process.env.SLAYZONE_CHAT_LIFECYCLE
-  process.env.SLAYZONE_CHAT_LIFECYCLE = 'authoritative'
-  try {
-    const h = transportHarness()
-    await startTab()
-    await sendAndStart(h.fakes[0], 'u1')
-    await until(() => statuses(h).some((s) => s.turnOpen))
-    expect(statuses(h).every((s) => s.authoritative)).toBe(true)
-  } finally {
-    if (before === undefined) delete process.env.SLAYZONE_CHAT_LIFECYCLE
-    else process.env.SLAYZONE_CHAT_LIFECYCLE = before
-  }
-})
-
-test('sessions are authoritative by default (no mode, no SLAYZONE_CHAT_LIFECYCLE)', async () => {
-  const before = process.env.SLAYZONE_CHAT_LIFECYCLE
-  delete process.env.SLAYZONE_CHAT_LIFECYCLE
-  try {
-    const h = transportHarness()
-    await startTab()
-    await sendAndStart(h.fakes[0], 'u1')
-    await until(() => statuses(h).some((s) => s.turnOpen))
-    expect(statuses(h).every((s) => s.authoritative)).toBe(true)
-  } finally {
-    if (before !== undefined) process.env.SLAYZONE_CHAT_LIFECYCLE = before
-  }
-})
-
-test('SLAYZONE_CHAT_LIFECYCLE=shadow keeps the runtime as the authority', async () => {
-  const before = process.env.SLAYZONE_CHAT_LIFECYCLE
-  process.env.SLAYZONE_CHAT_LIFECYCLE = 'shadow'
-  try {
-    const h = transportHarness()
-    await startTab()
-    await sendAndStart(h.fakes[0], 'u1')
-    await until(() => statuses(h).some((s) => s.turnOpen))
-    expect(statuses(h).some((s) => s.authoritative)).toBe(false)
-  } finally {
-    if (before === undefined) delete process.env.SLAYZONE_CHAT_LIFECYCLE
-    else process.env.SLAYZONE_CHAT_LIFECYCLE = before
-  }
-})
-
-// ---- authoritative: the lifecycle model is the server's status ----
+// ---- the lifecycle model is the server's status ----
 // A deliberately different model shows whose status the server publishes and
-// answers with: the model's in `authoritative` mode, the runtime's otherwise.
+// answers with: the model's, while it works; the runtime's once it gave up.
 // (The real model and the runtime agree on every contract trace.)
 const stuckRunning: typeof reduceChatLifecycle = (state, input) => {
   const next = reduceChatLifecycle(state, input)
@@ -190,11 +137,11 @@ const stuckRunning: typeof reduceChatLifecycle = (state, input) => {
     : next
 }
 
-async function finishedTurn(mode: 'shadow' | 'authoritative') {
+async function finishedTurn() {
   allowLifecycleDisagreement()
   const h = transportHarness()
   mgr.__setLifecycleReducerForTests(stuckRunning)
-  await startTab({ lifecycleMode: mode } as never)
+  await startTab()
   const f = h.fakes[0]
   await sendAndStart(f, 'u1')
   emitLine(f, sj.success())
@@ -206,8 +153,8 @@ async function finishedTurn(mode: 'shadow' | 'authoritative') {
 
 afterEach(() => mgr.__setLifecycleReducerForTests(null))
 
-test('authoritative: the model, not the runtime, is the status the server answers and publishes', async () => {
-  const h = await finishedTurn('authoritative')
+test('the model, not the runtime, is the status the server answers and publishes', async () => {
+  const h = await finishedTurn()
   expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'running', turnOpen: false })
   expect(mgr.getSessionTerminalState(TAB_OPTS.tabId)).toBe('running')
   expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(false)
@@ -217,14 +164,7 @@ test('authoritative: the model, not the runtime, is the status the server answer
   expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.mismatches).toBeGreaterThan(0)
 })
 
-test('shadow: the runtime stays the status; the model is only compared', async () => {
-  const h = await finishedTurn('shadow')
-  expect(mgr.getTurnStatus(TAB_OPTS.tabId)).toMatchObject({ state: 'idle', turnOpen: false })
-  expect(mgr.isReadyForQueuedMessage(TAB_OPTS.tabId)).toBe(true)
-  expect(statuses(h).at(-1)).toMatchObject({ authoritative: false, state: 'idle' })
-})
-
-test('authoritative: a model that fails hands the status back to the runtime', async () => {
+test('a model that fails hands the status back to the runtime', async () => {
   allowLifecycleDisagreement()
   const h = transportHarness()
   mgr.__setLifecycleReducerForTests((state, input) => {
@@ -232,7 +172,7 @@ test('authoritative: a model that fails hands the status back to the runtime', a
       throw new Error('broken model')
     return reduceChatLifecycle(state, input)
   })
-  await startTab({ lifecycleMode: 'authoritative' } as never)
+  await startTab()
   const f = h.fakes[0]
   await sendAndStart(f, 'u1')
   emitLine(f, sj.success())
@@ -244,11 +184,11 @@ test('authoritative: a model that fails hands the status back to the runtime', a
   expect(statuses(h).at(-1)).toMatchObject({ state: 'idle', turnOpen: false })
 })
 
-test('authoritative: the queue drains when the model reads the turn as over', async () => {
+test('the queue drains when the model reads the turn as over', async () => {
   const h = transportHarness()
   const kicks: string[] = []
   mgr.registerChatQueueDrainer((tabId) => kicks.push(tabId))
-  await startTab({ lifecycleMode: 'authoritative' } as never)
+  await startTab()
   const f = h.fakes[0]
   await sendAndStart(f, 'u1')
   kicks.length = 0
@@ -262,56 +202,50 @@ test('authoritative: the queue drains when the model reads the turn as over', as
 // Seen on a real chat (2026-11-18): a respawn requested while the first process
 // was still starting. The runtime never lets a process it is stopping read as
 // ready; the model must not either, or the tab reads `idle` until the new one runs.
-test.each(['shadow', 'authoritative'] as const)(
-  '%s: a process replaced while it starts never reads as ready, and the two agree',
-  async (mode) => {
-    const records: Array<{ event: string }> = []
-    let hold: (() => void) | null = null
-    const h = transportHarness({
-      exitOnKill: false,
-      deps: { diagnostic: (_t, r) => records.push(r) },
-      onFake: (f, i) => {
-        if (i === 0) {
-          // Its spawn is held until the respawn has asked it to stop.
-          const emit = f.emitter.emit.bind(f.emitter)
-          f.emitter.emit = ((name: string, ...args: unknown[]) => {
-            if (name !== 'spawn') return emit(name, ...args)
-            hold = () => emit(name, ...args)
-            return true
-          }) as typeof f.emitter.emit
-        }
+test('a process replaced while it starts never reads as ready, and the two agree', async () => {
+  const records: Array<{ event: string }> = []
+  let hold: (() => void) | null = null
+  const h = transportHarness({
+    exitOnKill: false,
+    deps: { diagnostic: (_t, r) => records.push(r) },
+    onFake: (f, i) => {
+      if (i === 0) {
+        // Its spawn is held until the respawn has asked it to stop.
+        const emit = f.emitter.emit.bind(f.emitter)
+        f.emitter.emit = ((name: string, ...args: unknown[]) => {
+          if (name !== 'spawn') return emit(name, ...args)
+          hold = () => emit(name, ...args)
+          return true
+        }) as typeof f.emitter.emit
       }
-    })
-    await mgr.hydrateSession({ ...TAB_OPTS, lifecycleMode: mode } as never)
-    void mgr.ensureSpawned(TAB_OPTS.tabId)
-    await until(() => hold !== null)
-    const respawned = mgr.respawn(TAB_OPTS.tabId, { ...TAB_OPTS })
-    await until(() => h.fakes[0].kills.length > 0)
-    hold!()
-    await mgr.__flushEventsForTests(TAB_OPTS.tabId)
-    await new Promise((r) => setImmediate(r))
-    expect(mgr.getTurnStatus(TAB_OPTS.tabId)?.state).toBe('starting')
-    expect(statuses(h).some((s) => s.state === 'idle')).toBe(false)
-    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
-    h.fakes[0].emitter.emit('exit', null, 'SIGTERM')
-    await respawned
-    await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.state === 'idle')
-    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
-  }
-)
+    }
+  })
+  await mgr.hydrateSession({ ...TAB_OPTS })
+  void mgr.ensureSpawned(TAB_OPTS.tabId)
+  await until(() => hold !== null)
+  const respawned = mgr.respawn(TAB_OPTS.tabId, { ...TAB_OPTS })
+  await until(() => h.fakes[0].kills.length > 0)
+  hold!()
+  await mgr.__flushEventsForTests(TAB_OPTS.tabId)
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)?.state).toBe('starting')
+  expect(statuses(h).some((s) => s.state === 'idle')).toBe(false)
+  expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+  h.fakes[0].emitter.emit('exit', null, 'SIGTERM')
+  await respawned
+  await until(() => mgr.getTurnStatus(TAB_OPTS.tabId)?.state === 'idle')
+  expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+})
 
 // Seen on a real chat (2026-11-18): a never-started chat closed. Nothing ran, so
 // it stays `not-spawned`; the model was told its process ended and read `dead`.
-test.each(['shadow', 'authoritative'] as const)(
-  '%s: closing a chat that never started leaves it not started, and the two agree',
-  async (mode) => {
-    const records: Array<{ event: string }> = []
-    transportHarness({ deps: { diagnostic: (_t, r) => records.push(r) } })
-    await mgr.hydrateSession({ ...TAB_OPTS, lifecycleMode: mode } as never)
-    mgr.kill(TAB_OPTS.tabId)
-    await new Promise((r) => setImmediate(r))
-    expect(mgr.getTurnStatus(TAB_OPTS.tabId)?.state).toBe('not-spawned')
-    expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.snapshot.state).toBe('not-spawned')
-    expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
-  }
-)
+test('closing a chat that never started leaves it not started, and the two agree', async () => {
+  const records: Array<{ event: string }> = []
+  transportHarness({ deps: { diagnostic: (_t, r) => records.push(r) } })
+  await mgr.hydrateSession({ ...TAB_OPTS })
+  mgr.kill(TAB_OPTS.tabId)
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getTurnStatus(TAB_OPTS.tabId)?.state).toBe('not-spawned')
+  expect(mgr.__getLifecycleShadowForTests(TAB_OPTS.tabId)?.snapshot.state).toBe('not-spawned')
+  expect(records.filter((r) => r.event === 'chat.lifecycle_shadow_mismatch')).toEqual([])
+})

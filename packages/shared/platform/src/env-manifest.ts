@@ -146,9 +146,6 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_SUPERVISED: 'infra', // "started by the desktop app" flag
   SLAYZONE_USER_DATA_DIR: 'infra', // Playwright Electron userData redirect
   SLAYZONE_SIDECAR_HOT_RESTART: 'infra',
-  // Computer-only: how chat sessions keep turn state (legacy | shadow | authoritative;
-  // chat-transport-manager `ChatLifecycleMode`). Infra: an agent must not inherit it.
-  SLAYZONE_CHAT_LIFECYCLE: 'infra',
   SLAYZONE_BOOT_LOG_PATH: 'infra',
   SLAYZONE_DEBUG_BOOT: 'infra',
   SLAYZONE_REGISTER_DEV_PROTOCOL: 'infra',

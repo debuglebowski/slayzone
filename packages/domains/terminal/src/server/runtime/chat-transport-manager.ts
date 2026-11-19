@@ -492,9 +492,12 @@ interface ChatTab {
   reportedState: ChatTerminalState
   /** What the current process runs in the background (sub-agents, commands). */
   work: ChatBackgroundWork
-  /** Candidate lifecycle observer; never owns production state or controls. */
+  /**
+   * The lifecycle model: the session's turn status (what the server answers and
+   * publishes), checked against the runtime's own state (disagreements reported).
+   * Null only while the tab is being built.
+   */
   shadow: ChatLifecycleShadow | null
-  lifecycleMode: ChatLifecycleMode
   /** The published `turn-status`: this tab instance's epoch, its last revision and value. */
   statusEpoch: string
   statusRevision: number
@@ -607,31 +610,7 @@ interface ChatTab {
 
 type WatchdogVector = 'stuck-starting' | 'running-stall' | 'fatal-kill'
 
-/**
- * How a session's turn state is kept, chosen once at hydration (default:
- * `SLAYZONE_CHAT_LIFECYCLE`, else `authoritative`). `authoritative`: the
- * lifecycle model is the server's turn status and clients take turn state from
- * its published status (`turn-status`), not from their transcript; the runtime's
- * own state is still compared alongside it. `shadow`: the runtime's own state is
- * the authority, the model is compared alongside it. `legacy`: no comparison.
- */
-export type ChatLifecycleMode = 'legacy' | 'shadow' | 'authoritative'
-
-const LIFECYCLE_MODES: readonly ChatLifecycleMode[] = ['legacy', 'shadow', 'authoritative']
-
-function defaultLifecycleMode(): ChatLifecycleMode {
-  const raw = process.env.SLAYZONE_CHAT_LIFECYCLE
-  if (!raw) return 'authoritative'
-  if ((LIFECYCLE_MODES as readonly string[]).includes(raw)) return raw as ChatLifecycleMode
-  console.warn(
-    `[chat-transport] SLAYZONE_CHAT_LIFECYCLE=${raw} is not one of ${LIFECYCLE_MODES.join(', ')}: authoritative`
-  )
-  return 'authoritative'
-}
-
 export interface CreateChatOpts {
-  /** Chosen once for the whole session (see `ChatLifecycleMode`). */
-  lifecycleMode?: ChatLifecycleMode
   /** A side discussion must never fall back to resuming its parent's session. */
   isolatedConversation?: boolean
   initialFork?: { fromSessionId: string; atMessageUuid: string }
@@ -1273,13 +1252,13 @@ export function createChatTransport(
    * (the ladder of `agent-tree.ts`: needs you > working > helpers > idle).
    */
   /**
-   * The lifecycle model's status when the session runs it as the authority
-   * (`authoritative` mode, model healthy); null: the runtime's own state applies.
+   * The lifecycle model's status; null when the model gave up (its reducer threw):
+   * the runtime's own state applies.
    * The runtime's state still drives its internal mechanics (watchdog, steering,
    * Stop); what the server answers and publishes comes from here.
    */
   function authorityOf(tab: ChatTab): ChatLifecycleSnapshot | null {
-    return tab.lifecycleMode === 'authoritative' ? (tab.shadow?.authority() ?? null) : null
+    return tab.shadow?.authority() ?? null
   }
 
   /** The turn state the server answers and publishes (see `authorityOf`). */
@@ -1304,7 +1283,7 @@ export function createChatTransport(
   /** Tell clients the tab's state and background-job count, when they changed. */
   function publishState(tab: ChatTab): void {
     // The model takes the rows being published in, in order: publish once settled.
-    if (tab.lifecycleMode === 'authoritative' && publicationBusy.has(tab)) {
+    if (publicationBusy.has(tab)) {
       statusDeferred.add(tab)
       return
     }
@@ -1342,7 +1321,7 @@ export function createChatTransport(
     tab.statusKey = key
     const event: AgentEvent = {
       kind: 'turn-status',
-      authoritative: tab.lifecycleMode === 'authoritative',
+      authoritative: true,
       epoch: tab.statusEpoch,
       revision: ++tab.statusRevision,
       ...status
@@ -1673,7 +1652,7 @@ export function createChatTransport(
     if (!publicationBusy.has(tab)) {
       observe(tab.shadow)
       // The model is the session's status: what it now says is published.
-      if (tab.lifecycleMode === 'authoritative') publishState(tab)
+      publishState(tab)
       return
     }
     const backlog = shadowBacklog.get(tab)
@@ -1712,7 +1691,8 @@ export function createChatTransport(
       if (publicationTail.get(tab) !== result) return
       publicationBusy.delete(tab)
       flushLifecycle(tab)
-      if (statusDeferred.delete(tab) || tab.lifecycleMode === 'authoritative') publishState(tab)
+      statusDeferred.delete(tab)
+      publishState(tab)
       kickQueueDrainer(tab)
     }
     void result.then(settled, (error) => {
@@ -2745,7 +2725,6 @@ export function createChatTransport(
       reportedState: 'not-spawned',
       work: new ChatBackgroundWork(),
       shadow: null,
-      lifecycleMode: opts.lifecycleMode ?? defaultLifecycleMode(),
       statusEpoch: randomUUID(),
       statusRevision: 0,
       statusKey: '',
@@ -2832,41 +2811,38 @@ export function createChatTransport(
       })
     }
     tab.outbox = createOutbox(tab)
-    tab.shadow =
-      tab.lifecycleMode === 'legacy'
-        ? null
-        : new ChatLifecycleShadow(opts.tabId, {
-            autonomous: chatCapabilitiesForMode(opts.mode).agentStartedTurns,
-            ...(lifecycleReducerForTests ? { reduce: lifecycleReducerForTests } : {}),
-            observe: () => {
-              const work = tab.work.counts()
-              return {
-                generation: tab.gen,
-                conversationId: tab.sessionConfirmed ? tab.sessionId : null,
-                state: tab.terminalState,
-                reportedState: runtimeReportedState(tab),
-                turnOpen: runtimeTurnOpen(tab),
-                mainTurnOpen: runtimeMainTurnOpen(tab),
-                pendingRequestIds: [...tab.pendingPrompts],
-                outboxInFlight: tab.outbox.inFlight(),
-                backgroundHelpers: work.subAgents,
-                backgroundJobs: work.jobs,
-                readyForMessage: runtimeReadyForMessage(tab),
-                seq: tab.log.lastSeq,
-                live: tab.liveSeq
-              }
-            },
-            report: (record) =>
-              diagnostic(
-                tab,
-                'warn',
-                `chat.lifecycle_shadow_${record.kind}`,
-                record.kind === 'mismatch'
-                  ? 'candidate lifecycle differs from current runtime'
-                  : 'candidate lifecycle observer disabled',
-                { ...record }
-              )
-          })
+    tab.shadow = new ChatLifecycleShadow(opts.tabId, {
+      autonomous: chatCapabilitiesForMode(opts.mode).agentStartedTurns,
+      ...(lifecycleReducerForTests ? { reduce: lifecycleReducerForTests } : {}),
+      observe: () => {
+        const work = tab.work.counts()
+        return {
+          generation: tab.gen,
+          conversationId: tab.sessionConfirmed ? tab.sessionId : null,
+          state: tab.terminalState,
+          reportedState: runtimeReportedState(tab),
+          turnOpen: runtimeTurnOpen(tab),
+          mainTurnOpen: runtimeMainTurnOpen(tab),
+          pendingRequestIds: [...tab.pendingPrompts],
+          outboxInFlight: tab.outbox.inFlight(),
+          backgroundHelpers: work.subAgents,
+          backgroundJobs: work.jobs,
+          readyForMessage: runtimeReadyForMessage(tab),
+          seq: tab.log.lastSeq,
+          live: tab.liveSeq
+        }
+      },
+      report: (record) =>
+        diagnostic(
+          tab,
+          'warn',
+          `chat.lifecycle_shadow_${record.kind}`,
+          record.kind === 'mismatch'
+            ? 'candidate lifecycle differs from current runtime'
+            : 'candidate lifecycle observer disabled',
+          { ...record }
+        )
+    })
     tab.projection = Promise.resolve(projection)
     tabs.set(opts.tabId, tab)
 

@@ -112,22 +112,18 @@ outbox admission remain independent. The existing outbox owns delivery; the mode
 does not infer acknowledgement from a spinner or transcript counter.
 
 The computer's transport runs this model in `ChatLifecycleShadow` next to the
-runtime's own state and reports every disagreement (`chat.lifecycle_shadow_*`). A
-session's `CreateChatOpts.lifecycleMode` is chosen at hydration (default
-`SLAYZONE_CHAT_LIFECYCLE`, else `authoritative`: the model is the server's turn
-status; `shadow`: the runtime's state is, the model only compared; `legacy`
-disables observation). The
-transport publishes its turn status (`turn-status`: state, reported state, turn
+runtime's own state and reports every disagreement (`chat.lifecycle_shadow_*`).
+The model is the server's turn status (the only mode). The transport publishes its turn status (`turn-status`: state, reported state, turn
 open, pending prompt ids, outbox in flight) live on the chat's event stream on
 every change, with an epoch per tab instance and a rising revision; the splitter
-keeps the latest for a viewer attaching later. In `authoritative` mode the status
-says so, and the shared timeline's `isTurnOpen` (desktop and mobile composer:
+keeps the latest for a viewer attaching later. The status says it is
+authoritative (an older server's may not), and the shared timeline's `isTurnOpen` (desktop and mobile composer:
 spinner, Stop, send vs queue) follows its `mainTurnOpen` instead of the
 transcript, so the composer reads what tab dots, kanban and the CLI read.
 `mainTurnOpen` is the main turn running or parked on its prompt, or a message on
 its way; `turnOpen` also counts a background helper's prompt after the main turn.
 
-In `authoritative` mode the lifecycle model is also the source of that status:
+The lifecycle model is the source of that status:
 `getTurnStatus`, `isTurnOpen`, `isReadyForQueuedMessage`, `getSessionTerminalState`,
 the reported state (tab dots, kanban, automations) and `turn-status` all come from
 `ChatLifecycleShadow.authority()`. The runtime's own state keeps driving its internal
