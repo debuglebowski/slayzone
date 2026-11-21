@@ -79,12 +79,12 @@
     "sharp": "^0.35.5",
     "tsx": "^4.23.15",
     "turbo": "^2.11.10",
-    "typescript": "7.1.0-dev.20261111.1"
+    "typescript": "7.1.0-dev.20261121.1"
   },
   "engines": {
-    "node": ">=24.21.0",
-    "pnpm": ">=12.12.1"
+    "node": ">=24.22.1",
+    "pnpm": ">=12.15.0"
   },
   "version": "0.42.0",
-  "packageManager": "pnpm@12.12.1+sha512.b7f98934c0b1f29a65f5da52f2d7f994e7faad573ffdddea1497fb4dcb5aec051590ee7c7d95a38172b4bfae103a5b83edf2ee866e11731c2cafa96063610ac5"
+  "packageManager": "pnpm@12.15.0+sha512.b3951d6d6ff4a9f13dc7cf56cd28d2b8eb37dbcc9c68e52e1e1191873ea9f82a017287ab50baadc5ccc494f036c67c0e47eb13608c2fa36f47711b61ea128e61"
 }

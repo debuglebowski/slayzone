@@ -43,13 +43,13 @@ allowBuilds:
   utf-8-validate: false
 
 overrides:
-  'zod': '^4.6.6'
+  'zod': '^4.6.7'
   'd3-shape>d3-path': '^3.1.0'
   'node-abi': '^4.37.0'
   'node-forge': '^1.4.3'
-  'posix>nan': '^2.29.0'
+  'posix>nan': '^2.30.0'
   'electron-chrome-web-store>adm-zip': '^0.6.1'
-  'prosemirror-view': '^1.42.6'
+  'prosemirror-view': '^1.42.7'
   'prosemirror-model': '^1.25.12'
 
 # expo-router depends on react-native-drawer-layout for `expo-router/drawer` only, which

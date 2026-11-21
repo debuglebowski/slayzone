@@ -70,7 +70,7 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.68.0",
     "react-hook-form": "^7.91.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

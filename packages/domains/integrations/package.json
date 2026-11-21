@@ -32,7 +32,7 @@
     "@slayzone/workflow": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
     "lucide-react": "^1.68.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "electron": "^45.0.0",
