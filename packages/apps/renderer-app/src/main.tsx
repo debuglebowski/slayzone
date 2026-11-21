@@ -8,6 +8,9 @@ import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { ConvexAuthBootstrap } from '@slayzone/leaderboard'
 import { HomeView } from './HomeView'
+import { SpatialApp } from './spatial/SpatialApp'
+import { parseSpatialRoute } from './spatial/spatial-route'
+import { FaultedTasksProvider } from '@slayzone/tasks/client'
 import { TaskDetailsView } from './TaskDetailsView'
 import { registerTaskPanels } from '@slayzone/task/client/TaskPanels'
 import { taskPanels } from './taskPanels'
@@ -89,6 +92,10 @@ export async function mountApp({ onboarding = true }: MountAppOptions = {}): Pro
     return
   }
 
+  // Spatial (visionOS POC) mode: `?spatial=<panel>` renders that one panel,
+  // chrome-free, inside the same provider stack (spatial/spatial-route.ts).
+  const spatialRoute = parseSpatialRoute(window.location.search)
+
   // Home view — connects to the sidecar over tRPC-WS. Resolve the server URL
   // (baked-in default port unless overridden) + windowId before mounting so the
   // tRPC client singleton exists for module-scope callers (zustand stores) too.
@@ -125,7 +132,13 @@ export async function mountApp({ onboarding = true }: MountAppOptions = {}): Pro
               <AppearanceProvider settingsRevision={0}>
                 <UndoProvider>
                   <TooltipProvider delayDuration={0}>
-                    <HomeView onboarding={onboarding} />
+                    {spatialRoute ? (
+                      <FaultedTasksProvider>
+                        <SpatialApp route={spatialRoute} />
+                      </FaultedTasksProvider>
+                    ) : (
+                      <HomeView onboarding={onboarding} />
+                    )}
                   </TooltipProvider>
                 </UndoProvider>
               </AppearanceProvider>

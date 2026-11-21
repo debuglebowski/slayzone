@@ -1505,6 +1505,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/web-shell/src/client-save.test.ts \
   packages/apps/web-shell/src/mermaid-export-source.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
+  packages/apps/renderer-app/src/spatial/spatial-route.test.ts \
+  packages/apps/renderer-app/src/spatial/spatial-bridge.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
@@ -1588,6 +1590,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/app-shell/useProjectPathGuard.hub.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
+  packages/apps/renderer-app/src/spatial/SpatialApp.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
   packages/domains/automations/src/client/automation-dialog/AutomationDialog.test.tsx \

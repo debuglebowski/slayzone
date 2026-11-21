@@ -1,0 +1,52 @@
+# XcodeGen spec for the SlayZone Spatial POC (visionOS).
+# Generate the Xcode project on a Mac:  brew install xcodegen && xcodegen generate
+name: SlayZoneSpatial
+options:
+  bundleIdPrefix: com.slayzone
+  deploymentTarget:
+    visionOS: "2.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  SlayZoneSpatial:
+    type: application
+    platform: visionOS
+    sources:
+      - path: Sources/SlayZoneSpatial
+    info:
+      path: Sources/SlayZoneSpatial/Info.plist
+      properties:
+        CFBundleDisplayName: SlayZone
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        # The POC talks to a hub on the local network over plain http.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsInWebContent: true
+        NSLocalNetworkUsageDescription: SlayZone connects to your SlayZone hub on the local network.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.slayzone.spatial
+        GENERATE_INFOPLIST_FILE: false
+  SlayZoneSpatialTests:
+    type: bundle.unit-test
+    platform: visionOS
+    sources:
+      - path: Tests/SlayZoneSpatialTests
+    dependencies:
+      - target: SlayZoneSpatial
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+schemes:
+  SlayZoneSpatial:
+    build:
+      targets:
+        SlayZoneSpatial: all
+        SlayZoneSpatialTests: [test]
+    test:
+      targets:
+        - SlayZoneSpatialTests

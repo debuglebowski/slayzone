@@ -1,0 +1,4 @@
+*.xcodeproj/
+Sources/SlayZoneSpatial/Info.plist
+build/
+DerivedData/
