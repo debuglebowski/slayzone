@@ -21,6 +21,6 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   }
 }

@@ -71,7 +71,7 @@
     "@xterm/xterm": "6.1.0-beta.315",
     "lucide-react": "^1.68.0",
     "node-pty": "^1.1.0",
-    "zod": "^4.6.6",
+    "zod": "^4.6.7",
     "zustand": "^5.0.16"
   },
   "peerDependencies": {

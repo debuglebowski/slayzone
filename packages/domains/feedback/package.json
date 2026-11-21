@@ -29,6 +29,6 @@
     "@slayzone/ui": "workspace:*",
     "convex": "^1.49.0",
     "lucide-react": "^1.68.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   }
 }
