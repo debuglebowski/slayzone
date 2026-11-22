@@ -101,6 +101,10 @@ export type WindowHost = {
   // no-op when the window can't be resolved / isn't focused. windowId is the
   // caller's webContents id (ctx.windowId), matching `windowClose`.
   appFocusRenderer: (windowId: number | null) => void
+  // Raise/show+focus the main window. Called by the renderer when a hub asks for a
+  // task to be opened in the foreground (`slay tasks open`): any hub can ask, but
+  // only the desktop can raise its own window. No-op off-window (standalone).
+  appRaiseMainWindow: () => void
   // window.close — closes the window owning the connection (ctx.windowId).
   // Same effect as the `window:close` IPC (which uses event.sender).
   windowClose: (windowId: number) => void

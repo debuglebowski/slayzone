@@ -108,11 +108,6 @@ export type AppDeps = HostCapabilities &
      * and then hand callers a Promise at runtime.
      */
     appGetDownloadsDir: () => Promise<string>
-    // Raise/show+focus the main window — the CLI/agent `tasks/open` foreground
-    // path. Forwarded over the capability bridge so the side-car's REST route can
-    // bring the Electron host window forward. No-op off-window (standalone).
-    appRaiseMainWindow: () => void
-
     // Theme — Electron `nativeTheme`-backed (resolves 'system' against the OS), so
     // host-only. The `settings.*Theme` tRPC procedures resolve these (through
     // `settings-host-wiring.ts`; forwarded

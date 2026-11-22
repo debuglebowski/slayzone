@@ -20,6 +20,7 @@ import {
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
 import { useComputerConnectRefetch } from './app-shell/computer-connect-refetch'
+import { HubTaskEvents } from './app-shell/HubTaskEvents'
 import { useAppBadge } from './hooks/useAppBadge'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
@@ -952,9 +953,6 @@ function App(): React.JSX.Element {
   // Main↔renderer IPC subscriptions (extracted — close/open/toggle/settings + browser view wiring)
   useAppIpcListeners({
     closeTab,
-    guardTaskOpen,
-    openTaskInBackground,
-    openTask,
     setActiveTabIndex,
     selectedProjectId,
     globalAgentPanelState,
@@ -1402,6 +1400,11 @@ function App(): React.JSX.Element {
     <AppearanceProvider settingsRevision={settingsRevision}>
       <SidebarProvider defaultOpen={true}>
         <div id="app-shell" className="relative h-full w-full flex">
+          <HubTaskEvents
+            openTask={openTask}
+            openTaskInBackground={openTaskInBackground}
+            guardTaskOpen={guardTaskOpen}
+          />
           <AppSidebar
             projects={projects}
             projectGroups={projectGroups}

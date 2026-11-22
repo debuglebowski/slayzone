@@ -275,6 +275,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'app.window.focusRenderer': 'user',
   'app.window.getContentBounds': 'user',
   'app.window.getDisplayScaleFactor': 'user',
+  'app.window.raise': 'user',
   'app.window.setTrafficLightPosition': 'user',
   'app.window.setWindowButtonVisibility': 'user',
   'artifacts.cleanupTask': 'user',

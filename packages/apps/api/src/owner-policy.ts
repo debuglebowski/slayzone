@@ -701,6 +701,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.window.setTrafficLightPosition': none(HOST),
   'app.window.setWindowButtonVisibility': none(HOST),
   'app.window.focusRenderer': none(HOST),
+  'app.window.raise': none(HOST),
   'app.shortcuts.changed': none(HOST),
   'app.auth.githubSystemSignIn': none('starts a GitHub sign-in for the caller'),
   'app.auth.onCallback': none(`${HOST} (fed only by the supervised hub's sidecar socket)`),

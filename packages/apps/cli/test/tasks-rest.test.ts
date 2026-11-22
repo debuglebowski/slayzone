@@ -165,12 +165,11 @@ registerGetTaskRoute(app, {
   }
 })
 
-// Capture app:open-task broadcasts + window show/focus calls. The open route no
-// longer reaches into `electron` directly — it emits via injected `legacyBroadcast`
-// (test-only spy) + `windowActions` (raise/show/focus). Wire both so the spies fire.
+// Capture app:open-task broadcasts + the `open-task` menu event. The open route
+// never raises a window itself: it asks the renderer that opens the tab to (`raise`),
+// because the hub it runs on may not be the desktop's own.
 const openTaskBroadcasts: Array<{ taskId: string; background: boolean }> = []
-let showCalled = 0
-let focusCalled = 0
+const openTaskEvents: Array<{ taskId: string; background?: boolean; raise?: boolean }> = []
 const fakeWin = {
   webContents: {
     send: (channel: string, ...args: unknown[]) => {
@@ -181,12 +180,8 @@ const fakeWin = {
   },
   isMinimized: () => false,
   restore: () => {},
-  show: () => {
-    showCalled++
-  },
-  focus: () => {
-    focusCalled++
-  }
+  show: () => {},
+  focus: () => {}
 }
 ;(BrowserWindow as unknown as { getAllWindows: () => unknown[] }).getAllWindows = () => [fakeWin]
 
@@ -197,17 +192,15 @@ registerOpenTaskRoute(app, {
   },
   legacyBroadcast: (channel: string, ...args: unknown[]) =>
     fakeWin.webContents.send(channel, ...args),
-  windowActions: {
-    raiseMainWindow: () => {
-      fakeWin.show()
-      fakeWin.focus()
+  menu: {
+    emit: (event: string, payload: (typeof openTaskEvents)[number]) => {
+      if (event === 'open-task') openTaskEvents.push(payload)
     }
   }
 } as never)
 function resetOpenSpies(): void {
   openTaskBroadcasts.length = 0
-  showCalled = 0
-  focusCalled = 0
+  openTaskEvents.length = 0
 }
 const rest = await mountRestApp(app)
 
@@ -887,7 +880,7 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks open → REST /api/open-task', () => {
     ).run(openTaskId, projectId, 'OpenMe', 'todo', 3, 'claude-code', '{}', now, now)
   })
 
-  test('default (no flag): broadcasts (id, false) + main window show/focus', async () => {
+  test('default (no flag): broadcasts (id, false) + asks the renderer to raise', async () => {
     resetOpenSpies()
     const r = await runCli(['tasks', 'open', openTaskId.slice(0, 8)])
     expect(r.exitCode).toBe(0)
@@ -895,11 +888,10 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks open → REST /api/open-task', () => {
     expect(openTaskBroadcasts.length).toBe(1)
     expect(openTaskBroadcasts[0].taskId).toBe(openTaskId)
     expect(openTaskBroadcasts[0].background).toBe(false)
-    expect(showCalled).toBe(1)
-    expect(focusCalled).toBe(1)
+    expect(openTaskEvents).toEqual([{ taskId: openTaskId, background: false, raise: true }])
   })
 
-  test('--background: broadcasts (id, true) + no show/focus', async () => {
+  test('--background: broadcasts (id, true) + no raise', async () => {
     resetOpenSpies()
     const r = await runCli(['tasks', 'open', openTaskId.slice(0, 8), '--background'])
     expect(r.exitCode).toBe(0)
@@ -907,8 +899,7 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks open → REST /api/open-task', () => {
     expect(openTaskBroadcasts.length).toBe(1)
     expect(openTaskBroadcasts[0].taskId).toBe(openTaskId)
     expect(openTaskBroadcasts[0].background).toBe(true)
-    expect(showCalled).toBe(0)
-    expect(focusCalled).toBe(0)
+    expect(openTaskEvents).toEqual([{ taskId: openTaskId, background: true, raise: false }])
   })
 })
 

@@ -360,6 +360,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'app.window.focusRenderer': 'never',
   'app.window.getContentBounds': 'never',
   'app.window.getDisplayScaleFactor': 'never',
+  'app.window.raise': 'never',
   'app.window.setTrafficLightPosition': 'never',
   'app.window.setWindowButtonVisibility': 'never',
   'artifacts.cleanupTask': 'tasks',

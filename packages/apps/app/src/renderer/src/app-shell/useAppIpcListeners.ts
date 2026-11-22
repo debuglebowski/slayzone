@@ -20,9 +20,6 @@ import { openSettings } from '@slayzone/settings'
 
 export interface AppIpcListenersDeps {
   closeTab: (index: number) => void
-  guardTaskOpen: (taskId: string, fn: (id: string) => void, projectOverride?: Project) => void
-  openTaskInBackground: (taskId: string) => void
-  openTask: (taskId: string, projectOverride?: Project) => void
   setActiveTabIndex: (index: number) => void
   selectedProjectId: string
   globalAgentPanelState: GlobalAgentPanelState
@@ -34,15 +31,12 @@ export interface AppIpcListenersDeps {
   tasksMap: Map<string, Task>
 }
 
-// Main↔renderer subscriptions: window close, task open, panel toggles,
+// Main↔renderer subscriptions: window close, panel toggles,
 // settings, plus WebContentsView wiring (reload, zoom, shortcut forwarding,
 // focus relay, create-task-from-link).
 export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   const {
     closeTab,
-    guardTaskOpen,
-    openTaskInBackground,
-    openTask,
     setActiveTabIndex,
     selectedProjectId,
     globalAgentPanelState,
@@ -77,22 +71,7 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   useSubscription(
     trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, { onData: closeCurrentHome })
   )
-  useSubscription(
-    trpc.menu.onCloseTask.subscriptionOptions(undefined, {
-      onData: (taskId) => {
-        useTabStore.getState().closeTabByTaskId(taskId)
-        void trpcClient.processes.removeForTask.mutate({ taskId })
-      }
-    })
-  )
-  useSubscription(
-    trpc.menu.onOpenTask.subscriptionOptions(undefined, {
-      onData: ({ taskId, background }) => {
-        if (background) guardTaskOpen(taskId, openTaskInBackground)
-        else openTask(taskId)
-      }
-    })
-  )
+  // Task open/close requests come from every hub, not just this one: `HubTaskEvents`.
   useSubscription(
     trpc.menu.onGoHome.subscriptionOptions(undefined, {
       onData: () => {

@@ -26,22 +26,16 @@ function seedTask(id: string): string {
 seedTask('abc-123')
 seedTask('xyz-789')
 
-// The route reaches the window through INJECTED deps (`legacyBroadcast` +
-// `windowActions`), not `electron` directly — spy on those. A patched
-// mock-electron `BrowserWindow.getAllWindows` would never be consulted, which is
-// why every assertion below silently read `undefined` before this was rewired.
+// The route reaches the renderer through INJECTED deps: the `open-task` menu event
+// (which the renderer that opens the tab acts on, raising its window when `raise`)
+// and the legacy broadcast. It never raises a window itself — the hub it runs on may
+// be a remote one with no window to reach.
 const sent: Array<{ channel: string; args: unknown[] }> = []
-let showCalled = 0
-let focusCalled = 0
-let restoreCalled = 0
-let minimized = false
+const events: Array<{ taskId: string; background?: boolean; raise?: boolean }> = []
 
 function reset(): void {
   sent.length = 0
-  showCalled = 0
-  focusCalled = 0
-  restoreCalled = 0
-  minimized = false
+  events.length = 0
 }
 
 const app = express()
@@ -52,19 +46,16 @@ registerOpenTaskRoute(app, {
   legacyBroadcast: (channel: string, ...args: unknown[]) => {
     sent.push({ channel, args })
   },
-  windowActions: {
-    raiseMainWindow: () => {
-      // Mirrors the host impl: restore first when minimized, then show + focus.
-      if (minimized) restoreCalled++
-      showCalled++
-      focusCalled++
+  menu: {
+    emit: (event: string, payload: (typeof events)[number]) => {
+      if (event === 'open-task') events.push(payload)
     }
   }
 } as never)
 const rest = await mountRestApp(app)
 
 describe('POST /api/open-task/:id', () => {
-  test('foreground (no flag): broadcasts (id, false) + shows/focuses window', async () => {
+  test('foreground (no flag): broadcasts (id, false) + asks the renderer to raise', async () => {
     reset()
     const res = await rest.request<{ ok: boolean }>('POST', '/api/open-task/abc-123')
     expect(res.status).toBe(200)
@@ -73,20 +64,10 @@ describe('POST /api/open-task/:id', () => {
     expect(ev).toBeTruthy()
     expect(ev!.args[0]).toBe('abc-123')
     expect(ev!.args[1]).toBe(false)
-    expect(showCalled).toBe(1)
-    expect(focusCalled).toBe(1)
+    expect(events).toEqual([{ taskId: 'abc-123', background: false, raise: true }])
   })
 
-  test('foreground: restores window when minimized', async () => {
-    reset()
-    minimized = true
-    await rest.request<{ ok: boolean }>('POST', '/api/open-task/abc-123')
-    expect(restoreCalled).toBe(1)
-    expect(showCalled).toBe(1)
-    expect(focusCalled).toBe(1)
-  })
-
-  test('background=1: broadcasts (id, true) + does NOT show/focus', async () => {
+  test('background=1: broadcasts (id, true) + does NOT ask to raise', async () => {
     reset()
     const res = await rest.request<{ ok: boolean }>('POST', '/api/open-task/xyz-789?background=1')
     expect(res.status).toBe(200)
@@ -94,9 +75,7 @@ describe('POST /api/open-task/:id', () => {
     expect(ev).toBeTruthy()
     expect(ev!.args[0]).toBe('xyz-789')
     expect(ev!.args[1]).toBe(true)
-    expect(showCalled).toBe(0)
-    expect(focusCalled).toBe(0)
-    expect(restoreCalled).toBe(0)
+    expect(events).toEqual([{ taskId: 'xyz-789', background: true, raise: false }])
   })
 
   test('background=true (string): also treated as background', async () => {
@@ -104,7 +83,7 @@ describe('POST /api/open-task/:id', () => {
     await rest.request<{ ok: boolean }>('POST', '/api/open-task/xyz-789?background=true')
     const ev = sent.find((s) => s.channel === 'app:open-task')
     expect(ev!.args[1]).toBe(true)
-    expect(focusCalled).toBe(0)
+    expect(events[0].raise).toBe(false)
   })
 
   test('background=0: treated as foreground', async () => {
@@ -112,7 +91,7 @@ describe('POST /api/open-task/:id', () => {
     await rest.request<{ ok: boolean }>('POST', '/api/open-task/abc-123?background=0')
     const ev = sent.find((s) => s.channel === 'app:open-task')
     expect(ev!.args[1]).toBe(false)
-    expect(focusCalled).toBe(1)
+    expect(events[0].raise).toBe(true)
   })
 
   test('happy: unique id prefix broadcasts the FULL resolved id', async () => {
@@ -144,7 +123,7 @@ describe('POST /api/open-task/:id', () => {
     expect(res.body.error.includes(a.slice(0, 8))).toBe(true)
     expect(res.body.error.includes(b.slice(0, 8))).toBe(true)
     expect(sent.length).toBe(0)
-    expect(focusCalled).toBe(0)
+    expect(events.length).toBe(0)
   })
 
   test('404: unknown id names what was searched for and broadcasts nothing', async () => {
@@ -156,7 +135,7 @@ describe('POST /api/open-task/:id', () => {
     expect(res.status).toBe(404)
     expect(res.body.error).toBe('Task not found: no-such-task')
     expect(sent.length).toBe(0)
-    expect(focusCalled).toBe(0)
+    expect(events.length).toBe(0)
   })
 })
 

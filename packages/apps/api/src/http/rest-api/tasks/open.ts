@@ -30,11 +30,10 @@ export function registerOpenTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       const { id: taskId, title } = resolved.row
       const background = req.query.background === '1' || req.query.background === 'true'
-      deps.menu?.emit('open-task', { taskId, background })
+      // The renderer that opens the tab raises its window (`raise`): this hub may be
+      // a remote one with no window of its own to reach.
+      deps.menu?.emit('open-task', { taskId, background, raise: !background })
       deps.legacyBroadcast?.('app:open-task', taskId, background) // slice 5: drop legacy send
-      if (!background) {
-        deps.windowActions?.raiseMainWindow()
-      }
       res.json({ ok: true, data: { id: taskId, title } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })

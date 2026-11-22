@@ -7,7 +7,8 @@
  * to the local hub even from inside a remote task's `HubScope` — the client's
  * per-hub link stack does that with {@link isHostPath} (`hostRouteLink`).
  *
- * Classified per `app.<router>` (plus all of `menu`). Every `app.*` router must
+ * Classified per `app.<router>` (plus `menu`, minus its hub-raised streams in
+ * {@link HUB_MENU_PROCEDURES}). Every `app.*` router must
  * be listed in exactly one of the two sets; `api`'s `host-paths.test.ts` checks
  * that against the live router, so a new `app.*` router fails CI until someone
  * decides where it runs.
@@ -46,8 +47,24 @@ export const HUB_APP_ROUTERS: readonly string[] = [
   'usage'
 ]
 
+/**
+ * `menu.*` streams a HUB raises (its REST/MCP routes: `slay tasks open`, `slay
+ * browser`, artifact open, …) about its OWN tasks — not native menu events. Every
+ * hub serves them from its own bus, so each must be heard on the hub that owns the
+ * task: forwarded to the local hub, a remote hub's emit reaches no one.
+ */
+export const HUB_MENU_PROCEDURES: readonly string[] = [
+  'menu.onOpenTask',
+  'menu.onCloseTask',
+  'menu.onOpenArtifact',
+  'menu.onBrowserEnsurePanelOpen',
+  'menu.onBrowserCreateTab',
+  'menu.onBrowserAgentTouched'
+]
+
 /** True when `path` (dotted, e.g. `app.shell.openExternal`) runs on the desktop host. */
 export function isHostPath(path: string): boolean {
+  if (HUB_MENU_PROCEDURES.includes(path)) return false
   const [root, sub] = path.split('.', 2)
   if (HOST_ROOT_ROUTERS.includes(root)) return true
   return root === 'app' && sub !== undefined && HOST_APP_ROUTERS.includes(sub)

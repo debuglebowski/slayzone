@@ -79,8 +79,8 @@ export const menuRouter = router({
     })
   ),
   onOpenTask: publicProcedure.subscription(() =>
-    observable<{ taskId: string; background?: boolean }>((emit) => {
-      const h = (payload: { taskId: string; background?: boolean }): void => emit.next(payload)
+    observable<MenuEventMap['open-task'][0]>((emit) => {
+      const h = (payload: MenuEventMap['open-task'][0]): void => emit.next(payload)
       const ev = getMenuEvents()
       ev.on('open-task', h)
       return () => ev.off('open-task', h)

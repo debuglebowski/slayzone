@@ -113,7 +113,10 @@ export const appWindowRouter = router({
   // renderer's focus calls never reject. Was the `app:focus-renderer` IPC.
   focusRenderer: publicProcedure.mutation(({ ctx }) =>
     getHost().appFocusRenderer(ctx.windowId ?? null)
-  )
+  ),
+  // Bring the main window forward — a foreground `open-task` from any hub (the
+  // hub that raised it may not be this desktop's). Fire-and-forget.
+  raise: publicProcedure.mutation(() => getHost().appRaiseMainWindow())
 })
 
 export type AppWindowRouter = typeof appWindowRouter

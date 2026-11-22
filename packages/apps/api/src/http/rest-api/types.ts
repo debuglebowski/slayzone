@@ -331,8 +331,6 @@ export interface RestApiDeps {
   terminalStateBridge?: TerminalStateBridge
   processes?: ProcessesAccess
   browser?: BrowserAccess
-  /** Raise/show+focus the main window (open-task foreground path). */
-  windowActions?: { raiseMainWindow: () => void }
   /**
    * Computer listener info accessors (hub/computer split, Wave3.5-D3). Set ONLY under
    * the composition root wires it, closed over the same late-bound refs the

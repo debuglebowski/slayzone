@@ -24,7 +24,9 @@ export type MenuEventMap = {
   'open-settings': []
   'open-project-settings': []
   'new-temporary-task': []
-  'open-task': [payload: { taskId: string; background?: boolean }]
+  /** `raise`: also bring the window forward (a foreground `slay tasks open`). The
+   *  receiving renderer raises it: the hub that emits may not be this desktop's. */
+  'open-task': [payload: { taskId: string; background?: boolean; raise?: boolean }]
   'close-task': [taskId: string]
   'open-artifact': [payload: { taskId: string; artifactId: string }]
   'screenshot-trigger': []

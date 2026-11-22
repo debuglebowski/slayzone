@@ -6,7 +6,12 @@
  */
 import { describe, expect, test } from 'vitest'
 import { appRouter } from './router'
-import { HOST_APP_ROUTERS, HUB_APP_ROUTERS, isHostPath } from '@slayzone/transport/host-paths'
+import {
+  HOST_APP_ROUTERS,
+  HUB_APP_ROUTERS,
+  HUB_MENU_PROCEDURES,
+  isHostPath
+} from '@slayzone/transport/host-paths'
 
 const LIVE_APP_ROUTERS = [
   ...new Set(
@@ -29,5 +34,17 @@ describe('host-paths classification', () => {
     expect(isHostPath('app.backup.list')).toBe(false)
     expect(isHostPath('task.getAll')).toBe(false)
     expect(isHostPath('app')).toBe(false)
+  })
+
+  test('hub-raised menu streams stay on the hub that raised them', () => {
+    expect(isHostPath('menu.onOpenTask')).toBe(false)
+    expect(isHostPath('menu.onCloseTask')).toBe(false)
+    expect(isHostPath('menu.onOpenArtifact')).toBe(false)
+    expect(isHostPath('menu.onGoHome')).toBe(true)
+  })
+
+  test('every hub-raised menu stream is a live procedure', () => {
+    const live = new Set(Object.keys(appRouter._def.procedures))
+    for (const path of HUB_MENU_PROCEDURES) expect(live.has(path), path).toBe(true)
   })
 })

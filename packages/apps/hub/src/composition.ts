@@ -2165,12 +2165,6 @@ export function composeServer(opts: {
           secure: webSessionCookieSecure(opts.publicAddress)
         })
     },
-    // Raise the host window for the CLI/agent `tasks/open` foreground path. The
-    // route itself runs HERE (emits the `open-task` menu event on the side-car's
-    // bus → renderer); only the window raise is bridged to the Electron host.
-    windowActions: bridge
-      ? { raiseMainWindow: () => void bridge.appDeps.appRaiseMainWindow() }
-      : undefined,
     // Browser routes run HERE, where the `tasks.browser_tabs` row they read and write
     // lives; each operation on a live tab is relayed to the client that owns it. Only
     // the desktop's own local agent may use the user's own tabs; everyone else sees
