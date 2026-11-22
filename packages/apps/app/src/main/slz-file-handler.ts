@@ -2,11 +2,16 @@ import { readFile } from 'node:fs/promises'
 import { normalize, posix, sep } from 'node:path'
 import { contentTypeForPath } from '@slayzone/platform/mime-types'
 import { injectForcedHtmlTheme } from '@slayzone/platform/forced-html-theme'
-import { parseSlzFileUrl, type SlzFileSource } from '@slayzone/platform/slz-file-url'
+import {
+  parseHtmlArtifactPreviewUrl,
+  parseSlzFileUrl,
+  SLZ_ARTIFACT_SCHEME,
+  type SlzFileSource
+} from '@slayzone/platform/slz-file-url'
 
 /**
- * The `slz-file://` protocol handler (Chromium blocks `file://` in webviews and
- * cross-origin renderers, so previews load files through this scheme).
+ * Protocol handler for files and desktop HTML artifact previews. Chromium
+ * blocks `file://` in webviews and cross-origin renderers.
  *
  * Two kinds of URL (see `@slayzone/platform/slz-file-url`):
  *
@@ -155,6 +160,10 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
     const out = pick(res.headers)
     out.set('content-type', contentType)
     out.set('cache-control', 'no-cache')
+    if (url.protocol === `${SLZ_ARTIFACT_SCHEME}:`) {
+      // Apply the sandbox to the document as well as to the preview iframe.
+      out.set('content-security-policy', 'sandbox allow-scripts allow-same-origin')
+    }
     const theme = forcedTheme(url, contentType)
     if (theme && res.status === 200) {
       const doctored = injectForcedHtmlTheme(await res.text(), theme)
@@ -167,10 +176,10 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
 
   return async function slzFileHandler(request: Request): Promise<Response> {
     const url = new URL(request.url)
-    // URLs are built via `toSlzFileUrl` / `toSlzSourceUrl`, which fill the
-    // authority with SLZ_FILE_HOST so Chromium's standard-URL canonicalizer can't
-    // move the first path segment into the host. Anything else is refused.
-    const parsed = parseSlzFileUrl(request.url)
+    const parsed =
+      url.protocol === `${SLZ_ARTIFACT_SCHEME}:`
+        ? await parseHtmlArtifactPreviewUrl(url)
+        : parseSlzFileUrl(request.url)
     if (!parsed) return new Response('Forbidden', { status: 403 })
     if (parsed.kind === 'local') return serveLocal(url, parsed.path)
     return serveSource(url, request, parsed.source, parsed.relPath)

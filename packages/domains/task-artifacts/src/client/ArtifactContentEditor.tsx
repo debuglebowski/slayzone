@@ -17,7 +17,11 @@ import {
   useHtmlPreviewLinks,
   type LinkOpenTarget
 } from '@slayzone/editor'
-import { toArtifactFileUrl } from '@slayzone/platform/slz-file-url'
+import {
+  SLZ_ARTIFACT_SCHEME,
+  toArtifactFileUrl,
+  toHtmlArtifactPreviewUrl
+} from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact } from '@slayzone/task-contracts'
 import {
@@ -931,17 +935,12 @@ function ArtifactPreview({
   return null
 }
 
-// HTML preview via slz-file:// custom scheme (registered with bypassCSP +
-// secure privileges). Cannot use srcDoc/blob/data URLs: parent renderer's CSP
-// `script-src 'self'` is inherited by them and blocks inline + CDN scripts.
-// slz-file gets its own origin and bypasses CSP so user HTML runs unmodified.
+// Hub HTML previews get an origin per artifact so browser storage stays private
+// to it. Standalone previews keep the opaque-origin sandbox on slz-file://.
 // `contentVersion` cache-busts on each save so the iframe reloads after edits.
 //
-// `htmlTheme` rides the same URL as a `?theme=` param (see `toSlzFileUrl`):
-// the sandbox (no `allow-same-origin`) also means the parent can't reach
-// `contentDocument` to force a color scheme at runtime, so a forced theme is
-// injected as CSS into the response body by the main-process slz-file
-// handler instead, before the bytes ever reach this frame.
+// The parent is cross-origin, so the main-process protocol handler injects
+// the theme CSS before the document loads, using the URL's `?theme=` param.
 //
 // Zoom cannot go through CSS `zoom` here the way it does for the DOM panes: the
 // frame is a separate document on its own origin behind `sandbox`, so the parent
@@ -986,19 +985,17 @@ function HtmlPreviewFrame({
     // lookup is still in flight).
     let cancelled = false
     getFilePath(artifactId)
-      .then((p) => {
+      .then(async (p) => {
         if (cancelled) return
-        if (p)
-          setSrc(
-            toArtifactFileUrl(
-              hubId,
-              artifactId,
-              p,
-              contentVersion,
-              htmlTheme === 'system' ? undefined : htmlTheme
-            )
-          )
-        else setError('This artifact has no file on disk yet.')
+        if (!p) {
+          setError('This artifact has no file on disk yet.')
+          return
+        }
+        const theme = htmlTheme === 'system' ? undefined : htmlTheme
+        const url = hubId
+          ? await toHtmlArtifactPreviewUrl(hubId, artifactId, p, contentVersion, theme)
+          : toArtifactFileUrl(null, artifactId, p, contentVersion, theme)
+        if (!cancelled) setSrc(url)
       })
       .catch((e: unknown) => {
         if (cancelled) return
@@ -1044,7 +1041,11 @@ function HtmlPreviewFrame({
       <iframe
         ref={iframeRef}
         src={src}
-        sandbox="allow-scripts"
+        sandbox={
+          src.startsWith(`${SLZ_ARTIFACT_SCHEME}://`)
+            ? 'allow-scripts allow-same-origin'
+            : 'allow-scripts'
+        }
         className="absolute top-0 left-0 border-0"
         style={{
           width: `${100 / zoom}%`,

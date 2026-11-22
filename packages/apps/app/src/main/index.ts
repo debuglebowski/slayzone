@@ -121,6 +121,7 @@ import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
 import { createSlzFileHandler } from './slz-file-handler'
+import { SLZ_ARTIFACT_SCHEME } from '@slayzone/platform/slz-file-url'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -188,6 +189,10 @@ protocol.registerSchemesAsPrivileged([
       stream: true,
       bypassCSP: true
     }
+  },
+  {
+    scheme: SLZ_ARTIFACT_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
   },
   ...BLOCKED_EXTERNAL_PROTOCOLS.map((scheme) => ({
     scheme,
@@ -3121,6 +3126,7 @@ app
     browserSession.protocol.handle('slz-file', slzFileHandler)
     webPanelSession.protocol.handle('slz-file', slzFileHandler)
     session.defaultSession.protocol.handle('slz-file', slzFileHandler)
+    session.defaultSession.protocol.handle(SLZ_ARTIFACT_SCHEME, slzFileHandler)
 
     // Emit the renderer Content-Security-Policy as a response header so it can
     // name the dynamic in-process tRPC WS port exactly (a static meta tag

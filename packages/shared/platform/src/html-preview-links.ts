@@ -1,15 +1,14 @@
 /**
  * Link clicks inside HTML artifact previews.
  *
- * HTML artifacts render in an `<iframe sandbox="allow-scripts">` served over
- * `slz-file://`. The parent can't reach the cross-origin document, and the
- * sandbox (no `allow-popups`) changes what a click on a link does:
+ * HTML artifacts render in sandboxed iframes on their own origins. The parent
+ * can't reach the document, and the sandbox changes what a link click does:
  *
  *   target=_blank / ⌘ click / middle click → popup blocked by the sandbox, click lost
  *   bare click                             → navigates the PREVIEW itself to the site
  *                                            (usually refused by X-Frame-Options → blank pane)
  *
- * Main injects `buildHtmlPreviewLinkBridgeScript()` into every slz-file frame of
+ * Main injects `buildHtmlPreviewLinkBridgeScript()` into preview frames of
  * an app window: a bubble-phase click listener that, for http(s)/mailto links the
  * page itself didn't handle, cancels the navigation and posts the URL + modifiers
  * to the app renderer (`window.top`). The renderer routes it with the read-only
@@ -22,7 +21,7 @@
  * inside the iframe activates its ancestors too).
  */
 
-import { SLZ_FILE_PREFIX } from './slz-file-url'
+import { SLZ_ARTIFACT_SCHEME, SLZ_FILE_PREFIX } from './slz-file-url'
 
 export const HTML_PREVIEW_LINK_MESSAGE_TYPE = 'slayzone:html-preview-link'
 
@@ -47,9 +46,9 @@ export function parseHtmlPreviewLinkMessage(data: unknown): HtmlPreviewLinkMessa
   return { type, url, metaKey, ctrlKey, shiftKey }
 }
 
-/** Frames that get the bridge: slz-file documents, minus PDFs (their own bridge). */
+/** Frames that get the bridge: artifact and file previews, minus PDFs. */
 export function isHtmlPreviewFrameUrl(url: string): boolean {
-  if (!url.startsWith(SLZ_FILE_PREFIX)) return false
+  if (!url.startsWith(SLZ_FILE_PREFIX) && !url.startsWith(`${SLZ_ARTIFACT_SCHEME}://`)) return false
   const path = url.split(/[?#]/, 1)[0]
   return !/\.pdf$/i.test(path)
 }

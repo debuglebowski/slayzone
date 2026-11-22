@@ -151,8 +151,9 @@ describe('parseHtmlPreviewLinkMessage', () => {
 })
 
 describe('isHtmlPreviewFrameUrl', () => {
-  it('matches slz-file documents only', () => {
+  it('matches SlayZone file and artifact documents', () => {
     expect(isHtmlPreviewFrameUrl('slz-file://app/Users/me/a.html?v=1')).toBe(true)
+    expect(isHtmlPreviewFrameUrl('slz-artifact://artifact-abc/@src/token/a.html?v=1')).toBe(true)
     expect(isHtmlPreviewFrameUrl('file:///Users/me/a.html')).toBe(false)
     expect(isHtmlPreviewFrameUrl('http://localhost:5173/')).toBe(false)
     expect(isHtmlPreviewFrameUrl('slz-file://app/Users/me/a.pdf')).toBe(false)

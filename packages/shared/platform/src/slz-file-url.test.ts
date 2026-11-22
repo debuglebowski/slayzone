@@ -5,6 +5,7 @@ import {
   slzFileUrlToFileUrl,
   SLZ_FILE_PREFIX,
   toArtifactFileUrl,
+  toHtmlArtifactPreviewUrl,
   toSlzFileUrl,
   toSlzSourceUrl
 } from './slz-file-url'
@@ -146,5 +147,24 @@ describe('toArtifactFileUrl', () => {
     expect(toArtifactFileUrl(null, 'a1', '/Users/me/a1.png', 1)).toBe(
       toSlzFileUrl('/Users/me/a1.png', 1)
     )
+  })
+})
+
+describe('HTML artifact preview origins', () => {
+  it('keeps the hostname across versions, renames and theme changes', async () => {
+    const before = new URL(await toHtmlArtifactPreviewUrl('hub', 'artifact', '/old.html', 1))
+    const after = new URL(await toHtmlArtifactPreviewUrl('hub', 'artifact', '/new.html', 2, 'dark'))
+    expect(before.protocol).toBe('slz-artifact:')
+    expect(after.hostname).toBe(before.hostname)
+    expect(after.pathname).toMatch(/\/new\.html$/)
+    expect(after.searchParams.get('v')).toBe('2')
+    expect(after.searchParams.get('theme')).toBe('dark')
+  })
+
+  it('separates artifacts and hubs even when filenames or artifact IDs match', async () => {
+    const host = async (hubId: string, id: string) =>
+      new URL(await toHtmlArtifactPreviewUrl(hubId, id, '/report.html')).hostname
+    expect(await host('hub', 'a1')).not.toBe(await host('hub', 'a2'))
+    expect(await host('hub', 'a1')).not.toBe(await host('other-hub', 'a1'))
   })
 })

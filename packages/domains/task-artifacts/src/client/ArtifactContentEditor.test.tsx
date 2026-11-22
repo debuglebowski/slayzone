@@ -8,6 +8,7 @@ import { Activity } from 'react'
 import type React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { webcrypto } from 'node:crypto'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import { RICH_TEXT_MAX_BYTES, type ArtifactTextRead } from '../shared/text-read'
@@ -31,12 +32,13 @@ vi.mock('./trpc', () => {
 })
 /** The file watcher's `content-changed` handler the mounted editor subscribed. */
 let contentChanged: ((id: string) => void) | undefined
+let hubId: string | null = null
 vi.mock('@slayzone/transport/client', () => ({
   useSubscription: (opts: { onData?: (id: string) => void }) => {
     contentChanged = opts?.onData
   },
   // No hub scope: previews are plain local `slz-file://` paths (`toArtifactFileUrl`).
-  useHubId: () => null
+  useHubId: () => hubId
 }))
 const appearance = {
   notesFontFamily: 'sans',
@@ -157,6 +159,7 @@ const flush = () => act(async () => {})
 
 beforeEach(() => {
   vi.useFakeTimers()
+  hubId = null
   disk.content = { a1: 'v1' }
   disk.mtime = { a1: 1, img: 1 }
   disk.notText = {}
@@ -168,6 +171,21 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+it('gives a hub HTML preview a storage origin with the other sandbox flags intact', async () => {
+  vi.useRealTimers()
+  vi.stubGlobal('crypto', webcrypto)
+  hubId = 'hub'
+  const html = artifact('page', 'page.html')
+  disk.content.page = '<p>Hello</p>'
+  getFilePath.mockResolvedValueOnce('/data/page.html')
+  render(<Tab mode="visible" art={html} viewMode="preview" />)
+
+  const frame = await screen.findByTitle('HTML preview')
+  expect(new URL((frame as HTMLIFrameElement).src).protocol).toBe('slz-artifact:')
+  expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
 })
 
 describe('ArtifactContentEditor across a tab switch', () => {

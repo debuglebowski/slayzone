@@ -34,7 +34,7 @@ function staticDirectives(dev: boolean): string[] {
     "default-src 'self'",
     dev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self'",
     "worker-src 'self' blob:",
-    "frame-src 'self' slz-file:",
+    "frame-src 'self' slz-file: slz-artifact:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https: slz-file:"
   ]

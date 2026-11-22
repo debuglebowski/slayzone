@@ -14,6 +14,7 @@
 
 export const SLZ_FILE_HOST = 'app'
 export const SLZ_FILE_PREFIX = `slz-file://${SLZ_FILE_HOST}`
+export const SLZ_ARTIFACT_SCHEME = 'slz-artifact'
 
 /**
  * Build a slz-file URL from an absolute path. Pass `version` to cache-bust.
@@ -147,6 +148,15 @@ export function toSlzSourceUrl(
   version?: string | number,
   theme?: 'light' | 'dark'
 ): string {
+  return SLZ_FILE_PREFIX + sourcePath(source, relPath, version, theme)
+}
+
+function sourcePath(
+  source: SlzFileSource,
+  relPath: string,
+  version?: string | number,
+  theme?: 'light' | 'dark'
+): string {
   const path = relPath
     .split('/')
     .filter((s) => s.length > 0)
@@ -156,7 +166,7 @@ export function toSlzSourceUrl(
   if (version !== undefined) params.push(`v=${encodeURIComponent(String(version))}`)
   if (theme !== undefined) params.push(`theme=${theme}`)
   const query = params.length > 0 ? `?${params.join('&')}` : ''
-  return `${SLZ_FILE_PREFIX}/${SOURCE_SEGMENT}/${encodeSource(source)}/${path}${query}`
+  return `/${SOURCE_SEGMENT}/${encodeSource(source)}/${path}${query}`
 }
 
 /**
@@ -172,19 +182,22 @@ export function parseSlzFileUrl(url: string): ParsedSlzFileUrl | null {
     return null
   }
   if (parsed.protocol !== 'slz-file:' || parsed.hostname !== SLZ_FILE_HOST) return null
-  const raw = parsed.pathname.split('/').slice(1)
-  if (raw[0] !== SOURCE_SEGMENT) {
-    try {
-      return { kind: 'local', path: decodeURIComponent(parsed.pathname) }
-    } catch {
-      return null
-    }
+  if (parsed.pathname.split('/')[1] === SOURCE_SEGMENT) return parseSourcePath(parsed.pathname)
+  try {
+    return { kind: 'local', path: decodeURIComponent(parsed.pathname) }
+  } catch {
+    return null
   }
-  const source = decodeSource(raw[1] ?? '')
+}
+
+function parseSourcePath(pathname: string): Extract<ParsedSlzFileUrl, { kind: 'source' }> | null {
+  const [, segment, token, ...raw] = pathname.split('/')
+  if (segment !== SOURCE_SEGMENT || !token) return null
+  const source = decodeSource(token)
   if (!source) return null
   let segments: string[]
   try {
-    segments = raw.slice(2).map(decodeURIComponent)
+    segments = raw.map(decodeURIComponent)
   } catch {
     return null
   }
@@ -214,4 +227,41 @@ export function toArtifactFileUrl(
   if (!hubId) return toSlzFileUrl(hubPath, version, theme)
   const name = hubPath.split(/[\\/]/).pop() || artifactId
   return toSlzSourceUrl({ kind: 'artifact', hubId, artifactId, name }, name, version, theme)
+}
+
+/** Origin identity survives edits and renames. The hash fits in a DNS label. */
+async function artifactHost(hubId: string, artifactId: string): Promise<string> {
+  const identity = new TextEncoder().encode(JSON.stringify([hubId, artifactId]))
+  const digest = await crypto.subtle.digest('SHA-256', identity)
+  const hex = Array.from(new Uint8Array(digest, 0, 24), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('')
+  return `artifact-${hex}`
+}
+
+/** Desktop HTML previews use separate browser storage for each hub and artifact. */
+export async function toHtmlArtifactPreviewUrl(
+  hubId: string,
+  artifactId: string,
+  hubPath: string,
+  version?: string | number,
+  theme?: 'light' | 'dark'
+): Promise<string> {
+  const name = hubPath.split(/[\\/]/).pop() || artifactId
+  const path = sourcePath({ kind: 'artifact', hubId, artifactId, name }, name, version, theme)
+  return `${SLZ_ARTIFACT_SCHEME}://${await artifactHost(hubId, artifactId)}${path}`
+}
+
+/** Accept only the artifact that owns this origin. Paths and workspace sources
+ * must never substitute a different document under an artifact's hostname. */
+export async function parseHtmlArtifactPreviewUrl(
+  url: URL
+): Promise<Extract<ParsedSlzFileUrl, { kind: 'source' }> | null> {
+  if (url.protocol !== `${SLZ_ARTIFACT_SCHEME}:` || url.username || url.password || url.port) {
+    return null
+  }
+  const parsed = parseSourcePath(url.pathname)
+  if (parsed?.source.kind !== 'artifact') return null
+  const { hubId, artifactId } = parsed.source
+  return url.hostname === (await artifactHost(hubId, artifactId)) ? parsed : null
 }

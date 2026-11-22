@@ -20,7 +20,7 @@ const previewFrame = (page: Page) =>
  * Wait for the preview through its REAL stages instead of one composite budget.
  *
  * `expect(frame.locator('#x')).toHaveText(...)` spans four hops — React commit →
- * `getFilePath` IPC → `slz-file://` fetch → parse+script — and reports all of them
+ * `getFilePath` IPC → `slz-artifact://` fetch → parse+script — and reports all of them
  * as `element(s) not found`, which cannot distinguish "iframe never mounted" from
  * "document never loaded". These tests otherwise run in 0.1–0.3s against a 5s
  * ceiling, so when one fails it is stuck, not slow; naming the stuck hop is the
@@ -140,7 +140,7 @@ test.describe('HTML artifact preview executes scripts', () => {
     await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
     await expect(frame.locator('#r')).toHaveText('initial', { timeout: 5_000 })
-    // Sandboxed iframe (allow-scripts only) — programmatic click via evaluate
+    // Sandboxed iframe — programmatic click via evaluate
     // is more reliable than Playwright's input dispatch into a sandbox.
     await frame.locator('#b').evaluate((el: HTMLElement) => el.click())
     await expect(frame.locator('#r')).toHaveText('CLICKED', { timeout: 3_000 })
@@ -188,35 +188,59 @@ test.describe('HTML artifact preview executes scripts', () => {
     await expect(frame.locator('#ok')).toHaveText('yes', { timeout: 5_000 })
   })
 
-  test('iframe is sandboxed (no parent window access, unique origin)', async ({ mainWindow }) => {
+  test('storage survives reopening and is private to each sandboxed artifact', async ({
+    mainWindow
+  }) => {
     const html = `<!DOCTYPE html><html><body>
       <div id="origin">?</div>
       <div id="parent">?</div>
+      <div id="value">?</div>
+      <button id="save">Save value</button>
       <script>
-        document.getElementById('origin').textContent = location.origin;
+        document.getElementById('origin').textContent = self.origin;
         try {
           document.getElementById('parent').textContent = window.parent.location.href;
         } catch (e) {
           document.getElementById('parent').textContent = 'BLOCKED';
         }
+        const value = document.getElementById('value');
+        try {
+          value.textContent = localStorage.getItem('checklist') ?? 'empty';
+        } catch (error) {
+          value.textContent = error.name;
+        }
+        document.getElementById('save').onclick = () => {
+          localStorage.setItem('checklist', 'saved');
+          value.textContent = localStorage.getItem('checklist');
+        };
       </script>
     </body></html>`
 
     const s = seed(mainWindow)
-    await s.createArtifact({ taskId, title: 'sandbox-test.html', content: html })
+    await s.createArtifact({ taskId, title: 'storage-first.html', content: html })
+    await s.createArtifact({ taskId, title: 'storage-second.html', content: html })
     await s.refreshData()
 
     await openArtifactsPanel(mainWindow)
-    await artifactRow(mainWindow, 'sandbox-test.html').click()
-
+    await artifactRow(mainWindow, 'storage-first.html').click()
     await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
-    // slz-file is a standard, secure scheme (needed for Storage APIs in artifact
-    // previews) — sandbox without allow-same-origin still surfaces the scheme as
-    // origin rather than the spec-default "null". The cross-origin barrier is
-    // what we really care about; assert that parent access is blocked.
-    await expect(frame.locator('#origin')).toHaveText(/slz-file:\/\//, { timeout: 5_000 })
-    await expect(frame.locator('#parent')).toHaveText('BLOCKED', { timeout: 3_000 })
+    await expect(frame.locator('#value')).toHaveText('empty')
+    await expect(frame.locator('#parent')).toHaveText('BLOCKED')
+    await expect(frame.locator('#origin')).toHaveText(/^slz-artifact:\/\/artifact-/)
+    const firstOrigin = (await frame.locator('#origin').innerText()).trim()
+    await frame.locator('#save').click()
+    await expect(frame.locator('#value')).toHaveText('saved')
+
+    await artifactRow(mainWindow, 'storage-second.html').click()
+    await waitForPreviewLoaded(mainWindow)
+    await expect(frame.locator('#value')).toHaveText('empty')
+    await expect(frame.locator('#origin')).not.toHaveText(firstOrigin)
+
+    await artifactRow(mainWindow, 'storage-first.html').click()
+    await waitForPreviewLoaded(mainWindow)
+    await expect(frame.locator('#origin')).toHaveText(firstOrigin)
+    await expect(frame.locator('#value')).toHaveText('saved')
   })
 
   test.describe('links', () => {

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { toSlzFileUrl, toSlzSourceUrl, type SlzFileSource } from '@slayzone/platform/slz-file-url'
+import {
+  toHtmlArtifactPreviewUrl,
+  toSlzFileUrl,
+  toSlzSourceUrl,
+  type SlzFileSource
+} from '@slayzone/platform/slz-file-url'
 import { createSlzFileHandler } from './slz-file-handler'
 
 const HOME = '/Users/me'
@@ -25,6 +30,44 @@ function setup(over: Partial<Parameters<typeof createSlzFileHandler>[0]> = {}) {
 }
 
 const req = (url: string, headers?: Record<string, string>) => new Request(url, { headers })
+
+describe('isolated HTML artifact URLs', () => {
+  it('serves the artifact from its hub with its preview theme and sandbox', async () => {
+    const { handler, fetch, readFile } = setup()
+    const url = await toHtmlArtifactPreviewUrl('remote-1', 'a1', '/hub/report.html', 2, 'dark')
+    const res = await handler(req(url))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('text/html')
+    expect(res.headers.get('content-security-policy')).toBe(
+      'sandbox allow-scripts allow-same-origin'
+    )
+    expect(await res.text()).toContain('color-scheme:dark')
+    expect(fetch).toHaveBeenCalledWith(
+      'https://hub.example/api/artifacts/a1/content',
+      expect.anything()
+    )
+    expect(readFile).not.toHaveBeenCalled()
+  })
+
+  it('refuses to serve another artifact, a workspace, or a disk path under an artifact origin', async () => {
+    const { handler, fetch, readFile } = setup()
+    const original = new URL(await toHtmlArtifactPreviewUrl('remote-1', 'a1', '/report.html'))
+    const origin = `${original.protocol}//${original.host}`
+    const otherArtifact = new URL(await toHtmlArtifactPreviewUrl('remote-1', 'a2', '/report.html'))
+    const otherHub = new URL(await toHtmlArtifactPreviewUrl('remote-2', 'a1', '/report.html'))
+    const workspaceFile = new URL(toSlzSourceUrl(workspace, 'report.html'))
+    for (const path of [
+      otherArtifact.pathname,
+      otherHub.pathname,
+      workspaceFile.pathname,
+      `${HOME}/report.html`
+    ]) {
+      expect((await handler(req(origin + path))).status).toBe(403)
+    }
+    expect(fetch).not.toHaveBeenCalled()
+    expect(readFile).not.toHaveBeenCalled()
+  })
+})
 
 describe('local URLs', () => {
   it('serves a file under home with its mime type', async () => {
