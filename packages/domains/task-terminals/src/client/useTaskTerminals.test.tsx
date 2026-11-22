@@ -8,6 +8,8 @@ type OnChanged = (data: { taskId: string; focusTabId?: string }) => Promise<void
 const TASK = 't1'
 let listResult: TerminalTab[] = []
 let onChanged: OnChanged | null = null
+let reopen: ((dropped: boolean) => void) | null = null
+let listQuery = vi.fn(() => Promise.resolve(listResult))
 const mutations: Record<string, ReturnType<typeof vi.fn>> = {
   delete: vi.fn(),
   kill: vi.fn(),
@@ -16,7 +18,7 @@ const mutations: Record<string, ReturnType<typeof vi.fn>> = {
 const client = {
   taskTerminals: {
     ensureMain: { mutate: vi.fn().mockResolvedValue(undefined) },
-    list: { query: () => Promise.resolve(listResult) }
+    list: { query: (...args: unknown[]) => listQuery(...(args as [])) }
   }
 }
 
@@ -39,6 +41,9 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => client,
   useSubscription: (opts: { onData: OnChanged }) => {
     onChanged = opts.onData
+  },
+  useHubReopen: (cb: (dropped: boolean) => void) => {
+    reopen = cb
   }
 }))
 
@@ -75,6 +80,8 @@ async function setup(initial: TerminalTab[]) {
 
 beforeEach(() => {
   onChanged = null
+  reopen = null
+  listQuery = vi.fn(() => Promise.resolve(listResult))
   mutations.delete.mockReset().mockResolvedValue(true)
   mutations.kill.mockReset().mockResolvedValue(undefined)
   mutations.remove.mockReset().mockResolvedValue(undefined)
@@ -163,5 +170,75 @@ describe('useTaskTerminals active group', () => {
     const { result } = renderHook(() => useTaskTerminals(TASK, 'terminal'))
     act(() => result.current.setActiveGroupId('nowhere'))
     expect(result.current.activeGroupId).toBe('nowhere')
+  })
+})
+
+describe('useTaskTerminals load failures', () => {
+  // A hub socket that drops while the first load is in flight (e.g. the machine slept)
+  // rejects it. The pane must know the load failed — not read it as "no tabs" — and
+  // load again once the hub is reachable.
+  const failOnce = () => {
+    listQuery = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('socket closed'))
+      .mockImplementation(() => Promise.resolve(listResult))
+  }
+
+  it('reports a failed load, distinct from an empty one', async () => {
+    listResult = [MAIN]
+    failOnce()
+    const { result } = renderHook(() => useTaskTerminals(TASK, 'terminal'))
+    expect(result.current.loadState).toBe('loading')
+    await waitFor(() => expect(result.current.loadState).toBe('failed'))
+    expect(result.current.tabs).toEqual([])
+  })
+
+  it('loads again when the hub reopens after a failed load', async () => {
+    listResult = [MAIN]
+    failOnce()
+    const { result } = renderHook(() => useTaskTerminals(TASK, 'terminal'))
+    await waitFor(() => expect(result.current.loadState).toBe('failed'))
+    await act(async () => reopen!(false))
+    await waitFor(() => expect(result.current.tabs).toEqual([MAIN]))
+    expect(result.current.loadState).toBe('loaded')
+  })
+
+  it('reload() loads again after a failed load', async () => {
+    listResult = [MAIN]
+    failOnce()
+    const { result } = renderHook(() => useTaskTerminals(TASK, 'terminal'))
+    await waitFor(() => expect(result.current.loadState).toBe('failed'))
+    await act(async () => result.current.reload())
+    await waitFor(() => expect(result.current.tabs).toEqual([MAIN]))
+  })
+
+  it('reloads a loaded list when a dropped connection reopens (pushes may be missed)', async () => {
+    const { result } = await setup([MAIN])
+    listResult = [MAIN, tab('x', 'gx', false, 1)]
+    await act(async () => reopen!(true))
+    await waitFor(() => expect(result.current.tabs).toHaveLength(2))
+  })
+
+  it("a first open doesn't reload a list that loaded", async () => {
+    const { result } = await setup([MAIN])
+    const calls = listQuery.mock.calls.length
+    await act(async () => reopen!(false))
+    expect(listQuery.mock.calls.length).toBe(calls)
+    expect(result.current.loadState).toBe('loaded')
+  })
+
+  it('a stale load for a previous task never lands', async () => {
+    let resolveFirst: (tabs: TerminalTab[]) => void = () => {}
+    listQuery = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<TerminalTab[]>((r) => (resolveFirst = r)))
+      .mockImplementation(() => Promise.resolve([tab('t2', 't2', true)]))
+    const hook = renderHook(({ id }) => useTaskTerminals(id, 'terminal'), {
+      initialProps: { id: TASK }
+    })
+    hook.rerender({ id: 't2' })
+    await waitFor(() => expect(hook.result.current.tabs[0]?.id).toBe('t2'))
+    await act(async () => resolveFirst([MAIN]))
+    expect(hook.result.current.tabs[0]?.id).toBe('t2')
   })
 })

@@ -81,6 +81,7 @@ export {
   toHubConnection,
   useConnectionState,
   useHubConnection,
+  useHubReopen,
   watchReopen,
   type HubConnection
 } from './hubConnection'

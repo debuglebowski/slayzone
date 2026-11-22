@@ -25,6 +25,9 @@ const groups: TerminalGroup[] = [
 ]
 
 let setActive: (id: string) => void = () => {}
+/** What the mocked hook reports about its load; null = loaded with both groups. */
+let loadOverride: { loadState: 'loading' | 'loaded' | 'failed'; empty: boolean } | null = null
+const reload = vi.fn()
 const mounts: string[] = []
 const focused: string[] = []
 
@@ -32,9 +35,12 @@ vi.mock('./useTaskTerminals', () => ({
   useTaskTerminals: () => {
     const [activeGroupId, setActiveGroupId] = useState('task')
     setActive = setActiveGroupId
+    const empty = loadOverride?.empty ?? false
     return {
-      tabs: [mainTab, otherTab],
-      groups,
+      tabs: empty ? [] : [mainTab, otherTab],
+      groups: empty ? [] : groups,
+      loadState: loadOverride?.loadState ?? 'loaded',
+      reload,
       activeGroupId,
       setActiveGroupId,
       createTab: vi.fn(),
@@ -92,6 +98,8 @@ vi.mock('./TerminalSplitGroup', () => ({
 const { TerminalContainer } = await import('./TerminalContainer')
 
 beforeEach(() => {
+  loadOverride = null
+  reload.mockReset()
   mounts.length = 0
   focused.length = 0
 })
@@ -117,4 +125,27 @@ test('switching back to a mounted group focuses it (no pane attach completes the
   focused.length = 0
   act(() => setActive('task'))
   expect(focused).toEqual(['task:task'])
+})
+
+test('no tabs of your own after a successful load: offers to start an agent', () => {
+  loadOverride = { loadState: 'loaded', empty: true }
+  render(<TerminalContainer taskId="task" cwd="/repo" defaultMode="claude-chat" />)
+  expect(screen.queryByTestId('terminal-empty-own')).not.toBeNull()
+  expect(screen.queryByTestId('terminal-load-failed')).toBeNull()
+})
+
+test('a failed load is an error with a retry, never the start-your-own offer', () => {
+  loadOverride = { loadState: 'failed', empty: true }
+  render(<TerminalContainer taskId="task" cwd="/repo" defaultMode="claude-chat" />)
+  expect(screen.queryByTestId('terminal-empty-own')).toBeNull()
+  const failed = screen.getByTestId('terminal-load-failed')
+  act(() => failed.querySelector('button')!.click())
+  expect(reload).toHaveBeenCalledTimes(1)
+})
+
+test('while loading, neither the offer nor the error shows', () => {
+  loadOverride = { loadState: 'loading', empty: true }
+  render(<TerminalContainer taskId="task" cwd="/repo" defaultMode="claude-chat" />)
+  expect(screen.queryByTestId('terminal-empty-own')).toBeNull()
+  expect(screen.queryByTestId('terminal-load-failed')).toBeNull()
 })

@@ -1,7 +1,8 @@
 import { behaviorSubject } from '@trpc/server/observable'
-import { useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { ConnectionStateSource } from './connectDeadlineLink'
-import { useFederation } from './FederationProvider'
+import { useFederation, useFederationOrNull } from './FederationProvider'
+import { useHubId } from './HubScope'
 
 /**
  * A hub's connection as the UI reads it: the socket's OWN state (@trpc/client's
@@ -92,4 +93,25 @@ export function useHubConnection(hubId: string): HubConnection | null {
   const resolved = useFederation().resolve(hubId)
   const connection = useConnectionState(resolved?.ws.wsClient.connectionState ?? NO_SOCKET)
   return resolved ? connection : null
+}
+
+/**
+ * {@link watchReopen} on the socket of the nearest `HubScope`'s hub: `onReopen` runs
+ * each time it opens after not being open. For a read loaded once (not a query that
+ * refetches itself): reload it when a failed attempt can now succeed, or when the
+ * socket `dropped` and pushes it relied on may have been missed. Nothing outside a
+ * federation or a hub scope.
+ */
+export function useHubReopen(onReopen: (dropped: boolean) => void): void {
+  const hubId = useHubId()
+  const federation = useFederationOrNull()
+  const source = hubId ? federation?.resolve(hubId)?.ws.wsClient.connectionState : undefined
+  const latest = useRef(onReopen)
+  useEffect(() => {
+    latest.current = onReopen
+  })
+  useEffect(() => {
+    if (!source) return
+    return watchReopen(source, (dropped) => latest.current(dropped))
+  }, [source])
 }

@@ -166,6 +166,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   ) {
     const {
       tabs,
+      loadState,
+      reload,
       groups,
       activeGroupId,
       setActiveGroupId,
@@ -684,7 +686,29 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             mainTabContextMenu={mainTabContextMenu}
           />
           <div className="flex-1 min-h-0 relative">
-            {groups.length === 0 && (
+            {groups.length === 0 && loadState === 'failed' && (
+              // The hub couldn't answer (e.g. its socket dropped mid-read): not "no tabs".
+              // It also loads again by itself once the hub's socket reopens.
+              <div
+                className="absolute inset-0 flex items-center justify-center p-6"
+                data-testid="terminal-load-failed"
+              >
+                <div className="max-w-sm space-y-3 text-center">
+                  <div className="text-sm font-medium text-muted-foreground">
+                    Couldn't load this task's agents
+                  </div>
+                  <div className="text-xs text-muted-foreground/70">
+                    The hub didn't answer. This retries when the connection comes back.
+                  </div>
+                  <div className="flex justify-center">
+                    <Button size="sm" variant="outline" onClick={reload}>
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {groups.length === 0 && loadState === 'loaded' && (
               // No tab of one's own yet: someone working on a task another person created
               // (T-100) — the main agent is theirs, on their computer.
               <div

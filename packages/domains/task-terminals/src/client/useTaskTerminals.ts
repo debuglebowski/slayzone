@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { useHubReopen, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { AgentId } from '@slayzone/terminal-contracts'
@@ -30,8 +30,18 @@ async function loadTaskTabs(
   return ensured ? client.taskTerminals.list.query({ taskId }) : tabs
 }
 
+/**
+ * Where the first read of a task's tabs stands. `failed` is not "no tabs": the hub
+ * could not answer (e.g. its socket dropped mid-read), so the pane must not offer
+ * to start an agent as if the task had none of the user's.
+ */
+export type TabsLoadState = 'loading' | 'loaded' | 'failed'
+
 interface UseTaskTerminalsResult {
   tabs: TerminalTab[]
+  loadState: TabsLoadState
+  /** Read the task's tabs again (a failed load's retry). */
+  reload: () => void
   groups: TerminalGroup[]
   activeGroupId: string
   setActiveGroupId: (id: string) => void
@@ -80,6 +90,9 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const [tabs, setTabs] = useState<TerminalTab[]>([])
+  const [loadState, setLoadState] = useState<TabsLoadState>('loading')
+  const [loadGeneration, setLoadGeneration] = useState(0)
+  const reload = useCallback(() => setLoadGeneration((g) => g + 1), [])
   const [activeGroupId, setActiveGroupId] = useState<string>(taskId) // Main group id = taskId
   const closingTabIdsRef = useRef<Set<string>>(new Set())
   const { subscribeExit } = usePty()
@@ -99,11 +112,15 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
 
   const groups = useMemo(() => computeGroups(tabs), [tabs])
 
-  // Load tabs on mount
+  // Load tabs on mount, and again on `reload`. A load for a previous task, mode or
+  // client never lands.
   useEffect(() => {
+    let current = true
     loadTaskTabs(trpcClient, taskId, defaultMode)
       .then((loadedTabs) => {
+        if (!current) return
         setTabs(loadedTabs)
+        setLoadState('loaded')
         // Set active to main group if the current active one doesn't exist
         const loadedGroups = computeGroups(loadedTabs)
         const mainGroup = loadedGroups.find((g) => g.isMain)
@@ -114,9 +131,20 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
         }
       })
       .catch((err: unknown) => {
+        if (!current) return
         console.error('[useTaskTerminals] Failed to load tabs:', err)
+        setLoadState('failed')
       })
-  }, [taskId, defaultMode, trpcClient])
+    return () => {
+      current = false
+    }
+  }, [taskId, defaultMode, trpcClient, loadGeneration])
+
+  // The hub's socket reopened: a failed load can succeed now, and after a drop the
+  // `onChanged` pushes sent while it was down never arrived.
+  useHubReopen((dropped) => {
+    if (dropped || loadState === 'failed') reload()
+  })
 
   // Re-fetch when an external actor (CLI via REST, other window) mutates tabs.
   // Optionally focus the new tab's group if `focusTabId` is provided. Server
@@ -286,6 +314,8 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
 
   return {
     tabs,
+    loadState,
+    reload,
     groups,
     activeGroupId,
     setActiveGroupId,
