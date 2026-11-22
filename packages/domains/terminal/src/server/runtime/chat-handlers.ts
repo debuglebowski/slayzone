@@ -4,6 +4,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ChatBlobChunk,
   ChatCreateOpts,
+  ChatHistoryDisplay,
   ChatHistoryPageBudget
 } from '@slayzone/terminal-contracts'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
@@ -649,6 +650,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getReplayPage,
     openTimeline,
     timelinePages,
+    toolDetail,
     searchTimeline,
     getCommandTaskOutput,
     stopCommandTask,
@@ -980,10 +982,12 @@ export function createChatOps(opts: ChatHandlerOpts) {
       pages: number[],
       asOfSeq: number,
       epoch: number,
-      startRow?: number
-    ) => timelinePages(tabId, pages, asOfSeq, epoch, startRow),
+      startRow?: number,
+      toolPreviews?: boolean | ChatHistoryDisplay
+    ) => timelinePages(tabId, pages, asOfSeq, epoch, startRow, toolPreviews),
+    toolDetail,
     /** Sealed pages that may hold `query`. */
-    searchTimeline: (tabId: string, query: string) => searchTimeline(tabId, query),
+    searchTimeline,
 
     /** A command task's output so far (`gone` once its process is). Plan 3.9. */
     commandTaskOutput: (tabId: string, taskId: string) => getCommandTaskOutput(tabId, taskId),

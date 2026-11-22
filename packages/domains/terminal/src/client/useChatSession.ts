@@ -8,19 +8,38 @@ import {
   type Dispatch,
   type RefObject
 } from 'react'
-import { useDirectLease, useSubscription } from '@slayzone/transport/client'
+import {
+  hubSupportsToolPreviews,
+  useDirectLease,
+  useSubscription
+} from '@slayzone/transport/client'
 import {
   chatViaDirect,
   noteDirectChatEvent,
   noteDirectChatLink,
-  readReplayPages
+  readReplayPages,
+  readInitialChatHistory,
+  wantedTimelinePages,
+  PAGES_PER_REQUEST,
+  timelinePagesAll,
+  type ChatPaging,
+  type OpenedChatHistory
 } from './chat-direct'
+import {
+  readCompleteTextDetail,
+  readCompleteToolDetail,
+  shareToolDetailReads,
+  type ChatTextDetailReader,
+  type ChatToolDetailReader
+} from './chat-tool-details'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type {
   AgentEvent,
   ChatBlobChunk,
+  ChatHistoryDisplay,
+  ChatToolSearchResult,
   PermissionDecision,
   RewindFilesPreview,
   RewindResult,
@@ -29,17 +48,20 @@ import type {
   UserContentBlock
 } from '@slayzone/terminal-contracts'
 import {
+  CHAT_HISTORY_DISPLAY_VERSION,
   chatCapabilitiesForMode,
   userMessageText,
   userMessageAttachments
 } from '@slayzone/terminal-contracts'
 import type { ChatPrompt } from '../shared/chat-prompts'
-import {
-  TIMELINE_PROJECTION_VERSION,
-  decodeTimelineState
-} from '../shared/chat-timeline-checkpoint'
-import { summarizeRows, type TimelinePageSummary } from '../shared/timeline-summary'
+import { summarizeRows } from '../shared/timeline-summary'
 import { SessionReadyGate } from '../shared/chat-session-ready'
+import {
+  afterNextPaint,
+  createChatOpenTimer,
+  reportChatOpenTiming,
+  type ChatOpenTimer
+} from '../shared/chat-open-timing'
 import { ChatStreamPosition } from '../shared/chat-stream-position'
 import {
   initialState,
@@ -51,26 +73,7 @@ import {
   type TimelineRows
 } from '../shared/chat-timeline'
 
-/**
- * A tab opened paged (from the hub's timeline projection): rows of pages
- * `0..sealed-1` load on demand (`loadPages`); the rest — the tail and every
- * newer row — are always here.
- */
-export interface ChatPaging {
-  pageRows: number
-  /** Pages the hub had sealed when the tab opened. */
-  sealed: number
-  /** One per sealed page, as the hub had it (a loaded page: summarize its rows). */
-  summaries: TimelinePageSummary[]
-}
-
-/** What `chat.openTimeline` answers (see the transport's `ChatTimelineOpenResult`). */
-interface OpenedPaged {
-  kind: 'paged'
-  snapshot: { seq: number; epoch: number; pageRows: number; state: string; summaries: unknown[] }
-  events: Array<{ seq: number; event: unknown; at?: number }>
-  live: { afterSeq: number; liveSeq: number; events: unknown[] }
-}
+export type { ChatPaging } from './chat-direct'
 
 export interface UseChatSessionResult {
   state: ChatTimelineState
@@ -79,6 +82,8 @@ export interface UseChatSessionResult {
    * the tab's direct link or the hub. Stable identity.
    */
   readBlob: (sha256: string, offset: number) => Promise<ChatBlobChunk>
+  readToolDetail: ChatToolDetailReader
+  readTextDetail: ChatTextDetailReader
   /** The rows; `undefined` = not loaded here (paged history). */
   timeline: TimelineRows
   inFlight: boolean
@@ -101,7 +106,7 @@ export interface UseChatSessionResult {
   /** Drop these pages' rows from memory (any the reducer needs again load again). */
   unloadPages: (pages: readonly number[]) => void
   /** Pages that may hold `query` (paged history; load them to search them). */
-  searchPages: (query: string) => Promise<number[]>
+  searchPages: (query: string, caseSensitive?: boolean) => Promise<number[] | ChatToolSearchResult>
   /**
    * Live permission mode reported by the running subprocess (raw CLI value,
    * e.g. 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'default').
@@ -190,8 +195,11 @@ export interface UseChatSessionResult {
 }
 
 export interface UseChatSessionOpts {
-  /** Renderer restoration admission holds its slot until these reads really settle. */
-  trackRestore?: <T>(work: Promise<T>) => Promise<T>
+  /** An admitted history open holds the renderer's startup slot until it settles. */
+  trackHistory?: <T>(work: Promise<T>) => Promise<T>
+  /** How long the panel waited for its restoration slot (open-timing diagnostic). */
+  restoreQueuedMs?: () => number | null
+  display?: ChatHistoryDisplay
   tabId: string
   taskId: string
   mode: string
@@ -206,6 +214,7 @@ interface HydrateChatCtx {
   trpcClient: ReturnType<typeof useTRPCClient>
   /** History reads: over the direct link when the tab has one, else the hub. */
   reads: Pick<ChatIo, 'openTimeline' | 'getReplay'>
+  historyDisplay: () => ChatHistoryDisplay | undefined
   target: {
     tabId: string
     taskId: string
@@ -229,12 +238,17 @@ interface HydrateChatCtx {
   /** Adopt a replay's live snapshot (blocks still streaming) at its live counter. */
   applySnapshot: (events: AgentEvent[], afterSeq: number, liveSeq: number) => void
   /** Open from the hub's projection snapshot (paged history). */
-  openPaged: (opened: OpenedPaged) => ReadonlySet<string>
+  openPaged: (opened: Extract<OpenedChatHistory, { kind: 'paged' }>) => void
   /** Opening from the full replay (no page table). */
   openFull: () => void
   dispatch: Dispatch<ChatTimelineAction>
   onHydrated: () => void
   restoreLocal: (confirmed: ReadonlySet<string>) => void
+  /** This open's step timings (`chat-open-timing.ts`), reported once its rows are painted. */
+  timer: ChatOpenTimer
+  /** Whether reads go over the direct link right now (else the hub). */
+  viaDirect: () => boolean
+  report: () => void
   onError: (message: string | null) => void
   onHydrateError: (message: string | null) => void
 }
@@ -256,6 +270,7 @@ interface HydrateChatCtx {
 async function hydrateAndReplay({
   trpcClient,
   reads,
+  historyDisplay,
   target,
   gen,
   genRef,
@@ -273,75 +288,55 @@ async function hydrateAndReplay({
   onHydrated,
   restoreLocal,
   onError,
-  onHydrateError
+  onHydrateError,
+  timer,
+  viaDirect,
+  report
 }: HydrateChatCtx): Promise<void> {
+  timer.set('reload', loadedOnceRef.current)
   try {
     await sessionReady.track(trpcClient.chat.hydrate.mutate(target))
+    timer.mark('hydrateMs')
     if (gen === genRef.current) onHydrateError(null)
   } catch (e) {
     // Surface hydrate failure but still attempt replay (e.g. session may
     // exist from a previous reattach despite this hydrate rejecting). Not a
     // timeline row: the panel's notice owns load failures, so one cause is
     // shown once, and a reload's reset cannot erase it.
+    timer.set('hydrateFailed', true)
     if (gen === genRef.current) onHydrateError(e instanceof Error ? e.message : String(e))
   }
   if (gen !== genRef.current) return
   try {
-    // Paged: the hub's projection — the state as of now, its newest rows, the
-    // events saved since and what streams. `full`: replay every event (below).
-    let opened: Awaited<ReturnType<typeof trpcClient.chat.openTimeline.query>> = { kind: 'full' }
-    try {
-      opened = await reads.openTimeline({
-        tabId: target.tabId,
-        version: TIMELINE_PROJECTION_VERSION
-      })
-    } catch (error) {
-      const code = (error as { data?: { code?: string } } | null)?.data?.code
-      const message = error instanceof Error ? error.message : ''
-      // Only an older hub lacking the procedure needs a full replay. A timeout,
-      // denied read or unavailable computer must not amplify into loading all history.
-      if (
-        code !== 'NOT_IMPLEMENTED' &&
-        !(
-          code === 'NOT_FOUND' &&
-          /no procedure found|no ["']?query["']?-procedure|procedure.*not found/i.test(message)
-        )
-      )
-        throw error
-    }
-    if (gen !== genRef.current) return
-    if (opened.kind === 'paged') {
-      const confirmed = new Set(openPaged(opened as OpenedPaged))
-      for (const entry of opened.events) {
-        const event = entry.event as AgentEvent
-        if (event.kind === 'user-message' && event.id) confirmed.add(event.id)
-      }
-      applySaved(opened.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
-      applySnapshot(opened.live.events as AgentEvent[], opened.live.afterSeq, opened.live.liveSeq)
-      restoreLocal(confirmed)
-      onError(null)
-      return
-    }
-    // Saved history + what is streaming right now, read in bounded pages (the last
-    // carries what streams), applied below in one piece.
-    const replay = await readReplayPages(reads, target.tabId, -1, () => gen !== genRef.current)
-    if (!replay || gen !== genRef.current) return
-    openFull()
-    if (loadedOnceRef.current) dispatch({ type: 'reset' })
-    // The whole history in ONE reducer batch (one render, linear time), with the
-    // seq dedup every saved event gets. Prompt state is part of the reducer, so
-    // a pending prompt comes back from the replay.
-    applySaved(replay.events as Array<{ seq: number; event: AgentEvent; at?: number }>)
-    // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
-    applySnapshot(replay.live.events as AgentEvent[], replay.live.afterSeq, replay.live.liveSeq)
+    const stale = () => gen !== genRef.current
+    const history = await readInitialChatHistory(
+      reads,
+      target.tabId,
+      timer,
+      stale,
+      historyDisplay()
+    )
+    if (!history || stale()) return
+    timer.set('viaDirect', viaDirect())
     const confirmed = new Set<string>()
-    for (const entry of replay.events) {
-      const event = entry.event as AgentEvent
+    if (history.kind === 'paged') {
+      openPaged(history)
+      for (const [id] of history.state.userIndex.entries()) confirmed.add(id)
+    } else {
+      openFull()
+      if (loadedOnceRef.current) dispatch({ type: 'reset' })
+    }
+    // Restore the saved history in one batch, then redraw live fragments.
+    applySaved(history.events)
+    applySnapshot(history.live.events as AgentEvent[], history.live.afterSeq, history.live.liveSeq)
+    for (const { event } of history.events) {
       if (event.kind === 'user-message' && event.id) confirmed.add(event.id)
     }
     restoreLocal(confirmed)
+    timer.mark('appliedMs')
     onError(null)
   } catch (error) {
+    timer.set('failed', true)
     if (gen === genRef.current) onError(error instanceof Error ? error.message : String(error))
   } finally {
     if (gen === genRef.current) {
@@ -354,58 +349,9 @@ async function hydrateAndReplay({
       // The loaded state is complete at once, not a frame later.
       flushLive()
       onHydrated()
+      report()
     }
   }
-}
-
-type PagesAnswer =
-  | { expired: true }
-  | {
-      expired: false
-      pages: Array<{ page: number; from: number; rows: unknown[] }>
-      omitted?: number[]
-      /** The answer ended inside the first `omitted` page: ask again from this row. */
-      next?: number
-    }
-
-/**
- * `timelinePages` for every page asked: an answer carries at most a byte budget of
- * rows and names the pages it left out (`omitted`), which are asked for again at
- * once. Asked from a row (`startRow`, always sent): a page larger than the budget
- * comes in row slices, the next asked from `next`. An older peer ignores
- * `startRow` and answers whole pages. `expired` as soon as one answer is.
- */
-async function timelinePagesAll(
-  io: Pick<ChatIo, 'timelinePages'>,
-  input: { tabId: string; pages: number[]; asOfSeq: number; epoch: number; pageRows: number }
-): Promise<PagesAnswer> {
-  const { pageRows, ...ask } = input
-  const pages: Array<{ page: number; from: number; rows: unknown[] }> = []
-  for (let wanted = ask.pages, startRow = (ask.pages[0] ?? 0) * pageRows; wanted.length > 0; ) {
-    const res = (await io.timelinePages({ ...ask, pages: wanted, startRow })) as PagesAnswer
-    if (res.expired) return res
-    pages.push(...res.pages)
-    const asked = wanted
-    const again = (res.omitted ?? []).filter((page) => asked.includes(page))
-    // An answer with no row and nothing left out has nothing more to give.
-    if (res.pages.length === 0 || res.pages.every((p) => p.rows.length === 0)) break
-    wanted = again
-    startRow =
-      res.next !== undefined && again[0] === Math.floor(res.next / pageRows)
-        ? res.next
-        : (again[0] ?? 0) * pageRows
-  }
-  return { expired: false, pages }
-}
-
-/** Pages asked for in one `timelinePages` request, at most. */
-const PAGES_PER_REQUEST = 32
-
-/** Whether page `page` has a row not loaded. */
-function pageHasUnloaded(timeline: TimelineRows, page: number, pageRows: number): boolean {
-  const end = Math.min(timeline.length, (page + 1) * pageRows)
-  for (let i = page * pageRows; i < end; i++) if (timeline[i] === undefined) return true
-  return false
 }
 
 /** The next animation frame (a timer where there is none, e.g. a non-DOM test). */
@@ -433,7 +379,7 @@ function cancelFrame(id: number): void {
  * 5. On unmount: unsubscribe only. Session persists (main keeps buffer). Tab close triggers chat:remove via useTaskTerminals.
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
-  const trackRestore = opts.trackRestore
+  const trackHistory = opts.trackHistory
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
@@ -441,11 +387,14 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // reads, the event stream and simple commands go there; the hub otherwise.
   const { lease: directChat, lost: directChatLost } = useDirectLease(
     trpcClient,
-    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null,
-    undefined,
-    trackRestore
+    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null
   )
-  const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
+  const chatIo = chatViaDirect(
+    trpcClient,
+    directChat?.client ?? null,
+    directChatLost,
+    (withDisplay) => hubSupportsToolPreviews(trpcClient, withDisplay)
+  )
   // Fixed identities for the hydrate effect: they read the CURRENT path when called,
   // so a lease that comes or goes does not re-run the load.
   const openTimelineRead = useStableCallback((input: Parameters<typeof chatIo.openTimeline>[0]) =>
@@ -454,10 +403,23 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const getReplayRead = useStableCallback((input: Parameters<typeof chatIo.getReplay>[0]) =>
     chatIo.getReplay(input)
   )
+  const readsViaDirect = useStableCallback(() => directChat !== null)
+  const restoreQueuedMs = useStableCallback(() => opts.restoreQueuedMs?.() ?? null)
+  const readToolDetailOnce = useStableCallback<
+    Parameters<ChatToolDetailReader>,
+    ReturnType<ChatToolDetailReader>
+  >((ref, signal) => readCompleteToolDetail(chatIo, opts.tabId, ref, signal))
+  const readTextDetailOnce = useStableCallback<
+    Parameters<ChatTextDetailReader>,
+    ReturnType<ChatTextDetailReader>
+  >((ref, signal) => readCompleteTextDetail(chatIo, opts.tabId, ref, signal))
+  const [readTextDetail] = useState(() => shareToolDetailReads(readTextDetailOnce))
+  const historyDisplay = useStableCallback(() => opts.display)
   const readBlob = useStableCallback(
     (sha256: string, offset: number) =>
       chatIo.readBlob({ tabId: opts.tabId, sha256, offset }) as Promise<ChatBlobChunk>
   )
+  const [readToolDetail] = useState(() => shareToolDetailReads(readToolDetailOnce))
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
     initialState({ agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns })
@@ -634,17 +596,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     dispatch(action)
   }, [])
   // Stable: refs + dispatch + setters only.
-  const openPaged = useCallback((opened: OpenedPaged): ReadonlySet<string> => {
-    const decoded = decodeTimelineState(opened.snapshot.state)
-    dispatch({ type: 'restore', state: decoded })
-    positionRef.current.seq = opened.snapshot.seq
+  const openPaged = useCallback((opened: Extract<OpenedChatHistory, { kind: 'paged' }>): void => {
+    dispatch({ type: 'restore', state: opened.state })
+    positionRef.current.seq = opened.seq
     loadingPagesRef.current.clear()
-    setPaging({
-      pageRows: opened.snapshot.pageRows,
-      sealed: opened.snapshot.summaries.length,
-      summaries: opened.snapshot.summaries as TimelinePageSummary[]
-    })
-    return new Set([...decoded.userIndex.entries()].map(([id]) => id))
+    setPaging(opened.paging)
   }, [])
   const openFull = useCallback((): void => {
     loadingPagesRef.current.clear()
@@ -655,16 +611,25 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      timelinePagesAll(chatIo, {
-        tabId: opts.tabId,
-        pages: wanted,
-        asOfSeq,
-        epoch,
-        pageRows: paging?.pageRows ?? 0
-      }).then(
+      const display =
+        paging?.displaySettings === CHAT_HISTORY_DISPLAY_VERSION ? historyDisplay() : undefined
+      timelinePagesAll(
+        chatIo,
+        {
+          tabId: opts.tabId,
+          pages: wanted,
+          asOfSeq,
+          epoch,
+          pageRows: paging?.pageRows ?? 0,
+          ...(paging?.toolPreviews ? { toolPreviews: true } : {}),
+          ...(display ? { display } : {})
+        },
+        () => gen !== genRef.current
+      ).then(
         (res) => {
-          for (const page of wanted) loadingPagesRef.current.delete(page)
           if (gen !== genRef.current) return
+          for (const page of wanted) loadingPagesRef.current.delete(page)
+          if (!res) return
           if (res.expired) {
             setReopenToken((t) => t + 1)
             return
@@ -679,23 +644,17 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
           }
         },
         () => {
+          if (gen !== genRef.current) return
           for (const page of wanted) loadingPagesRef.current.delete(page)
           // Without those rows the reducer can't go on: open again.
-          if (gen === genRef.current) setReopenToken((t) => t + 1)
+          setReopenToken((t) => t + 1)
         }
       )
     }
   )
   const loadPages = useStableCallback((pages: readonly number[]): void => {
     if (!paging) return
-    const { pageRows, sealed } = paging
-    const wanted = pages.filter(
-      (page) =>
-        page >= 0 &&
-        page < sealed &&
-        !loadingPagesRef.current.has(page) &&
-        pageHasUnloaded(state.timeline, page, pageRows)
-    )
+    const wanted = wantedTimelinePages(pages, state.timeline, paging, loadingPagesRef.current)
     if (wanted.length === 0) return
     for (const page of wanted) loadingPagesRef.current.add(page)
     const gen = genRef.current
@@ -707,9 +666,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     }
   })
   const searchPages = useStableCallback(
-    (query: string): Promise<number[]> =>
+    (query: string, caseSensitive?: boolean): Promise<number[] | ChatToolSearchResult> =>
       paging
-        ? chatIo.searchTimeline({ tabId: opts.tabId, query }).catch(() => [])
+        ? chatIo.searchTimeline({ tabId: opts.tabId, query, caseSensitive }).catch(() => [])
         : Promise.resolve([])
   )
   const unloadPages = useStableCallback((pages: readonly number[]): void => {
@@ -976,9 +935,14 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       trpcClient
     }
 
+    const timer = createChatOpenTimer()
+    const queuedMs = restoreQueuedMs()
+    if (queuedMs !== null) timer.set('queuedMs', queuedMs)
+    let cancelPaintTiming: (() => void) | undefined
     const work = hydrateAndReplay({
       trpcClient,
       reads: { openTimeline: openTimelineRead, getReplay: getReplayRead },
+      historyDisplay,
       target: {
         tabId: opts.tabId,
         taskId: opts.taskId,
@@ -1002,17 +966,30 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       restoreLocal,
       onError: setLoadError,
       onHydrateError: setHydrateError,
-      onHydrated: () => setLoadedInputs(inputs)
+      onHydrated: () => setLoadedInputs(inputs),
+      timer,
+      viaDirect: readsViaDirect,
+      report: () => {
+        cancelPaintTiming = afterNextPaint(() => {
+          timer.mark('paintedMs')
+          reportChatOpenTiming(
+            trpcClient,
+            { taskId: opts.taskId, tabId: opts.tabId, mode: opts.mode, client: 'desktop' },
+            timer
+          )
+        })
+      }
     })
-    void (trackRestore ? trackRestore(work) : work)
+    void (trackHistory ? trackHistory(work) : work)
 
     return () => {
       // Bump the generation so the subscriptions + any in-flight async work for
       // this session become no-ops (matches the old `cancelled = true`).
       genRef.current = gen + 1
+      cancelPaintTiming?.()
     }
   }, [
-    trackRestore,
+    trackHistory,
     opts.tabId,
     opts.taskId,
     opts.mode,
@@ -1030,6 +1007,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     reopenToken,
     openTimelineRead,
     getReplayRead,
+    readsViaDirect,
+    historyDisplay,
+    restoreQueuedMs,
     sessionReady
   ])
 
@@ -1198,6 +1178,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   return {
     state,
     readBlob,
+    readToolDetail,
+    readTextDetail,
     timeline: state.timeline,
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),

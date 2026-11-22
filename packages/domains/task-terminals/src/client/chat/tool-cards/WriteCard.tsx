@@ -29,7 +29,14 @@ export function WriteCard({ invocation, timestamp }: ToolProps) {
   const path = result?.filePath ?? input?.file_path ?? ''
   const content = result?.content ?? input?.content ?? ''
   const lines = (content.endsWith('\n') ? content.slice(0, -1) : content).split('\n')
-  const lineCount = content ? lines.length : 0
+  const change = invocation.toolPreview?.files?.[0]
+  const lineCount = invocation.toolPreview?.input
+    ? change?.created
+      ? (change.additions ?? 0)
+      : 0
+    : content
+      ? lines.length
+      : 0
   const overwrite =
     result?.type === 'update' &&
     Array.isArray(result.structuredPatch) &&

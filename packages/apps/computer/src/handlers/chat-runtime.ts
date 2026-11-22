@@ -70,6 +70,7 @@ export const DIRECT_CHAT_READS = new Set([
   'readBlob',
   'openTimeline',
   'timelinePages',
+  'toolDetail',
   'searchTimeline'
 ] as const)
 export type DirectChatRead = typeof DIRECT_CHAT_READS extends Set<infer M> ? M : never
@@ -353,6 +354,7 @@ export function createChatRuntimeHandlers(opts: {
       hubScope: opts.hubScope,
       workerPath: opts.workerPath ?? computerStorageWorkerEntry(),
       computerId,
+      holdHistoryRead: opts.admission?.holdHistoryRead,
       hasExternalTaskWork: opts.hasTaskWork,
       log: (line) => opts.ctx.log(line),
       healIo: createConversationHealIo(opts.ctx, opts.getProjectPaths),

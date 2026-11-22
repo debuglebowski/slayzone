@@ -75,7 +75,7 @@ async function invoke(msg: WorkerCall): Promise<unknown> {
       raw: boolean
       metadata: boolean
     }
-    const { projection, from } = await TimelineProjection.begin({
+    const { projection, ...start } = await TimelineProjection.begin({
       ...opts,
       store: storeProxy(msg.projectionId, opts.raw, opts.metadata),
       onError: (what, err) =>
@@ -87,7 +87,7 @@ async function invoke(msg: WorkerCall): Promise<unknown> {
         } satisfies WorkerNotice)
     })
     projections.set(msg.projectionId, projection)
-    return from
+    return start
   }
   const projection = projections.get(msg.projectionId)
   if (!projection) throw new Error('Timeline worker projection is closed')

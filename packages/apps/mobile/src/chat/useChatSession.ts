@@ -10,7 +10,7 @@
  *    again on every reconnect) starts a load, so no event can slip between the load's
  *    snapshot and the subscription:
  *      - first: `chat.hydrate` (loads the persisted history into a skeleton on the
- *        hub; spawns nothing), then `chat.getReplay` from -1, a bounded page per read;
+ *        hub; spawns nothing), then the projected tail (legacy peers use `chat.getReplay`);
  *      - after a reconnect: `chat.getReplay` after the newest applied event (catch-up),
  *        or a full load when a reply was streaming (its fragments cannot be merged) or
  *        the hub's log went backwards.
@@ -28,20 +28,47 @@ import {
 } from '@slayzone/terminal-contracts'
 import {
   type ChatTimelineState,
+  type TimelineItem,
   initialState,
   isTurnOpen,
   reducer
 } from '@slayzone/terminal/reducer'
 import {
   chatViaDirect,
+  readInitialChatHistory,
+  wantedTimelinePages,
+  pageHasUnloaded,
+  PAGES_PER_REQUEST,
   readReplayPages,
-  type WholeChatReplay
+  timelinePagesAll,
+  type ChatPaging,
+  type OpenedChatHistory
 } from '@slayzone/terminal/chat-direct'
+import {
+  readCompleteToolDetail,
+  shareToolDetailReads,
+  type ChatToolDetailReader
+} from '@slayzone/terminal/chat-tool-details'
 import { SessionReadyGate } from '@slayzone/terminal/chat-session-ready'
-import { useDirectLease, useSubscription } from '@slayzone/transport/client'
+import {
+  afterNextPaint,
+  createChatOpenTimer,
+  reportChatOpenTiming
+} from '@slayzone/terminal/chat-open-timing'
+import {
+  hubSupportsToolPreviews,
+  useDirectLease,
+  useSubscription
+} from '@slayzone/transport/client'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { messageContent } from './attachments'
-import { ChatSync, type ChatWireEvent, type ChatWireExit, type LocalMessage } from './chat-sync'
+import {
+  ChatSync,
+  type ChatReplay,
+  type ChatWireEvent,
+  type ChatWireExit,
+  type LocalMessage
+} from './chat-sync'
 import { newMessageId } from './ids'
 import { useStableCallback } from './useStableCallback'
 import { useTRPC, useTRPCClient } from '../trpc'
@@ -57,6 +84,12 @@ export interface ChatTarget {
   providerFlagsOverride: string | null
 }
 
+export interface OlderChatHistory {
+  loading: boolean
+  error: string | null
+  load: () => void
+}
+
 export interface ChatSessionApi {
   state: ChatTimelineState
   inFlight: boolean
@@ -66,8 +99,11 @@ export interface ChatSessionApi {
   reconnecting: boolean
   /** Why the last load failed; null = it did not. */
   loadError: string | null
-  /** Load the whole history again. */
+  /** Reload the tail, keeping unsent messages. */
   reload: () => void
+  olderHistory: OlderChatHistory | null
+  loadHistoryRows: (rows: readonly number[]) => void
+  readToolDetail: ChatToolDetailReader
   /** Request ids whose answer is on its way (their buttons are disabled). */
   submittingPrompts: ReadonlySet<string>
   /** Shows at once, tracked to delivery; a failure stays on screen with Retry. */
@@ -105,11 +141,7 @@ function localMessages(state: ChatTimelineState): LocalMessage[] {
   for (const it of state.timeline) {
     if (it?.kind !== 'user-text' || !it.id) continue
     if (it.optimistic || it.delivery === 'failed') {
-      out.push({
-        id: it.id,
-        text: it.text,
-        failed: it.delivery === 'failed' ? (it.deliveryError ?? 'Not sent') : null
-      })
+      out.push(it)
     }
   }
   return out
@@ -139,6 +171,15 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   })
   const [hydrating, setHydrating] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [paging, setPaging] = useState<ChatPaging | null>(null)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const pageGeneration = useRef(0)
+  const loadingPages = useRef(new Set<number>())
+  const invalidateHistoryReads = useCallback(() => {
+    pageGeneration.current++
+    loadingPages.current.clear()
+  }, [])
 
   // One engine per mounted tab (the caller keys this hook's component by tab + folder).
   const [sync] = useState(() => {
@@ -158,7 +199,15 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     })
     return engine
   })
-  useEffect(() => () => sync.dispose(), [sync])
+  const cancelPaintTiming = useRef<(() => void) | undefined>(undefined)
+  useEffect(
+    () => () => {
+      cancelPaintTiming.current?.()
+      invalidateHistoryReads()
+      sync.dispose()
+    },
+    [invalidateHistoryReads, sync]
+  )
   // The tab's latest hydrate: the computer holds the tab's session only once it ran
   // there, and a send that overtakes it is refused ("No chat session for tab").
   const [sessionReady] = useState(() => new SessionReadyGate())
@@ -172,32 +221,60 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     taskId
   })
   const chatIo = useMemo(
-    () => chatViaDirect(trpcClient, direct?.client ?? null, directLost),
+    () =>
+      chatViaDirect(trpcClient, direct?.client ?? null, directLost, () =>
+        hubSupportsToolPreviews(trpcClient)
+      ),
     [trpcClient, direct, directLost]
   )
+  const readToolDetailOnce = useStableCallback<
+    Parameters<ChatToolDetailReader>,
+    ReturnType<ChatToolDetailReader>
+  >((ref, signal) => readCompleteToolDetail(chatIo, tabId, ref, signal))
+  const [readToolDetail] = useState(() => shareToolDetailReads(readToolDetailOnce))
   const loadOnce = useCallback(
     async (first: 'full' | 'catch-up'): Promise<void> => {
       // A catch-up that finds the hub's log went backwards asks for a full load;
       // events that raced ahead of a load and show a gap ask for a catch-up.
       for (let kind: 'full' | 'catch-up' = first; ; ) {
-        const keep = kind === 'full' ? localMessages(stateRef.current) : []
         const ticket = sync.beginLoad(kind)
+        // A full load's step timings (`chat-open-timing.ts`), reported once painted.
+        const timer = kind === 'full' ? createChatOpenTimer() : null
+        timer?.set('reload', sync.loadedOnce)
         if (kind === 'full') {
+          cancelPaintTiming.current?.()
+          invalidateHistoryReads()
+          setLoadingHistory(false)
+          setHistoryError(null)
           try {
             await sessionReady.track(
               trpcClient.chat.hydrate.mutate({ tabId, taskId, mode, cwd, providerFlagsOverride })
             )
+            timer?.mark('hydrateMs')
           } catch (err) {
+            timer?.set('hydrateFailed', true)
             // Shown in the chat (desktop does the same); the replay may still work.
             if (sync.isCurrent(ticket)) {
               dispatch({ type: 'event', event: { kind: 'error', message: message(err) } })
             }
           }
         }
-        let replay: WholeChatReplay
+        const stale = () => !sync.isCurrent(ticket)
+        let replay: ChatReplay
+        let paged: Extract<OpenedChatHistory, { kind: 'paged' }> | null = null
         try {
-          // A bounded page per read; the whole replay is applied at once below.
-          replay = (await readReplayPages(chatIo, tabId, ticket.afterSeq))!
+          if (stale()) return
+          if (timer) {
+            const history = await readInitialChatHistory(chatIo, tabId, timer, stale)
+            if (!history || stale()) return
+            replay = history
+            if (history.kind === 'paged') paged = history
+            timer.set('viaDirect', direct !== null)
+          } else {
+            const all = await readReplayPages(chatIo, tabId, ticket.afterSeq, stale)
+            if (!all || stale()) return
+            replay = all
+          }
         } catch (err) {
           if (sync.failLoad(ticket) === 'done') {
             setLoadError(message(err))
@@ -205,7 +282,9 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
           }
           return
         }
-        const result = sync.completeLoad(ticket, replay, keep)
+        if (kind === 'full') setPaging(paged?.paging ?? null)
+        const keep = kind === 'full' ? localMessages(stateRef.current) : []
+        const result = sync.completeLoad(ticket, replay, keep, paged ?? undefined)
         if (result === 'reload' || result === 'resync') {
           kind = result === 'reload' ? 'full' : 'catch-up'
           continue
@@ -213,11 +292,32 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         if (result === 'done') {
           setLoadError(null)
           setHydrating(false)
+          if (timer) {
+            timer.mark('appliedMs')
+            cancelPaintTiming.current?.()
+            cancelPaintTiming.current = afterNextPaint(() => {
+              cancelPaintTiming.current = undefined
+              timer.mark('paintedMs')
+              reportChatOpenTiming(trpcClient, { taskId, tabId, mode, client: 'mobile' }, timer)
+            })
+          }
         }
         return
       }
     },
-    [sync, sessionReady, trpcClient, chatIo, tabId, taskId, mode, cwd, providerFlagsOverride]
+    [
+      sync,
+      sessionReady,
+      trpcClient,
+      chatIo,
+      direct,
+      tabId,
+      taskId,
+      mode,
+      cwd,
+      providerFlagsOverride,
+      invalidateHistoryReads
+    ]
   )
   // A catch-up runs: the turn state shown is the last known one until it lands.
   const [catchingUp, setCatchingUp] = useState(false)
@@ -352,7 +452,84 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   )
 
   const reload = useCallback(() => void load('full'), [load])
-  const resetLocal = useCallback(() => sync.resetLocal(), [sync])
+  const resetLocal = useCallback(() => {
+    invalidateHistoryReads()
+    setPaging(null)
+    setLoadingHistory(false)
+    setHistoryError(null)
+    sync.resetLocal()
+  }, [invalidateHistoryReads, sync])
+
+  const loadPages = useStableCallback((pages: readonly number[]): void => {
+    if (!paging || sync.loading) return
+    const { pageRows } = paging
+    const waiting = loadingPages.current
+    const wanted = wantedTimelinePages(pages, state.timeline, paging, waiting)
+    if (!wanted.length) return
+    const generation = pageGeneration.current
+    const stale = () => generation !== pageGeneration.current
+    const { appliedSeq: asOfSeq, rowsEpoch: epoch } = state
+    for (const page of wanted) waiting.add(page)
+    setLoadingHistory(true)
+    setHistoryError(null)
+    const read = async () => {
+      for (let i = 0; i < wanted.length; i += PAGES_PER_REQUEST) {
+        const res = await timelinePagesAll(
+          chatIo,
+          {
+            tabId,
+            pages: wanted.slice(i, i + PAGES_PER_REQUEST),
+            asOfSeq,
+            epoch,
+            pageRows,
+            ...(paging.toolPreviews ? { toolPreviews: true } : {})
+          },
+          stale
+        )
+        if (!res || stale()) return
+        if (res.expired) {
+          reload()
+          return
+        }
+        for (const page of res.pages) {
+          dispatch({
+            type: 'rows-loaded',
+            from: page.from,
+            rows: page.rows as TimelineItem[],
+            epoch
+          })
+        }
+      }
+    }
+    void read()
+      .catch((error: unknown) => {
+        if (!stale()) setHistoryError(message(error))
+      })
+      .finally(() => {
+        if (stale()) return
+        for (const page of wanted) waiting.delete(page)
+        setLoadingHistory(waiting.size > 0)
+      })
+  })
+  const loadHistoryRows = useStableCallback((rows: readonly number[]) => {
+    if (paging) loadPages([...new Set(rows.map((row) => Math.floor(row / paging.pageRows)))])
+  })
+  const stalledNeed = state.stalled?.need ?? null
+  useEffect(() => {
+    if (paging && stalledNeed !== null) loadHistoryRows([stalledNeed])
+  }, [paging, stalledNeed, loadHistoryRows])
+
+  const olderPage = useMemo(() => {
+    if (!paging) return -1
+    for (let page = paging.sealed - 1; page >= 0; page--) {
+      if (pageHasUnloaded(state.timeline, page, paging.pageRows)) return page
+    }
+    return -1
+  }, [paging, state.timeline])
+  const loadEarlier = useStableCallback(() => {
+    if (stalledNeed !== null) loadHistoryRows([stalledNeed])
+    else loadPages([olderPage])
+  })
 
   return {
     state,
@@ -365,6 +542,10 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     reconnecting: !hydrating && ((!direct && hubStream.status === 'connecting') || catchingUp),
     loadError,
     reload,
+    olderHistory:
+      olderPage < 0 ? null : { loading: loadingHistory, error: historyError, load: loadEarlier },
+    loadHistoryRows,
+    readToolDetail,
     submittingPrompts,
     sendMessage,
     retryMessage,

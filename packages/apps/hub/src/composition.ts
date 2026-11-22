@@ -1416,7 +1416,16 @@ export function composeServer(opts: {
     },
     computers: computerChat.computers,
     testing: computerChat.testing,
-    availability: computerChat.availability,
+    availability: async (tabId) => {
+      const status = await computerChat.availability(tabId)
+      if (
+        status.state === 'offline' &&
+        status.computer &&
+        (await localBootGate?.waitingFor(status.computer.id))
+      )
+        return { ...status, historyWaiting: true }
+      return status
+    },
     watchEvents: chatRelayWatch.watch
   })
   setChatSessionSource(computerChat.relay.sessions)

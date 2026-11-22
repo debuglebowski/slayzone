@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useChatRestorationPending } from './chat-restoration'
 import { useStableCallback } from '@slayzone/ui'
 import {
   defaultChatEffortSettingKey,
@@ -13,8 +12,7 @@ import { useTRPC } from '../trpc'
 function useSetting(key: string) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const { data, isFetching } = useQuery(trpc.settings.get.queryOptions({ key }))
-  useChatRestorationPending(isFetching)
+  const { data } = useQuery(trpc.settings.get.queryOptions({ key }))
   const { mutate } = useMutation(
     trpc.settings.set.mutationOptions({
       onSuccess: () =>

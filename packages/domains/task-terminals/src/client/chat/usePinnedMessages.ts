@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { TimelineItem, TimelinePageSummary } from '@slayzone/terminal/client'
-import type { ChatPinnedMessage } from '@slayzone/terminal-contracts'
+import type { ChatTextDetailReader } from '@slayzone/terminal/chat-tool-details'
+import { pinnedMessageExcerpt, type ChatPinnedMessage } from '@slayzone/terminal-contracts'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { pinnableRow, pinnedMessageToJumpTo, pinPlace } from './pinned-messages'
 import { flashRow, type RevealTimelineItem } from './timeline-reveal'
@@ -38,6 +39,7 @@ export interface PinnedMessagesTimeline {
 export function usePinnedMessages({
   target,
   conversationId,
+  readTextDetail,
   timeline
 }: {
   target: {
@@ -49,6 +51,7 @@ export function usePinnedMessages({
   }
   /** The provider conversation on screen (null: none yet — nothing to pin). */
   conversationId: string | null
+  readTextDetail?: ChatTextDetailReader
   timeline: PinnedMessagesTimeline
 }) {
   const trpc = useTRPC()
@@ -80,7 +83,7 @@ export function usePinnedMessages({
     toast(`Couldn't ${verb} the message: ${err instanceof Error ? err.message : String(err)}`)
     void query.refetch()
   }
-  const toggle = useStableCallback((item: TimelineItem): void => {
+  const toggle = useStableCallback(async (item: TimelineItem) => {
     const row = pinnableRow(item)
     if (!row || !conversationId) return
     if (keys.has(row.key)) {
@@ -91,7 +94,18 @@ export function usePinnedMessages({
       return
     }
     const at = timeline.rowOf(item)
-    const input = { ...row, conversationId, ...(at !== undefined ? { row: at } : {}) }
+    let { excerpt } = row
+    if (item.kind === 'text' && item.textDetail) {
+      const text = await readTextDetail?.(item.textDetail, new AbortController().signal).catch(
+        () => null
+      )
+      if (!text) {
+        toast.error('Could not load the message to pin it')
+        return
+      }
+      excerpt = pinnedMessageExcerpt(text)
+    }
+    const input = { ...row, excerpt, conversationId, ...(at !== undefined ? { row: at } : {}) }
     setPins((list) => [
       ...list.filter((p) => p.key !== row.key),
       { ...input, pinnedAt: Date.now() }

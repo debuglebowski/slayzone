@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useChatRestorationPending, useChatRestorationTracker } from './chat-restoration'
 import { useTRPCClient } from '../trpc'
 import { hubAllows } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
@@ -179,7 +178,6 @@ export function useChatLifecycle({
   clearQueue
 }: UseChatLifecycleOpts) {
   const trpcClient = useTRPCClient()
-  const trackRestoration = useChatRestorationTracker()
   const [resetting, setResetting] = useState(false)
   const [restarting, setRestarting] = useState(false)
   // Suppress "Session ended" UI during a reset/restart — process-exit fires between kill and
@@ -206,13 +204,11 @@ export function useChatLifecycle({
     autoStartedRef.current = true
     // Not cancelled on re-render: the ref makes this one-shot, so a cancelled
     // query would never start the agent (`chatApi` identity can change per render).
-    void trackRestoration(
-      Promise.all([
-        trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
-        hubAllows(trpcClient, 'chat.start'),
-        computerCanStartNow(trpcClient, tabId)
-      ])
-    )
+    void Promise.all([
+      trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
+      hubAllows(trpcClient, 'chat.start'),
+      computerCanStartNow(trpcClient, tabId)
+    ])
       .then(([raw, canStart, computerCan]) => {
         // Older hubs and narrower credentials may deny startup. Restoring a tab
         // must not issue a forbidden spawn or leave the startup card loading.
@@ -240,13 +236,12 @@ export function useChatLifecycle({
         // Best-effort — the chat still spawns when the user types.
         setStartDecision('none')
       })
-  }, [hydrating, openState, trpcClient, trackRestoration, tabId])
+  }, [hydrating, openState, trpcClient, tabId])
   // Still coming up (the startup card counts it, see chat-loading.ts): until the
   // decision lands. A 'now' start is requested in the same commit (effect below),
   // after which the hub reports the agent itself. A failed load is shown in the
   // chat, not waited on.
   const loading = startDecision === null && !loadFailed
-  useChatRestorationPending(loading)
   useEffect(() => (loading ? trackChatLoading() : undefined), [loading])
   const startFiredRef = useRef(false)
   /** The start went out as a restore (hidden tab) and has not been re-asked as the user's. */
@@ -262,8 +257,8 @@ export function useChatLifecycle({
     // 'shown', the user is looking at it: it goes first.
     const restore = startDecision === 'now' && !shown
     restoreStartRef.current = restore
-    trackRestoration(
-      chatApi.start({
+    void chatApi
+      .start({
         tabId,
         taskId,
         mode,
@@ -271,10 +266,10 @@ export function useChatLifecycle({
         providerFlagsOverride: providerFlagsOverride ?? null,
         reason: restore ? 'restore' : 'user'
       })
-    ).catch((err: unknown) => {
-      // Also shown in the chat itself (the start failure card); never silent.
-      toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
-    })
+      .catch((err: unknown) => {
+        // Also shown in the chat itself (the start failure card); never silent.
+        toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
+      })
   }, [
     startDecision,
     shown,
@@ -284,8 +279,7 @@ export function useChatLifecycle({
     taskId,
     mode,
     cwd,
-    providerFlagsOverride,
-    trackRestoration
+    providerFlagsOverride
   ])
 
   // Revealed while its restore still waits for an agent-start slot (the hub
@@ -296,8 +290,8 @@ export function useChatLifecycle({
   useEffect(() => {
     if (!shown || !restoreStartRef.current || !notStarted) return
     restoreStartRef.current = false
-    trackRestoration(
-      chatApi.start({
+    void chatApi
+      .start({
         tabId,
         taskId,
         mode,
@@ -305,20 +299,10 @@ export function useChatLifecycle({
         providerFlagsOverride: providerFlagsOverride ?? null,
         reason: 'user'
       })
-    ).catch(() => {
-      /* reported by the first start */
-    })
-  }, [
-    shown,
-    notStarted,
-    chatApi,
-    tabId,
-    taskId,
-    mode,
-    cwd,
-    providerFlagsOverride,
-    trackRestoration
-  ])
+      .catch(() => {
+        /* reported by the first start */
+      })
+  }, [shown, notStarted, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleRestart = useCallback(async () => {
     if (restarting) return

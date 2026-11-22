@@ -2,7 +2,7 @@ import { useMemo, type Key } from 'react'
 import { useStableCallback } from '@slayzone/ui'
 import type { TimelineItem, TimelinePageSummary } from '@slayzone/terminal/client'
 import { selectTurnOutline, turnToJumpTo, type TurnEntry } from './turn-outline'
-import { isRenderable } from './renderers'
+import { isRenderable } from '@slayzone/terminal/chat-presentation'
 import type { RevealTimelineItem } from './timeline-reveal'
 import type { VirtualTimelineController } from './virtual-timeline'
 

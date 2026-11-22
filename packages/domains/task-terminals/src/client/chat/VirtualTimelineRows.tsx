@@ -1,6 +1,6 @@
 import { memo, useLayoutEffect, useSyncExternalStore, type Key, type ReactNode } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
-import { stableAnchorKey } from './useChatDisplay'
+import { stableAnchorKey } from '@slayzone/terminal/chat-presentation'
 import { TimelineRowIndexContext, TimelineRowKeyContext } from './row-ui-state'
 import type { VirtualTimelineController } from './virtual-timeline'
 

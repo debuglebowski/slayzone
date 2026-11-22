@@ -6,20 +6,15 @@ import {
   useSyncExternalStore,
   type ReactNode
 } from 'react'
-import { useQueryClient, type Query } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '../trpc'
 import { useStableCallback } from '@slayzone/ui'
-import {
-  defaultChatModeSettingKey,
-  defaultChatModelSettingKey,
-  defaultChatEffortSettingKey
-} from '@slayzone/terminal-contracts'
 import { chatRestorationQueueFor, type ChatRestorationTicket } from './chat-restoration-queue'
 import { trackChatLoading } from './chat-loading'
 
-export const ChatRestorationContext = createContext<ChatRestorationTicket | null>(null)
+const ChatRestorationContext = createContext<ChatRestorationTicket | null>(null)
+type ComputerReadiness = 'checking' | 'waiting' | 'ready'
 const untracked = <T,>(work: Promise<T>): Promise<T> => work
-const idleSubscribe = (_cb: () => void) => () => undefined
-const idleSnapshot = () => false
 
 type Admission = { ticket: ChatRestorationTicket | null; ready: boolean }
 const EMPTY_ADMISSION: Admission = { ticket: null, ready: false }
@@ -36,6 +31,13 @@ function createAdmission(target: { client: object; taskId: string; tabId: string
     state = { ticket, ready }
     for (const cb of [...listeners]) cb()
   }
+  const stop = () => {
+    off?.()
+    off = undefined
+    ticket?.cancel()
+    ticket = null
+    publish()
+  }
   return {
     snapshot: () => state,
     subscribe(cb: () => void) {
@@ -45,6 +47,7 @@ function createAdmission(target: { client: object; taskId: string; tabId: string
       }
     },
     start(active: boolean) {
+      if (ticket) return
       ticket = chatRestorationQueueFor(target.client).enqueue(active)
       off = ticket.subscribe(publish)
       publish()
@@ -52,12 +55,10 @@ function createAdmission(target: { client: object; taskId: string; tabId: string
     setActive(active: boolean) {
       ticket?.setActive(active)
     },
-    stop() {
-      off?.()
-      ticket?.cancel()
-      ticket = null
-      publish()
-    }
+    defer() {
+      if (ticket && !ticket.ready()) stop()
+    },
+    stop
   }
 }
 
@@ -66,12 +67,14 @@ export function ChatRestorationBoundary({
   taskId,
   tabId,
   active,
+  computerReadiness = 'ready',
   children
 }: {
   client: object
   taskId: string
   tabId: string
   active: boolean
+  computerReadiness?: ComputerReadiness
   children: ReactNode
 }) {
   const initialActive = useStableCallback(() => active)
@@ -84,10 +87,11 @@ export function ChatRestorationBoundary({
     admission.snapshot,
     () => EMPTY_ADMISSION
   )
+  useEffect(() => () => admission.stop(), [admission])
   useEffect(() => {
-    admission.start(initialActive())
-    return () => admission.stop()
-  }, [admission, initialActive])
+    if (computerReadiness === 'ready') admission.start(initialActive())
+    else admission.defer()
+  }, [admission, computerReadiness, initialActive])
   useEffect(() => admission.setActive(active), [admission, active])
   useEffect(() => {
     if (ready) ticket?.mounted()
@@ -99,7 +103,7 @@ export function ChatRestorationBoundary({
         role="status"
         className="flex h-full items-center justify-center text-sm text-muted-foreground"
       >
-        Loading chat…
+        {computerReadiness === 'waiting' ? 'Waiting for computer…' : 'Loading chat…'}
       </div>
     )
   return (
@@ -107,69 +111,33 @@ export function ChatRestorationBoundary({
   )
 }
 
-export function useChatRestorationTracker() {
+/** Resolve metadata outside the history queue. Only known startup waits are retried. */
+export function useChatHistoryReadiness(tabId: string): ComputerReadiness {
+  const trpc = useTRPC()
+  const query = useQuery({
+    ...trpc.chat.availability.queryOptions({ tabId }),
+    enabled: Boolean(tabId),
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: ({ state }) =>
+      state.status !== 'error' && state.data?.historyWaiting ? 2_000 : false,
+    refetchIntervalInBackground: true
+  })
+  // Unknown readiness and older hubs use the normal open and its recovery UI.
+  if (!tabId || query.isError || query.fetchStatus === 'paused') return 'ready'
+  if (query.data?.historyWaiting) return 'waiting'
+  return query.isPending ? 'checking' : 'ready'
+}
+
+export function useChatHistoryTracker() {
   const ticket = useContext(ChatRestorationContext)
   return ticket?.track ?? untracked
 }
 
-/** Include query reads and lifecycle state between consecutive asynchronous startup stages. */
-export function useChatRestorationPending(pending: boolean): void {
-  const ticket = useContext(ChatRestorationContext)
-  useEffect(() => (pending ? ticket?.hold() : undefined), [pending, ticket])
-}
+const notQueued = (): number | null => null
 
-/** Track actual query promises, so unmounting cannot free capacity while reads still run. */
-export function useChatRestorationQueries({
-  taskId,
-  tabId,
-  mode
-}: {
-  taskId: string
-  tabId: string
-  mode: string
-}): void {
-  const client = useQueryClient()
+/** How long this chat waited for its restoration slot (open-timing diagnostic). */
+export function useChatRestorationQueuedMs(): () => number | null {
   const ticket = useContext(ChatRestorationContext)
-  const restoring = useSyncExternalStore(
-    ticket?.subscribe ?? idleSubscribe,
-    ticket?.restoring ?? idleSnapshot,
-    idleSnapshot
-  )
-  useEffect(() => {
-    if (!ticket || !restoring) return
-    const settings = new Set([
-      defaultChatModeSettingKey(mode),
-      defaultChatModelSettingKey(mode),
-      defaultChatEffortSettingKey(mode)
-    ])
-    const seen = new WeakSet<Promise<unknown>>()
-    const inspecting = new Set<Query>()
-    const inspect = (query: Query) => {
-      const input = (
-        query.queryKey[1] as
-          | { input?: { taskId?: string; tabId?: string; key?: string } }
-          | undefined
-      )?.input
-      if (input?.taskId !== taskId && input?.tabId !== tabId && !settings.has(input?.key ?? ''))
-        return
-      if (query.state.fetchStatus === 'idle' || inspecting.has(query)) return
-      // The fetch event precedes TanStack assigning query.promise. Hold now, then
-      // capture the actual promise after fetch() returns, even if we unmount first.
-      const release = ticket.hold()
-      inspecting.add(query)
-      queueMicrotask(() => {
-        inspecting.delete(query)
-        const promise = query.promise
-        if (promise && !seen.has(promise)) {
-          seen.add(promise)
-          void ticket.track(promise).catch(() => undefined) // The consumer presents errors.
-        }
-        release()
-      })
-    }
-    const cache = client.getQueryCache()
-    const stop = cache.subscribe((event) => inspect(event.query))
-    for (const query of cache.getAll()) inspect(query)
-    return stop
-  }, [client, ticket, restoring, taskId, tabId, mode])
+  return ticket?.queuedMs ?? notQueued
 }

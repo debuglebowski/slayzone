@@ -5,7 +5,9 @@ export type ProjectionMethod =
   | 'apply'
   | 'openSnapshot'
   | 'pagesAsOf'
+  | 'toolDetail'
   | 'searchPages'
+  | 'searchToolMatches'
   | 'flush'
   | 'close'
 export type StoreMethod =

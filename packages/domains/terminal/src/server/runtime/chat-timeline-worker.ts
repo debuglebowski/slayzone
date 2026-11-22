@@ -2,6 +2,7 @@ import type { Worker } from 'node:worker_threads'
 import type {
   BeginTimelineProjection,
   TimelineProjectionHandle,
+  TimelineProjectionStart,
   TimelineProjectionStore
 } from './chat-timeline-projection'
 import type {
@@ -27,7 +28,7 @@ export function createTimelineWorkerPool(createWorker: () => Worker): {
       const current = channel
       const id = current.add(opts.store, opts.onError)
       try {
-        const from = await current.call<number>(id, 'begin', [
+        const start = await current.call<TimelineProjectionStart>(id, 'begin', [
           {
             lastSeq: opts.lastSeq,
             agentStartedTurns: opts.agentStartedTurns,
@@ -46,10 +47,15 @@ export function createTimelineWorkerPool(createWorker: () => Worker): {
           finish: () => current.call(id, 'finish', []),
           // A failed derived projection never stops saving or delivering chat events.
           apply: (entry) => current.call<void>(id, 'apply', [entry]).catch(() => undefined),
-          openSnapshot: () => current.call(id, 'openSnapshot', []),
-          pagesAsOf: (pages, seq, epoch, startRow) =>
-            current.call(id, 'pagesAsOf', [pages, seq, epoch, startRow]),
+          openSnapshot: (instance, display) =>
+            current.call(id, 'openSnapshot', [instance, display]),
+          pagesAsOf: (pages, seq, epoch, startRow, instance, display) =>
+            current.call(id, 'pagesAsOf', [pages, seq, epoch, startRow, instance, display]),
+          toolDetail: (ref, offset, revision) =>
+            current.call(id, 'toolDetail', [ref, offset, revision]),
           searchPages: (query) => current.call(id, 'searchPages', [query]),
+          searchToolMatches: (query, caseSensitive) =>
+            current.call(id, 'searchToolMatches', [query, caseSensitive]),
           flush: () => current.call(id, 'flush', []),
           close() {
             if (closing) return closing
@@ -68,7 +74,7 @@ export function createTimelineWorkerPool(createWorker: () => Worker): {
           }
         }
         handles.add(projection)
-        return { projection, from }
+        return { projection, ...start }
       } catch (err) {
         current.remove(id)
         throw err

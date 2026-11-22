@@ -23,8 +23,28 @@ type Runtime = {
   local?: unknown
   ops: ReturnType<typeof createChatOps>
   queueOps: ReturnType<ChatQueueRuntime['createChatQueueOps']>
+  holdHistoryRead?(): () => void
   execute?(call: ChatInvocation, work: () => unknown): Promise<unknown>
 }
+/** Initial history and compatibility replay can span multiple bounded requests. */
+const startupHistoryOperations = new Set<ChatOperation>([
+  'hydrate',
+  'openTimeline',
+  'getReplay',
+  'getReplayPage',
+  'getBufferSince',
+  'getEventPage'
+])
+
+async function runHistoryRead(hold: () => () => void, work: () => unknown): Promise<unknown> {
+  const release = hold()
+  try {
+    return await work()
+  } finally {
+    release()
+  }
+}
+
 const tabOperations = new Set([
   'releaseConversation',
   'send',
@@ -41,6 +61,7 @@ const tabOperations = new Set([
   'getTurnStatus',
   'openTimeline',
   'timelinePages',
+  'toolDetail',
   'searchTimeline',
   'commandTaskOutput',
   'stopCommandTask',
@@ -143,6 +164,14 @@ export function createChatInvoker(runtime: Runtime) {
       req.method
     ]
     if (typeof operation !== 'function') throw new Error('Chat operation unavailable')
+    const holdHistoryRead = runtime.holdHistoryRead
+    const runOperation = () => operation(...req.args)
+    const work =
+      holdHistoryRead &&
+      req.target === 'ops' &&
+      startupHistoryOperations.has(req.method as ChatOperation)
+        ? () => runHistoryRead(holdHistoryRead, runOperation)
+        : runOperation
     const read =
       req.target === 'queue'
         ? req.method === 'list'
@@ -159,7 +188,7 @@ export function createChatInvoker(runtime: Runtime) {
       !['hydrate', 'kill', 'remove'].includes(req.method)
     )
       throw new Error('Task chat is paused or deleted')
-    if (read) return operation(...req.args)
+    if (read) return work()
     if (
       runtime.ops.getInfo(identity.tabId)?.storageUnavailable &&
       !['restart', 'reset', 'remove', 'kill', 'interrupt'].includes(req.method)
@@ -197,9 +226,7 @@ export function createChatInvoker(runtime: Runtime) {
           'Operation acceptance is durable but completion is unconfirmed; reconcile state before an explicit retry'
         )
       }
-      const result = await (runtime.execute
-        ? runtime.execute(req, () => operation(...req.args))
-        : operation(...req.args))
+      const result = await (runtime.execute ? runtime.execute(req, work) : work())
       const saved = result ?? null,
         ephemeral = req.method === 'askSideQuestion'
       await runtime.storage.completeCommand(

@@ -682,3 +682,69 @@ describe('images stored out-of-line (chat blob references)', () => {
     expect(document.body.textContent).not.toContain('$chatBlob')
   })
 })
+
+it('fetches a previewed tool result only when the card expands', async () => {
+  const detail = { instance: 'session', epoch: 0, row: 0, toolUseId: 'Read-1' }
+  const preview = {
+    ...inv('Read', { file_path: '/repo/large.txt' }, { rawContent: 'preview…', structured: null }),
+    toolDetail: detail
+  }
+  const readToolDetail = vi.fn(async () => ({
+    ...inv(
+      'Read',
+      { file_path: '/repo/large.txt' },
+      {
+        rawContent: 'Complete file body',
+        structured: null
+      }
+    )
+  }))
+  function Example() {
+    const base = useContext(ChatViewContext)
+    return (
+      <ChatViewContext.Provider value={{ ...base, readToolDetail }}>
+        {renderTool(preview)}
+      </ChatViewContext.Provider>
+    )
+  }
+  render(<Example />)
+  expect(readToolDetail).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: /Read.*large.txt/ }))
+  expect(await screen.findByText('Complete file body')).toBeTruthy()
+  expect(readToolDetail).toHaveBeenCalledTimes(1)
+  expect(readToolDetail.mock.calls[0]).toEqual([detail, expect.any(AbortSignal)])
+})
+
+it('loads just the preview when a hidden tool becomes visible', async () => {
+  const detail = { instance: 'session', epoch: 0, row: 0, toolUseId: 'Read-1' }
+  const body = (text: string) =>
+    inv('Read', { file_path: '/repo/large.txt' }, { rawContent: text, structured: null })
+  const preview = { ...body('preview…'), toolDetail: detail }
+  const hidden = {
+    ...preview,
+    input: null,
+    result: undefined,
+    toolPreview: { hidden: true as const, input: true as const }
+  }
+  const readToolDetail = vi.fn(async (ref: { preview?: true }) =>
+    ref.preview ? preview : body('Complete file body')
+  )
+  function Example() {
+    const base = useContext(ChatViewContext)
+    return (
+      <ChatViewContext.Provider value={{ ...base, readToolDetail }}>
+        {renderTool(hidden)}
+      </ChatViewContext.Provider>
+    )
+  }
+  render(<Example />)
+  const card = await screen.findByRole('button', { name: /Read.*large.txt/ })
+  expect(readToolDetail).toHaveBeenCalledTimes(1)
+  expect(readToolDetail.mock.calls[0]).toEqual([
+    { ...detail, preview: true },
+    expect.any(AbortSignal)
+  ])
+  fireEvent.click(card)
+  expect(await screen.findByText('Complete file body')).toBeTruthy()
+  expect(readToolDetail.mock.calls[1]).toEqual([detail, expect.any(AbortSignal)])
+})

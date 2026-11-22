@@ -13,6 +13,7 @@ export function MultiEditCard({ invocation, timestamp }: ToolProps) {
   } | null
   const { fileEditsOpenByDefault } = useChatView()
   const edits = input?.edits ?? []
+  const count = invocation.toolPreview?.editCount ?? edits.length
   const fileDiff = invocation.result
     ? claudeEditResultToFileDiff(invocation.result.structured)
     : null
@@ -23,7 +24,7 @@ export function MultiEditCard({ invocation, timestamp }: ToolProps) {
       title="MultiEdit"
       invocation={invocation}
       timestamp={timestamp}
-      summary={`${shortenPath(path)} · ${edits.length} edit${edits.length === 1 ? '' : 's'}`}
+      summary={`${shortenPath(path)} · ${count} edit${count === 1 ? '' : 's'}`}
       defaultOpen={fileEditsOpenByDefault}
     >
       {Boolean(path || fileDiff || edits.length > 0) && (

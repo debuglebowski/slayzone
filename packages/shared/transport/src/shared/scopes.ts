@@ -521,6 +521,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.threads.setClosed': 'never',
   'chat.threads.onChanged': 'agent',
   'chat.timelinePages': 'agent',
+  'chat.toolDetail': 'agent',
   'chat.workspaceChanges.get': 'agent',
   'chat.workspaceChanges.getFileDiff': 'agent',
   'computers.claim': 'never',

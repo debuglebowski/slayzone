@@ -1,3 +1,4 @@
+import { CHAT_HISTORY_DISPLAY_VERSION } from '@slayzone/terminal-contracts'
 import { z } from 'zod'
 import { HUB_SWITCH_DEFAULTS } from '@slayzone/platform'
 import { SettingsService } from '@slayzone/settings-core/server'
@@ -60,7 +61,11 @@ export const hubRouter = router({
       authRequired: deps?.getAuthRequired() ?? false,
       switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS },
       scopes: getAuthGate() ? (ctx.principal?.scopes ?? null) : null,
-      wire: { compactBytes: true as const }
+      wire: {
+        compactBytes: true as const,
+        toolPreviews: true as const,
+        chatDisplay: CHAT_HISTORY_DISPLAY_VERSION
+      }
     }
   }),
 

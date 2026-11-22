@@ -17,8 +17,16 @@
  * failure stops persisting for the tab (the next open rebuilds); it never
  * stops the chat.
  */
+import { createHash } from 'node:crypto'
 import {
+  CHAT_HISTORY_DISPLAY_VERSION,
   CHAT_HISTORY_PAGE_MAX_BYTES,
+  chatRowDetailIdentity,
+  CHAT_TOOL_DETAIL_CHARS,
+  type ChatToolDetailChunk,
+  type ChatHistoryDisplay,
+  type ChatRowDetailRef,
+  type ChatToolSearchResult,
   jsonByteLength,
   utf8Length,
   type AgentEvent
@@ -47,6 +55,8 @@ import type { BufferedEvent } from '../chat-events-store'
 import { historyReadTurns } from '../history-turns'
 import type { TimelineCheckpointRow, TimelineWrite } from '../chat-timeline-store'
 import type { TimelineRecordStore } from './chat-timeline-records'
+import { HydrateScan, type HydrateCheckpoint } from './chat-hydrate-scan'
+import { hiddenActivityTextRows, previewTimelineRow } from './chat-tool-preview'
 
 export const TIMELINE_PAGE_ROWS = 256
 /** Sealed pages kept in memory besides the tail, most recently used. */
@@ -54,6 +64,8 @@ const RESIDENT_PAGES = 8
 /** Row changes remembered, so rows can be served as they were at an earlier seq. */
 const UNDO_KEEP = 4096
 const FLUSH_DELAY_MS = 1500
+const TOOL_DETAIL_CACHE_CHARS = 4 * 1024 * 1024
+const TOOL_DETAIL_CACHE_MS = 10_000
 /** Events folded per step of a long run (a rebuild): pages written + unloaded between steps. */
 const FOLD_CHUNK = 256
 /**
@@ -83,14 +95,27 @@ export type TimelineProjectionHandle = Pick<
   | 'apply'
   | 'openSnapshot'
   | 'pagesAsOf'
+  | 'toolDetail'
   | 'searchPages'
+  | 'searchToolMatches'
   | 'flush'
   | 'close'
   | 'usable'
 >
+export interface TimelineProjectionStart {
+  from: number
+  hydrate?: HydrateCheckpoint
+  checkpointMiss:
+    | 'checkpoint-none'
+    | 'checkpoint-version'
+    | 'checkpoint-ahead'
+    | 'checkpoint-other'
+    | null
+}
+
 export type BeginTimelineProjection = (
   opts: Parameters<typeof TimelineProjection.begin>[0]
-) => Promise<{ projection: TimelineProjectionHandle; from: number }>
+) => Promise<TimelineProjectionStart & { projection: TimelineProjectionHandle }>
 
 /**
  * A tab's saved events as the projection reads them on open: `lastSeq` (its
@@ -125,6 +150,9 @@ export interface TimelineOpen {
   state: string
   /** One per sealed page, in page order. */
   summaries: TimelinePageSummary[]
+  /** The requesting client opted into large tool result previews. */
+  toolPreviews?: true
+  displaySettings?: typeof CHAT_HISTORY_DISPLAY_VERSION
 }
 
 /**
@@ -150,11 +178,13 @@ export type TimelinePagesResult =
 interface CheckpointData {
   sealed: number
   state: string
+  hydrate: HydrateCheckpoint
 }
 
 export class TimelineProjection {
   private state: ChatTimelineState
   private seq = -1
+  private hydrateScan = new HydrateScan()
   /** Pages `0..sealed-1` are sealed (rows before `sealed * PAGE` are paged). */
   private sealed = 0
   private summaries: TimelinePageSummary[] = []
@@ -181,6 +211,15 @@ export class TimelineProjection {
   private checkpointDropped = false
   /** Opened to rebuild (`begin`), until `finish`. */
   private rebuilding = false
+  /** Reuse encoded data during a chunked read, one short-lived payload per chat. */
+  private detailTransfer: {
+    seq: number
+    row: number
+    key: string
+    json: string
+    revision: string
+    timer: ReturnType<typeof setTimeout>
+  } | null = null
 
   private constructor(
     private readonly store: TimelineProjectionStore,
@@ -232,7 +271,7 @@ export class TimelineProjection {
     onError?: (what: string, err: unknown) => void
     pageBudgetBytes?: number
     flushSliceBytes?: number
-  }): Promise<{ projection: TimelineProjection; from: number }> {
+  }): Promise<TimelineProjectionStart & { projection: TimelineProjection }> {
     const p = new TimelineProjection(
       opts.store,
       opts.agentStartedTurns,
@@ -242,7 +281,10 @@ export class TimelineProjection {
     )
     // Storage metadata can itself take bounded history turns. Do not hold a
     // scheduler slot across those awaits (the compatibility path shares it).
-    if (await p.restore(opts.lastSeq)) return { projection: p, from: p.seq }
+    const checkpointMiss = await p.restore(opts.lastSeq)
+    if (!checkpointMiss) {
+      return { projection: p, from: p.seq, checkpointMiss, hydrate: p.hydrateScan.checkpoint() }
+    }
     // Rebuild: every event, every page written again.
     p.rebuilding = true
     p.state = initialState({ agentStartedTurns: p.agentStartedTurns })
@@ -251,7 +293,7 @@ export class TimelineProjection {
     p.summaries = []
     p.dropFrom = 0
     if (opts.lastSeq < 0) p.checkpointDirty = true
-    return { projection: p, from: -1 }
+    return { projection: p, from: -1, checkpointMiss }
   }
 
   /** Saved events of the history being opened, in seq order (those already folded in are skipped). */
@@ -304,24 +346,31 @@ export class TimelineProjection {
   }
 
   /** From the stored checkpoint, when it fits these events. */
-  private async restore(lastSeq: number): Promise<boolean> {
+  private async restore(lastSeq: number): Promise<TimelineProjectionStart['checkpointMiss']> {
     try {
       const cp = await historyReadTurns.take(() => this.store.loadCheckpoint())
-      if (!cp || cp.version !== TIMELINE_PROJECTION_VERSION || cp.seq > lastSeq) return false
+      if (!cp) return 'checkpoint-none'
+      if (cp.version !== TIMELINE_PROJECTION_VERSION) return 'checkpoint-version'
+      if (cp.seq > lastSeq) return 'checkpoint-ahead'
       const data = JSON.parse(cp.data) as CheckpointData
+      if (data.hydrate?.version !== 1 || !Array.isArray(data.hydrate.messages))
+        return 'checkpoint-other'
+      const hydrate = new HydrateScan(data.hydrate)
       const state = decodeTimelineState(data.state)
-      if (state.agentStartedTurns !== this.agentStartedTurns) return false
+      if (state.agentStartedTurns !== this.agentStartedTurns) return 'checkpoint-other'
       const summaries = await this.store.loadSummaries()
-      if (summaries.length !== data.sealed || summaries.some((s, i) => s.page !== i)) return false
+      if (summaries.length !== data.sealed || summaries.some((s, i) => s.page !== i))
+        return 'checkpoint-other'
       this.state = state
+      this.hydrateScan = hydrate
       this.seq = cp.seq
       this.sealed = data.sealed
       this.summaries = summaries.map((s) => JSON.parse(s.summary) as TimelinePageSummary)
       this.undoFloor = cp.seq
-      return true
+      return null
     } catch (err) {
       this.onError('checkpoint unreadable, rebuilding', err)
-      return false
+      return 'checkpoint-other'
     }
   }
 
@@ -361,16 +410,45 @@ export class TimelineProjection {
   }
 
   /** What a client opens from, once every event queued so far is folded in. */
-  openSnapshot(): Promise<TimelineOpen> {
+  openSnapshot(toolPreviewInstance?: string, display?: ChatHistoryDisplay): Promise<TimelineOpen> {
     return this.enqueue(async () => {
       if (this.failed) throw new Error('the timeline projection failed')
+      const tailFrom = this.sealed * TIMELINE_PAGE_ROWS
+      const hideMessages = display?.hideActivityMessages || display?.hideActivities
+      const hiddenText =
+        toolPreviewInstance && hideMessages
+          ? hiddenActivityTextRows(this.state.timeline, tailFrom, 0)
+          : undefined
+      const result = this.state.lastResult
+      const wireState =
+        toolPreviewInstance && hideMessages && result?.copyText
+          ? { ...this.state, lastResult: { ...result, copyText: null } }
+          : this.state
       return {
         version: TIMELINE_PROJECTION_VERSION,
         seq: this.seq,
         epoch: this.state.rowsEpoch,
         pageRows: TIMELINE_PAGE_ROWS,
-        state: encodeTimelineState(this.state, this.sealed * TIMELINE_PAGE_ROWS),
-        summaries: this.summaries
+        state: encodeTimelineState(
+          wireState,
+          tailFrom,
+          toolPreviewInstance
+            ? (row, index) =>
+                previewTimelineRow(
+                  row,
+                  index,
+                  this.state.rowsEpoch,
+                  toolPreviewInstance,
+                  display,
+                  hiddenText?.has(index),
+                  index < this.state.turnStart
+                )
+            : undefined
+        ),
+        summaries: this.summaries,
+        ...(toolPreviewInstance
+          ? { toolPreviews: true as const, displaySettings: CHAT_HISTORY_DISPLAY_VERSION }
+          : {})
       }
     })
   }
@@ -390,7 +468,9 @@ export class TimelineProjection {
     pages: readonly number[],
     asOfSeq: number,
     epoch: number,
-    startRow?: number
+    startRow?: number,
+    toolPreviewInstance?: string,
+    display?: ChatHistoryDisplay
   ): Promise<TimelinePagesResult> {
     return this.enqueue(async (): Promise<TimelinePagesResult> => {
       if (
@@ -437,12 +517,27 @@ export class TimelineProjection {
                 : (JSON.parse(await this.readStoredPage(page)) as TimelineItem[])
             )
             const skip = startRow > from && startRow < from + rows.length ? startRow - from : 0
+            const hiddenText =
+              display?.hideActivityMessages || display?.hideActivities
+                ? hiddenActivityTextRows(rows, 0, from)
+                : undefined
             const taken: TimelineItem[] = []
             for (let k = skip; k < rows.length; k++) {
-              const size = jsonByteLength(rows[k])
+              const row = toolPreviewInstance
+                ? previewTimelineRow(
+                    rows[k],
+                    from + k,
+                    epoch,
+                    toolPreviewInstance,
+                    display,
+                    hiddenText?.has(from + k),
+                    asOfSeq === this.seq && from + k < this.state.turnStart
+                  )
+                : rows[k]
+              const size = jsonByteLength(row)
               if ((out.length > 0 || taken.length > 0) && bytes + size > this.pageBudgetBytes) break
               bytes += size
-              taken.push(rows[k])
+              taken.push(row)
             }
             if (taken.length > 0) out.push({ page, from: from + skip, rows: taken })
             if (skip + taken.length < rows.length) {
@@ -489,33 +584,136 @@ export class TimelineProjection {
     })
   }
 
+  /** Full row detail, guarded by row epoch, identity and a revision across chunks. */
+  toolDetail(
+    ref: ChatRowDetailRef,
+    offset: number,
+    revision?: string
+  ): Promise<ChatToolDetailChunk> {
+    return this.enqueue(async () => {
+      if (
+        this.failed ||
+        ref.epoch !== this.state.rowsEpoch ||
+        ref.row >= this.state.timeline.length
+      )
+        return null
+      const key = chatRowDetailIdentity(ref)
+      const cached = this.detailTransfer
+      let json: string
+      let hash: string
+      if (cached?.seq === this.seq && cached.row === ref.row && cached.key === key) {
+        json = cached.json
+        hash = cached.revision
+      } else {
+        const page = Math.floor(ref.row / TIMELINE_PAGE_ROWS)
+        const row =
+          this.state.timeline[ref.row] ?? (await this.readPage(page))[ref.row % TIMELINE_PAGE_ROWS]
+        if ('toolUseId' in ref) {
+          if (row?.kind !== 'tool' || row.invocation.id !== ref.toolUseId) return null
+          const visible = ref.preview
+            ? previewTimelineRow(row, ref.row, ref.epoch, ref.instance)
+            : row
+          if (visible.kind !== 'tool') return null
+          json = JSON.stringify(visible.invocation)
+        } else if (ref.kind === 'result-copy') {
+          if (row?.kind !== 'result' || row.timestamp !== ref.timestamp || !row.copyText)
+            return null
+          json = JSON.stringify(row.copyText)
+        } else {
+          if (
+            row?.kind !== ref.kind ||
+            row.messageId !== ref.messageId ||
+            row.blockOrdinal !== ref.blockOrdinal
+          )
+            return null
+          json = JSON.stringify(row.text)
+        }
+        hash = createHash('sha256').update(json).digest('hex')
+      }
+      if ((revision === undefined ? offset !== 0 : revision !== hash) || offset >= json.length)
+        return null
+      let end = Math.min(offset + CHAT_TOOL_DETAIL_CHARS, json.length)
+      // Keep surrogate pairs together across chunks.
+      const lastChar = json.charCodeAt(end - 1)
+      if (end < json.length && lastChar >= 0xd800 && lastChar <= 0xdbff) end--
+      this.clearDetailTransfer()
+      if (end < json.length && json.length <= TOOL_DETAIL_CACHE_CHARS) {
+        const timer = setTimeout(() => this.clearDetailTransfer(), TOOL_DETAIL_CACHE_MS)
+        timer.unref?.()
+        this.detailTransfer = {
+          seq: this.seq,
+          row: ref.row,
+          key,
+          json,
+          revision: hash,
+          timer
+        }
+      }
+      return { data: json.slice(offset, end), revision: hash, next: end < json.length ? end : null }
+    })
+  }
+
   /**
    * Sealed pages that may hold `query` (a superset: the caller checks the rows
    * it loads). Pages changed since they were written are always in.
    */
   searchPages(query: string): Promise<number[]> {
+    return this.enqueue(() => this.findSearchPages(query.toLowerCase()))
+  }
+
+  /** Exact matches for deferred text and tool input, using their originals. */
+  searchToolMatches(query: string, caseSensitive: boolean): Promise<ChatToolSearchResult> {
     return this.enqueue(async () => {
-      const needle = query.toLowerCase()
-      if (!needle) return []
-      let stored: number[] = []
-      try {
-        stored = await this.store.searchPages(needle)
-      } catch (err) {
-        this.onError('search failed', err)
-        // Without the index: every page may hold it.
-        stored = Array.from({ length: this.sealed }, (_, i) => i)
+      const pages = await this.findSearchPages(query.toLowerCase())
+      const toolUseIds = new Set<string>()
+      const needle = caseSensitive ? query : query.toLowerCase()
+      if (!needle || this.failed) return { pages, toolUseIds: [] }
+      const textRows: number[] = []
+      const inspect = (rows: Readonly<TimelineRows>, from: number) => {
+        rows.forEach((row, offset) => {
+          if (row?.kind !== 'tool' && row?.kind !== 'thinking' && row?.kind !== 'text') return
+          const text = searchableText(row)
+          if (!(caseSensitive ? text : text.toLowerCase()).includes(needle)) return
+          if (row.kind === 'tool') toolUseIds.add(row.invocation.id)
+          else textRows.push(from + offset)
+        })
       }
-      const pages = new Set(stored.filter((p) => p < this.sealed))
-      for (const p of this.dirty) if (p < this.sealed) pages.add(p)
-      // A page in memory is checked here (cheap, and its stored text may be stale).
-      for (const p of this.resident) {
-        const from = p * TIMELINE_PAGE_ROWS
-        const rows = this.state.timeline.slice(from, from + TIMELINE_PAGE_ROWS)
-        if (rows.some((r) => r && searchableText(r).toLowerCase().includes(needle))) pages.add(p)
-        else if (!this.dirty.has(p)) pages.delete(p)
+      for (const page of pages) {
+        inspect(
+          this.resident.includes(page) ? this.pageRows(page) : await this.readPage(page),
+          page * TIMELINE_PAGE_ROWS
+        )
       }
-      return [...pages].sort((a, b) => a - b)
+      const tailFrom = this.sealed * TIMELINE_PAGE_ROWS
+      inspect(this.state.timeline.slice(tailFrom), tailFrom)
+      return {
+        pages,
+        toolUseIds: [...toolUseIds],
+        ...(textRows.length ? { textMatches: { epoch: this.state.rowsEpoch, rows: textRows } } : {})
+      }
     })
+  }
+
+  private async findSearchPages(needle: string): Promise<number[]> {
+    if (!needle) return []
+    let stored: number[] = []
+    try {
+      stored = await this.store.searchPages(needle)
+    } catch (err) {
+      this.onError('search failed', err)
+      // Without the index: every page may hold it.
+      stored = Array.from({ length: this.sealed }, (_, i) => i)
+    }
+    const pages = new Set(stored.filter((p) => p < this.sealed))
+    for (const p of this.dirty) if (p < this.sealed) pages.add(p)
+    // A page in memory is checked here (cheap, and its stored text may be stale).
+    for (const p of this.resident) {
+      const from = p * TIMELINE_PAGE_ROWS
+      const rows = this.state.timeline.slice(from, from + TIMELINE_PAGE_ROWS)
+      if (rows.some((r) => r && searchableText(r).toLowerCase().includes(needle))) pages.add(p)
+      else if (!this.dirty.has(p)) pages.delete(p)
+    }
+    return [...pages].sort((a, b) => a - b)
   }
 
   /** Write what changed (dirty pages + checkpoint) now. */
@@ -529,10 +727,17 @@ export class TimelineProjection {
     this.flushTimer = null
     await this.flush()
     await this.discarding
+    this.clearDetailTransfer()
     this.closed = true
   }
 
   // ---- internals ----
+
+  private clearDetailTransfer(): void {
+    if (!this.detailTransfer) return
+    clearTimeout(this.detailTransfer.timer)
+    this.detailTransfer = null
+  }
 
   /**
    * A step failed (a stored page unreadable, ...): its state may no longer
@@ -580,6 +785,7 @@ export class TimelineProjection {
       })
     }
     const seq = entries[entries.length - 1].seq
+    for (const entry of entries) this.hydrateScan.add(entry.event)
     this.state = next
     this.seq = seq
     this.checkpointDirty = true
@@ -740,7 +946,8 @@ export class TimelineProjection {
                   seq: this.seq,
                   data: JSON.stringify({
                     sealed: this.sealed,
-                    state: encodeTimelineState(this.state, this.sealed * TIMELINE_PAGE_ROWS)
+                    state: encodeTimelineState(this.state, this.sealed * TIMELINE_PAGE_ROWS),
+                    hydrate: this.hydrateScan.checkpoint()
                   } satisfies CheckpointData)
                 }
               : null

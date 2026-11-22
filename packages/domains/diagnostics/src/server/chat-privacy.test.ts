@@ -149,3 +149,46 @@ test('identity fields that are not identifiers are dropped', () => {
   })
   expect(safe.payload).toEqual({})
 })
+
+test('chat open timings keep their numbers, flags and reason words', () => {
+  const safe = chatSafeDiagnostic({
+    level: 'info',
+    source: 'main',
+    event: 'chat.open_hydrate',
+    message: 'chat hydrate timing',
+    payload: {
+      tabId: 'tab-1',
+      mode: 'codex-chat',
+      totalMs: 1301,
+      scannedEvents: 24860,
+      restored: false,
+      checkpoint: 'checkpoint-version'
+    }
+  })
+  expect(safe.payload).toEqual({
+    tabId: 'tab-1',
+    mode: 'codex-chat',
+    totalMs: 1301,
+    scannedEvents: 24860,
+    restored: false,
+    checkpoint: 'checkpoint-version'
+  })
+  for (const word of [
+    'checkpoint-none',
+    'checkpoint-ahead',
+    'checkpoint-other',
+    'full-client-version',
+    'full-no-projection',
+    'full-projection-failed',
+    'full-tail-outran'
+  ]) {
+    const kept = chatSafeDiagnostic({
+      level: 'info',
+      source: 'main',
+      event: 'chat.open_timeline',
+      message: null,
+      payload: { fullBecause: word }
+    })
+    expect(kept.payload).toEqual({ fullBecause: word })
+  }
+})

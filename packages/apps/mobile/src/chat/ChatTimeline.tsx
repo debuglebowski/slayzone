@@ -35,6 +35,7 @@ import { codeBlocksOf, copyText, shareText } from './message-text'
 import { useThemedStyles } from './styles'
 import { TextViewer } from './TextViewer'
 import { TimelineRow } from './TimelineRow'
+import type { OlderChatHistory } from './useChatSession'
 import { ExpandedStore, type TimelineUi, TimelineUiContext } from './timeline-ui'
 import { subAgentItems, type TimelineRow as Row, timelineRows } from './timeline-rows'
 
@@ -52,7 +53,9 @@ export function ChatTimeline({
   reconnecting = false,
   emptyText,
   topInset = 0,
-  onScrollFromNewest
+  onScrollFromNewest,
+  olderHistory,
+  loadHistoryRows
 }: {
   state: ChatTimelineState
   hydrating: boolean
@@ -65,9 +68,12 @@ export function ChatTimeline({
   topInset?: number
   /** The list scrolled: how far it is from its newest row (pt). */
   onScrollFromNewest?: (offset: number) => void
+  olderHistory?: OlderChatHistory | null
+  loadHistoryRows?: (rows: readonly number[]) => void
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
   const list = useRef<FlatList<Row>>(null)
+  const userScrolled = useRef(false)
   const [away, setAway] = useState(false)
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -106,6 +112,18 @@ export function ChatTimeline({
     [state.timeline, openBranches]
   )
   const { timeline, childIndex } = state
+  const loadSubAgent = useCallback(
+    (id: string) => {
+      const children = childIndex.get(id)
+      if (children?.length) loadHistoryRows?.(children)
+    },
+    [childIndex, loadHistoryRows]
+  )
+  const onReachOlder = useCallback(() => {
+    if (!userScrolled.current || olderHistory?.loading || olderHistory?.error) return
+    userScrolled.current = false
+    olderHistory?.load()
+  }, [olderHistory])
   // Not keyed on the whole state: a streaming delta changes only `state.live`, which
   // reaches its row through the live store, not through the list.
   const renderItem = useCallback<ListRenderItem<Row>>(
@@ -118,11 +136,12 @@ export function ChatTimeline({
             : undefined
         }
         rowKey={item.key}
+        loadSubAgent={loadSubAgent}
         branchOpen={item.item.kind === 'conversation-branch' && openBranches.has(item.item.id)}
         onToggleBranch={toggleBranch}
       />
     ),
-    [timeline, childIndex, openBranches, toggleBranch]
+    [timeline, childIndex, loadSubAgent, openBranches, toggleBranch]
   )
   // The last row streams: it shows the progress itself.
   const last = rows[0]?.item
@@ -141,7 +160,7 @@ export function ChatTimeline({
       </View>
     )
   }
-  if (rows.length === 0 && !label) {
+  if (rows.length === 0 && !label && !olderHistory) {
     return (
       <View style={[s.center, { paddingTop: topInset }]}>
         <Text style={s.empty}>{emptyText}</Text>
@@ -173,12 +192,37 @@ export function ChatTimeline({
           }
           contentContainerStyle={s.content}
           // Inverted, the list's footer is its top: the oldest row stops below the bar.
-          ListFooterComponent={topInset > 0 ? <View style={{ height: topInset }} /> : undefined}
+          ListFooterComponent={
+            olderHistory || topInset > 0 ? (
+              <View style={{ paddingBottom: topInset }}>
+                {olderHistory?.loading ? (
+                  <ActivityIndicator accessibilityLabel="Loading earlier messages" />
+                ) : olderHistory ? (
+                  <Pressable
+                    style={s.olderHistory}
+                    accessibilityRole="button"
+                    onPress={olderHistory.load}
+                  >
+                    <Text style={s.workingText}>
+                      {olderHistory.error
+                        ? "Couldn't load earlier messages. Retry"
+                        : 'Load earlier messages'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : undefined
+          }
           scrollIndicatorInsets={topInset > 0 ? { bottom: topInset } : undefined}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           maintainVisibleContentPosition={MVCP}
           onScroll={onScroll}
+          onScrollBeginDrag={() => {
+            userScrolled.current = true
+          }}
+          onEndReached={onReachOlder}
+          onEndReachedThreshold={0.3}
           scrollEventThrottle={64}
           initialNumToRender={15}
           windowSize={11}
@@ -246,6 +290,7 @@ function makeStyles(t: ChromeColors) {
       marginHorizontal: 16,
       marginVertical: 8
     },
+    olderHistory: { alignItems: 'center', padding: 12 },
     workingText: { color: t.mutedForeground, fontSize: 13 },
     flex: { flex: 1 },
     pill: {

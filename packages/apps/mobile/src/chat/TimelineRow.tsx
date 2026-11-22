@@ -9,7 +9,7 @@
 import { useLiveBlock } from '@slayzone/terminal/live-blocks'
 import { apiRetryReason } from '@slayzone/terminal-contracts'
 import { streamKeyOf, type TimelineItem } from '@slayzone/terminal/reducer'
-import { memo } from 'react'
+import { memo, useEffect } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { attachmentLabel } from './attachments'
@@ -25,6 +25,7 @@ type Item<K extends TimelineItem['kind']> = Extract<TimelineItem, { kind: K }>
 export const TimelineRow = memo(function TimelineRow({
   item,
   childItems,
+  loadSubAgent,
   rowKey,
   branchOpen = false,
   onToggleBranch
@@ -34,6 +35,7 @@ export const TimelineRow = memo(function TimelineRow({
   rowKey?: string
   /** A sub-agent's own items (its row lists them when opened). */
   childItems?: readonly TimelineItem[]
+  loadSubAgent?: (id: string) => void
   /** A `conversation-branch` divider: its folded rows are shown. */
   branchOpen?: boolean
   /** A `conversation-branch` divider: show / hide its folded rows. */
@@ -50,7 +52,7 @@ export const TimelineRow = memo(function TimelineRow({
     case 'tool':
       return <ToolCard invocation={item.invocation} streaming={item.inputStreaming === true} />
     case 'sub-agent':
-      return <SubAgent item={item} childItems={childItems ?? []} s={s} />
+      return <SubAgent item={item} childItems={childItems ?? []} load={loadSubAgent} s={s} />
     case 'result':
       return <TurnResult item={item} s={s} />
     case 'turn-error':
@@ -320,13 +322,19 @@ function Thinking({
 function SubAgent({
   item,
   childItems,
+  load,
   s
 }: {
   item: Item<'sub-agent'>
   childItems: readonly TimelineItem[]
+  load?: (id: string) => void
   s: Styles
 }) {
   const [open, toggle] = useExpanded(`sub-agent:${item.toolUseId}`, false)
+  const { toolUseId } = item
+  useEffect(() => {
+    if (open) load?.(toolUseId)
+  }, [load, open, toolUseId])
   const state =
     item.phase === 'in-flight' ? 'Running' : item.phase === 'completed' ? 'Done' : 'Failed'
   const tools = item.toolUses ? `, ${item.toolUses} tools` : ''

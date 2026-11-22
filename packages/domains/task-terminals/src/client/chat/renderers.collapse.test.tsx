@@ -106,6 +106,24 @@ describe('ThinkingBlock collapse', () => {
     expect(screen.queryByText('deep thought')).toBeNull()
   })
 
+  it('reads deferred text when opened and reuses it on the next expand', async () => {
+    const ref = { kind: 'thinking', instance: 'chat', epoch: 0, row: 4, messageId: 'm1' } as const
+    const readTextDetail = vi.fn(async () => 'complete reasoning')
+    render(
+      <View signal={0} overrides={{ readTextDetail }}>
+        <ThinkingBlock item={{ ...item, text: '', textDetail: ref }} />
+      </View>
+    )
+    expect(readTextDetail).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Thinking'))
+    expect(await screen.findByText('complete reasoning')).toBeDefined()
+    expect(readTextDetail).toHaveBeenCalledWith(ref, expect.any(AbortSignal))
+    fireEvent.click(screen.getByText('Thinking'))
+    fireEvent.click(screen.getByText('Thinking'))
+    expect(screen.getByText('complete reasoning')).toBeDefined()
+    expect(readTextDetail).toHaveBeenCalledTimes(1)
+  })
+
   it('mounting under an already-bumped signal does not count as a bump', () => {
     const { rerender } = render(ui(3))
     fireEvent.click(screen.getByText('Thinking'))

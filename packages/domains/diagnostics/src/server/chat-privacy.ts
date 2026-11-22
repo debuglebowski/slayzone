@@ -90,7 +90,17 @@ const vocabulary = new Set([
   'SubagentStart',
   'SubagentStop',
   'PreCompact',
-  'Notification'
+  'Notification',
+  // Chat open timings (`chat.open_hydrate`, `chat.open_timeline`): why a stored
+  // timeline checkpoint was rebuilt, why a client opened from the whole history.
+  'checkpoint-none',
+  'checkpoint-version',
+  'checkpoint-ahead',
+  'checkpoint-other',
+  'full-client-version',
+  'full-no-projection',
+  'full-projection-failed',
+  'full-tail-outran'
 ])
 /**
  * An error's IDENTITY, never its text: the class, Node's error code, the failing

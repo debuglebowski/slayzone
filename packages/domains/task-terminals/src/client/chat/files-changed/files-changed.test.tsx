@@ -38,7 +38,7 @@ vi.mock('../../trpc', () => ({
 
 import { ChatViewContext, type ChatViewState } from '../ChatViewContext'
 import { renderTimelineItem } from '../renderers'
-import { stableAnchorKey } from '../useChatDisplay'
+import { stableAnchorKey } from '@slayzone/terminal/chat-presentation'
 import { TimelineRevealContext } from '../timeline-reveal'
 import { ToolFocusContext, ToolFocusStore } from '../tool-cards/tool-focus'
 import { FilesChangedPanel } from './FilesChangedPanel'
@@ -344,4 +344,33 @@ describe('files-changed panel', () => {
     fireEvent.keyDown(panel, { key: 'Escape' })
     expect(onClose).toHaveBeenCalled()
   })
+})
+
+it('loads original edits before drawing a file-history diff', async () => {
+  const path = '/repo/example.txt'
+  const full = editTool('preview', path, 'real before\n', 'real after\n')
+  const detail = { instance: 'chat', epoch: 0, row: 0, toolUseId: full.invocation.id }
+  const preview: TimelineItem = {
+    ...full,
+    invocation: {
+      ...full.invocation,
+      result: { isError: false, rawContent: 'ok', structured: { filePath: path } },
+      toolDetail: detail,
+      toolPreview: { files: [{ path, additions: 1, deletions: 1, created: false }] }
+    }
+  }
+  const readToolDetail = vi.fn(async () => full.invocation)
+  function View() {
+    const base = useContext(ChatViewContext)
+    return (
+      <ChatViewContext.Provider value={{ ...base, readToolDetail }}>
+        <FilesChangedPanel timeline={[preview]} cwd="/repo" onClose={() => undefined} />
+      </ChatViewContext.Provider>
+    )
+  }
+  render(<View />)
+  const diff = await screen.findByTestId('diff-view')
+  expect(diff.textContent).toContain('real before')
+  expect(diff.textContent).toContain('real after')
+  expect(readToolDetail.mock.calls[0]).toEqual([detail, expect.any(AbortSignal)])
 })

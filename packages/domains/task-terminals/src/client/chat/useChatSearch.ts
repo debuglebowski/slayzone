@@ -16,6 +16,12 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [activeIdx, setActiveIdx] = useState(0)
   const [focusToken, setFocusToken] = useState(0)
+  const [toolMatches, setToolMatches] = useState<{
+    query: string
+    caseSensitive: boolean
+    ids: ReadonlySet<string>
+    textMatches?: { epoch: number; rows: ReadonlySet<number> }
+  } | null>(null)
 
   // Per-item match offsets: itemIndex → array of `{ start, end }` char ranges.
   // Empty for items with no matches; absent itemIndex = no matches.
@@ -24,8 +30,21 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
     if (!query) return map
     const needle = caseSensitive ? query : query.toLowerCase()
     if (needle.length === 0) return map
+    const remote =
+      toolMatches?.query === query && toolMatches.caseSensitive === caseSensitive
+        ? toolMatches
+        : null
     for (let i = 0; i < displayedTimeline.length; i++) {
       const item = displayedTimeline[i]
+      if (item.kind === 'tool' && item.invocation.toolPreview?.input) {
+        if (remote?.ids.has(item.invocation.id)) map.set(i, [])
+        continue
+      }
+      if ((item.kind === 'thinking' || item.kind === 'text') && item.textDetail) {
+        const { epoch, row } = item.textDetail
+        if (remote?.textMatches?.epoch === epoch && remote.textMatches.rows.has(row)) map.set(i, [])
+        continue
+      }
       const hay = searchableText(item)
       if (!hay) continue
       const cmp = caseSensitive ? hay : hay.toLowerCase()
@@ -40,7 +59,7 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
       if (ranges.length > 0) map.set(i, ranges)
     }
     return map
-  }, [query, caseSensitive, displayedTimeline])
+  }, [query, caseSensitive, displayedTimeline, toolMatches])
 
   const matchedIndices = useMemo(
     () => Array.from(itemMatches.keys()).sort((a, b) => a - b),
@@ -59,6 +78,7 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
   const close = useCallback(() => {
     setOpen(false)
     setQuery('')
+    setToolMatches(null)
     setActiveIdx(0)
   }, [])
 
@@ -86,6 +106,7 @@ export function useChatSearch(displayedTimeline: TimelineItem[]) {
     setQuery,
     caseSensitive,
     setCaseSensitive,
+    setToolMatches,
     matchCount: matchedIndices.length,
     activeIdx: matchedIndices.length > 0 ? Math.min(activeIdx, matchedIndices.length - 1) : -1,
     activeItemIdx,

@@ -1,3 +1,8 @@
+import type {
+  ChatResultCopyRef,
+  ChatTextBlockRef,
+  ChatToolDetailRef
+} from '@slayzone/terminal-contracts'
 import { PersistentIndex } from './persistent-index'
 import type {
   AgentEvent,
@@ -110,6 +115,7 @@ export type TimelineItem =
       role: 'assistant'
       messageId: string
       text: string
+      textDetail?: ChatTextBlockRef
       /** n-th text block of its message (0-based): with `messageId`, the row's key. */
       blockOrdinal?: number
       /** Still streaming (see `StreamState`); undefined once the block is final. */
@@ -122,6 +128,8 @@ export type TimelineItem =
       messageId: string
       text: string
       hasSignature: boolean
+      /** Historical text deferred by the device's wire display settings. */
+      textDetail?: ChatTextBlockRef
       /** n-th thinking block of its message (0-based). */
       blockOrdinal?: number
       stream?: StreamState
@@ -164,6 +172,8 @@ export type TimelineItem =
       turnCostUsd?: number
       /** Concatenated assistant-text from this turn, for the footer Copy button. */
       copyText: string | null
+      copyDetail?: ChatResultCopyRef
+      copySources?: Array<string | ChatTextBlockRef>
       timestamp: number
       parentToolUseId?: string
     }
@@ -416,7 +426,22 @@ export interface ToolInvocation {
   name: string
   input: unknown
   status: 'pending' | 'done' | 'error' | 'denied'
+  /** Wire-only metadata for an omitted body. Persisted projection rows are full. */
+  toolDetail?: ChatToolDetailRef
+  toolPreview?: {
+    input?: true
+    hidden?: true
+    editCount?: number
+    files?: Array<{
+      path: string
+      additions: number | null
+      deletions: number | null
+      created: boolean
+    }>
+  }
   result?: { rawContent: unknown; structured: unknown; isError: boolean }
+  /** The background shell this poll or kill call addressed. */
+  shellPoll?: { spawnToolUseId: string; spawnedAt: number; spawnId: string | null; kill: boolean }
   /** Set once the CLI reports the call's command as a task (plan 3.9). */
   task?: CommandTaskView
   /**
@@ -550,10 +575,7 @@ export interface ChatTimelineState {
    * `timeline` — so it re-renders the one row that reads it (see `LiveBlocks`).
    */
   live: LiveBlocks
-  /**
-   * Command tasks by tool_use_id (latest snapshot). Mirrored into the tool row's
-   * `invocation.task`; kept here too for a row that arrives after its task.
-   */
+  /** Latest snapshot by tool_use_id for running tasks or tasks without a tool row yet. */
   commandTasks: Map<string, CommandTaskView>
   /**
    * Live permission mode reported by the running subprocess. Sourced from
@@ -570,13 +592,6 @@ export interface ChatTimelineState {
    */
   bgShells: Map<string, BgShell>
   bgShellOrder: string[]
-  /**
-   * Maps a `BashOutput`/`KillShell` tool_use_id back to the spawn tool_use_id
-   * (and the kind of poll) so the poll's tool_result can be attributed to the
-   * right shell, and a successful KillShell can flip status to 'killed' even
-   * when the result payload has no explicit status field.
-   */
-  bgShellPollIndex: Map<string, { spawnToolUseId: string; kind: 'output' | 'kill' }>
   /**
    * Opaque id of the most recent OS subprocess that emitted a `session-spawn`
    * event. Used to scope bg shells to the lifetime of the spawning OS process
@@ -750,7 +765,6 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     permissionMode: null,
     bgShells: new Map(),
     bgShellOrder: [],
-    bgShellPollIndex: new Map(),
     currentSpawnId: null,
     notStarted: true,
     cliCommands: null,
@@ -1742,9 +1756,6 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         input: event.input,
         status: 'pending'
       }
-      // A task reported before its call's row (rare): it applies now.
-      const task = state.commandTasks.size > 0 ? state.commandTasks.get(event.id) : undefined
-      if (task) invocation.task = task
       const item: TimelineItem = {
         kind: 'tool',
         invocation,
@@ -1753,12 +1764,15 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       }
       const newIndex = state.toolIndex.with(event.id, state.timeline.length)
       const childIndex = registerChild(state, state.timeline.length, event.parentToolUseId)
-      return {
-        ...state,
-        timeline: appended(state.timeline, item),
-        toolIndex: newIndex,
-        childIndex
-      }
+      return attachPendingCommandTask(
+        {
+          ...state,
+          timeline: appended(state.timeline, item),
+          toolIndex: newIndex,
+          childIndex
+        },
+        event.id
+      )
     }
     case 'stream-message-start': {
       return {
@@ -1802,15 +1816,18 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           ? state.toolIndex.with(event.toolUseId, timelineIndex)
           : state.toolIndex
         const childIndex = registerChild(state, timelineIndex, event.parentToolUseId)
-        return {
-          ...state,
-          timeline: appended(state.timeline, item),
-          openBlocks: nextOpen,
-          toolIndex: nextToolIndex,
-          childIndex,
-          streamingRows: withRowIn(state.streamingRows, timelineIndex),
-          live: setLive(state.live, { key: liveKey, text: '', json: '' })
-        }
+        return attachPendingCommandTask(
+          {
+            ...state,
+            timeline: appended(state.timeline, item),
+            openBlocks: nextOpen,
+            toolIndex: nextToolIndex,
+            childIndex,
+            streamingRows: withRowIn(state.streamingRows, timelineIndex),
+            live: setLive(state.live, { key: liveKey, text: '', json: '' })
+          },
+          toolUseId
+        )
       }
 
       // Thinking shows at once: summarized thinking text arrives late, in a burst.
@@ -1939,17 +1956,23 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
           baseState.timeline.length,
           event.parentToolUseId
         )
-        return {
-          ...baseState,
-          timeline: appended(baseState.timeline, item),
-          toolIndex: newIndex,
-          childIndex
-        }
+        return attachPendingCommandTask(
+          {
+            ...baseState,
+            timeline: appended(baseState.timeline, item),
+            toolIndex: newIndex,
+            childIndex
+          },
+          event.toolUseId
+        )
       }
       const target = rowAt(baseState.timeline, idx)
       if (target.kind !== 'tool') return baseState
       const nextInvocation: ToolInvocation = {
         ...target.invocation,
+        ...(target.invocation.toolPreview?.files
+          ? { toolPreview: { ...target.invocation.toolPreview, files: undefined } }
+          : {}),
         status: event.isError ? 'error' : 'done',
         result: {
           rawContent: event.rawContent,
@@ -1977,15 +2000,16 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
     }
     case 'result': {
       // Collect this turn's assistant text (back to the last user-text or start) for Copy.
-      const texts: string[] = []
+      const texts: Array<string | ChatTextBlockRef> = []
       for (let i = state.timeline.length - 1; i >= 0; i--) {
         const it = rowAt(state.timeline, i)
         if (it.kind === 'user-text') break
-        if (it.kind === 'text' && it.role === 'assistant') texts.unshift(it.text)
+        if (it.kind === 'text' && it.role === 'assistant') texts.unshift(it.textDetail ?? it.text)
         if (it.kind === 'codex-plan') texts.unshift(it.text)
         if (it.kind === 'command-output') texts.unshift(it.text)
       }
-      const copyText = texts.length > 0 ? texts.join('\n\n') : null
+      const deferredCopy = texts.some((text) => typeof text !== 'string')
+      const copyText = texts.length > 0 && !deferredCopy ? texts.join('\n\n') : null
       const { usage, turnCostUsd } = applyResultCost(state.usage, state.model, event)
       // The CLI's end of a turn the user stopped (Stop, or a prompt's plain "No"):
       // an end, not a failure.
@@ -2012,6 +2036,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         numTurns: event.numTurns,
         text: event.text,
         copyText,
+        ...(deferredCopy ? { copySources: texts } : {}),
         timestamp: ts
       }
       // A turn that failed without any reply: its error text (an expired login,
@@ -2119,7 +2144,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // A command's task (a Monitor, a run_in_background Bash) reported with the
       // sub-agent frame: a resumed CLI's notice for the previous process's
       // orphans, which its tracker never saw start. It ends that command.
-      const command = state.commandTasks.get(event.toolUseId)
+      const command = commandTaskAt(state, event.toolUseId)
       if (command) {
         const ended = endedCommandStatus(event.status)
         return ended && command.status === 'running'
@@ -2463,7 +2488,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
     case 'background-notification':
       return withTurnNotification(state, event)
     case 'command-task-output': {
-      const view = state.commandTasks.get(event.toolUseId)
+      const view = commandTaskAt(state, event.toolUseId)
       if (!view) return state
       return setCommandTask(state, event.toolUseId, {
         ...view,
@@ -2685,16 +2710,35 @@ function settleStreams(state: ChatTimelineState): ChatTimelineState {
 
 // --- command tasks (plan 3.9) --------------------------------------------------
 
-/** Record a task's view and mirror it into its tool row. */
+function commandTaskAt(state: ChatTimelineState, toolUseId: string): CommandTaskView | undefined {
+  const indexed = state.commandTasks.get(toolUseId)
+  if (indexed) return indexed
+  // A late update to a finished task can load its sealed tool row on demand.
+  const row = rowAtIfAny(state.timeline, state.toolIndex.get(toolUseId))
+  return row?.kind === 'tool' ? row.invocation.task : undefined
+}
+
+/** Attach a task the CLI reported before its tool row arrived. */
+function attachPendingCommandTask(state: ChatTimelineState, toolUseId: string): ChatTimelineState {
+  const task = state.commandTasks.get(toolUseId)
+  return task ? setCommandTask(state, toolUseId, task) : state
+}
+
+/** The tool row owns the view. The index tracks running and unattached tasks. */
 function setCommandTask(
   state: ChatTimelineState,
   toolUseId: string,
   view: CommandTaskView
 ): ChatTimelineState {
-  const commandTasks = writableMap(state.commandTasks)
-  commandTasks.set(toolUseId, view)
   const at = state.toolIndex.get(toolUseId)
   const row = rowAtIfAny(state.timeline, at)
+  const keepIndexed = view.status === 'running' || row?.kind !== 'tool'
+  let commandTasks = state.commandTasks
+  if (keepIndexed || state.commandTasks.has(toolUseId)) {
+    commandTasks = writableMap(state.commandTasks)
+    if (keepIndexed) commandTasks.set(toolUseId, view)
+    else commandTasks.delete(toolUseId)
+  }
   if (at === undefined || row?.kind !== 'tool') return { ...state, commandTasks }
   const t = writable(state.timeline)
   t[at] = { ...row, invocation: { ...row.invocation, task: view } }
@@ -2705,7 +2749,7 @@ function applyCommandTask(
   state: ChatTimelineState,
   event: Extract<AgentEvent, { kind: 'command-task' }>
 ): ChatTimelineState {
-  const prev = state.commandTasks.get(event.toolUseId)
+  const prev = commandTaskAt(state, event.toolUseId)
   const view: CommandTaskView = {
     taskId: event.taskId,
     status: event.status,
@@ -2883,10 +2927,13 @@ export function selectUsageSummary(state: ChatTimelineState): UsageSummary | nul
  * `conversation-branch` item (rewound, left behind by a fork, a previous
  * conversation).
  */
-export function selectFoldedIndexes(timeline: Readonly<TimelineRows>): ReadonlySet<number> {
+export function selectFoldedIndexes(
+  timeline: Iterable<TimelineItem | undefined>,
+  openBranches?: ReadonlySet<string>
+): ReadonlySet<number> {
   const folded = new Set<number>()
   for (const it of timeline) {
-    if (it?.kind !== 'conversation-branch') continue
+    if (it?.kind !== 'conversation-branch' || openBranches?.has(it.id)) continue
     for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) folded.add(i)
   }
   return folded
@@ -3464,19 +3511,17 @@ function tail(s: string, max: number): string {
 
 function evictTerminalShells(
   shells: Map<string, BgShell>,
-  order: string[],
-  pollIndex: Map<string, { spawnToolUseId: string; kind: 'output' | 'kill' }>
+  order: string[]
 ): {
   shells: Map<string, BgShell>
   order: string[]
-  pollIndex: Map<string, { spawnToolUseId: string; kind: 'output' | 'kill' }>
 } {
   let terminalCount = 0
   for (const s of shells.values()) {
     if (TERMINAL_BG_STATUSES.has(s.status)) terminalCount++
   }
   if (terminalCount <= BG_TERMINAL_HISTORY_KEEP) {
-    return { shells, order, pollIndex }
+    return { shells, order }
   }
   let toEvict = terminalCount - BG_TERMINAL_HISTORY_KEEP
   const evicted = new Set<string>()
@@ -3488,15 +3533,11 @@ function evictTerminalShells(
       toEvict--
     }
   }
-  if (evicted.size === 0) return { shells, order, pollIndex }
+  if (evicted.size === 0) return { shells, order }
   const nextShells = new Map<string, BgShell>()
   for (const [k, v] of shells) if (!evicted.has(k)) nextShells.set(k, v)
   const nextOrder = order.filter((id) => !evicted.has(id))
-  const nextPollIndex = new Map<string, { spawnToolUseId: string; kind: 'output' | 'kill' }>()
-  for (const [pollId, ref] of pollIndex) {
-    if (!evicted.has(ref.spawnToolUseId)) nextPollIndex.set(pollId, ref)
-  }
-  return { shells: nextShells, order: nextOrder, pollIndex: nextPollIndex }
+  return { shells: nextShells, order: nextOrder }
 }
 
 function setBgShell(state: ChatTimelineState, shell: BgShell): ChatTimelineState {
@@ -3506,12 +3547,11 @@ function setBgShell(state: ChatTimelineState, shell: BgShell): ChatTimelineState
   const order = isNew ? [...state.bgShellOrder, shell.spawnToolUseId] : state.bgShellOrder
   // Eviction runs on every setBgShell so terminal-history bound holds across
   // both new spawns AND status transitions (running→completed bumps count).
-  const evicted = evictTerminalShells(shellMap, order, state.bgShellPollIndex)
+  const evicted = evictTerminalShells(shellMap, order)
   return {
     ...state,
     bgShells: evicted.shells,
-    bgShellOrder: evicted.order,
-    bgShellPollIndex: evicted.pollIndex
+    bgShellOrder: evicted.order
   }
 }
 
@@ -3578,16 +3618,7 @@ function dropActiveShells(
     if (!toDrop.has(id)) nextShells.set(id, shell)
   }
   const nextOrder = state.bgShellOrder.filter((id) => !toDrop.has(id))
-  const nextPollIndex = new Map<string, { spawnToolUseId: string; kind: 'output' | 'kill' }>()
-  for (const [pollId, ref] of state.bgShellPollIndex) {
-    if (!toDrop.has(ref.spawnToolUseId)) nextPollIndex.set(pollId, ref)
-  }
-  return {
-    ...state,
-    bgShells: nextShells,
-    bgShellOrder: nextOrder,
-    bgShellPollIndex: nextPollIndex
-  }
+  return { ...state, bgShells: nextShells, bgShellOrder: nextOrder }
 }
 
 /** The open turn's identity (`turnsClosed`), null when none is open. */
@@ -3680,22 +3711,28 @@ function applyBgShellToolCall(
     }
     return setBgShell(state, shell)
   }
-  // 2. BashOutput / KillShell — remember which spawn this poll targets so the
-  //    poll's tool_result can be attributed correctly.
-  const output = extractBashOutputCall(event)
+  // File the target on the tool row. A late result can load that row even after sealing.
   const kill = extractKillShellCall(event)
-  const poll = output ?? kill
-  if (poll) {
-    const owner = findShellByShellId(state, poll.shellId)
-    if (!owner) return state
-    const nextIdx = new Map(state.bgShellPollIndex)
-    nextIdx.set(event.id, {
-      spawnToolUseId: owner.spawnToolUseId,
-      kind: kill ? 'kill' : 'output'
-    })
-    return { ...state, bgShellPollIndex: nextIdx }
+  const poll = kill ?? extractBashOutputCall(event)
+  if (!poll) return state
+  const owner = findShellByShellId(state, poll.shellId)
+  const at = state.toolIndex.get(event.id)
+  const row = rowAtIfAny(state.timeline, at)
+  if (!owner || at === undefined || row?.kind !== 'tool') return state
+  const t = writable(state.timeline)
+  t[at] = {
+    ...row,
+    invocation: {
+      ...row.invocation,
+      shellPoll: {
+        spawnToolUseId: owner.spawnToolUseId,
+        spawnedAt: owner.spawnedAt,
+        spawnId: owner.spawnedInSpawnId,
+        kill: Boolean(kill)
+      }
+    }
   }
-  return state
+  return { ...state, timeline: t }
 }
 
 function applyBgShellToolResult(
@@ -3716,16 +3753,18 @@ function applyBgShellToolResult(
     return setBgShell(state, next)
   }
   // 2. BashOutput / KillShell result → update status/output for the owning shell.
-  const ref = state.bgShellPollIndex.get(event.toolUseId)
+  const row = rowAtIfAny(state.timeline, state.toolIndex.get(event.toolUseId))
+  const ref = row?.kind === 'tool' ? row.invocation.shellPoll : undefined
   if (!ref) return state
   const owner = state.bgShells.get(ref.spawnToolUseId)
-  if (!owner) return state
+  if (!owner || owner.spawnedInSpawnId !== ref.spawnId || owner.spawnedAt !== ref.spawnedAt)
+    return state
   const sig = extractBashOutputResult(event)
   // KillShell tool_results often omit explicit status. When the originating
   // call was a KillShell and the result wasn't an error, force 'killed' so
   // the UI doesn't perpetually show 'running' for a terminated shell.
   let nextStatus = pickStatus(owner.status, sig.status)
-  if (ref.kind === 'kill' && !event.isError && nextStatus !== 'killed') {
+  if (ref.kill && !event.isError && nextStatus !== 'killed') {
     nextStatus = 'killed'
   }
   const next: BgShell = {

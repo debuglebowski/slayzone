@@ -105,7 +105,7 @@ export {
   type HubIssueEntry
 } from './hubIssues'
 export { electronBootstrap } from './electron-bootstrap'
-export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
+export { hubAllows, hubPermitsTelemetry, hubSupportsToolPreviews } from './hubCapabilities'
 export { useHubRegistryStore, seedHubRegistry } from './hubRegistryStore'
 export {
   useHubOwnershipStore,

@@ -98,6 +98,7 @@ const historyReadMethods = new Set([
   'readBlob',
   'openTimeline',
   'timelinePages',
+  'toolDetail',
   'searchTimeline'
 ])
 

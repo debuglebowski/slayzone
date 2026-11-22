@@ -21,8 +21,7 @@ import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 export function useDirectLease(
   client: unknown,
   target: DirectIssueTarget | null,
-  wakeKey?: unknown,
-  trackConnect?: <T>(work: Promise<T>) => Promise<T>
+  wakeKey?: unknown
 ): { lease: DirectLease | null; lost: () => void } {
   const hubId = useHubId() ?? DIRECT_LINK_DEFAULT_HUB_ID
   const [lease, setLease] = useState<DirectLease | null>(null)
@@ -41,7 +40,6 @@ export function useDirectLease(
   useEffect(() => {
     if (!kind || !id || !taskId || !isDirectLinkEnabled()) return
     const keeper = keepDirectLease({
-      trackConnect,
       target:
         kind === 'pty'
           ? { kind, sessionId: id, taskId }
@@ -60,7 +58,7 @@ export function useDirectLease(
       keeperRef.current = null
       keeper.stop()
     }
-  }, [client, hubId, kind, id, taskId, trackConnect])
+  }, [client, hubId, kind, id, taskId])
 
   useEffect(() => {
     for (const cb of wakeRef.current) cb()

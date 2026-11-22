@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from 'vitest'
 vi.mock('@slayzone/diff-view', () => ({ DiffView: () => null }))
 vi.mock('@slayzone/markdown/client', () => ({ GhMarkdown: () => null }))
 
-import { isRenderable } from './renderers'
+import { isRenderable } from '@slayzone/terminal/chat-presentation'
 
 describe('isRenderable: interrupted markers', () => {
   test('a marker is shown', () => {

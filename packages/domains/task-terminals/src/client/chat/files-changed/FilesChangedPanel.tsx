@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileDiff as FileDiffIcon, X } from 'lucide-react'
 import { cn, IconButton } from '@slayzone/ui'
-import type { TimelineRows, ToolInvocation } from '@slayzone/terminal/client'
+import { fileChangesOf, type TimelineRows, type ToolInvocation } from '@slayzone/terminal/client'
+import { useChatView } from '../ChatViewContext'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { CardBadge, FileLink } from '../tool-cards/links'
 import { LineCounts } from './FilesChangedRow'
@@ -12,6 +13,8 @@ import { WorkspaceChangesContent } from './WorkspaceChangesRow'
 import {
   collectSessionFileChanges,
   combinedFileDiff,
+  loadFileChange,
+  needsFileDetail,
   type CombinedFileDiff,
   type SessionFileChange
 } from './session-file-changes'
@@ -19,15 +22,25 @@ import {
 /** Above this many files the sections start closed (the list stays scannable). */
 const OPEN_ALL_UP_TO = 8
 
-// Done calls never change, so a file's diff is keyed by its last call and how
-// many calls it has: reopening the panel or a new event elsewhere reuses it.
-const combinedCache = new WeakMap<ToolInvocation, { count: number; value: CombinedFileDiff }>()
+// Reuse diffs while the underlying edit objects are the same.
+const combinedCache = new WeakMap<
+  ToolInvocation,
+  {
+    edits: ToolInvocation[]
+    value: CombinedFileDiff
+  }
+>()
 function combinedOf(change: SessionFileChange): CombinedFileDiff {
   const last = change.edits[change.edits.length - 1].invocation
   const hit = combinedCache.get(last)
-  if (hit && hit.count === change.edits.length) return hit.value
+  if (
+    hit &&
+    hit.edits.length === change.edits.length &&
+    hit.edits.every((edit, i) => edit === change.edits[i].invocation)
+  )
+    return hit.value
   const value = combinedFileDiff(change)
-  combinedCache.set(last, { count: change.edits.length, value })
+  combinedCache.set(last, { edits: change.edits.map((edit) => edit.invocation), value })
   return value
 }
 
@@ -297,11 +310,44 @@ function FileSection({
     setWasFocused(focused)
     if (focused) setOpen(true)
   }
-  const combined = combinedOf(change)
+  const { readToolDetail } = useChatView()
+  // The timeline can append while the panel stays open. Keep an in-flight
+  // read for the same edit objects even when the list is rebuilt.
+  const [previousChange, setPreviousChange] = useState(change)
+  const sameEdits =
+    previousChange.path === change.path &&
+    previousChange.edits.length === change.edits.length &&
+    previousChange.edits.every((edit, i) => edit.invocation === change.edits[i].invocation)
+  const source = sameEdits ? previousChange : change
+  if (!sameEdits) setPreviousChange(change)
+
+  const deferred = source.edits.some((edit) => needsFileDetail(edit.invocation))
+  const [attempt, retry] = useState(0)
+  const [detail, setDetail] = useState<{
+    source: SessionFileChange
+    attempt: number
+    change: SessionFileChange | null
+  } | null>(null)
+  const current = detail?.source === source && detail.attempt === attempt ? detail : null
+  useEffect(() => {
+    if (!open || !deferred || !readToolDetail || current) return
+    const read = new AbortController()
+    const finish = (change: SessionFileChange | null) => {
+      if (!read.signal.aborted) setDetail({ source, attempt, change })
+    }
+    void loadFileChange(source, readToolDetail, read.signal).then(finish, () => finish(null))
+    return () => read.abort()
+  }, [open, deferred, readToolDetail, current, source, attempt])
+  const resolved = deferred ? current?.change : source
+  const combined = resolved ? combinedOf(resolved) : null
+  const previewCounts =
+    deferred && source.edits.length === 1
+      ? fileChangesOf(source.edits[0].invocation).find((file) => file.path === source.path)
+      : undefined
   const counts =
-    combined.mode === 'combined'
+    combined?.mode === 'combined'
       ? { additions: combined.diff.additions, deletions: combined.diff.deletions }
-      : { additions: null, deletions: null }
+      : (previewCounts ?? { additions: null, deletions: null })
   const edits = change.edits.length
   return (
     <section
@@ -334,7 +380,22 @@ function FileSection({
         <div className="flex-1" />
         <FileLink path={change.path} label="Open" />
       </div>
-      {open && <FileBody combined={combined} />}
+      {open &&
+        (combined ? (
+          <FileBody combined={combined} />
+        ) : current?.change === null || !readToolDetail ? (
+          <button
+            type="button"
+            className="px-3 pb-2 text-xs underline"
+            onClick={() => retry((n) => n + 1)}
+          >
+            Retry loading diff
+          </button>
+        ) : (
+          <p role="status" className="px-3 pb-2 text-xs text-muted-foreground">
+            Loading diff…
+          </p>
+        ))}
     </section>
   )
 }

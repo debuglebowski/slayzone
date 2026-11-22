@@ -1,5 +1,9 @@
 import { createContext, useContext } from 'react'
 import type { AgentMode } from '@slayzone/ui'
+import type {
+  ChatTextDetailReader,
+  ChatToolDetailReader
+} from '@slayzone/terminal/chat-tool-details'
 import type { ChatPrompt, TimelineRows } from '@slayzone/terminal/client'
 import {
   chatProviderForMode,
@@ -13,6 +17,8 @@ import type { DiffLineComment } from './diff-comments/format'
 import type { HistoryGap } from './HistoryGapRow'
 
 export interface ChatViewState {
+  readToolDetail?: ChatToolDetailReader
+  readTextDetail?: ChatTextDetailReader
   /**
    * Monotonic counter. When it increments, all expandable items should reset to collapsed.
    * Items close when it CHANGES (state adjusted during render), never on mount —

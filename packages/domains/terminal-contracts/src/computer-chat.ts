@@ -219,6 +219,8 @@ export interface ChatAvailability {
    */
   reason?: string
   waitingForAgents?: boolean
+  /** A known computer boot or chat reconciliation is still in progress. */
+  historyWaiting?: true
   /** Socket survived a hub freeze; liveness is being confirmed, not known offline. */
   recovering?: boolean
   /**

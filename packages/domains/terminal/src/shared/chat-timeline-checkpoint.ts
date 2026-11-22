@@ -11,7 +11,7 @@
  * hashes {@link REDUCER_SOURCES}: changing them fails it until the version is
  * bumped.
  */
-import type { ChatTimelineState } from './chat-timeline'
+import type { ChatTimelineState, TimelineItem } from './chat-timeline'
 import { PersistentIndex } from './persistent-index'
 import { beginReducerCall, endReducerCall } from './replay-batch'
 
@@ -21,7 +21,7 @@ import { beginReducerCall, endReducerCall } from './replay-batch'
  * 19 = rows carry out-of-line references (`chat-blobs`), so pages built before the
  * v13 chat store (inline base64) are rebuilt from the events on next open.
  */
-export const CHAT_TIMELINE_VERSION = '24'
+export const CHAT_TIMELINE_VERSION = '25'
 
 /**
  * Bump when what the hub persists or serves next to the state changes shape
@@ -59,7 +59,11 @@ interface Encoded {
 }
 
 /** `state` as text, without its rows before `tailFrom`. */
-export function encodeTimelineState(state: ChatTimelineState, tailFrom: number): string {
+export function encodeTimelineState(
+  state: ChatTimelineState,
+  tailFrom: number,
+  mapWireRow?: (row: TimelineItem, index: number) => TimelineItem
+): string {
   if (state.stalled) throw new Error('a stalled timeline state is not a checkpoint')
   const { timeline, stalled: _stalled, ...rest } = state
   const from = Math.max(0, Math.min(tailFrom, timeline.length))
@@ -71,7 +75,7 @@ export function encodeTimelineState(state: ChatTimelineState, tailFrom: number):
     v: CHAT_TIMELINE_VERSION,
     rowCount: timeline.length,
     tailFrom: from,
-    tail,
+    tail: mapWireRow ? (tail as TimelineItem[]).map((row, i) => mapWireRow(row, from + i)) : tail,
     state: rest
   }
   return JSON.stringify(encoded, (_key, value: unknown) => {

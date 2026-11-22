@@ -14,6 +14,8 @@
  *     — the cap keeps one silent agent from serialising everything behind it;
  *   - `foreground` (the tab the user is looking at) goes before `background`,
  *     each FIFO; a queued start can be promoted when its tab is revealed;
+ *   - startup history reads defer new background and warm starts, with a
+ *     periodic admission so slow history cannot stall their queues;
  *   - `warm` (the pre-boot pool) only starts when no agent start is queued or in
  *     flight and none has been for {@link DEFAULT_WARM_QUIET_MS}, one at a time —
  *     the pool is a speed-up for the NEXT task, never a competitor of this one.
@@ -56,6 +58,8 @@ export interface SpawnAdmission {
   prioritize(ticket: AdmissionTicket): boolean
   /** Is this ticket still waiting? */
   isQueued(ticket: AdmissionTicket): boolean
+  /** Defer lower-priority starts until this read finishes. Returns an idempotent release. */
+  holdHistoryRead(): () => void
   stats(): { queued: number; active: number; concurrency: number }
 }
 
@@ -114,6 +118,10 @@ interface ActiveSlot {
 }
 
 const LANE_RANK: Record<AdmissionLane, number> = { foreground: 0, background: 1, warm: 2 }
+/** Bridge the gap between hydrate and the following history request. */
+const HISTORY_QUIET_MS = 150
+/** During sustained history work, admit at most one lower-priority start per interval. */
+const HISTORY_START_INTERVAL_MS = 2_000
 
 export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdmission {
   const concurrency = Math.max(1, opts.concurrency ?? defaultAdmissionConcurrency())
@@ -143,7 +151,10 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
   let promotions = 0
   /** Last time an agent start was queued or finished starting; gates the warm lane. */
   let lastAgentActivity = Number.NEGATIVE_INFINITY
-  let warmRetry: unknown = null
+  let historyReads = 0
+  let historyQuietUntil = Number.NEGATIVE_INFINITY
+  let nextStartDuringHistory = Number.NEGATIVE_INFINITY
+  let retry: unknown = null
   let pumping = false
   let pumpAgain = false
 
@@ -162,20 +173,24 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
         best = t
       }
     }
-    if (!best || best.lane !== 'warm') return best
-    // Only warm starts are left. They wait for the agent starts to be over.
-    if (activeAgents() > 0 || activeWarm() > 0) return null
-    const quietLeft = lastAgentActivity + warmQuietMs - now()
-    if (quietLeft > 0) {
-      if (warmRetry === null) {
-        warmRetry = setTimer(() => {
-          warmRetry = null
-          pump()
-        }, quietLeft)
-      }
-      return null
-    }
-    return best
+    if (!best || best.lane === 'foreground') return best
+    if (best.lane === 'warm' && (activeAgents() > 0 || activeWarm() > 0)) return null
+    const historyReadyAt =
+      historyReads > 0
+        ? nextStartDuringHistory
+        : Math.min(historyQuietUntil, nextStartDuringHistory)
+    const readyAt =
+      best.lane === 'warm'
+        ? Math.max(historyReadyAt, lastAgentActivity + warmQuietMs)
+        : historyReadyAt
+    const waitMs = readyAt - now()
+    if (waitMs <= 0) return best
+    if (retry !== null) clearTimer(retry)
+    retry = setTimer(() => {
+      retry = null
+      pump()
+    }, waitMs)
+    return null
   }
 
   function admit(ticket: Ticket): void {
@@ -183,6 +198,8 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
     const warm = ticket.lane === 'warm'
     const held: ActiveSlot = { warm, released: false, cap: null }
     const admittedAt = now()
+    if ((historyReads > 0 || admittedAt < historyQuietUntil) && ticket.lane !== 'foreground')
+      nextStartDuringHistory = admittedAt + HISTORY_START_INTERVAL_MS
     const release = (by: 'agent' | 'cap' = 'agent'): void => {
       if (held.released) return
       held.released = true
@@ -251,6 +268,21 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
     },
     isQueued(ticket) {
       return queue.includes(ticket as Ticket)
+    },
+    holdHistoryRead() {
+      const startedAt = now()
+      if (historyReads === 0 && startedAt >= historyQuietUntil)
+        nextStartDuringHistory = startedAt + HISTORY_START_INTERVAL_MS
+      historyReads++
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        if (--historyReads === 0) {
+          historyQuietUntil = now() + HISTORY_QUIET_MS
+          pump()
+        }
+      }
     },
     stats() {
       return { queued: queue.length, active: active.size, concurrency }

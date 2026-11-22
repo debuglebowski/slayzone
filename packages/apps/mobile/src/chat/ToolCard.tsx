@@ -9,6 +9,7 @@
  * all" opens the whole of it on its own screen, selectable, with Copy. Opened or closed,
  * a card stays so when the list draws its row again (`useExpanded`).
  */
+import { useToolDetail } from '@slayzone/terminal/chat-tool-details'
 import type { ChatPrompt } from '@slayzone/terminal/chat-prompts'
 import type { ToolInvocation } from '@slayzone/terminal/reducer'
 import { useQuery } from '@tanstack/react-query'
@@ -36,10 +37,11 @@ export const ToolCard = memo(function ToolCard({
   streaming?: boolean
 }) {
   const { s, theme } = useThemedStyles(makeStyles)
-  const { prompts, agentName = 'Claude' } = useChatView()
+  const { prompts, readToolDetail, agentName = 'Claude' } = useChatView()
   const prompt = latestPromptFor(prompts, invocation.id)
   const special = invocation.name === 'AskUserQuestion' || invocation.name === 'ExitPlanMode'
   const [open, toggle] = useExpanded(`tool:${invocation.id}`, special)
+  const detail = useToolDetail(invocation, readToolDetail, open)
   const { title, summary } = toolSummary(invocation)
   const waiting = prompt?.status === 'pending'
 
@@ -64,12 +66,20 @@ export const ToolCard = memo(function ToolCard({
       {waiting && <Text style={s.waiting}>Waiting for your answer</Text>}
       {open && (
         <View style={s.body}>
+          {detail.loading && <ActivityIndicator accessibilityLabel="Loading full result" />}
+          {detail.failed && (
+            <Pressable accessibilityRole="button" onPress={detail.retry}>
+              <Text style={s.showAllText}>Retry loading full result</Text>
+            </Pressable>
+          )}
           {invocation.name === 'AskUserQuestion' ? (
             <Questions invocation={invocation} prompt={prompt} agentName={agentName} s={s} />
           ) : invocation.name === 'ExitPlanMode' ? (
             <Plan invocation={invocation} prompt={prompt} agentName={agentName} s={s} />
-          ) : (
-            <Body invocation={invocation} title={title} s={s} />
+          ) : detail.invocation.toolDetail &&
+            (detail.invocation.toolPreview?.files ||
+              detail.invocation.toolPreview?.input) ? null : (
+            <Body invocation={detail.invocation} title={title} s={s} full={detail.loaded} />
           )}
         </View>
       )}
@@ -99,11 +109,21 @@ function StatusGlyph({
   return <Text style={[s.glyph, s.ok]}>✓</Text>
 }
 
-function Body({ invocation, title, s }: { invocation: ToolInvocation; title: string; s: Styles }) {
+function Body({
+  invocation,
+  title,
+  s,
+  full
+}: {
+  invocation: ToolInvocation
+  title: string
+  s: Styles
+  full: boolean
+}) {
   const [all, setAll] = useState(false)
   const running = invocation.task?.status === 'running'
   const live = useCommandOutput(invocation.task?.taskId, running)
-  let body: ToolBody = toolBody(invocation)
+  let body: ToolBody = toolBody(invocation, full)
   if (running && live && (live.state === 'running' || live.state === 'ended')) {
     const cmd = (invocation.input as { command?: string } | null)?.command ?? ''
     body = { type: 'text', text: `$ ${cmd}\n${live.output}` }

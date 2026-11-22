@@ -5,9 +5,12 @@ import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { build } from 'esbuild'
+import { toolPreviewVersion, type ChatRowDetailRef } from '@slayzone/terminal-contracts'
+import { decodeTimelineState } from '@slayzone/terminal/timeline-checkpoint'
 import { TIMELINE_PROJECTION_VERSION } from '@slayzone/terminal/timeline-projection'
 import { createChatRuntimeHandlers } from './chat-runtime'
 import { createFixtureChatRuntime, projectScopedDeps } from '../project-scope.fixture'
+import { createSpawnAdmission } from '../spawn-admission'
 const dirs: string[] = [],
   handles: Array<ReturnType<typeof createChatRuntimeHandlers>> = []
 afterEach(async () => {
@@ -115,6 +118,37 @@ test('computer endpoints persist drafts and reject foreign tab commands', async 
       }
     })
   ).toMatchObject({ draft: { text: 'local only' } })
+})
+
+test('relayed and direct history reads hold spawn admission after ownership validation', async () => {
+  const release = vi.fn()
+  const holdHistoryRead = vi.fn(() => release)
+  const { h } = setup({ admission: { ...createSpawnAdmission(), holdHistoryRead } })
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  const invoke = (method: string, args: unknown[], operationId?: string) =>
+    h.request({
+      kind: 'invoke',
+      value: { route: { id: 'store', epoch: 1 }, target: 'ops', method, args, operationId }
+    })
+  const version = TIMELINE_PROJECTION_VERSION
+
+  await invoke('getInfo', ['tab'])
+  await expect(invoke('openTimeline', ['foreign', version])).rejects.toThrow(/ownership/)
+  await expect(h.direct.read('tab', 2, 'openTimeline', ['tab', version])).rejects.toThrow(/epoch/)
+  expect(holdHistoryRead).not.toHaveBeenCalled()
+
+  const context = { taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: bootstrap.cwd }
+  await invoke('hydrate', [context], 'hydrate')
+  expect(holdHistoryRead).toHaveBeenCalledTimes(1)
+  expect(release).toHaveBeenCalledTimes(1)
+
+  await invoke('hydrate', [context], 'hydrate')
+  expect(holdHistoryRead).toHaveBeenCalledTimes(1)
+
+  await invoke('openTimeline', ['tab', version])
+  await h.direct.read('tab', 1, 'getReplay', ['tab', -1])
+  expect(holdHistoryRead).toHaveBeenCalledTimes(3)
+  expect(release).toHaveBeenCalledTimes(3)
 })
 
 test('diagnostic policy accepts only explicit booleans', async () => {
@@ -533,6 +567,29 @@ test('computer handler uses the bundled projection worker and survives its start
     const { h } = setup()
     try {
       await h.request({ kind: 'bootstrap', value: bootstrap })
+      const rawContent = 'complete stored output '.repeat(600)
+      const thinking = 'Historical reasoning for the file read'
+      vi.stubEnv('PLAYWRIGHT', '1')
+      try {
+        await h.request({
+          kind: 'test.seedEvents',
+          route: { id: 'store', epoch: 1 },
+          fromSeq: 0,
+          events: [
+            { kind: 'tool-call', id: 'tool', name: 'Read', input: { file_path: '/sample' } },
+            {
+              kind: 'tool-result',
+              toolUseId: 'tool',
+              rawContent,
+              structured: null,
+              isError: false
+            },
+            { kind: 'assistant-thinking', messageId: 'thought', text: thinking, hasSignature: true }
+          ]
+        })
+      } finally {
+        vi.unstubAllEnvs()
+      }
       await h.request({
         kind: 'invoke',
         value: {
@@ -543,17 +600,55 @@ test('computer handler uses the bundled projection worker and survives its start
           args: [{ taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: bootstrap.cwd }]
         }
       })
-      expect(
-        await h.request({
-          kind: 'invoke',
-          value: {
-            route: { id: 'store', epoch: 1 },
-            target: 'ops',
-            method: 'openTimeline',
-            args: ['tab', TIMELINE_PROJECTION_VERSION]
-          }
+      const opened = (await h.request({
+        kind: 'invoke',
+        value: {
+          route: { id: 'store', epoch: 1 },
+          target: 'ops',
+          method: 'openTimeline',
+          args: ['tab', toolPreviewVersion(TIMELINE_PROJECTION_VERSION, { hideThinking: true })]
+        }
+      })) as { kind: string; snapshot?: { state: string; toolPreviews: boolean } }
+      expect(opened.kind).toBe(expectedKind)
+      if (expectedKind === 'paged') {
+        expect(opened.snapshot?.toolPreviews).toBe(true)
+        const [row, thought] = decodeTimelineState(opened.snapshot!.state).timeline
+        if (row?.kind !== 'tool') throw new Error('Expected a tool row')
+        expect(row.invocation.result?.rawContent).not.toBe(rawContent)
+        const ref = row.invocation.toolDetail
+        if (!ref) throw new Error('Expected a tool preview')
+        const read = (tabId: string, detail: ChatRowDetailRef) =>
+          h.request({
+            kind: 'invoke',
+            value: {
+              route: { id: 'store', epoch: 1 },
+              target: 'ops',
+              method: 'toolDetail',
+              args: [tabId, detail, 0]
+            }
+          })
+        expect(await read('tab', ref)).toMatchObject({ data: expect.stringContaining(rawContent) })
+        await expect(read('tab', { ...ref, instance: 'previous-open' })).resolves.toBeNull()
+        await expect(read('another-tab', ref)).rejects.toThrow(/ownership/i)
+        if (thought?.kind !== 'thinking' || !thought.textDetail)
+          throw new Error('Expected a thinking stub')
+        expect(thought.text).toBe('')
+        expect(await read('tab', thought.textDetail)).toMatchObject({
+          data: JSON.stringify(thinking)
         })
-      ).toMatchObject({ kind: expectedKind })
+        await expect(read('another-tab', thought.textDetail)).rejects.toThrow(/ownership/i)
+        await expect(
+          h.request({
+            kind: 'invoke',
+            value: {
+              route: { id: 'store', epoch: 1 },
+              target: 'ops',
+              method: 'searchTimeline',
+              args: ['tab', '/SAMPLE', false]
+            }
+          })
+        ).resolves.toEqual({ pages: [], toolUseIds: ['tool'] })
+      }
       await h.request({
         kind: 'invoke',
         value: {

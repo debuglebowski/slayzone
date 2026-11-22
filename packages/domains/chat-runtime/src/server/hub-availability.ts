@@ -34,6 +34,7 @@ export function createChatAvailability(opts: {
   resolveComputer(taskId: string): Promise<string | null>
   connected(computerId: string): boolean
   recovering?(computerId: string): boolean
+  historyRecovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
   /** The conversation's history generation (see {@link chatHistoryGeneration}). */
   historyGeneration?(computerId: string, conversationId: string, epoch: number): string
@@ -102,16 +103,21 @@ export function createChatAvailability(opts: {
       }
     }
     if (opts.chatRuntimeReady?.(computer.id) === false) return { state: 'upgrading', computer }
-    if (!owner) return { state: 'preparing', computer }
+    const computerId = computer.id
+    const waiting = () =>
+      opts.historyRecovering?.(computerId) ? { historyWaiting: true as const } : {}
+    if (!owner) return { state: 'preparing', computer, ...waiting() }
     const missing = await opts.ownership.unavailable(owner.id)
     if (missing) return unavailable(computer, missing.reason)
-    if (await opts.ownership.bootstrapReservation(owner.id)) return { state: 'preparing', computer }
+    if (await opts.ownership.bootstrapReservation(owner.id))
+      return { state: 'preparing', computer, ...waiting() }
     if (owner.state !== 'active' || owner.cleanupPending)
       return { state: 'migrating', computer, waitingForAgents: await opts.hasLiveTask(tab.task_id) }
     const generation = opts.historyGeneration?.(computer.id, owner.id, owner.epoch)
     return {
       state: 'ready',
       computer,
+      ...waiting(),
       ...(generation ? { recoveryGeneration: generation } : {})
     }
   }

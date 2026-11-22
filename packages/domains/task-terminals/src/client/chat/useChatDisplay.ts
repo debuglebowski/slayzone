@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react'
 import { toast, safeClipboardWriteText, useStableCallback } from '@slayzone/ui'
-import type { ChatScrollAnchor } from '@slayzone/terminal-contracts'
+import type { ChatTextDetailReader } from '@slayzone/terminal/chat-tool-details'
+import type { ChatScrollAnchor, ChatToolSearchResult } from '@slayzone/terminal-contracts'
 import {
-  streamKeyOf,
+  selectFoldedIndexes,
   type ChatPaging,
   type TimelineItem,
   type TimelinePageSummary,
@@ -13,7 +14,7 @@ import { historySummary } from './history-summary'
 import type { RevealTimelineItem } from './timeline-reveal'
 import { useChatSearch } from './useChatSearch'
 import { itemKeyOf } from './timeline-item-key'
-import { isRenderable } from './renderers'
+import { isRenderable, stableAnchorKey } from '@slayzone/terminal/chat-presentation'
 import { useVirtualTimeline } from './useVirtualTimeline'
 import type { TimelineFollow } from './virtual-timeline'
 import type { FollowBottomApi } from './useFollowBottom'
@@ -32,13 +33,14 @@ export interface UseChatDisplayOpts {
   errorsOnly?: boolean
   showThinking?: boolean
   searchThinking?: boolean
+  readTextDetail?: ChatTextDetailReader
   /** The timeline's follow-bottom lock (`useFollowBottom`). */
   follow: TimelineFollow & Pick<FollowBottomApi, 'restoreAnchor'>
   /** Paged history (`useChatSession`): page summaries, and loading pages. */
   paging?: ChatPaging | null
   loadPages?: (pages: readonly number[]) => void
   /** Pages that may hold a search query (loaded, so the search sees their rows). */
-  searchPages?: (query: string) => Promise<number[]>
+  searchPages?: (query: string, caseSensitive?: boolean) => Promise<number[] | ChatToolSearchResult>
   /** The whole history's summary (`historySummary`), when the caller has it already. */
   summary?: TimelinePageSummary
   /** Drop pages' rows from memory (paged history: what is far from the view). */
@@ -81,39 +83,6 @@ export function knownBranches(
     }
   }
   return out
-}
-
-/**
- * A row's key that is the same after a reload (from ids the events carry), for
- * scroll anchors (`data-anchor-key`). Null for rows only known by position.
- */
-export function stableAnchorKey(item: TimelineItem): string | null {
-  switch (item.kind) {
-    case 'user-text':
-      return item.id ? `user:${item.id}` : null
-    case 'text':
-    case 'thinking':
-    case 'tool':
-      // The streaming key (`text:<messageId>:<n>`, `tool:<id>`) is the same live
-      // and on replay; rows from before streaming have no block ordinal.
-      return (
-        streamKeyOf(item) ??
-        `${item.kind}:${item.kind === 'tool' ? item.invocation.id : item.messageId}`
-      )
-    case 'hook':
-      return item.hookId ? `hook:${item.hookId}` : null
-    case 'codex-plan':
-      return `codex-plan:${item.planId}`
-    case 'sub-agent':
-      return `sub-agent:${item.toolUseId}`
-    case 'notice':
-      return item.id ? `notice:${item.id}` : null
-    case 'files-changed':
-    case 'workspace-changes':
-      return item.id
-    default:
-      return null
-  }
 }
 
 /**
@@ -161,6 +130,7 @@ export function useChatDisplay({
   errorsOnly = false,
   showThinking,
   searchThinking = true,
+  readTextDetail,
   follow,
   paging,
   loadPages,
@@ -179,14 +149,10 @@ export function useChatDisplay({
   // Folds: what a rewind / fork / switch left the conversation without stays in
   // the timeline, hidden behind its `conversation-branch` divider until opened.
   const [openBranches, setOpenBranches] = useState<ReadonlySet<string>>(() => new Set())
-  const folded = useMemo<ReadonlySet<number>>(() => {
-    const out = new Set<number>()
-    for (const it of knownBranches(timeline, paging)) {
-      if (openBranches.has(it.id)) continue
-      for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) out.add(i)
-    }
-    return out
-  }, [timeline, openBranches, paging])
+  const folded = useMemo(
+    () => selectFoldedIndexes(knownBranches(timeline, paging), openBranches),
+    [timeline, openBranches, paging]
+  )
 
   // Rows not loaded here (paged history) show as one placeholder per run of
   // them, about as tall as the rows they stand for.
@@ -405,17 +371,42 @@ export function useChatDisplay({
   })
   // Paged history: the pages that may hold the query load, so the search
   // counts and reaches matches in the whole history, not just what is loaded.
-  const searchQuery = search.query
+  const { query: searchQuery, caseSensitive, setToolMatches } = search
   useEffect(() => {
     if (!paging || !loadPages || !searchPages || !searchQuery) return
+    let stale = false
     const timer = setTimeout(() => {
-      void searchPages(searchQuery).then((pages) => {
-        pinPages('search', pages)
-        loadPages(pages)
-      })
+      void searchPages(searchQuery, paging.toolPreviews ? caseSensitive : undefined).then(
+        (result) => {
+          if (stale) return
+          const pages = Array.isArray(result) ? result : result.pages
+          setToolMatches(
+            Array.isArray(result)
+              ? null
+              : {
+                  query: searchQuery,
+                  caseSensitive,
+                  ids: new Set(result.toolUseIds),
+                  ...(result.textMatches
+                    ? {
+                        textMatches: {
+                          epoch: result.textMatches.epoch,
+                          rows: new Set(result.textMatches.rows)
+                        }
+                      }
+                    : {})
+                }
+          )
+          pinPages('search', pages)
+          loadPages(pages)
+        }
+      )
     }, SEARCH_PAGES_DELAY_MS)
-    return () => clearTimeout(timer)
-  }, [searchQuery, paging, loadPages, searchPages, pinPages])
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
+  }, [searchQuery, caseSensitive, paging, loadPages, searchPages, pinPages, setToolMatches])
   useEffect(() => {
     if (!searchQuery) pinPages('search', null)
   }, [searchQuery, pinPages])
@@ -474,7 +465,25 @@ export function useChatDisplay({
     virtual.revealIndex(search.activeItemIdx, { align: 'center' })
   }, [search.activeItemIdx, virtual])
 
-  const copyNow = useCallback(() => {
+  const copyController = useRef<AbortController | null>(null)
+  useEffect(() => () => copyController.current?.abort(), [])
+  const copyNow = useCallback(async () => {
+    copyController.current?.abort()
+    const controller = new AbortController()
+    copyController.current = controller
+    const loadedText = new Map<TimelineItem, string>()
+    for (const item of baseTimeline) {
+      if ((item.kind !== 'thinking' && item.kind !== 'text') || !item.textDetail) continue
+      const value = readTextDetail
+        ? await readTextDetail(item.textDetail, controller.signal).catch(() => null)
+        : null
+      if (value === null) {
+        if (!controller.signal.aborted) toast.error('Could not load the whole conversation')
+        return
+      }
+      loadedText.set(item, value)
+    }
+    if (controller.signal.aborted) return
     const text = baseTimeline
       .map((it) => {
         switch (it.kind) {
@@ -486,11 +495,11 @@ export function useChatDisplay({
               .join('\n')
           }
           case 'text':
-            return it.text
+            return loadedText.get(it) ?? it.text
           case 'codex-plan':
             return it.text
           case 'thinking':
-            return `[thinking] ${it.text}`
+            return `[thinking] ${loadedText.get(it) ?? it.text}`
           case 'result':
             return it.text ?? ''
           case 'tool':
@@ -503,13 +512,13 @@ export function useChatDisplay({
       .join('\n\n')
     void safeClipboardWriteText(text)
     toast('Conversation copied')
-  }, [baseTimeline])
+  }, [baseTimeline, readTextDetail])
   // Paged history: the whole conversation loads first (held while it does).
   const hasUnloaded = useMemo(() => timeline.some((row) => row === undefined), [timeline])
   const copyPendingRef = useRef(false)
   const copyAllMessages = useStableCallback((): void => {
     if (!paging || !loadPages || !hasUnloaded) {
-      copyNow()
+      void copyNow()
       return
     }
     const all = Array.from({ length: paging.sealed }, (_, p) => p)
@@ -522,20 +531,28 @@ export function useChatDisplay({
     if (!copyPendingRef.current || hasUnloaded) return
     copyPendingRef.current = false
     pinPages('copy-all', null)
-    copyNow()
+    void copyNow()
   }, [hasUnloaded, pinPages, copyNow])
 
-  const copyLastResponse = useCallback(() => {
+  const copyLastResponse = useCallback(async () => {
     const last = [...displayedTimeline]
       .reverse()
       .find((it) => it.kind === 'text' || it.kind === 'codex-plan')
     if (last && (last.kind === 'text' || last.kind === 'codex-plan')) {
-      void safeClipboardWriteText(last.text)
+      const text =
+        last.kind === 'text' && last.textDetail
+          ? await readTextDetail?.(last.textDetail, new AbortController().signal).catch(() => null)
+          : last.text
+      if (text == null) {
+        toast.error('Could not load the last response')
+        return
+      }
+      void safeClipboardWriteText(text)
       toast('Last response copied')
     } else {
       toast('No response to copy')
     }
-  }, [displayedTimeline])
+  }, [displayedTimeline, readTextDetail])
 
   // (Stable per timeline: rows' `data-row`.)
   const rowOfItem = useCallback((item: TimelineItem) => rowOf.get(item), [rowOf])
@@ -549,13 +566,10 @@ export function useChatDisplay({
   const summary = ownSummary
   // What the conversation no longer holds — every fold, opened in the UI or not
   // (what edit / rewind / fork and the files count go by).
-  const conversationFolded = useMemo<ReadonlySet<number>>(() => {
-    const out = new Set<number>()
-    for (const b of summary.branches) {
-      for (let i = b.item.hiddenFrom; i < b.item.hiddenFrom + b.item.hiddenCount; i++) out.add(i)
-    }
-    return out
-  }, [summary])
+  const conversationFolded = useMemo(
+    () => selectFoldedIndexes(summary.branches.map((branch) => branch.item)),
+    [summary]
+  )
 
   // Reveal a row by its key — not here (paged history): its page (`row`) loads,
   // then it is revealed.

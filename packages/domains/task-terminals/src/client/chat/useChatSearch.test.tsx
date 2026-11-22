@@ -129,3 +129,65 @@ describe('useChatSearch — a block folded into its tool card', () => {
     expect(result.current.matchCount).toBe(1)
   })
 })
+
+it('counts a server-confirmed match beyond the input preview and clears it on a case change', () => {
+  const items: TimelineItem[] = [
+    {
+      kind: 'tool',
+      timestamp: 0,
+      invocation: {
+        id: 'write',
+        name: 'Write',
+        input: { content: 'unrelated prefix…' },
+        status: 'done',
+        toolPreview: { input: true }
+      }
+    }
+  ]
+  const { result } = renderHook(() => useChatSearch(items))
+  act(() => result.current.setQuery('hidden'))
+  expect(result.current.matchCount).toBe(0)
+  act(() =>
+    result.current.setToolMatches({
+      query: 'hidden',
+      caseSensitive: false,
+      ids: new Set(['write'])
+    })
+  )
+  expect(result.current.matchCount).toBe(1)
+  expect(result.current.activeItemIdx).toBe(0)
+  act(() => result.current.setCaseSensitive(true))
+  expect(result.current.matchCount).toBe(0)
+})
+
+it('accepts a deferred thinking match only for the matching row epoch and query', () => {
+  const items: TimelineItem[] = [
+    {
+      kind: 'thinking',
+      messageId: 'think',
+      text: '',
+      hasSignature: false,
+      timestamp: 0,
+      textDetail: { kind: 'thinking', instance: 't', epoch: 2, row: 11, messageId: 'think' }
+    }
+  ]
+  const { result } = renderHook(() => useChatSearch(items))
+  act(() => result.current.setQuery('needle'))
+  const matches = {
+    query: 'needle',
+    caseSensitive: false,
+    ids: new Set<string>(),
+    textMatches: { epoch: 1, rows: new Set([11]) }
+  }
+  act(() => result.current.setToolMatches(matches))
+  expect(result.current.matchCount).toBe(0)
+  act(() =>
+    result.current.setToolMatches({
+      ...matches,
+      textMatches: { ...matches.textMatches, epoch: 2 }
+    })
+  )
+  expect(result.current.matchCount).toBe(1)
+  act(() => result.current.setQuery('else'))
+  expect(result.current.matchCount).toBe(0)
+})

@@ -1,7 +1,7 @@
+import type { ChatToolDetailReader } from '@slayzone/terminal/chat-tool-details'
 import { applyPatch, type StructuredPatchHunk } from 'diff'
 import type { FileDiff } from '@slayzone/diff-view'
 import {
-  CODEX_FILE_CHANGE_TOOL,
   SHELL_TOOL_NAMES,
   codexChangeContent,
   codexChangeHunks,
@@ -112,6 +112,43 @@ function codexContentOf(
   return { before, after: typeof out === 'string' ? out : null }
 }
 
+export function needsFileDetail(invocation: ToolInvocation): boolean {
+  return !!(
+    invocation.toolDetail &&
+    (invocation.toolPreview?.input || invocation.toolPreview?.files)
+  )
+}
+
+function fileEdit(
+  invocation: ToolInvocation,
+  nested: boolean,
+  previousAfter: string | null,
+  codexChange?: CodexFileChange
+): FileEdit {
+  const base = { invocation, toolUseId: invocation.id, nested }
+  if (needsFileDetail(invocation)) return { ...base, before: null, after: null }
+  return codexChange
+    ? { ...base, ...codexContentOf(codexChange, previousAfter), codexChange }
+    : { ...base, ...contentOf(invocation) }
+}
+
+/** Resolve original edits in order, so Codex hunks can build on earlier content. */
+export async function loadFileChange(
+  change: SessionFileChange,
+  read: ChatToolDetailReader,
+  signal: AbortSignal
+): Promise<SessionFileChange> {
+  const edits: FileEdit[] = []
+  for (const edit of change.edits) {
+    if (signal.aborted) throw new Error('File detail read cancelled')
+    const ref = needsFileDetail(edit.invocation) ? edit.invocation.toolDetail : undefined
+    const invocation = ref ? await read(ref, signal) : edit.invocation
+    const codexChange = codexFileChanges(invocation).find((file) => file.path === change.path)
+    edits.push(fileEdit(invocation, edit.nested, edits.at(-1)?.after ?? null, codexChange))
+  }
+  return { ...change, edits }
+}
+
 /**
  * Every file the agent's file tools (Edit, Write, MultiEdit, NotebookEdit,
  * Codex file changes) changed in the conversation as it is now: what a rewind,
@@ -127,20 +164,15 @@ export function collectSessionFileChanges(timeline: Readonly<TimelineRows>): Ses
     if (SHELL_TOOL_NAMES.has(it.invocation.name)) shellCommands++
     const changes = fileChangesOf(it.invocation)
     if (changes.length === 0) return
-    const codexChanges =
-      it.invocation.name === CODEX_FILE_CHANGE_TOOL ? codexFileChanges(it.invocation) : null
+    const codexChanges = new Map(codexFileChanges(it.invocation).map((file) => [file.path, file]))
     for (const change of changes) {
       const entry = byPath.get(change.path)
-      const codexChange = codexChanges?.find((c) => c.path === change.path)
-      const previousAfter = entry ? entry.edits[entry.edits.length - 1].after : null
-      const edit: FileEdit = {
-        toolUseId: it.invocation.id,
-        invocation: it.invocation,
-        ...(codexChange
-          ? { ...codexContentOf(codexChange, previousAfter), codexChange }
-          : contentOf(it.invocation)),
-        nested: it.parentToolUseId != null
-      }
+      const edit = fileEdit(
+        it.invocation,
+        it.parentToolUseId != null,
+        entry?.edits.at(-1)?.after ?? null,
+        codexChanges.get(change.path)
+      )
       if (entry) entry.edits.push(edit)
       else byPath.set(change.path, { path: change.path, edits: [edit], created: change.created })
     }

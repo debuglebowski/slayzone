@@ -116,7 +116,7 @@ describe('ChatSync', () => {
     expect(h.state().live).toHaveLength(0)
 
     h.sync.flush()
-    expect(h.actions.filter((a) => a.type === 'events')).toHaveLength(1)
+    expect(h.actions.filter((a) => a.type === 'events' && a.seq === undefined)).toHaveLength(1)
     expect(h.state().live[0]?.text).toBe('Hel')
   })
 
@@ -291,8 +291,15 @@ describe('ChatSync', () => {
     h.sync.completeLoad(h.sync.beginLoad('full'), replay([[0, userMessage('u1', 'hi')]]))
     const ticket = h.sync.beginLoad('full')
     h.sync.completeLoad(ticket, replay([[0, userMessage('u1', 'hi')]]), [
-      { id: 'u1', text: 'hi', failed: null },
-      { id: 'u2', text: 'lost on the way', failed: 'WebSocket closed' }
+      { kind: 'user-text', id: 'u1', text: 'hi', timestamp: 0, optimistic: true },
+      {
+        kind: 'user-text',
+        id: 'u2',
+        text: 'lost on the way',
+        timestamp: 0,
+        delivery: 'failed',
+        deliveryError: 'WebSocket closed'
+      }
     ])
     const users = h
       .state()
