@@ -12,8 +12,19 @@ export const appFloatingAgentRouter = router({
     .input(z.object({ enabled: z.boolean() }))
     .mutation(({ input }) => getAgentPanelsHost().floatingAgent.setEnabled(input.enabled)),
   setSessionId: publicProcedure
-    .input(z.object({ sessionId: z.string().nullable() }))
-    .mutation(({ input }) => getAgentPanelsHost().floatingAgent.setSessionId(input.sessionId)),
+    .input(
+      z.object({
+        sessionId: z.string().nullable(),
+        // What the floating window needs to show the session: its folder, agent
+        // and the hub that owns its project (#183).
+        cwd: z.string().optional(),
+        mode: z.string().optional(),
+        hubId: z.string().nullable().optional()
+      })
+    )
+    .mutation(({ input: { sessionId, ...meta } }) =>
+      getAgentPanelsHost().floatingAgent.setSessionId(sessionId, meta)
+    ),
   setPanelOpen: publicProcedure
     .input(z.object({ isOpen: z.boolean() }))
     .mutation(({ input }) => getAgentPanelsHost().floatingAgent.setPanelOpen(input.isOpen)),

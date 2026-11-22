@@ -12,6 +12,15 @@ vi.mock('@slayzone/terminal/client/LazyTerminal', () => ({
     </div>
   )
 }))
+// The session runs on the hub that owns its project: the terminal is scoped to it.
+vi.mock('@slayzone/transport/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@slayzone/transport/client')>()),
+  HubScope: ({ hubId, children }: { hubId: string; children: React.ReactNode }) => (
+    <div data-testid={`hub-${hubId}`}>{children}</div>
+  ),
+  useHubRegistryStore: (pick: (s: { defaultHubId: string }) => unknown) =>
+    pick({ defaultHubId: 'local' })
+}))
 vi.mock('./FloatingGlobalAgentPanelCollapsed', () => ({
   FloatingGlobalAgentPanelCollapsed: (props: { state: string }) => (
     <div data-testid="collapsed-widget">{props.state}</div>
@@ -32,7 +41,7 @@ async function flush(): Promise<void> {
   })
 }
 
-let session: { sessionId: string; cwd: string; mode: string } | null
+let session: { sessionId: string; cwd: string; mode: string; hubId?: string } | null
 let config: { style: string } | null
 let calls: string[]
 let sessionChanged: Array<(d: unknown) => void>
@@ -116,5 +125,33 @@ describe('FloatingGlobalAgentPanel session + config load', () => {
     })
     await flush()
     expect(screen.getByTestId('collapsed-icon').textContent).toBe('state:s1')
+  })
+})
+
+describe('FloatingGlobalAgentPanel hub', () => {
+  async function expand(): Promise<void> {
+    act(() => {
+      for (const push of [...collapseChanged]) push({ collapsed: false })
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200))
+    })
+  }
+
+  it("another hub's session: the terminal is scoped to that hub (#183)", async () => {
+    session = { sessionId: 's3', cwd: '/home/ci/p', mode: 'claude-code', hubId: 'hub:wss://r' }
+    act(() => {
+      for (const push of [...sessionChanged]) push(undefined)
+    })
+    await flush()
+    await expand()
+    const terminal = screen.getByTestId('terminal')
+    expect(screen.getByTestId('hub-hub:wss://r').contains(terminal)).toBe(true)
+  })
+
+  it('a session without a hub runs on the default hub', async () => {
+    await flush()
+    await expand()
+    expect(screen.getByTestId('hub-local').contains(screen.getByTestId('terminal'))).toBe(true)
   })
 })

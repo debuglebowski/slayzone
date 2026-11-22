@@ -49,7 +49,21 @@ let ctx: Context = { enabled: false, panelOpen: false, sessionId: null, collapse
 
 let mainWindow: BrowserWindow | null = null
 let floatingGlobalAgentPanelWindow: BrowserWindow | null = null
-let currentFloatingSession: { sessionId: string; cwd: string; mode: string } | null = null
+/** What the floating window shows: the detached session and where it runs. */
+interface FloatingSession {
+  sessionId: string
+  cwd: string
+  mode: string
+  /** The hub that owns the session's project; null = the window's default hub. */
+  hubId: string | null
+}
+/** What the renderer last told us about the global agent's session (`setSessionId`). */
+interface SessionMeta {
+  cwd?: string
+  mode?: string
+  hubId?: string | null
+}
+let currentFloatingSession: FloatingSession | null = null
 let currentConfig: FloatingGlobalAgentPanelConfig = DEFAULT_CONFIG
 let registeredAccelerator: string | null = null
 let getShortcutOverrides: () => Record<string, string | null> = () => ({})
@@ -107,18 +121,13 @@ function executeAction(action: Action): void {
 
     case 'redirect-session-to-floating':
       if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
-        const ok = redirectSessionWindow(action.sessionId, floatingGlobalAgentPanelWindow)
-        if (ok) {
-          // Synchronous now: the meta came in with the detach call instead of
-          // from an async settings read.
-          currentFloatingSession = resolveSessionMeta(action.sessionId)
-          if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
-            floatingGlobalAgentPanelWindow.webContents.send(
-              'floating-global-agent-panel:session-changed'
-            ) // legacy IPC (slice 5 drops)
-          }
-          floatingGlobalAgentPanelEvents.emit('session-changed') // tRPC app.floatingAgent.onSessionChanged source
-        }
+        // Only a pty in THIS process has a window to redirect. Agents run on a hub
+        // (the sidecar, or a remote one) and stream to every window subscribed to
+        // them, so the floating window shows the session whether or not this finds
+        // it — gating on it left the window empty once ptys left this process.
+        redirectSessionWindow(action.sessionId, floatingGlobalAgentPanelWindow)
+        currentFloatingSession = floatingSessionFor(action.sessionId)
+        announceFloatingSession()
       }
       return
 
@@ -246,19 +255,28 @@ function broadcastState(): void {
   floatingGlobalAgentPanelEvents.emit('state', payload) // tRPC app.floatingAgent.onState source
 }
 
-/** Set by `detach()` immediately before the FSM dispatch that consumes it. */
-let pendingSessionMeta: { cwd?: string; mode?: string } | null = null
+/**
+ * Pushed by the renderer with every `setSessionId`: it already knows the session's
+ * folder, agent and owning hub — this is not read back out of a database (the
+ * `globalAgentPanelState` row is a pointer INTO hub data, owned by the renderer).
+ * Kept current so an auto-detach on blur has it too, not only a manual detach.
+ */
+let sessionMeta: SessionMeta = {}
 
-function resolveSessionMeta(sessionId: string): {
-  sessionId: string
-  cwd: string
-  mode: string
-} {
+function floatingSessionFor(sessionId: string): FloatingSession {
   return {
     sessionId,
-    cwd: pendingSessionMeta?.cwd ?? '',
-    mode: pendingSessionMeta?.mode ?? 'claude-code'
+    cwd: sessionMeta.cwd ?? '',
+    mode: sessionMeta.mode ?? 'claude-code',
+    hubId: sessionMeta.hubId ?? null
   }
+}
+
+function announceFloatingSession(): void {
+  if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+    floatingGlobalAgentPanelWindow.webContents.send('floating-global-agent-panel:session-changed') // legacy IPC (slice 5 drops)
+  }
+  floatingGlobalAgentPanelEvents.emit('session-changed') // tRPC app.floatingAgent.onSessionChanged source
 }
 
 // --- Anchor Math ---
@@ -462,11 +480,16 @@ export const floatingGlobalAgentPanelOps = {
     dispatch({ kind: 'user-set-enabled', enabled })
     return { kind: state.kind }
   },
-  setSessionId: (sessionId: string | null) => {
+  setSessionId: (sessionId: string | null, meta?: SessionMeta) => {
     const previous = ctx.sessionId
+    if (meta) sessionMeta = meta
     ctx = { ...ctx, sessionId }
     if (previous !== sessionId) {
       dispatch({ kind: 'session-id-changed', sessionId })
+    } else if (meta && currentFloatingSession?.sessionId === sessionId) {
+      // Same session, newer facts (its folder or hub resolved after the detach).
+      currentFloatingSession = floatingSessionFor(sessionId)
+      announceFloatingSession()
     }
     return { kind: state.kind }
   },
@@ -483,15 +506,8 @@ export const floatingGlobalAgentPanelOps = {
     dispatch({ kind: 'user-reset-size' })
     return { kind: state.kind }
   },
-  /**
-   * `meta` carries the session's cwd + mode. It used to be read here from the
-   * `globalAgentPanelState` settings row — but that row is a pointer INTO hub data
-   * (a pty session id and a path on the hub's filesystem), owned and written by the
-   * renderer. The renderer already has both at detach time, so passing them is
-   * strictly less machinery than reading them back out of a database.
-   */
-  detach: (meta?: { cwd?: string; mode?: string }) => {
-    pendingSessionMeta = meta ?? null
+  /** The session's folder, agent and hub come with `setSessionId`. */
+  detach: () => {
     dispatch({ kind: 'user-detach' })
     return currentStatePayload()
   },

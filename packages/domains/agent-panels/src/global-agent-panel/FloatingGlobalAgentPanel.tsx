@@ -3,7 +3,7 @@ import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { useSessionState } from '@slayzone/terminal/client'
 import type { AgentId } from '@slayzone/terminal-contracts'
-import { useSubscription } from '@slayzone/transport/client'
+import { HubScope, useHubRegistryStore, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
 import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPanelCollapsedIcon'
@@ -12,6 +12,8 @@ interface FloatingSession {
   sessionId: string
   cwd: string
   mode: AgentId
+  /** The hub that owns the session's project; none = this window's default hub. */
+  hubId: string | null
 }
 
 // Shapes returned by the floatingAgent.get* queries + onState subscription.
@@ -23,6 +25,7 @@ interface FloatingSessionPayload {
   sessionId: string
   cwd: string
   mode: string
+  hubId?: string | null
 }
 interface FloatingConfigPayload {
   style: string
@@ -35,6 +38,7 @@ interface FloatingStatePayload {
 export function FloatingGlobalAgentPanel() {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const defaultHubId = useHubRegistryStore((s) => s.defaultHubId)
   const [session, setSession] = useState<FloatingSession | null>(null)
   const [collapsed, setCollapsed] = useState(true)
   const [style, setStyle] = useState<'widget' | 'icon'>('widget')
@@ -51,7 +55,12 @@ export function FloatingGlobalAgentPanel() {
       trpcClient.app.floatingAgent.getSession.query().then((rawSession) => {
         const data = rawSession as FloatingSessionPayload | null
         if (data)
-          setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as AgentId })
+          setSession({
+            sessionId: data.sessionId,
+            cwd: data.cwd,
+            mode: data.mode as AgentId,
+            hubId: data.hubId ?? null
+          })
         return trpcClient.app.floatingAgent.getConfig.query().then((rawConfig) => {
           const config = rawConfig as FloatingConfigPayload | null
           if (config) setStyle(config.style as 'widget' | 'icon')
@@ -181,13 +190,17 @@ export function FloatingGlobalAgentPanel() {
         className={`flex-1 min-h-0 transition-opacity duration-200${showTerminal ? ' opacity-100' : ' opacity-0'}`}
       >
         {session && showTerminal ? (
-          <Terminal
-            key={session.sessionId}
-            sessionId={session.sessionId}
-            cwd={session.cwd}
-            mode={session.mode}
-            isActive={true}
-          />
+          // On the hub that owns the session: another hub's project is unknown to
+          // this window's default hub, which would start it on this machine (#183).
+          <HubScope hubId={session.hubId ?? defaultHubId}>
+            <Terminal
+              key={session.sessionId}
+              sessionId={session.sessionId}
+              cwd={session.cwd}
+              mode={session.mode}
+              isActive={true}
+            />
+          </HubScope>
         ) : (
           <div className="h-full bg-black" />
         )}
