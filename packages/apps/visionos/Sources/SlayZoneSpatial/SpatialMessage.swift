@@ -5,6 +5,34 @@ import Foundation
 struct PanelSpec: Codable, Hashable {
     var url: URL
     var title: String
+
+    enum Scene: String {
+        case workspace = "panel"
+        case terminal = "terminal"
+        case details = "details"
+    }
+
+    var scene: Scene {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        guard items?.first(where: { $0.name == "spatial" })?.value == "panel" else {
+            return .workspace
+        }
+        switch items?.first(where: { $0.name == "view" })?.value {
+        case "terminal": return .terminal
+        case "settings": return .details
+        default: return .workspace
+        }
+    }
+
+    // A rename changes the label, not the identity of an open window.
+    private var identity: URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        parts.queryItems = parts.queryItems?.filter { $0.name != "groupName" }
+        return parts.url ?? url
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.identity == rhs.identity }
+    func hash(into hasher: inout Hasher) { hasher.combine(identity) }
 }
 
 /// A message posted by the web renderer through
@@ -24,7 +52,9 @@ enum SpatialMessage: Equatable {
         case "open":
             guard let urlString = dict["url"] as? String,
                   let url = URL(string: urlString),
-                  url.scheme == "http" || url.scheme == "https"
+                  url.scheme == "http" || url.scheme == "https",
+                  url.host != nil,
+                  url.user == nil, url.password == nil
             else { return nil }
             let title = (dict["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "SlayZone"
             self = .open(PanelSpec(url: url, title: title))
@@ -39,7 +69,7 @@ enum SpatialMessage: Equatable {
 /// Where the hub lives and the URL of each entry panel.
 enum HubAddress {
     static let storageKey = "hubURL"
-    static let defaultURL = "http://localhost:3000"
+    static let defaultURL = "http://127.0.0.1:3000"
 
     /// The hub's base URL from user input, or nil if it isn't a usable http(s) URL.
     static func normalized(_ raw: String) -> URL? {
@@ -51,6 +81,14 @@ enum HubAddress {
               url.host != nil
         else { return nil }
         return url
+    }
+
+    static func sameOrigin(_ first: URL, _ second: URL) -> Bool {
+        guard let scheme = first.scheme, let host = first.host,
+              scheme == second.scheme,
+              host.lowercased() == second.host?.lowercased() else { return false }
+        let defaultPort = scheme == "https" ? 443 : 80
+        return (first.port ?? defaultPort) == (second.port ?? defaultPort)
     }
 
     /// The launcher panel (the project list) on that hub.

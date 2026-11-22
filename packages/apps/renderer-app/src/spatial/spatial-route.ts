@@ -1,40 +1,55 @@
-// Spatial (visionOS POC) panel routing.
-//
-// A spatial host opens every panel as its own window, each loading this same
-// bundle with a `?spatial=<panel>` query. The query is the whole contract
-// between the web renderer and the native host: the host never needs to know
-// how a panel renders, only which route to load.
+import type { TaskWindowPanel } from '@slayzone/task/client/TaskDetailPage'
+
+export interface SpatialGroup {
+  id: string
+  name: string
+}
+
+export const spatialTaskPanels = [
+  'terminal',
+  'settings'
+] as const satisfies readonly TaskWindowPanel[]
+export type SpatialTaskPanel = (typeof spatialTaskPanels)[number]
+
+function isSpatialTaskPanel(value: string | null): value is SpatialTaskPanel {
+  return spatialTaskPanels.some((panel) => panel === value)
+}
 
 export type SpatialRoute =
   | { panel: 'launcher' }
-  | { panel: 'board'; projectId: string }
-  | { panel: 'task'; taskId: string }
+  | { panel: 'board'; projectId: string; group?: SpatialGroup }
+  | { panel: 'task'; taskId: string; group?: SpatialGroup }
+  | { panel: 'panel'; taskId: string; view: SpatialTaskPanel; group?: SpatialGroup }
 
-const PANEL_PARAM = 'spatial'
-const PROJECT_PARAM = 'project'
-const TASK_PARAM = 'task'
-
-/** The spatial route in a `location.search` string, or null when the page is not spatial.
- *  A spatial page with an unknown panel or a missing id falls back to the launcher. */
+/** Unknown or incomplete spatial links open the launcher. */
 export function parseSpatialRoute(search: string): SpatialRoute | null {
   const params = new URLSearchParams(search)
-  const panel = params.get(PANEL_PARAM)
+  const panel = params.get('spatial')
   if (panel === null) return null
-  if (panel === 'board') {
-    const projectId = params.get(PROJECT_PARAM)
-    if (projectId) return { panel, projectId }
-  }
-  if (panel === 'task') {
-    const taskId = params.get(TASK_PARAM)
-    if (taskId) return { panel, taskId }
+
+  const id = params.get('group')
+  const name = params.get('groupName')
+  const scope = id && name ? { group: { id, name } } : {}
+  const projectId = params.get('project')
+  const taskId = params.get('task')
+  const view = params.get('view')
+
+  if (panel === 'board' && projectId) return { panel, projectId, ...scope }
+  if (panel === 'task' && taskId) return { panel, taskId, ...scope }
+  if (panel === 'panel' && taskId && isSpatialTaskPanel(view)) {
+    return { panel, taskId, view, ...scope }
   }
   return { panel: 'launcher' }
 }
 
-/** The `?…` search string that loads `route`. */
 export function spatialRouteSearch(route: SpatialRoute): string {
-  const params = new URLSearchParams({ [PANEL_PARAM]: route.panel })
-  if (route.panel === 'board') params.set(PROJECT_PARAM, route.projectId)
-  if (route.panel === 'task') params.set(TASK_PARAM, route.taskId)
+  const params = new URLSearchParams({ spatial: route.panel })
+  if (route.panel === 'board') params.set('project', route.projectId)
+  if (route.panel === 'task' || route.panel === 'panel') params.set('task', route.taskId)
+  if (route.panel === 'panel') params.set('view', route.view)
+  if (route.panel !== 'launcher' && route.group) {
+    params.set('group', route.group.id)
+    params.set('groupName', route.group.name)
+  }
   return `?${params.toString()}`
 }

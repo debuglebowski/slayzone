@@ -15,7 +15,10 @@ import { Suspense, useCallback } from 'react'
 import type { useTasksData } from '@slayzone/tasks/client'
 import type { Task } from '@slayzone/task-contracts'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
-import { TaskDetailDataLoader } from '@slayzone/task/client/TaskDetailDataLoader'
+import {
+  TaskDetailDataLoader,
+  type TaskDetailDataLoaderProps
+} from '@slayzone/task/client/TaskDetailDataLoader'
 import { useTRPCClient } from './trpc'
 import { getDefaultStatus, getStatusByCategory } from '@slayzone/projects-contracts'
 
@@ -33,6 +36,7 @@ interface TaskDetailViewProps {
   compact?: boolean
   /** Zen mode — the canonical page hides its own surplus chrome. */
   zenMode?: boolean
+  windowLayout?: TaskDetailDataLoaderProps['windowLayout']
   /** Clear the fork's open-task selection (back / close the task). */
   onClose: () => void
   /** Open a sibling task (e.g. a blocker / parent link). */
@@ -46,6 +50,7 @@ export function TaskDetailView({
   hasShortcutFocus,
   compact,
   zenMode,
+  windowLayout,
   onClose,
   onNavigateToTask
 }: TaskDetailViewProps): React.JSX.Element {
@@ -87,6 +92,7 @@ export function TaskDetailView({
         hasShortcutFocus={hasShortcutFocus}
         compact={compact}
         zenMode={zenMode}
+        windowLayout={windowLayout}
         onBack={onClose}
         onCloseTab={onClose}
         onTaskUpdated={data.updateTask}

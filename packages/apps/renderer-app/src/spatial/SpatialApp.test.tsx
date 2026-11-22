@@ -41,6 +41,7 @@ import { SpatialApp } from './SpatialApp'
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
   vi.clearAllMocks()
   data.boardStatus = 'success'
 })
@@ -50,7 +51,24 @@ describe('SpatialApp launcher', () => {
     render(<SpatialApp route={{ panel: 'launcher' }} />)
     expect(screen.getByText('Website')).toBeTruthy()
     fireEvent.click(screen.getByText('SlayZone'))
-    expect(bridge.open).toHaveBeenCalledWith({ panel: 'board', projectId: 'p1' }, 'SlayZone')
+    expect(bridge.open).toHaveBeenCalledWith(
+      { panel: 'board', projectId: 'p1', group: { id: 'p1', name: 'SlayZone' } },
+      'SlayZone'
+    )
+  })
+
+  it('reopens a named group from the launcher with the same identity', () => {
+    const launcher = render(<SpatialApp route={{ panel: 'launcher' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'New group for SlayZone' }))
+    fireEvent.change(screen.getByLabelText('Group name'), { target: { value: 'Review' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    const route = bridge.open.mock.calls[0][0]
+    expect(route).toMatchObject({ panel: 'board', projectId: 'p1', group: { name: 'Review' } })
+    launcher.unmount()
+
+    render(<SpatialApp route={{ panel: 'launcher' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(bridge.open).toHaveBeenLastCalledWith(route, 'SlayZone')
   })
 
   it('shows a connecting state until the board loads', () => {
@@ -62,9 +80,10 @@ describe('SpatialApp launcher', () => {
 
 describe('SpatialApp board panel', () => {
   it('renders the project board and opens a clicked task as its own panel', () => {
-    render(<SpatialApp route={{ panel: 'board', projectId: 'p1' }} />)
+    const group = { id: 'g1', name: 'Review' }
+    render(<SpatialApp route={{ panel: 'board', projectId: 'p1', group }} />)
     fireEvent.click(screen.getByText('board:p1'))
-    expect(bridge.open).toHaveBeenCalledWith({ panel: 'task', taskId: 't1' }, 'Fix login')
+    expect(bridge.open).toHaveBeenCalledWith({ panel: 'task', taskId: 't1', group }, 'Fix login')
   })
 
   it('says so when the project no longer exists', () => {

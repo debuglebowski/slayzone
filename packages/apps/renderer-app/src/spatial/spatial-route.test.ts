@@ -31,6 +31,16 @@ describe('parseSpatialRoute', () => {
     expect(parseSpatialRoute('?spatial=task&task=')).toEqual({ panel: 'launcher' })
   })
 
+  it('requires a supported panel and a task for detached windows', () => {
+    expect(parseSpatialRoute('?spatial=panel&task=t1&view=terminal')).toEqual({
+      panel: 'panel',
+      taskId: 't1',
+      view: 'terminal'
+    })
+    expect(parseSpatialRoute('?spatial=panel&task=t1&view=unknown')).toEqual({ panel: 'launcher' })
+    expect(parseSpatialRoute('?spatial=panel&view=settings')).toEqual({ panel: 'launcher' })
+  })
+
   it('falls back to the launcher for an unknown panel', () => {
     expect(parseSpatialRoute('?spatial=hologram')).toEqual({ panel: 'launcher' })
   })
@@ -41,7 +51,15 @@ describe('spatialRouteSearch', () => {
     for (const route of [
       { panel: 'launcher' },
       { panel: 'board', projectId: 'p 1' },
-      { panel: 'task', taskId: 't&1' }
+      { panel: 'task', taskId: 't&1' },
+      { panel: 'board', projectId: 'p1', group: { id: 'g1', name: 'Research & design' } },
+      { panel: 'task', taskId: 't1', group: { id: 'g1', name: 'Research & design' } },
+      {
+        panel: 'panel',
+        taskId: 't1',
+        view: 'settings',
+        group: { id: 'g1', name: 'Research & design' }
+      }
     ] as const) {
       expect(parseSpatialRoute(spatialRouteSearch(route))).toEqual(route)
     }

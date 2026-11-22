@@ -235,6 +235,11 @@ import {
   type UnifiedGitPanelHandle
 } from './task-detail'
 
+export type TaskWindowPanel = 'terminal' | 'settings'
+type TaskWindowLayout =
+  | { only: TaskWindowPanel; hide?: never }
+  | { only?: never; hide: readonly TaskWindowPanel[] }
+
 export interface TaskDetailPageProps {
   taskId: string
   /** Live task object from global state (source of truth). */
@@ -261,6 +266,8 @@ export interface TaskDetailPageProps {
   initialData: TaskDetailData | null
   /** True when this TaskDetailPage is mounted inside a secondary "Open in new window" frame. */
   isSecondaryWindow?: boolean
+  /** Local visibility for a task or panel in the spatial host. */
+  windowLayout?: TaskWindowLayout
   /** When provided, called on every panelVisibility change. Lifts state to parent so it
    *  survives remounts triggered by Follow-current-tab swaps. */
   onPanelVisibilityChange?: (visibility: PanelVisibility) => void
@@ -300,6 +307,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   isSidePanelResizing,
   initialData,
   isSecondaryWindow = false,
+  windowLayout,
   onPanelVisibilityChange
 }: TaskDetailPageProps): React.JSX.Element {
   const { track, trackTask } = useTrack()
@@ -307,6 +315,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const task = taskProp ?? initialData?.task ?? null
   const project = projectProp ?? initialData?.project ?? null
 
+  const standalonePanel = windowLayout?.only
+  const localPanelLayout = isSecondaryWindow || !!windowLayout
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
   const shortcutActive = hasShortcutFocus ?? isActive
 
@@ -627,9 +637,27 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         artifacts: false,
         processes: false
       }
-  const [panelVisibility, setPanelVisibility] = useState<PanelVisibility>(
+  const [savedPanelVisibility, setPanelVisibility] = useState<PanelVisibility>(
     initialData?.panelVisibility ?? defaultPanelVisibility
   )
+  const panelVisibility = useMemo(() => {
+    if (!windowLayout) return savedPanelVisibility
+    if (windowLayout.only) {
+      return {
+        terminal: windowLayout.only === 'terminal',
+        settings: windowLayout.only === 'settings',
+        browser: false,
+        diff: false,
+        editor: false,
+        artifacts: false,
+        processes: false
+      } satisfies PanelVisibility
+    }
+
+    const visible = { ...savedPanelVisibility }
+    for (const panel of windowLayout.hide) visible[panel] = false
+    return visible
+  }, [savedPanelVisibility, windowLayout])
 
   // Notify parent on every visibility change (used by SecondaryTaskWindow to persist
   // panel layout across Follow-current-tab swaps that remount this component).
@@ -769,17 +797,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     })
   )
 
-  // Panel sizes for resizable panels — per-task, persisted to the DB (mirrors
-  // panel_visibility). Secondary windows keep sizes local (no DB write).
+  // Panel sizes are persisted per task. Secondary and spatial windows keep their sizes local.
   const loadedTaskId = task?.id
   const persistPanelSizes = useCallback(
     (sizes: PanelSizes) => {
-      if (!loadedTaskId || isSecondaryWindow) return
+      if (!loadedTaskId || localPanelLayout) return
       void updateTaskAsync({ id: loadedTaskId, panelSizes: sizes }).then((updated) => {
         if (updated) onTaskUpdated(updated)
       })
     },
-    [loadedTaskId, isSecondaryWindow, onTaskUpdated, updateTaskAsync]
+    [loadedTaskId, localPanelLayout, onTaskUpdated, updateTaskAsync]
   )
   const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
     usePanelSizes(initialData?.panelSizes, persistPanelSizes)
@@ -1317,11 +1344,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Handle panel visibility toggle
   const handlePanelToggle = useCallback(
     async (panelId: string, active: boolean) => {
-      if (!task) return
+      if (!task || standalonePanel || windowLayout?.hide?.some((panel) => panel === panelId)) return
       track('panel_toggled', { panel: panelId, active, context: 'task' })
       // Reset panel size to default when opening
       if (active) resetPanelSize(panelId)
-      const newVisibility = { ...panelVisibility, [panelId]: active }
+      const newVisibility = { ...savedPanelVisibility, [panelId]: active }
       setPanelVisibility(newVisibility)
       // Multi-window: claim ownership only if no one owns yet (or already mine).
       // If another window owns, opening here renders a stub w/ Take over buttons —
@@ -1342,8 +1369,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           browserPanelRef.current?.focus()
         })
       }
-      // Persist to DB only for primary window — secondary's visibility is local-only
-      if (isSecondaryWindow) return
+      // Secondary and spatial windows keep changes local.
+      if (localPanelLayout) return
       const updated = await updateTaskAsync({
         id: task.id,
         panelVisibility: newVisibility
@@ -1352,11 +1379,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [
       task,
-      panelVisibility,
+      savedPanelVisibility,
       onTaskUpdated,
       resetPanelSize,
       ownership,
-      isSecondaryWindow,
+      localPanelLayout,
+      standalonePanel,
+      windowLayout,
       updateTaskAsync,
       track
     ]
@@ -1978,7 +2007,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onCustomSnooze: () => setSnoozeDialogOpen(true),
     parentTask,
     templates,
-    windowAction: isSecondaryWindow ? 'reattach' : hasOpenSecondary ? null : 'detach',
+    windowAction: windowLayout
+      ? null
+      : isSecondaryWindow
+        ? 'reattach'
+        : hasOpenSecondary
+          ? null
+          : 'detach',
     browserOpen: !!panelVisibility.browser && isBuiltinEnabled('browser', 'task'),
     onConvertToTask: async () => {
       if (!task) return
@@ -2833,7 +2868,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   taskHeaderPanelAlign === 'left' && 'flex-row-reverse'
                 )}
               >
-                {task &&
+                {!windowLayout &&
+                  task &&
                   (isSecondaryWindow || !hasOpenSecondary) &&
                   (taskHeaderPanelMode === 'menu' ? (
                     <Tooltip>
@@ -3059,7 +3095,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         ref={splitContainerRef}
         className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
       >
-        {isTaskCompleted && !openCompletedAnyway ? (
+        {isTaskCompleted && !openCompletedAnyway && !standalonePanel ? (
           <TaskCompletedScreen
             task={task}
             project={project}
@@ -3093,7 +3129,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             )}
 
             {/* Resize handle before Terminal */}
-            {!compact && panelVisibility.terminal && renderResizeHandle('terminal')}
+            {!compact &&
+              !standalonePanel &&
+              panelVisibility.terminal &&
+              renderResizeHandle('terminal')}
 
             {/* Terminal Panel */}
             {(compact || panelVisibility.terminal) && (
@@ -3108,7 +3147,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
                 )}
                 style={
-                  compact
+                  compact || standalonePanel
                     ? { flex: 1 }
                     : containerWidth > 0
                       ? { width: resolvedWidths.terminal, order: panelOrderIdx.terminal ?? 0 }
@@ -3942,7 +3981,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             )}
 
             {/* Resize handle before Settings */}
-            {!compact && panelVisibility.settings && renderResizeHandle('settings')}
+            {!compact &&
+              !standalonePanel &&
+              panelVisibility.settings &&
+              renderResizeHandle('settings')}
 
             {/* Settings Panel */}
             {!compact && panelVisibility.settings && (
@@ -3955,7 +3997,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     focusedPanel === 'settings' &&
                     'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
                 )}
-                style={{ width: resolvedWidths.settings, ...panelOrderStyle('settings') }}
+                style={
+                  standalonePanel
+                    ? { flex: 1 }
+                    : { width: resolvedWidths.settings, ...panelOrderStyle('settings') }
+                }
               >
                 {ownership.hasOtherOwner('settings') ? (
                   <PanelOwnerStub

@@ -9,14 +9,23 @@ struct SlayZoneSpatialApp: App {
         }
         .defaultSize(width: 700, height: 800)
 
-        // Every board / task panel is its own window, freely placed by the user.
-        // visionOS restores open windows and their placement on relaunch.
-        WindowGroup(id: "panel", for: PanelSpec.self) { $spec in
-            if let spec {
-                PanelWindow(spec: spec)
-            }
+        WindowGroup("SlayZone workspace", id: PanelSpec.Scene.workspace.rawValue, for: PanelSpec.self) { $spec in
+            if let spec { PanelWindow(spec: spec, minWidth: 520, minHeight: 420) }
         }
-        .defaultSize(width: 1400, height: 900)
+        .defaultSize(width: 1150, height: 780)
+        .windowResizability(.contentMinSize)
+
+        WindowGroup("Terminal", id: PanelSpec.Scene.terminal.rawValue, for: PanelSpec.self) { $spec in
+            if let spec { PanelWindow(spec: spec, minWidth: 420, minHeight: 300) }
+        }
+        .defaultSize(width: 820, height: 530)
+        .windowResizability(.contentMinSize)
+
+        WindowGroup("Task details", id: PanelSpec.Scene.details.rawValue, for: PanelSpec.self) { $spec in
+            if let spec { PanelWindow(spec: spec, minWidth: 360, minHeight: 400) }
+        }
+        .defaultSize(width: 530, height: 720)
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -27,7 +36,7 @@ private struct SpatialMessageRouter {
 
     func handle(_ message: SpatialMessage) {
         switch message {
-        case .open(let spec): openWindow(id: "panel", value: spec)
+        case .open(let spec): openWindow(id: spec.scene.rawValue, value: spec)
         case .close: dismiss()
         }
     }
@@ -35,14 +44,17 @@ private struct SpatialMessageRouter {
 
 struct PanelWindow: View {
     let spec: PanelSpec
+    let minWidth: CGFloat
+    let minHeight: CGFloat
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         let router = SpatialMessageRouter(openWindow: openWindow) {
-            dismissWindow(id: "panel", value: spec)
+            dismissWindow(id: spec.scene.rawValue, value: spec)
         }
         PanelWebView(url: spec.url, onMessage: router.handle)
+            .frame(minWidth: minWidth, minHeight: minHeight)
             .navigationTitle(spec.title)
     }
 }

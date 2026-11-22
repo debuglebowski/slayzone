@@ -48,7 +48,12 @@ struct PanelWebView: UIViewRepresentable {
         func userContentController(
             _ controller: WKUserContentController, didReceive message: WKScriptMessage
         ) {
-            guard let parsed = SpatialMessage(body: message.body) else { return }
+            guard message.frameInfo.isMainFrame,
+                  let hub = loadedURL,
+                  let sender = message.frameInfo.request.url,
+                  HubAddress.sameOrigin(hub, sender),
+                  let parsed = SpatialMessage(body: message.body) else { return }
+            if case .open(let panel) = parsed, !HubAddress.sameOrigin(hub, panel.url) { return }
             onMessage(parsed)
         }
     }
