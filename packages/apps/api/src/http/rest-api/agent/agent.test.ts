@@ -110,7 +110,7 @@ describe('a chat task', () => {
       const res = await rest.request<Ok<{ started: boolean }>>(
         'POST',
         `/api/agent/${chatTask}/send`,
-        { text: 'next' }
+        { text: 'next', deliver: 'queue' }
       )
       expect(res.status).toBe(200)
       expect(res.body.data.started).toBe(false)
@@ -118,6 +118,13 @@ describe('a chat task', () => {
       expect(chatStatus).toMatchObject({ state: 'running', turnOpen: true })
     }
   )
+
+  test('send mid-turn without deliver is a 409; nothing queued', async () => {
+    chatStatus = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
+    const res = await rest.request('POST', `/api/agent/${chatTask}/send`, { text: 'next' })
+    expect(res.status).toBe(409)
+    expect(calls).toEqual([])
+  })
 
   test('send queues into the chat; status/wait read the turn', async () => {
     const sent = await rest.request<Ok<{ kind: string }>>('POST', `/api/agent/${chatTask}/send`, {

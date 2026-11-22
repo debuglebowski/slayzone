@@ -209,13 +209,46 @@ describe('send', () => {
     expect(fake.calls[0]).toEqual(['startMain', chatTask])
   })
 
-  test('steer takes it into the running turn', async () => {
+  test('deliver steer takes it into the running turn', async () => {
+    fake.status = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
     const res = await rest.request<Ok<{ steered: boolean }>>('POST', `/api/chat/${chatTask}/send`, {
       text: 'also this',
-      steer: true
+      deliver: 'steer'
     })
     expect(res.body.data.steered).toBe(true)
     expect(fake.calls.some((c) => c[0] === 'steer')).toBe(true)
+  })
+
+  test('deliver queue waits for the running turn', async () => {
+    fake.status = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
+    const res = await rest.request<Ok<{ steered: null }>>('POST', `/api/chat/${chatTask}/send`, {
+      text: 'after this',
+      deliver: 'queue'
+    })
+    expect(res.body.data.steered).toBeNull()
+    expect(fake.calls.some((c) => c[0] === 'push')).toBe(true)
+    expect(fake.calls.some((c) => c[0] === 'steer')).toBe(false)
+  })
+
+  test('mid-turn without deliver is a 409 that names the choice; nothing queued', async () => {
+    fake.status = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
+    const res = await rest.request<{ ok: false; error: string }>(
+      'POST',
+      `/api/chat/${chatTask}/send`,
+      { text: 'hm' }
+    )
+    expect(res.status).toBe(409)
+    expect(res.body.error).toMatch(/--deliver queue\|steer/)
+    expect(fake.calls.some((c) => c[0] === 'push')).toBe(false)
+  })
+
+  test('a bad deliver, or the retired steer field, is a 400', async () => {
+    for (const body of [
+      { text: 'x', deliver: 'now' },
+      { text: 'x', steer: true }
+    ])
+      expect((await rest.request('POST', `/api/chat/${chatTask}/send`, body)).status).toBe(400)
+    expect(fake.calls.some((c) => c[0] === 'push')).toBe(false)
   })
 
   test('empty text is a 400', async () => {

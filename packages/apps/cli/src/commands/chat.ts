@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { apiDelete, apiFetch, apiGet, apiPost } from '../api'
 import { resolveId } from './tasks/_shared'
 
@@ -13,6 +13,16 @@ import { resolveId } from './tasks/_shared'
  */
 
 export const EXIT_PROMPT = 3
+
+/** How `send` delivers to a chat agent; the API requires a choice while a turn is open. */
+export type Delivery = 'queue' | 'steer'
+
+export function deliverOption(prefix = ''): Option {
+  return new Option(
+    '--deliver <how>',
+    `${prefix}queue = after the running turn, steer = into it now (required mid-turn)`
+  ).choices(['queue', 'steer'])
+}
 
 interface TargetOpts {
   task?: string
@@ -189,15 +199,17 @@ export function chatCommand(): Command {
     })
 
   withTargetOptions(cmd.command('send [text]'))
-    .description('Send a message (queued like the composer: it waits for the running turn)')
-    .option('--steer', 'Take it into the running turn now instead of queueing')
+    .description(
+      'Send a message. Mid-turn, --deliver is required: queue (after this turn) or steer (into it now)'
+    )
+    .addOption(deliverOption())
     .option('--wait', 'Wait until the agent answered it (or stops on a prompt)')
     .option('--timeout <ms>', 'Timeout for --wait in milliseconds', '600000')
     .option('--json', 'Output as JSON')
     .action(
       async (
         text: string | undefined,
-        opts: TargetOpts & { steer?: boolean; wait?: boolean; timeout: string; json?: boolean }
+        opts: TargetOpts & { deliver?: Delivery; wait?: boolean; timeout: string; json?: boolean }
       ) => {
         if (!text) text = await readStdin()
         if (!text.trim()) {
@@ -218,7 +230,7 @@ export function chatCommand(): Command {
         }>(await chatPath(opts, 'send', {}, { tabInQuery: false }), {
           text,
           messageId,
-          ...(opts.steer ? { steer: true } : {}),
+          ...(opts.deliver ? { deliver: opts.deliver } : {}),
           ...bodyTab(opts)
         })
         if (data.steered === false && !opts.json)

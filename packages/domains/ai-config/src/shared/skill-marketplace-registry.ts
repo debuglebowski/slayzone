@@ -713,7 +713,7 @@ An agent may not \`wait\` on its own chat turn (it would never settle) — the C
 ## slay chat
 
 - \`slay chat status [--json]\` — state, open turn, pending prompts, queue, model, permission mode
-- \`slay chat send [text] [--steer] [--wait] [--timeout <ms>] [--json]\` — send a message; reads stdin without text. Queued like the composer (it waits for the running turn); \`--steer\` takes it into the running turn now. Starts the agent if it is not running. Prints the message id; \`--wait\` waits until the agent answered it (or stops on a prompt). Default timeout 10 min
+- \`slay chat send [text] [--deliver queue|steer] [--wait] [--timeout <ms>] [--json]\` — send a message; reads stdin without text. \`--deliver queue\` waits for the running turn (like the composer); \`--deliver steer\` takes it into the running turn now. Required while a turn is running (else exit 1, nothing sent); optional when idle. Starts the agent if it is not running. Prints the message id; \`--wait\` waits until the agent answered it (or stops on a prompt). Default timeout 10 min
 - \`slay chat wait [--until idle|prompt] [--timeout <ms>] [--json]\` — wait until the turn settles (or, \`--until prompt\`, only until the agent asks)
 - \`slay chat read [--last <n>] [--since <row>] [-v] [--json]\` — the conversation as text, as the panel shows it (rewound rows left out). \`-v\` adds thinking and tool results. \`--json\` rows carry \`row\` (for \`--since\`) and, for user messages, \`messageId\` (for fork / rewind)
 - \`slay chat follow [--since <row>] [-v] [--json]\` — stream rows, prompts and state changes as they happen (\`--since -1\` replays everything first)
@@ -738,7 +738,7 @@ An agent may not \`wait\` on its own chat turn (it would never settle) — the C
 
 - \`slay agent status [--json]\` — kind (\`chat\` | \`pty\`), mode, state, pending prompts
 - \`slay agent start [--json]\` — start (wake) the agent without sending a message; no-op if already running
-- \`slay agent send [text] [--steer] [--wait] [--timeout <ms>]\` — chat: queued; terminal: submitted. Starts the agent if needed
+- \`slay agent send [text] [--deliver queue|steer] [--wait] [--timeout <ms>]\` — chat: as \`slay chat send\` (\`--deliver\` required mid-turn); terminal: submitted. Starts the agent if needed
 - \`slay agent wait [--timeout <ms>]\` — same exit codes as \`slay chat wait\`
 - \`slay agent read [--last <n>] [-v]\` — chat transcript, or the terminal buffer
 - \`slay agent interrupt\` — chat: interrupt; terminal: Ctrl-C

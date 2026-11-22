@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Express } from 'express'
 import { decideChatPrompt, type ChatPromptAnswer } from '@slayzone/task-terminals/prompt-answers'
+import type { ChatTurnStatus } from '@slayzone/terminal-contracts'
 import type { ChatAccess, RestApiDeps } from '../types'
 import {
   chatHandler,
@@ -16,28 +17,58 @@ import {
 const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
 
 /** Make sure the tab has a running agent: the main one starts as `task.startMainAgent` does. */
-export async function ensureStarted(chat: ChatAccess, target: ChatTarget): Promise<boolean> {
-  const status = await turnStatus(chat, target)
+export async function ensureStarted(
+  chat: ChatAccess,
+  target: ChatTarget,
+  known?: { status: ChatTurnStatus | null }
+): Promise<boolean> {
+  const status = known ? known.status : await turnStatus(chat, target)
   if (status && status.state !== 'dead' && status.state !== 'not-spawned') return false
   if (target.isMain) await chat.startMain(target.taskId)
   else await chat.deps().ops.start({ ...(await chatOpts(chat, target)), reason: 'user' })
   return true
 }
 
-/** Queue a message the way the composer does (it waits for the turn), optionally steering it in. */
+/**
+ * How a sent message reaches the agent: `queue` waits for the running turn (as the
+ * composer does), `steer` takes it into that turn now. While a turn is open the caller
+ * must choose — an agent driving the CLI cannot tell "delivered" from "stuck behind a
+ * long turn" otherwise. With no turn open the two are the same, so it may be omitted.
+ */
+export type ChatDelivery = 'queue' | 'steer'
+
+/** Read `deliver` from a send body; 400 on a bad value or the retired `steer` field. */
+export function parseDelivery(body: {
+  deliver?: unknown
+  steer?: unknown
+}): ChatDelivery | undefined {
+  if (body.steer !== undefined)
+    throw new ChatRouteError(400, '`steer` was replaced by `deliver: "queue" | "steer"`')
+  if (body.deliver === undefined) return undefined
+  if (body.deliver === 'queue' || body.deliver === 'steer') return body.deliver
+  throw new ChatRouteError(400, 'deliver must be "queue" or "steer"')
+}
+
+/** Queue a message the way the composer does (it waits for the turn), or steer it in. */
 export async function sendChatMessage(
   chat: ChatAccess,
   target: ChatTarget,
-  input: { text: string; messageId?: string; steer?: boolean }
+  input: { text: string; messageId?: string; deliver: ChatDelivery | undefined }
 ): Promise<{ messageId: string; started: boolean; steered: boolean | null; steerError?: string }> {
-  const started = await ensureStarted(chat, target)
+  const status = await turnStatus(chat, target)
+  if (input.deliver === undefined && status?.turnOpen)
+    throw new ChatRouteError(
+      409,
+      'The agent is mid-turn: choose how to deliver — `--deliver queue|steer` (queue = after this turn, steer = into it now)'
+    )
+  const started = await ensureStarted(chat, target, { status })
   const queue = chat.deps().queueOps
   const item = await queue.push(target.tabId, input.text, input.text, {
     id: input.messageId ?? randomUUID(),
     content: [{ type: 'text', text: input.text }],
     expectedMode: target.mode
   })
-  if (!input.steer) return { messageId: item.id, started, steered: null }
+  if (input.deliver !== 'steer') return { messageId: item.id, started, steered: null }
   const steer = await queue.steer(item.id, target.tabId)
   return steer.ok
     ? { messageId: item.id, started, steered: true }
@@ -46,11 +77,16 @@ export async function sendChatMessage(
 
 /** Act routes: send, answer prompts, stop/restart/kill/reset. */
 export function registerChatActRoutes(app: Express, deps: RestApiDeps): void {
-  // POST /api/chat/:id/send { text, messageId?, steer?, tab? }
+  // POST /api/chat/:id/send { text, messageId?, deliver?: 'queue' | 'steer', tab? }
   app.post(
     '/api/chat/:id/send',
     chatHandler(deps, async ({ chat, target, req, res }) => {
-      const body = (req.body ?? {}) as { text?: unknown; messageId?: unknown; steer?: unknown }
+      const body = (req.body ?? {}) as {
+        text?: unknown
+        messageId?: unknown
+        deliver?: unknown
+        steer?: unknown
+      }
       if (!isStr(body.text) || body.text.trim() === '') {
         res.status(400).json({ ok: false, error: 'text must be a non-empty string' })
         return
@@ -62,7 +98,7 @@ export function registerChatActRoutes(app: Express, deps: RestApiDeps): void {
       const data = await sendChatMessage(chat, target, {
         text: body.text,
         messageId: body.messageId as string | undefined,
-        steer: body.steer === true
+        deliver: parseDelivery(body)
       })
       res.json({ ok: true, data: { taskId: target.taskId, tabId: target.tabId, ...data } })
     })
@@ -128,8 +164,9 @@ export function registerChatActRoutes(app: Express, deps: RestApiDeps): void {
       if (!ok) throw new ChatRouteError(409, `Prompt ${request.requestId} is no longer pending`)
       let followUp: string | null = null
       if (decided.followUpMessage)
-        followUp = (await sendChatMessage(chat, target, { text: decided.followUpMessage }))
-          .messageId
+        followUp = (
+          await sendChatMessage(chat, target, { text: decided.followUpMessage, deliver: 'queue' })
+        ).messageId
       res.json({
         ok: true,
         data: {

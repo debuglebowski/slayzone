@@ -6,7 +6,8 @@
  *
  *   GET  status     { kind, mode, state, … }
  *   POST start      → { kind, started }: start the agent without a message (no-op if running)
- *   POST send       { text, steer? } → chat: queued like the composer; pty: submitted
+ *   POST send       { text, deliver? } → chat: queued like the composer (`deliver: 'steer'` = into the
+ *                   running turn; required mid-turn); pty: submitted
  *   GET  wait       ?timeout= → { outcome: idle | prompt | dead | error | timeout }
  *   GET  read       ?last=&verbose= → text: chat transcript / terminal buffer
  *   POST interrupt  chat: stop the turn; pty: Ctrl-C
@@ -26,7 +27,7 @@ import {
   type ChatTarget
 } from '../chat/_chat'
 import { waitForChat } from '../chat/_wait'
-import { ensureStarted, sendChatMessage } from '../chat/act'
+import { ensureStarted, parseDelivery, sendChatMessage } from '../chat/act'
 import { waitForPtyState } from '../pty/_wait'
 import { startMainPty } from '../pty/_start-main'
 
@@ -150,14 +151,19 @@ export function registerAgentRoutes(app: Express, deps: RestApiDeps): void {
   app.post(
     '/api/agent/:id/send',
     agentHandler(deps, async (agent, req, res) => {
-      const body = (req.body ?? {}) as { text?: unknown; steer?: unknown; messageId?: unknown }
+      const body = (req.body ?? {}) as {
+        text?: unknown
+        deliver?: unknown
+        steer?: unknown
+        messageId?: unknown
+      }
       if (typeof body.text !== 'string' || body.text.trim() === '')
         throw new ChatRouteError(400, 'text must be a non-empty string')
       if (agent.kind === 'chat') {
         const sent = await sendChatMessage(agent.chat, agent.target, {
           text: body.text,
           messageId: typeof body.messageId === 'string' ? body.messageId : undefined,
-          steer: body.steer === true
+          deliver: parseDelivery(body)
         })
         res.json({ ok: true, data: { kind: 'chat', taskId: agent.target.taskId, ...sent } })
         return

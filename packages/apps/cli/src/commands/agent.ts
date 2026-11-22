@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { apiFetch, apiGet, apiPost } from '../api'
 import { resolveId } from './tasks/_shared'
-import { EXIT_PROMPT, refuseSelfWait } from './chat'
+import { deliverOption, EXIT_PROMPT, refuseSelfWait, type Delivery } from './chat'
 
 /**
  * `slay agent` — drive a task's MAIN agent whatever it runs in: a chat tab
@@ -96,15 +96,17 @@ export function agentCommand(): Command {
     })
 
   withTask(cmd.command('send [text]'))
-    .description('Send a message (chat: queued; terminal: submitted), starting the agent if needed')
-    .option('--steer', 'Chat: take it into the running turn now')
+    .description(
+      'Send a message (chat: --deliver queue|steer, required mid-turn; terminal: submitted), starting the agent if needed'
+    )
+    .addOption(deliverOption('Chat: '))
     .option('--wait', 'Then wait until the agent settles')
     .option('--timeout <ms>', 'Timeout for --wait in milliseconds', '600000')
     .option('--json', 'Output as JSON')
     .action(
       async (
         text: string | undefined,
-        opts: AgentOpts & { steer?: boolean; wait?: boolean; timeout: string; json?: boolean }
+        opts: AgentOpts & { deliver?: Delivery; wait?: boolean; timeout: string; json?: boolean }
       ) => {
         if (!text) text = await readStdin()
         if (!text.trim()) {
@@ -114,7 +116,7 @@ export function agentCommand(): Command {
         if (opts.wait) refuseSelfWait(await resolveId(opts.task), undefined)
         const { data } = await apiPost<{ ok: true; data: Record<string, unknown> }>(
           await agentPath(opts, 'send'),
-          { text, ...(opts.steer ? { steer: true } : {}) }
+          { text, ...(opts.deliver ? { deliver: opts.deliver } : {}) }
         )
         if (!opts.wait) {
           if (opts.json) console.log(JSON.stringify(data, null, 2))

@@ -103,6 +103,18 @@ describe.skipIf(!HAS_SLAY_BIN)('slay chat', () => {
     expect(fake.calls.find((c) => c[0] === 'push')?.slice(1, 3)).toEqual([task, 'hello'])
   })
 
+  test('send mid-turn: --deliver required; steer goes into the turn', async () => {
+    fake.status = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
+    const refused = await runCli(['chat', 'send', 'hm', '--task', task])
+    expect(refused.code).toBe(1)
+    expect(refused.stderr).toMatch(/--deliver queue\|steer/)
+    expect(fake.calls.some((c) => c[0] === 'push')).toBe(false)
+    const steered = await runCli(['agent', 'send', 'now', '--deliver', 'steer', '--task', task])
+    expect(steered.code, steered.stderr).toBe(0)
+    expect(fake.calls.some((c) => c[0] === 'steer')).toBe(true)
+    expect((await runCli(['chat', 'send', 'x', '--deliver', 'later', '--task', task])).code).toBe(1)
+  })
+
   test('wait: 0 idle, 3 parked on a prompt, 2 timeout', async () => {
     expect((await runCli(['chat', 'wait', '--task', task])).code).toBe(0)
     fake.status = { state: 'idle', turnOpen: true, pendingRequestIds: ['r1'], outboxInFlight: 0 }
