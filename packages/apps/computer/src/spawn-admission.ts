@@ -59,7 +59,7 @@ export interface SpawnAdmission {
   /** Is this ticket still waiting? */
   isQueued(ticket: AdmissionTicket): boolean
   /** Defer lower-priority starts until this read finishes. Returns an idempotent release. */
-  holdHistoryRead(): () => void
+  holdHistoryRead?(): () => void
   stats(): { queued: number; active: number; concurrency: number }
 }
 
@@ -123,7 +123,7 @@ const HISTORY_QUIET_MS = 150
 /** During sustained history work, admit at most one lower-priority start per interval. */
 const HISTORY_START_INTERVAL_MS = 2_000
 
-export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdmission {
+export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): Required<SpawnAdmission> {
   const concurrency = Math.max(1, opts.concurrency ?? defaultAdmissionConcurrency())
   const startCapMs = opts.startCapMs ?? DEFAULT_START_CAP_MS
   const warmQuietMs = opts.warmQuietMs ?? DEFAULT_WARM_QUIET_MS

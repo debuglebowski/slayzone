@@ -48,6 +48,8 @@ const MVCP = { minIndexForVisible: 1, autoscrollToTopThreshold: FOLLOW_THRESHOLD
 
 export function ChatTimeline({
   state,
+  agentName,
+  productName,
   hydrating,
   working,
   reconnecting = false,
@@ -58,6 +60,8 @@ export function ChatTimeline({
   loadHistoryRows
 }: {
   state: ChatTimelineState
+  agentName?: string
+  productName?: string
   hydrating: boolean
   /** A turn runs and the agent is not waiting for the user. */
   working: boolean
@@ -130,6 +134,8 @@ export function ChatTimeline({
     ({ item }) => (
       <TimelineRow
         item={item.item}
+        agentName={agentName}
+        productName={productName}
         childItems={
           item.item.kind === 'sub-agent'
             ? subAgentItems({ timeline, childIndex }, item.item.toolUseId)
@@ -141,7 +147,7 @@ export function ChatTimeline({
         onToggleBranch={toggleBranch}
       />
     ),
-    [timeline, childIndex, loadSubAgent, openBranches, toggleBranch]
+    [timeline, childIndex, loadSubAgent, openBranches, toggleBranch, agentName, productName]
   )
   // The last row streams: it shows the progress itself.
   const last = rows[0]?.item

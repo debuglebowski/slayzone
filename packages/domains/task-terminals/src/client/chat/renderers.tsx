@@ -1,4 +1,4 @@
-import { isAgentLauncherToolName } from '@slayzone/terminal/chat-presentation'
+import { interruptedLabel, isAgentLauncherToolName } from '@slayzone/terminal/chat-presentation'
 import { MessageDetails } from './MessageDetails'
 import { useContext, useDeferredValue, useEffect, useId, useMemo, useState } from 'react'
 import {
@@ -386,15 +386,7 @@ export function InterruptedBlock({
       className="flex items-start gap-2 py-2 text-sm leading-5 text-warning-foreground/70"
     >
       <CircleStop aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <span>
-        {item.reason === 'already-in-conversation'
-          ? `Not run again: ${provider.agent} already had this message`
-          : item.reason === 'watchdog'
-            ? 'Turn interrupted by SlayZone watchdog'
-            : item.reason === 'stop-request'
-              ? 'Turn stopped by request'
-              : 'Turn interrupted'}
-      </span>
+      <span>{interruptedLabel(item, provider.agent)}</span>
     </div>
   )
 }

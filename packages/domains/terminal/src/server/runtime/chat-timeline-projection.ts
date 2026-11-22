@@ -350,19 +350,23 @@ export class TimelineProjection {
     try {
       const cp = await historyReadTurns.take(() => this.store.loadCheckpoint())
       if (!cp) return 'checkpoint-none'
-      if (cp.version !== TIMELINE_PROJECTION_VERSION) return 'checkpoint-version'
+      // 25.1 used the same reducer rows, summaries and hydrate scan. Only its
+      // index encoding differs. Other versions need an explicit compatibility proof.
+      const legacyIndex = cp.version === '25.1'
+      if (!legacyIndex && cp.version !== TIMELINE_PROJECTION_VERSION) return 'checkpoint-version'
       if (cp.seq > lastSeq) return 'checkpoint-ahead'
       const data = JSON.parse(cp.data) as CheckpointData
       if (data.hydrate?.version !== 1 || !Array.isArray(data.hydrate.messages))
         return 'checkpoint-other'
       const hydrate = new HydrateScan(data.hydrate)
-      const state = decodeTimelineState(data.state)
+      const state = decodeTimelineState(data.state, legacyIndex ? '25' : undefined)
       if (state.agentStartedTurns !== this.agentStartedTurns) return 'checkpoint-other'
       const summaries = await this.store.loadSummaries()
       if (summaries.length !== data.sealed || summaries.some((s, i) => s.page !== i))
         return 'checkpoint-other'
       this.state = state
       this.hydrateScan = hydrate
+      this.checkpointDirty = legacyIndex
       this.seq = cp.seq
       this.sealed = data.sealed
       this.summaries = summaries.map((s) => JSON.parse(s.summary) as TimelinePageSummary)

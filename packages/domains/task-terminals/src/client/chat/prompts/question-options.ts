@@ -6,28 +6,7 @@
  */
 import type { PermissionDecision } from '@slayzone/terminal-contracts'
 
-export interface AskOption {
-  label: string
-  description?: string
-  /** Shown beside the options when focused (a mock-up, a snippet). */
-  preview?: string
-}
-export interface AskQuestion {
-  question: string
-  header?: string
-  multiSelect?: boolean
-  options: AskOption[]
-}
-
-export function questionsOf(input: unknown): AskQuestion[] {
-  const qs = (input as { questions?: unknown } | null)?.questions
-  return Array.isArray(qs)
-    ? qs.filter(
-        (q): q is AskQuestion =>
-          q !== null && typeof q === 'object' && typeof (q as AskQuestion).question === 'string'
-      )
-    : []
-}
+export { questionsOf, type AskOption, type AskQuestion } from '@slayzone/terminal/chat-presentation'
 
 /** Codex's user-input questions (`item/tool/requestUserInput`). */
 export const CODEX_QUESTIONS = 'item/tool/requestUserInput'

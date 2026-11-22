@@ -4,7 +4,7 @@ import { TypedEmitter } from '@slayzone/platform/events'
 import {
   dispatchUserMessage,
   ensureSpawned,
-  getEventBufferSince,
+  readRecentEvents,
   getSessionTerminalState,
   getSessionInfo,
   isReadyForQueuedMessage,
@@ -58,7 +58,7 @@ type QueueTransport = Pick<
   ChatTransport,
   | 'dispatchUserMessage'
   | 'ensureSpawned'
-  | 'getEventBufferSince'
+  | 'readRecentEvents'
   | 'getSessionTerminalState'
   | 'getSessionInfo'
   | 'isReadyForQueuedMessage'
@@ -70,7 +70,7 @@ type QueueTransport = Pick<
 const legacyQueueTransport: QueueTransport = {
   dispatchUserMessage,
   ensureSpawned,
-  getEventBufferSince,
+  readRecentEvents,
   getSessionTerminalState,
   getSessionInfo,
   isReadyForQueuedMessage,
@@ -83,7 +83,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
   const {
     dispatchUserMessage,
     ensureSpawned,
-    getEventBufferSince,
+    readRecentEvents,
     getSessionTerminalState,
     getSessionInfo,
     isReadyForQueuedMessage,
@@ -390,7 +390,7 @@ export function createChatQueueRuntime(transport: QueueTransport = legacyQueueTr
         tabId,
         content,
         lookup,
-        events: getEventBufferSince(tabId, -1).map((e) => e.event),
+        events: async () => (await readRecentEvents(tabId)).map((e) => e.event),
         ...(exceptQueuedId ? { exceptQueuedId } : {})
       })
 

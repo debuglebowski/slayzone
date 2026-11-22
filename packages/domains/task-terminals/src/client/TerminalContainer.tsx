@@ -227,6 +227,24 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     if (!mountedGroupIds.has(activeGroupId)) {
       setMountedGroupIds(new Set([...mountedGroupIds, activeGroupId]))
     }
+    const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null)
+    const [prefetchedGroupId, setPrefetchedGroupId] = useState<string | null>(null)
+    const hovered = groups.find((g) => g.id === hoveredGroupId)
+    const hoveredTab = hovered?.tabs.length === 1 ? hovered.tabs[0] : undefined
+    const prefetchCandidate =
+      isActive &&
+      hoveredGroupId &&
+      !mountedGroupIds.has(hoveredGroupId) &&
+      hoveredTab &&
+      hoveredTab.agentState !== 'new' &&
+      isChatSupported(hoveredTab.mode)
+        ? hoveredGroupId
+        : null
+    useEffect(() => {
+      if (!prefetchCandidate) return
+      const timer = setTimeout(() => setPrefetchedGroupId(prefetchCandidate), 180)
+      return () => clearTimeout(timer)
+    }, [prefetchCandidate])
     const mainGroupId = groups.find((group) => group.tabs.some((tab) => tab.isMain))?.id ?? null
 
     // Chat font size: the header control sizes the active group's chat(s). A group
@@ -646,6 +664,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             ref={tabBarRef}
             groups={groups}
             activeGroupId={activeGroupId}
+            onGroupHover={setHoveredGroupId}
             terminalTitles={terminalTitles}
             onGroupSelect={(groupId) => {
               claimFocus(true)
@@ -735,7 +754,13 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
               </div>
             )}
             {groups
-              .filter((group) => mountedGroupIds.has(group.id))
+              .filter((group) => {
+                const tab = group.tabs.length === 1 ? group.tabs[0] : undefined
+                return (
+                  mountedGroupIds.has(group.id) ||
+                  (isActive && group.id === prefetchedGroupId && tab && isChatSupported(tab.mode))
+                )
+              })
               .map((group) => {
                 const shown = group.id === activeGroupId
                 return (
@@ -750,6 +775,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
                       ref={shown ? splitGroupRef : undefined}
                       panes={panesByGroup.get(group.id) ?? []}
                       isActive={isActive && shown}
+                      prefetchOnly={!mountedGroupIds.has(group.id)}
                       paused={paused}
                       onAttached={shown ? handlePaneAttached : undefined}
                       onOpenUrl={onOpenUrl}

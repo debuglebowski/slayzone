@@ -55,6 +55,7 @@ export interface TerminalSplitGroupHandle {
 interface TerminalSplitGroupProps {
   panes: PaneProps[]
   isActive?: boolean
+  prefetchOnly?: boolean
   /** Panel is mid-resize — pause xterm re-fit in each pane (no remount). */
   paused?: boolean
   onAttached?: (api: { sessionId: string; focus: () => void }) => void
@@ -65,7 +66,7 @@ interface TerminalSplitGroupProps {
 
 export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalSplitGroupProps>(
   function TerminalSplitGroup(
-    { panes, isActive, paused, onAttached, onOpenUrl, onOpenFile, onOpenArtifact },
+    { panes, isActive, prefetchOnly, paused, onAttached, onOpenUrl, onOpenFile, onOpenArtifact },
     ref
   ) {
     const hubId = useHubId()
@@ -160,6 +161,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
             mode={pane.tab.mode}
             cwd={pane.cwd}
             isActive={isActive}
+            prefetchOnly={prefetchOnly}
             providerFlagsOverride={pane.providerFlags ?? null}
             permissionNotice={pane.permissionNotice ?? null}
             onOpenUrl={onOpenUrl}

@@ -4,6 +4,7 @@ import { saveComputerUpgradeStatus } from '@slayzone/computers/server'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { type WebSocket, WebSocketServer } from 'ws'
+import { wsCompression } from '@slayzone/computer-transport/shared'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import {
   appRouter,
@@ -659,9 +660,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   //                computer protocol: enroll/hello frames + join token). Its receive
   //                limit IS the gateway's frame limit, which the computer's sender
   //                honours — so an oversized reply fails one request, not the socket.
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: wsCompression })
   const computerWss = computerGateway
-    ? new WebSocketServer({ noServer: true, maxPayload: computerGateway.maxFrameBytes })
+    ? new WebSocketServer({
+        noServer: true,
+        maxPayload: computerGateway.maxFrameBytes,
+        perMessageDeflate: wsCompression
+      })
     : null
   httpServer.on('upgrade', (req, socket, head) => {
     adoptClientAddress(req, trustedProxies)

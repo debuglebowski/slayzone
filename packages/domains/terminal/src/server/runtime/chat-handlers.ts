@@ -678,7 +678,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     confirmedConversation,
     releaseChatConversation,
     switchTabConversation,
-    getEventBufferSince,
+    readRecentEvents,
     readEventsSince,
     readEventPage,
     getSessionInfo,
@@ -1044,7 +1044,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
           tabId,
           content: message.content,
           lookup: data.attachments,
-          events: getEventBufferSince(tabId, -1).map((e) => e.event)
+          events: async () => (await readRecentEvents(tabId)).map((e) => e.event)
         }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
       }),
 
@@ -1825,7 +1825,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     }> =>
       withPlanDecisionLock(o.tabId, async () => {
         if (o.mode !== 'codex-chat') throw new Error('Plan approval requires Codex chat')
-        const events = getEventBufferSince(o.tabId, -1).map((entry) => entry.event)
+        const events = (await readRecentEvents(o.tabId)).map((entry) => entry.event)
         const decisions = events.filter(
           (event): event is Extract<AgentEvent, { kind: 'codex-plan-decision' }> =>
             event.kind === 'codex-plan-decision' && event.planId === o.planId

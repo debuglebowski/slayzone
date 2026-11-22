@@ -25,6 +25,7 @@ const groups: TerminalGroup[] = [
 ]
 
 let setActive: (id: string) => void = () => {}
+let hoverGroup: (id: string | null) => void = () => {}
 /** What the mocked hook reports about its load; null = loaded with both groups. */
 let loadOverride: { loadState: 'loading' | 'loaded' | 'failed'; empty: boolean } | null = null
 const reload = vi.fn()
@@ -68,7 +69,12 @@ vi.mock('@slayzone/ui', async (orig) => ({
   ...(await orig<typeof import('@slayzone/ui')>()),
   useTheme: () => ({ terminalOverrideThemeId: null, contentVariant: 'dark' })
 }))
-vi.mock('./TerminalTabBar', () => ({ TerminalTabBar: () => null }))
+vi.mock('./TerminalTabBar', () => ({
+  TerminalTabBar: ({ onGroupHover }: { onGroupHover: typeof hoverGroup }) => {
+    hoverGroup = onGroupHover
+    return null
+  }
+}))
 vi.mock('./agent-prompts/AgentPromptsSidebar', () => ({
   AgentPromptsSidebar: () => null,
   AgentPromptsToggleButton: () => null,
@@ -83,7 +89,11 @@ vi.mock('./agent-sessions/useFamilySessions', () => ({ useFamilySessions: () => 
 vi.mock('./chat/ChatFontSizeControl', () => ({ ChatFontSizeControl: () => null }))
 vi.mock('./TerminalSplitGroup', () => ({
   TerminalSplitGroup: forwardRef(function FakeGroup(
-    { panes, isActive }: { panes: { sessionId: string }[]; isActive?: boolean },
+    {
+      panes,
+      isActive,
+      prefetchOnly
+    }: { panes: { sessionId: string }[]; isActive?: boolean; prefetchOnly?: boolean },
     ref
   ) {
     const id = panes.map((p) => p.sessionId).join(',')
@@ -91,7 +101,13 @@ vi.mock('./TerminalSplitGroup', () => ({
     useEffect(() => {
       mounts.push(id)
     }, [id])
-    return <div data-testid={`group ${id}`} data-active={String(!!isActive)} />
+    return (
+      <div
+        data-testid={`group ${id}`}
+        data-active={String(!!isActive)}
+        data-prefetch={String(!!prefetchOnly)}
+      />
+    )
   })
 }))
 
@@ -102,8 +118,36 @@ beforeEach(() => {
   reload.mockReset()
   mounts.length = 0
   focused.length = 0
+  otherTab.mode = 'terminal'
+  otherTab.agentState = 'new'
 })
 afterEach(cleanup)
+
+test('a hovered chat prefetches once and stays mounted when selected', () => {
+  otherTab.mode = 'claude-chat'
+  otherTab.agentState = 'stopped'
+  vi.useFakeTimers()
+  try {
+    render(<TerminalContainer isActive taskId="task" cwd="/repo" defaultMode="claude-chat" />)
+    act(() => hoverGroup('other'))
+    act(() => vi.advanceTimersByTime(100))
+    act(() => hoverGroup(null))
+    act(() => vi.advanceTimersByTime(200))
+    expect(mounts).toEqual(['task:task'])
+    act(() => hoverGroup('other'))
+    act(() => vi.advanceTimersByTime(180))
+    const group = screen.getByTestId('group task:other')
+    expect(group.dataset.prefetch).toBe('true')
+    expect(group.dataset.active).toBe('false')
+    act(() => setActive('other'))
+    expect(screen.getByTestId('group task:other')).toBe(group)
+    expect(group.dataset.prefetch).toBe('false')
+    expect(group.dataset.active).toBe('true')
+    expect(mounts).toEqual(['task:task', 'task:other'])
+  } finally {
+    vi.useRealTimers()
+  }
+})
 
 test('switching tab groups keeps a visited group mounted, only the active one is live', () => {
   render(<TerminalContainer taskId="task" cwd="/repo" defaultMode="claude-chat" />)

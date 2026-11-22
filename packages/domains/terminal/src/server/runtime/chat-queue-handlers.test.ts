@@ -44,7 +44,7 @@ vi.mock('./chat-transport-manager', () => ({
     transport.withdrawn.push(id)
     return transport.withdrawResult
   },
-  getEventBufferSince: () => [],
+  readRecentEvents: async () => [],
   dispatchUserMessage: (tabId: string, message: OutgoingUserMessage) => {
     transport.dispatched.push({ tabId, message })
     return { id: message.id, state: 'queued' }

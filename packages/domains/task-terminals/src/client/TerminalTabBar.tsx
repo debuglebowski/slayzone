@@ -23,6 +23,7 @@ interface TerminalTabBarProps {
   groups: TerminalGroup[]
   activeGroupId: string
   onGroupSelect: (groupId: string) => void
+  onGroupHover?: (groupId: string | null) => void
   onGroupCreate: () => void
   onGroupClose: (groupId: string) => void
   onGroupSplit: (groupId: string) => void
@@ -54,6 +55,7 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
       groups,
       activeGroupId,
       onGroupSelect,
+      onGroupHover,
       onGroupCreate,
       onGroupClose,
       onGroupSplit,
@@ -199,6 +201,10 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
                       data-tab-id={group.id}
                       data-tab-main={group.isMain ? 'true' : 'false'}
                       data-tab-active={isActive ? 'true' : 'false'}
+                      onPointerEnter={(event) => {
+                        if (event.pointerType === 'mouse') onGroupHover?.(group.id)
+                      }}
+                      onPointerLeave={() => onGroupHover?.(null)}
                       className={cn(
                         'group flex items-center h-7 rounded-md cursor-pointer transition-all select-none shrink-0',
                         'bg-surface-2 dark:bg-surface-2/50 hover:bg-accent/80 dark:hover:bg-accent/50',

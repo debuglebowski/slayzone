@@ -29,6 +29,8 @@ export interface UseChatLifecycleOpts {
   /** Task view on screen. Off screen (tab-bar restore on reload/restart) the
    *  startup mode only restores what `auto` would; the rest waits until shown. */
   shown?: boolean
+  /** A hovered tab may read history before opening. Its lifecycle starts on selection. */
+  prefetchOnly?: boolean
   /**
    * The chat's computer can run its agent now (the tab's chat availability, which is
    * read while the tab is on screen). A start deferred because that computer could
@@ -167,6 +169,7 @@ export function useChatLifecycle({
   isMain = false,
   isTemporary = false,
   shown = true,
+  prefetchOnly = false,
   computerReady = true,
   chatApi,
   inFlight,
@@ -247,7 +250,7 @@ export function useChatLifecycle({
   /** The start went out as a restore (hidden tab) and has not been re-asked as the user's. */
   const restoreStartRef = useRef(false)
   useEffect(() => {
-    if (startDecision === null || startDecision === 'none') return
+    if (prefetchOnly || startDecision === null || startDecision === 'none') return
     if (startDecision === 'shown' && !shown) return
     if (startDecision === 'computer' && !(shown && computerReady)) return
     if (startFiredRef.current) return
@@ -273,6 +276,7 @@ export function useChatLifecycle({
   }, [
     startDecision,
     shown,
+    prefetchOnly,
     computerReady,
     chatApi,
     tabId,
@@ -342,8 +346,8 @@ export function useChatLifecycle({
 
   // Clear queue on session end / reset.
   useEffect(() => {
-    if (state.sessionEnded) void clearQueue()
-  }, [state.sessionEnded, clearQueue])
+    if (!prefetchOnly && state.sessionEnded) void clearQueue()
+  }, [prefetchOnly, state.sessionEnded, clearQueue])
 
   // Diagnostic: log every inFlight transition (incl. baseline post-hydrate) with
   // the counters that drive `isInFlight` plus the last 5 timeline kinds. Captures

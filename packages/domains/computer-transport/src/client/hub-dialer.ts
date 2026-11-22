@@ -28,6 +28,7 @@ import {
   ComputerToHubMethods
 } from '../shared/frames'
 import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
+import { wsCompression } from '../shared/ws-compression'
 import { DuplexRpc, JSON_RPC_INTERNAL_ERROR, RpcError } from '../shared/rpc'
 import { isWsMessageTooLargeError, wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
@@ -294,7 +295,10 @@ export class HubDialer {
     // No TLS options: a wss:// hub is verified with Node's defaults (CA chain +
     // hostname). There is deliberately no pin and no way to skip verification.
     const maxFrameBytes = this.opts.maxFrameBytes ?? COMPUTER_FRAME_MAX_BYTES
-    const ws = new WebSocket(this.opts.url, { maxPayload: maxFrameBytes })
+    const ws = new WebSocket(this.opts.url, {
+      maxPayload: maxFrameBytes,
+      perMessageDeflate: wsCompression
+    })
     const conn: Connection = {
       ws,
       rpc: null as unknown as DuplexRpc,

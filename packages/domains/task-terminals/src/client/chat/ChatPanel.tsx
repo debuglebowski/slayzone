@@ -121,6 +121,7 @@ export interface ChatPanelProps {
   mode: string
   cwd: string
   isActive?: boolean
+  prefetchOnly?: boolean
   providerFlagsOverride?: string | null
   permissionNotice?: string | null
   /** Cmd+Click on a URL → in-app slay browser. Cmd+Shift+Click always external. */
@@ -187,6 +188,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       mode,
       cwd,
       isActive = true,
+      prefetchOnly = false,
       providerFlagsOverride,
       permissionNotice: overrideNotice,
       onOpenUrl,
@@ -566,6 +568,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       isMain,
       isTemporary,
       shown: isActive,
+      prefetchOnly,
       computerReady: storage.status !== null && chatComputerCanStart(storage.status.state),
       chatApi,
       inFlight,

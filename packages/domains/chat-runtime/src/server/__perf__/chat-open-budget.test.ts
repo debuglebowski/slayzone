@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { deflateRawSync } from 'node:zlib'
 import { expect, test } from 'vitest'
 import {
   CHAT_HISTORY_PAGE_MAX_BYTES,
@@ -154,6 +155,9 @@ test('a 25k-event chat keeps completed command output out of the open indexes', 
       expect(compact.toolPreviews).toBe(true)
       expect(compact.state.includes('unpreviewed source')).toBe(false)
       expect(jsonByteLength(compact)).toBeLessThan(1.5 * MIB)
+      const deflateBytes = (value: unknown) =>
+        deflateRawSync(JSON.stringify(value), { level: 3, memLevel: 6 }).length
+      expect(deflateBytes(compact)).toBeLessThan(80 * KIB)
       const sealed = snapshot.summaries.length - 1
       const page = await projection.pagesAsOf(
         [sealed],
@@ -173,6 +177,7 @@ test('a 25k-event chat keeps completed command output out of the open indexes', 
       )
       expect(previews.expired).toBe(false)
       expect(jsonByteLength(previews)).toBeLessThan(128 * KIB)
+      expect(deflateBytes(previews)).toBeLessThan(30 * KIB)
       expect(
         page.pages[0].rows.some(
           (row) => row.kind === 'tool' && row.invocation.task?.finalOutput?.totalBytes === 8 * KIB

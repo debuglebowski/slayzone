@@ -238,6 +238,49 @@ describe('thrown away and rebuilt', () => {
   const events = buildLongSession({ events: 3_000, seed: 5 })
   const history = buffered(events)
 
+  test('reuses a compatible v25 checkpoint and its sealed pages after the codec upgrade', async () => {
+    const mem = memoryStore()
+    const old = buffered(events.slice(0, 2_500))
+    await (
+      await TimelineProjection.open({ store: mem.store, history: old, agentStartedTurns: true })
+    ).close()
+    const cp = mem.checkpoint!
+    const data = JSON.parse(cp.data)
+    const state = JSON.parse(data.state)
+    state.v = '25'
+    for (const [key, value] of Object.entries(state.state)) {
+      const packed = value as {
+        $entries?: Record<string, unknown>
+        $toolu?: Record<string, unknown>
+      }
+      if (packed?.$entries)
+        state.state[key] = {
+          $index: [
+            ...Object.entries(packed.$entries),
+            ...Object.entries(packed.$toolu ?? {}).map(([key, value]) => [`toolu_${key}`, value])
+          ]
+        }
+    }
+    data.state = JSON.stringify(state)
+    mem.checkpoint = { ...cp, version: '25.1', data: JSON.stringify(data) }
+    const fedFrom: number[] = []
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history: {
+        lastSeq: history.at(-1)!.seq,
+        async *pages(afterSeq) {
+          fedFrom.push(afterSeq)
+          yield history.filter((b) => b.seq > afterSeq)
+        }
+      },
+      agentStartedTurns: true
+    })
+    expect(fedFrom).toEqual([cp.seq])
+    expect(meaning(await clientView(p))).toEqual(meaning(fullReplay(history, true)))
+    await p.close()
+    expect(mem.checkpoint?.version).toBe(TIMELINE_PROJECTION_VERSION)
+  })
+
   test('a checkpoint of another version', async () => {
     const mem = memoryStore()
     await (

@@ -18,7 +18,7 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { cpus, loadavg } from 'node:os'
 import { performance } from 'node:perf_hooks'
-import { gzipSync } from 'node:zlib'
+import { deflateRawSync, gzipSync } from 'node:zlib'
 import { expect, test } from 'vitest'
 import {
   CHAT_HISTORY_PAGE_MAX_BYTES,
@@ -173,15 +173,26 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
       const snapshot = await restored.openSnapshot()
       const snapshotMs = performance.now() - t
       const wire = JSON.stringify(snapshot)
-      const previewWire = JSON.stringify(await restored.openSnapshot('benchmark'))
+      t = performance.now()
+      const preview = await restored.openSnapshot('benchmark')
+      const previewSnapshotMs = performance.now() - t
+      const previewWire = JSON.stringify(preview)
       t = performance.now()
       const decoded = decodeTimelineState(snapshot.state)
       const decodeMs = performance.now() - t
       const tailRows = decoded.timeline.filter((r) => r !== undefined).length
+      t = performance.now()
+      decodeTimelineState(preview.state)
+      const previewDecodeMs = performance.now() - t
+      t = performance.now()
+      const wsBytes = deflateRawSync(previewWire, { level: 3, memLevel: 6 }).length
+      const deflateMs = performance.now() - t
 
       // 5. One older page (the newest sealed one), as scrolling up asks for it.
       let pageMs = 0,
-        pageBytes = 0
+        pageBytes = 0,
+        previewPageBytes = 0,
+        previewPageDeflateBytes = 0
       const sealed = snapshot.summaries.length
       if (sealed > 0) {
         const p = sealed - 1
@@ -194,6 +205,16 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
         )
         pageMs = performance.now() - t
         pageBytes = Buffer.byteLength(JSON.stringify(res))
+        const compactPage = await restored.pagesAsOf(
+          [p],
+          preview.seq,
+          preview.epoch,
+          p * preview.pageRows,
+          'benchmark'
+        )
+        const pageWire = JSON.stringify(compactPage)
+        previewPageBytes = Buffer.byteLength(pageWire)
+        previewPageDeflateBytes = deflateRawSync(pageWire, { level: 3, memLevel: 6 }).length
       }
       await restored.close()
 
@@ -222,6 +243,10 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
         snapshotMs: ms(snapshotMs),
         snapshotKB: kb(Buffer.byteLength(wire)),
         previewSnapshotKB: kb(Buffer.byteLength(previewWire)),
+        previewSnapshotMs: ms(previewSnapshotMs),
+        previewDecodeMs: ms(previewDecodeMs),
+        previewWebSocketKB: kb(wsBytes),
+        previewDeflateMs: ms(deflateMs),
         snapshotGzipKB: kb(gzipSync(wire).length),
         snapshotStateKB: kb(Buffer.byteLength(snapshot.state)),
         summaries: sealed,
@@ -229,6 +254,8 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
         clientDecodeMs: ms(decodeMs),
         olderPageMs: ms(pageMs),
         olderPageKB: kb(pageBytes),
+        olderPreviewPageKB: kb(previewPageBytes),
+        olderPreviewPageWebSocketKB: kb(previewPageDeflateBytes),
         mobileReplayKB: kb(Buffer.byteLength(replayWire)),
         mobileReplayGzipKB: kb(gzipSync(replayWire).length),
         mobileReduceMs: ms(mobileReduceMs)

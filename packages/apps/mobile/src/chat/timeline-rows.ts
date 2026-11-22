@@ -44,72 +44,12 @@ export function timelineRows(
   return rows
 }
 
-type Branch = Extract<TimelineItem, { kind: 'conversation-branch' }>
-
-/** What a divider says happened (desktop's `ConversationBranchRow`). */
-export function branchLabel(item: Branch): string {
-  switch (item.reason) {
-    case 'rewound':
-      return 'Rewound: Claude forgot what came after this point'
-    case 'forked':
-      return 'Forked into a new conversation'
-    case 'fork-failed':
-      return 'Fork failed: still the original conversation'
-    case 'switched':
-      if (item.source === 'terminal') return 'Continued from the terminal'
-      return item.title ? `Resumed: ${item.title}` : 'Resumed an earlier conversation'
-  }
-}
-
-/** The divider's show / hide control; null when it folds nothing. */
-export function branchToggleLabel(item: Branch, open: boolean): string | null {
-  if (item.hiddenCount <= 0) return null
-  const what =
-    item.reason === 'switched'
-      ? 'previous conversation'
-      : item.reason === 'forked'
-        ? 'original conversation'
-        : 'rewound'
-  return open ? `Hide ${what}` : `Show ${what} (${item.hiddenCount})`
-}
-
-/** Where a turn ended without a reply (desktop's `InterruptedBlock`). */
-export function interruptedLabel(item: Extract<TimelineItem, { kind: 'interrupted' }>): string {
-  return item.reason === 'already-in-conversation'
-    ? 'Not run again: Claude Code already had this message'
-    : 'Turn interrupted'
-}
-
-const PRODUCT: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
-
-/**
- * An agent that could not start, in desktop's words (`AgentProblemCard`): what happened
- * and the way out. `inUse`: the terminal runs this conversation, so it can be continued
- * here (`chat.takeOver`).
- */
-export function agentProblemText(item: Extract<TimelineItem, { kind: 'agent-problem' }>): {
-  title: string
-  hint: string
-  inUse: boolean
-} {
-  const inUse = item.code === 'conversation-in-use'
-  const name = (item.binary ? PRODUCT[item.binary] : undefined) ?? item.binary ?? 'The agent'
-  const title =
-    item.code === 'cli-not-installed'
-      ? `${name} isn't installed`
-      : item.code === 'spawn-refused'
-        ? 'The computer refused to start the agent'
-        : inUse
-          ? 'This conversation is running in the terminal'
-          : "The agent couldn't start"
-  const hint =
-    item.code === 'cli-not-installed'
-      ? `Install ${name} on the computer this task runs on (it must be on that computer's PATH), then retry.`
-      : inUse
-        ? 'One conversation runs in one place at a time. Continue it here (the terminal stops first), or stop it there and retry.'
-        : 'Fix the cause below, then retry.'
-  return { title, hint, inUse }
-}
+export {
+  agentProblemText,
+  branchLabel,
+  branchToggleLabel,
+  interruptedLabel
+} from '@slayzone/terminal/chat-presentation'
 
 export function rowKey(item: TimelineItem, index: number): string {
   if (item.kind === 'conversation-branch') return item.id

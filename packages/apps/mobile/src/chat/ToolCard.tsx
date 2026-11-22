@@ -9,6 +9,7 @@
  * all" opens the whole of it on its own screen, selectable, with Copy. Opened or closed,
  * a card stays so when the list draws its row again (`useExpanded`).
  */
+import { questionsOf } from '@slayzone/terminal/chat-presentation'
 import { useToolDetail } from '@slayzone/terminal/chat-tool-details'
 import type { ChatPrompt } from '@slayzone/terminal/chat-prompts'
 import type { ToolInvocation } from '@slayzone/terminal/reducer'
@@ -196,21 +197,6 @@ function useCommandOutput(taskId: string | undefined, running: boolean) {
     retry: false
   })
   return q.data
-}
-
-interface AskQuestion {
-  question: string
-  options: Array<{ label: string; description?: string }>
-}
-
-export function questionsOf(input: unknown): AskQuestion[] {
-  const qs = (input as { questions?: unknown } | null)?.questions
-  return Array.isArray(qs)
-    ? qs.filter(
-        (q): q is AskQuestion =>
-          q !== null && typeof q === 'object' && typeof (q as AskQuestion).question === 'string'
-      )
-    : []
 }
 
 function Questions({

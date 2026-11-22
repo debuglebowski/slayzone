@@ -452,7 +452,7 @@ test('cold hydrate resumes the outbox and unfinished-turn scan after its checkpo
       state: 'failed'
     })
   )
-  expect(reads).not.toContain(-1)
+  expect(reads).toEqual([saved.length - 2])
   expect(diagnostic).toHaveBeenCalledWith(
     TAB_OPTS.tabId,
     expect.objectContaining({

@@ -351,6 +351,8 @@ function ChatView({
           <BackgroundJobs state={state} tabId={target.tabId} onError={notify} />
           <ChatTimeline
             state={state}
+            agentName={agentName}
+            productName={provider.product}
             hydrating={session.hydrating}
             working={session.inFlight && !awaitingUser}
             reconnecting={session.reconnecting}

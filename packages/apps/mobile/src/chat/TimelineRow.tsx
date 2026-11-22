@@ -24,6 +24,8 @@ type Item<K extends TimelineItem['kind']> = Extract<TimelineItem, { kind: K }>
 
 export const TimelineRow = memo(function TimelineRow({
   item,
+  agentName,
+  productName,
   childItems,
   loadSubAgent,
   rowKey,
@@ -31,6 +33,8 @@ export const TimelineRow = memo(function TimelineRow({
   onToggleBranch
 }: {
   item: TimelineItem
+  agentName?: string
+  productName?: string
   /** The row's stable key (`timelineRows`): what it keeps open is kept by it. */
   rowKey?: string
   /** A sub-agent's own items (its row lists them when opened). */
@@ -65,14 +69,14 @@ export const TimelineRow = memo(function TimelineRow({
     case 'agent-problem':
       return <AgentProblem item={item} s={s} />
     case 'interrupted':
-      return <Divider label={interruptedLabel(item)} s={s} />
+      return <Divider label={interruptedLabel(item, productName)} s={s} />
     case 'conversation-branch': {
       const toggle = branchToggleLabel(item, branchOpen)
       return (
         <View style={s.divider} testID="chat-branch">
           <View style={s.rule} />
           <Text style={s.dividerText} numberOfLines={1}>
-            {branchLabel(item)}
+            {branchLabel(item, agentName)}
           </Text>
           {toggle && onToggleBranch ? (
             <Pressable

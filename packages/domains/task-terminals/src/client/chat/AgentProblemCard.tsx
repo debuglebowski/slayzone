@@ -1,3 +1,4 @@
+import { agentProblemText } from '@slayzone/terminal/chat-presentation'
 import { AlertTriangle } from 'lucide-react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { chatProviderForBinary } from '@slayzone/terminal-contracts'
@@ -10,23 +11,8 @@ export function AgentProblemCard({
   item: Extract<TimelineItem, { kind: 'agent-problem' }>
 }): React.JSX.Element {
   const { restartAgent, restartingAgent, takeOver, onOpenUrl } = useChatView()
-  const inUse = item.code === 'conversation-in-use'
+  const { title, hint, inUse } = agentProblemText(item)
   const product = item.binary ? chatProviderForBinary(item.binary) : null
-  const name = product?.product ?? item.binary ?? 'The agent'
-  const title =
-    item.code === 'cli-not-installed'
-      ? `${name} isn't installed`
-      : item.code === 'spawn-refused'
-        ? 'The computer refused to start the agent'
-        : inUse
-          ? 'This conversation is running in the terminal'
-          : "The agent couldn't start"
-  const hint =
-    item.code === 'cli-not-installed'
-      ? `Install ${name} on the computer this task runs on (it must be on that computer's PATH), then retry.`
-      : inUse
-        ? 'One conversation runs in one place at a time. Continue it here (the terminal stops first), or stop it there and retry.'
-        : 'Fix the cause below, then retry.'
   if (item.resolved) {
     // History: the agent started after it. No Retry — it would replace that agent.
     return (

@@ -34,7 +34,7 @@ import { createContext, type ReactNode, useContext, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { ChromeColors } from '../theme'
 import { MONO, useThemedStyles } from './styles'
-import { questionsOf } from './ToolCard'
+import { questionsOf } from '@slayzone/terminal/chat-presentation'
 
 export type PromptAnswer = (optionId: string, decision: PermissionDecision) => Promise<boolean>
 
@@ -360,12 +360,7 @@ function QuestionPrompt({
   answer: PromptAnswer
   s: Styles
 }) {
-  const questions = questionsOf(prompt.input) as Array<{
-    question: string
-    header?: string
-    multiSelect?: boolean
-    options: Array<{ label: string; description?: string }>
-  }>
+  const questions = questionsOf(prompt.input)
   const [picked, setPicked] = useState<Map<number, string[]>>(() => new Map())
   const [other, setOther] = useState<Map<number, string>>(() => new Map())
 
