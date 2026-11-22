@@ -14,16 +14,28 @@ the headset.
 
 ## Run on the Mac (simulator)
 
-1. Build the web shell and start a hub that serves it. Not verified yet: the
-   commands, port and auth setup may need adjusting.
+1. From the `poc/spatial` worktree root, build and start a loopback hub with
+   its own data directory. Use the Node and pnpm versions in `package.json`.
    ```sh
    pnpm install
    pnpm --filter @slayzone/web-shell build
    pnpm --filter @slayzone/hub build
-   node packages/apps/hub/dist/bin.cjs   # SLAYZONE_HUB_LISTEN_ADDRESS=127.0.0.1:<port> to pick a port
+   SLAYZONE_ROOT="$(mktemp -d)" \
+     SLAYZONE_NONINTERACTIVE=1 \
+     SLAYZONE_HUB_LISTEN_ADDRESS=127.0.0.1:3000 \
+     node packages/apps/hub/dist/bin.cjs
    ```
-   Check it in Safari first: `http://localhost:<port>/?spatial=launcher` should
-   list your projects.
+   In a second terminal, add a demo project and task through the local hub API.
+   ```sh
+   curl -fsS -H 'Content-Type: application/json' \
+     -d '{"name":"Spatial Demo"}' http://127.0.0.1:3000/api/projects
+   curl -fsS -H 'Content-Type: application/json' \
+     -d '{"project":"Spatial Demo","title":"Try the task window"}' \
+     http://127.0.0.1:3000/api/tasks
+   ```
+   Open `http://127.0.0.1:3000/?spatial=launcher` in Safari, then select
+   **Spatial Demo** and **Try the task window**. For a live terminal, the
+   project also needs a connected computer.
 2. Generate and open the Xcode project:
    ```sh
    cd packages/apps/visionos
@@ -31,10 +43,14 @@ the headset.
    xcodegen generate
    open SlayZoneSpatial.xcodeproj
    ```
-3. Run the `SlayZoneSpatial` scheme on the Apple Vision Pro simulator. Enter
-   `http://localhost:<port>` as the hub address.
-4. Unit tests: `xcodebuild test -scheme SlayZoneSpatial -destination 'platform=visionOS Simulator,name=Apple Vision Pro'`.
-   Per CLAUDE.md, run builds through the repo's build lock.
+3. Run the `SlayZoneSpatial` scheme on the Apple Vision Pro simulator. Open
+   **Hub** in the launcher toolbar and enter `http://127.0.0.1:3000`.
+4. From `packages/apps/visionos`, run the Swift tests through the repo’s build lock.
+   ```sh
+   node ../../../scripts/ios-build.mjs exec -- xcodebuild test \
+     -scheme SlayZoneSpatial \
+     -destination 'platform=visionOS Simulator,name=Apple Vision Pro'
+   ```
 
 Debug a panel from Safari > Develop > (simulator) > the page.
 

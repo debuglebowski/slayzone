@@ -14,7 +14,7 @@ export type SpatialHostMessage =
 /** The slice of `window` the bridge touches (injectable for tests). */
 export interface SpatialHostWindow {
   location: { origin: string; pathname: string }
-  open: (url: string, target: string) => unknown
+  open: (url: string, target: string, features?: string) => unknown
   close: () => void
   webkit?: {
     messageHandlers?: {
@@ -46,7 +46,8 @@ export function createSpatialBridge(win: SpatialHostWindow): SpatialBridge {
   return {
     isNative: false,
     open: (route) => {
-      win.open(urlFor(route), '_blank')
+      // The web shell stores its window ID in sessionStorage, which an opener would copy.
+      win.open(urlFor(route), '_blank', 'noopener')
     },
     close: () => win.close()
   }

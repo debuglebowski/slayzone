@@ -51,12 +51,13 @@ describe('spatial bridge in a plain browser', () => {
     expect(createSpatialBridge(browserWindow().win).isNative).toBe(false)
   })
 
-  it('opens the panel in a new browser window, keeping the page path', () => {
+  it('opens an independent browser window, keeping the page path', () => {
     const { win } = browserWindow()
     createSpatialBridge(win).open({ panel: 'board', projectId: 'p1' }, 'SlayZone')
     expect(win.open).toHaveBeenCalledWith(
       'http://localhost:4000/app/?spatial=board&project=p1',
-      '_blank'
+      '_blank',
+      'noopener'
     )
   })
 
