@@ -10,6 +10,7 @@ import { electronBootstrap } from '@slayzone/transport/client'
 import { initTrpcClient } from './trpc'
 import { setupWindowApi } from './window-api'
 import { authInvalidationLink } from './auth-invalidation-link'
+import { browserOpenExternalLink } from './browser-open-external-link'
 import { LoginScreen } from './LoginScreen'
 import { SignOutControl } from './SignOutControl'
 import { signInErrorMessage } from '@slayzone/hub-auth/client'
@@ -71,16 +72,12 @@ async function boot(): Promise<void> {
   }
 
   const trpcUrl = withWindowId(server.url, windowId)
-  // Pre-initialize the tRPC singleton with the auth-invalidation link BEFORE
-  // renderer-app's mountApp() makes its own (now cache-hit — initTrpcClient is
-  // idempotent, first call wins, see its docstring) initTrpcClient call. This decides
-  // the whole link stack for the web shell: mountApp()'s own browserMojoLink() never
-  // gets added, which is correct — a plain web page has no native browser-panel host
-  // for that link to bridge to.
+  // Install the web-only links before mountApp() and TrpcProvider reuse the tRPC
+  // singleton. This covers both React mutations and vanilla client calls.
   //
   // No token (T-13): the browser sends the session cookie with the `/trpc` upgrade on
   // its own, and the hub honours it only from this page's Origin.
-  initTrpcClient(trpcUrl, { links: [authInvalidationLink()] })
+  initTrpcClient(trpcUrl, { links: [browserOpenExternalLink, authInvalidationLink()] })
 
   const { mountApp } = await import('@slayzone/renderer-app')
   // The web shell has no onboarding (MountAppOptions in renderer-app's main.tsx).

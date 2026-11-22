@@ -63,7 +63,9 @@ async function spawnHub(requireLogin: boolean): Promise<Hub> {
       PLAYWRIGHT: '1',
       SLAYZONE_ROOT: root,
       SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
-      SLAYZONE_HUB_REQUIRE_LOGIN: requireLogin ? '1' : '0'
+      SLAYZONE_HUB_REQUIRE_LOGIN: requireLogin ? '1' : '0',
+      // Exercise a headless hub and prevent OS launches if link routing regresses.
+      SLAYZONE_HUB_ENABLE_PROCESSES: '0'
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -141,7 +143,7 @@ test.describe('web shell file editor — real hub, real browser', () => {
   let stopComputer: (() => Promise<void>) | null = null
 
   test.beforeAll(async () => {
-    browser = await chromium.launch()
+    browser = await chromium.launch({ ignoreDefaultArgs: ['--disable-popup-blocking'] })
   })
 
   test.beforeEach(async () => {
@@ -169,6 +171,13 @@ test.describe('web shell file editor — real hub, real browser', () => {
     )
     const page = await context.newPage()
     const errors: string[] = []
+    const externalOpenRequests: string[] = []
+    page.on('websocket', (socket) => {
+      socket.on('framesent', ({ payload }) => {
+        const frame = payload.toString()
+        if (frame.includes('"path":"app.shell.openExternal"')) externalOpenRequests.push(frame)
+      })
+    })
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
     page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console: ${m.text()}`)
@@ -182,7 +191,7 @@ test.describe('web shell file editor — real hub, real browser', () => {
       .first()
       .click({ timeout: 20_000 })
 
-    return { page, errors }
+    return { page, errors, externalOpenRequests }
   }
 
   test('opens the editor, shows the tree, opens a file, saves an edit to disk', async () => {
@@ -207,6 +216,34 @@ test.describe('web shell file editor — real hub, real browser', () => {
     await expect
       .poll(() => fs.readFileSync(path.join(workDir, 'hello.ts'), 'utf8'), { timeout: 10_000 })
       .toContain('// edited in the browser')
+  })
+
+  test('opens an external Markdown link in the viewer browser without calling the hub', async () => {
+    const workDir = await seed(hub, 'External link')
+    const url = 'https://external.example/guide'
+    fs.writeFileSync(path.join(workDir, 'guide.md'), `[Open guide](${url})\n`)
+
+    const { page, externalOpenRequests } = await openEditor('External link')
+    const context = page.context()
+    await context.route(url, (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<h1>External guide</h1>' })
+    )
+
+    const panel = page.locator('[data-panel-id="editor"]:visible')
+    await panel.locator('button.w-full:has-text("guide.md")').first().click()
+    await panel.getByRole('link', { name: 'Open guide' }).click({
+      modifiers: ['ControlOrMeta', 'Shift']
+    })
+
+    await expect
+      .poll(() => ({ pages: context.pages().length, externalOpenRequests }))
+      .toEqual({ pages: 2, externalOpenRequests: [] })
+    const destination = context.pages()[1]
+    await expect(destination).toHaveURL(url)
+    await expect(destination.getByRole('heading', { name: 'External guide' })).toBeVisible()
+    expect(await destination.evaluate(() => window.opener === null)).toBe(true)
+    expect(externalOpenRequests).toEqual([])
+    await context.close()
   })
 
   test('a file tree the hub cannot read shows the error and retries, never spins forever', async () => {
