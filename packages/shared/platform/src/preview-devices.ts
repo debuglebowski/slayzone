@@ -107,11 +107,11 @@ export const PREVIEW_DEVICES: readonly PreviewDevice[] = [
     deviceScaleFactor: 3,
     mobile: true,
     userAgent: MOBILE_UA.replaceAll('17_0', '27_0').replace('Version/17.0', 'Version/27.0'),
-    // Approximate CSS viewports from Apple's listed pixel resolutions at 3x.
-    // https://www.apple.com/iphone-duo/specs/
+    // Full displays at 3x, from App Store Connect's device resolutions.
+    // https://developer.apple.com/help/app-store-connect/reference/app-information/app-preview-specifications#app-preview-resolutions
     screens: [
       { name: 'Cover', width: 466, height: 678 },
-      { name: 'Unfolded', width: 890, height: 626 }
+      { name: 'Unfolded', width: 951, height: 669 }
     ]
   },
   {

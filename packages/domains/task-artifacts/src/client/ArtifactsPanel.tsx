@@ -79,12 +79,8 @@ import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'
 import { ArtifactSearchPanel } from './ArtifactSearchPanel'
 import { ArtifactContentEditor } from './ArtifactContentEditor'
-import {
-  ArtifactDevicePicker,
-  artifactDeviceViewport,
-  type ArtifactDeviceSelection
-} from './ArtifactDevicePicker'
-import { setShowDeviceFrame, useShowDeviceFrame } from './device-frame-preference'
+import { ArtifactDevicePicker, artifactDevicePreviews } from './ArtifactDevicePicker'
+import { useDevicePreviewPreferences } from './device-preview-preferences'
 import { VersionsPanel } from './VersionsPanel'
 import { TreeSidebar } from './TreeSidebar'
 import { useArtifactTree } from './useArtifactTree'
@@ -268,10 +264,6 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
           ? 'split'
           : 'preview'
     const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
-    const [deviceSelections, setDeviceSelections] = useState<
-      Record<string, ArtifactDeviceSelection>
-    >({})
-    const showDeviceFrame = useShowDeviceFrame()
     const [dragOver, setDragOver] = useState(false)
     const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
     const dragArtifactIdsRef = useRef<string[]>([])
@@ -361,14 +353,13 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const htmlTheme = selectedArtifact?.html_theme_override ?? 'system'
     const showHtmlTheme = selectedRenderMode === 'html-preview'
     const showHtmlDevice = showHtmlTheme && viewMode !== 'raw'
-    const deviceSelection = selectedArtifact
-      ? (deviceSelections[selectedArtifact.id] ?? null)
-      : null
-    const deviceViewport = useMemo(() => artifactDeviceViewport(deviceSelection), [deviceSelection])
-    const deviceFrame =
-      showDeviceFrame && deviceSelection?.kind === 'preset'
-        ? { device: deviceSelection.device, screen: deviceSelection.screen }
-        : undefined
+    const {
+      selection: deviceSelection,
+      setSelection: setDeviceSelection,
+      showDeviceFrame,
+      setShowDeviceFrame
+    } = useDevicePreviewPreferences(selectedArtifact?.id)
+    const devicePreviews = useMemo(() => artifactDevicePreviews(deviceSelection), [deviceSelection])
     const HtmlViewIcon = viewMode === 'preview' ? Eye : viewMode === 'split' ? Columns2 : Code2
 
     const applyViewMode = (mode: typeof viewMode) => {
@@ -1025,12 +1016,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                       selection={deviceSelection}
                       showDeviceFrame={showDeviceFrame}
                       onShowDeviceFrameChange={setShowDeviceFrame}
-                      onChange={(next) =>
-                        setDeviceSelections((current) => ({
-                          ...current,
-                          [selectedArtifact.id]: next
-                        }))
-                      }
+                      onChange={setDeviceSelection}
                     />
                   )}
                   {showZoom && (
@@ -1390,8 +1376,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   effectiveWidth={effectiveWidth}
                   zoomPct={zoomPct}
                   htmlTheme={htmlTheme}
-                  deviceViewport={deviceViewport}
-                  deviceFrame={deviceFrame}
+                  devicePreviews={devicePreviews}
+                  showDeviceFrame={showDeviceFrame}
                   searchQuery={findOpen ? findQuery : ''}
                   searchActiveIndex={findActiveIndex}
                   searchMatchCase={findMatchCase}

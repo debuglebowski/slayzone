@@ -1,5 +1,12 @@
 import { useId, useState, type FormEvent } from 'react'
-import { Check, ChevronDown, MonitorSmartphone, RotateCw } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Check,
+  ChevronDown,
+  MonitorSmartphone,
+  RectangleHorizontal,
+  RectangleVertical
+} from 'lucide-react'
 import {
   Button,
   Command,
@@ -24,19 +31,41 @@ import {
   type DeviceViewport,
   type PreviewDevice
 } from '@slayzone/platform/preview-devices'
+import type { ArtifactDeviceFrame } from './ArtifactDeviceFrame'
 
 export type ArtifactDeviceSelection =
-  | { kind: 'preset'; device: PreviewDevice; screen: number; rotated: boolean }
+  | { kind: 'preset'; device: PreviewDevice; screen: number; rotated: boolean; showBoth?: boolean }
   | { kind: 'custom'; viewport: DeviceViewport }
   | null
 
-export function artifactDeviceViewport(
-  selection: ArtifactDeviceSelection
-): DeviceViewport | undefined {
-  if (!selection) return undefined
+function artifactDeviceViewport(selection: NonNullable<ArtifactDeviceSelection>): DeviceViewport {
   if (selection.kind === 'custom') return selection.viewport
   const viewport = deviceViewport(selection.device, selection.screen)
   return selection.rotated ? rotateDeviceViewport(viewport) : viewport
+}
+
+export interface ArtifactDevicePreview {
+  slot: 'primary' | 'secondary'
+  viewport: DeviceViewport
+  frame?: ArtifactDeviceFrame
+  label?: string
+}
+
+export function artifactDevicePreviews(
+  selection: ArtifactDeviceSelection
+): ArtifactDevicePreview[] {
+  if (!selection) return []
+  if (selection.kind === 'custom') return [{ slot: 'primary', viewport: selection.viewport }]
+
+  const { device, screen, showBoth } = selection
+  const screens = showBoth && device.screens.length > 1 ? [0, 1] : [screen]
+  const primary = screens.includes(screen) ? screen : screens[0]
+  return screens.map((index) => ({
+    slot: index === primary ? 'primary' : 'secondary',
+    viewport: artifactDeviceViewport({ ...selection, screen: index }),
+    frame: { device, screen: index },
+    label: screens.length > 1 ? device.screens[index]?.name : undefined
+  }))
 }
 
 export function ArtifactDevicePicker({
@@ -53,15 +82,41 @@ export function ArtifactDevicePicker({
   const [open, setOpen] = useState(false)
   const [custom, setCustom] = useState(false)
   const frameSwitchId = useId()
-  const viewport = artifactDeviceViewport(selection)
+  const viewport = selection ? artifactDeviceViewport(selection) : undefined
   const screen =
     selection?.kind === 'preset' ? selection.device.screens[selection.screen] : undefined
   const name =
     selection?.kind === 'preset' ? selection.device.name : selection ? 'Custom' : 'Device'
 
+  const foldable =
+    selection?.kind === 'preset' && selection.device.screens.length > 1 ? selection : null
+  const screenOptions = foldable
+    ? [...foldable.device.screens.map(({ name }, index) => name ?? 'Screen ' + (index + 1)), 'Both']
+    : []
+  const showBoth = foldable?.showBoth === true
+  const activeScreen = showBoth ? screenOptions.length - 1 : (foldable?.screen ?? 0)
+  const nextScreen = activeScreen + 1 < screenOptions.length ? activeScreen + 1 : 0
+  const screenAction = 'Switch to ' + screenOptions[nextScreen]
+  const toPortrait = viewport && viewport.width > viewport.height
+  const OrientationIcon = toPortrait ? RectangleVertical : RectangleHorizontal
+  const orientationAction = showBoth
+    ? 'Rotate both screens'
+    : viewport?.width === viewport?.height
+      ? 'Rotate preview 90°'
+      : toPortrait
+        ? 'Switch to portrait'
+        : 'Switch to landscape'
+
+  function chooseScreen(index: number) {
+    if (!foldable) return
+    const compare = index === foldable.device.screens.length
+    onChange({ ...foldable, screen: compare ? foldable.screen : index, showBoth: compare })
+  }
+
   function chooseDevice(device: PreviewDevice) {
     onChange({ kind: 'preset', device, screen: 0, rotated: false })
-    setOpen(device.screens.length > 1)
+    setCustom(false)
+    setOpen(false)
   }
 
   function applyCustom(event: FormEvent<HTMLFormElement>) {
@@ -100,16 +155,15 @@ export function ArtifactDevicePicker({
             size="sm"
             className="h-7 gap-1.5 px-2 text-xs"
             aria-label={
-              viewport
-                ? `Device preview, ${name}${screen?.name ? `, ${screen.name}` : ''}, ${viewport.width} by ${viewport.height}`
-                : 'Device preview'
+              showBoth
+                ? 'Device preview, ' + name + ', both screens'
+                : viewport
+                  ? `Device preview, ${name}${screen?.name ? `, ${screen.name}` : ''}, ${viewport.width} by ${viewport.height}`
+                  : 'Device preview'
             }
           >
             <MonitorSmartphone className="size-3.5" />
-            <span className="max-w-32 truncate">
-              {name}
-              {screen?.name ? ` · ${screen.name}` : ''}
-            </span>
+            <span className="max-w-32 truncate">{name}</span>
             <ChevronDown className="size-3 opacity-60" />
           </Button>
         </PopoverTrigger>
@@ -128,26 +182,26 @@ export function ArtifactDevicePicker({
               onCheckedChange={onShowDeviceFrameChange}
             />
           </div>
-          {selection?.kind === 'preset' && selection.device.screens.length > 1 && (
+          {foldable && (
             <div
               className="flex shrink-0 flex-wrap gap-1 border-b border-border p-2"
               role="group"
               aria-label="Device screen"
             >
-              {selection.device.screens.map((option, index) => (
+              {screenOptions.map((option, index) => (
                 <Button
-                  key={option.name}
+                  key={option}
                   type="button"
-                  variant={selection.screen === index ? 'secondary' : 'ghost'}
+                  variant={activeScreen === index ? 'secondary' : 'ghost'}
                   size="sm"
                   className="h-7 px-2 text-xs"
-                  aria-pressed={selection.screen === index}
+                  aria-pressed={activeScreen === index}
                   onClick={() => {
-                    onChange({ ...selection, screen: index })
+                    chooseScreen(index)
                     setOpen(false)
                   }}
                 >
-                  {option.name}
+                  {option}
                 </Button>
               ))}
             </div>
@@ -236,17 +290,31 @@ export function ArtifactDevicePicker({
           </div>
         </PopoverContent>
       </Popover>
+      {foldable && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs"
+          title={screenAction}
+          aria-label={screenAction}
+          onClick={() => chooseScreen(nextScreen)}
+        >
+          <ArrowLeftRight className="size-3.5" />
+          <span className="max-w-24 truncate">{screenOptions[activeScreen]}</span>
+        </Button>
+      )}
       {viewport && (
         <Button
           type="button"
           variant="outline"
           size="icon"
           className="size-7"
-          title="Rotate device"
-          aria-label="Rotate device"
+          title={orientationAction}
+          aria-label={orientationAction}
           onClick={rotate}
         >
-          <RotateCw className="size-3.5" />
+          <OrientationIcon className="size-3.5" />
         </Button>
       )}
     </div>

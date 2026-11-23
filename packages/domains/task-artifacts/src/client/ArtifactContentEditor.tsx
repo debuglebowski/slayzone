@@ -17,7 +17,6 @@ import {
   type LinkOpenTarget
 } from '@slayzone/editor'
 import { toArtifactFileUrl } from '@slayzone/platform/slz-file-url'
-import type { DeviceViewport } from '@slayzone/platform/preview-devices'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact } from '@slayzone/task-contracts'
 import {
@@ -40,8 +39,9 @@ import {
 } from '../shared/text-read'
 import { Download, FileQuestion } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
-import type { ArtifactDeviceFrame } from './ArtifactDeviceFrame'
+import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import { HtmlPreviewFrame } from './ArtifactHtmlPreview'
+import { parseHtmlPrototype, type HtmlPrototype } from './html-prototype'
 import { MediaPlayerViewer } from './MediaPlayerViewer'
 import { ArchiveViewer } from './ArchiveViewer'
 import { FontViewer } from './FontViewer'
@@ -246,8 +246,8 @@ export function ArtifactContentEditor({
   effectiveWidth,
   zoomPct,
   htmlTheme,
-  deviceViewport,
-  deviceFrame,
+  devicePreviews,
+  showDeviceFrame,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -269,8 +269,8 @@ export function ArtifactContentEditor({
   effectiveWidth: 'narrow' | 'wide'
   zoomPct: number
   htmlTheme: HtmlArtifactTheme
-  deviceViewport?: DeviceViewport
-  deviceFrame?: ArtifactDeviceFrame
+  devicePreviews?: readonly ArtifactDevicePreview[]
+  showDeviceFrame?: boolean
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -339,6 +339,7 @@ export function ArtifactContentEditor({
   //   iframes (HTML/PDF/image) so they refetch from disk.
   const [editorReloadVersion, setEditorReloadVersion] = useState(0)
   const [previewVersion, setPreviewVersion] = useState(0)
+  const [prototype, setPrototype] = useState<HtmlPrototype | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const baselineMtimeRef = useRef<number | null>(null)
   // Saves in flight, and whether a change event arrived during one. The watcher
@@ -369,6 +370,16 @@ export function ArtifactContentEditor({
   // baseline is in, below), so it loads once instead of at v0 and again at v1.
   const loading = isBinary ? previewVersion === 0 : loadedId !== artifact.id
 
+  const refreshTextPreview = useCallback(
+    (savedContent: string) => {
+      if (renderMode === 'html-preview') {
+        setPrototype(parseHtmlPrototype(savedContent))
+      }
+      setPreviewVersion((v) => v + 1)
+    },
+    [renderMode]
+  )
+
   // Read file + mtime from disk. Pure: callers apply the result.
   const readFromDisk = useCallback(
     (): Promise<[ArtifactTextRead | null, number | null]> =>
@@ -376,21 +387,25 @@ export function ArtifactContentEditor({
     [artifact.id, readText, getMtime]
   )
   // Show a disk read + refresh baseline mtime. Clears dirty + pending flags.
-  const applyDisk = useCallback(([read, mtime]: [ArtifactTextRead | null, number | null]): void => {
-    if (read && read.kind !== 'text') {
-      setNotText(read)
-      setContent(null)
-    } else {
-      setNotText(null)
-      setContent(read?.content ?? '')
-      setDiskSize(read?.size ?? 0)
-    }
-    baselineMtimeRef.current = mtime
-    setIsDirty(false)
-    setExternalChangePending(false)
-    setEditorReloadVersion((v) => v + 1)
-    setPreviewVersion((v) => v + 1)
-  }, [])
+  const applyDisk = useCallback(
+    ([read, mtime]: [ArtifactTextRead | null, number | null]): void => {
+      const savedContent = read?.kind === 'text' ? read.content : ''
+      if (read && read.kind !== 'text') {
+        setNotText(read)
+        setContent(null)
+      } else {
+        setNotText(null)
+        setContent(savedContent)
+        setDiskSize(read?.size ?? 0)
+      }
+      baselineMtimeRef.current = mtime
+      setIsDirty(false)
+      setExternalChangePending(false)
+      setEditorReloadVersion((v) => v + 1)
+      refreshTextPreview(savedContent)
+    },
+    [refreshTextPreview]
+  )
   const loadFromDisk = useCallback(
     (): Promise<void> => readFromDisk().then(applyDisk),
     [readFromDisk, applyDisk]
@@ -539,11 +554,11 @@ export function ArtifactContentEditor({
           if (contentRef.current === value) setIsDirty(false)
           // Cache-bust preview iframes only. Editor must NOT see this bump or
           // CodeMirror replaceAll resets the caret mid-typing.
-          setPreviewVersion((v) => v + 1)
+          refreshTextPreview(value)
         })
       }, 500)
     },
-    [artifact.id, saveContent, getMtime, recheckAfterSave]
+    [artifact.id, saveContent, getMtime, recheckAfterSave, refreshTextPreview]
   )
 
   const handleReloadFromDisk = useCallback((): void => {
@@ -567,8 +582,9 @@ export function ArtifactContentEditor({
       baselineMtimeRef.current = newMtime
       setIsDirty(false)
       setExternalChangePending(false)
+      if (renderMode === 'html-preview') refreshTextPreview(draft)
     })
-  }, [artifact.id, saveContent, getMtime, recheckAfterSave])
+  }, [artifact.id, saveContent, getMtime, recheckAfterSave, renderMode, refreshTextPreview])
 
   const banner = externalChangePending ? (
     <div
@@ -783,13 +799,14 @@ export function ArtifactContentEditor({
           <ArtifactPreview
             renderMode={renderMode}
             content={content ?? ''}
+            prototype={prototype}
             artifactId={artifact.id}
             contentVersion={previewVersion}
             getFilePath={getFilePath}
             zoom={zoom}
             htmlTheme={htmlTheme}
-            deviceViewport={deviceViewport}
-            deviceFrame={deviceFrame}
+            devicePreviews={devicePreviews}
+            showDeviceFrame={showDeviceFrame}
             onOpenLink={handleOpenLink}
           />
         </div>
@@ -820,13 +837,14 @@ export function ArtifactContentEditor({
             <ArtifactPreview
               renderMode={renderMode}
               content={content ?? ''}
+              prototype={prototype}
               artifactId={artifact.id}
               contentVersion={previewVersion}
               getFilePath={getFilePath}
               zoom={zoom}
               htmlTheme={htmlTheme}
-              deviceViewport={deviceViewport}
-              deviceFrame={deviceFrame}
+              devicePreviews={devicePreviews}
+              showDeviceFrame={showDeviceFrame}
               onOpenLink={handleOpenLink}
             />
           </div>
@@ -896,24 +914,26 @@ export function ArtifactContentEditor({
 function ArtifactPreview({
   renderMode,
   content,
+  prototype,
   artifactId,
   contentVersion,
   getFilePath,
   zoom,
   htmlTheme,
-  deviceViewport,
-  deviceFrame,
+  devicePreviews,
+  showDeviceFrame,
   onOpenLink
 }: {
   renderMode: RenderMode
   content: string
+  prototype: HtmlPrototype | null
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
   htmlTheme: HtmlArtifactTheme
-  deviceViewport?: DeviceViewport
-  deviceFrame?: ArtifactDeviceFrame
+  devicePreviews?: readonly ArtifactDevicePreview[]
+  showDeviceFrame?: boolean
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   if (renderMode === 'html-preview')
@@ -927,11 +947,12 @@ function ArtifactPreview({
         key={`${artifactId}:${contentVersion}:${htmlTheme}`}
         artifactId={artifactId}
         contentVersion={contentVersion}
+        prototype={prototype}
         getFilePath={getFilePath}
         zoom={zoom}
         htmlTheme={htmlTheme}
-        deviceViewport={deviceViewport}
-        deviceFrame={deviceFrame}
+        devicePreviews={devicePreviews}
+        showDeviceFrame={showDeviceFrame}
         onOpenLink={onOpenLink}
       />
     )

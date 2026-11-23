@@ -4,6 +4,10 @@ import {
   parseHtmlPreviewLinkMessage
 } from '@slayzone/platform/html-preview-links'
 import {
+  HTML_PROTOTYPE_ACTION,
+  parseHtmlPrototypeAction
+} from '@slayzone/platform/html-prototype-actions'
+import {
   ARTIFACT_DEVICE_TOUCH_INPUT,
   ARTIFACT_DEVICE_TOUCH_MODE,
   type ArtifactDeviceTouchInput
@@ -98,6 +102,12 @@ function installMouseAsTouch() {
 
 if (process.isMainFrame && location.protocol === `${SLZ_ARTIFACT_SCHEME}:`) {
   installMouseAsTouch()
+
+  // Give the page the same message as an iframe while keeping IPC in the preload.
+  ipcRenderer.on(HTML_PROTOTYPE_ACTION, (_event, action: unknown, value: unknown) => {
+    const message = parseHtmlPrototypeAction({ type: HTML_PROTOTYPE_ACTION, action, value })
+    if (message) window.postMessage(message, '*')
+  })
 
   // Runs in the guest's isolated world. Only a real link click can reach the
   // embedder; the artifact page has no access to this IPC channel.

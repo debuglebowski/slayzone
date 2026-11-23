@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ArtifactsSidebarState, TaskArtifact } from '@slayzone/task-contracts'
-import type { DeviceViewport } from '@slayzone/platform/preview-devices'
+import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
 import { detectPlatform, toast, useShortcutStore } from '@slayzone/ui'
 
@@ -132,26 +132,29 @@ vi.mock('./ArtifactContentEditor', () => ({
     artifact,
     viewMode,
     searchQuery,
-    deviceViewport,
-    deviceFrame
+    devicePreviews,
+    showDeviceFrame
   }: {
     artifact: TaskArtifact
     viewMode: string
     searchQuery: string
-    deviceViewport?: DeviceViewport
-    deviceFrame?: { device: { id: string } }
-  }) => (
-    <div
-      data-testid="viewer"
-      data-artifact={artifact.id}
-      data-view-mode={viewMode}
-      data-search={searchQuery}
-      data-device-frame={deviceFrame?.device.id}
-      data-viewport={
-        deviceViewport ? `${deviceViewport.width}×${deviceViewport.height}` : undefined
-      }
-    />
-  )
+    devicePreviews?: readonly ArtifactDevicePreview[]
+    showDeviceFrame?: boolean
+  }) => {
+    const primary = devicePreviews?.find(({ slot }) => slot === 'primary')
+    const format = ({ viewport }: ArtifactDevicePreview) => viewport.width + '×' + viewport.height
+    return (
+      <div
+        data-testid="viewer"
+        data-artifact={artifact.id}
+        data-view-mode={viewMode}
+        data-search={searchQuery}
+        data-device-frame={showDeviceFrame ? primary?.frame?.device.id : undefined}
+        data-viewports={devicePreviews?.map(format).join(', ')}
+        data-viewport={primary && format(primary)}
+      />
+    )
+  }
 }))
 // The search sidebar, reduced to one hit per artifact (a "needle" match).
 vi.mock('./ArtifactSearchPanel', () => ({
@@ -258,28 +261,44 @@ afterEach(() => {
   client.clear()
 })
 
-it('selects and rotates both iPhone Duo screens and keeps the choice with its artifact', async () => {
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  )
+describe('ArtifactsPanel device preview persistence', () => {
   const scrollIntoView = HTMLElement.prototype.scrollIntoView
-  HTMLElement.prototype.scrollIntoView ??= () => undefined
-  try {
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
+    HTMLElement.prototype.scrollIntoView ??= () => undefined
     server.rows = [
       { ...row('a1', 'split'), title: 'first.html' },
       { ...row('a2'), title: 'other.html' }
     ]
-    await mountLoaded()
+  })
+
+  afterEach(() => {
+    cleanup()
+    localStorage.clear()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the device, foldable mode, rotation and frame setting per artifact after reopening', async () => {
+    const view = await mountLoaded()
     expect(viewer().dataset.viewMode).toBe('split')
     fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
     fireEvent.click(await screen.findByRole('option', { name: 'iPhone Duo' }))
     expect(viewer().dataset.viewport).toBe('466×678')
     expect(viewer().dataset.deviceFrame).toBe('iphone-duo')
+    expect(screen.getByRole('button', { name: 'Switch to Unfolded' })).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: 'Search devices' })).toBeNull()
+
+    const devicePicker = screen.getByRole('button', { name: /^Device preview, iPhone Duo/ })
+    fireEvent.click(devicePicker)
     const showFrame = screen.getByRole('switch', { name: 'Show device frame' })
     expect(showFrame.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(showFrame)
@@ -288,20 +307,76 @@ it('selects and rotates both iPhone Duo screens and keeps the choice with its ar
     fireEvent.click(showFrame)
     expect(viewer().dataset.deviceFrame).toBe('iphone-duo')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Unfolded' }))
-    expect(viewer().dataset.viewport).toBe('890×626')
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate device' }))
-    expect(viewer().dataset.viewport).toBe('626×890')
+    fireEvent.click(screen.getByRole('button', { name: 'Both' }))
+    expect(viewer().dataset.viewports).toBe('466×678, 951×669')
+    const screenSwitcher = screen.getByRole('button', { name: 'Switch to Cover' })
+    fireEvent.click(screenSwitcher)
+    expect(viewer().dataset.viewports).toBe('466×678')
+
+    expect(screen.getByRole('button', { name: 'Switch to Unfolded' })).toBe(screenSwitcher)
+    fireEvent.click(screenSwitcher)
+    expect(viewer().dataset.viewport).toBe('951×669')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to portrait' }))
+    expect(viewer().dataset.viewport).toBe('669×951')
+    expect(screen.getByRole('button', { name: 'Switch to Both' })).toBe(screenSwitcher)
+    fireEvent.click(screenSwitcher)
+    expect(viewer().dataset.viewports).toBe('678×466, 669×951')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Cover' }))
+    expect(viewer().dataset.viewport).toBe('678×466')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Unfolded' }))
+    expect(viewer().dataset.viewport).toBe('669×951')
 
     select('a2')
     expect(viewer().dataset.viewport).toBeUndefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Surface Duo' }))
+    expect(viewer().dataset.viewport).toBe('540×720')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Dual screen' }))
+    expect(viewer().dataset.viewport).toBe('1114×720')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Both' }))
+    expect(viewer().dataset.viewports).toBe('540×720, 1114×720')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Single screen' }))
+    expect(viewer().dataset.viewport).toBe('540×720')
+
     select('a1')
-    expect(viewer().dataset.viewport).toBe('626×890')
-  } finally {
-    cleanup()
-    HTMLElement.prototype.scrollIntoView = scrollIntoView
-    vi.unstubAllGlobals()
-  }
+    expect(viewer().dataset.viewport).toBe('669×951')
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Both' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Device preview, iPhone Duo, both screens' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Show device frame' }))
+
+    view.unmount()
+    await mountLoaded()
+    expect(viewer().dataset.viewports).toBe('678×466, 669×951')
+    expect(viewer().dataset.viewport).toBe('669×951')
+    expect(viewer().dataset.deviceFrame).toBeUndefined()
+    select('a2')
+    expect(viewer().dataset.viewport).toBe('540×720')
+    expect(viewer().dataset.deviceFrame).toBe('surface-duo')
+  })
+
+  it('restores a rotated custom size and remembers switching back to fit to pane', async () => {
+    const view = await mountLoaded()
+    fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Custom size' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Viewport width' }), {
+      target: { value: '700' }
+    })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Viewport height' }), {
+      target: { value: '900' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to landscape' }))
+
+    view.unmount()
+    const reopened = await mountLoaded()
+    expect(viewer().dataset.viewport).toBe('900×700')
+    fireEvent.click(screen.getByRole('button', { name: 'Device preview, Custom, 900 by 700' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Fit to pane' }))
+
+    reopened.unmount()
+    await mountLoaded()
+    expect(viewer().dataset.viewport).toBeUndefined()
+  })
 })
 
 describe('ArtifactsPanel uploads to a remote hub', () => {

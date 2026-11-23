@@ -10,7 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { webcrypto } from 'node:crypto'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
-import { deviceViewport, PREVIEW_DEVICES } from '@slayzone/platform/preview-devices'
+import {
+  deviceViewport,
+  PREVIEW_DEVICES,
+  rotateDeviceViewport,
+  type DeviceViewport
+} from '@slayzone/platform/preview-devices'
+import { deviceChassisLayout, type ArtifactDeviceFrame } from './ArtifactDeviceFrame'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import { RICH_TEXT_MAX_BYTES, type ArtifactTextRead } from '../shared/text-read'
 
@@ -127,14 +133,16 @@ function Tab({
   viewMode = 'raw',
   siblings = [],
   deviceViewport,
-  deviceFrame
+  deviceFrame,
+  devicePreviews
 }: {
   mode: 'visible' | 'hidden'
   art?: TaskArtifact
   viewMode?: 'preview' | 'split' | 'raw'
   siblings?: TaskArtifact[]
-  deviceViewport?: React.ComponentProps<typeof ArtifactContentEditor>['deviceViewport']
-  deviceFrame?: React.ComponentProps<typeof ArtifactContentEditor>['deviceFrame']
+  deviceViewport?: DeviceViewport
+  deviceFrame?: ArtifactDeviceFrame
+  devicePreviews?: React.ComponentProps<typeof ArtifactContentEditor>['devicePreviews']
 }) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
     artifact: art,
@@ -147,8 +155,11 @@ function Tab({
     effectiveWidth: 'wide',
     zoomPct: 100,
     htmlTheme: 'system',
-    deviceViewport,
-    deviceFrame,
+    devicePreviews:
+      devicePreviews ??
+      (deviceViewport
+        ? [{ slot: 'primary', viewport: deviceViewport, frame: deviceFrame }]
+        : undefined),
     searchQuery: '',
     searchActiveIndex: 0,
     searchMatchCase: false,
@@ -237,6 +248,37 @@ it.each(['preview', 'split'] as const)(
   }
 )
 
+it.each(['desktop-1080p', 'compact-laptop'])('fits a thin bezel around the %s screen', (id) => {
+  const device = PREVIEW_DEVICES.find((preset) => preset.id === id)!
+  const viewport = deviceViewport(device, 0)
+  const { layerStyle } = deviceChassisLayout({ device, screen: 0 }, viewport)
+  expect(layerStyle.width - viewport.width).toBeLessThan(40)
+  expect(layerStyle.height - viewport.height).toBeLessThan(40)
+})
+
+it('puts the iPhone Duo camera cutout in the cover corner only', () => {
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const cover = deviceChassisLayout({ device, screen: 0 }, deviceViewport(device, 0))
+  const inner = deviceChassisLayout({ device, screen: 1 }, deviceViewport(device, 1))
+  expect(cover.chassis.cutout?.position).toBeGreaterThan(0.9)
+  expect(cover.chassis.cutout?.width).toBe(cover.chassis.cutout?.height)
+  expect(inner.chassis.cutout).toBeUndefined()
+  expect(Math.abs(cover.height - inner.height)).toBeLessThan(3)
+})
+
+it('keeps the Duo cover flatter on the hinge edge when the device rotates', () => {
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const frame = { device, screen: 0 }
+  const viewport = deviceViewport(device, 0)
+  const portrait = deviceChassisLayout(frame, viewport)
+  const landscape = deviceChassisLayout(frame, rotateDeviceViewport(viewport))
+  expect(portrait.screenRadius).toBe('6px 44px 44px 6px')
+  expect(landscape.screenRadius).toBe('6px 6px 44px 44px')
+  expect(portrait.width).toBe(landscape.height)
+  expect(portrait.height).toBe(landscape.width)
+  expect(portrait.layerStyle.width - viewport.width).toBeLessThan(30)
+})
+
 it('toggles a device frame around the same live HTML viewport', async () => {
   vi.useRealTimers()
   const html = artifact('page', 'page.html')
@@ -254,14 +296,167 @@ it('toggles a device frame around the same live HTML viewport', async () => {
   )
   const frame = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
   expect(screen.getByTestId('artifact-device-frame').getAttribute('data-device')).toBe('iphone-duo')
-  expect(frame.style.width).toBe('890px')
-  expect(frame.style.height).toBe('626px')
+  expect(frame.style.width).toBe('951px')
+  expect(frame.style.height).toBe('669px')
 
   view.rerender(<Tab mode="visible" art={html} viewMode="preview" deviceViewport={viewport} />)
   expect(screen.queryByTestId('artifact-device-frame')).toBeNull()
   expect(screen.getByTitle('HTML preview')).toBe(frame)
-  expect(frame.style.width).toBe('890px')
-  expect(frame.style.height).toBe('626px')
+  expect(frame.style.width).toBe('951px')
+  expect(frame.style.height).toBe('669px')
+})
+
+it('shows both Duo displays and keeps the original preview mounted', async () => {
+  vi.useRealTimers()
+  disk.content.page = '<p>Hello</p>'
+  const html = artifact('page', 'page.html')
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const cover = { slot: 'primary' as const, viewport: deviceViewport(device, 0) }
+  const inner = {
+    slot: 'secondary' as const,
+    viewport: deviceViewport(device, 1),
+    label: 'Unfolded'
+  }
+  const view = render(<Tab mode="visible" art={html} viewMode="preview" devicePreviews={[cover]} />)
+  const original = await screen.findByTitle('HTML preview')
+
+  view.rerender(
+    <Tab
+      mode="visible"
+      art={html}
+      viewMode="preview"
+      devicePreviews={[{ ...cover, label: 'Cover' }, inner]}
+    />
+  )
+  expect(screen.getByTitle('HTML preview — Cover')).toBe(original)
+  expect(original).toHaveProperty('style.width', '466px')
+  expect(screen.getByTitle('HTML preview — Unfolded')).toHaveProperty('style.width', '951px')
+  expect(screen.getByTitle('HTML preview — Unfolded')).toHaveProperty('style.height', '669px')
+  expect(getFilePath).toHaveBeenCalledTimes(1)
+})
+
+const PROTOTYPE_HTML = `<!doctype html>
+<html><head><script type="application/json" id="slayzone-prototype">
+  {"actions":[{"id":"show-error","label":"Show error"}]}
+</script></head><body><p>Prototype</p></body></html>`
+const SHOW_ERROR = { type: 'slayzone:prototype-action', action: 'show-error' }
+
+it.each(['preview', 'split'] as const)(
+  'sends repeatable prototype actions to the Fit to pane preview in %s mode',
+  async (viewMode) => {
+    vi.useRealTimers()
+    disk.content.page = PROTOTYPE_HTML
+    render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode={viewMode} />)
+
+    const frame = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
+    const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
+    const action = screen.getByRole('button', { name: 'Show error' }) as HTMLButtonElement
+    expect(action.disabled).toBe(true)
+    fireEvent.load(frame)
+    expect(action.disabled).toBe(false)
+    fireEvent.click(action)
+    fireEvent.click(action)
+    expect(postMessage.mock.calls).toEqual([
+      [SHOW_ERROR, '*'],
+      [SHOW_ERROR, '*']
+    ])
+  }
+)
+
+it('sends one prototype action to both device previews once both are loaded', async () => {
+  vi.useRealTimers()
+  disk.content.page = PROTOTYPE_HTML
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  render(
+    <Tab
+      mode="visible"
+      art={artifact('page', 'page.html')}
+      viewMode="preview"
+      devicePreviews={[
+        { slot: 'primary', viewport: deviceViewport(device, 0), label: 'Cover' },
+        { slot: 'secondary', viewport: deviceViewport(device, 1), label: 'Unfolded' }
+      ]}
+    />
+  )
+  const cover = (await screen.findByTitle('HTML preview — Cover')) as HTMLIFrameElement
+  const unfolded = screen.getByTitle('HTML preview — Unfolded') as HTMLIFrameElement
+  const sends = [cover, unfolded].map((frame) => vi.spyOn(frame.contentWindow!, 'postMessage'))
+  const action = screen.getByRole('button', { name: 'Show error' }) as HTMLButtonElement
+  const controls = screen.getByRole('group', { name: 'Prototype controls' })
+  const canvas = screen.getByTestId('artifact-device-canvas')
+  expect(canvas.contains(controls)).toBe(true)
+  expect(canvas.contains(cover)).toBe(true)
+  expect(controls.compareDocumentPosition(cover)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  fireEvent.load(cover)
+  expect(action.disabled).toBe(true)
+  fireEvent.load(unfolded)
+  fireEvent.click(action)
+  for (const send of sends) expect(send).toHaveBeenCalledExactlyOnceWith(SHOW_ERROR, '*')
+})
+
+it('keeps the prototype toolbar aligned with the saved HTML in Split mode', async () => {
+  vi.useRealTimers()
+  disk.content.page = PROTOTYPE_HTML
+  render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode="split" />)
+
+  await screen.findByRole('button', { name: 'Show error' })
+  vi.useFakeTimers()
+  fireEvent.change(code()!, { target: { value: PROTOTYPE_HTML.replace('Show error', 'Retry') } })
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Show error' })).toBeTruthy()
+  await act(() => vi.advanceTimersByTimeAsync(500))
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+})
+
+it('shows the prototype controls only in a preview with a valid manifest', async () => {
+  vi.useRealTimers()
+  const html = artifact('page', 'page.html')
+  disk.content.page = PROTOTYPE_HTML
+  const view = render(<Tab mode="visible" art={html} viewMode="raw" />)
+  await screen.findByTestId('code')
+  expect(screen.queryByRole('group', { name: 'Prototype controls' })).toBeNull()
+
+  const broken = artifact('broken', 'broken.html')
+  disk.content.broken = PROTOTYPE_HTML.replace('"actions":', '"actions"')
+  view.rerender(<Tab mode="visible" art={broken} viewMode="preview" />)
+  await screen.findByTitle('HTML preview')
+  expect(screen.queryByRole('group', { name: 'Prototype controls' })).toBeNull()
+})
+
+it('relays values from the artifact-owned controls and ignores messages from the preview', async () => {
+  vi.useRealTimers()
+  disk.content.page = PROTOTYPE_HTML.replace(
+    '<head>',
+    '<head><meta name="slayzone-prototype-controls" content="96">'
+  )
+  render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode="preview" />)
+
+  const controls = (await screen.findByTitle('Prototype controls')) as HTMLIFrameElement
+  const preview = screen.getByTitle('HTML preview') as HTMLIFrameElement
+  expect(controls.getAttribute('sandbox')).toBe('allow-scripts')
+  expect(new URL(controls.src).searchParams.get('slayzone-preview')).toBe('controls')
+  expect(new URL(preview.src).searchParams.has('slayzone-preview')).toBe(false)
+  expect(screen.queryByRole('button', { name: 'Show error' })).toBeNull()
+  const sendToScreen = vi.spyOn(preview.contentWindow!, 'postMessage')
+  const sendToControls = vi.spyOn(controls.contentWindow!, 'postMessage')
+
+  fireEvent.load(preview)
+  expect(sendToControls).toHaveBeenCalledWith(
+    { type: 'slayzone:prototype-ready', ready: true },
+    '*'
+  )
+  const action = { type: 'slayzone:prototype-action', action: 'set-quantity', value: 4 }
+  fireEvent(window, new MessageEvent('message', { source: preview.contentWindow, data: action }))
+  fireEvent(
+    window,
+    new MessageEvent('message', {
+      source: controls.contentWindow,
+      data: { ...action, value: {} }
+    })
+  )
+  expect(sendToScreen).not.toHaveBeenCalled()
+  fireEvent(window, new MessageEvent('message', { source: controls.contentWindow, data: action }))
+  expect(sendToScreen).toHaveBeenCalledExactlyOnceWith(action, '*')
 })
 
 describe('ArtifactContentEditor across a tab switch', () => {
