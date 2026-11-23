@@ -291,6 +291,42 @@ describe('command tasks', () => {
     expect(invocation(s).task).toMatchObject({ taskId: 't1', status: 'running' })
   })
 
+  test('a finished task is retained until its tool row arrives', () => {
+    const ended = apply(begin(), task({ status: 'completed' }))
+    expect(ended.commandTasks.has('toolu_1')).toBe(true)
+    const attached = apply(ended, bash('toolu_1', { command: 'ticks' }))
+    expect(invocation(attached).task?.status).toBe('completed')
+    expect(attached.commandTasks.has('toolu_1')).toBe(false)
+  })
+
+  test('late output reaches a finished command on an unloaded page', () => {
+    const state = apply(
+      begin(),
+      bash('toolu_1', { command: 'ticks' }),
+      task({ status: 'completed' })
+    )
+    const at = state.toolIndex.get('toolu_1')!
+    const row = state.timeline[at]!
+    const evicted = reducer(state, { type: 'rows-unloaded', from: at, to: at + 1 })
+    const stalled = apply(evicted, {
+      kind: 'command-task-output',
+      taskId: 't1',
+      toolUseId: 'toolu_1',
+      output: 'late output',
+      totalBytes: 11,
+      truncated: false
+    })
+    expect(stalled.stalled?.need).toBe(at)
+    const loaded = reducer(stalled, {
+      type: 'rows-loaded',
+      from: at,
+      rows: [row],
+      epoch: state.rowsEpoch
+    })
+    expect(invocation(loaded).task?.finalOutput?.output).toBe('late output')
+    expect(loaded.commandTasks.has('toolu_1')).toBe(false)
+  })
+
   test('the saved final output of a background command reaches its card and the banner', () => {
     let s = apply(
       begin(),

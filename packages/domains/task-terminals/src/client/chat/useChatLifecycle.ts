@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useChatRestorationPending, useChatRestorationTracker } from './chat-restoration'
 import { useTRPCClient } from '../trpc'
 import { hubAllows } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
@@ -30,6 +29,8 @@ export interface UseChatLifecycleOpts {
   /** Task view on screen. Off screen (tab-bar restore on reload/restart) the
    *  startup mode only restores what `auto` would; the rest waits until shown. */
   shown?: boolean
+  /** A hovered tab may read history before opening. Its lifecycle starts on selection. */
+  prefetchOnly?: boolean
   /**
    * The chat's computer can run its agent now (the tab's chat availability, which is
    * read while the tab is on screen). A start deferred because that computer could
@@ -168,6 +169,7 @@ export function useChatLifecycle({
   isMain = false,
   isTemporary = false,
   shown = true,
+  prefetchOnly = false,
   computerReady = true,
   chatApi,
   inFlight,
@@ -179,7 +181,6 @@ export function useChatLifecycle({
   clearQueue
 }: UseChatLifecycleOpts) {
   const trpcClient = useTRPCClient()
-  const trackRestoration = useChatRestorationTracker()
   const [resetting, setResetting] = useState(false)
   const [restarting, setRestarting] = useState(false)
   // Suppress "Session ended" UI during a reset/restart — process-exit fires between kill and
@@ -206,13 +207,11 @@ export function useChatLifecycle({
     autoStartedRef.current = true
     // Not cancelled on re-render: the ref makes this one-shot, so a cancelled
     // query would never start the agent (`chatApi` identity can change per render).
-    void trackRestoration(
-      Promise.all([
-        trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
-        hubAllows(trpcClient, 'chat.start'),
-        computerCanStartNow(trpcClient, tabId)
-      ])
-    )
+    void Promise.all([
+      trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
+      hubAllows(trpcClient, 'chat.start'),
+      computerCanStartNow(trpcClient, tabId)
+    ])
       .then(([raw, canStart, computerCan]) => {
         // Older hubs and narrower credentials may deny startup. Restoring a tab
         // must not issue a forbidden spawn or leave the startup card loading.
@@ -240,19 +239,18 @@ export function useChatLifecycle({
         // Best-effort — the chat still spawns when the user types.
         setStartDecision('none')
       })
-  }, [hydrating, openState, trpcClient, trackRestoration, tabId])
+  }, [hydrating, openState, trpcClient, tabId])
   // Still coming up (the startup card counts it, see chat-loading.ts): until the
   // decision lands. A 'now' start is requested in the same commit (effect below),
   // after which the hub reports the agent itself. A failed load is shown in the
   // chat, not waited on.
   const loading = startDecision === null && !loadFailed
-  useChatRestorationPending(loading)
   useEffect(() => (loading ? trackChatLoading() : undefined), [loading])
   const startFiredRef = useRef(false)
   /** The start went out as a restore (hidden tab) and has not been re-asked as the user's. */
   const restoreStartRef = useRef(false)
   useEffect(() => {
-    if (startDecision === null || startDecision === 'none') return
+    if (prefetchOnly || startDecision === null || startDecision === 'none') return
     if (startDecision === 'shown' && !shown) return
     if (startDecision === 'computer' && !(shown && computerReady)) return
     if (startFiredRef.current) return
@@ -280,6 +278,7 @@ export function useChatLifecycle({
   }, [
     startDecision,
     shown,
+    prefetchOnly,
     computerReady,
     chatApi,
     tabId,
@@ -349,8 +348,8 @@ export function useChatLifecycle({
 
   // Clear queue on session end / reset.
   useEffect(() => {
-    if (state.sessionEnded) void clearQueue()
-  }, [state.sessionEnded, clearQueue])
+    if (!prefetchOnly && state.sessionEnded) void clearQueue()
+  }, [prefetchOnly, state.sessionEnded, clearQueue])
 
   // Diagnostic: log every inFlight transition (incl. baseline post-hydrate) with
   // the counters that drive `isInFlight` plus the last 5 timeline kinds. Captures

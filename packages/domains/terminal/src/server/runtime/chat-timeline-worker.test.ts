@@ -195,6 +195,8 @@ test('one worker isolates tabs and a new worker recovers after a crash', async (
     b = fixture()
   const first = await pool.begin({ store: a.store, lastSeq: -1, agentStartedTurns: true })
   const second = await pool.begin({ store: b.store, lastSeq: -1, agentStartedTurns: false })
+  expect(first.checkpointMiss).toBe('checkpoint-none')
+  expect(second.checkpointMiss).toBe('checkpoint-none')
   await first.projection.finish()
   await second.projection.finish()
   expect(workers).toHaveLength(1)

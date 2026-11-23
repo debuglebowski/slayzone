@@ -1,3 +1,4 @@
+import { CODEX_FILE_CHANGE_TOOL, codexFileChanges } from '@slayzone/terminal/codex-file-changes'
 /**
  * What the chat timeline shows of the reducer's items, as plain data: which items are
  * rows (desktop's `isRenderable` + root-only rule, `task-terminals` renderers; what a
@@ -10,29 +11,16 @@ import {
   type BgShell,
   type ChatTimelineState,
   selectBackgroundJobs,
-  streamKeyOf,
+  selectFoldedIndexes,
   type TimelineItem,
   type TimelineRows,
   type ToolInvocation
 } from '@slayzone/terminal/reducer'
 import { chatBlobJsonReplacer } from '@slayzone/terminal-contracts'
-
-/** Marker texts older builds sent as chat messages (approve / cancel a plan): never shown. */
-const PLAN_MARKERS = new Set(['__slay_plan_approved__', '__slay_plan_cancelled__'])
-
-/** The sub-agent launcher (`Agent`, `Task` in older CLIs): shown inside its sub-agent row. */
-export function isAgentLauncher(name: string | undefined): boolean {
-  return name === 'Agent' || name === 'Task'
-}
+import { isRenderable, stableAnchorKey } from '@slayzone/terminal/chat-presentation'
 
 export function isShown(item: TimelineItem): boolean {
-  if (item.parentToolUseId != null) return false
-  if (item.kind === 'session-start') return false
-  if (item.kind === 'interrupted' && item.superseded) return false
-  if (item.kind === 'rate-limit' && item.status === 'allowed') return false
-  if (item.kind === 'tool' && isAgentLauncher(item.invocation.name)) return false
-  if (item.kind === 'user-text' && PLAN_MARKERS.has(item.text)) return false
-  return true
+  return item.parentToolUseId == null && isRenderable(item)
 }
 
 export interface TimelineRow {
@@ -48,97 +36,25 @@ export function timelineRows(
   timeline: Readonly<TimelineRows>,
   openBranches: ReadonlySet<string> = new Set()
 ): TimelineRow[] {
-  const folded = new Set<number>()
-  for (const it of timeline) {
-    if (it?.kind !== 'conversation-branch' || openBranches.has(it.id)) continue
-    for (let i = it.hiddenFrom; i < it.hiddenFrom + it.hiddenCount; i++) folded.add(i)
-  }
+  const folded = selectFoldedIndexes(timeline, openBranches)
   const rows: TimelineRow[] = []
   timeline.forEach((item, index) => {
-    // (Mobile loads the whole history: no row is ever unloaded here.)
     if (item && !folded.has(index) && isShown(item)) rows.push({ key: rowKey(item, index), item })
   })
   return rows
 }
 
-type Branch = Extract<TimelineItem, { kind: 'conversation-branch' }>
-
-/** What a divider says happened (desktop's `ConversationBranchRow`). */
-export function branchLabel(item: Branch): string {
-  switch (item.reason) {
-    case 'rewound':
-      return 'Rewound: Claude forgot what came after this point'
-    case 'forked':
-      return 'Forked into a new conversation'
-    case 'fork-failed':
-      return 'Fork failed: still the original conversation'
-    case 'switched':
-      if (item.source === 'terminal') return 'Continued from the terminal'
-      return item.title ? `Resumed: ${item.title}` : 'Resumed an earlier conversation'
-  }
-}
-
-/** The divider's show / hide control; null when it folds nothing. */
-export function branchToggleLabel(item: Branch, open: boolean): string | null {
-  if (item.hiddenCount <= 0) return null
-  const what =
-    item.reason === 'switched'
-      ? 'previous conversation'
-      : item.reason === 'forked'
-        ? 'original conversation'
-        : 'rewound'
-  return open ? `Hide ${what}` : `Show ${what} (${item.hiddenCount})`
-}
-
-/** Where a turn ended without a reply (desktop's `InterruptedBlock`). */
-export function interruptedLabel(item: Extract<TimelineItem, { kind: 'interrupted' }>): string {
-  return item.reason === 'already-in-conversation'
-    ? 'Not run again: Claude Code already had this message'
-    : 'Turn interrupted'
-}
-
-const PRODUCT: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
-
-/**
- * An agent that could not start, in desktop's words (`AgentProblemCard`): what happened
- * and the way out. `inUse`: the terminal runs this conversation, so it can be continued
- * here (`chat.takeOver`).
- */
-export function agentProblemText(item: Extract<TimelineItem, { kind: 'agent-problem' }>): {
-  title: string
-  hint: string
-  inUse: boolean
-} {
-  const inUse = item.code === 'conversation-in-use'
-  const name = (item.binary ? PRODUCT[item.binary] : undefined) ?? item.binary ?? 'The agent'
-  const title =
-    item.code === 'cli-not-installed'
-      ? `${name} isn't installed`
-      : item.code === 'spawn-refused'
-        ? 'The computer refused to start the agent'
-        : inUse
-          ? 'This conversation is running in the terminal'
-          : "The agent couldn't start"
-  const hint =
-    item.code === 'cli-not-installed'
-      ? `Install ${name} on the computer this task runs on (it must be on that computer's PATH), then retry.`
-      : inUse
-        ? 'One conversation runs in one place at a time. Continue it here (the terminal stops first), or stop it there and retry.'
-        : 'Fix the cause below, then retry.'
-  return { title, hint, inUse }
-}
+export {
+  agentProblemText,
+  branchLabel,
+  branchToggleLabel,
+  interruptedLabel
+} from '@slayzone/terminal/chat-presentation'
 
 export function rowKey(item: TimelineItem, index: number): string {
-  const streamKey = streamKeyOf(item)
-  if (streamKey) return streamKey
   if (item.kind === 'conversation-branch') return item.id
-  if (item.kind === 'text' || item.kind === 'thinking') return `${item.kind}:${item.messageId}`
-  if (item.kind === 'user-text' && item.id) return `user:${item.id}`
   if (item.kind === 'result') return `result:${item.timestamp}:${index}`
-  if (item.kind === 'hook' && item.hookId) return `hook:${item.hookId}`
-  if (item.kind === 'notice' && item.id) return `notice:${item.id}`
-  if (item.kind === 'sub-agent') return `sub-agent:${item.toolUseId}`
-  return `${item.kind}:${index}`
+  return stableAnchorKey(item) ?? `${item.kind}:${index}`
 }
 
 /** A sub-agent's own items (rendered inside its row), in order. */
@@ -197,11 +113,24 @@ export function toolSummary(inv: ToolInvocation): ToolSummary {
     case 'Edit':
     case 'MultiEdit':
     case 'Write':
-    case 'NotebookEdit':
-      return {
-        title: inv.name,
-        summary: shortPath(str(input.file_path) ?? str(input.notebook_path))
-      }
+    case 'NotebookEdit': {
+      const file = inv.toolPreview?.files?.[0]
+      const path = shortPath(str(input.file_path) ?? str(input.notebook_path) ?? file?.path)
+      const counts =
+        file && file.additions !== null && file.deletions !== null
+          ? ` · +${file.additions} −${file.deletions}`
+          : ''
+      return { title: inv.name, summary: `${path}${counts}` }
+    }
+    case CODEX_FILE_CHANGE_TOOL: {
+      const changes = codexFileChanges(inv)
+      const path = changes.length === 1 ? shortPath(changes[0].path) : `${changes.length} files`
+      const files = inv.toolPreview?.files
+      const counts = files?.length
+        ? ` · +${files.reduce((n, f) => n + (f.additions ?? 0), 0)} −${files.reduce((n, f) => n + (f.deletions ?? 0), 0)}`
+        : ''
+      return { title: 'Edit', summary: `${path}${counts}` }
+    }
     case 'Glob': {
       const n = typeof structured.numFiles === 'number' ? ` → ${structured.numFiles} files` : ''
       return { title: 'Glob', summary: `${str(input.pattern) ?? ''}${n}` }
@@ -282,7 +211,11 @@ export type ToolBody =
 
 const MAX_BODY = 4_000
 
-export function toolBody(inv: ToolInvocation): ToolBody {
+export function toolBody(inv: ToolInvocation, full = false): ToolBody {
+  const textBody = (text: string): ToolBody => ({
+    type: 'text',
+    text: full ? text : truncate(text, MAX_BODY)
+  })
   const input = rec(inv.input)
   const edits = (pairs: Array<[unknown, unknown]>): ToolBody => ({
     type: 'diff',
@@ -294,6 +227,12 @@ export function toolBody(inv: ToolInvocation): ToolBody {
   switch (inv.name) {
     case 'Edit':
       return edits([[input.old_string, input.new_string]])
+    case CODEX_FILE_CHANGE_TOOL: {
+      const changes = codexFileChanges(inv)
+      return changes.length
+        ? textBody(changes.map((change) => `${change.path}\n${change.diff}`).join('\n\n'))
+        : null
+    }
     case 'MultiEdit':
       return edits(
         (Array.isArray(input.edits) ? input.edits : []).map((e) => [
@@ -302,23 +241,21 @@ export function toolBody(inv: ToolInvocation): ToolBody {
         ])
       )
     case 'Write':
-      return typeof input.content === 'string'
-        ? { type: 'text', text: truncate(input.content, MAX_BODY) }
-        : null
+      return typeof input.content === 'string' ? textBody(input.content) : null
     case 'TodoWrite':
       return { type: 'todos', todos: todosOf(inv) }
     case 'Bash': {
       const out = resultText(inv)
       const cmd = str(input.command) ?? ''
-      return { type: 'text', text: truncate(out ? `$ ${cmd}\n${out}` : `$ ${cmd}`, MAX_BODY) }
+      return textBody(out ? `$ ${cmd}\n${out}` : `$ ${cmd}`)
     }
     default: {
       const out = resultText(inv)
-      if (out) return { type: 'text', text: truncate(out, MAX_BODY) }
+      if (out) return textBody(out)
       // Stored images / files (`chat-blobs`) print as `[image/png · 120 KB]`.
       const args =
         Object.keys(input).length > 0 ? JSON.stringify(inv.input, chatBlobJsonReplacer, 2) : ''
-      return args ? { type: 'text', text: truncate(args, MAX_BODY) } : null
+      return args ? textBody(args) : null
     }
   }
 }

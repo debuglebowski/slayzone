@@ -72,7 +72,10 @@ export function activityView(
     // thinking is one): no activity, no row. One still streaming counts.
     const empty = segment.filter(
       (item) =>
-        (item.kind === 'text' || item.kind === 'thinking') && !item.text && item.stream !== 'open'
+        (item.kind === 'text' || item.kind === 'thinking') &&
+        !item.text &&
+        item.stream !== 'open' &&
+        !item.textDetail
     )
     const activity = segment.filter(
       (item): item is ActivityItem =>

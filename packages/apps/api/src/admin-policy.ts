@@ -353,6 +353,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.readBlob': 'user',
   'chat.openTimeline': 'user',
   'chat.timelinePages': 'user',
+  'chat.toolDetail': 'user',
   'chat.searchTimeline': 'user',
   'chat.hydrate': 'user',
   'chat.inspectPermissions': 'user',

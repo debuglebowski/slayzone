@@ -403,6 +403,21 @@ test('open() of a short or empty history keeps all of it, and honours the sequen
   expect(log.lastSeq).toBe(2)
 })
 
+test('a deferred seed loads its recent window once and preserves the durable sequence floor', async () => {
+  const store = memoryStore()
+  for (let seq = 0; seq < 10; seq++) store.rows.set(`tab:${seq}`, { seq, event: text(String(seq)) })
+  const log = await ChatEventLog.open('tab', store.persistence, 20, { cap: 3, deferSeed: true })
+  expect(log.newestSeq).toBe(9)
+  expect(log.lastSeq).toBe(19)
+  expect(store.reads).toEqual([])
+  expect((await log.append(text('next'))).seq).toBe(20)
+  const [recent, concurrent] = await Promise.all([log.readRecent(), log.readRecent()])
+  expect(seqs(recent)).toEqual([8, 9, 20])
+  expect(concurrent).toBe(recent)
+  expect(store.reads).toEqual([[7, 10]])
+  expect(seqs(await log.readSince(8))).toEqual([9, 20])
+})
+
 test('pages() lets the event loop run between pages', async () => {
   const store = memoryStore()
   const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })

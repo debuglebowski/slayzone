@@ -186,7 +186,7 @@ test.each([false, true])(
     )
     expect(tuple).not.toBeNull()
     const oldTuple = tuple![0].replace(
-      /,\n[ \t]+external_exports\.number\(\)\.int\(\)\.nonnegative\(\)\.optional\(\)/,
+      /,\n[ \t]+external_exports\.number\(\)\.int\(\)\.nonnegative\(\)\.optional\(\),\n[ \t]+[^\n]+\.optional\(\)/,
       ''
     )
     expect(oldTuple).not.toBe(tuple![0])

@@ -37,6 +37,7 @@
  */
 
 import { z } from 'zod'
+import { textEditSchema, textRevisionSchema } from '@slayzone/file-editor/shared'
 import { directAddressSchema } from './direct'
 import { FRAME_TOO_LARGE_CODE } from './frame-limit'
 import { RpcError } from './rpc'
@@ -2146,7 +2147,8 @@ export type FsReadDirResult = z.infer<typeof fsReadDirResultSchema>
 export const fsReadFileParamsSchema = z.object({
   rootPath: z.string().min(1),
   filePath: z.string().min(1),
-  force: z.boolean().optional()
+  force: z.boolean().optional(),
+  revision: z.union([z.literal('initial'), textRevisionSchema]).optional()
 })
 export type FsReadFileParams = z.infer<typeof fsReadFileParamsSchema>
 
@@ -2154,7 +2156,9 @@ export type FsReadFileParams = z.infer<typeof fsReadFileParamsSchema>
 export const fsReadFileResultSchema = z.object({
   content: z.string().nullable(),
   tooLarge: z.boolean().optional(),
-  sizeBytes: z.number().optional()
+  sizeBytes: z.number().optional(),
+  revision: textRevisionSchema.optional(),
+  unchanged: z.literal(true).optional()
 })
 export type FsReadFileResult = z.infer<typeof fsReadFileResultSchema>
 
@@ -2198,12 +2202,20 @@ export type FsReadBytesResult = z.infer<typeof fsReadBytesResultSchema>
 export const fsErrnoErrorDataSchema = z.object({ errno: z.string().min(1).max(32) })
 export type FsErrnoErrorData = z.infer<typeof fsErrnoErrorDataSchema>
 
-export const fsWriteFileParamsSchema = z.object({
+const fsWriteTarget = {
   rootPath: z.string().min(1),
-  filePath: z.string().min(1),
-  content: z.string()
-})
+  filePath: z.string().min(1)
+}
+export const fsWriteFileParamsSchema = z.union([
+  z.object({ ...fsWriteTarget, content: z.string() }),
+  z.object({ ...fsWriteTarget, edit: textEditSchema })
+])
 export type FsWriteFileParams = z.infer<typeof fsWriteFileParamsSchema>
+
+export const fsWriteFileResultSchema = z.object({
+  ok: z.literal(true),
+  revision: textRevisionSchema.optional()
+})
 
 export const fsCreateFileParamsSchema = z.object({
   rootPath: z.string().min(1),

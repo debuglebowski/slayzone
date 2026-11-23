@@ -6,7 +6,11 @@
  * few pages, never the whole history.
  */
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import {
+  CHAT_HISTORY_DISPLAY_VERSION,
+  jsonByteLength,
+  type AgentEvent
+} from '@slayzone/terminal-contracts'
 import { buildLongSession } from '@slayzone/test-utils/chat-long-session'
 import {
   initialState,
@@ -192,6 +196,79 @@ describe.each([
     expect(mem.writes.slice(writes).every((w) => w.dropPagesFrom === null)).toBe(true)
   })
 
+  test('large saved tool fields spend less of the small open window and remain expandable', async () => {
+    const output = 'sample output '.repeat(130) + 'original end'
+    const p = await TimelineProjection.open({
+      store: memoryStore().store,
+      history: buffered([
+        { kind: 'tool-call', id: 'x', name: 'Bash', input: { command: 'make test' } },
+        {
+          kind: 'tool-result',
+          toolUseId: 'x',
+          rawContent: output,
+          structured: null,
+          isError: false
+        }
+      ]),
+      agentStartedTurns
+    })
+    try {
+      const before = await p.openSnapshot('client')
+      const window = await p.openSnapshot('client', { windowed: true })
+      expect(before.state).toContain('original end')
+      expect(window.state).not.toContain('original end')
+      const row = decodeTimelineState(window.state).timeline[0]
+      if (row?.kind !== 'tool' || !row.invocation.toolDetail) throw new Error('missing tool detail')
+      const detail = await p.toolDetail(row.invocation.toolDetail, 0)
+      expect(JSON.parse(detail!.data).result.rawContent).toBe(output)
+    } finally {
+      await p.close()
+    }
+  })
+
+  test('a small open window keeps older rows and summaries reachable across stored and in-memory pages', async () => {
+    const mem = memoryStore()
+    const history = buffered(events.slice(0, 6_000))
+    const p = await TimelineProjection.open({ store: mem.store, history, agentStartedTurns })
+    try {
+      const legacy = await p.openSnapshot('client')
+      const display = { windowed: true } as const
+      const open = await p.openSnapshot('client', display)
+      const state = decodeTimelineState(open.state)
+      const oldState = decodeTimelineState(legacy.state)
+      expect(open.pageRows).toBe(8)
+      expect(resident(state)).toBeLessThan(16)
+      expect(jsonByteLength(open)).toBeLessThan(jsonByteLength(legacy))
+      const last = open.summaries.length - 1
+      const from = last * open.pageRows
+      expect(from).toBeGreaterThan(legacy.summaries.length * legacy.pageRows)
+      expect(open.summaries.flatMap((summary) => summary.users)).toEqual(
+        expect.arrayContaining(legacy.summaries.flatMap((summary) => summary.users))
+      )
+      for (const page of [0, last]) {
+        const start = page * open.pageRows
+        const got = await p.pagesAsOf([page], open.seq, open.epoch, start, 'client', display)
+        expect(got.expired).toBe(false)
+        if (got.expired) continue
+        expect(got.pages[0]).toMatchObject({ page, from: start })
+        expect(got.pages[0].rows).toHaveLength(open.pageRows)
+        if (page !== last) continue
+        const original = oldState.timeline.slice(from, from + open.pageRows)
+        for (const [i, row] of got.pages[0].rows.entries()) {
+          const before = original[i]
+          if (row.kind === 'result' && row.copyDetail && before?.kind === 'result') {
+            const detail = await p.toolDetail(row.copyDetail, 0)
+            expect(JSON.parse(detail!.data)).toBe(before.copyText)
+            continue
+          }
+          expect(JSON.stringify(row)).toBe(JSON.stringify(before))
+        }
+      }
+    } finally {
+      await p.close()
+    }
+  })
+
   test('live: events applied one by one, a late change to an evicted page goes out again; older rows are served as they were', async () => {
     const mem = memoryStore()
     const head = buffered(events.slice(0, 6_000))
@@ -237,6 +314,49 @@ describe.each([
 describe('thrown away and rebuilt', () => {
   const events = buildLongSession({ events: 3_000, seed: 5 })
   const history = buffered(events)
+
+  test('reuses a compatible v25 checkpoint and its sealed pages after the codec upgrade', async () => {
+    const mem = memoryStore()
+    const old = buffered(events.slice(0, 2_500))
+    await (
+      await TimelineProjection.open({ store: mem.store, history: old, agentStartedTurns: true })
+    ).close()
+    const cp = mem.checkpoint!
+    const data = JSON.parse(cp.data)
+    const state = JSON.parse(data.state)
+    state.v = '25'
+    for (const [key, value] of Object.entries(state.state)) {
+      const packed = value as {
+        $entries?: Record<string, unknown>
+        $toolu?: Record<string, unknown>
+      }
+      if (packed?.$entries)
+        state.state[key] = {
+          $index: [
+            ...Object.entries(packed.$entries),
+            ...Object.entries(packed.$toolu ?? {}).map(([key, value]) => [`toolu_${key}`, value])
+          ]
+        }
+    }
+    data.state = JSON.stringify(state)
+    mem.checkpoint = { ...cp, version: '25.1', data: JSON.stringify(data) }
+    const fedFrom: number[] = []
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history: {
+        lastSeq: history.at(-1)!.seq,
+        async *pages(afterSeq) {
+          fedFrom.push(afterSeq)
+          yield history.filter((b) => b.seq > afterSeq)
+        }
+      },
+      agentStartedTurns: true
+    })
+    expect(fedFrom).toEqual([cp.seq])
+    expect(meaning(await clientView(p))).toEqual(meaning(fullReplay(history, true)))
+    await p.close()
+    expect(mem.checkpoint?.version).toBe(TIMELINE_PROJECTION_VERSION)
+  })
 
   test('a checkpoint of another version', async () => {
     const mem = memoryStore()
@@ -771,4 +891,426 @@ describe('historical rows that became smaller after the snapshot', () => {
       await p.close()
     }
   })
+})
+
+test('opt-in opens preview large tool results and read the original through bounded detail chunks', async () => {
+  const rawContent = 'long 🧪 command output\n'.repeat(12_000)
+  const history = buffered([
+    { kind: 'tool-call', id: 'command', name: 'Bash', input: { command: 'build' } },
+    { kind: 'tool-result', toolUseId: 'command', rawContent, structured: null, isError: false }
+  ])
+  const projection = await TimelineProjection.open({
+    store: memoryStore().store,
+    history,
+    agentStartedTurns: true
+  })
+  try {
+    const compact = await projection.openSnapshot('instance')
+    expect(compact.state.length).toBeLessThan(8_000)
+    const [row] = decodeTimelineState(compact.state).timeline
+    expect(row?.kind).toBe('tool')
+    if (row?.kind !== 'tool') throw new Error('missing tool')
+    const { toolDetail } = row.invocation as typeof row.invocation & {
+      toolDetail: { instance: string; epoch: number; row: number; toolUseId: string }
+    }
+    expect(toolDetail).toEqual({
+      instance: 'instance',
+      epoch: compact.epoch,
+      row: 0,
+      toolUseId: 'command'
+    })
+    const parts: string[] = []
+    let offset = 0
+    let revision: string | undefined
+    for (;;) {
+      const chunk = await projection.toolDetail(toolDetail, offset, revision)
+      if (!chunk) throw new Error('missing chunk')
+      expect(chunk.data.length).toBeLessThanOrEqual(64 * 1024)
+      parts.push(chunk.data)
+      if (chunk.next === null) break
+      revision = chunk.revision
+      offset = chunk.next
+    }
+    expect(parts.length).toBeGreaterThan(1)
+    expect(JSON.parse(parts.join('')).result.rawContent).toBe(rawContent)
+    expect(await projection.toolDetail({ ...toolDetail, toolUseId: 'other' }, 0)).toBeNull()
+
+    const [legacy] = decodeTimelineState((await projection.openSnapshot()).state).timeline
+    expect(legacy?.kind === 'tool' && legacy.invocation.result?.rawContent).toBe(rawContent)
+
+    const first = await projection.toolDetail(toolDetail, 0)
+    if (!first?.next) throw new Error('expected another chunk')
+    await projection.apply({
+      seq: 2,
+      event: {
+        kind: 'tool-result',
+        toolUseId: 'command',
+        rawContent: 'updated result',
+        structured: null,
+        isError: false
+      }
+    })
+    expect(await projection.toolDetail(toolDetail, first.next, first.revision)).toBeNull()
+    expect(await projection.toolDetail(toolDetail, 0)).toMatchObject({
+      data: expect.stringContaining('updated result')
+    })
+  } finally {
+    await projection.close()
+  }
+})
+
+test('file previews preserve change counts and search beyond the preview in sealed pages and the tail', async () => {
+  const body = 'large file line\n'.repeat(4_000) + 'HiddenSearchWord\n'
+  const write = (id: string, path: string): AgentEvent[] => [
+    { kind: 'tool-call', id, name: 'Write', input: { file_path: path, content: body } },
+    {
+      kind: 'tool-result',
+      toolUseId: id,
+      rawContent: 'saved',
+      structured: { type: 'create', filePath: path, content: body },
+      isError: false
+    }
+  ]
+  const history = buffered([
+    ...write('older', '/repo/older.txt'),
+    ...Array.from(
+      { length: TIMELINE_PAGE_ROWS * 3 },
+      (_, i): AgentEvent => ({ kind: 'assistant-text', messageId: `message-${i}`, text: 'row' })
+    ),
+    ...write('newer', '/repo/newer.txt')
+  ])
+  const projection = await TimelineProjection.open({
+    store: memoryStore().store,
+    history,
+    agentStartedTurns: true
+  })
+  try {
+    const opened = await projection.openSnapshot('instance')
+    const tail = decodeTimelineState(opened.state).timeline.at(-1)
+    if (tail?.kind !== 'tool') throw new Error('missing Write row')
+    expect(tail.invocation.input).toMatchObject({ file_path: '/repo/newer.txt' })
+    expect(opened.state).not.toContain('HiddenSearchWord')
+    expect(tail.invocation.toolPreview?.files).toEqual([
+      { path: '/repo/newer.txt', additions: 4001, deletions: 0, created: true }
+    ])
+    const older = await projection.pagesAsOf([0], opened.seq, opened.epoch, 0, 'instance')
+    expect(JSON.stringify(older)).not.toContain('HiddenSearchWord')
+    expect(await projection.searchToolMatches('hiddensearchword', false)).toEqual({
+      pages: [0],
+      windowedPages: [0, Math.floor((history.length - 2) / 8)],
+      toolUseIds: ['older', 'newer']
+    })
+    expect(await projection.searchToolMatches('hiddensearchword', true)).toEqual({
+      pages: [0],
+      windowedPages: [],
+      toolUseIds: []
+    })
+  } finally {
+    await projection.close()
+  }
+})
+
+test('Codex file previews retain exact diff counts and recover the original patch', async () => {
+  const hidden = 'new line '.repeat(1_500) + 'end of patch'
+  const diff = `@@ -1 +1 @@\n-old line\n+${hidden}`
+  const changes = [{ path: '/repo/code.ts', kind: { type: 'update' }, diff }]
+  const projection = await TimelineProjection.open({
+    store: memoryStore().store,
+    history: buffered([
+      { kind: 'tool-call', id: 'edit', name: 'codex/fileChange', input: { changes } },
+      {
+        kind: 'tool-result',
+        toolUseId: 'edit',
+        rawContent: '',
+        structured: { changes },
+        isError: false
+      }
+    ]),
+    agentStartedTurns: true
+  })
+  try {
+    const opened = await projection.openSnapshot('session')
+    const row = decodeTimelineState(opened.state).timeline[0]
+    if (row?.kind !== 'tool' || !row.invocation.toolDetail) throw new Error('missing preview')
+    expect(opened.state.includes('end of patch')).toBe(false)
+    expect(row.invocation.toolPreview?.files).toEqual([
+      { path: '/repo/code.ts', additions: 1, deletions: 1, created: false }
+    ])
+    const chunk = await projection.toolDetail(row.invocation.toolDetail, 0)
+    expect(chunk?.next).toBeNull()
+    expect(JSON.parse(chunk!.data).result.structured.changes[0].diff).toEqual(diff)
+  } finally {
+    await projection.close()
+  }
+})
+
+test('hidden thinking sends a stub in the tail and history pages and retains full text for search and reveal', async () => {
+  const thought = 'MixedCase reasoning '.repeat(4_000)
+  const thinking = (messageId: string): AgentEvent => ({
+    kind: 'assistant-thinking',
+    messageId,
+    text: thought,
+    hasSignature: true
+  })
+  const history = buffered([
+    thinking('old'),
+    ...Array.from(
+      { length: TIMELINE_PAGE_ROWS * 2 },
+      (_, i): AgentEvent => ({
+        kind: 'assistant-text',
+        messageId: `text-${i}`,
+        text: 'Keep this answer'
+      })
+    ),
+    thinking('new')
+  ])
+  const projection = await TimelineProjection.open({
+    store: memoryStore().store,
+    history,
+    agentStartedTurns: true
+  })
+  try {
+    const hidden = await projection.openSnapshot('instance', { hideThinking: true })
+    const visible = await projection.openSnapshot('instance')
+    expect(hidden.displaySettings).toBe(CHAT_HISTORY_DISPLAY_VERSION)
+    expect(hidden.state.length).toBeLessThan(visible.state.length - thought.length / 2)
+    expect(hidden.state).toContain('Keep this answer')
+    const oldPage = await projection.pagesAsOf([0], hidden.seq, hidden.epoch, 0, 'instance', {
+      hideThinking: true
+    })
+    expect(oldPage.expired).toBe(false)
+    if (oldPage.expired) throw new Error('missing old page')
+    const old = oldPage.pages[0].rows[0]
+    const latest = decodeTimelineState(hidden.state).timeline.at(-1)
+    for (const row of [old, latest]) {
+      if (row?.kind !== 'thinking' || !row.textDetail) throw new Error('missing thinking stub')
+      expect(row.text).toBe('')
+      expect(row.hasSignature).toBe(true)
+      expect(
+        await projection.toolDetail({ ...row.textDetail, messageId: 'different' }, 0)
+      ).toBeNull()
+      const first = await projection.toolDetail(row.textDetail, 0)
+      if (!first?.next) throw new Error('expected chunking')
+      const second = await projection.toolDetail(row.textDetail, first.next, first.revision)
+      expect(second?.next).toBeNull()
+      expect(JSON.parse(first.data + second?.data)).toBe(thought)
+    }
+    expect(await projection.searchToolMatches('MixedCase', true)).toMatchObject({
+      textMatches: { epoch: hidden.epoch, rows: [0, history.length - 1] }
+    })
+    expect(await projection.searchToolMatches('mixedcase', true)).not.toHaveProperty('textMatches')
+  } finally {
+    await projection.close()
+  }
+})
+
+test('hidden activities keep final answers and file counts while leaving bodies and reply copies on the computer', async () => {
+  const progress = 'Searching earlier attempts '.repeat(4_000)
+  const output = 'Full command output '.repeat(8_000)
+  const patch = 'File body '.repeat(12_000)
+  const history = buffered([
+    { kind: 'user-message', id: 'start', text: 'Update the file' },
+    { kind: 'assistant-text', messageId: 'progress', text: progress },
+    { kind: 'tool-call', id: 'bash', name: 'Bash', input: { command: 'pwd' } },
+    {
+      kind: 'tool-result',
+      toolUseId: 'bash',
+      rawContent: output,
+      structured: null,
+      isError: false
+    },
+    {
+      kind: 'tool-call',
+      id: 'write',
+      name: 'Write',
+      input: { file_path: 'test.txt', content: patch }
+    },
+    {
+      kind: 'tool-result',
+      toolUseId: 'write',
+      rawContent: null,
+      structured: { type: 'create' },
+      isError: false
+    },
+    { kind: 'assistant-text', messageId: 'final', text: 'File updated.' },
+    {
+      kind: 'result',
+      subtype: 'success',
+      isError: false,
+      durationMs: 100,
+      durationApiMs: 90,
+      totalCostUsd: 0,
+      numTurns: 1,
+      text: null,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0
+      },
+      modelUsage: {},
+      stopReason: null,
+      terminalReason: null,
+      permissionDenials: []
+    },
+    { kind: 'user-message', id: 'open', text: 'Continue' },
+    { kind: 'assistant-text', messageId: 'open-response', text: 'Still running.' },
+    { kind: 'tool-call', id: 'work', name: 'Read', input: { file_path: 'working.txt' } },
+    {
+      kind: 'tool-result',
+      toolUseId: 'work',
+      rawContent: 'Current activity',
+      structured: null,
+      isError: false
+    }
+  ])
+  const projection = await TimelineProjection.open({
+    store: memoryStore().store,
+    history,
+    agentStartedTurns: true
+  })
+  try {
+    const config = { hideActivityMessages: true, hideActivityTools: true } as const
+    const opened = await projection.openSnapshot('instance', config)
+    expect(opened.state.length).toBeLessThan(8_000)
+    const state = decodeTimelineState(opened.state)
+    const row = state.timeline.find(
+      (item) => item?.kind === 'text' && item.messageId === 'progress'
+    )
+    if (row?.kind !== 'text' || !row.textDetail)
+      throw new Error('Expected a deferred activity message')
+    expect(row.text).toBe('')
+    expect(state.timeline).toContainEqual(
+      expect.objectContaining({ kind: 'text', text: 'File updated.' })
+    )
+    expect(state.timeline).toContainEqual(
+      expect.objectContaining({ kind: 'text', text: 'Still running.' })
+    )
+    const tool = state.timeline.find(
+      (item) => item?.kind === 'tool' && item.invocation.id === 'write'
+    )
+    if (tool?.kind !== 'tool' || !tool.invocation.toolDetail)
+      throw new Error('Expected a deferred tool')
+    expect(tool.invocation.toolPreview).toMatchObject({
+      hidden: true,
+      files: [{ path: 'test.txt', additions: 1 }]
+    })
+    const preview = await projection.toolDetail({ ...tool.invocation.toolDetail, preview: true }, 0)
+    if (!preview) throw new Error('Expected a revealed tool preview')
+    expect(preview.next).toBeNull()
+    expect(JSON.parse(preview.data)).toMatchObject({
+      input: { file_path: 'test.txt' },
+      toolPreview: { input: true, files: [{ path: 'test.txt' }] },
+      toolDetail: tool.invocation.toolDetail
+    })
+    const result = state.timeline.find((item) => item?.kind === 'result')
+    if (result?.kind !== 'result' || !result.copyDetail)
+      throw new Error('Expected a deferred reply copy')
+    expect(result.copyText).toBeNull()
+
+    const fullText = async (
+      ref: NonNullable<typeof result.copyDetail> | NonNullable<typeof row.textDetail>
+    ) => {
+      let part = await projection.toolDetail(ref, 0)
+      if (!part) throw new Error('Expected full text')
+      let text = part.data
+      while (part.next !== null) {
+        part = await projection.toolDetail(ref, part.next, part.revision)
+        if (!part) throw new Error('Missing chunk')
+        text += part.data
+      }
+      return JSON.parse(text)
+    }
+    expect(await fullText(row.textDetail)).toBe(progress)
+    expect(await fullText(result.copyDetail)).toBe(progress + '\n\nFile updated.')
+    expect(await projection.searchToolMatches('earlier attempts', true)).toMatchObject({
+      textMatches: { epoch: opened.epoch, rows: [1] }
+    })
+    const closedDisclosure = await projection.openSnapshot('instance', { hideActivities: true })
+    const closedTimeline = decodeTimelineState(closedDisclosure.state).timeline
+    expect(closedTimeline).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool',
+        invocation: expect.objectContaining({
+          id: 'write',
+          toolPreview: expect.objectContaining({ hidden: true })
+        })
+      })
+    )
+    expect(closedTimeline).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool',
+        invocation: expect.objectContaining({ id: 'work', input: { file_path: 'working.txt' } })
+      })
+    )
+  } finally {
+    await projection.close()
+  }
+})
+
+test('completed background polls leave no open index and late replies update the original shell from sealed rows', async () => {
+  const events = buffered([
+    {
+      kind: 'tool-call',
+      id: 'spawn',
+      name: 'Bash',
+      input: { command: 'check', run_in_background: true }
+    },
+    {
+      kind: 'tool-result',
+      toolUseId: 'spawn',
+      rawContent: '',
+      structured: { shellId: 'shell-1' },
+      isError: false
+    },
+    { kind: 'tool-call', id: 'poll', name: 'BashOutput', input: { bash_id: 'shell-1' } },
+    {
+      kind: 'tool-result',
+      toolUseId: 'poll',
+      rawContent: '',
+      structured: { status: 'running', stdout: 'first' },
+      isError: false
+    },
+    ...Array.from(
+      { length: TIMELINE_PAGE_ROWS * 6 },
+      (_, i): AgentEvent => ({
+        kind: 'assistant-text',
+        messageId: `note-${i}`,
+        text: 'More history'
+      })
+    )
+  ])
+  const projection = await TimelineProjection.open({
+    store: memoryStore().store,
+    history: events,
+    agentStartedTurns: true
+  })
+  try {
+    const before = decodeTimelineState((await projection.openSnapshot()).state)
+    expect(before.timeline[1]).toBeUndefined()
+    expect(before.bgShells.get('spawn')?.latestStdout).toBe('first')
+    expect(before).not.toHaveProperty('bgShellPollIndex')
+    await projection.apply(
+      buffered(
+        [
+          {
+            kind: 'tool-result',
+            toolUseId: 'poll',
+            rawContent: '',
+            structured: { status: 'completed', stdout: 'last', exitCode: 0 },
+            isError: false
+          }
+        ],
+        events.length
+      )[0]
+    )
+    const after = decodeTimelineState((await projection.openSnapshot()).state)
+    expect(after.bgShells.get('spawn')).toMatchObject({
+      latestStdout: 'last',
+      status: 'completed',
+      exitCode: 0
+    })
+  } finally {
+    await projection.close()
+  }
 })

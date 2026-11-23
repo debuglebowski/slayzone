@@ -1023,6 +1023,7 @@ run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
 run_harness packages/domains/chat-runtime/src/server/timeline-storage-bounded.test.ts
+run_harness packages/domains/chat-runtime/src/server/__perf__/chat-open-budget.test.ts
 run_harness packages/domains/chat-runtime/src/server/chat-db-swap.test.ts
 run_harness packages/domains/chat-runtime/src/server/chat-durability.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-fence.test.ts
@@ -1402,6 +1403,7 @@ run_harness packages/domains/terminal/src/server/workspace-changes-store.test.ts
 run_harness packages/domains/terminal/src/shared/workspace-changes.test.ts
 # Chat commands wait for the tab's latest hydrate (a reload's too); a failed one holds nothing.
 run_harness packages/domains/terminal/src/shared/chat-session-ready.test.ts
+run_harness packages/domains/terminal/src/shared/chat-open-timing.test.ts
 run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts
@@ -1477,6 +1479,8 @@ skip_suite packages/domains/chat-runtime/src/server/__perf__/timeline-restore.pe
   "event-loop measurement of many chats' timeline projections (machine-dependent, minutes); run it by hand, see its header"
 skip_suite packages/domains/chat-runtime/src/server/__perf__/blob-backfill.perf.test.ts \
   "event-loop + read-count measurement of the blob backfill (machine-dependent, minutes); run it by hand, see its header"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/real-store-open.perf.test.ts \
+  "chat open measurement against a local store copy; run it by hand, see its header"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the
 # app's vitest config, not the node harness config above. The app
@@ -1786,6 +1790,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/shared/editor/src/milkdown-task-list.test.ts \
   packages/shared/suspense/src/suspense-cache.test.tsx \
   packages/shared/transport/src/client/hubRegistryStore.test.ts \
+  packages/shared/transport/src/client/useHubReopen.test.tsx \
   packages/apps/api/src/txns/txns.test.ts
 
 # tasks-changed refresh: per-subscriber burst coalescing, board row patching, the

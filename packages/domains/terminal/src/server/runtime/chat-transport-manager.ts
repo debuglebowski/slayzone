@@ -18,6 +18,11 @@ import type {
 } from '@slayzone/terminal-contracts'
 import {
   chatCapabilitiesForMode,
+  parseToolPreviewVersion,
+  type ChatHistoryDisplay,
+  type ChatRowDetailRef,
+  type ChatToolDetailChunk,
+  type ChatToolSearchResult,
   defaultChatModeForMode,
   SIDE_QUESTION_TIMEOUT_MS,
   userMessageText,
@@ -30,6 +35,7 @@ import {
   historyOfEvents,
   type TimelineHistorySource,
   type TimelineOpen,
+  packTimelineOpen,
   type TimelinePagesResult,
   type TimelineProjectionStore,
   type TimelineProjectionHandle,
@@ -103,7 +109,8 @@ import {
 } from './chat-proc-handle'
 import { ChatProcess } from './chat-process'
 import { ChatEventSplitter, isStreamFragment } from './chat-event-splitter'
-import { ChatOutbox, OutboxRestoreScan, type OutboxState } from './chat-outbox'
+import { ChatOutbox, type OutboxState } from './chat-outbox'
+import { HydrateScan } from './chat-hydrate-scan'
 import { classifyResumeEvent } from './chat-resume-guard'
 import { runningDeadline, toolBoundMs } from './chat-watchdog'
 import { processSuspendClock, type SuspendClock } from '@slayzone/platform/suspend-clock'
@@ -199,56 +206,6 @@ class ForkPointScan {
       e.parentToolUseId == null
     )
       this.at = e.uuid ?? this.messageId
-  }
-}
-
-/**
- * What hydrate needs from a tab's WHOLE saved history, folded in event by event
- * (fed a page at a time): the outbox's unconfirmed messages, the newest
- * conversation branch (an unconfirmed fork re-arms), and whether the history ends
- * in an unfinished turn (a tool call after the last turn end, not imported).
- */
-class HydrateScan {
-  readonly outbox = new OutboxRestoreScan()
-  newestBranch: AgentEvent | null = null
-  /** The newest event that decides whether the turn is unfinished. */
-  private decided: 'none' | 'ended' | 'branch' | 'user' | 'imported' = 'none'
-  /** A tool call after it. */
-  private toolCall = false
-
-  add(event: AgentEvent): void {
-    this.outbox.add(event)
-    switch (event.kind) {
-      case 'result':
-      case 'process-exit':
-      case 'interrupted':
-      case 'user-message-popped':
-        this.decide('ended')
-        break
-      case 'conversation-branch':
-        this.newestBranch = event
-        this.decide('branch')
-        break
-      case 'user-message':
-        this.decide(event.history ? 'imported' : 'user')
-        break
-      case 'tool-call':
-        // A background child's tools can outlive a completed main turn.
-        if (event.parentToolUseId == null) this.toolCall = true
-        break
-    }
-  }
-
-  /** Restored history with an unfinished turn gets a synthetic `interrupted`. */
-  get unfinishedTurn(): boolean {
-    if (this.decided === 'branch' || this.decided === 'imported') return false
-    if (this.decided === 'user') return true
-    return this.toolCall
-  }
-
-  private decide(kind: HydrateScan['decided']): void {
-    this.decided = kind
-    this.toolCall = false
   }
 }
 
@@ -722,7 +679,7 @@ const OPEN_TIMELINE_ATTEMPTS = 3
 export type ChatTimelineOpenResult =
   | {
       kind: 'paged'
-      snapshot: TimelineOpen
+      snapshot: ReturnType<typeof packTimelineOpen<TimelineOpen>>
       events: BufferedEvent[]
       live: ChatReplay['live']
     }
@@ -933,7 +890,7 @@ export function createChatTransport(
     tab: ChatTab
     proc: ChatProcess
     boundary: ReturnType<ChatProcess['outputBoundary']>
-    cut: { candidate: PoppedMessage | null | undefined }
+    cut: { candidate?: Promise<PoppedMessage | null> }
     refs: number
     released: boolean
     previousStopping: boolean
@@ -2701,6 +2658,7 @@ export function createChatTransport(
   }
 
   async function createTab(opts: CreateChatOpts): Promise<ChatSessionInfo> {
+    const hydrateStarted = performance.now()
     const backend = getBackend(opts.mode)
     if (!backend) {
       throw new ChatTransportError(`No agent backend registered for mode "${opts.mode}"`)
@@ -2784,8 +2742,8 @@ export function createChatTransport(
         failEventPipeline(tab, err)
       }
     }
-    // The cache holds the newest events only: seeded from the store's tail, a page
-    // at a time — the history before it is never loaded here.
+    // A checkpoint can open with no event bodies. History actions load the
+    // bounded recent window when they need it.
     tab.log = opts.initialBuffer
       ? new ChatEventLog(
           opts.tabId,
@@ -2793,20 +2751,26 @@ export function createChatTransport(
           { events: opts.initialBuffer, nextSeq },
           logOptions
         )
-      : await ChatEventLog.open(opts.tabId, deps.eventStore, nextSeq, logOptions)
-    // What hydrate needs from the WHOLE history (unconfirmed messages, a fork to
-    // re-arm, an unfinished turn), in one pass a page at a time: the event loop
-    // runs between pages, however long the conversation.
-    // The same pass feeds the timeline projection: the events after its checkpoint,
-    // or all of them when it must rebuild — the history is never read twice.
+      : await ChatEventLog.open(opts.tabId, deps.eventStore, nextSeq, {
+          ...logOptions,
+          deferSeed: true
+        })
+    // Resume the restart bookkeeping and projection from the same checkpoint.
+    // Each uncached saved event feeds both in a single pass.
     const history = historySource(tab.log, opts.initialBuffer)
-    const scan = new HydrateScan()
-    let projection = await beginProjection(opts.tabId, opts.mode, history.lastSeq)
-    for await (const page of history.pages(-1)) {
+    const scanStarted = performance.now()
+    const begun = await beginProjection(opts.tabId, opts.mode, history.lastSeq)
+    const scan = new HydrateScan(begun?.hydrate)
+    let projection = begun?.projection ?? null
+    const projectionMs = performance.now() - scanStarted
+    let scannedEvents = 0
+    for await (const page of history.pages(begun?.hydrate ? begun.from : -1)) {
+      scannedEvents += page.length
       for (const entry of page) scan.add(entry.event)
       if (projection) projection = await feedProjection(opts.tabId, projection, page)
     }
     if (projection) projection = await finishProjection(opts.tabId, projection)
+    const scanMs = performance.now() - scanStarted
     rearmPendingFork(tab, scan.newestBranch)
     if (deps.workspaceCapture && deps.workspaceStore) {
       tab.workspaceTracker = new ChatWorkspaceTracker({
@@ -2870,6 +2834,16 @@ export function createChatTransport(
     // viewer attaching now never falls back to guessing from its transcript.
     publishStatus(tab)
 
+    diagnostic(tab, 'info', 'chat.open_hydrate', 'chat hydrate timing', {
+      totalMs: Math.round(performance.now() - hydrateStarted),
+      scanMs: Math.round(scanMs),
+      projectionBeginMs: Math.round(projectionMs),
+      scannedEvents,
+      restored: begun?.checkpointMiss === null,
+      fedEvents: begun ? Math.max(0, history.lastSeq - begun.from) : 0,
+      projectionUsable: projection?.usable === true,
+      ...(begun?.checkpointMiss && history.lastSeq >= 0 ? { checkpoint: begun.checkpointMiss } : {})
+    })
     return toInfo(tab)
   }
 
@@ -3511,13 +3485,14 @@ export function createChatTransport(
       const waiting = new Promise<void>((r) => {
         resume = r
       })
-      const cut: { candidate: PoppedMessage | null | undefined } = { candidate: undefined }
+      const cut: ControlGroup['cut'] = {}
       group = {
         tab,
         proc,
         cut,
         boundary: proc.outputBoundary(() => {
           cut.candidate = peekTrailingUserMessage(tab)
+          void cut.candidate.catch(() => undefined)
         }),
         refs: 0,
         released: false,
@@ -3896,17 +3871,25 @@ export function createChatTransport(
    * to handle late-arriving events between renderer's check and this call.
    * "Progress" includes live fragments, which are never in the saved history.
    */
-  function popLastUserMessage(tabId: string): { popped: boolean; text: string | null } {
+  async function popLastUserMessage(
+    tabId: string
+  ): Promise<{ popped: boolean; text: string | null }> {
     const tab = tabs.get(tabId)
     if (!tab || tab.closed || tab.ended) return { popped: false, text: null }
-    const popped = popTrailingUserMessage(tab)
+    const popped = popTrailingUserMessage(tab, await peekTrailingUserMessage(tab))
     return popped ? { popped: true, text: popped.text } : { popped: false, text: null }
   }
 
-  function peekTrailingUserMessage(tab: ChatTab): PoppedMessage | null {
+  async function peekTrailingUserMessage(tab: ChatTab): Promise<PoppedMessage | null> {
     if (tab.turnProgress) return null
+    // Live output usually decides this without a history read.
+    const decisive = ({ event }: BufferedEvent) =>
+      event.kind === 'user-message' ||
+      event.kind === 'user-message-popped' ||
+      isProgressEventKind(event.kind)
+    const events = tab.log.events.some(decisive) ? tab.log.events : await tab.log.readRecent()
+    if (tab.turnProgress || tab.closed) return null
     let found: PoppedMessage | null = null
-    const events = tab.log.events
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i].event
       if (e.kind === 'user-message') {
@@ -3934,12 +3917,8 @@ export function createChatTransport(
     return found
   }
 
-  function popTrailingUserMessage(
-    tab: ChatTab,
-    candidate?: PoppedMessage | null
-  ): PoppedMessage | null {
-    const found = candidate === undefined ? peekTrailingUserMessage(tab) : candidate
-    if (!found) return null
+  function popTrailingUserMessage(tab: ChatTab, found: PoppedMessage | null): PoppedMessage | null {
+    if (!found || tab.closed || tabs.get(tab.tabId) !== tab) return null
     routeHostEvent(tab, {
       kind: 'user-message-popped',
       text: found.text,
@@ -4020,9 +3999,14 @@ export function createChatTransport(
       throw new Error('Chat control generation changed before stop')
     if (continuation?.group.decisionMade) return stopResult(null, 'interrupt')
     if (continuation) continuation.group.decisionMade = true
-    const popped = opts.restorePrompt
-      ? popTrailingUserMessage(tab, continuation?.group.cut.candidate)
-      : null
+    const candidate = continuation?.group.cut.candidate
+    let popped: PoppedMessage | null = null
+    if (opts.restorePrompt) {
+      const found = await (candidate ?? peekTrailingUserMessage(tab))
+      if (tab.closed || tabs.get(tabId) !== tab || (proc && tab.proc !== proc))
+        throw new ChatTransportError('Chat generation changed during stop')
+      popped = popTrailingUserMessage(tab, found)
+    }
     const reach = popped?.id ? tab.outbox.reach(popped.id) : null
     if (!popped) {
       const pending = tab.outbox.oldestInFlight()
@@ -4319,7 +4303,7 @@ export function createChatTransport(
    */
   function activeUserMessages(
     tab: ChatTab,
-    events: readonly BufferedEvent[] = tab.log.events
+    events: readonly BufferedEvent[]
   ): Array<{ id: string; text: string }> {
     const active: Array<{ id: string; text: string }> = []
     // What the conversation held before the last fork (a refused fork restores it).
@@ -4350,8 +4334,12 @@ export function createChatTransport(
    * The user message a rewind acts on: `before` — the message itself (it and what
    * follows go); `after` — the next one (this message and its answer stay).
    */
-  function rewindTarget(tab: ChatTab, messageId: string, scope: RewindScope): string {
-    const active = activeUserMessages(tab)
+  async function rewindTarget(
+    tab: ChatTab,
+    messageId: string,
+    scope: RewindScope
+  ): Promise<string> {
+    const active = activeUserMessages(tab, await tab.log.readRecent())
     const at = active.findIndex((m) => m.id === messageId)
     if (at < 0) {
       throw new ChatTransportError('That message is not in the conversation any more.')
@@ -4403,16 +4391,6 @@ export function createChatTransport(
     }
   }
 
-  function forkPoint(
-    tab: ChatTab,
-    messageId: string,
-    opts: { anyAnswer?: boolean } = {}
-  ): string | null {
-    const scan = new ForkPointScan(messageId, opts.anyAnswer === true)
-    for (const entry of tab.log.events) scan.add(entry.event)
-    return scan.at
-  }
-
   /**
    * Fork the conversation from a past message, in this tab (plan 3.3) — the TUI's
    * branch. The new conversation holds everything up to the end of that
@@ -4429,17 +4407,17 @@ export function createChatTransport(
   ): Promise<{ conversationId: string; fromConversationId: string }> {
     const tab = requireTab(tabId)
     await flushEvents(tab)
-    if (!activeUserMessages(tab).some((m) => m.id === opts.messageId)) {
+    if (!activeUserMessages(tab, await tab.log.readRecent()).some((m) => m.id === opts.messageId)) {
       throw new ChatTransportError('That message is not in the conversation any more.')
     }
     if (turnInFlight(tab)) {
       await stopTurn(tabId, { restorePrompt: false, respawnOpts: opts.respawnOpts })
     }
     // A CLI forking at a user message (Codex: through its turn) needs only an answer.
-    const at =
-      tab.backend.forkAt === 'message'
-        ? forkPoint(tab, opts.messageId, { anyAnswer: true }) && opts.messageId
-        : forkPoint(tab, opts.messageId)
+    const forkAtMessage = tab.backend.forkAt === 'message'
+    const scan = new ForkPointScan(opts.messageId, forkAtMessage)
+    for (const { event } of await tab.log.readRecent()) scan.add(event)
+    const at = scan.at && (forkAtMessage ? opts.messageId : scan.at)
     if (!at)
       throw new ChatTransportError(
         `${tab.backend.displayName} has not answered that message: there is nothing to fork yet.`
@@ -4514,7 +4492,7 @@ export function createChatTransport(
     opts: { messageId: string; scope: RewindScope }
   ): Promise<RewindFilesPreview> {
     const tab = requireTab(tabId)
-    const target = rewindTarget(tab, opts.messageId, opts.scope)
+    const target = await rewindTarget(tab, opts.messageId, opts.scope)
     const proc = await controllableProcess(tab)
     return toPreview(
       controlPayload(
@@ -4547,7 +4525,7 @@ export function createChatTransport(
   ): Promise<RewindResult> {
     const tab = requireTab(tabId)
     await flushEvents(tab)
-    const target = rewindTarget(tab, opts.messageId, opts.scope)
+    const target = await rewindTarget(tab, opts.messageId, opts.scope)
     if (turnInFlight(tab)) {
       await stopTurn(tabId, { restorePrompt: false, respawnOpts: opts.respawnOpts })
     }
@@ -4782,7 +4760,7 @@ export function createChatTransport(
     tabId: string,
     mode: string,
     lastSeq: number
-  ): Promise<TimelineProjectionHandle | null> {
+  ): Promise<Awaited<ReturnType<BeginTimelineProjection>> | null> {
     const store = deps.timelineStore?.(tabId)
     if (!store) return null
     return (deps.beginTimelineProjection ?? TimelineProjection.begin)({
@@ -4790,10 +4768,11 @@ export function createChatTransport(
       lastSeq,
       agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns
     }).then(
-      ({ projection }) => projection,
+      (begun) => begun,
       (err: unknown) => projectionFailed(tabId, err)
     )
   }
+
   function feedProjection(
     tabId: string,
     projection: TimelineProjectionHandle,
@@ -4824,11 +4803,24 @@ export function createChatTransport(
     tabId: string,
     clientVersion: string
   ): Promise<ChatTimelineOpenResult> {
+    const started = performance.now()
     const tab = tabs.get(tabId)
-    if (!tab || clientVersion !== TIMELINE_PROJECTION_VERSION) return { kind: 'full' }
+    if (!tab) return { kind: 'full' }
+    const full = (reason: string): ChatTimelineOpenResult => {
+      diagnostic(tab, 'info', 'chat.open_timeline', 'chat open timeline timing', {
+        paged: false,
+        fullBecause: reason,
+        ms: Math.round(performance.now() - started)
+      })
+      return { kind: 'full' }
+    }
+    const display = parseToolPreviewVersion(TIMELINE_PROJECTION_VERSION, clientVersion)
+    const compact = display !== null
+    if (!compact && clientVersion !== TIMELINE_PROJECTION_VERSION)
+      return full('full-client-version')
     await flushEvents(tab)
     const projection = await tab.projection
-    if (!projection?.usable) return { kind: 'full' }
+    if (!projection?.usable) return full('full-no-projection')
     // The snapshot waits for every projection step queued before it; the events
     // saved meanwhile follow it — within ONE history page (a busy chat can save MBs
     // while it waits). More than a page: a fresh snapshot covers them (it waits for
@@ -4837,24 +4829,35 @@ export function createChatTransport(
     for (let attempt = 0; attempt < OPEN_TIMELINE_ATTEMPTS; attempt++) {
       let snapshot: TimelineOpen
       try {
-        snapshot = await projection.openSnapshot()
+        snapshot = await projection.openSnapshot(
+          compact ? tab.statusEpoch : undefined,
+          display ?? undefined
+        )
       } catch {
-        return { kind: 'full' }
+        return full('full-projection-failed')
       }
       // Drain the accepted tail outside the history turn that reads its page.
       await flushEvents(tab)
       const tail = await tab.log.readPage(snapshot.seq)
       if (tail.hasMore) continue
+      diagnostic(tab, 'info', 'chat.open_timeline', 'chat open timeline timing', {
+        paged: true,
+        ms: Math.round(performance.now() - started),
+        attempts: attempt + 1,
+        stateChars: snapshot.state.length,
+        summaries: snapshot.summaries.length,
+        tailEvents: tail.events.length
+      })
       // Taken in the same turn the saved events end (only microtasks between), so
       // the live part follows exactly the newest of them.
       return {
         kind: 'paged',
-        snapshot,
+        snapshot: display?.packedOpen ? packTimelineOpen(snapshot) : snapshot,
         events: tail.events,
         live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
       }
     }
-    return { kind: 'full' }
+    return full('full-tail-outran')
   }
 
   /**
@@ -4866,17 +4869,62 @@ export function createChatTransport(
     pages: number[],
     asOfSeq: number,
     epoch: number,
-    startRow?: number
+    startRow?: number,
+    toolPreviews?: boolean | ChatHistoryDisplay
   ): Promise<TimelinePagesResult> {
-    const projection = await tabs.get(tabId)?.projection
-    if (!projection) return { expired: true }
-    return projection.pagesAsOf(pages, asOfSeq, epoch, startRow)
+    const started = performance.now()
+    const tab = tabs.get(tabId)
+    const projection = await tab?.projection
+    if (!tab || !projection) return { expired: true }
+    const res = await projection.pagesAsOf(
+      pages,
+      asOfSeq,
+      epoch,
+      startRow,
+      toolPreviews ? tab.statusEpoch : undefined,
+      typeof toolPreviews === 'object' ? toolPreviews : undefined
+    )
+    diagnostic(tab, 'info', 'chat.open_pages', 'chat history pages timing', {
+      ms: Math.round(performance.now() - started),
+      asked: pages.length,
+      expired: res.expired,
+      ...(res.expired
+        ? {}
+        : {
+            answered: res.pages.length,
+            rows: res.pages.reduce((n, p) => n + p.rows.length, 0),
+            omitted: res.omitted?.length ?? 0
+          })
+    })
+    return res
+  }
+
+  async function toolDetail(
+    tabId: string,
+    ref: ChatRowDetailRef,
+    offset: number,
+    revision?: string
+  ): Promise<ChatToolDetailChunk> {
+    const tab = tabs.get(tabId)
+    if (!tab || tab.statusEpoch !== ref.instance) return null
+    await flushEvents(tab)
+    const projection = await tab.projection
+    if (!projection || tabs.get(tabId) !== tab) return null
+    const chunk = await projection.toolDetail(ref, offset, revision)
+    return tabs.get(tabId) === tab ? chunk : null
   }
 
   /** Sealed pages that may hold `query` (the client checks the rows it loads). */
-  async function searchTimeline(tabId: string, query: string): Promise<number[]> {
+  async function searchTimeline(
+    tabId: string,
+    query: string,
+    caseSensitive?: boolean
+  ): Promise<number[] | ChatToolSearchResult> {
     const projection = await tabs.get(tabId)?.projection
-    return projection ? projection.searchPages(query) : []
+    if (caseSensitive === undefined) return projection ? projection.searchPages(query) : []
+    return projection
+      ? projection.searchToolMatches(query, caseSensitive)
+      : { pages: [], toolUseIds: [] }
   }
 
   /** The CACHED saved events after `afterSeq` (the newest ones; in-process checks). */
@@ -4884,6 +4932,10 @@ export function createChatTransport(
     const tab = tabs.get(tabId)
     if (!tab) return []
     return tab.log.since(afterSeq)
+  }
+
+  function readRecentEvents(tabId: string): Promise<readonly BufferedEvent[]> {
+    return tabs.get(tabId)?.log.readRecent() ?? Promise.resolve([])
   }
 
   /**
@@ -5155,7 +5207,12 @@ export function createChatTransport(
 
   function hibernationInventory() {
     let hibernated = 0
-    const candidates = []
+    const candidates: Array<{
+      tabId: string
+      taskId: string
+      idleSince: number
+      hibernate(allowed: () => Promise<boolean>): Promise<boolean>
+    }> = []
     for (const tab of tabs.values()) {
       if (tab.hibernated) hibernated++
       if (!canHibernate(tab)) continue
@@ -5168,7 +5225,8 @@ export function createChatTransport(
         async hibernate(allowed: () => Promise<boolean>) {
           if (!(await allowed())) return false
           await flushEvents(tab)
-          if (tab.proc !== proc || tab.lastOutputTime !== idleSince || !canHibernate(tab)) return false
+          if (tab.proc !== proc || tab.lastOutputTime !== idleSince || !canHibernate(tab))
+            return false
           // Set the process fence before yielding so a concurrent send waits
           // for the exit and starts a new generation with the same session id.
           proc.retiring = true
@@ -5194,7 +5252,10 @@ export function createChatTransport(
             kickQueueDrainer(tab)
             return true
           })()
-          const settled = work.then(() => undefined, () => undefined)
+          const settled = work.then(
+            () => undefined,
+            () => undefined
+          )
           tab.respawning = settled
           try {
             return await work
@@ -5331,8 +5392,10 @@ export function createChatTransport(
     removeSession,
     openTimeline,
     timelinePages,
+    toolDetail,
     searchTimeline,
     getEventBufferSince,
+    readRecentEvents,
     readEventsSince,
     readEventPage,
     getReplay,
@@ -5408,8 +5471,10 @@ export const {
   removeSession,
   openTimeline,
   timelinePages,
+  toolDetail,
   searchTimeline,
   getEventBufferSince,
+  readRecentEvents,
   readEventsSince,
   readEventPage,
   getReplay,

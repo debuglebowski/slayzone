@@ -1,3 +1,4 @@
+import { CHAT_HISTORY_DISPLAY_VERSION } from '@slayzone/terminal-contracts'
 import { isPathAllowed, type Scope } from '../shared/scopes'
 import type { RuntimeClient } from './runtime'
 
@@ -5,7 +6,7 @@ import type { RuntimeClient } from './runtime'
 type HubDescribe = {
   scopes?: readonly Scope[] | null
   switches?: { enableTelemetry?: boolean }
-  wire?: { compactBytes?: boolean }
+  wire?: { compactBytes?: boolean; toolPreviews?: boolean; chatDisplay?: number }
 }
 
 /**
@@ -83,6 +84,19 @@ export async function hubPermitsTelemetry(client: RuntimeClient): Promise<boolea
 export async function hubReadsCompactBytes(client: RuntimeClient): Promise<boolean> {
   return describeOf(client).then(
     (d) => d.wire?.compactBytes === true,
+    () => false
+  )
+}
+
+/** Can a direct preview still read its full tool detail if the direct link drops? */
+export async function hubSupportsToolPreviews(
+  client: RuntimeClient,
+  withDisplay = false
+): Promise<boolean> {
+  return describeOf(client).then(
+    (d) =>
+      d.wire?.toolPreviews === true &&
+      (!withDisplay || d.wire.chatDisplay === CHAT_HISTORY_DISPLAY_VERSION),
     () => false
   )
 }

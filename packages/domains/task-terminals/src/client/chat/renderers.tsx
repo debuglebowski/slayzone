@@ -1,3 +1,4 @@
+import { interruptedLabel, isAgentLauncherToolName } from '@slayzone/terminal/chat-presentation'
 import { MessageDetails } from './MessageDetails'
 import { useContext, useDeferredValue, useEffect, useId, useMemo, useState } from 'react'
 import {
@@ -7,6 +8,12 @@ import {
   formatRetrySpan,
   stripAnsi
 } from '@slayzone/terminal-contracts'
+import {
+  toolDetailRef,
+  useTextDetail,
+  useToolDetail,
+  type ChatToolDetailReader
+} from '@slayzone/terminal/chat-tool-details'
 import { useChatProvider, useChatView } from './ChatViewContext'
 import { TimelineRowKeyContext, nestedRowKey, useRowUiState } from './row-ui-state'
 import { useToolFocusRequest } from './tool-cards/tool-focus'
@@ -28,7 +35,7 @@ import {
   User,
   Bot
 } from 'lucide-react'
-import { cn, useDepsChanged, useNow, useAppearance } from '@slayzone/ui'
+import { cn, useDepsChanged, useNow, useAppearance, useStableCallback } from '@slayzone/ui'
 import { ChatDiffView } from './diff-comments/ChatDiffView'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import { renderCodexFileCitations } from './codex-file-citations'
@@ -54,6 +61,7 @@ import {
   LinkText,
   ToolShell,
   ToolInActivityContext,
+  ToolDetailDisclosureContext,
   StatusIcon,
   shortenPath,
   type ToolProps
@@ -132,7 +140,23 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
 export function AssistantMessageBody({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
   const streaming = item.stream === 'open'
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
-  const text = useDeferredValue(live?.text ?? item.text)
+  const { readTextDetail } = useChatView()
+  const detail = useTextDetail(item, readTextDetail, true)
+  const text = useDeferredValue(live?.text ?? detail.text)
+  if (detail.loading) {
+    return (
+      <p role="status" className="text-xs text-muted-foreground">
+        Loading message…
+      </p>
+    )
+  }
+  if (detail.failed) {
+    return (
+      <button type="button" className="text-xs underline" onClick={detail.retry}>
+        Retry loading message
+      </button>
+    )
+  }
   return (
     <div className="min-w-0">
       <div
@@ -195,9 +219,11 @@ export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 't
   const [open, setOpen] = useRowUiState('thinking', false, false)
   const streaming = item.stream === 'open'
   const live = useLiveBlock(streaming ? streamKeyOf(item) : undefined)
-  const text = live?.text || item.text
+  const { readTextDetail } = useChatView()
+  const detail = useTextDetail(item, readTextDetail, open && appearance.chatShowThinking)
+  const text = live?.text || detail.text
   const now = useNow(1000, { enabled: streaming })
-  if (!appearance.chatShowThinking || (!streaming && !text)) return null
+  if (!appearance.chatShowThinking || (!streaming && !text && !item.textDetail)) return null
   return (
     <div
       data-chat-thinking
@@ -217,6 +243,16 @@ export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 't
           </span>
         )}
       </button>
+      {detail.loading && (
+        <p role="status" className="text-xs text-muted-foreground">
+          Loading thinking…
+        </p>
+      )}
+      {detail.failed && (
+        <button type="button" className="text-xs underline" onClick={detail.retry}>
+          Retry loading thinking
+        </button>
+      )}
       {open && text && (
         <pre className="mt-1 text-xs text-muted-foreground/80 whitespace-pre-wrap italic pl-5 border-l border-border/40 ml-1">
           <HighlightedText text={text} />
@@ -350,15 +386,7 @@ export function InterruptedBlock({
       className="flex items-start gap-2 py-2 text-sm leading-5 text-warning-foreground/70"
     >
       <CircleStop aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <span>
-        {item.reason === 'already-in-conversation'
-          ? `Not run again: ${provider.agent} already had this message`
-          : item.reason === 'watchdog'
-            ? 'Turn interrupted by SlayZone watchdog'
-            : item.reason === 'stop-request'
-              ? 'Turn stopped by request'
-              : 'Turn interrupted'}
-      </span>
+      <span>{interruptedLabel(item, provider.agent)}</span>
     </div>
   )
 }
@@ -575,16 +603,6 @@ function formatTokens(n: number): string {
 }
 
 // --- Tool renderers ---
-
-/**
- * Sub-agent launcher tool — `Agent` in current Claude Code SDK, `Task` in older
- * versions. Paired with a `kind:'sub-agent'` timeline row that already shows
- * status/usage; we render this card inside the SubAgentRow accordion instead of
- * at root.
- */
-function isAgentLauncherToolName(name: string | undefined): boolean {
-  return name === 'Agent' || name === 'Task'
-}
 
 export function ToolCallEdit({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as {
@@ -890,13 +908,6 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
 }
 
 // Marker texts older builds sent as chat messages to approve / cancel a plan.
-// Plan approval now answers ExitPlanMode itself; the markers stay only so old
-// conversations keep them hidden (`isRenderable`) and out of prompt history.
-export const PLAN_APPROVED_MARKER = '__slay_plan_approved__'
-export const PLAN_CANCELLED_MARKER = '__slay_plan_cancelled__'
-export const isPlanMarker = (text: string): boolean =>
-  text === PLAN_APPROVED_MARKER || text === PLAN_CANCELLED_MARKER
-
 /**
  * ExitPlanMode in the timeline: the plan, and how it was answered. Approval
  * happens in the prompt dock right below ("Ready to code?").
@@ -1029,6 +1040,9 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
 }
 
 export function renderTool(invocation: ToolInvocation, timestamp?: number): React.JSX.Element {
+  if (invocation.toolPreview?.hidden) {
+    return <HiddenToolCard invocation={invocation} timestamp={timestamp} />
+  }
   const R =
     toolRenderers[invocation.name] ??
     (invocation.name.startsWith(CODEX_AGENT_TOOL_PREFIX)
@@ -1036,24 +1050,47 @@ export function renderTool(invocation: ToolInvocation, timestamp?: number): Reac
       : parseMcpToolName(invocation.name)
         ? McpToolCard
         : ToolCallGeneric)
-  return <R invocation={invocation} timestamp={timestamp} />
+  return toolDetailRef(invocation) ? (
+    <ToolDetailCard renderCard={R} invocation={invocation} timestamp={timestamp} />
+  ) : (
+    <R invocation={invocation} timestamp={timestamp} />
+  )
 }
 
-/**
- * Items the dispatcher renders as `null`. Virtualized lists must filter these
- * before counting, otherwise reserved slot heights leave ghost gaps.
- */
-export function isRenderable(item: TimelineItem): boolean {
-  if (item.kind === 'session-start') return false
-  // A later marker closes the same turn: one "Turn interrupted" per turn.
-  if (item.kind === 'interrupted' && item.superseded) return false
-  if (item.kind === 'codex-plan-decision') return false
-  if (item.kind === 'rate-limit' && item.status === 'allowed') return false
-  // Launcher tool is rendered inside SubAgentRow's accordion, not at root.
-  if (item.kind === 'tool' && isAgentLauncherToolName(item.invocation.name)) return false
-  // Plan resolution markers are detector-only, never shown as user bubbles.
-  if (item.kind === 'user-text' && isPlanMarker(item.text)) return false
-  return true
+function HiddenToolCard({ invocation, timestamp }: ToolProps) {
+  const { readToolDetail } = useChatView()
+  const readPreview = useStableCallback<
+    Parameters<ChatToolDetailReader>,
+    ReturnType<ChatToolDetailReader>
+  >((ref, signal) => readToolDetail!({ ...ref, preview: true }, signal))
+  const preview = useToolDetail(invocation, readToolDetail && readPreview, true)
+  if (preview.loaded) return renderTool(preview.invocation, timestamp)
+  return (
+    <div className={cn(CHAT_CARD_INDENT, 'py-1 text-xs text-muted-foreground')}>
+      {preview.failed ? (
+        <button type="button" className="underline" onClick={preview.retry}>
+          Retry loading {invocation.name}
+        </button>
+      ) : (
+        <span role="status">Loading {invocation.name}…</span>
+      )}
+    </div>
+  )
+}
+
+function ToolDetailCard({
+  renderCard: Card,
+  invocation,
+  timestamp
+}: ToolProps & { renderCard: React.ComponentType<ToolProps> }) {
+  const { readToolDetail } = useChatView()
+  const [open, setOpen] = useState(false)
+  const detail = useToolDetail(invocation, readToolDetail, open)
+  return (
+    <ToolDetailDisclosureContext.Provider value={{ ...detail, onExpanded: setOpen }}>
+      <Card invocation={detail.invocation} timestamp={timestamp} />
+    </ToolDetailDisclosureContext.Provider>
+  )
 }
 
 /** Single dispatcher used by ChatPanel + the dev harness. */

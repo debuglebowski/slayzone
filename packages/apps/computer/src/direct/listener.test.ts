@@ -83,7 +83,7 @@ function fakePty() {
 }
 
 /** A stand-in for one hub's chat. */
-function fakeChat() {
+function fakeChat(body?: string) {
   const reads: unknown[] = []
   const commands: unknown[] = []
   const watchers = new Map<
@@ -93,7 +93,7 @@ function fakeChat() {
   const service = {
     read: async (tabId: string, epoch: number, method: string, args: unknown[]) => {
       reads.push({ tabId, epoch, method, args })
-      return { ok: method }
+      return { ok: method, ...(body === undefined ? {} : { body }) }
     },
     command: async (
       tabId: string,
@@ -118,9 +118,9 @@ function fakeChat() {
   return { service, reads, commands, watchers }
 }
 
-async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits']) {
+async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits'], body?: string) {
   const pty = fakePty()
-  const chat = fakeChat()
+  const chat = fakeChat(body)
   const chatLookup = { get: (hubKey: string) => (hubKey === 'hub' ? chat.service : null) }
   const taskReads: Array<{ taskId: string; request: unknown }> = []
   const taskData = {
@@ -148,11 +148,11 @@ async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits
   return { store, listener, audit, pty, chat, chatLookup, taskReads }
 }
 
-function client(listener: DirectListener, token: string | null) {
+function client(listener: DirectListener, token: string | null, Socket = WebSocket) {
   const closes: Array<{ code: number; reason: string }> = []
   const ws = createWSClient({
     url: `ws://${listener.boundAddress}/direct/v1`,
-    WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+    WebSocket: Socket as unknown as typeof globalThis.WebSocket,
     connectionParams: token === null ? null : { token },
     retryDelayMs: () => 60_000,
     onClose: (cause) => closes.push({ code: cause?.code ?? 0, reason: '' })
@@ -417,6 +417,31 @@ describe('direct listener: terminals', () => {
     expect(await trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).toBeTruthy()
     expect(closes).toEqual([])
   })
+})
+
+it('compresses large direct chat answers when the peer offers WebSocket compression', async () => {
+  const body = 'build output with a repeated prefix\n'.repeat(4_000)
+  const { store, listener } = await setup(undefined, body)
+  const bytes: number[] = []
+  for (const offer of [false, true]) {
+    let readBytes = () => 0
+    class MeasuredSocket extends WebSocket {
+      constructor(url: string) {
+        super(url, { perMessageDeflate: offer })
+        this.once('upgrade', (response) => {
+          readBytes = () => response.socket.bytesRead
+        })
+      }
+    }
+    const { token } = grant(store, { chat: { tabId: 't1', epoch: 1 } })
+    const { trpc } = client(listener, token, MeasuredSocket as typeof WebSocket)
+    await trpc.ping.query()
+    const before = readBytes()
+    expect(await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })).toMatchObject({ body })
+    bytes.push(readBytes() - before)
+  }
+  expect(bytes[0]).toBeGreaterThan(Buffer.byteLength(body))
+  expect(bytes[1]).toBeLessThan(bytes[0] / 10)
 })
 
 describe('direct listener: terminal input', () => {

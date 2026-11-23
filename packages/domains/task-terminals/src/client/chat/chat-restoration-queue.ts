@@ -1,19 +1,21 @@
 /** Renderer restoration admission. Agent processes and their durable queues never wait here. */
 export interface ChatRestorationTicket {
   ready(): boolean
-  restoring(): boolean
   subscribe(cb: () => void): () => void
   setActive(active: boolean): void
   /** The panel committed; its child effects have registered their initial work. */
   mounted(): void
-  hold(): () => void
+  /** Hold admission until history work settles, including after cancellation. */
   track<T>(work: Promise<T>): Promise<T>
+  /** ms from enqueue until it got its slot (null while it waits): open-timing diagnostic. */
+  queuedMs(): number | null
   cancel(): void
 }
 
 export function createChatRestorationQueue(
-  opts: { concurrency?: number; backgroundConcurrency?: number } = {}
+  opts: { concurrency?: number; backgroundConcurrency?: number; now?: () => number } = {}
 ) {
+  const now = opts.now ?? (() => performance.now())
   const concurrency = opts.concurrency ?? 3
   const backgroundConcurrency = opts.backgroundConcurrency ?? 2
   const waiting: Entry[] = []
@@ -29,18 +31,28 @@ export function createChatRestorationQueue(
     done: boolean
     pending: number
     mounted: boolean
+    enqueuedAt: number
+    startedAt: number | null
     timer: ReturnType<typeof setTimeout> | null
     listeners: Set<() => void>
   }
   const backgroundCount = () => [...running].filter((e) => !e.active).length
   const pump = (): void => {
-    while (running.size < concurrency) {
+    while (concurrency > 0 && running.size <= concurrency) {
+      const foreground = waiting.find((e) => e.active)
+      const hasSlot = running.size < concurrency
+      // The requests started for the previous selection still drain. Let the
+      // now-visible panel open in one temporary extra slot.
+      if (!hasSlot && (!foreground || [...running].some((e) => e.active && !e.cancelled))) return
       const bg =
-        backgroundCount() < backgroundConcurrency ? waiting.find((e) => !e.active) : undefined
-      const next = (foregroundStreak >= 4 ? bg : undefined) ?? waiting.find((e) => e.active) ?? bg
+        hasSlot && backgroundCount() < backgroundConcurrency
+          ? waiting.find((e) => !e.active)
+          : undefined
+      const next = (foregroundStreak >= 4 ? bg : undefined) ?? foreground ?? bg
       if (!next) return
       waiting.splice(waiting.indexOf(next), 1)
       next.started = true
+      next.startedAt = now()
       running.add(next)
       started++
       foregroundStreak = next.active ? foregroundStreak + 1 : 0
@@ -50,7 +62,7 @@ export function createChatRestorationQueue(
   }
   const settle = (e: Entry): void => {
     if (!e.started || e.done || e.pending > 0 || (!e.mounted && !e.cancelled) || e.timer) return
-    // Let React commit follow-up effects (startup decisions, metadata invalidations).
+    // Let the panel commit and register any replacement history load.
     e.timer = setTimeout(() => {
       e.timer = null
       if (e.pending > 0 || e.done) return
@@ -78,25 +90,15 @@ export function createChatRestorationQueue(
         pending: 0,
         mounted: false,
         timer: null,
-        listeners: new Set()
+        listeners: new Set(),
+        enqueuedAt: now(),
+        startedAt: null
       }
       waiting.push(e)
       peakQueued = Math.max(peakQueued, waiting.length)
       pump()
-      const hold = (): (() => void) => {
-        if (e.done || !e.started) return () => undefined
-        e.pending++
-        let released = false
-        return () => {
-          if (released) return
-          released = true
-          e.pending--
-          settle(e)
-        }
-      }
       return {
         ready: () => e.started && !e.cancelled,
-        restoring: () => e.started && !e.done && !e.cancelled,
         subscribe(cb) {
           e.listeners.add(cb)
           return () => {
@@ -111,11 +113,15 @@ export function createChatRestorationQueue(
           e.mounted = true
           settle(e)
         },
-        hold,
         track<T>(work: Promise<T>): Promise<T> {
-          const release = hold()
-          return work.finally(release)
+          if (e.done || !e.started) return work
+          e.pending++
+          return work.finally(() => {
+            e.pending--
+            settle(e)
+          })
         },
+        queuedMs: () => (e.startedAt === null ? null : Math.round(e.startedAt - e.enqueuedAt)),
         cancel() {
           if (e.cancelled) return
           e.cancelled = true
@@ -126,7 +132,7 @@ export function createChatRestorationQueue(
             waiting.splice(i, 1)
             e.done = true
           }
-          // A cancelled panel's requests still occupy capacity until they actually settle.
+          // A cancelled panel's history still occupies capacity until they actually settle.
           settle(e)
           pump()
         }

@@ -282,16 +282,18 @@ function ChatView({
       )
   }, [client, target, notify])
 
+  const { readToolDetail } = session
   const view = useMemo<ChatViewValue>(
     () => ({
       tabId: target.tabId,
+      readToolDetail,
       retryMessage: (id) => void retryMessage(id),
       prompts: state.prompts,
       restartAgent: restart,
       takeOver,
       agentName: provider.agent
     }),
-    [target.tabId, retryMessage, state.prompts, restart, takeOver, provider.agent]
+    [target.tabId, readToolDetail, retryMessage, state.prompts, restart, takeOver, provider.agent]
   )
 
   // The keyboard lifts the composer by what it covers of THIS view, measured where the
@@ -362,9 +364,13 @@ function ChatView({
           )}
           <ChatTimeline
             state={state}
+            agentName={agentName}
+            productName={provider.product}
             hydrating={session.hydrating}
             working={session.inFlight && !awaitingUser}
             reconnecting={session.reconnecting}
+            olderHistory={session.olderHistory}
+            loadHistoryRows={session.loadHistoryRows}
             emptyText="Send a message to start."
             {...(chrome
               ? { topInset: chrome.top, onScrollFromNewest: chrome.onTimelineScroll }

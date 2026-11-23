@@ -74,7 +74,7 @@ export async function admitAttachments(args: {
   content: UserContentBlock[]
   lookup: AttachmentLookup
   /** The tab's saved events (for the budget). */
-  events: Iterable<AgentEvent>
+  events: Iterable<AgentEvent> | (() => Promise<Iterable<AgentEvent>>)
   /** A queued message being edited: its old files don't count twice. */
   exceptQueuedId?: string
 }): Promise<UserContentBlock[]> {
@@ -106,7 +106,8 @@ export async function admitAttachments(args: {
     }
   }
 
-  let used = conversationAttachmentBytes(budgetEntriesFromEvents(args.events))
+  const events = typeof args.events === 'function' ? await args.events() : args.events
+  let used = conversationAttachmentBytes(budgetEntriesFromEvents(events))
   for (const q of await args.lookup.queued(args.tabId, args.exceptQueuedId)) {
     used += attachmentEncodedBytes(q)
   }

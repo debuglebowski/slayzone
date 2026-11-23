@@ -61,6 +61,7 @@ export function fileChangeOf(
   if (!FILE_TOOL_NAMES.has(invocation.name)) return null
   if (invocation.status !== 'done' || invocation.denied || !invocation.result) return null
   if (invocation.result.isError) return null
+  if (invocation.toolPreview?.files) return invocation.toolPreview.files[0] ?? null
   const input = isRecord(invocation.input) ? invocation.input : {}
   const res = isRecord(invocation.result.structured) ? invocation.result.structured : {}
   if (invocation.name === 'NotebookEdit') {
@@ -96,6 +97,7 @@ export function fileChangesOf(
   if (invocation.name === CODEX_FILE_CHANGE_TOOL) {
     if (invocation.status !== 'done' || invocation.denied || !invocation.result) return []
     if (invocation.result.isError) return []
+    if (invocation.toolPreview?.files) return invocation.toolPreview.files
     return codexFileChanges(invocation).map((change) => ({
       path: change.path,
       ...codexChangeCounts(change),

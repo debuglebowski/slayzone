@@ -7,6 +7,7 @@ import { createElement, useLayoutEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
+import { CHAT_HISTORY_DISPLAY_VERSION } from '@slayzone/terminal-contracts'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import type { TimelineItem } from '../shared/chat-timeline'
 
@@ -222,20 +223,22 @@ interface Props {
   cwd: string
   mode?: string
   flags?: string | null
+  hideThinking?: boolean
 }
 
-function setup() {
+function setup(hideThinking?: boolean) {
   // Every COMMITTED (cwd, hydrating) pair — a layout effect only runs for a render that
   // reaches the screen.
   const frames: Array<{ cwd: string; hydrating: boolean }> = []
   const hook = renderHook(
-    ({ cwd, mode = 'claude-chat', flags = null }: Props) => {
+    ({ cwd, mode = 'claude-chat', flags = null, hideThinking }: Props) => {
       const r = useChatSession({
         tabId: 'tab-1',
         taskId: 't1',
         mode,
         cwd,
-        providerFlagsOverride: flags
+        providerFlagsOverride: flags,
+        display: hideThinking ? { hideThinking: true } : undefined
       })
       const hydrating = r.hydrating
       useLayoutEffect(() => {
@@ -244,7 +247,7 @@ function setup() {
       return r
     },
     {
-      initialProps: { cwd: '/repo' } as Props,
+      initialProps: { cwd: '/repo', hideThinking } as Props,
       wrapper: ({ children }) =>
         createElement(QueryClientProvider, { client: queryClient }, children)
     }
@@ -858,6 +861,10 @@ describe('useChatSession — stream fragments, one render per frame (plan 3.2)',
     const frames = controlFrames()
     const { result: r } = setup()
     await finishLoad(0, [{ seq: 0, event: userMsg('one') }])
+    // The open's own frames (its painted-rows timing, `chat-open-timing.ts`) first.
+    frames.frame()
+    frames.frame()
+    frames.raf.mockClear()
     liveOnly(0, 1, streamStart[0])
     liveOnly(0, 2, streamStart[1])
     liveOnly(0, 3, textDelta('Hel'))
@@ -1063,6 +1070,38 @@ describe('paged history (opened from the hub projection)', () => {
     // Dropped again: rows gone, meaning kept.
     act(() => r.current.unloadPages([0, 1]))
     expect(r.current.timeline.slice(0, 2 * PAGE).every((it) => it === undefined)).toBe(true)
+  })
+
+  it('applies the setting on open and older page loads without reopening the chat on toggle', async () => {
+    const h = fakeHub(all, all.length - 1)
+    const open = h.open
+    h.open = async (input) => {
+      const reply = (await open(input)) as {
+        snapshot: { toolPreviews?: true; displaySettings?: typeof CHAT_HISTORY_DISPLAY_VERSION }
+      }
+      reply.snapshot.toolPreviews = true
+      reply.snapshot.displaySettings = CHAT_HISTORY_DISPLAY_VERSION
+      return reply
+    }
+    hub = h
+    const opens = vi.spyOn(client.chat.openTimeline, 'query')
+    const pages = vi.spyOn(client.chat.timelinePages, 'query')
+    const { result, rerender } = setup(true)
+    await openPaged(0)
+    expect(opens).toHaveBeenCalledWith(
+      expect.objectContaining({ display: { hideThinking: true, windowed: true, packedOpen: true } })
+    )
+    act(() => result.current.loadPages([0]))
+    await settle()
+    expect(pages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ display: { hideThinking: true } })
+    )
+    rerender({ cwd: '/repo', hideThinking: false })
+    act(() => result.current.loadPages([1]))
+    await settle()
+    expect(pages.mock.lastCall?.[0]).not.toHaveProperty('display')
+    expect(opens).toHaveBeenCalledTimes(1)
+    expect(loads).toHaveLength(1)
   })
 
   it('pages an answer left out (over its byte budget) are asked for again at once', async () => {

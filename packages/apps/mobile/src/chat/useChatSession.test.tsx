@@ -1,3 +1,5 @@
+import { encodeTimelineState } from '@slayzone/terminal/timeline-checkpoint'
+import { initialState, reducer } from '@slayzone/terminal/reducer'
 import { act, renderHook, waitFor } from '@testing-library/react-native'
 import { trpcTest } from '../testing'
 import { fakeHub } from './fake-hub'
@@ -66,6 +68,103 @@ describe('useChatSession', () => {
     expect(order).toEqual(['hydrate', 'replay -1'])
     expect(hub.subscribed['chat.onEvent']).toEqual([{ tabIds: ['tab-1'] }])
     expect(result.current.state.timeline.map((i) => i?.kind)).toEqual(['user-text'])
+  })
+
+  it('opens the projected tail and fetches older rows only when asked', async () => {
+    const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
+    const head = reducer(initialState({ agentStartedTurns: true }), {
+      type: 'events',
+      events: [
+        { kind: 'user-message', id: 'older', text: 'Earlier prompt' },
+        { kind: 'assistant-text', messageId: 'recent', text: 'Latest response' }
+      ],
+      at: [100, 200],
+      seq: [0, 1]
+    })
+    hub.on('chat.openTimeline', () => ({
+      kind: 'paged',
+      snapshot: {
+        seq: 1,
+        epoch: head.rowsEpoch,
+        pageRows: 1,
+        state: encodeTimelineState(head, 1),
+        summaries: [{}]
+      },
+      events: [],
+      live: { afterSeq: 1, liveSeq: 0, events: [] }
+    }))
+    hub.on('chat.timelinePages', () => ({
+      expired: false,
+      pages: [{ page: 0, from: 0, rows: head.timeline.slice(0, 1) }]
+    }))
+    const { wrapper } = trpcTest(hub.backend)
+    const { result } = await renderHook(() => useChatSession(target), { wrapper })
+    await waitFor(() => expect(result.current.hydrating).toBe(false))
+    expect(result.current.state.timeline).toEqual([undefined, head.timeline[1]])
+    expect(hub.callsTo('chat.getReplay')).toHaveLength(0)
+    expect(hub.callsTo('chat.timelinePages')).toHaveLength(0)
+
+    await act(async () => result.current.olderHistory?.load())
+    await waitFor(() => expect(result.current.state.timeline).toEqual(head.timeline))
+    expect(result.current.olderHistory).toBeNull()
+    expect(hub.callsTo('chat.timelinePages')).toEqual([
+      { tabId: target.tabId, pages: [0], epoch: head.rowsEpoch, asOfSeq: 1, startRow: 0 }
+    ])
+  })
+
+  it('loads a sealed tool row when a live event updates it', async () => {
+    const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
+    const head = reducer(initialState({ agentStartedTurns: true }), {
+      type: 'events',
+      events: [
+        { kind: 'tool-call', id: 'older', name: 'Bash', input: { command: 'pwd' } },
+        { kind: 'assistant-text', messageId: 'recent', text: 'Waiting' }
+      ],
+      seq: [0, 1]
+    })
+    hub.on('chat.openTimeline', () => ({
+      kind: 'paged',
+      snapshot: {
+        seq: 1,
+        epoch: head.rowsEpoch,
+        pageRows: 1,
+        state: encodeTimelineState(head, 1),
+        summaries: [{}]
+      },
+      events: [],
+      live: { afterSeq: 1, liveSeq: 0, events: [] }
+    }))
+    hub.on('chat.timelinePages', () => ({
+      expired: false,
+      pages: [{ page: 0, from: 0, rows: head.timeline.slice(0, 1) }]
+    }))
+    const { wrapper } = trpcTest(hub.backend)
+    const { result } = await renderHook(() => useChatSession(target), { wrapper })
+    await waitFor(() => expect(result.current.hydrating).toBe(false))
+    await act(async () => {
+      hub.emit('chat.onEvent', {
+        tabId: target.tabId,
+        seq: 2,
+        event: {
+          kind: 'tool-result',
+          toolUseId: 'older',
+          rawContent: '/w',
+          structured: null,
+          isError: false
+        }
+      })
+    })
+    await waitFor(() => {
+      expect(result.current.state.appliedSeq).toBe(2)
+      expect(result.current.state.stalled).toBeNull()
+      expect(result.current.state.timeline[0]).toMatchObject({
+        kind: 'tool',
+        invocation: { result: { rawContent: '/w' } }
+      })
+    })
+    expect(hub.callsTo('chat.timelinePages')).toEqual([
+      { tabId: target.tabId, pages: [0], epoch: head.rowsEpoch, asOfSeq: 1, startRow: 0 }
+    ])
   })
 
   it('reads the history in bounded pages, carrying on after the last event of each', async () => {

@@ -401,3 +401,34 @@ test('A: a chat its live computer did not return carries that reason too', async
     h.cleanup()
   }
 })
+
+test('availability reports recovery without waiting for it or probing other computers', async () => {
+  const { h, owners } = await setup()
+  try {
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    let recovering = true
+    const availability = createChatAvailability({
+      db: h.slayDb,
+      ownership: owners,
+      resolveComputer: async () => 'different-pc',
+      connected: () => true,
+      hasLiveTask: async () => false,
+      historyRecovering: (id) => id === 'pc' && recovering
+    })
+    expect(await availability('tab')).toMatchObject({ state: 'ready', historyWaiting: true })
+    recovering = false
+    expect(await availability('tab')).toEqual({
+      state: 'ready',
+      computer: { id: 'pc', name: 'Computer' }
+    })
+  } finally {
+    h.cleanup()
+  }
+})

@@ -605,6 +605,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       if (!chats.has(tabId)) chats.set(tabId, { taskId, cwd, events: [] })
       return chatInfo(tabId)
     },
+    'chat.openTimeline': () => ({ kind: 'full' }),
     'chat.getReplay': ({ tabId, afterSeq }) => {
       const log = chats.get(tabId)
       const events = (log?.events ?? []).filter((e) => e.seq > afterSeq)

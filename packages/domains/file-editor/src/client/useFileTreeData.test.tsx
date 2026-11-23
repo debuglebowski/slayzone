@@ -80,3 +80,34 @@ describe('useFileTreeData git status', () => {
     expect(result.current.gitStatus).toBe(same)
   })
 })
+
+it('coalesces watcher changes into reads of the affected directories only', async () => {
+  const readDir = vi.fn(() => [])
+  const listeners = new Set<(data: unknown) => void>()
+  const backend = createTrpcTest({
+    procedures: { 'fileEditor.gitStatus': () => git, 'fileEditor.readDir': readDir },
+    subscriptions: {
+      'fileEditor.watch': (_input, push) => {
+        listeners.add(push)
+        return () => listeners.delete(push)
+      }
+    }
+  })
+  const folders = new Set(['src', 'docs', 'vendor'])
+  renderHook(() => useFileTreeData({ projectPath: '/proj', controlledExpanded: folders }), {
+    wrapper: scopedWrapper(backend.wrapper)
+  })
+  await flush()
+  readDir.mockClear()
+  await act(async () => {
+    for (const push of listeners) {
+      push({ type: 'changed', root: '/proj', relPath: 'src/a.ts' })
+      push({ type: 'deleted', root: '/proj', relPath: 'docs/b.md' })
+    }
+    await vi.advanceTimersByTimeAsync(100)
+  })
+  expect(readDir.mock.calls).toEqual([
+    [expect.objectContaining({ dirPath: 'src' })],
+    [expect.objectContaining({ dirPath: 'docs' })]
+  ])
+})

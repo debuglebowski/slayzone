@@ -11,9 +11,9 @@ import {
 } from 'react'
 import {
   ChatRestorationBoundary,
-  useChatRestorationQueries,
-  useChatRestorationPending,
-  useChatRestorationTracker
+  useChatHistoryReadiness,
+  useChatRestorationQueuedMs,
+  useChatHistoryTracker
 } from './chat-restoration'
 import { CornerDownLeft } from 'lucide-react'
 import {
@@ -125,6 +125,7 @@ export interface ChatPanelProps {
   mode: string
   cwd: string
   isActive?: boolean
+  prefetchOnly?: boolean
   providerFlagsOverride?: string | null
   permissionNotice?: string | null
   /** Cmd+Click on a URL → in-app slay browser. Cmd+Shift+Click always external. */
@@ -165,12 +166,14 @@ export interface ChatPanelProps {
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ScheduledChatPanel(props, ref) {
     const client = useTRPCClient()
+    const computerReadiness = useChatHistoryReadiness(props.tabId)
     return (
       <ChatRestorationBoundary
         client={client}
         taskId={props.taskId}
         tabId={props.tabId}
         active={props.isActive ?? true}
+        computerReadiness={computerReadiness}
       >
         <ChatPanelBody {...props} ref={ref} />
       </ChatRestorationBoundary>
@@ -181,13 +184,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ChatPanelView(props, ref) {
     const trpcClient = useTRPCClient()
-    const trackRestore = useChatRestorationTracker()
+    const trackHistory = useChatHistoryTracker()
+    const restoreQueuedMs = useChatRestorationQueuedMs()
     const {
       tabId,
       taskId,
       mode,
       cwd,
       isActive = true,
+      prefetchOnly = false,
       providerFlagsOverride,
       permissionNotice: overrideNotice,
       onOpenUrl,
@@ -201,6 +206,13 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       onReady,
       fontSize: fontSizeOverride
     } = props
+    const appearance = useAppearance()
+    const displaySettings = {
+      ...(!appearance.chatShowThinking ? { hideThinking: true as const } : {}),
+      ...(!appearance.chatShowActivities ? { hideActivities: true as const } : {}),
+      ...(!appearance.chatShowActivityMessages ? { hideActivityMessages: true as const } : {}),
+      ...(!appearance.chatShowActivityTools ? { hideActivityTools: true as const } : {})
+    }
     const {
       state,
       timeline,
@@ -228,6 +240,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       fork,
       takeOver,
       readBlob,
+      readToolDetail,
+      readTextDetail,
       reset: resetTimeline
     } = useChatSession({
       tabId,
@@ -235,15 +249,14 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       mode,
       cwd,
       providerFlagsOverride,
-      trackRestore
+      trackHistory,
+      restoreQueuedMs,
+      display: Object.keys(displaySettings).length ? displaySettings : undefined
     })
-    useChatRestorationPending(hydrating)
-    useChatRestorationQueries({ taskId, tabId, mode })
     // The whole history's summary: rows here, and for pages not loaded (paged
     // history) what the hub sent — the outline, rewind, files count and budget.
     const historyOfSession = useMemo(() => historySummary(timeline, paging), [timeline, paging])
 
-    const appearance = useAppearance()
     const fontSize = fontSizeOverride ?? appearance.chatFontSize
     const finalOnly = false
     const showLastMessageTools = false
@@ -425,6 +438,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inFlight,
       showThinking: true,
       searchThinking: appearance.chatShowThinking,
+      readTextDetail,
       follow,
       paging,
       loadPages,
@@ -453,6 +467,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const pinned = usePinnedMessages({
       target: { tabId, taskId, mode, cwd, providerFlagsOverride },
       conversationId: state.sessionId || null,
+      readTextDetail,
       timeline: display
     })
 
@@ -557,6 +572,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       isMain,
       isTemporary,
       shown: isActive,
+      prefetchOnly,
       computerReady: storage.status !== null && chatComputerCanStart(storage.status.state),
       chatApi,
       inFlight,
@@ -803,6 +819,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
         threads: threadApi.view,
         pinnedMessages: pinned.view,
         sendToolResult,
+        readToolDetail,
+        readTextDetail,
         promptCards,
         prompts,
         submittingPrompts,
@@ -841,6 +859,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
         threadApi.view,
         pinned.view,
         sendToolResult,
+        readToolDetail,
+        readTextDetail,
         promptCards,
         prompts,
         submittingPrompts,

@@ -1,6 +1,6 @@
 import { Brain, Clock3, CircleX, Copy, Check } from 'lucide-react'
-import { cn, safeClipboardWriteText } from '@slayzone/ui'
-import { useState, type ReactNode } from 'react'
+import { cn, safeClipboardWriteText, toast } from '@slayzone/ui'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { useChatView } from './ChatViewContext'
 import { useRowUiState } from './row-ui-state'
@@ -28,9 +28,34 @@ export function MessageDetails({
   item: Extract<TimelineItem, { kind: 'result' }>
   standalone?: boolean
 }) {
-  const { showMessageMeta } = useChatView()
+  const { showMessageMeta, readTextDetail } = useChatView()
   const [expanded, setExpanded] = useRowUiState('meta', false, false)
   const [copied, setCopied] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const copyRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => copyRequest.current?.abort(), [])
+  const copy = async () => {
+    const controller = new AbortController()
+    copyRequest.current?.abort()
+    copyRequest.current = controller
+    setCopying(true)
+    const sources = item.copySources ?? (item.copyDetail ? [item.copyDetail] : null)
+    let text = item.copyText
+    if (sources) {
+      const parts = await Promise.all(
+        sources.map((source) =>
+          typeof source === 'string'
+            ? source
+            : readTextDetail?.(source, controller.signal).catch(() => null)
+        )
+      )
+      text = parts.every((part) => part != null) ? parts.join('\n\n') : null
+    }
+    if (controller.signal.aborted) return
+    if (text && (await safeClipboardWriteText(text))) setCopied(true)
+    else toast.error('Could not copy the assistant reply')
+    setCopying(false)
+  }
   if (!showMessageMeta) return null
   return (
     <div className="contents">
@@ -92,17 +117,16 @@ export function MessageDetails({
           </Detail>
         )}
       </button>
-      {standalone && item.copyText && (
+      {standalone && (item.copyText || item.copyDetail || item.copySources) && (
         <button
           type="button"
           className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
           aria-label="Copy assistant reply"
-          onClick={() => {
-            void safeClipboardWriteText(item.copyText!).then(() => setCopied(true))
-          }}
+          disabled={copying}
+          onClick={() => void copy()}
         >
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-          {copied ? 'Copied' : 'Copy'}
+          {copying ? 'Copying…' : copied ? 'Copied' : 'Copy'}
         </button>
       )}
       {expanded && item.text && (

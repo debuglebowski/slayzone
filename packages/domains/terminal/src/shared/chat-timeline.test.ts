@@ -789,7 +789,9 @@ describe('sub-agent: orphan notification after a restart', () => {
     s = apply(s, [orphan('tu_mon')])
     expect(rowsOf(s).some((i) => i.kind === 'sub-agent')).toBe(false)
     expect(s.inFlightSubAgents).toEqual([])
-    expect(s.commandTasks.get('tu_mon')?.status).toBe('killed')
+    const tool = rowsOf(s).find((row) => row.kind === 'tool' && row.invocation.id === 'tu_mon')
+    expect(tool).toMatchObject({ invocation: { task: { status: 'killed' } } })
+    expect(s.commandTasks.has('tu_mon')).toBe(false)
   })
 
   test('for a command after the new process spawned: still no sub-agent row', () => {
@@ -809,7 +811,9 @@ describe('sub-agent: orphan notification after a restart', () => {
       orphan('tu_bash')
     ])
     expect(rowsOf(s).some((i) => i.kind === 'sub-agent')).toBe(false)
-    expect(s.commandTasks.get('tu_bash')?.status).toBe('killed')
+    const tool = rowsOf(s).find((row) => row.kind === 'tool' && row.invocation.id === 'tu_bash')
+    expect(tool).toMatchObject({ invocation: { task: { status: 'killed' } } })
+    expect(s.commandTasks.has('tu_bash')).toBe(false)
   })
 
   test('for a task with no row: an ended row, never a running one', () => {

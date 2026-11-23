@@ -142,6 +142,8 @@ export interface ChatLogPage {
 export interface ChatEventLogOptions {
   /** In-memory cache size (newest kept). Defaults to {@link CACHED_EVENTS_PER_TAB}. */
   cap?: number
+  /** Start with a sequence lookup. Load saved events when a consumer reads them. */
+  deferSeed?: boolean
   /** A row already existed at this seq — another writer. Logged, never overwritten. */
   onClash?: (seq: number, event: AgentEvent) => void
   /** The first failed write: the log stops accepting writes and every fence rejects. */
@@ -171,6 +173,8 @@ export class ChatEventLog {
   private evictedThrough: number
   /** Serialized size of cached events (a page budget counts it), computed once. */
   private readonly sizes = new WeakMap<BufferedEvent, number>()
+  private pendingRecent?: Promise<readonly BufferedEvent[]>
+  private needsRecent: boolean
 
   constructor(
     readonly tabId: string,
@@ -180,6 +184,7 @@ export class ChatEventLog {
   ) {
     this.cap = opts.cap ?? CACHED_EVENTS_PER_TAB
     this.ring = seed.events.slice(-this.cap)
+    this.needsRecent = opts.deferSeed === true && (seed.evictedThrough ?? -1) >= 0
     const dropped = seed.events.length - this.ring.length
     this.evictedThrough = Math.max(
       dropped > 0 ? seed.events[dropped - 1].seq : -1,
@@ -200,6 +205,15 @@ export class ChatEventLog {
     nextSeq: number,
     opts: ChatEventLogOptions = {}
   ): Promise<ChatEventLog> {
+    if (opts.deferSeed) {
+      const newest = (await persistence.tailStart(tabId, 1)) ?? -1
+      return new ChatEventLog(
+        tabId,
+        persistence,
+        { events: [], nextSeq: Math.max(nextSeq, newest + 1), evictedThrough: newest },
+        opts
+      )
+    }
     const cap = opts.cap ?? CACHED_EVENTS_PER_TAB
     const start = await persistence.tailStart(tabId, cap)
     const evictedThrough = start === null ? -1 : start - 1
@@ -274,6 +288,29 @@ export class ChatEventLog {
   /** Cached saved events after `afterSeq` — the newest `cap` at most. */
   since(afterSeq: number): BufferedEvent[] {
     return this.ring.filter((b) => b.seq > afterSeq)
+  }
+
+  /** The same bounded recent window on hot and cold tabs. */
+  async readRecent(): Promise<readonly BufferedEvent[]> {
+    if (!this.needsRecent || this.ring.length >= this.cap) return this.ring
+    return (this.pendingRecent ??= this.loadRecent().finally(() => {
+      this.pendingRecent = undefined
+    }))
+  }
+
+  private async loadRecent(): Promise<readonly BufferedEvent[]> {
+    const beforeSeq = this.evictedThrough + 1
+    const start = await this.persistence.tailStart(this.tabId, this.cap)
+    const saved: BufferedEvent[] = []
+    for await (const page of this.pages(start === null ? -1 : start - 1, { beforeSeq }))
+      saved.push(...page)
+    if (this.ring.length < this.cap && saved.length > 0) {
+      const restored = saved.slice(-(this.cap - this.ring.length))
+      this.ring.unshift(...restored)
+      this.evictedThrough = restored[0].seq - 1
+    }
+    this.needsRecent = false
+    return this.ring
   }
 
   /**

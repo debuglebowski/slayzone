@@ -143,7 +143,7 @@ test('same session IDs on different hubs keep independent user-input attention m
 test.each([true, false])(
   'transport diagnostics stay on their computer and respect opt-out (%s)',
   async (enabled) => {
-    const { fakeChild, until } = await import(
+    const { fakeChild } = await import(
       '../../../terminal/src/server/runtime/chat-transport-testkit'
     )
     const root = mkdtempSync(join(tmpdir(), 'chat-local-diagnostics-'))
@@ -176,20 +176,23 @@ test.each([true, false])(
       1
     )
     await expect(a.transport.ensureSpawned('tab-a')).rejects.toThrow(/already exists/)
-    if (enabled)
-      await until(() =>
-        a.storage.findRecords('settings').some((row) => row.id.startsWith('diagnostic:'))
-      )
-    else await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
     const records = a.storage
       .findRecords('settings')
       .filter((row) => row.id.startsWith('diagnostic:'))
-    expect(records).toHaveLength(enabled ? 1 : 0)
-    if (enabled)
-      expect(records[0].value).toMatchObject({
-        event: 'chat.event_seq_clash',
-        message: expect.stringContaining('kept the existing row')
-      })
+    if (enabled) {
+      expect(records.map((row) => row.value)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event: 'chat.open_hydrate' }),
+          expect.objectContaining({
+            event: 'chat.event_seq_clash',
+            message: expect.stringContaining('kept the existing row')
+          })
+        ])
+      )
+    } else {
+      expect(records).toEqual([])
+    }
     expect(
       b.storage.findRecords('settings').filter((row) => row.id.startsWith('diagnostic:'))
     ).toEqual([])

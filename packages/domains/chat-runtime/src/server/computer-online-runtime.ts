@@ -40,7 +40,10 @@ export type OpenComputerChatRuntimeOptions = Omit<
   ComputerChatRuntimeOptions,
   'maintenance' | 'dataImports' | 'blobBackfill' | 'markerBackfill' | 'compaction'
 > &
-  OnlineStoreData & { workerPath: string }
+  OnlineStoreData & {
+    workerPath: string
+    holdHistoryRead?(): () => void
+  }
 
 export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptions) {
   let closing: Promise<void> | null = null,
@@ -357,6 +360,7 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
       local,
       ops,
       queueOps,
+      holdHistoryRead: opts.holdHistoryRead,
       execute: async (_call, work) => {
         const entry = committing.getStore()
         if (!entry) return work()

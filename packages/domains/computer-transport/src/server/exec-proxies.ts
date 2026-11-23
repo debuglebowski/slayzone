@@ -91,6 +91,7 @@ import {
   fsPathExistsResultSchema,
   fsReadDirResultSchema,
   fsReadFileResultSchema,
+  fsWriteFileResultSchema,
   fsReadBytesResultSchema,
   fsErrnoErrorDataSchema,
   fsSearchFilesResultSchema,
@@ -2926,12 +2927,12 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       return res.entries
     },
 
-    async readFile(computerId, rootPath, filePath, force) {
-      if (computerId == null) return local.readFile(rootPath, filePath, force)
+    async readFile(computerId, rootPath, filePath, force, revision) {
+      if (computerId == null) return local.readFile(rootPath, filePath, force, revision)
       return req(
         computerId,
         HubToComputerMethods.fsReadFile,
-        { rootPath, filePath, force },
+        { rootPath, filePath, force, ...(revision ? { revision } : {}) },
         fsReadFileResultSchema
       )
     },
@@ -2956,12 +2957,13 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
 
     async writeFile(computerId, rootPath, filePath, content) {
       if (computerId == null) return local.writeFile(rootPath, filePath, content)
-      await req(
+      const result = await req(
         computerId,
         HubToComputerMethods.fsWriteFile,
-        { rootPath, filePath, content },
-        fsOkResultSchema
+        { rootPath, filePath, ...(typeof content === 'string' ? { content } : { edit: content }) },
+        fsWriteFileResultSchema
       )
+      return result.revision
     },
 
     async createFile(computerId, rootPath, filePath) {

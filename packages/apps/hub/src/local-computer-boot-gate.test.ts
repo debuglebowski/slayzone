@@ -42,6 +42,21 @@ describe('local computer boot gate', () => {
     expect(resolved).toBe(2)
   })
 
+  test('the nonblocking boot hint only parks chats bound to the registered local computer', async () => {
+    const { gate, connect } = setup()
+    expect(await gate.waitingFor('local')).toBe(true)
+    expect(await gate.waitingFor('remote')).toBe(false)
+    connect('remote')
+    expect(await gate.waitingFor('local')).toBe(true)
+    connect('local')
+    expect(await gate.waitingFor('local')).toBe(false)
+    expect(await setup(1_000, false).gate.waitingFor('local')).toBe(false)
+
+    const other = setup()
+    other.gate.close()
+    expect(await other.gate.waitingFor('local')).toBe(false)
+  })
+
   test('a usable answer never waits', async () => {
     const { gate, usable } = setup()
     usable.add('remote')

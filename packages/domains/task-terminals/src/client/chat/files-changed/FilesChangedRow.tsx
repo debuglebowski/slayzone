@@ -7,7 +7,7 @@ import { CHAT_CARD_INDENT } from '../tool-cards/card-shell'
 import { CardBadge } from '../tool-cards/links'
 import { ToolFocusContext } from '../tool-cards/tool-focus'
 import { flashRow, useRevealTimelineItem } from '../timeline-reveal'
-import { stableAnchorKey } from '../useChatDisplay'
+import { stableAnchorKey } from '@slayzone/terminal/chat-presentation'
 import { relativeToCwd } from './relative-path'
 import { TurnFooterPanel } from '../turn-footer'
 

@@ -26,6 +26,13 @@ import {
   setDirectLinkProbe,
   useSubscription
 } from '@slayzone/transport/client'
+import {
+  MAX_PATCH_ROWS,
+  patchBoardRows,
+  type BoardData,
+  type BoardRows
+} from '@slayzone/tasks/board'
+import type { TasksChangedEvent } from '@slayzone/task-contracts'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { installDirectRtc } from './direct-rtc'
 import {
@@ -48,7 +55,7 @@ import {
   UNREACHABLE_GRACE_MS
 } from './hub-board'
 import type { HubSession } from './hub-session'
-import { useTRPC } from './trpc'
+import { useTRPC, useTRPCClient } from './trpc'
 
 // Direct links to computers (docs/direct-link.md): the phone reaches a computer
 // straight when the hub offers its public address and a plain HTTP probe gets
@@ -174,7 +181,7 @@ function HubFeedScope({ hub, onFeed }: { hub: HubEntry; onFeed: Report }) {
 
 /**
  * One hub's feed: its board (`task.loadBoardData`, the procedure the desktop board
- * loads), reloaded when the hub says its tasks changed (`notify.onTasksChanged`), its
+ * loads), patched when the hub names changed tasks (`notify.onTasksChanged`), its
  * agent sessions (`useHubAgentSessions`), and its connection. Everything shown of the
  * hub loads again by itself when its socket comes back (`useReloadOnReconnect`). Must
  * sit inside that hub's `HubScope`. Renders nothing.
@@ -189,11 +196,39 @@ export function HubFeedSource({
   onFeed: Report
 }) {
   const trpc = useTRPC()
+  const client = useTRPCClient()
   const queryClient = useQueryClient()
   const boardQ = useQuery(trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000 }))
+  const changes = useRef(Promise.resolve())
+  const onTasksChanged = (event: TasksChangedEvent | undefined): void => {
+    const ids = event?.taskIds
+    if (ids?.length === 0) return
+    const boardKey = trpc.task.loadBoardData.queryKey()
+    const boardFilter = trpc.task.loadBoardData.queryFilter()
+    const reload = () => queryClient.invalidateQueries(boardFilter)
+    changes.current = changes.current
+      .then(async () => {
+        const before = queryClient.getQueryState(boardKey)
+        if (!ids || ids.length > MAX_PATCH_ROWS || !before?.data || before.fetchStatus !== 'idle') {
+          await reload()
+          return
+        }
+        const rows = await client.task.loadBoardRows.query({ ids })
+        // An overlapping reconnect or explicit refresh owns the cache. Refetch if
+        // it overlapped this event, since the order of the two reads is unknown.
+        if (queryClient.getQueryState(boardKey) !== before) {
+          await reload()
+          return
+        }
+        const next = patchBoardRows(before.data as BoardData, ids, rows as BoardRows)
+        if (next) queryClient.setQueryData(boardKey, next)
+        else await reload()
+      })
+      .catch(reload)
+  }
   useSubscription(
     trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
-      onData: () => void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
+      onData: onTasksChanged
     })
   )
   const stalled = useStalled(connection !== null && connection.status !== 'open')

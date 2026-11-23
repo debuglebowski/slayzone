@@ -16,7 +16,8 @@ export function adaptersOver(local: LocalWorkspaceFs): WorkspaceFsAdapters {
     forgetProjectPath: async (_r, projectId) => local.forgetProjectPath(projectId),
 
     readDir: async (_r, rootPath, dirPath) => local.readDir(rootPath, dirPath),
-    readFile: async (_r, rootPath, filePath, force) => local.readFile(rootPath, filePath, force),
+    readFile: async (_r, rootPath, filePath, force, revision) =>
+      local.readFile(rootPath, filePath, force, revision),
     readBytes: async (_r, rootPath, filePath, offset, length) =>
       local.readBytes(rootPath, filePath, offset, length),
     writeFile: async (_r, rootPath, filePath, content) =>

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import type React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, renderHook } from '@testing-library/react'
+import * as ui from '@slayzone/ui'
 import type { TimelineItem } from '@slayzone/terminal/client'
 
 // renderers.tsx (isRenderable) pulls these in; irrelevant here and heavy to load.
@@ -196,7 +197,7 @@ describe('useChatDisplay final-only view', () => {
   })
 
   it('keys a sub-agent row by its Task call, not its position (reveal + anchors)', async () => {
-    const { stableAnchorKey } = await import('./useChatDisplay')
+    const { stableAnchorKey } = await import('@slayzone/terminal/chat-presentation')
     const agent = {
       kind: 'sub-agent',
       toolUseId: 'toolu_task1',
@@ -271,7 +272,7 @@ describe('useChatDisplay — a hook block folded into its card', () => {
 
 describe('useChatDisplay scroll anchors', () => {
   it('stable anchor keys: rows the same after a reload; none for rows keyed by position', async () => {
-    const { stableAnchorKey } = await import('./useChatDisplay')
+    const { stableAnchorKey } = await import('@slayzone/terminal/chat-presentation')
     expect(
       stableAnchorKey({ kind: 'user-text', id: 'm1', text: 'x', timestamp: 1 } as TimelineItem)
     ).toBe('user:m1')
@@ -456,4 +457,39 @@ describe('display preferences', () => {
     expect(shown.map((item) => item.kind)).toEqual(['tool', 'text'])
     expect(shown[0]).toBe(items[2])
   })
+})
+
+it('copies the original reasoning when the device hid it during open', async () => {
+  const write = vi.spyOn(ui, 'safeClipboardWriteText').mockResolvedValue(true)
+  const ref = { kind: 'thinking', instance: 't', epoch: 2, row: 0, messageId: 'm' } as const
+  const items: TimelineItem[] = [
+    {
+      kind: 'thinking',
+      messageId: 'm',
+      text: '',
+      timestamp: 0,
+      hasSignature: false,
+      textDetail: ref
+    },
+    text('Final answer', 2)
+  ]
+  const readTextDetail = vi.fn(async () => 'Stored reasoning')
+  try {
+    const { result } = renderHook(() =>
+      useChatDisplay({
+        timeline: items,
+        finalOnly: false,
+        showLastMessageTools: false,
+        searchThinking: false,
+        follow: detachedFollow(),
+        readTextDetail
+      })
+    )
+    expect(readTextDetail).not.toHaveBeenCalled()
+    await act(async () => result.current.copyAllMessages())
+    expect(readTextDetail).toHaveBeenCalledWith(ref, expect.any(AbortSignal))
+    expect(write).toHaveBeenCalledWith('[thinking] Stored reasoning\n\nFinal answer')
+  } finally {
+    write.mockRestore()
+  }
 })

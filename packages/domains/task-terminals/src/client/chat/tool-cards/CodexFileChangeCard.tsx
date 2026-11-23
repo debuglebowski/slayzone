@@ -4,6 +4,7 @@ import { stripAnsi } from '@slayzone/terminal-contracts'
 import {
   codexChangeCounts,
   codexFileChanges,
+  fileChangesOf,
   type CodexFileChange
 } from '@slayzone/terminal/client'
 import { useChatView } from '../ChatViewContext'
@@ -37,8 +38,11 @@ export function CodexFileChangeCard({ invocation, timestamp }: ToolProps) {
       })),
     [invocation]
   )
-  const additions = files.reduce((n, f) => n + f.counts.additions, 0)
-  const deletions = files.reduce((n, f) => n + f.counts.deletions, 0)
+  const counts = invocation.toolPreview?.files
+    ? fileChangesOf(invocation)
+    : files.map((file) => file.counts)
+  const additions = counts.reduce((n, count) => n + (count.additions ?? 0), 0)
+  const deletions = counts.reduce((n, count) => n + (count.deletions ?? 0), 0)
   const only = files.length === 1 ? files[0].change : null
   const title = only
     ? only.kind === 'add'

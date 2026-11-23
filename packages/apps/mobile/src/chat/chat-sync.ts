@@ -18,7 +18,7 @@
  *   - While a LOAD runs, events are queued, then applied after the loaded history
  *     with the same dedup — whatever raced ahead of the load is neither lost nor
  *     doubled.
- *   - Loads: `full` = the whole history (`chat.getReplay` after -1), replacing the
+ *   - Loads: `full` = the projected tail or a legacy replay, replacing the
  *     timeline when it is not the first; `catch-up` = only what was saved after the
  *     newest applied event (after a reconnect). A catch-up that finds the hub's log
  *     went backwards (reset elsewhere) or the tab's live counter restarted (a new tab
@@ -29,7 +29,7 @@
  */
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { ChatStreamPosition } from '@slayzone/terminal/chat-stream-position'
-import type { Action } from '@slayzone/terminal/reducer'
+import type { Action, ChatTimelineState, TimelineItem } from '@slayzone/terminal/reducer'
 
 /** One `chat.onEvent` message. */
 export interface ChatWireEvent {
@@ -37,6 +37,7 @@ export interface ChatWireEvent {
   /** The domain's own `AgentEvent` (the router types it `unknown`). */
   event: unknown
   seq: number
+  at?: number
   live?: number
 }
 
@@ -50,7 +51,7 @@ export interface ChatWireExit {
 
 /** `chat.getReplay`: saved events after `afterSeq` + what streams right now. */
 export interface ChatReplay {
-  events: ReadonlyArray<{ seq: number; event: unknown }>
+  events: ReadonlyArray<{ seq: number; event: unknown; at?: number }>
   live: {
     /** The saved seq these live events follow (the log's newest). */
     afterSeq: number
@@ -77,12 +78,7 @@ export interface LoadTicket {
 }
 
 /** A message this client sent that a full reload must not lose (`completeLoad`). */
-export interface LocalMessage {
-  id: string
-  text: string
-  /** Why its send failed; null = still on its way. */
-  failed: string | null
-}
+export type LocalMessage = Extract<TimelineItem, { kind: 'user-text' }>
 
 export class ChatSync {
   private gen = 0
@@ -138,20 +134,33 @@ export class ChatSync {
   completeLoad(
     ticket: LoadTicket,
     replay: ChatReplay,
-    keep: readonly LocalMessage[] = []
+    keep: readonly LocalMessage[] = [],
+    projection?: { state: ChatTimelineState; seq: number }
   ): 'done' | 'stale' | 'reload' | 'resync' {
     if (ticket.gen !== this.loadingGen) return 'stale'
     if (ticket.kind === 'catch-up') {
       if (this.position.catchUpNeedsReload(replay.live)) return 'reload'
     } else {
-      if (this.hasLoaded) this.sink.dispatch({ type: 'reset' })
       this.position.reset()
+      if (projection) {
+        this.sink.dispatch({ type: 'restore', state: projection.state })
+        this.position.seq = projection.seq
+      } else if (this.hasLoaded) {
+        this.sink.dispatch({ type: 'reset' })
+      }
     }
-    const replayed = new Set<string>()
-    for (const { seq, event } of replay.events) {
-      const e = event as AgentEvent
-      if (e.kind === 'user-message' && e.id) replayed.add(e.id)
-      this.applySaved(e, seq)
+    const events: AgentEvent[] = []
+    const at: Array<number | undefined> = []
+    const seq: number[] = []
+    for (const entry of replay.events) {
+      if (this.position.saved(entry.seq) === 'duplicate') continue
+      events.push(entry.event as AgentEvent)
+      at.push(entry.at)
+      seq.push(entry.seq)
+    }
+    if (events.length > 0) {
+      this.flush()
+      this.sink.dispatch({ type: 'events', events, at, seq })
     }
     // A reply mid-stream: its fragments are live-only (never saved) — redraw them.
     if (this.position.snapshot(replay.live) === 'apply') {
@@ -159,13 +168,8 @@ export class ChatSync {
         this.sink.dispatch({ type: 'events', events: replay.live.events as AgentEvent[] })
       }
     }
-    if (ticket.kind === 'full') {
-      for (const m of keep) {
-        if (replayed.has(m.id)) continue
-        this.sink.dispatch({ type: 'user-sent', id: m.id, text: m.text })
-        if (m.failed !== null)
-          this.sink.dispatch({ type: 'user-send-failed', id: m.id, error: m.failed })
-      }
+    if (ticket.kind === 'full' && keep.length > 0) {
+      this.sink.dispatch({ type: 'restore-local-messages', messages: keep })
     }
     return this.goLive() ? 'resync' : 'done'
   }
@@ -248,7 +252,7 @@ export class ChatSync {
 
   private apply(msg: ChatWireEvent): boolean | 'resync' {
     const event = msg.event as AgentEvent
-    if (msg.live === undefined) return this.applySaved(event, msg.seq)
+    if (msg.live === undefined) return this.applySaved(event, msg.seq, msg.at)
     const verdict = this.position.live(event, msg.seq, msg.live)
     if (verdict === 'resync') return 'resync'
     if (verdict === 'drop') return false
@@ -260,10 +264,10 @@ export class ChatSync {
     return true
   }
 
-  private applySaved(event: AgentEvent, seq: number): boolean {
+  private applySaved(event: AgentEvent, seq: number, at?: number): boolean {
     if (this.position.saved(seq) === 'duplicate') return false
     this.flush()
-    this.sink.dispatch({ type: 'event', event })
+    this.sink.dispatch({ type: 'event', event, seq, at })
     return true
   }
 

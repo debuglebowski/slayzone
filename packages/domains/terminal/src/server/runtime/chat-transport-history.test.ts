@@ -3,15 +3,16 @@
  * events in memory, but a replay — what a chat panel opens with — and the saved
  * buffer read return EVERY saved event, the older ones read back from the store.
  */
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import {
   CHAT_HISTORY_PAGE_MAX_BYTES,
   jsonByteLength,
+  toolPreviewVersion,
   type AgentEvent
 } from '@slayzone/terminal-contracts'
 import { CACHED_EVENTS_PER_TAB, pageOfRows, type BufferedEvent } from '../chat-events-store'
 import * as mgr from './chat-transport-manager'
-import { TIMELINE_PROJECTION_VERSION } from './chat-timeline-projection'
+import { TimelineProjection, TIMELINE_PROJECTION_VERSION } from './chat-timeline-projection'
 import {
   emitLine,
   sj,
@@ -248,6 +249,32 @@ function memoryTimelineStore() {
   }
 }
 
+test('hydrate reports why the original checkpoint missed without reading it again', async () => {
+  const store = memoryTimelineStore()
+  await store.save({
+    dropPagesFrom: null,
+    pages: [],
+    checkpoint: { version: 'old', seq: 0, data: '{}' }
+  })
+  const loadCheckpoint = vi.spyOn(store, 'loadCheckpoint')
+  const diagnostic = vi.fn()
+  transportHarness({
+    history: history(1),
+    deps: { timelineStore: () => store, diagnostic }
+  })
+
+  await mgr.hydrateSession({ ...TAB_OPTS })
+
+  expect(loadCheckpoint).toHaveBeenCalledTimes(1)
+  expect(diagnostic).toHaveBeenCalledWith(
+    TAB_OPTS.tabId,
+    expect.objectContaining({
+      event: 'chat.open_hydrate',
+      payload: expect.objectContaining({ restored: false, checkpoint: 'checkpoint-version' })
+    })
+  )
+})
+
 test('a burst of hydrates reads about one history page per event-loop turn in total, not one per tab', async () => {
   const rows = heavyHistory(3_000, 8) // ~24 MB per tab
   let readsSinceTick = 0
@@ -292,6 +319,20 @@ test('a burst of hydrates reads about one history page per event-loop turn in to
     const opened = await mgr.openTimeline(`tab-${i}`, TIMELINE_PROJECTION_VERSION)
     expect(opened.kind).toBe('paged')
   }
+  const plain = await mgr.openTimeline(
+    'tab-0',
+    toolPreviewVersion(TIMELINE_PROJECTION_VERSION, { windowed: true })
+  )
+  const packed = await mgr.openTimeline(
+    'tab-0',
+    toolPreviewVersion(TIMELINE_PROJECTION_VERSION, { windowed: true, packedOpen: true })
+  )
+  if (plain.kind !== 'paged' || packed.kind !== 'paged') throw new Error('missing paged history')
+  expect(packed.snapshot.windowed).toBe(true)
+  expect(typeof plain.snapshot.state).toBe('string')
+  expect(JSON.stringify(packed.snapshot.state)).toBe(plain.snapshot.state)
+  expect(packed.snapshot.summaries).toHaveLength(plain.snapshot.summaries.length)
+  expect(jsonByteLength(packed)).toBeLessThan(jsonByteLength(plain))
 })
 
 test('openTimeline answers the events saved while its snapshot waited within a page budget, consistent with the live part', async () => {
@@ -380,4 +421,58 @@ test('opening a timeline waits for accepted delayed commits before snapshot and 
     opened.events.reduce((bytes, e) => bytes + jsonByteLength(e.event), 0)
   ).toBeLessThanOrEqual(CHAT_HISTORY_PAGE_MAX_BYTES)
   expect(opened.events.at(-1)?.seq ?? opened.snapshot.seq).toBe(opened.live.afterSeq)
+})
+
+test('cold hydrate resumes the outbox and unfinished-turn scan after its checkpoint', async () => {
+  const saved = history(CACHED_EVENTS_PER_TAB + 200)
+  saved.push({
+    seq: saved.length,
+    event: { kind: 'user-message', id: 'pending-before-restart', text: 'Still here' }
+  })
+  const store = memoryTimelineStore()
+  const projection = await TimelineProjection.open({
+    store,
+    history: saved,
+    agentStartedTurns: true
+  })
+  await projection.close()
+
+  saved.push({
+    seq: saved.length,
+    event: { kind: 'tool-call', id: 'late-main-tool', name: 'Bash', input: {} }
+  })
+  const diagnostic = vi.fn()
+  const reads: number[] = []
+  const h = transportHarness({
+    deps: {
+      timelineStore: () => store,
+      diagnostic,
+      eventStore: {
+        insert: async () => 'inserted',
+        readPage: async (_tab, after, before, budget) => {
+          reads.push(after)
+          return pageOfRows(saved, after, before, budget)
+        },
+        tailStart: async (_tab, count) =>
+          saved.length >= count ? saved[saved.length - count].seq : null
+      }
+    }
+  })
+  await mgr.hydrateSession({ ...TAB_OPTS })
+  await until(() => h.savedKinds().includes('interrupted'))
+  expect(h.saved()).toContainEqual(
+    expect.objectContaining({
+      kind: 'user-message-delivery',
+      id: 'pending-before-restart',
+      state: 'failed'
+    })
+  )
+  expect(reads).toEqual([saved.length - 2])
+  expect(diagnostic).toHaveBeenCalledWith(
+    TAB_OPTS.tabId,
+    expect.objectContaining({
+      event: 'chat.open_hydrate',
+      payload: expect.objectContaining({ scannedEvents: 1, restored: true })
+    })
+  )
 })

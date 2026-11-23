@@ -1,4 +1,3 @@
-import { useChatRestorationTracker } from './chat-restoration'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTRPCClient } from '../trpc'
 import { readChatInfo } from './chat-info-read'
@@ -178,7 +177,6 @@ export function useChatMode({
   settingsGeneration
 }: UseChatModeOpts) {
   const trpcClient = useTRPCClient()
-  const trackRestoration = useChatRestorationTracker()
   const [chatMode, setChatModeState] = useState<AgentMode>('auto-accept')
   const [autoCapability, setAutoCapability] = useState<AutoModeCapability>({
     eligible: false,
@@ -201,15 +199,13 @@ export function useChatMode({
   // Reads this render's ids and settings generation (a stable callback runs the
   // latest committed render's body), so each effect below lists only its trigger.
   const hydrate = useStableCallback((isCancelled: () => boolean) => {
-    void trackRestoration(
-      hydrateChatMode(
-        trpcClient,
-        { taskId, mode, tabId },
-        settingsGeneration,
-        isCancelled,
-        confirmedModeRef,
-        setChatModeState
-      )
+    void hydrateChatMode(
+      trpcClient,
+      { taskId, mode, tabId },
+      settingsGeneration,
+      isCancelled,
+      confirmedModeRef,
+      setChatModeState
     )
   })
 
@@ -256,7 +252,8 @@ export function useChatMode({
 
   // Mount-only; reads the latest trpcClient.
   const loadAutoEligibility = useStableCallback((isCancelled: () => boolean) => {
-    void trackRestoration(trpcClient.chat.getAutoEligibility.query({ taskId, tabId }))
+    void trpcClient.chat.getAutoEligibility
+      .query({ taskId, tabId })
       .then((cap) => {
         if (!isCancelled()) setAutoCapability(cap)
       })

@@ -5,11 +5,13 @@
  * answered), and the ways out of an agent that could not start (start it again; continue
  * here a conversation the terminal runs). Provided by `ChatView`.
  */
+import type { ChatToolDetailReader } from '@slayzone/terminal/chat-tool-details'
 import type { ChatPrompt } from '@slayzone/terminal/chat-prompts'
 import { createContext, useContext } from 'react'
 
 export interface ChatViewValue {
   tabId: string
+  readToolDetail?: ChatToolDetailReader
   retryMessage: (id: string) => void
   prompts: readonly ChatPrompt[]
   /** Start the agent again (`chat.start`). */

@@ -208,6 +208,23 @@ describe('useChatLifecycle displaySessionEnded', () => {
 })
 
 describe('useChatLifecycle startup (non-main tab)', () => {
+  it('prefetch neither starts the agent nor clears its queue before selection', async () => {
+    const { chatApi, clearQueue, update } = setup({
+      agentState: 'running',
+      shown: false,
+      prefetchOnly: true,
+      state: timelineState({ sessionEnded: true })
+    })
+    await flush()
+    expect(chatApi.start).not.toHaveBeenCalled()
+    expect(clearQueue).not.toHaveBeenCalled()
+    update({ prefetchOnly: false, shown: true })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledOnce()
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'user' })
+    expect(clearQueue).toHaveBeenCalledOnce()
+  })
+
   it('restores an agent that was running', async () => {
     const { chatApi } = setup({ agentState: 'running', shown: false })
     await flush()

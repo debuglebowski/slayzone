@@ -2,6 +2,7 @@
 // Pins useChatMode's hybrid optimistic / server-authoritative mode state: mount
 // hydration (live session > DB cache), drift sync from the subprocess's permission
 // mode, and the serialized one-IPC-at-a-time setMode loop with revert on failure.
+import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 
@@ -54,7 +55,7 @@ vi.mock('@slayzone/ui', async () => ({
 }))
 
 import { useChatMode } from './useChatMode'
-import { ChatRestorationBoundary } from './chat-restoration'
+import { ChatRestorationBoundary, useChatHistoryTracker } from './chat-restoration'
 
 interface Props {
   taskId: string
@@ -94,12 +95,17 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('useChatMode hydration', () => {
-  it('keeps a restoration slot until a delayed eligibility read settles, including after unmount', async () => {
+  it('releases a restoration slot when history settles even if eligibility is pending', async () => {
     const work = Array.from({ length: 3 }, () => deferred<Capability>())
+    const history = Array.from({ length: 3 }, () => deferred<void>())
     m.getAutoEligibility.mockImplementation(
       () => work[m.getAutoEligibility.mock.calls.length - 1]!.promise
     )
     function Chat({ id }: { id: number }) {
+      const track = useChatHistoryTracker()
+      useEffect(() => {
+        void track(history[id]!.promise)
+      }, [id, track])
       useChatMode({ ...base, taskId: 'task' + id, tabId: 'tab' + id })
       return <span>{id}</span>
     }
@@ -126,11 +132,12 @@ describe('useChatMode hydration', () => {
       view.rerender(tree(true))
       await flush()
       expect(m.getAutoEligibility).toHaveBeenCalledTimes(2)
-      await act(async () => work[0]!.resolve({ eligible: true, optedIn: true }))
+      await act(async () => history[0]!.resolve())
       await waitFor(() => expect(m.getAutoEligibility).toHaveBeenCalledTimes(3))
     } finally {
       cleanup()
       await act(async () => {
+        for (const item of history) item.resolve()
         for (const item of work) item.resolve({ eligible: true, optedIn: true })
       })
     }

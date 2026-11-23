@@ -22,6 +22,7 @@
     "./client/terminal-mru": "./src/client/terminal-mru.ts",
     "./agents": "./src/server/agents/index.ts",
     "./reducer": "./src/shared/chat-timeline.ts",
+    "./codex-file-changes": "./src/shared/codex-file-changes.ts",
     "./chat-lifecycle": "./src/shared/chat-lifecycle.ts",
     "./chat-stream-position": "./src/shared/chat-stream-position.ts",
     "./chat-prompts": "./src/shared/chat-prompts.ts",
@@ -41,8 +42,11 @@
     "./pty-backend": "./src/server/runtime/pty-backend.ts",
     "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
     "./claude-transcripts": "./src/server/claude-transcripts.ts",
+    "./chat-presentation": "./src/shared/chat-presentation.ts",
     "./chat-direct": "./src/client/chat-direct.ts",
-    "./chat-session-ready": "./src/shared/chat-session-ready.ts"
+    "./chat-tool-details": "./src/client/chat-tool-details.ts",
+    "./chat-session-ready": "./src/shared/chat-session-ready.ts",
+    "./chat-open-timing": "./src/shared/chat-open-timing.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

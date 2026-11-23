@@ -86,6 +86,42 @@ test('file-editor router: readFile content + rejects traversal', async () => {
   ).toBe(true)
 })
 
+test('conditional editor reads send content only when its revision changes', async () => {
+  const filePath = 'conditional-read.txt'
+  const input = { projectId: 'p1', rootPath, filePath }
+  fs.writeFileSync(path.join(rootPath, filePath), 'first')
+  const first = await caller.readFile({ ...input, revision: 'initial' })
+  expect(first).toMatchObject({
+    content: 'first',
+    revision: expect.stringMatching(/^[a-f0-9]{64}$/)
+  })
+  expect(await caller.readFile({ ...input, revision: first.revision })).toEqual({
+    content: null,
+    revision: first.revision,
+    unchanged: true
+  })
+  fs.writeFileSync(path.join(rootPath, filePath), 'other')
+  const second = await caller.readFile({ ...input, revision: first.revision })
+  expect(second.content).toBe('other')
+  expect(second.revision).not.toBe(first.revision)
+})
+
+test('an editor delta applies to its exact base and refuses a stale retry', async () => {
+  const filePath = 'text-edit.txt'
+  const input = { projectId: 'p1', rootPath, filePath }
+  const pathOnDisk = path.join(rootPath, filePath)
+  fs.writeFileSync(pathOnDisk, 'prefix A suffix')
+  const base = await caller.readFile({ ...input, revision: 'initial' })
+  const edit = { revision: base.revision!, from: 7, to: 8, text: '日' }
+  const saved = await caller.writeFile({ ...input, edit })
+  expect(fs.readFileSync(pathOnDisk, 'utf8')).toBe('prefix 日 suffix')
+  expect(await caller.readFile({ ...input, revision: saved!.revision })).toMatchObject({
+    unchanged: true
+  })
+  await expect(caller.writeFile({ ...input, edit })).rejects.toThrow(/changed on disk/)
+  expect(fs.readFileSync(pathOnDisk, 'utf8')).toBe('prefix 日 suffix')
+})
+
 // Whole-tree reads are capped at the transport layer now that they cross a wire,
 // so the shape is `{ files, truncated }` — the flag has to reach the caller or a
 // partial tree reads as the complete one.

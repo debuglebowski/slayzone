@@ -13,7 +13,7 @@ import { TurnTriggerRow } from './TurnTriggerRow'
 import type { TimelineItem } from '@slayzone/terminal/client'
 import { PromptHistorySearch } from './PromptHistorySearch'
 import { formatCost, formatTokens } from './usage-format'
-import { PLAN_APPROVED_MARKER, PLAN_CANCELLED_MARKER } from './renderers'
+import { PLAN_APPROVED_MARKER, PLAN_CANCELLED_MARKER } from '@slayzone/terminal/chat-presentation'
 
 beforeAll(() => {
   // Radix tooltip content measures itself; jsdom has no layout.

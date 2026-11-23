@@ -127,8 +127,14 @@ function message(err: unknown): string {
  * event (a long history is fed a page at a time): each message's latest content
  * and its last confirmed delivery state, in first-seen order.
  */
+export type RestoredOutboxMessage = { message: OutgoingUserMessage; state: OutboxState }
+
 export class OutboxRestoreScan {
-  readonly messages = new Map<string, { message: OutgoingUserMessage; state: OutboxState }>()
+  readonly messages = new Map<string, RestoredOutboxMessage>()
+
+  constructor(saved: readonly RestoredOutboxMessage[] = []) {
+    for (const entry of saved) this.messages.set(entry.message.id, { ...entry })
+  }
 
   add(event: AgentEvent): void {
     // Imported history was answered long ago, never by this tab's outbox.

@@ -3,6 +3,8 @@
  * which folder it hydrates in, the `/` menu, a send that fails and its retry, an answer
  * the hub no longer takes, and the mode picker.
  */
+import { initialState, reducer } from '@slayzone/terminal/reducer'
+import { encodeTimelineState } from '@slayzone/terminal/timeline-checkpoint'
 import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
 import {
   act,
@@ -1228,4 +1230,62 @@ describe("ChatSession: the CLI's own command words", () => {
     expect(screen.getByTestId('chat-input').props.value).toBe('/compact ')
     expect(await screen.findByText(/\/compact <focus>/)).toBeOnTheScreen()
   })
+})
+
+it('loads full tool detail through the hub when a preview card opens', async () => {
+  const hub = fakeHub({ tabId: TAB, taskId: TASK, session: { taskId: TASK, cwd: '/w' } })
+  const detail = { instance: 'chat', epoch: 0, row: 0, toolUseId: 'tool' }
+  const previous = reducer(initialState({ agentStartedTurns: true }), {
+    type: 'events',
+    events: [
+      { kind: 'tool-call', id: 'tool', name: 'Read', input: { file_path: '/w/log.txt' } },
+      {
+        kind: 'tool-result',
+        toolUseId: 'tool',
+        rawContent: 'preview…',
+        structured: null,
+        isError: false
+      }
+    ],
+    seq: [0, 1]
+  })
+  const row = previous.timeline[0]
+  if (row?.kind !== 'tool') throw new Error('Expected a tool row')
+  const state = {
+    ...previous,
+    timeline: [{ ...row, invocation: { ...row.invocation, toolDetail: detail } }]
+  }
+  hub.on('chat.openTimeline', () => ({
+    kind: 'paged',
+    snapshot: {
+      seq: 1,
+      epoch: 0,
+      pageRows: 256,
+      state: encodeTimelineState(state, 0),
+      summaries: [],
+      toolPreviews: true
+    },
+    events: [],
+    live: { afterSeq: 1, liveSeq: 0, events: [] }
+  }))
+  const json = JSON.stringify({
+    ...row.invocation,
+    result: { rawContent: 'Complete log contents', structured: null, isError: false }
+  })
+  const cut = json.indexOf('Complete') + 5
+  const revision = 'a'.repeat(64)
+  hub.on('chat.toolDetail', ({ offset }) =>
+    offset === 0
+      ? { data: json.slice(0, cut), revision, next: cut }
+      : { data: json.slice(cut), revision, next: null }
+  )
+  await open(hub)
+  const card = await screen.findByRole('button', { name: /Read .*log.txt/ })
+  expect(hub.callsTo('chat.toolDetail')).toHaveLength(0)
+  await userEvent.setup().press(card)
+  expect(await screen.findByText('Complete log contents')).toBeOnTheScreen()
+  expect(hub.callsTo('chat.toolDetail')).toMatchObject([
+    { tabId: TAB, detail, offset: 0 },
+    { tabId: TAB, detail, offset: cut, revision }
+  ])
 })

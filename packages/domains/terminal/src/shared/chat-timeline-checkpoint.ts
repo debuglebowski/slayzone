@@ -11,7 +11,7 @@
  * hashes {@link REDUCER_SOURCES}: changing them fails it until the version is
  * bumped.
  */
-import type { ChatTimelineState } from './chat-timeline'
+import type { ChatTimelineState, TimelineItem } from './chat-timeline'
 import { PersistentIndex } from './persistent-index'
 import { beginReducerCall, endReducerCall } from './replay-batch'
 
@@ -21,7 +21,7 @@ import { beginReducerCall, endReducerCall } from './replay-batch'
  * 19 = rows carry out-of-line references (`chat-blobs`), so pages built before the
  * v13 chat store (inline base64) are rebuilt from the events on next open.
  */
-export const CHAT_TIMELINE_VERSION = '24'
+export const CHAT_TIMELINE_VERSION = '26'
 
 /**
  * Bump when what the hub persists or serves next to the state changes shape
@@ -58,8 +58,40 @@ interface Encoded {
   state: Record<string, unknown>
 }
 
+interface StoredIndex {
+  $entries: Record<string, unknown>
+  $toolu?: Record<string, unknown>
+}
+
+const TOOL_USE_PREFIX = 'toolu_'
+
+function encodeIndex(index: PersistentIndex<unknown>, groupToolIds: boolean): StoredIndex {
+  const entries: Record<string, unknown> = Object.create(null)
+  const tools: Record<string, unknown> = Object.create(null)
+  let hasTools = false
+  for (const [id, value] of index.entries()) {
+    if (groupToolIds && id.startsWith(TOOL_USE_PREFIX)) {
+      tools[id.slice(TOOL_USE_PREFIX.length)] = value
+      hasTools = true
+    } else {
+      entries[id] = value
+    }
+  }
+  return hasTools ? { $entries: entries, $toolu: tools } : { $entries: entries }
+}
+
+function* indexEntries(packed: StoredIndex): Generator<[string, unknown]> {
+  yield* Object.entries(packed.$entries)
+  if (packed.$toolu)
+    for (const [id, value] of Object.entries(packed.$toolu)) yield [TOOL_USE_PREFIX + id, value]
+}
+
 /** `state` as text, without its rows before `tailFrom`. */
-export function encodeTimelineState(state: ChatTimelineState, tailFrom: number): string {
+export function encodeTimelineState(
+  state: ChatTimelineState,
+  tailFrom: number,
+  mapWireRow?: (row: TimelineItem, index: number) => TimelineItem
+): string {
   if (state.stalled) throw new Error('a stalled timeline state is not a checkpoint')
   const { timeline, stalled: _stalled, ...rest } = state
   const from = Math.max(0, Math.min(tailFrom, timeline.length))
@@ -71,37 +103,53 @@ export function encodeTimelineState(state: ChatTimelineState, tailFrom: number):
     v: CHAT_TIMELINE_VERSION,
     rowCount: timeline.length,
     tailFrom: from,
-    tail,
-    state: rest
+    tail: mapWireRow ? (tail as TimelineItem[]).map((row, i) => mapWireRow(row, from + i)) : tail,
+    state: Object.fromEntries(
+      Object.entries(rest).map(([key, value]) => [
+        key,
+        value instanceof PersistentIndex ? encodeIndex(value, key === 'toolIndex') : value
+      ])
+    )
   }
   return JSON.stringify(encoded, (_key, value: unknown) => {
     if (value instanceof Map) return { $map: [...value.entries()] }
-    if (value instanceof PersistentIndex) return { $index: [...value.entries()] }
     return value
   })
 }
 
 /** A state from {@link encodeTimelineState} text: rows before its tail unloaded. Throws on another version. */
-export function decodeTimelineState(text: string): ChatTimelineState {
+export function decodeTimelineState(
+  text: string,
+  version: typeof CHAT_TIMELINE_VERSION | '25' = CHAT_TIMELINE_VERSION
+): ChatTimelineState {
   const decoded = JSON.parse(text, (_key, value: unknown) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const o = value as Record<string, unknown>
-      if (Array.isArray(o.$map) && Object.keys(o).length === 1) {
+      if (
+        Array.isArray(o.$map) &&
+        Object.keys(o).length === 1 &&
+        o.$map.every((entry) => Array.isArray(entry) && entry.length === 2)
+      ) {
         return new Map(o.$map as Array<[unknown, unknown]>)
-      }
-      if (Array.isArray(o.$index) && Object.keys(o).length === 1) {
-        beginReducerCall()
-        try {
-          return PersistentIndex.fromEntries(o.$index as Array<[string, unknown]>)
-        } finally {
-          endReducerCall()
-        }
       }
     }
     return value
   }) as Encoded
-  if (decoded.v !== CHAT_TIMELINE_VERSION) {
-    throw new Error(`timeline checkpoint version ${decoded.v} is not ${CHAT_TIMELINE_VERSION}`)
+  if (decoded.v !== version) {
+    throw new Error(`timeline checkpoint version ${decoded.v} is not ${version}`)
+  }
+  beginReducerCall()
+  try {
+    for (const key of ['toolIndex', 'workspaceIndex', 'promptIndex', 'userIndex', 'takenBack']) {
+      const value = decoded.state[key]
+      const entries =
+        version === '25'
+          ? (value as { $index: Array<[string, unknown]> }).$index
+          : indexEntries(value as StoredIndex)
+      decoded.state[key] = PersistentIndex.fromEntries(entries)
+    }
+  } finally {
+    endReducerCall()
   }
   const timeline = new Array<unknown>(decoded.rowCount).fill(undefined)
   for (let k = 0; k < decoded.tail.length; k++) timeline[decoded.tailFrom + k] = decoded.tail[k]

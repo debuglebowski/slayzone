@@ -107,6 +107,17 @@ describe('checkpoint', () => {
     expect(() => encodeTimelineState(s, 0)).toThrow(/stalled/)
   })
 
+  test('packed indexes retain arbitrary IDs as well as prefixed tool IDs', () => {
+    const state = initialState()
+    state.toolIndex = state.toolIndex.with('toolu_abc', 4).with('__proto__', 5).with('abc', 6)
+    state.userIndex = state.userIndex.with('$map', [0])
+    const restored = decodeTimelineState(encodeTimelineState(state, 0))
+    expect(restored.toolIndex.get('toolu_abc')).toBe(4)
+    expect(restored.toolIndex.get('__proto__')).toBe(5)
+    expect(restored.toolIndex.get('abc')).toBe(6)
+    expect(restored.userIndex.get('$map')).toEqual([0])
+  })
+
   test('text from another version, or unreadable text, is refused (the caller rebuilds)', () => {
     const text = encodeTimelineState(initialState(), 0)
     expect(() =>

@@ -36,6 +36,7 @@ import {
   type DisposableSuspendClock
 } from '@slayzone/platform/suspend-clock'
 import { COMPUTER_FRAME_MAX_BYTES, FRAME_TOO_LARGE_CODE } from './frame-limit'
+import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 
 export type JsonRpcId = string | number
 
@@ -95,6 +96,7 @@ export interface FrameTooLargeInfo {
 export interface DuplexRpcOptions {
   /** Write one framed JSON document (transport appends any newline framing). */
   write: (line: string) => void
+  writeBinary?: (packet: Uint8Array) => void
   /**
    * Peer→local request (method + id). The handler must eventually call
    * `respond(id, ...)` or `respondError(id, ...)`. When omitted, requests are
@@ -150,12 +152,14 @@ interface PendingRequest {
   /** Cancels the timeout; null when the request has none. */
   cancelTimeout: (() => void) | null
   removeAbort: () => void
+  binaryReply: boolean
 }
 
 export const JSON_RPC_METHOD_NOT_FOUND = -32601
 export const JSON_RPC_INTERNAL_ERROR = -32000
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const MAX_BINARY_HEADER = 64 * 1024
 
 /** A method name as it appears in a message: the peer chose it, so bound it. */
 function methodLabel(method: string | null): string {
@@ -245,7 +249,8 @@ export class DuplexRpc {
     params?: unknown,
     timeoutMs?: number,
     actor?: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    binaryReply = false
   ): Promise<T> {
     if (signal?.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
     if (this.disposed) {
@@ -298,7 +303,8 @@ export class DuplexRpc {
         resolve: resolve as (r: unknown) => void,
         reject,
         cancelTimeout,
-        removeAbort
+        removeAbort,
+        binaryReply
       })
       signal?.addEventListener('abort', abort, { once: true })
       try {
@@ -339,6 +345,55 @@ export class DuplexRpc {
   respond(id: JsonRpcId, result: unknown): void {
     if (this.disposed) return
     this.sendReply(id, { jsonrpc: '2.0', id, result: result ?? null })
+  }
+
+  /** One binary WebSocket message: header length, JSON metadata, then bytes. */
+  respondBinary(id: JsonRpcId, metadata: Record<string, unknown>, bytes: Buffer): boolean {
+    if (this.disposed || !this.opts.writeBinary || bytes.length > BYTE_RANGE_MAX_CHUNK) return false
+    const header = Buffer.from(JSON.stringify({ id, result: metadata }))
+    const size = 4 + header.length + bytes.length
+    if (header.length > MAX_BINARY_HEADER || (this.maxFrameBytes > 0 && size > this.maxFrameBytes))
+      return false
+    const prefix = Buffer.allocUnsafe(4)
+    prefix.writeUInt32BE(header.length)
+    this.opts.writeBinary(Buffer.concat([prefix, header, bytes], size))
+    this.inboundMethods.delete(id)
+    this.inboundAborts.delete(id)
+    return true
+  }
+
+  handleBinaryReply(packet: Buffer): void {
+    if (
+      this.disposed ||
+      packet.length < 4 ||
+      packet.length > 4 + MAX_BINARY_HEADER + BYTE_RANGE_MAX_CHUNK
+    )
+      return
+    const length = packet.readUInt32BE(0)
+    const end = 4 + length
+    if (
+      length > MAX_BINARY_HEADER ||
+      end > packet.length ||
+      packet.length - end > BYTE_RANGE_MAX_CHUNK
+    )
+      return
+    let reply: { id?: unknown; result?: unknown }
+    try {
+      reply = JSON.parse(packet.toString('utf8', 4, end))
+    } catch {
+      return
+    }
+    const id = reply?.id
+    const result = reply?.result
+    if (
+      (typeof id === 'number' || typeof id === 'string') &&
+      this.pending.get(id)?.binaryReply &&
+      result &&
+      typeof result === 'object' &&
+      !Array.isArray(result)
+    ) {
+      this.resolvePending(id, { result: { ...result, data: packet.subarray(end) } })
+    }
   }
 
   /**

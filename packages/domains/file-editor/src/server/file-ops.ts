@@ -1,11 +1,13 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { gitCommand } from '@slayzone/platform/resolve-command'
 import ignore from 'ignore'
 import type {
   DirEntry,
   ReadFileResult,
+  TextEdit,
   FileSearchResult,
   FileSearchMatch,
   SearchFilesOptions,
@@ -175,7 +177,16 @@ export function readDir(rootPath: string, dirPath: string): DirEntry[] {
     })
 }
 
-export function readFile(rootPath: string, filePath: string, force?: boolean): ReadFileResult {
+export function textRevision(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex')
+}
+
+export function readFile(
+  rootPath: string,
+  filePath: string,
+  force?: boolean,
+  knownRevision?: string
+): ReadFileResult {
   const abs = assertWithinRoot(rootPath, filePath)
   const stat = fs.statSync(abs)
   if (stat.size > FORCE_MAX_FILE_SIZE) {
@@ -184,7 +195,12 @@ export function readFile(rootPath: string, filePath: string, force?: boolean): R
   if (!force && stat.size > MAX_FILE_SIZE) {
     return { content: null, tooLarge: true, sizeBytes: stat.size }
   }
-  return { content: fs.readFileSync(abs, 'utf-8') }
+  const content = fs.readFileSync(abs, 'utf-8')
+  if (!knownRevision) return { content }
+  const revision = textRevision(content)
+  return revision === knownRevision
+    ? { content: null, revision, unchanged: true }
+    : { content, revision }
 }
 
 export function listAllFiles(rootPath: string): string[] {
@@ -215,10 +231,54 @@ export function listAllFiles(rootPath: string): string[] {
   return results
 }
 
-export function writeFile(rootPath: string, filePath: string, content: string): void {
+/** Apply one replacement to an open regular file, checking its complete base. */
+export function applyTextEdit(fd: number, edit: TextEdit): string {
+  const before = fs.fstatSync(fd, { bigint: true })
+  if (!before.isFile() || before.size > FORCE_MAX_FILE_SIZE)
+    throw new Error('Cannot edit this file')
+  const buf = Buffer.alloc(Number(before.size))
+  for (let offset = 0; offset < buf.length; ) {
+    const size = fs.readSync(fd, buf, offset, buf.length - offset, offset)
+    if (size === 0) throw new Error('File changed on disk before save')
+    offset += size
+  }
+  const content = buf.toString('utf8')
+  const after = fs.fstatSync(fd, { bigint: true })
+  if (
+    before.size !== after.size ||
+    before.mtimeNs !== after.mtimeNs ||
+    before.ctimeNs !== after.ctimeNs ||
+    textRevision(content) !== edit.revision
+  )
+    throw new Error('File changed on disk before save')
+  if (edit.from > edit.to || edit.to > content.length) throw new Error('Invalid editor range')
+  const next = Buffer.from(content.slice(0, edit.from) + edit.text + content.slice(edit.to))
+  if (next.length > FORCE_MAX_FILE_SIZE) throw new Error('Edited file is too large')
+  for (let offset = 0; offset < next.length; ) {
+    const size = fs.writeSync(fd, next, offset, next.length - offset, offset)
+    if (size === 0) throw new Error('Could not write edited file')
+    offset += size
+  }
+  fs.ftruncateSync(fd, next.length)
+  return createHash('sha256').update(next).digest('hex')
+}
+
+export function writeFile(rootPath: string, filePath: string, content: string | TextEdit): string {
   const abs = assertWithinRoot(rootPath, filePath)
+  if (typeof content !== 'string') {
+    const fd = fs.openSync(
+      abs,
+      fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW ?? 0) | fs.constants.O_NONBLOCK
+    )
+    try {
+      return applyTextEdit(fd, content)
+    } finally {
+      fs.closeSync(fd)
+    }
+  }
   fs.mkdirSync(path.dirname(abs), { recursive: true })
   fs.writeFileSync(abs, content, 'utf-8')
+  return textRevision(content)
 }
 
 export function createFile(rootPath: string, filePath: string): void {

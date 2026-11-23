@@ -7,6 +7,8 @@ import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
 import type { ActivityItem, ActivityTurn as ActivityTurnData, SubAgentItem } from './activity-view'
 import { HighlightedText } from './HighlightedText'
 import { renderTimelineItem } from './renderers'
+import { useTextDetail } from '@slayzone/terminal/chat-tool-details'
+import { useChatView } from './ChatViewContext'
 import { TimelineRowIndexContext, TimelineRowKeyContext, useRowUiState } from './row-ui-state'
 import { ToolInActivityContext } from './tool-cards/card-shell'
 import { ToolFocusContext } from './tool-cards/tool-focus'
@@ -26,10 +28,25 @@ function ActivityNarrative({
   const live = useLiveBlock(item.stream === 'open' ? streamKeyOf(item) : undefined)
   const [expanded, setExpanded] = useRowUiState('activity-preview', false, false)
   const id = useId()
-  const text = live?.text || item.text
+  const { readTextDetail } = useChatView()
+  const detail = useTextDetail(item, readTextDetail, true)
+  const text = live?.text || detail.text
   const thinking = item.kind === 'thinking'
   const streaming = item.stream === 'open'
   const now = useNow(1000, { enabled: thinking && streaming })
+  if (detail.failed) {
+    return (
+      <button type="button" className="text-xs underline" onClick={detail.retry}>
+        Retry loading {thinking ? 'thinking' : 'message'}
+      </button>
+    )
+  }
+  if (detail.loading)
+    return (
+      <p role="status" className="text-xs text-muted-foreground">
+        Loading {thinking ? 'thinking' : 'message'}…
+      </p>
+    )
   if (!text && item.stream !== 'open') return null
   const Icon = thinking ? Brain : MessageSquare
   // Tool cards lead with a status icon, then the tool icon. An empty status

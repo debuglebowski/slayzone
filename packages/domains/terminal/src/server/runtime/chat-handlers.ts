@@ -4,6 +4,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ChatBlobChunk,
   ChatCreateOpts,
+  ChatHistoryDisplay,
   ChatHistoryPageBudget
 } from '@slayzone/terminal-contracts'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
@@ -649,6 +650,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getReplayPage,
     openTimeline,
     timelinePages,
+    toolDetail,
     searchTimeline,
     getCommandTaskOutput,
     stopCommandTask,
@@ -676,7 +678,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     confirmedConversation,
     releaseChatConversation,
     switchTabConversation,
-    getEventBufferSince,
+    readRecentEvents,
     readEventsSince,
     readEventPage,
     getSessionInfo,
@@ -980,10 +982,12 @@ export function createChatOps(opts: ChatHandlerOpts) {
       pages: number[],
       asOfSeq: number,
       epoch: number,
-      startRow?: number
-    ) => timelinePages(tabId, pages, asOfSeq, epoch, startRow),
+      startRow?: number,
+      toolPreviews?: boolean | ChatHistoryDisplay
+    ) => timelinePages(tabId, pages, asOfSeq, epoch, startRow, toolPreviews),
+    toolDetail,
     /** Sealed pages that may hold `query`. */
-    searchTimeline: (tabId: string, query: string) => searchTimeline(tabId, query),
+    searchTimeline,
 
     /** A command task's output so far (`gone` once its process is). Plan 3.9. */
     commandTaskOutput: (tabId: string, taskId: string) => getCommandTaskOutput(tabId, taskId),
@@ -1038,7 +1042,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
           tabId,
           content: message.content,
           lookup: data.attachments,
-          events: getEventBufferSince(tabId, -1).map((e) => e.event)
+          events: async () => (await readRecentEvents(tabId)).map((e) => e.event)
         }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
       }),
 
@@ -1819,7 +1823,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     }> =>
       withPlanDecisionLock(o.tabId, async () => {
         if (o.mode !== 'codex-chat') throw new Error('Plan approval requires Codex chat')
-        const events = getEventBufferSince(o.tabId, -1).map((entry) => entry.event)
+        const events = (await readRecentEvents(o.tabId)).map((entry) => entry.event)
         const decisions = events.filter(
           (event): event is Extract<AgentEvent, { kind: 'codex-plan-decision' }> =>
             event.kind === 'codex-plan-decision' && event.planId === o.planId

@@ -11,7 +11,7 @@ import {
 import type { ArtifactReadSpec, ArtifactVersion, VersionRef } from '@slayzone/task-artifacts/shared'
 import {
   BYTE_RANGE_MAX_CHUNK,
-  type ByteRangePage,
+  type ByteRangeReply,
   collectByteRanges,
   readByteRanges,
   retryByteSourceChanges
@@ -41,7 +41,7 @@ const reads = new Set([
 ])
 
 /** One range of a computer-held artifact (`readRange`); a version's row rides on range 0. */
-type ArtifactRangePage = ByteRangePage & { version?: ArtifactVersion; missing?: true }
+type ArtifactRangePage = ByteRangeReply & { version?: ArtifactVersion; missing?: true }
 
 const sha256 = () => {
   const h = createHash('sha256')

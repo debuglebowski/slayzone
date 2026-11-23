@@ -1,4 +1,3 @@
-import { useChatRestorationTracker } from './chat-restoration'
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
 import { readChatInfo } from './chat-info-read'
@@ -90,7 +89,6 @@ export function useChatCollaboration({
   settingsGeneration
 }: UseChatCollaborationOpts) {
   const trpcClient = useTRPCClient()
-  const trackRestoration = useChatRestorationTracker()
   const [chatCollaboration, setChatCollaborationState] = useState<ChatCollaborationMode>(
     DEFAULT_CHAT_COLLABORATION
   )
@@ -103,14 +101,12 @@ export function useChatCollaboration({
       generation: number,
       isCancelled: () => boolean
     ) => {
-      void trackRestoration(
-        hydrateChatCollaboration(
-          trpcClient,
-          ids,
-          generation,
-          isCancelled,
-          setChatCollaborationState
-        )
+      void hydrateChatCollaboration(
+        trpcClient,
+        ids,
+        generation,
+        isCancelled,
+        setChatCollaborationState
       )
     }
   )

@@ -860,6 +860,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.readBlob': checked(tab('tabId')),
   'chat.openTimeline': checked(tab('tabId')),
   'chat.timelinePages': checked(tab('tabId')),
+  'chat.toolDetail': checked(tab('tabId')),
   'chat.searchTimeline': checked(tab('tabId')),
   'chat.commandTaskOutput': checked(tab('tabId')),
   'chat.stopCommandTask': checked(tab('tabId')),

@@ -2,7 +2,9 @@ import { z } from 'zod'
 import {
   PINNED_MESSAGE_EXCERPT_MAX,
   PINNED_MESSAGE_KEY_MAX,
-  SIDE_QUESTION_MAX_CHARS
+  SIDE_QUESTION_MAX_CHARS,
+  chatHistoryDisplaySchema,
+  chatToolDetailInputSchema
 } from '@slayzone/terminal-contracts'
 
 const id = z.string().min(1).max(500),
@@ -273,9 +275,16 @@ export const chatOperationSchemas = {
     z.array(z.number().int().nonnegative()).max(512),
     z.number().int(),
     z.number().int(),
-    z.number().int().nonnegative().optional()
+    z.number().int().nonnegative().optional(),
+    z.union([z.boolean(), chatHistoryDisplaySchema]).optional()
   ]),
-  searchTimeline: z.tuple([id, z.string().max(1000)]),
+  toolDetail: z.tuple([
+    id,
+    chatToolDetailInputSchema.shape.detail,
+    chatToolDetailInputSchema.shape.offset,
+    chatToolDetailInputSchema.shape.revision
+  ]),
+  searchTimeline: z.tuple([id, z.string().max(1000), z.boolean().optional()]),
   commandTaskOutput: z.tuple([id, id]),
   stopCommandTask: z.tuple([id, id]),
   backgroundCommandTask: z.tuple([id, id]),
@@ -368,6 +377,7 @@ export const CHAT_READ_OPERATIONS = new Set<ChatOperation>([
   'getTurnStatus',
   'openTimeline',
   'timelinePages',
+  'toolDetail',
   'searchTimeline',
   'commandTaskOutput',
   'getWorkspaceChanges',

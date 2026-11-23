@@ -957,6 +957,17 @@ export const jailedFs = forgettingRootSpellings({
     }
   },
 
+  /** Read and update the same existing file without following a replacement link. */
+  updateFile<T>(judged: string, update: (fd: number) => T): T {
+    assertParentUnchanged(judged)
+    const fd = openSync(judged, fsConstants.O_RDWR | NOFOLLOW | fsConstants.O_NONBLOCK)
+    try {
+      return update(fd)
+    } finally {
+      closeSync(fd)
+    }
+  },
+
   /** Create a NEW file; `File already exists` (a dangling link counts) otherwise. */
   createFile(judged: string, content: string | Uint8Array = ''): void {
     const fd = openForWrite(judged, true)

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type React from 'react'
+import * as ui from '@slayzone/ui'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { TimelineItem } from '@slayzone/terminal/client'
@@ -9,6 +10,7 @@ vi.mock('@slayzone/markdown/client', () => ({
 vi.mock('@slayzone/diff-view', () => ({ DiffView: () => null }))
 import { ChatViewContext, defaultChatView } from './ChatViewContext'
 import { AssistantAnswer } from './AssistantAnswer'
+import { MessageDetails } from './MessageDetails'
 import { activityView } from './activity-view'
 import type { ConversationActionsView } from './useConversationActions'
 
@@ -309,4 +311,30 @@ describe('assistant answer fork', () => {
     fireEvent.click(fork)
     expect(conversation.begin).not.toHaveBeenCalled()
   })
+})
+
+it('copies the full reply behind a standalone result on demand', async () => {
+  const write = vi.spyOn(ui, 'safeClipboardWriteText').mockResolvedValue(true)
+  const detail = {
+    kind: 'result-copy',
+    instance: 'session',
+    epoch: 0,
+    row: 2,
+    timestamp: result.timestamp
+  } as const
+  const readTextDetail = vi.fn(async () => 'Earlier progress\n\nFinal reply')
+  try {
+    render(
+      <ChatViewContext.Provider value={{ ...defaultChatView, readTextDetail }}>
+        <MessageDetails item={{ ...result, copyText: null, copyDetail: detail }} standalone />
+      </ChatViewContext.Provider>
+    )
+    expect(readTextDetail).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy assistant reply' }))
+    expect(await screen.findByText('Copied')).toBeDefined()
+    expect(readTextDetail).toHaveBeenCalledWith(detail, expect.any(AbortSignal))
+    expect(write).toHaveBeenCalledWith('Earlier progress\n\nFinal reply')
+  } finally {
+    write.mockRestore()
+  }
 })

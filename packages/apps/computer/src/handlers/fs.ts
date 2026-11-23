@@ -39,6 +39,8 @@ import {
   listAllFiles as feListAllFiles,
   readDir as feReadDir,
   readFile as feReadFile,
+  applyTextEdit,
+  textRevision,
   readBytesAt as feReadBytesAt,
   searchFiles as feSearchFiles,
   subscribeFileWatcher
@@ -253,9 +255,9 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
   }
 
   function readFileHandler(rawParams: unknown): FsReadFileResult {
-    const { rootPath, filePath, force } = fsReadFileParamsSchema.parse(rawParams)
+    const { rootPath, filePath, force, revision } = fsReadFileParamsSchema.parse(rawParams)
     const { root } = allowIn(rootPath, filePath)
-    return feReadFile(root, filePath, force)
+    return feReadFile(root, filePath, force, revision)
   }
 
   /**
@@ -284,10 +286,15 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
     }
   }
 
-  function writeFileHandler(rawParams: unknown): { ok: true } {
-    const { rootPath, filePath, content } = fsWriteFileParamsSchema.parse(rawParams)
-    jailedFs.writeFile(allowIn(rootPath, filePath, { access: 'write' }).path, content)
-    return { ok: true }
+  function writeFileHandler(rawParams: unknown): { ok: true; revision: string } {
+    const input = fsWriteFileParamsSchema.parse(rawParams)
+    const abs = allowIn(input.rootPath, input.filePath, { access: 'write' }).path
+    if ('edit' in input) {
+      const { edit } = input
+      return { ok: true, revision: jailedFs.updateFile(abs, (fd) => applyTextEdit(fd, edit)) }
+    }
+    jailedFs.writeFile(abs, input.content)
+    return { ok: true, revision: textRevision(input.content) }
   }
 
   function createFileHandler(rawParams: unknown): { ok: true } {

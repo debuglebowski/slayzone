@@ -105,6 +105,10 @@ export function createLocalComputerBootGate(deps: LocalComputerBootGateDeps) {
     get booting(): boolean {
       return !booted && !closed
     },
+    /** A nonblocking readiness check for work that has yet to acquire a slot. */
+    async waitingFor(computerId: string): Promise<boolean> {
+      return computerId === deps.localComputerId && (await waits()) && !booted && !closed
+    },
     /**
      * Close the boot window now: the local computer is known not to be coming (its
      * supervisor reported a start failure). Waiting calls answer with what they have.

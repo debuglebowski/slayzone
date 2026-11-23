@@ -19,7 +19,11 @@ import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import {
   chatScrollAnchorSchema,
   chatTabStateExpectationsSchema,
-  chatTextDraftSchema
+  chatTextDraftSchema,
+  chatHistoryDisplaySchema,
+  chatToolDetailInputSchema,
+  chatToolDetailChunkSchema,
+  toolPreviewVersion
 } from '@slayzone/terminal-contracts'
 import { z } from 'zod'
 
@@ -161,6 +165,7 @@ export interface DirectChatService {
       | 'readBlob'
       | 'openTimeline'
       | 'timelinePages'
+      | 'toolDetail'
       | 'searchTimeline',
     args: unknown[]
   ): Promise<unknown>
@@ -398,10 +403,20 @@ export function createDirectRouter(services: DirectRouterServices) {
           ])
         }),
       openTimeline: t.procedure
-        .input(z.object({ tabId, version: z.string().max(200) }))
+        .input(
+          z.object({
+            tabId,
+            version: z.string().max(200),
+            toolPreviews: z.boolean().optional(),
+            display: chatHistoryDisplaySchema.optional()
+          })
+        )
         .query(({ ctx, input }) => {
           const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.read(input.tabId, epoch, 'openTimeline', [input.tabId, input.version])
+          return service.read(input.tabId, epoch, 'openTimeline', [
+            input.tabId,
+            input.toolPreviews ? toolPreviewVersion(input.version, input.display) : input.version
+          ])
         }),
       timelinePages: t.procedure
         .input(
@@ -411,7 +426,9 @@ export function createDirectRouter(services: DirectRouterServices) {
             asOfSeq: z.number().int(),
             epoch: z.number().int(),
             // Row slices from this row (`next`); an older computer strips it: whole pages.
-            startRow: z.number().int().nonnegative().optional()
+            startRow: z.number().int().nonnegative().optional(),
+            toolPreviews: z.boolean().optional(),
+            display: chatHistoryDisplaySchema.optional()
           })
         )
         .query(({ ctx, input }) => {
@@ -421,14 +438,33 @@ export function createDirectRouter(services: DirectRouterServices) {
             input.pages,
             input.asOfSeq,
             input.epoch,
-            ...(input.startRow !== undefined ? [input.startRow] : [])
+            ...(input.startRow !== undefined ? [input.startRow] : []),
+            ...(input.startRow !== undefined && input.toolPreviews ? [input.display ?? true] : [])
           ])
         }),
+      toolDetail: t.procedure
+        .input(chatToolDetailInputSchema.extend({ tabId }))
+        .query(async ({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          const result = await service.read(input.tabId, epoch, 'toolDetail', [
+            input.tabId,
+            input.detail,
+            input.offset,
+            ...(input.revision !== undefined ? [input.revision] : [])
+          ])
+          return chatToolDetailChunkSchema.parse(result)
+        }),
       searchTimeline: t.procedure
-        .input(z.object({ tabId, query: z.string().max(1000) }))
+        .input(
+          z.object({ tabId, query: z.string().max(1000), caseSensitive: z.boolean().optional() })
+        )
         .query(({ ctx, input }) => {
           const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.read(input.tabId, epoch, 'searchTimeline', [input.tabId, input.query])
+          return service.read(input.tabId, epoch, 'searchTimeline', [
+            input.tabId,
+            input.query,
+            ...(input.caseSensitive === undefined ? [] : [input.caseSensitive])
+          ])
         }),
       /**
        * Commands that need only the computer's ownership check (the hub's shapes).

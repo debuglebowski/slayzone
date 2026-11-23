@@ -21,6 +21,7 @@
  */
 
 import { z } from 'zod'
+import { textEditSchema, textRevisionSchema } from '../shared'
 import { TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import type { SlayzoneDb } from '@slayzone/platform'
@@ -92,10 +93,23 @@ export const fileEditorRouter = router({
     ),
 
   readFile: publicProcedure
-    .input(scoped({ rootPath: z.string(), filePath: z.string(), force: z.boolean().optional() }))
+    .input(
+      scoped({
+        rootPath: z.string(),
+        filePath: z.string(),
+        force: z.boolean().optional(),
+        revision: z.union([z.literal('initial'), textRevisionSchema]).optional()
+      })
+    )
     .query(({ ctx, input }) =>
       inScope(ctx.db, input, async () =>
-        fs().readFile(await resolve(input), input.rootPath, input.filePath, input.force)
+        fs().readFile(
+          await resolve(input),
+          input.rootPath,
+          input.filePath,
+          input.force,
+          input.revision
+        )
       )
     ),
 
@@ -111,10 +125,21 @@ export const fileEditorRouter = router({
     ),
 
   writeFile: publicProcedure
-    .input(scoped({ rootPath: z.string(), filePath: z.string(), content: z.string() }))
+    .input(
+      z.union([
+        scoped({ rootPath: z.string(), filePath: z.string(), content: z.string() }),
+        scoped({ rootPath: z.string(), filePath: z.string(), edit: textEditSchema })
+      ])
+    )
     .mutation(({ ctx, input }) =>
       inScope(ctx.db, input, async () => {
-        await fs().writeFile(await resolve(input), input.rootPath, input.filePath, input.content)
+        const revision = await fs().writeFile(
+          await resolve(input),
+          input.rootPath,
+          input.filePath,
+          'edit' in input ? input.edit : input.content
+        )
+        return revision ? { revision } : undefined
       })
     ),
 

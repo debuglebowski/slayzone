@@ -159,6 +159,12 @@ function ApprovalRuleChip({ rule }: { rule: string }) {
 
 export const ToolAutoOpenContext = createContext<boolean | undefined>(undefined)
 export const ToolInActivityContext = createContext(false)
+export const ToolDetailDisclosureContext = createContext<{
+  onExpanded: (open: boolean) => void
+  loading: boolean
+  failed: boolean
+  retry: () => void
+} | null>(null)
 
 function ToolShell({
   invocation,
@@ -198,6 +204,11 @@ function ToolShell({
   useEffect(() => {
     if (focusRequested && !open) setOpen(true)
   }, [focusRequested, open, setOpen])
+  const detail = useContext(ToolDetailDisclosureContext)
+  const onExpanded = detail?.onExpanded
+  useEffect(() => {
+    onExpanded?.(open)
+  }, [onExpanded, open])
   // Body fallback chain: per-tool rich children > rawContent text > pending placeholder.
   // Keeps any tool card non-blank when structured data is missing or absent.
   const rawText = useMemo(() => resultTextOf(invocation), [invocation])
@@ -212,7 +223,7 @@ function ToolShell({
   if (!body && status === 'pending') {
     body = <div className="px-3 py-2 text-xs text-muted-foreground italic">Waiting for result…</div>
   }
-  const canOpen = Boolean(body)
+  const canOpen = Boolean(body || detail)
   return (
     <div
       data-tool-use-id={invocation.id}
@@ -258,7 +269,22 @@ function ToolShell({
           </div>
         )}
         {open && canOpen && (
-          <div className="border-t border-border/40 bg-background/40">{body}</div>
+          <div className="border-t border-border/40 bg-background/40">
+            {detail?.loading && (
+              <div role="status" className="px-3 pt-1 text-xs text-muted-foreground">
+                Loading full result…
+              </div>
+            )}
+            {detail?.failed && (
+              <button type="button" className="px-3 pt-1 text-xs underline" onClick={detail.retry}>
+                Retry loading full result
+              </button>
+            )}
+            {invocation.toolDetail &&
+            (invocation.toolPreview?.files || invocation.toolPreview?.input)
+              ? null
+              : body}
+          </div>
         )}
       </div>
       <HoverTimestamp timestamp={timestamp} />

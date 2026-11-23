@@ -177,7 +177,7 @@ test('an abandoned hub lease wakes the drainer after expiry without another requ
     ensureSpawned: async () => {
       throw new Error('Queue fixture is already spawned')
     },
-    getEventBufferSince: () => [],
+    readRecentEvents: async () => [],
     getSessionTerminalState: () => 'idle',
     getSessionInfo: () => null,
     isReadyForQueuedMessage: () => ready,

@@ -10,7 +10,11 @@ import {
   chatToolResultArgsSchema,
   PINNED_MESSAGE_EXCERPT_MAX,
   PINNED_MESSAGE_KEY_MAX,
-  SIDE_QUESTION_MAX_CHARS
+  SIDE_QUESTION_MAX_CHARS,
+  chatHistoryDisplaySchema,
+  chatToolDetailInputSchema,
+  chatToolDetailChunkSchema,
+  toolPreviewVersion
 } from '@slayzone/terminal-contracts'
 import { getChatDeps } from './chat-router-deps'
 
@@ -544,8 +548,20 @@ export const chatRouter = router({
   // Paged history: open from the hub's timeline projection (`full`: use getReplay),
   // rows of older pages as of the client's newest event, pages that may hold a query.
   openTimeline: publicProcedure
-    .input(z.object({ tabId: z.string(), version: z.string() }))
-    .query(({ input }) => ops().openTimeline(input.tabId, input.version)),
+    .input(
+      z.object({
+        tabId: z.string(),
+        version: z.string(),
+        toolPreviews: z.boolean().optional(),
+        display: chatHistoryDisplaySchema.optional()
+      })
+    )
+    .query(({ input }) =>
+      ops().openTimeline(
+        input.tabId,
+        input.toolPreviews ? toolPreviewVersion(input.version, input.display) : input.version
+      )
+    ),
   timelinePages: publicProcedure
     .input(
       z.object({
@@ -554,17 +570,52 @@ export const chatRouter = router({
         asOfSeq: z.number().int(),
         epoch: z.number().int(),
         // Answered by row slices from this row (`next`); an older hub drops it.
-        startRow: z.number().int().nonnegative().optional()
+        startRow: z.number().int().nonnegative().optional(),
+        toolPreviews: z.boolean().optional(),
+        display: chatHistoryDisplaySchema.optional()
       })
     )
     .query(({ input }) =>
       input.startRow === undefined
         ? ops().timelinePages(input.tabId, input.pages, input.asOfSeq, input.epoch)
-        : ops().timelinePages(input.tabId, input.pages, input.asOfSeq, input.epoch, input.startRow)
+        : input.toolPreviews
+          ? ops().timelinePages(
+              input.tabId,
+              input.pages,
+              input.asOfSeq,
+              input.epoch,
+              input.startRow,
+              input.display ?? true
+            )
+          : ops().timelinePages(
+              input.tabId,
+              input.pages,
+              input.asOfSeq,
+              input.epoch,
+              input.startRow
+            )
+    ),
+  toolDetail: publicProcedure
+    .input(chatToolDetailInputSchema)
+    .output(chatToolDetailChunkSchema)
+    .query(({ input }) =>
+      input.revision === undefined
+        ? ops().toolDetail(input.tabId, input.detail, input.offset)
+        : ops().toolDetail(input.tabId, input.detail, input.offset, input.revision)
     ),
   searchTimeline: publicProcedure
-    .input(z.object({ tabId: z.string(), query: z.string().max(1000) }))
-    .query(({ input }) => ops().searchTimeline(input.tabId, input.query)),
+    .input(
+      z.object({
+        tabId: z.string(),
+        query: z.string().max(1000),
+        caseSensitive: z.boolean().optional()
+      })
+    )
+    .query(({ input }) =>
+      input.caseSensitive === undefined
+        ? ops().searchTimeline(input.tabId, input.query)
+        : ops().searchTimeline(input.tabId, input.query, input.caseSensitive)
+    ),
   // A command the agent runs as a task (plan 3.9): its live output (polled by
   // the command card while it runs and is on screen), stop, move to background.
   commandTaskOutput: publicProcedure

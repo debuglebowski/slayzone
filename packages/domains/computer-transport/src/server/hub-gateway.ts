@@ -63,7 +63,12 @@ import {
   type RequestActor
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
-import { isWsMessageTooLargeError, wsDataByteLength, wsDataToText } from '../shared/ws-data'
+import {
+  isArtifactRangeRequest,
+  isWsMessageTooLargeError,
+  wsDataByteLength,
+  wsDataToText
+} from '../shared/ws-data'
 import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
 import { isBareAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { auditedHubCall } from './hub-audit'
@@ -1235,11 +1240,17 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       conn.authTimer.unref?.()
     }
 
-    ws.on('message', (data) => {
+    ws.on('message', (data, binary) => {
       if (!conn.descriptor && wsDataByteLength(data) > PRE_AUTH_FRAME_MAX_BYTES) {
         // Dropped unparsed: see PRE_AUTH_FRAME_MAX_BYTES. 1009 = message too big.
         protocolError(conn, `unauthenticated frame over ${PRE_AUTH_FRAME_MAX_BYTES} bytes`)
         ws.close(1009, 'frame too large before authentication')
+        return
+      }
+      // The capped binary header length starts with NUL. Older peers can still
+      // send a JSON document in a binary WebSocket message.
+      if (binary && Buffer.isBuffer(data) && data[0] === 0) {
+        if (conn.descriptor) conn.rpc.handleBinaryReply(data)
         return
       }
       for (const line of wsDataToText(data).split('\n')) {
@@ -1337,10 +1348,12 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         route: ctx?.route ? ctx.route.slice(0, 200) : null,
         ...(pathScope ? { pathScope } : {})
       }
+      const binary = isArtifactRangeRequest(method, params)
+      const wireParams = binary ? { ...params, binaryReply: true } : params
       const send = () => {
         if (getConnection(computerId) !== conn || conn.closed)
           throw new Error('Computer connection changed before command delivery')
-        return conn.rpc.request<T>(method, params, timeoutMs, actor, signal)
+        return conn.rpc.request<T>(method, wireParams, timeoutMs, actor, signal, binary)
       }
       const { authorizeRequest, beforeRequest } = options
       const startedAt = Date.now()
@@ -1351,7 +1364,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
               .then(() => authorizeRequest?.(computerId, method))
               .then(() => beforeRequest?.(computerId, method, params))
               .then(send)
-          : conn.rpc.request<T>(method, params, timeoutMs, actor, signal)
+          : conn.rpc.request<T>(method, wireParams, timeoutMs, actor, signal, binary)
       )
         .catch((err: unknown) => {
           if (isFrameTooLargeError(err) && (err.data as { frame?: unknown })?.frame === 'reply') {

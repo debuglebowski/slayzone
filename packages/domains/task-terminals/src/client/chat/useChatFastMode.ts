@@ -1,4 +1,3 @@
-import { useChatRestorationTracker } from './chat-restoration'
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
 import { readChatInfo } from './chat-info-read'
@@ -77,7 +76,6 @@ export function useChatFastMode({
   settingsGeneration
 }: UseChatFastModeOpts) {
   const trpcClient = useTRPCClient()
-  const trackRestoration = useChatRestorationTracker()
   const [chatFastMode, setChatFastModeState] = useState<boolean>(DEFAULT_CHAT_FAST_MODE)
   const [fastModeChanging, setFastModeChanging] = useState(false)
 
@@ -88,9 +86,7 @@ export function useChatFastMode({
       generation: number,
       isCancelled: () => boolean
     ) => {
-      void trackRestoration(
-        hydrateChatFastMode(trpcClient, ids, generation, isCancelled, setChatFastModeState)
-      )
+      void hydrateChatFastMode(trpcClient, ids, generation, isCancelled, setChatFastModeState)
     }
   )
 

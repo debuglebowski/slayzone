@@ -57,6 +57,7 @@ import {
   type DirectTarget
 } from '@slayzone/transport/direct'
 import { WebSocketServer, type WebSocket } from 'ws'
+import { wsCompression } from '@slayzone/computer-transport/shared'
 import type { RtcServerSocket } from './rtc-socket'
 
 /** A WebSocket, or a WebRTC data channel made to look like one (rtc-socket.ts). */
@@ -221,7 +222,11 @@ export async function createDirectListener(
   }
 
   const router = createDirectRouter(options.services)
-  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxMessageBytes })
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: limits.maxMessageBytes,
+    perMessageDeflate: wsCompression
+  })
 
   function closeUnauthorized(ws: ServedSocket, reason: string): void {
     if (ws.readyState === 1 || ws.readyState === 0) {

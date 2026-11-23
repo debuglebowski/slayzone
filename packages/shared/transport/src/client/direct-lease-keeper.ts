@@ -15,8 +15,6 @@ import type { DirectIssueTarget } from '../direct/router'
 import type { DirectLease, DirectLinkManager } from './direct-link'
 
 export interface DirectLeaseKeeperOptions {
-  /** Optional owner tracks connection setup as part of bounded restoration. */
-  trackConnect?: <T>(work: Promise<T>) => Promise<T>
   target: DirectIssueTarget
   manager: Pick<DirectLinkManager, 'acquire' | 'onComputerConnected'>
   onChange(lease: DirectLease | null): void
@@ -67,8 +65,7 @@ export function keepDirectLease(opts: DirectLeaseKeeperOptions): DirectLeaseKeep
   async function connect(): Promise<void> {
     if (stopped || connecting || lease) return
     connecting = true
-    const work = opts.manager.acquire(opts.target).catch(() => null)
-    const got = await (opts.trackConnect ? opts.trackConnect(work) : work)
+    const got = await opts.manager.acquire(opts.target).catch(() => null)
     connecting = false
     if (stopped) {
       got?.release()

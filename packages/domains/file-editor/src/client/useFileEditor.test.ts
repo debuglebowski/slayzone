@@ -91,6 +91,61 @@ async function flush() {
   })
 }
 
+it('reads only the active saved tab, then loads other tabs on selection', async () => {
+  const { result } = renderHook(
+    () => useFileEditor(ROOT, { files: ['a.ts', 'b.ts'], activeFile: 'b.ts' }),
+    { wrapper: fs.wrapper }
+  )
+  await flush()
+  expect(fs.readFile.mock.calls).toEqual([[ROOT, 'b.ts']])
+  expect(result.current.openFiles.map((file) => file.path)).toEqual(['a.ts', 'b.ts'])
+  expect(result.current.activeFile?.content).toBe('B')
+  await act(async () => {
+    result.current.setActiveFilePath('a.ts')
+  })
+  expect(fs.readFile.mock.calls).toEqual([
+    [ROOT, 'b.ts'],
+    [ROOT, 'a.ts']
+  ])
+  expect(result.current.activeFile?.content).toBe('A')
+})
+
+it('sends a small revision-checked edit and uses the new revision for its watcher echo', async () => {
+  const original = 'before ' + 'padding '.repeat(200)
+  const oldRevision = 'a'.repeat(64)
+  const newRevision = 'b'.repeat(64)
+  const read = vi.fn((input: { revision: string }) =>
+    input.revision === newRevision
+      ? { content: null, revision: newRevision, unchanged: true }
+      : { content: original, revision: oldRevision }
+  )
+  const write = vi.fn(() => ({ revision: newRevision }))
+  let emit: (event: FileWatchEvent) => void = () => undefined
+  const backend = createTrpcTest({
+    procedures: { 'fileEditor.readFile': read, 'fileEditor.writeFile': write },
+    subscriptions: {
+      'fileEditor.watch': (_input, push) => {
+        emit = push
+      }
+    }
+  })
+  const { result } = renderHook(() => useFileEditor(ROOT), {
+    wrapper: scopedWrapper(backend.wrapper)
+  })
+  await act(async () => result.current.openFile('a.ts'))
+  const content = original.replace('before', 'before-X')
+  act(() => result.current.updateContent('a.ts', content))
+  await act(async () => result.current.saveFile('a.ts'))
+  expect(write).toHaveBeenCalledWith(
+    expect.objectContaining({
+      edit: { revision: oldRevision, from: 6, to: 6, text: '-X' }
+    })
+  )
+  await act(async () => emit({ type: 'changed', root: ROOT, relPath: 'a.ts' }))
+  expect(read).toHaveBeenLastCalledWith(expect.objectContaining({ revision: newRevision }))
+  expect(result.current.activeFile).toMatchObject({ content, originalContent: content })
+})
+
 describe('useFileEditor — delete handling', () => {
   it('closes tab when its file is deleted on disk', async () => {
     const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })

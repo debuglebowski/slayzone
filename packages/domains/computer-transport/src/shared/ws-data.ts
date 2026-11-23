@@ -5,6 +5,18 @@
  * @module computer/shared/ws-data
  */
 
+import { HubToComputerMethods } from './frames'
+
+export function isArtifactRangeRequest(
+  method: string,
+  params: unknown
+): params is Record<string, unknown> {
+  if (method !== HubToComputerMethods.chatRequest || !params || typeof params !== 'object')
+    return false
+  const request = params as { kind?: unknown; value?: { method?: unknown } }
+  return request.kind === 'artifact.invoke' && request.value?.method === 'readRange'
+}
+
 export function wsDataToText(data: unknown): string {
   if (typeof data === 'string') return data
   if (Array.isArray(data)) return Buffer.concat(data as readonly Uint8Array[]).toString('utf8')
