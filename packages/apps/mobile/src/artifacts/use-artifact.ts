@@ -144,8 +144,8 @@ export function useArtifactText(
 
 /**
  * The artifact (or one version) as a local file, downloaded from its hub. A file handed
- * out earlier that is gone (the cache keeps one working copy and one version, and the OS
- * may purge it) is downloaded again rather than shown blank.
+ * out earlier may be evicted by another download or by the OS. Fetch it again if it
+ * is missing.
  */
 export function useArtifactFile(
   target: HubTarget,

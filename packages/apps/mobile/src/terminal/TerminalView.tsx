@@ -36,13 +36,11 @@
  */
 import { ENTER, stripOscReplies } from '@slayzone/terminal-contracts'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
-import { type ComponentRef, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
   type LayoutChangeEvent,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -51,6 +49,7 @@ import {
   View
 } from 'react-native'
 import { openWebLink } from '../chat/Markdown'
+import { useKeyboardOverlap } from '../chat/use-keyboard'
 import { copyText, shareText } from '../chat/message-text'
 import { type ChromeColors, useTerminalColors, useTheme, useThemeVariant } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
@@ -298,20 +297,10 @@ export function TerminalView({
     else shareText(text)
   }
 
-  // The keyboard lifts the key bar and field by what it covers of THIS view: its
-  // offset is how far the view sits below the top of the window, measured — again
-  // when the keyboard opens, as what is above may have changed height since.
   const rootRef = useRef<ComponentRef<typeof View>>(null)
-  const [top, setTop] = useState(0)
-  const measure = useCallback(() => {
-    rootRef.current?.measureInWindow((_x: number, y: number) =>
-      setTop((prev) => (prev === y ? prev : y))
-    )
-  }, [])
-  useEffect(() => {
-    const sub = Keyboard.addListener('keyboardWillShow', measure)
-    return () => sub.remove()
-  }, [measure])
+  const keyboard = useKeyboardOverlap(rootRef)
+  // Short windows keep the shortcuts beside the composer so output stays visible.
+  const inlineKeys = keyboard.bottom > 0 && (keyboard.availableHeight ?? Infinity) < 144
 
   let overlay = null
   if (status.phase === 'attaching') {
@@ -364,13 +353,12 @@ export function TerminalView({
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={top}
+    <View
+      ref={rootRef}
+      onLayout={keyboard.onLayout}
+      style={[styles.root, { paddingBottom: keyboard.bottom }]}
       testID="terminal-view"
     >
-      <View ref={rootRef} onLayout={measure} style={styles.probe} />
       <View
         style={[styles.terminal, { backgroundColor: colors.background }]}
         onLayout={measureArea}
@@ -396,94 +384,99 @@ export function TerminalView({
         ) : null}
         {overlay}
       </View>
-      <ScrollView
-        horizontal
-        keyboardShouldPersistTaps="always"
-        showsHorizontalScrollIndicator={false}
-        style={styles.keys}
-        contentContainerStyle={styles.keysContent}
-      >
-        {KEY_BAR.map((key) => {
-          const armed = key.modifier === true && ctrlArmed
-          return (
-            <Pressable
-              key={key.id}
-              accessibilityRole="button"
-              accessibilityLabel={key.accessibilityLabel}
-              accessibilityState={{ disabled: !live, selected: armed }}
-              disabled={!live}
-              onPress={key.repeats ? undefined : () => press(key)}
-              onPressIn={key.repeats ? () => repeater.press(() => press(key)) : undefined}
-              onPressOut={key.repeats ? () => repeater.release() : undefined}
-              style={({ pressed }) => [styles.key, (pressed || armed) && styles.keyPressed]}
-            >
-              <Text
-                style={[styles.keyLabel, !live && styles.disabled]}
-                maxFontSizeMultiplier={MAX_CHROME_SCALE}
+      {sendError ? <Text style={styles.problem}>Not sent: {sendError}</Text> : null}
+      <View testID="terminal-controls" style={inlineKeys ? styles.inlineControls : undefined}>
+        <ScrollView
+          horizontal
+          keyboardShouldPersistTaps="always"
+          showsHorizontalScrollIndicator={false}
+          style={[styles.keys, inlineKeys && styles.inlineKeys]}
+          contentContainerStyle={[styles.keysContent, inlineKeys && styles.inlineKeysContent]}
+        >
+          {KEY_BAR.map((key) => {
+            const armed = key.modifier === true && ctrlArmed
+            return (
+              <Pressable
+                key={key.id}
+                accessibilityRole="button"
+                accessibilityLabel={key.accessibilityLabel}
+                accessibilityState={{ disabled: !live, selected: armed }}
+                disabled={!live}
+                onPress={key.repeats ? undefined : () => press(key)}
+                onPressIn={key.repeats ? () => repeater.press(() => press(key)) : undefined}
+                onPressOut={key.repeats ? () => repeater.release() : undefined}
+                style={({ pressed }) => [
+                  styles.key,
+                  inlineKeys && styles.inlineKey,
+                  (pressed || armed) && styles.keyPressed
+                ]}
               >
-                {key.label}
+                <Text
+                  style={[styles.keyLabel, !live && styles.disabled]}
+                  maxFontSizeMultiplier={MAX_CHROME_SCALE}
+                >
+                  {key.label}
+                </Text>
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+        <View style={[styles.inputRow, inlineKeys && styles.inlineInputRow]}>
+          <TextInput
+            accessibilityLabel="Message to the agent"
+            style={[styles.input, inlineKeys && styles.inlineInput]}
+            value={text}
+            onChangeText={changeText}
+            onSubmitEditing={submit}
+            editable={live}
+            placeholder={live ? (ctrlArmed ? 'Ctrl + a letter' : 'Message') : 'Not running'}
+            placeholderTextColor={theme.mutedForeground}
+            multiline
+            submitBehavior="submit"
+            returnKeyType="send"
+            autoCapitalize="sentences"
+            autoCorrect
+            spellCheck
+            keyboardAppearance={variant}
+            onFocus={() => setTyping(true)}
+            onBlur={() => setTyping(false)}
+          />
+          {typing ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Hide keyboard"
+              onPress={() => Keyboard.dismiss()}
+              style={styles.textButton}
+            >
+              <Text style={styles.hide} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+                Hide
               </Text>
             </Pressable>
-          )
-        })}
-      </ScrollView>
-      {sendError ? <Text style={styles.problem}>Not sent: {sendError}</Text> : null}
-      <View style={styles.inputRow}>
-        <TextInput
-          accessibilityLabel="Message to the agent"
-          style={styles.input}
-          value={text}
-          onChangeText={changeText}
-          onSubmitEditing={submit}
-          editable={live}
-          placeholder={live ? (ctrlArmed ? 'Ctrl + a letter' : 'Message') : 'Not running'}
-          placeholderTextColor={theme.mutedForeground}
-          multiline
-          submitBehavior="submit"
-          returnKeyType="send"
-          autoCapitalize="sentences"
-          autoCorrect
-          spellCheck
-          keyboardAppearance={variant}
-          onFocus={() => setTyping(true)}
-          onBlur={() => setTyping(false)}
-        />
-        {typing ? (
+          ) : null}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Hide keyboard"
-            onPress={() => Keyboard.dismiss()}
+            accessibilityLabel="Send"
+            accessibilityState={{ disabled: !live }}
+            disabled={!live}
+            onPress={submit}
             style={styles.textButton}
           >
-            <Text style={styles.hide} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-              Hide
+            <Text
+              style={[styles.send, !live && styles.disabled]}
+              maxFontSizeMultiplier={MAX_CHROME_SCALE}
+            >
+              Send
             </Text>
           </Pressable>
-        ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          accessibilityState={{ disabled: !live }}
-          disabled={!live}
-          onPress={submit}
-          style={styles.textButton}
-        >
-          <Text
-            style={[styles.send, !live && styles.disabled]}
-            maxFontSizeMultiplier={MAX_CHROME_SCALE}
-          >
-            Send
-          </Text>
-        </Pressable>
+        </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   )
 }
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     root: { flex: 1 },
-    probe: { height: 0 },
     terminal: { flex: 1 },
     web: { flex: 1 },
     overlay: {
@@ -512,6 +505,10 @@ const makeStyles = (t: ChromeColors) =>
       borderTopColor: t.border,
       backgroundColor: t.surface1
     },
+    inlineControls: { flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface1 },
+    inlineKeys: { flex: 1, borderTopWidth: 0 },
+    inlineKeysContent: { alignItems: 'center', paddingVertical: 2 },
+    inlineKey: { minHeight: 36 },
     keysContent: { paddingHorizontal: 8, paddingVertical: 4, gap: 6 },
     key: {
       minWidth: 44,
@@ -533,6 +530,8 @@ const makeStyles = (t: ChromeColors) =>
       paddingVertical: 6,
       backgroundColor: t.surface1
     },
+    inlineInputRow: { flex: 2, paddingVertical: 0, paddingHorizontal: 6 },
+    inlineInput: { minHeight: 36, maxHeight: 44, paddingTop: 4, paddingBottom: 4 },
     input: {
       flex: 1,
       minHeight: 40,

@@ -61,6 +61,7 @@ export interface ArtifactsScreenProps {
   /** `artifact`: leaves the artifact; its Back is labelled `artifactBackLabel`. */
   onCloseArtifact?: () => void
   artifactBackLabel?: string
+  active?: boolean
   /** Inside the task page (its Artifacts tab): no screen header, an Upload row instead. */
   embedded?: boolean
 }
@@ -82,6 +83,7 @@ export function ArtifactsScreen({
   onBack,
   onCloseArtifact,
   artifactBackLabel,
+  active = true,
   embedded = false
 }: ArtifactsScreenProps) {
   const theme = useTheme()
@@ -226,6 +228,7 @@ export function ArtifactsScreen({
               taskId={taskId}
               artifactId={shownId}
               version={selected?.artifactId === shownId ? selected.version : null}
+              active={active}
               onSelectVersion={(version) => onSelectVersion(shownId, version)}
               onOpenArtifact={onOpenArtifact}
               onBack={layout === 'artifact' ? onCloseArtifact : undefined}

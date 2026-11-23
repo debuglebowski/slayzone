@@ -17,7 +17,7 @@ import type { ArtifactVersion } from '@slayzone/task-artifacts/shared'
 import { dbTimestampToIso, formatRelativeDate } from '@slayzone/task-artifacts/shared'
 import { getEffectiveRenderMode, type TaskArtifact } from '@slayzone/task-contracts/types'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -81,6 +81,8 @@ export interface ArtifactViewerProps {
   onBack?: () => void
   /** The back button's label: the screen it goes back to. */
   backLabel?: string
+  /** Share/export presentations belong to the focused viewer. */
+  active?: boolean
 }
 
 export function ArtifactViewer(props: ArtifactViewerProps) {
@@ -125,7 +127,8 @@ function LoadedArtifact({
   onSelectVersion,
   onOpenArtifact,
   onBack,
-  backLabel
+  backLabel,
+  active = true
 }: ArtifactViewerProps & { artifact: TaskArtifact; contentTick: number }) {
   const theme = useTheme()
   const variant = useThemeVariant()
@@ -167,7 +170,20 @@ function LoadedArtifact({
   // The running export's abort: closing the viewer stops it, so its share sheet never
   // opens over another screen.
   const exportAbort = useRef<AbortController | null>(null)
-  useEffect(() => () => exportAbort.current?.abort(), [])
+  const shareAbort = useRef<AbortController | null>(null)
+  const [presentation, setPresentation] = useState({ active, version })
+  if (presentation.active !== active || presentation.version !== version) {
+    setPresentation({ active, version })
+    if (shareState.busy) setShareState({ busy: false, error: null })
+    if (exportState.busy) setExportState({ busy: false, error: null, notice: null })
+  }
+  useLayoutEffect(
+    () => () => {
+      shareAbort.current?.abort()
+      exportAbort.current?.abort()
+    },
+    [active, version]
+  )
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
   const exportFormats = fileKind ? [] : exportFormatsOf(renderMode)
 
@@ -246,7 +262,9 @@ function LoadedArtifact({
   }
 
   const share = () => {
-    if (!versionReady) return
+    if (!active || !versionReady) return
+    shareAbort.current?.abort()
+    const { signal } = (shareAbort.current = new AbortController())
     setShareState({ busy: true, error: null })
     const ready =
       fileKind && file.data !== undefined
@@ -259,11 +277,17 @@ function LoadedArtifact({
             contentTick
           })
     ready
-      .then((uri) => Share.share({ url: uri, title: artifact.title }))
-      .then(() => setShareState({ busy: false, error: null }))
-      .catch((err: unknown) =>
-        setShareState({ busy: false, error: err instanceof Error ? err.message : String(err) })
-      )
+      .then((uri) => {
+        if (!signal.aborted) return Share.share({ url: uri, title: artifact.title })
+      })
+      .then(() => {
+        if (!signal.aborted) setShareState({ busy: false, error: null })
+      })
+      .catch((err: unknown) => {
+        if (!signal.aborted) {
+          setShareState({ busy: false, error: err instanceof Error ? err.message : String(err) })
+        }
+      })
   }
 
   // What is on screen: the working copy's text or the version's. Nothing while the
@@ -271,7 +295,10 @@ function LoadedArtifact({
   // a spinner or an error then, and the cache may still hold another copy's text.
   const exportContent = versionReady && !text.error ? content : undefined
   const chooseExport = () => {
-    if (exportContent === undefined) return
+    if (!active || exportContent === undefined) return
+    exportAbort.current?.abort()
+    const abort = new AbortController()
+    exportAbort.current = abort
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: 'Export',
@@ -282,9 +309,11 @@ function LoadedArtifact({
       },
       (index) => {
         const choice = exportFormats[index]
-        if (!choice) return
-        const abort = new AbortController()
-        exportAbort.current = abort
+        if (abort.signal.aborted) return
+        if (!choice) {
+          exportAbort.current = null
+          return
+        }
         setExportState({ busy: true, error: null, notice: null })
         exportArtifact(
           {
@@ -299,17 +328,25 @@ function LoadedArtifact({
             html2canvasScript: loadHtml2canvasScript,
             signal: abort.signal,
             // Shown under the toolbar as soon as it is known: before the share sheet opens.
-            onNotice: (notice) => setExportState((state) => ({ ...state, notice }))
+            onNotice: (notice) => {
+              if (!abort.signal.aborted) setExportState((state) => ({ ...state, notice }))
+            }
           }
         )
-          .then(() => setExportState((state) => ({ ...state, busy: false, error: null })))
-          .catch((err: unknown) =>
-            setExportState({
-              busy: false,
-              error: err instanceof Error ? err.message : String(err),
-              notice: null
-            })
-          )
+          .then(() => {
+            if (!abort.signal.aborted) {
+              setExportState((state) => ({ ...state, busy: false, error: null }))
+            }
+          })
+          .catch((err: unknown) => {
+            if (!abort.signal.aborted) {
+              setExportState({
+                busy: false,
+                error: err instanceof Error ? err.message : String(err),
+                notice: null
+              })
+            }
+          })
           .then(() => {
             if (exportAbort.current === abort) exportAbort.current = null
           })

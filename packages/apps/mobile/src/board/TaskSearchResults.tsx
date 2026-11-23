@@ -4,7 +4,7 @@ import { type ChromeColors, useTheme } from '../theme'
 import { Caption } from '../ui-kit/Chrome'
 import { AgentDot, PriorityIcon } from '../ui-kit/TaskGlyphs'
 import { statusCategoryOf, taskAgentDot } from './card-model'
-import { searchTasks, type TaskSearchResult } from './task-search'
+import { searchTasks, type TaskSearchOptions, type TaskSearchResult } from './task-search'
 
 /**
  * The Search tab's task results for a query (`searchTasks`: every hub's loaded board,
@@ -15,14 +15,16 @@ import { searchTasks, type TaskSearchResult } from './task-search'
 export function TaskSearchResults({
   feeds,
   q,
+  options,
   onOpen
 }: {
   feeds: readonly HubFeed[]
   q: string
+  options?: TaskSearchOptions
   onOpen: (result: TaskSearchResult) => void
 }) {
   const styles = makeStyles(useTheme())
-  const results = searchTasks(feeds, q)
+  const results = searchTasks(feeds, q, options)
   const severalHubs = feeds.length > 1
   return (
     <View testID="task-search-results">

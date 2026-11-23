@@ -117,6 +117,7 @@ export function DescriptionEditor({ row, onClose }: { row: TaskRow; onClose: () 
     )
 
   const done = () => {
+    if (saving) return
     const update = descriptionUpdate(original, doc.text)
     if (!update) {
       onClose()
@@ -254,6 +255,7 @@ export function DescriptionEditor({ row, onClose }: { row: TaskRow; onClose: () 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <TextInput
           testID="description-input"
+          editable={!saving}
           value={doc.text}
           onChangeText={(text) => setDoc((d) => ({ ...d, text }))}
           onSelectionChange={(e) => {

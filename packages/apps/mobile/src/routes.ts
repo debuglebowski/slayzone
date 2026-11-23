@@ -61,3 +61,14 @@ export function findSession(
   }
   return sessions.find((s) => s.entry.id === id)
 }
+
+/** The route immediately below this screen, even during the first render of a push. */
+export function previousStackRoute(
+  stack: { routes: ReadonlyArray<{ key: string; name: string }> } | undefined,
+  key: string
+): string | undefined {
+  if (!stack) return undefined
+  const index = stack.routes.findIndex((route) => route.key === key)
+  if (index === 0) return undefined
+  return stack.routes.at(index === -1 ? -1 : index - 1)?.name
+}

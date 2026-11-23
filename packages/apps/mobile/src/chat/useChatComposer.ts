@@ -25,8 +25,10 @@ import {
   type ChatModelsView,
   userMessageAttachments
 } from '@slayzone/terminal-contracts'
-import { useCallback, useRef, useState } from 'react'
+import { useHubId } from '@slayzone/transport/client'
+import { useCallback, useRef } from 'react'
 import { messageContent } from './attachments'
+import { useChatDraft } from './chat-drafts'
 import { openWebLink } from './Markdown'
 import {
   acceptSlash,
@@ -91,23 +93,16 @@ export function useChatComposer({
   sessionEnded: boolean
 }): ChatComposer {
   const client = useTRPCClient()
-  const version = useRef(0)
-  const draftSnapshot = useRef<{ text: string; attachments: readonly ChatAttachment[] }>({
-    text: '',
-    attachments: []
-  })
-  const [draft, setDraftState] = useState('')
-  const [attachments, setAttachmentsState] = useState<readonly ChatAttachment[]>([])
-  const setDraft = useCallback((text: string) => {
-    version.current++
-    draftSnapshot.current = { ...draftSnapshot.current, text }
-    setDraftState(text)
-  }, [])
-  const setAttachments = useCallback((files: readonly ChatAttachment[]) => {
-    version.current++
-    draftSnapshot.current = { ...draftSnapshot.current, attachments: files }
-    setAttachmentsState(files)
-  }, [])
+  const { draft: draftState, snapshot } = useChatDraft(
+    useHubId(),
+    JSON.stringify([target.taskId, target.tabId, target.mode])
+  )
+  const { text: draft, attachments } = snapshot
+  const setDraft = useCallback((text: string) => draftState.update({ text }), [draftState])
+  const setAttachments = useCallback(
+    (files: readonly ChatAttachment[]) => draftState.update({ attachments: files }),
+    [draftState]
+  )
   /** The entry picked from the menu for this draft (its use is counted on send). */
   const pickedRef = useRef<{ source: string; name: string } | null>(null)
   /** What was sent for the running turn (put back when Stop withdraws it). */
@@ -139,49 +134,46 @@ export function useChatComposer({
   )
   const sendDraft = useCallback(
     async (send: string, original: string, files: readonly ChatAttachment[]) => {
-      const submittedVersion = version.current
+      const submittedVersion = draftState.read().revision
       const queuedSend = inFlight || queued > 0
       if (!queuedSend) {
-        setDraft('')
-        setAttachments([])
+        draftState.clear()
       }
       try {
         await submitPrompt(send, original, files)
-        if (queuedSend && version.current === submittedVersion) {
-          setDraft('')
-          setAttachments([])
+        if (queuedSend && draftState.read().revision === submittedVersion) {
+          draftState.clear()
         }
       } catch (err) {
         notify(`Could not queue the message: ${err instanceof Error ? err.message : String(err)}`)
       }
     },
-    [inFlight, queued, submitPrompt, notify, setDraft, setAttachments]
+    [inFlight, queued, submitPrompt, notify, draftState]
   )
   const retryQueuedSubmission = useCallback(
     async (id: string) => {
       const entry = queue.pending?.find((item) => item.id === id)
-      const submittedVersion = version.current
+      const submittedVersion = draftState.read().revision
       const same =
         entry?.expectedMode === target.mode &&
         entry?.original === draft.trim() &&
         JSON.stringify(userMessageAttachments(entry.content)) === JSON.stringify(attachments)
       try {
         await queue.retryPending?.(id)
-        if (same && version.current === submittedVersion) {
-          setDraft('')
-          setAttachments([])
+        if (same && draftState.read().revision === submittedVersion) {
+          draftState.clear()
         }
       } catch {
         /* The pending row retains its input and failure reason. */
       }
     },
-    [queue, draft, attachments, setDraft, setAttachments, target.mode]
+    [queue, draft, attachments, draftState, target.mode]
   )
 
   const sendText = useCallback(
     async (raw: string): Promise<void> => {
       if (sessionEnded) return
-      const files = draftSnapshot.current.attachments
+      const files = draftState.read().attachments
       const plan = planSend(raw, { view: models, current: settings.model }, caps, slash.commands)
       switch (plan.type) {
         case 'empty':
@@ -215,7 +207,7 @@ export function useChatComposer({
         }
       }
     },
-    [sessionEnded, models, caps, slash, notify, settings, sendDraft, setDraft]
+    [sessionEnded, models, caps, slash, notify, settings, sendDraft, setDraft, draftState]
   )
 
   const chatActions: ChatActions = {
@@ -284,14 +276,14 @@ export function useChatComposer({
         return
       }
     }
-    void sendText(draftSnapshot.current.text)
+    void sendText(draftState.read().text)
   }
 
   const stop = (): void => {
     void queue.clear().catch(() => undefined)
     void abortAndPop().then(
       (result) => {
-        if (!result.popped || draftSnapshot.current.text.trim() !== '') return
+        if (!result.popped || draftState.read().text.trim() !== '') return
         // What this phone sent, else the popped message itself (sent elsewhere, or
         // before a remount): its text and its files.
         const sent = lastSentRef.current
@@ -312,7 +304,7 @@ export function useChatComposer({
     attachments,
     removeAttachment: (index) => setAttachments(attachments.filter((_, i) => i !== index)),
     // From the snapshot, not the render: uploads finish one by one, between renders.
-    addAttachments: (files) => setAttachments([...draftSnapshot.current.attachments, ...files]),
+    addAttachments: (files) => setAttachments([...draftState.read().attachments, ...files]),
     menu: menu && menu.length > 0 ? menu : null,
     pick: (item) => run(acceptSlash(item, draft, caps), item),
     send,

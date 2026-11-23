@@ -722,3 +722,28 @@ describe('ArtifactViewer, Export', () => {
     expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
   })
 })
+
+it('leaving during a slow artifact share download cancels the share sheet', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockReset()
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined })
+  let finishDownload!: (path: string) => void
+  download.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishDownload = resolve
+      })
+  )
+  const hub = fakeArtifactsHub({
+    artifacts: [artifactRow('a1', 'plan.md')],
+    content: { a1: '# Plan' }
+  })
+  await view(hub, { artifactId: 'a1' })
+  await screen.findByTestId('artifact-page-markdown')
+  await userEvent.setup().press(screen.getByRole('button', { name: 'Share' }))
+  await waitFor(() => expect(download).toHaveBeenCalledTimes(1))
+  await act(async () => screen.unmount())
+  await act(async () => finishDownload('file:///cache/a1/plan.md'))
+  expect(share).not.toHaveBeenCalled()
+})

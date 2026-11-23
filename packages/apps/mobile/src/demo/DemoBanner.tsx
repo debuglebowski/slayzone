@@ -18,9 +18,7 @@ export function DemoBanner() {
       <View style={styles.badge}>
         <Text style={styles.badgeText}>DEMO</Text>
       </View>
-      <Text style={styles.text} numberOfLines={2}>
-        Sample data — changes reset when you exit.
-      </Text>
+      <Text style={styles.text}>Sample data — changes reset when you exit.</Text>
       <Pressable
         testID="exit-demo"
         onPress={() => confirmExitDemo(exitDemo)}
@@ -56,6 +54,6 @@ const makeStyles = (t: ChromeColors) =>
     },
     badgeText: { fontSize: 11, fontWeight: '700', color: t.primaryForeground, letterSpacing: 0.5 },
     text: { flex: 1, fontSize: 13, color: t.accentForeground },
-    exit: { minHeight: 44, justifyContent: 'center' },
+    exit: { minHeight: 44, maxWidth: '35%', justifyContent: 'center' },
     action: { fontSize: 14, fontWeight: '600', color: t.accentForeground }
   })

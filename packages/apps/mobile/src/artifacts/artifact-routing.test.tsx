@@ -6,7 +6,7 @@
  */
 import { renderRouter, screen } from 'expo-router/testing-library'
 import type { ReactNode } from 'react'
-import { act } from '@testing-library/react-native'
+import { act, userEvent, waitFor } from '@testing-library/react-native'
 import { router } from 'expo-router'
 import { Dimensions, Platform } from 'react-native'
 import type { HubSession } from '../hub-session'
@@ -174,4 +174,29 @@ describe('artifactBackLabel', () => {
     expect(artifactBackLabel('something/else')).toBe('Back')
     expect(artifactBackLabel(undefined)).toBe('Artifacts')
   })
+})
+
+const mockTabVisibility: boolean[] = []
+jest.mock('../tab-bar', () => {
+  const actual = jest.requireActual('../tab-bar')
+  return {
+    ...actual,
+    useTabBarHiding: () => {
+      const value = actual.useTabBarHiding()
+      mockTabVisibility.push(value.hidden)
+      return value
+    }
+  }
+})
+
+it('task-origin artifact keeps the global bar hidden', async () => {
+  await renderRouter('src/app', { initialUrl: '/task/home.example/t1' })
+  await waitFor(() => expect(mockTabVisibility.at(-1)).toBe(true))
+  await act(async () => router.push('/artifacts/home.example/t1/a1'))
+  expect(await screen.findByText('back: Task', undefined, MOUNT)).toBeOnTheScreen()
+  expect(mockTabVisibility.at(-1)).toBe(true)
+  await userEvent.setup().press(screen.getByTestId('tab-details'))
+  expect(screen).toHavePathnameWithParams('/task/home.example/t1?segment=details')
+  await act(async () => router.back())
+  expect(screen).toHavePathname('/')
 })

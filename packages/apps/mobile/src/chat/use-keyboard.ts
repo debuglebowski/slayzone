@@ -22,13 +22,18 @@ function moveWithKeyboard(e: KeyboardEvent): void {
  */
 export function useKeyboardOverlap(ref: RefObject<ComponentRef<typeof View> | null>): {
   bottom: number
+  availableHeight: number | null
   onLayout: () => void
 } {
-  const [frameBottom, setFrameBottom] = useState<number | null>(null)
+  const [frame, setFrame] = useState<{ bottom: number; height: number } | null>(null)
   const [keyboardTop, setKeyboardTop] = useState<number | null>(null)
   const onLayout = useStableCallback(() => {
     ref.current?.measureInWindow((_x: number, y: number, _w: number, height: number) =>
-      setFrameBottom((prev) => (prev === y + height ? prev : y + height))
+      setFrame((prev) =>
+        prev?.bottom === y + height && prev.height === height
+          ? prev
+          : { bottom: y + height, height }
+      )
     )
   })
   useEffect(() => {
@@ -38,6 +43,9 @@ export function useKeyboardOverlap(ref: RefObject<ComponentRef<typeof View> | nu
         moveWithKeyboard(e)
         // Cross-fade transitions report no position: nothing to avoid (as KeyboardAvoidingView).
         setKeyboardTop(e.endCoordinates.screenY > 0 ? e.endCoordinates.screenY : null)
+      }),
+      Keyboard.addListener('keyboardWillChangeFrame', (e) => {
+        if (e.endCoordinates.screenY > 0) setKeyboardTop(e.endCoordinates.screenY)
       }),
       Keyboard.addListener('keyboardWillHide', (e) => {
         moveWithKeyboard(e)
@@ -51,6 +59,6 @@ export function useKeyboardOverlap(ref: RefObject<ComponentRef<typeof View> | nu
     }
   }, [onLayout])
   const bottom =
-    keyboardTop === null || frameBottom === null ? 0 : Math.max(0, frameBottom - keyboardTop)
-  return { bottom, onLayout }
+    keyboardTop === null || frame === null ? 0 : Math.max(0, frame.bottom - keyboardTop)
+  return { bottom, availableHeight: frame ? Math.max(0, frame.height - bottom) : null, onLayout }
 }

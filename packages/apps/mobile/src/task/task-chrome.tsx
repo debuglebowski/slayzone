@@ -34,7 +34,7 @@ export function TaskChromeProvider({
   value,
   children
 }: {
-  value: TaskChrome
+  value: TaskChrome | null
   children: ReactNode
 }) {
   return <TaskChromeContext.Provider value={value}>{children}</TaskChromeContext.Provider>
@@ -48,13 +48,12 @@ export function useTaskChrome(): TaskChrome | null {
 /**
  * Keeps content that cannot scroll under the chrome (the terminal: its own key bar and
  * field must stay reachable) clear of it — below the top bar, above the tab bar.
- * Outside the phone's task page: just its children.
+ * The wrapper stays mounted when the available width changes.
  */
 export function ChromeInsets({ children }: { children: ReactNode }) {
   const chrome = useTaskChrome()
-  if (!chrome) return <>{children}</>
   return (
-    <View style={{ flex: 1, paddingTop: chrome.top, paddingBottom: chrome.bottom }}>
+    <View style={{ flex: 1, paddingTop: chrome?.top ?? 0, paddingBottom: chrome?.bottom ?? 0 }}>
       {children}
     </View>
   )

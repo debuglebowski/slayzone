@@ -11,7 +11,9 @@ import { type ReactNode, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -21,7 +23,7 @@ import { findTaskRow, type HubFeed } from '../hub-board'
 import type { HubSession } from '../hub-session'
 import { type ChromeColors, useTheme } from '../theme'
 import { hubTarget } from './hub-rest'
-import type { HubArtifactSearchResult } from './search'
+import type { ArtifactSearchQuery, HubArtifactSearchResult } from './search'
 import { highlightParts } from './search-highlight'
 import { HeaderButton, ScreenHeader } from './ScreenHeader'
 import { useArtifactSearch } from './use-artifact-search'
@@ -47,7 +49,7 @@ export function ArtifactSearchScreen({
   /** A tab's root: the title large (no back). */
   largeTitle?: boolean
   /** Other results for the same query, shown above the artifacts' (the Search tab's tasks). */
-  before?: (q: string) => ReactNode
+  before?: (q: string, options: Pick<ArtifactSearchQuery, 'caseSensitive' | 'regex'>) => ReactNode
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -120,7 +122,23 @@ export function ArtifactSearchScreen({
           onPress={() => setRegex((v) => !v)}
         />
       </View>
-      {!q.trim() ? null : searching && !before ? (
+      {!q.trim() ? (
+        <ScrollView
+          testID="artifact-search-empty"
+          style={styles.fill}
+          contentContainerStyle={styles.fill}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical
+        >
+          <Pressable
+            testID="artifact-search-dismiss-keyboard"
+            accessible={false}
+            style={styles.fill}
+            onPress={Keyboard.dismiss}
+          />
+        </ScrollView>
+      ) : searching && !before ? (
         <View style={styles.center}>
           <ActivityIndicator testID="artifact-search-searching" />
         </View>
@@ -129,7 +147,7 @@ export function ArtifactSearchScreen({
           testID="artifact-search-list"
           keyboardDismissMode="on-drag"
           data={searching ? [] : (outcome?.results ?? [])}
-          ListHeaderComponent={before ? <>{before(q)}</> : undefined}
+          ListHeaderComponent={before ? <>{before(q, { caseSensitive, regex })}</> : undefined}
           keyExtractor={(r) => r.key}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
@@ -280,6 +298,7 @@ const makeStyles = (t: ChromeColors) =>
       paddingBottom: 4
     },
     screen: { flex: 1, backgroundColor: t.background },
+    fill: { flexGrow: 1 },
     bar: {
       flexDirection: 'row',
       alignItems: 'center',

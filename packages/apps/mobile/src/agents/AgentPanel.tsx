@@ -77,6 +77,7 @@ export interface AgentPanelProps {
    * Omitted (iPad): the panel's own bar.
    */
   phone?: (agent: AgentNav, body: ReactNode) => ReactNode
+  renderWide?: (body: ReactNode) => ReactNode
 }
 
 /** Something to do with the agent (the agent card lists them). */
@@ -176,7 +177,15 @@ class TerminalSlot {
 /** A pill's 30pt, reaching the 44pt a finger needs. */
 const PILL_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 }
 
-export function AgentPanel({ hubId, feed, showHub, row, openingKey, phone }: AgentPanelProps) {
+export function AgentPanel({
+  hubId,
+  feed,
+  showHub,
+  row,
+  openingKey,
+  phone,
+  renderWide
+}: AgentPanelProps) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const trpc = useTRPC()
@@ -512,6 +521,117 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, phone }: Age
     </View>
   )
 
+  const panel = (
+    <View style={styles.screen}>
+      {phone ? null : (
+        <>
+          <View style={styles.bar}>
+            <View style={styles.identity}>
+              {dot ? <AgentDot kind={dot} /> : <View style={styles.noDot} />}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Change provider"
+                accessibilityValue={{ text: modeLabel(task.agent_id) }}
+                onPress={() => setPicking(true)}
+                disabled={busy !== null}
+                style={styles.provider}
+              >
+                <Text style={styles.mode} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+                  {modeLabel(task.agent_id)} ▾
+                </Text>
+              </Pressable>
+              <Text
+                style={styles.statusText}
+                numberOfLines={2}
+                maxFontSizeMultiplier={MAX_CHROME_SCALE}
+              >
+                {statusParts.join(' · ')}
+              </Text>
+              {busy || (!loaded && !loadError) ? (
+                <ActivityIndicator color={theme.mutedForeground} />
+              ) : null}
+            </View>
+            {inline.length > 0 || more.length > 0 ? (
+              <View style={styles.actions}>
+                {inline.map((a) => (
+                  <Pressable
+                    key={a.name}
+                    accessibilityRole="button"
+                    onPress={a.onPress}
+                    disabled={busy !== null}
+                    hitSlop={PILL_HIT_SLOP}
+                    style={[styles.action, a.name === 'Start' && styles.actionPrimary]}
+                  >
+                    <Text
+                      style={[
+                        styles.actionText,
+                        a.name === 'Start' && styles.actionPrimaryText,
+                        busy !== null && styles.disabled
+                      ]}
+                      maxFontSizeMultiplier={MAX_CHROME_SCALE}
+                    >
+                      {a.name}
+                    </Text>
+                  </Pressable>
+                ))}
+                {more.length > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="More agent actions"
+                    onPress={openMenu}
+                    disabled={busy !== null}
+                    hitSlop={PILL_HIT_SLOP}
+                    style={styles.action}
+                  >
+                    <Text style={styles.actionText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
+                      ⋯
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+          {problems}
+        </>
+      )}
+      {body}
+      {phone ? null : (
+        <>
+          <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">
+            {more.map((a) => (
+              <Pressable
+                key={a.name}
+                accessibilityRole="button"
+                onPress={() => {
+                  setMenu(false)
+                  a.onPress()
+                }}
+                style={styles.pickerRow}
+              >
+                <Text style={styles.pickerText}>{a.name}</Text>
+              </Pressable>
+            ))}
+          </BottomSheet>
+          <BottomSheet visible={picking} onClose={() => setPicking(false)} testID="mode-picker">
+            <Text style={styles.pickerTitle}>Provider</Text>
+            {providers.map((m) => (
+              <Pressable
+                key={m.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: m.id === task.agent_id }}
+                onPress={() => switchTo(m.id)}
+                style={styles.pickerRow}
+              >
+                <Text style={styles.pickerText}>{m.label}</Text>
+                {m.id === task.agent_id ? <Text style={styles.pickerText}>✓</Text> : null}
+              </Pressable>
+            ))}
+          </BottomSheet>
+        </>
+      )}
+    </View>
+  )
+
   if (phone) {
     const stop = actions.find((a) => a.name === 'Stop')
     return phone(
@@ -539,112 +659,11 @@ export function AgentPanel({ hubId, feed, showHub, row, openingKey, phone }: Age
         onOpen: readTextSize,
         problems: loadError || actionError ? problems : null
       },
-      body
+      panel
     )
   }
 
-  return (
-    <View style={styles.screen}>
-      <View style={styles.bar}>
-        <View style={styles.identity}>
-          {dot ? <AgentDot kind={dot} /> : <View style={styles.noDot} />}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Change provider"
-            accessibilityValue={{ text: modeLabel(task.agent_id) }}
-            onPress={() => setPicking(true)}
-            disabled={busy !== null}
-            style={styles.provider}
-          >
-            <Text style={styles.mode} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-              {modeLabel(task.agent_id)} ▾
-            </Text>
-          </Pressable>
-          <Text
-            style={styles.statusText}
-            numberOfLines={2}
-            maxFontSizeMultiplier={MAX_CHROME_SCALE}
-          >
-            {statusParts.join(' · ')}
-          </Text>
-          {busy || (!loaded && !loadError) ? (
-            <ActivityIndicator color={theme.mutedForeground} />
-          ) : null}
-        </View>
-        {inline.length > 0 || more.length > 0 ? (
-          <View style={styles.actions}>
-            {inline.map((a) => (
-              <Pressable
-                key={a.name}
-                accessibilityRole="button"
-                onPress={a.onPress}
-                disabled={busy !== null}
-                hitSlop={PILL_HIT_SLOP}
-                style={[styles.action, a.name === 'Start' && styles.actionPrimary]}
-              >
-                <Text
-                  style={[
-                    styles.actionText,
-                    a.name === 'Start' && styles.actionPrimaryText,
-                    busy !== null && styles.disabled
-                  ]}
-                  maxFontSizeMultiplier={MAX_CHROME_SCALE}
-                >
-                  {a.name}
-                </Text>
-              </Pressable>
-            ))}
-            {more.length > 0 ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="More agent actions"
-                onPress={openMenu}
-                disabled={busy !== null}
-                hitSlop={PILL_HIT_SLOP}
-                style={styles.action}
-              >
-                <Text style={styles.actionText} maxFontSizeMultiplier={MAX_CHROME_SCALE}>
-                  ⋯
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
-      {problems}
-      {body}
-      <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">
-        {more.map((a) => (
-          <Pressable
-            key={a.name}
-            accessibilityRole="button"
-            onPress={() => {
-              setMenu(false)
-              a.onPress()
-            }}
-            style={styles.pickerRow}
-          >
-            <Text style={styles.pickerText}>{a.name}</Text>
-          </Pressable>
-        ))}
-      </BottomSheet>
-      <BottomSheet visible={picking} onClose={() => setPicking(false)} testID="mode-picker">
-        <Text style={styles.pickerTitle}>Provider</Text>
-        {providers.map((m) => (
-          <Pressable
-            key={m.id}
-            accessibilityRole="button"
-            accessibilityState={{ selected: m.id === task.agent_id }}
-            onPress={() => switchTo(m.id)}
-            style={styles.pickerRow}
-          >
-            <Text style={styles.pickerText}>{m.label}</Text>
-            {m.id === task.agent_id ? <Text style={styles.pickerText}>✓</Text> : null}
-          </Pressable>
-        ))}
-      </BottomSheet>
-    </View>
-  )
+  return renderWide ? renderWide(panel) : panel
 }
 
 const makeStyles = (t: ChromeColors) =>

@@ -129,6 +129,7 @@ function block(token: Token, s: Styles, key: string): ReactNode {
     case 'table': {
       const t = token as Tokens.Table
       const widths = columnWidths([t.header, ...t.rows])
+      const width = widths.reduce((sum, cell) => sum + cell, 0) + 2 * StyleSheet.hairlineWidth
       const row = (cells: Tokens.TableCell[], header: boolean, rowKey: string) => (
         <View key={rowKey} style={s.tableRow}>
           {cells.map((cell, i) => (
@@ -141,8 +142,14 @@ function block(token: Token, s: Styles, key: string): ReactNode {
         </View>
       )
       return (
-        <ScrollView key={key} horizontal style={s.block}>
-          <View style={s.table}>
+        <ScrollView
+          key={key}
+          testID="markdown-table-scroll"
+          horizontal
+          directionalLockEnabled
+          style={[s.block, s.tableViewport]}
+        >
+          <View style={[s.table, { width }]}>
             {row(t.header, true, `${key}.h`)}
             {t.rows.map((cells, i) => row(cells, false, `${key}.${i}`))}
           </View>
@@ -310,6 +317,7 @@ function makeStyles(t: ChromeColors, muted: boolean) {
     listItem: { flexDirection: 'row', marginBottom: 2 },
     bullet: { width: 22, color: t.mutedForeground },
     listBody: { flex: 1 },
+    tableViewport: { width: '100%', flexGrow: 0 },
     table: { borderWidth: StyleSheet.hairlineWidth, borderColor: t.border, borderRadius: 4 },
     tableRow: { flexDirection: 'row' },
     tableCell: {

@@ -19,6 +19,7 @@ import {
   useMemo,
   useState
 } from 'react'
+import { ChatDraftContext, ChatDraftStore } from './chat/chat-drafts'
 import { forgetArtifactCache } from './artifacts/files'
 import { type DemoHub, openDemoHub } from './demo/demo-hub'
 import { type HubSession, type HubSessionStore, hubSessions } from './hub-session'
@@ -69,6 +70,7 @@ export function HubSessionsProvider({
   children: ReactNode
 }) {
   const [sessions, setSessions] = useState<HubSession[] | undefined>(undefined)
+  const [drafts] = useState(() => new ChatDraftStore())
   const [demo, setDemo] = useState<DemoHub | null>(null)
   // A closed demo hub stops what it still had scheduled (a reply on its way).
   useEffect(() => (demo ? () => demo.dispose() : undefined), [demo])
@@ -83,9 +85,12 @@ export function HubSessionsProvider({
 
   const exitDemo = useCallback(() => {
     // The artifact files it showed were written to the device's cache.
-    if (demo) artifactFiles.forget(demo.session.entry.id)
+    if (demo) {
+      artifactFiles.forget(demo.session.entry.id)
+      drafts.forget(demo.session.entry.id)
+    }
     setDemo(null)
-  }, [demo, artifactFiles])
+  }, [demo, artifactFiles, drafts])
 
   const enterDemo = useCallback(() => setDemo(openDemo()), [openDemo])
 
@@ -110,10 +115,11 @@ export function HubSessionsProvider({
       }
       themeCache.forget(hubId)
       artifactFiles.forget(hubId)
+      drafts.forget(hubId)
       void store.forget(hubId)
       setSessions((current) => current?.filter((s) => s.entry.id !== hubId))
     },
-    [store, themeCache, artifactFiles, demo, exitDemo]
+    [store, themeCache, artifactFiles, drafts, demo, exitDemo]
   )
 
   const value = useMemo<HubSessionsValue>(
@@ -127,5 +133,9 @@ export function HubSessionsProvider({
     }),
     [sessions, demo, signedIn, signOut, enterDemo, exitDemo]
   )
-  return <HubSessionsContext.Provider value={value}>{children}</HubSessionsContext.Provider>
+  return (
+    <ChatDraftContext.Provider value={drafts}>
+      <HubSessionsContext.Provider value={value}>{children}</HubSessionsContext.Provider>
+    </ChatDraftContext.Provider>
+  )
 }

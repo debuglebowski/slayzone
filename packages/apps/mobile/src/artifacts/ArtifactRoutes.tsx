@@ -11,13 +11,16 @@
  * changing width (rotation, Split View) keeps the open artifact as it is.
  */
 import { HubScope } from '@slayzone/transport/client'
-import { useNavigation, useRoute, useRouter } from 'expo-router'
+import { useIsFocused, useNavigation, useRoute, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import type { HubSession } from '../hub-session'
 import { useHubSessions } from '../hub-sessions'
 import { useWide } from '../layout'
-import { findSession, HOME } from '../routes'
+import { findSession, HOME, previousStackRoute, taskHref } from '../routes'
+import { useHideTabBar } from '../tab-bar'
+import type { TaskSegment } from '../task/TaskPage'
+import { TaskTabBar } from '../task/TaskTabBar'
 import { type ChromeColors, useTheme } from '../theme'
 import { useTRPCClient } from '../trpc'
 import { ArtifactsScreen } from './ArtifactsScreen'
@@ -39,6 +42,8 @@ export function TaskArtifactsRoute({
   const router = useRouter()
   const { sessions = [] } = useHubSessions()
   const session = findSession(sessions, hub)
+  const wide = useWide()
+  useHideTabBar(!wide)
   const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
   if (!session) return <NotSignedIn hub={hub} onBack={back} />
   return (
@@ -49,6 +54,7 @@ export function TaskArtifactsRoute({
         taskId={taskId}
         artifactId={artifactId}
         version={version}
+        wide={wide}
       />
     </HubScope>
   )
@@ -70,43 +76,36 @@ export function artifactBackLabel(previousRoute: string | undefined): string {
   return 'Back'
 }
 
-/**
- * The name of the route under `key` in its stack. On the first render of a screen just
- * pushed, the stack may not list it yet: the screen on top then is the one below it.
- */
-function routeBelow(
-  stack: { routes: ReadonlyArray<{ key: string; name: string }> } | undefined,
-  key: string
-): string | undefined {
-  if (!stack) return undefined
-  const at = stack.routes.findIndex((r) => r.key === key)
-  if (at === -1) return stack.routes[stack.routes.length - 1]?.name
-  return at > 0 ? stack.routes[at - 1].name : undefined
-}
-
 function InHubScope({
   session,
   hub,
   taskId,
   artifactId,
-  version
+  version,
+  wide
 }: {
   session: HubSession
   hub: string
   taskId: string
   artifactId: string | null
   version: number | null
+  wide: boolean
 }) {
   const router = useRouter()
   const navigation = useNavigation()
   const hubClient = useTRPCClient()
   const styles = makeStyles(useTheme())
   const [linkError, setLinkError] = useState<string | null>(null)
-  const wide = useWide()
+  const active = useIsFocused()
   const layout = wide ? 'split' : artifactId !== null ? 'artifact' : 'list'
   const back = () => (router.canGoBack() ? router.back() : router.replace(HOME))
   const routeKey = useRoute().key
-  const previousRoute = routeBelow(navigation.getState(), routeKey)
+  const stack = navigation.getState()
+  const previousRoute = previousStackRoute(stack, routeKey)
+  const showTaskTab = (segment: TaskSegment) => {
+    if (segment === 'artifacts' && artifactId === null) return
+    router.dismissTo(taskHref(hub, taskId, { segment }))
+  }
 
   // An artifact link names an artifact, not its task: ask its hub which task holds it.
   const openLinked = (id: string) => {
@@ -140,6 +139,7 @@ function InHubScope({
         session={session}
         taskId={taskId}
         layout={layout}
+        active={active}
         selected={artifactId ? { artifactId, version } : null}
         onSelect={(id) =>
           wide
@@ -154,6 +154,11 @@ function InHubScope({
         }
         artifactBackLabel={artifactBackLabel(previousRoute)}
       />
+      {wide ? null : (
+        <View style={styles.tabs}>
+          <TaskTabBar shown="artifacts" onShow={showTaskTab} />
+        </View>
+      )}
     </View>
   )
 }
@@ -178,6 +183,7 @@ export function versionParam(value: string | string[] | undefined): number | nul
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
     fill: { flex: 1, backgroundColor: t.background },
+    tabs: { marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
     note: { color: t.mutedForeground, padding: 24, textAlign: 'center' },
     error: { color: t.destructive, paddingHorizontal: 16, paddingVertical: 8, fontSize: 13 }
   })

@@ -1,5 +1,5 @@
 /**
- * The phone's task page around its agent (`PhoneTaskPage`): the floating top bar and
+ * The phone's task page around its agent (`TaskPageLayout`): the floating top bar and
  * status island, the agent card (the agent's controls, the task's actions), the tab
  * bar, and the Details and Artifacts tabs — the task's fields, sub-tasks, tags,
  * blockers — every write to the hub that owns the task. The agent panel has a suite of
@@ -546,7 +546,9 @@ describe('the top bar and the status island', () => {
     expect(screen.getByTestId('status-island-label')).toHaveTextContent('Idle')
     await user().press(screen.getByLabelText('Write spec'))
     expect(onSegment).toHaveBeenCalledWith('details')
-    await user().press(screen.getByLabelText('Back to Home'))
+    const back = screen.getByLabelText('Back to Home')
+    expect(back).toHaveStyle({ width: '100%', flex: 1 })
+    await user().press(back)
     expect(onBack).toHaveBeenCalled()
   })
 
@@ -676,7 +678,7 @@ describe('compact bars while reading back', () => {
     expect(screen.getByTestId('task-tabs-compact')).toBeOnTheScreen()
     await user().press(screen.getByText('scroll 0'))
     expect(screen.getByTestId('task-title')).toBeOnTheScreen()
-    expect(screen.getByTestId('task-tabs')).toBeOnTheScreen()
+    expect(screen.getByTestId('task-tabs')).toHaveStyle({ width: '100%' })
   })
 
   it('the compact button brings the tab bar back', async () => {

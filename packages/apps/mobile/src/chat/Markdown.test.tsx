@@ -96,3 +96,23 @@ describe('Markdown', () => {
     expect(StyleSheet.flatten(screen.getByText('1').parent?.props.style).textAlign).toBe('right')
   })
 })
+
+it('gives a wide table a bounded viewport and room for every column', async () => {
+  const headings = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Last']
+  const row = (cells: string[]) => `| ${cells.join(' | ')} |`
+  await render(
+    <Markdown
+      text={[
+        row(headings),
+        row(headings.map(() => '---')),
+        row(headings.map((heading) => `${heading} cell`))
+      ].join('\n')}
+    />
+  )
+  const scroll = screen.getByTestId('markdown-table-scroll')
+  expect(scroll.props.horizontal).toBe(true)
+  expect(StyleSheet.flatten(scroll.props.style).width).toBe('100%')
+  const table = screen.getByText('Last').parent?.parent?.parent?.parent
+  expect(StyleSheet.flatten(table?.props.style).width).toBeGreaterThan(480)
+  expect(screen.getByText('Last cell')).toBeOnTheScreen()
+})

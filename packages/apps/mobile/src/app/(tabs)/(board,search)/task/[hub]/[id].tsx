@@ -1,11 +1,11 @@
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router'
+import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { useOpenTasks } from '../../../../../home/OpenTasksProvider'
 import { artifactHref } from '../../../../../artifacts/routes'
 import { useHubFeeds } from '../../../../../hub-connections'
 import { useHubSessions } from '../../../../../hub-sessions'
 import { useWide } from '../../../../../layout'
-import { findSession, HOME, taskHref } from '../../../../../routes'
+import { findSession, HOME, previousStackRoute, taskHref } from '../../../../../routes'
 import { useHideTabBar } from '../../../../../tab-bar'
 import { segmentParam, TaskScreen } from '../../../../../task/TaskScreen'
 
@@ -29,7 +29,17 @@ export default function TaskRoute() {
   const router = useRouter()
   // This route's own navigation: `router.setParams` names the focused route, which is
   // not this one while a screen pushed over it (an artifact) is still on its way out.
-  const navigation = useNavigation<{ setParams: (params: { segment: string }) => void }>()
+  const navigation = useNavigation()
+  const routeKey = useRoute().key
+  const previous = previousStackRoute(navigation.getState(), routeKey)
+  const backDestination =
+    previous === 'artifacts/index'
+      ? 'Search'
+      : previous?.startsWith('artifacts/')
+        ? 'Artifacts'
+        : previous?.startsWith('task/')
+          ? 'the parent task'
+          : undefined
   const wide = useWide()
   const [openedWide] = useState(wide)
   const { sessions = [] } = useHubSessions()
@@ -53,8 +63,15 @@ export default function TaskRoute() {
       feeds={feeds}
       wide={wide}
       segment={segmentParam(segment)}
-      onSegment={(next) => navigation.setParams({ segment: next })}
+      onSegment={(next) =>
+        navigation.dispatch({
+          type: 'SET_PARAMS',
+          source: routeKey,
+          payload: { params: { segment: next } }
+        })
+      }
       onBack={back}
+      {...(backDestination ? { backDestination } : {})}
       onOpenTask={(taskId) => router.push(taskHref(hub, taskId))}
       onOpenArtifact={(artifactId, version) =>
         router.push(artifactHref(hub, id, artifactId, version === null ? {} : { version }))

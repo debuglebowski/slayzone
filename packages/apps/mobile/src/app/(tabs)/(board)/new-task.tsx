@@ -1,5 +1,5 @@
-import { useLocalSearchParams, usePreventRemove, useRouter } from 'expo-router'
-import { useState } from 'react'
+import { useLocalSearchParams, useNavigation, usePreventRemove, useRouter } from 'expo-router'
+import { useCallback, useState } from 'react'
 import { HOME, taskHref } from '../../../routes'
 import { confirmDiscardTask, NewTaskScreen } from '../../../task-edit/NewTaskScreen'
 
@@ -19,14 +19,20 @@ export default function NewTaskRoute() {
     parent?: string
   }>()
   const router = useRouter()
-  const [dirty, setDirty] = useState(false)
+  const navigation = useNavigation()
+  const [form, setForm] = useState({ dirty: false, creating: false })
   // Leaving on purpose (Cancel already asked, or the task was created) skips the question.
-  const allowLeave = usePreventRemove(dirty, ({ repeat }) => confirmDiscardTask(repeat))
+  const allowLeave = usePreventRemove(form.dirty || form.creating, ({ repeat }) =>
+    confirmDiscardTask(repeat, form.creating)
+  )
   const back = () => {
     allowLeave()
     if (router.canGoBack()) router.back()
     else router.replace(HOME)
   }
+  const recordForm = useCallback((dirty: boolean, creating: boolean) => {
+    setForm({ dirty, creating })
+  }, [])
   return (
     <NewTaskScreen
       hubAddress={hub ?? ''}
@@ -36,11 +42,12 @@ export default function NewTaskRoute() {
       dueDate={due || undefined}
       parentId={parent || undefined}
       onCreated={(hubAddress, taskId) => {
+        if (!navigation.isFocused()) return
         allowLeave()
         router.replace(taskHref(hubAddress, taskId))
       }}
       onCancel={back}
-      onDirtyChange={setDirty}
+      onDirtyChange={recordForm}
     />
   )
 }

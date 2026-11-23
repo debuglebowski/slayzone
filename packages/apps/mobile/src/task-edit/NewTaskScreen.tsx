@@ -15,7 +15,7 @@ import { HubScope } from '@slayzone/transport/client'
 import { todayISO } from '@slayzone/tasks/board'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/workflow'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -52,10 +52,13 @@ import { messageOf } from './use-task-writes'
 const DEFAULT_PRIORITY = 3
 
 /** Asks before a typed task is thrown away (Cancel, or the route's swipe back). */
-export function confirmDiscardTask(onDiscard: () => void): void {
-  Alert.alert('Discard this task?', 'What you typed is not saved.', [
+export function confirmDiscardTask(onDiscard: () => void, creating = false): void {
+  const message = creating
+    ? 'The hub may still create this task. Leave this screen?'
+    : 'What you typed is not saved.'
+  Alert.alert(creating ? 'Leave while creating?' : 'Discard this task?', message, [
     { text: 'Keep editing', style: 'cancel' },
-    { text: 'Discard', style: 'destructive', onPress: onDiscard }
+    { text: creating ? 'Leave' : 'Discard', style: 'destructive', onPress: onDiscard }
   ])
 }
 
@@ -75,7 +78,7 @@ export interface NewTaskScreenProps {
   /** Cancel (after asking, when a title was typed). */
   onCancel: () => void
   /** Whether leaving now would throw away a typed title (the route guards swipe back). */
-  onDirtyChange?: (dirty: boolean) => void
+  onDirtyChange?: (dirty: boolean, creating: boolean) => void
 }
 
 function feedOfAddress(feeds: readonly HubFeed[], address: string): HubFeed | undefined {
@@ -168,7 +171,7 @@ function NewTaskForm({
   onMoveHub: (form: FormState) => void
   onCreated: NewTaskScreenProps['onCreated']
   onCancel: () => void
-  onDirtyChange?: (dirty: boolean) => void
+  onDirtyChange?: (dirty: boolean, creating: boolean) => void
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -179,6 +182,14 @@ function NewTaskForm({
   const [explicit, setExplicit] = useState(initial.explicit)
   const [open, setOpen] = useState<Open>(null)
   const [creating, setCreating] = useState(false)
+  const submitting = useRef(false)
+  const abandoned = useRef(false)
+  useLayoutEffect(() => {
+    abandoned.current = false
+    return () => {
+      abandoned.current = true
+    }
+  }, [])
   const [error, setError] = useState<string | null>(null)
   const project = projectIn(feed, draft.projectId)
   const parent = draft.parentId
@@ -187,14 +198,22 @@ function NewTaskForm({
   const today = todayISO()
   const set = (fields: Partial<NewTaskDraft>) => setDraft((d) => ({ ...d, ...fields }))
   const dirty = draft.title.trim() !== ''
-  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
-  const cancel = () => (dirty ? confirmDiscardTask(onCancel) : onCancel())
+  useEffect(() => onDirtyChange?.(dirty, creating), [dirty, creating, onDirtyChange])
+  const cancel = () => {
+    const leave = () => {
+      abandoned.current = true
+      onCancel()
+    }
+    if (dirty || submitting.current) confirmDiscardTask(leave, submitting.current)
+    else leave()
+  }
 
   const input = createTaskInput(draft)
   // Creates on the scope's hub; the created task goes on that hub's board at once (the
   // task screen finds it there) while the whole board reloads behind, then it opens.
   const create = () => {
-    if (!input || creating) return
+    if (!input || submitting.current) return
+    submitting.current = true
     setCreating(true)
     setError(null)
     client.task.create
@@ -208,9 +227,15 @@ function NewTaskForm({
               : board
         )
         void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
+        submitting.current = false
+        if (abandoned.current) return
+        setCreating(false)
+        setDraft((draft) => ({ ...draft, title: '' }))
         onCreated(feed.hub.label, task.id)
       })
       .catch((err: unknown) => {
+        submitting.current = false
+        if (abandoned.current) return
         setCreating(false)
         setError(`Couldn't create the task: ${messageOf(err)}`)
       })
@@ -273,6 +298,7 @@ function NewTaskForm({
       >
         <TextInput
           testID="new-task-title"
+          editable={!creating}
           value={draft.title}
           onChangeText={(title) => set({ title })}
           autoFocus
@@ -293,7 +319,7 @@ function NewTaskForm({
               testID="new-task-project"
               label={project?.name ?? 'Choose a project'}
               accessibilityLabel={`Project: ${project?.name ?? 'none chosen'}`}
-              onPress={draft.parentId ? undefined : () => setOpen('project')}
+              onPress={draft.parentId || creating ? undefined : () => setOpen('project')}
             />
           </Field>
           <Field label="Status">
@@ -301,7 +327,7 @@ function NewTaskForm({
               testID="new-task-status"
               label={statusLabel(draft.status, project)}
               accessibilityLabel={`Status: ${statusLabel(draft.status, project)}`}
-              onPress={() => setOpen('status')}
+              onPress={creating ? undefined : () => setOpen('status')}
             />
           </Field>
           <Field label="Priority">
@@ -309,7 +335,7 @@ function NewTaskForm({
               testID="new-task-priority"
               label={priorityLabel(draft.priority)}
               accessibilityLabel={`Priority: ${priorityLabel(draft.priority)}`}
-              onPress={() => setOpen('priority')}
+              onPress={creating ? undefined : () => setOpen('priority')}
             />
           </Field>
           <Field label="Due">
@@ -317,7 +343,7 @@ function NewTaskForm({
               testID="new-task-due"
               label={dueLabel(draft.dueDate, today)}
               accessibilityLabel={`Due: ${dueLabel(draft.dueDate, today)}`}
-              onPress={() => setOpen('due')}
+              onPress={creating ? undefined : () => setOpen('due')}
             />
           </Field>
           {templateList.length > 0 ? (
@@ -326,7 +352,7 @@ function NewTaskForm({
                 testID="new-task-template"
                 label={templateList.find((c) => c.key === draft.templateId)?.label ?? 'No template'}
                 accessibilityLabel={`Template: ${templateList.find((c) => c.key === draft.templateId)?.label ?? 'No template'}`}
-                onPress={() => setOpen('template')}
+                onPress={creating ? undefined : () => setOpen('template')}
               />
             </Field>
           ) : null}

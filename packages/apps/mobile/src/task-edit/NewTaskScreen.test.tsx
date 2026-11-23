@@ -149,7 +149,7 @@ describe('NewTaskScreen', () => {
     await user().press(screen.getByText('Cancel'))
     expect(onCancel).toHaveBeenCalledTimes(1)
     await fireEvent.changeText(screen.getByTestId('new-task-title'), 'Half a thought')
-    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true, false)
     let answer = 'Keep editing'
     const alert = jest
       .spyOn(Alert, 'alert')
@@ -349,4 +349,24 @@ describe('NewTaskScreen', () => {
     )
     expect(screen.getByText('Not signed in to gone.example')).toBeOnTheScreen()
   })
+})
+
+it('Cancel during a slow create does not later open the submitted task', async () => {
+  hubs()
+  let finishCreate!: (task: { id: string }) => void
+  const pending = new Promise<{ id: string }>((resolve) => {
+    finishCreate = resolve
+  })
+  const work = serveTaskHub(mockHubs, workHub.id, { 'task.create': () => pending })
+  const { onCancel, onCreated } = await open()
+  await fireEvent.changeText(screen.getByTestId('new-task-title'), 'Draft during slow create')
+  await user().press(screen.getByText('Create'))
+  await waitFor(() => expect(creates(work)).toHaveLength(1))
+  jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+    buttons?.find((b) => b.text === 'Leave')?.onPress?.()
+  })
+  await user().press(screen.getByText('Cancel'))
+  expect(onCancel).toHaveBeenCalledTimes(1)
+  await act(async () => finishCreate({ id: 'slow-response' }))
+  expect(onCreated).not.toHaveBeenCalled()
 })

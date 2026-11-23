@@ -1,4 +1,4 @@
-import { act, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
 import type { ReactNode } from 'react'
 import { Alert, type AlertButton } from 'react-native'
 import { pickUploads } from '../artifacts/pick-uploads'
@@ -226,4 +226,23 @@ describe('DescriptionSection', () => {
     expect(await screen.findByText("Couldn't attach a.jpg: Hub unreachable")).toBeOnTheScreen()
     expect(editor().props.value).toBe('Text')
   })
+})
+
+it('locks description input while a slow Done is saving a snapshot', async () => {
+  const row = rowWith('Original')
+  let finishRead!: (task: typeof row.task) => void
+  const read = new Promise<typeof row.task>((resolve) => {
+    finishRead = resolve
+  })
+  const { work } = await show(row, { 'task.get': () => read })
+  await user().press(screen.getByText('Edit'))
+  await fireEvent.changeText(editor(), 'First edit')
+  await user().press(screen.getByText('Done'))
+  await waitFor(() => expect(work.some((entry) => entry.path === 'task.get')).toBe(true))
+  expect(editor()).toBeDisabled()
+  await act(async () => finishRead(row.task))
+  await waitFor(() => expect(screen.queryByTestId('description-input')).toBeNull())
+  expect(writes(work)).toEqual([
+    { path: 'task.update', input: { id: 't1', description: 'First edit' } }
+  ])
 })

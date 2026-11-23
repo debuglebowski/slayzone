@@ -38,7 +38,8 @@ jest.mock('../agents/AgentPanel', () => ({
     useEffect(() => {
       mockAgent.mounts++
     }, [])
-    return <Text>agent panel</Text>
+    const body = <Text>agent panel</Text>
+    return props.renderWide ? props.renderWide(body) : body
   }
 }))
 jest.mock('../artifacts/ArtifactsScreen', () => ({
@@ -114,12 +115,12 @@ async function show({
     onBack: jest.fn(),
     onDeleted: jest.fn()
   }
-  const props = (shown: TaskSegment): TaskPageProps => ({
+  const props = (shown: TaskSegment, isWide = wide): TaskPageProps => ({
     row: rowFrom(workHub, board),
     feed: feedOf(workHub, board),
     session: { entry: hubEntryOf(workHub.label), token: 't' } as never,
     showHub: true,
-    wide,
+    wide: isWide,
     segment: shown,
     onOpenTask: jest.fn(),
     onOpenArtifact: jest.fn(),
@@ -131,7 +132,8 @@ async function show({
   const showSegment = async (next: TaskSegment) => {
     await view.rerender(<TaskPage {...props(next)} />)
   }
-  return { work, showSegment, ...handlers }
+  const resizeWide = async () => view.rerender(<TaskPage {...props(segment, true)} />)
+  return { work, showSegment, resizeWide, ...handlers }
 }
 
 const user = () => userEvent.setup()
@@ -190,4 +192,11 @@ describe('TaskPage on an iPad (wide): Agent and Details side by side', () => {
       expect(writes(work)).toEqual([{ path: 'task.archive', input: { id: 't1' } }])
     )
   })
+})
+
+it('iPad width change keeps the agent panel and its in-memory draft mounted', async () => {
+  const { resizeWide } = await show()
+  expect(mockAgent.mounts).toBe(1)
+  await resizeWide()
+  expect(mockAgent.mounts).toBe(1)
 })

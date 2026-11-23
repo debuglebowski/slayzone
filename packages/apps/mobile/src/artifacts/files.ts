@@ -49,8 +49,12 @@ export const deviceFileStore: ArtifactFileStore = {
  * are written to the file. A failure reads like the OS downloader's (`… response has
  * status N`), which `file-cache.ts` reads the status from.
  */
-export function inProcessFileStore(http: InProcessHttp): ArtifactFileStore {
-  return {
+const inProcessStores = new WeakMap<InProcessHttp, ArtifactFileStore>()
+
+function inProcessFileStore(http: InProcessHttp): ArtifactFileStore {
+  const existing = inProcessStores.get(http)
+  if (existing) return existing
+  const store: ArtifactFileStore = {
     ...deviceFileStore,
     async download(url, headers, dir, name) {
       const res = await http({ method: 'GET', url, headers })
@@ -65,6 +69,8 @@ export function inProcessFileStore(http: InProcessHttp): ArtifactFileStore {
       return file.uri
     }
   }
+  inProcessStores.set(http, store)
+  return store
 }
 
 /** The artifact (or one version) as a local file; see `file-cache.ts`. */

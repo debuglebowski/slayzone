@@ -5,7 +5,7 @@
  * hub is mocked. "Try demo" on the sign-in screen opens the app (Board · Search · Settings) on the sample data;
  * "Exit demo" goes back to sign-in; the keychain is never touched.
  */
-import { userEvent } from '@testing-library/react-native'
+import { fireEvent, userEvent } from '@testing-library/react-native'
 import { router } from 'expo-router'
 import { act, renderRouter, screen, waitFor, within } from 'expo-router/testing-library'
 import { Dimensions } from 'react-native'
@@ -127,7 +127,10 @@ describe('the demo', () => {
   it('shows the banner on every tab, and Exit demo goes back to sign-in', async () => {
     await enterDemo()
     for (const name of ['board', 'search', 'settings'] as const) {
-      expect(tab(name).getByTestId('demo-banner')).toBeOnTheScreen()
+      const banner = within(tab(name).getByTestId('demo-banner'))
+      expect(banner.getByText('Sample data — changes reset when you exit.')).not.toHaveProp(
+        'numberOfLines'
+      )
     }
     await press(tab('board').getByTestId('exit-demo'))
     expect(await screen.findByText('Sign in to a hub')).toBeOnTheScreen()
@@ -240,4 +243,37 @@ describe('the demo', () => {
     expect(board.queryByText('Benchmark on prod copy')).toBeNull()
     expect(mockKeychain.save).not.toHaveBeenCalled()
   })
+})
+
+it('combined Search Match case applies to task rows', async () => {
+  await enterDemo()
+  await openTab('/artifacts')
+  const search = tab('search')
+  await fireEvent.changeText(search.getByTestId('artifact-search-input'), 'auth refactor')
+  expect(await search.findByText('Auth refactor: session middleware')).toBeOnTheScreen()
+  await press(search.getByRole('button', { name: 'Match case' }))
+  expect(search.queryByText('Auth refactor: session middleware')).toBeNull()
+})
+
+it('combined Search regex applies to task rows', async () => {
+  await enterDemo()
+  await openTab('/artifacts')
+  const search = tab('search')
+  await fireEvent.changeText(search.getByTestId('artifact-search-input'), '^Auth refactor')
+  expect(search.queryByText('Auth refactor: session middleware')).toBeNull()
+  await press(search.getByRole('button', { name: 'Regular expression' }))
+  await press(await search.findByText('Auth refactor: session middleware'))
+  await press(await search.findByRole('button', { name: 'Back to Search' }))
+  expect(await search.findByText('Auth refactor: session middleware')).toBeOnTheScreen()
+})
+
+it('opening the same task again restores a typed chat draft', async () => {
+  await enterDemo()
+  const board = await openFromBell('Auth refactor: session middleware')
+  await fireEvent.changeText(board.getByTestId('chat-input'), 'Unsaved reply on the phone')
+  expect(board.getByTestId('chat-input')).toHaveDisplayValue('Unsaved reply on the phone')
+  await press(board.getByRole('button', { name: 'Back to API v2' }))
+  await board.findByTestId('bell')
+  await openFromBell('Auth refactor: session middleware')
+  expect(board.getByTestId('chat-input')).toHaveDisplayValue('Unsaved reply on the phone')
 })

@@ -7,7 +7,7 @@
  */
 import { todayISO } from '@slayzone/tasks/board'
 import { type ReactNode, useState } from 'react'
-import { StyleSheet, TextInput } from 'react-native'
+import { Alert, StyleSheet, TextInput } from 'react-native'
 import type { TaskRow } from '../hub-board'
 import { ChoiceSheet } from '../computers/ChoiceSheet'
 import { type ChromeColors, useTheme } from '../theme'
@@ -71,25 +71,40 @@ export function TitleInput({ writes }: { writes: TaskWrites }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
   const { task, update } = writes
-  // The title as typed; follows the task's when that changes (render-time sync).
-  const [title, setTitle] = useState(task.title)
-  const [titleOf, setTitleOf] = useState({ id: task.id, title: task.title })
-  if (titleOf.id !== task.id || titleOf.title !== task.title) {
-    setTitleOf({ id: task.id, title: task.title })
-    setTitle(task.title)
-  }
+  const [edit, setEdit] = useState({ id: task.id, base: task.title, text: task.title })
+  const resetTitle = () => setEdit({ id: task.id, base: task.title, text: task.title })
+  if (edit.id !== task.id || (edit.text === edit.base && edit.base !== task.title)) resetTitle()
+
   const saveTitle = () => {
-    const next = title.trim()
-    if (!next || next === task.title) {
-      setTitle(task.title)
+    const next = edit.text.trim()
+    if (!next || edit.text === edit.base || next === task.title) {
+      resetTitle()
       return
     }
-    void update({ title: next }, { title: next })
+    const save = () => {
+      void update({ title: next }, { title: next }).then((saved) => {
+        if (!saved) return
+        setEdit((current) =>
+          current.id === task.id && current.base === edit.base
+            ? { ...current, base: next, text: current.text === edit.text ? next : current.text }
+            : current
+        )
+      })
+    }
+    if (task.title === edit.base) {
+      save()
+      return
+    }
+    Alert.alert('Replace the hub’s title?', 'The title changed while you were editing it.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Use hub title', onPress: resetTitle },
+      { text: 'Overwrite', style: 'destructive', onPress: save }
+    ])
   }
   return (
     <TextInput
-      value={title}
-      onChangeText={setTitle}
+      value={edit.text}
+      onChangeText={(text) => setEdit((current) => ({ ...current, text }))}
       onEndEditing={saveTitle}
       style={styles.title}
       multiline

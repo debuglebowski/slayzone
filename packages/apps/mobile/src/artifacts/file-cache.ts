@@ -10,10 +10,10 @@
  * time, the file's modification time on the hub (an edit on disk while the phone wasn't
  * listening changes neither), plus a tick the viewer bumps when the hub says the file
  * changed on disk — or, for a version, its content hash (immutable). A stamp already on
- * disk is reused; a new one replaces the artifact's older copies of its kind: one working
- * copy and one version are kept, so going back and forth between the artifact and a
- * version finds both. A path handed out earlier may still be gone (replaced, or purged by
- * the OS): whoever keeps one checks it is there before showing it (`useArtifactFile`).
+ * disk is reused; a new one replaces settled older copies of its kind. Concurrent
+ * requests retain their own files until a later download can clean them up. A path handed
+ * out earlier may still be gone (replaced, or purged by the OS): `useArtifactFile` checks
+ * the file before showing it.
  *
  *   <caches>/slayzone-artifacts/<hub>/<artifact id>/<stamp>/<title>
  */
@@ -81,6 +81,13 @@ export function downloadStatusOf(err: unknown): number | null {
   return m ? Number(m[1]) : null
 }
 
+interface Downloads {
+  latest: string
+  pending: Map<string, number>
+}
+
+const downloadsByStore = new WeakMap<ArtifactFileStore, Map<string, Downloads>>()
+
 /** Downloads into `store` (the device's: `downloadArtifactFile` in `files.ts`). */
 export async function downloadArtifactFileTo(
   store: ArtifactFileStore,
@@ -91,34 +98,58 @@ export async function downloadArtifactFileTo(
   const stamp = artifactFileStamp(source)
   const dir = [...artifactDir, stamp]
   const name = fileName(source.artifact.title)
+  const kind = stamp.startsWith(VERSION_STAMP) ? VERSION_STAMP : WORKING_STAMP
+  let downloads = downloadsByStore.get(store)
+  if (!downloads) {
+    downloads = new Map()
+    downloadsByStore.set(store, downloads)
+  }
+  const key = JSON.stringify([...artifactDir, kind])
+  const inFlight = downloads.get(key)
   const cached = store.find(dir, name)
+  if (inFlight) inFlight.latest = stamp
   if (cached) return cached
 
-  const base = `/api/artifacts/${encodeURIComponent(source.artifact.id)}`
-  const urls = source.version
-    ? [hubApiUrl(target, `${base}/versions/content`, { ref: source.version.ref })]
-    : [
-        hubApiUrl(target, `${base}/content`),
-        // No working copy on disk (written by `slay artifacts write`): its current version.
-        hubApiUrl(target, `${base}/versions/content`, { ref: 'current' })
-      ]
+  const activity = inFlight ?? { latest: stamp, pending: new Map<string, number>() }
+  downloads.set(key, activity)
+  const count = (activity.pending.get(stamp) ?? 0) + 1
+  activity.pending.set(stamp, count)
 
-  let uri: string | null = null
-  let firstError: unknown = null
-  for (const url of urls) {
-    try {
-      uri = await store.download(url, authHeaders(target), dir, name)
-      break
-    } catch (err) {
-      firstError ??= err
-      if (downloadStatusOf(err) !== 404) break
+  try {
+    const base = `/api/artifacts/${encodeURIComponent(source.artifact.id)}`
+    const urls = source.version
+      ? [hubApiUrl(target, `${base}/versions/content`, { ref: source.version.ref })]
+      : [
+          hubApiUrl(target, `${base}/content`),
+          // No working copy on disk (written by `slay artifacts write`): its current version.
+          hubApiUrl(target, `${base}/versions/content`, { ref: 'current' })
+        ]
+
+    let firstError: unknown = null
+    for (const url of urls) {
+      let uri: string
+      try {
+        uri = await store.download(url, authHeaders(target), dir, name)
+      } catch (err) {
+        firstError ??= err
+        if (downloadStatusOf(err) !== 404) break
+        continue
+      }
+      if (activity.latest === stamp) {
+        store.removeExcept(
+          artifactDir,
+          (name) => activity.pending.has(name) || !name.startsWith(kind)
+        )
+      }
+      return uri
     }
+    throw downloadError(target, source, firstError)
+  } finally {
+    const remaining = (activity.pending.get(stamp) ?? 1) - 1
+    if (remaining > 0) activity.pending.set(stamp, remaining)
+    else activity.pending.delete(stamp)
+    if (activity.pending.size === 0) downloads.delete(key)
   }
-  if (uri === null) throw downloadError(target, source, firstError)
-  // Older copies of the same kind go; the other kind's one stays.
-  const kind = stamp.startsWith(VERSION_STAMP) ? VERSION_STAMP : WORKING_STAMP
-  store.removeExcept(artifactDir, (name) => name === stamp || !name.startsWith(kind))
-  return uri
 }
 
 function downloadError(target: HubTarget, source: ArtifactFileSource, err: unknown): Error {

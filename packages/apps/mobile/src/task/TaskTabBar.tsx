@@ -30,13 +30,13 @@ export function TaskTabBar({
 }: {
   shown: TaskSegment
   onShow: (tab: TaskSegment) => void
-  compact: boolean
+  compact?: boolean
   /** Compact: the button was tapped — show the whole bar. */
-  onExpand: () => void
+  onExpand?: () => void
   /** How many artifacts the task has (undefined: not loaded). */
-  artifacts: number | undefined
+  artifacts?: number
   /** The agent needs the user (its dot is amber): marked on the Agent tab. */
-  agentNeedsYou: boolean
+  agentNeedsYou?: boolean
 }) {
   const theme = useTheme()
   const styles = makeStyles(theme)
@@ -50,7 +50,7 @@ export function TaskTabBar({
           : 'Artifacts'
   if (compact) {
     return (
-      <Glass interactive style={styles.button}>
+      <Glass key="compact" interactive style={styles.button}>
         <Pressable
           onPress={onExpand}
           accessibilityRole="button"
@@ -64,7 +64,7 @@ export function TaskTabBar({
     )
   }
   return (
-    <Glass style={styles.bar} testID="task-tabs">
+    <Glass key="full" style={styles.bar} testID="task-tabs">
       <View style={styles.row} accessibilityRole="tablist">
         {TABS.map((tab) => {
           const on = tab === shown
@@ -140,7 +140,7 @@ function TabIcon({
 
 const makeStyles = (t: ChromeColors) =>
   StyleSheet.create({
-    bar: { height: TAB_BAR_HEIGHT, borderRadius: TAB_BAR_HEIGHT / 2, padding: 4 },
+    bar: { width: '100%', height: TAB_BAR_HEIGHT, borderRadius: TAB_BAR_HEIGHT / 2, padding: 4 },
     row: { flex: 1, flexDirection: 'row' },
     tab: {
       flex: 1,
@@ -153,11 +153,12 @@ const makeStyles = (t: ChromeColors) =>
     label: { fontSize: 10, fontWeight: '600', color: t.mutedForeground },
     labelOn: { color: t.foreground },
     button: {
+      alignSelf: 'flex-start',
       width: TAB_BUTTON_SIZE,
       height: TAB_BUTTON_SIZE,
       borderRadius: TAB_BUTTON_SIZE / 2
     },
-    fill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    fill: { width: '100%', flex: 1, alignItems: 'center', justifyContent: 'center' },
     badge: { position: 'absolute', top: -2, right: -6 },
     icon: { width: 24, height: 22, alignItems: 'center', justifyContent: 'center' },
     ink: { borderColor: t.mutedForeground, backgroundColor: t.mutedForeground },

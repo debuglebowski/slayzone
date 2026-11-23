@@ -1,4 +1,5 @@
-import { render, screen, userEvent } from '@testing-library/react-native'
+import { fireEvent, render, screen, userEvent } from '@testing-library/react-native'
+import { Keyboard } from 'react-native'
 import type { HubFeed } from '../hub-board'
 import { type HubSession, hubEntryOf } from '../hub-session'
 import { ArtifactSearchScreen } from './ArtifactSearchScreen'
@@ -103,6 +104,15 @@ describe('ArtifactSearchScreen', () => {
     expect(fetch.calls[0].url).toBe(
       'https://home.example/api/artifacts/search?q=(&allTasks=1&regex=1&caseSensitive=1'
     )
+  })
+
+  it('dismisses the keyboard by dragging or tapping the blank search area', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss')
+    await render(<ArtifactSearchScreen sessions={[]} feeds={[]} onOpen={jest.fn()} />)
+    expect(screen.getByTestId('artifact-search-empty').props.keyboardDismissMode).toBe('on-drag')
+    await fireEvent.press(screen.getByTestId('artifact-search-dismiss-keyboard'))
+    expect(dismiss).toHaveBeenCalledTimes(1)
+    dismiss.mockRestore()
   })
 
   it('highlights the query in each line; dragging the results puts the keyboard away', async () => {

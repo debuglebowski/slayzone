@@ -177,3 +177,23 @@ describe('forgetArtifactCache', () => {
     expect(files.size).toBe(1)
   })
 })
+
+it('keeps a newer artifact version when the previous download finishes last', async () => {
+  const { store, files } = memoryStore()
+  const download = store.download
+  let finishOld!: () => void
+  const oldResponse = new Promise<void>((resolve) => {
+    finishOld = resolve
+  })
+  store.download = async (url, headers, dir, name) => {
+    if (new URL(url).searchParams.get('ref') === '1') await oldResponse
+    return download(url, headers, dir, name)
+  }
+
+  const version = (ref: number) => ({ artifact, version: { ref, contentHash: `version-${ref}` } })
+  const old = downloadArtifactFile(home, version(1), store)
+  await downloadArtifactFile(home, version(2), store)
+  finishOld()
+  await old
+  expect([...files.keys()].some((path) => path.includes('/v-version-2/'))).toBe(true)
+})

@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
 import * as Clipboard from 'expo-clipboard'
-import { Keyboard, Share } from 'react-native'
+import { Keyboard, Share, StyleSheet } from 'react-native'
 import { openWebLink } from '../chat/Markdown'
+import * as keyboardOverlap from '../chat/use-keyboard'
 import { trpcTest } from '../testing'
 import { TerminalView, type TerminalViewHandle } from './TerminalView'
 
@@ -218,8 +219,32 @@ describe('TerminalView', () => {
   it('lifts the key bar and the message field above the keyboard', async () => {
     const h = hub()
     await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
-    // KeyboardAvoidingView's view: it measures itself against the keyboard's frame.
+    // The root measures its own frame, including any headers above it.
     expect(screen.getByTestId('terminal-view').props.onLayout).toBeInstanceOf(Function)
+  })
+
+  it('lays out the shortcuts beside the message field when the keyboard leaves little height', async () => {
+    const measure = jest.spyOn(keyboardOverlap, 'useKeyboardOverlap').mockReturnValue({
+      bottom: 164,
+      availableHeight: 94,
+      onLayout: jest.fn()
+    })
+    try {
+      await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: hub().wrapper })
+      expect(screen.getByTestId('terminal-area')).toBeOnTheScreen()
+      expect(screen.getByLabelText('Escape')).toBeOnTheScreen()
+      expect(screen.getByLabelText('Message to the agent')).toBeOnTheScreen()
+      expect(StyleSheet.flatten(screen.getByTestId('terminal-view').props.style)).toMatchObject({
+        paddingBottom: 164
+      })
+      expect(StyleSheet.flatten(screen.getByTestId('terminal-controls').props.style)).toMatchObject(
+        {
+          flexDirection: 'row'
+        }
+      )
+    } finally {
+      measure.mockRestore()
+    }
   })
 
   it('says it is connecting until the output is in', async () => {

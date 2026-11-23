@@ -24,10 +24,11 @@ export function SearchRoute() {
       largeTitle
       initialQuery={q ?? ''}
       placeholder="Search tasks and artifacts"
-      before={(q) => (
+      before={(q, options) => (
         <TaskSearchResults
           feeds={feeds}
           q={q}
+          options={options}
           onOpen={(r) => router.push(taskHref(r.hubLabel, r.task.id))}
         />
       )}
