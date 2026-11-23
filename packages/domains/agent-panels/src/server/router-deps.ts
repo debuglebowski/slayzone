@@ -15,12 +15,20 @@ export type FloatingAgentState = {
   hasCustomSize: boolean
 }
 
+/** What the floating window needs to show the global agent's session. */
+export type FloatingSessionMeta = {
+  cwd?: string
+  mode?: string
+  /** The hub that owns the session's project; null/absent = the default hub. */
+  hubId?: string | null
+}
+
 // Floating global agent panel — ops + the 3 streaming emitters the
 // floatingAgent subscriptions consume. Same instances back the
 // `floating-global-agent-panel:*` IPC handlers (coexistence until slice 5).
 export type FloatingAgentHost = {
   setEnabled: (enabled: boolean) => unknown
-  setSessionId: (sessionId: string | null) => unknown
+  setSessionId: (sessionId: string | null, meta?: FloatingSessionMeta) => unknown
   setPanelOpen: (isOpen: boolean) => unknown
   toggleCollapse: () => unknown
   resetSize: () => unknown

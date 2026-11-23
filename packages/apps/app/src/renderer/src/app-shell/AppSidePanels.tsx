@@ -1,5 +1,6 @@
 import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
 import { useMutation } from '@tanstack/react-query'
+import { HubScope } from '@slayzone/transport/client'
 import { useTRPC } from '../trpc'
 import type { Project } from '@slayzone/projects-contracts'
 import { defaultProjectRoot } from '@slayzone/projects-contracts'
@@ -30,6 +31,8 @@ interface AppSidePanelsProps {
   setIsSidePanelResizing: Dispatch<SetStateAction<boolean>>
   projects: Project[]
   selectedProjectId: string
+  /** The hub that owns the selected project: its agent runs there (#183). */
+  selectedProjectHubId: string
   agentMode: string
   handleAgentNewSession: GlobalAgentSidePanelProps['onNewSession']
   handleAgentModeChange: GlobalAgentSidePanelProps['onModeChange']
@@ -52,6 +55,7 @@ export function AppSidePanels({
   setIsSidePanelResizing,
   projects,
   selectedProjectId,
+  selectedProjectHubId,
   agentMode,
   handleAgentNewSession,
   handleAgentModeChange,
@@ -103,27 +107,34 @@ export function AppSidePanels({
           className={globalAgentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'}
           style={globalAgentPanelState.isOpen ? undefined : { position: 'absolute' as const }}
         >
-          <Suspense fallback={null}>
-            <GlobalAgentSidePanel
-              width={globalAgentPanelState.panelWidth}
-              sessionId={agentSessionId}
-              cwd={defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ?? ''}
-              mode={agentMode as AgentId}
-              isActive={globalAgentPanelState.isOpen}
-              isResizing={isSidePanelResizing}
-              onNewSession={handleAgentNewSession}
-              onModeChange={handleAgentModeChange}
-              floatingEnabled={globalAgentPanelState.floatingEnabled}
-              onToggleFloating={() =>
-                setGlobalAgentPanelState({
-                  floatingEnabled: !globalAgentPanelState.floatingEnabled
-                })
-              }
-              floatingState={floatingState}
-              onDetach={() => detachFloatingAgent.mutate()}
-              onReattach={() => reattachFloatingAgent.mutate()}
-            />
-          </Suspense>
+          {/* In the project's OWN hub's scope: this shell runs under the default
+              hub's client, which does not know another hub's project — it would
+              start the agent on this machine's computer with that hub's folder
+              (#183). The detach/reattach callbacks stay on the shell's client:
+              the floating window is this desktop's. */}
+          <HubScope hubId={selectedProjectHubId}>
+            <Suspense fallback={null}>
+              <GlobalAgentSidePanel
+                width={globalAgentPanelState.panelWidth}
+                sessionId={agentSessionId}
+                cwd={defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ?? ''}
+                mode={agentMode as AgentId}
+                isActive={globalAgentPanelState.isOpen}
+                isResizing={isSidePanelResizing}
+                onNewSession={handleAgentNewSession}
+                onModeChange={handleAgentModeChange}
+                floatingEnabled={globalAgentPanelState.floatingEnabled}
+                onToggleFloating={() =>
+                  setGlobalAgentPanelState({
+                    floatingEnabled: !globalAgentPanelState.floatingEnabled
+                  })
+                }
+                floatingState={floatingState}
+                onDetach={() => detachFloatingAgent.mutate()}
+                onReattach={() => reattachFloatingAgent.mutate()}
+              />
+            </Suspense>
+          </HubScope>
         </div>
       )}
       {agentStatusState.isLocked && (

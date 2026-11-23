@@ -814,34 +814,43 @@ function App(): React.JSX.Element {
     ? globalAgentPanelSessionId(selectedProjectId, globalAgentPanelState.sessionIndex)
     : null
 
+  // The panel's session lives on the project's own hub (its HubScope in
+  // AppSidePanels), so it is killed there too.
+  const killAgentSession = useCallback(async (): Promise<void> => {
+    if (agentSessionId)
+      await clientForProject(selectedProjectId).pty.kill.mutate({ sessionId: agentSessionId })
+  }, [agentSessionId, clientForProject, selectedProjectId])
+
   const handleAgentNewSession = useCallback(async () => {
-    if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
+    await killAgentSession()
     setGlobalAgentPanelState({ sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1 })
-  }, [agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState, trpcClient])
+  }, [killAgentSession, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState])
 
   const handleAgentModeChange = useCallback(
     async (nextMode: string) => {
       if (nextMode === agentMode) return
-      if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
+      await killAgentSession()
       setGlobalAgentPanelState({
         mode: nextMode,
         sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1
       })
     },
-    [
-      agentMode,
-      agentSessionId,
-      globalAgentPanelState.sessionIndex,
-      setGlobalAgentPanelState,
-      trpcClient
-    ]
+    [agentMode, killAgentSession, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState]
   )
 
   // Floating agent panel: push context to main-process state machine.
   // All detach/reattach decisions happen in main; renderer just keeps ctx in sync.
+  // With what the floating window needs to show it: the folder, the agent and the
+  // hub that owns the project (another hub's session runs there, #183).
+  const agentSessionCwd = defaultProjectRoot(projects.find((p) => p.id === selectedProjectId)) ?? ''
   useEffect(() => {
-    void trpcClient.app.floatingAgent.setSessionId.mutate({ sessionId: agentSessionId })
-  }, [agentSessionId, trpcClient])
+    void trpcClient.app.floatingAgent.setSessionId.mutate({
+      sessionId: agentSessionId,
+      cwd: agentSessionCwd,
+      mode: agentMode,
+      hubId: selectedProjectHubId
+    })
+  }, [agentSessionId, agentSessionCwd, agentMode, selectedProjectHubId, trpcClient])
   useEffect(() => {
     void trpcClient.app.floatingAgent.setPanelOpen.mutate({ isOpen: globalAgentPanelState.isOpen })
   }, [globalAgentPanelState.isOpen, trpcClient])
@@ -1789,6 +1798,7 @@ function App(): React.JSX.Element {
                       setIsSidePanelResizing={setIsSidePanelResizing}
                       projects={projects}
                       selectedProjectId={selectedProjectId}
+                      selectedProjectHubId={selectedProjectHubId}
                       agentMode={agentMode}
                       handleAgentNewSession={handleAgentNewSession}
                       handleAgentModeChange={handleAgentModeChange}

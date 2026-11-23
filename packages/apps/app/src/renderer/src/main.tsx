@@ -134,19 +134,26 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
 // Still needs TrpcProvider: ThemeProvider (and PtyProvider) now talk tRPC.
+// Federated like the main window: the session it shows runs on the hub that owns
+// its project, which may not be this desktop's own (#183). The default hub reuses
+// the boot client, exactly as in the main window.
 if (isFloatingGlobalAgentPanel) {
   Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(
-    ([server, windowId]) => {
+    async ([server, windowId]) => {
+      const { defaultHubId } = await seedHubRegistry(server, electronBootstrap)
+      initTrpcClient(withWindowId(server.url, windowId))
       createRoot(document.getElementById('root')!).render(
-        <TrpcProvider url={withWindowId(server.url, windowId)}>
-          <PtyProvider>
-            <ThemeProvider>
-              <TooltipProvider delayDuration={0}>
-                <FloatingGlobalAgentPanel />
-              </TooltipProvider>
-            </ThemeProvider>
-          </PtyProvider>
-        </TrpcProvider>
+        <FederatedRoot decorateUrl={(url) => withWindowId(url, windowId)}>
+          <HubScope hubId={defaultHubId}>
+            <PtyProvider>
+              <ThemeProvider>
+                <TooltipProvider delayDuration={0}>
+                  <FloatingGlobalAgentPanel />
+                </TooltipProvider>
+              </ThemeProvider>
+            </PtyProvider>
+          </HubScope>
+        </FederatedRoot>
       )
     }
   )
