@@ -11,6 +11,7 @@
  * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
 import { test, expect } from 'vitest'
+import { CHAT_HISTORY_DISPLAY_VERSION } from '@slayzone/terminal-contracts'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { setAuthGate } from '@slayzone/trpc-server'
 import { setAppDeps, setHubDescribeDeps, type AppDeps } from '../app-deps.js'
@@ -40,8 +41,13 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
     enableTelemetry: true
   })
   expect(d.label).toBeNull()
-  // This hub reads compact (base64) bytes in inputs, so a client may send them so.
-  expect(d.wire).toEqual({ compactBytes: true })
+  // This hub reads compact (base64) bytes in inputs, so a client may send them so;
+  // it also serves tool previews and the current chat history display version.
+  expect(d.wire).toEqual({
+    compactBytes: true,
+    toolPreviews: true,
+    chatDisplay: CHAT_HISTORY_DISPLAY_VERSION
+  })
 })
 
 test('hub.setLabel persists a label that describe then reports', async () => {

@@ -647,7 +647,7 @@ test('computer handler uses the bundled projection worker and survives its start
               args: ['tab', '/SAMPLE', false]
             }
           })
-        ).resolves.toEqual({ pages: [], toolUseIds: ['tool'] })
+        ).resolves.toEqual({ pages: [], toolUseIds: ['tool'], windowedPages: [0] })
       }
       await h.request({
         kind: 'invoke',

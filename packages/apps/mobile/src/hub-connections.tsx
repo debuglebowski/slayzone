@@ -56,6 +56,7 @@ import {
 } from './hub-board'
 import type { HubSession } from './hub-session'
 import { useTRPC, useTRPCClient } from './trpc'
+import { useStableCallback } from './chat/useStableCallback'
 
 // Direct links to computers (docs/direct-link.md): the phone reaches a computer
 // straight when the hub offers its public address and a plain HTTP probe gets
@@ -200,7 +201,7 @@ export function HubFeedSource({
   const queryClient = useQueryClient()
   const boardQ = useQuery(trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000 }))
   const changes = useRef(Promise.resolve())
-  const onTasksChanged = (event: TasksChangedEvent | undefined): void => {
+  const onTasksChanged = useStableCallback((event: TasksChangedEvent | undefined): void => {
     const ids = event?.taskIds
     if (ids?.length === 0) return
     const boardKey = trpc.task.loadBoardData.queryKey()
@@ -225,7 +226,7 @@ export function HubFeedSource({
         else await reload()
       })
       .catch(reload)
-  }
+  })
   useSubscription(
     trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
       onData: onTasksChanged

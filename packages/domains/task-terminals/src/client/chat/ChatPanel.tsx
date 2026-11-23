@@ -588,7 +588,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       clearQueue: composer.clearQueue
     })
     const liveAgentState = useSessionStateRaw(`${taskId}:${tabId}`)
-    const hibernated = liveAgentState === 'hibernated' ||
+    const hibernated =
+      liveAgentState === 'hibernated' ||
       (liveAgentState === undefined && storage.status?.hibernated === true)
     useResumeHibernatedChat({
       tabId,
@@ -596,7 +597,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       ready: !hydrating && !loadError && !hydrateError && storage.status?.state === 'ready',
       hibernated,
       resume: () => {
-        void chatApi.start({ tabId, taskId, mode, cwd, providerFlagsOverride, reason: 'user' })
+        void chatApi
+          .start({ tabId, taskId, mode, cwd, providerFlagsOverride, reason: 'user' })
           .catch(() => undefined)
       }
     })
@@ -1002,7 +1004,10 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           <ChatStorageNotice status={storage.status} onRetry={storage.retry} />
                         )}
                         {hibernated && (
-                          <p role="status" className="border-b px-4 py-2 text-xs text-muted-foreground">
+                          <p
+                            role="status"
+                            className="border-b px-4 py-2 text-xs text-muted-foreground"
+                          >
                             Hibernated · resumes on open
                           </p>
                         )}

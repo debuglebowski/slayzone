@@ -220,10 +220,11 @@ export function useFileTreeData({
   useResubscribeOnComputerConnect(watch)
 
   useEffect(() => {
+    const pending = changedDirs.current
     return () => {
       if (watchRefreshTimer.current) clearTimeout(watchRefreshTimer.current)
       watchRefreshTimer.current = null
-      changedDirs.current.clear()
+      pending.clear()
     }
   }, [loadDir])
 

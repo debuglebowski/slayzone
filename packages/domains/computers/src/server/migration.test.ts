@@ -55,7 +55,9 @@ describe('computer schema migration (v149 + v163)', () => {
         // v165 — private by default, but only once the computer has an owner.
         'visibility',
         // v194 — disabled: enrolled and connected, given no new work. NULL = enabled.
-        'disabled_at'
+        'disabled_at',
+        // v224 — last memory/agent health sample the computer reported.
+        'health_json'
       ])
       expect(columnNames(t.raw, 'join_tokens')).toEqual([
         'id',
