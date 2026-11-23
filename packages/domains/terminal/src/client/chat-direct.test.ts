@@ -165,10 +165,17 @@ it('shares a tool detail read while either card still needs it', async () => {
 it('tries ordinary previews before full history on a computer without display settings', async () => {
   const paged = { kind: 'paged', snapshot: { toolPreviews: true } }
   const io = {
-    openTimeline: vi.fn().mockResolvedValueOnce({ kind: 'full' }).mockResolvedValueOnce(paged)
+    openTimeline: vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'full' })
+      .mockResolvedValueOnce({ kind: 'full' })
+      .mockResolvedValueOnce(paged)
   }
   expect(await openChatTimeline(io, 't', { hideThinking: true })).toBe(paged)
-  expect(io.openTimeline).toHaveBeenCalledTimes(2)
-  expect(io.openTimeline.mock.calls[1][0]).toMatchObject({ tabId: 't', toolPreviews: true })
-  expect(io.openTimeline.mock.calls[1][0]).not.toHaveProperty('display')
+  expect(io.openTimeline).toHaveBeenCalledTimes(3)
+  expect(io.openTimeline.mock.calls[0][0]).toMatchObject({
+    display: { hideThinking: true, windowed: true }
+  })
+  expect(io.openTimeline.mock.calls[2][0]).toMatchObject({ tabId: 't', toolPreviews: true })
+  expect(io.openTimeline.mock.calls[2][0]).not.toHaveProperty('display')
 })

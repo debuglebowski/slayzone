@@ -6,7 +6,11 @@
  * few pages, never the whole history.
  */
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
-import { CHAT_HISTORY_DISPLAY_VERSION, type AgentEvent } from '@slayzone/terminal-contracts'
+import {
+  CHAT_HISTORY_DISPLAY_VERSION,
+  jsonByteLength,
+  type AgentEvent
+} from '@slayzone/terminal-contracts'
 import { buildLongSession } from '@slayzone/test-utils/chat-long-session'
 import {
   initialState,
@@ -190,6 +194,49 @@ describe.each([
     await p2.flush()
     // Only what the newer events changed or sealed was written: no rebuild.
     expect(mem.writes.slice(writes).every((w) => w.dropPagesFrom === null)).toBe(true)
+  })
+
+  test('a small open window keeps older rows and summaries reachable across stored and in-memory pages', async () => {
+    const mem = memoryStore()
+    const history = buffered(events.slice(0, 6_000))
+    const p = await TimelineProjection.open({ store: mem.store, history, agentStartedTurns })
+    try {
+      const legacy = await p.openSnapshot('client')
+      const display = { windowed: true } as const
+      const open = await p.openSnapshot('client', display)
+      const state = decodeTimelineState(open.state)
+      const oldState = decodeTimelineState(legacy.state)
+      expect(open.pageRows).toBe(16)
+      expect(resident(state)).toBeLessThan(32)
+      expect(jsonByteLength(open)).toBeLessThan(jsonByteLength(legacy))
+      const last = open.summaries.length - 1
+      const from = last * open.pageRows
+      expect(from).toBeGreaterThan(legacy.summaries.length * legacy.pageRows)
+      expect(open.summaries.flatMap((summary) => summary.users)).toEqual(
+        expect.arrayContaining(legacy.summaries.flatMap((summary) => summary.users))
+      )
+      for (const page of [0, last]) {
+        const start = page * open.pageRows
+        const got = await p.pagesAsOf([page], open.seq, open.epoch, start, 'client', display)
+        expect(got.expired).toBe(false)
+        if (got.expired) continue
+        expect(got.pages[0]).toMatchObject({ page, from: start })
+        expect(got.pages[0].rows).toHaveLength(open.pageRows)
+        if (page !== last) continue
+        const original = oldState.timeline.slice(from, from + open.pageRows)
+        for (const [i, row] of got.pages[0].rows.entries()) {
+          const before = original[i]
+          if (row.kind === 'result' && row.copyDetail && before?.kind === 'result') {
+            const detail = await p.toolDetail(row.copyDetail, 0)
+            expect(JSON.parse(detail!.data)).toBe(before.copyText)
+            continue
+          }
+          expect(JSON.stringify(row)).toBe(JSON.stringify(before))
+        }
+      }
+    } finally {
+      await p.close()
+    }
   })
 
   test('live: events applied one by one, a late change to an evicted page goes out again; older rows are served as they were', async () => {
@@ -920,10 +967,12 @@ test('file previews preserve change counts and search beyond the preview in seal
     expect(JSON.stringify(older)).not.toContain('HiddenSearchWord')
     expect(await projection.searchToolMatches('hiddensearchword', false)).toEqual({
       pages: [0],
+      windowedPages: [0, Math.floor((history.length - 2) / 16)],
       toolUseIds: ['older', 'newer']
     })
     expect(await projection.searchToolMatches('hiddensearchword', true)).toEqual({
       pages: [0],
+      windowedPages: [],
       toolUseIds: []
     })
   } finally {

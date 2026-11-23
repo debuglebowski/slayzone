@@ -57,8 +57,12 @@ import type { TimelineCheckpointRow, TimelineWrite } from '../chat-timeline-stor
 import type { TimelineRecordStore } from './chat-timeline-records'
 import { HydrateScan, type HydrateCheckpoint } from './chat-hydrate-scan'
 import { hiddenActivityTextRows, previewTimelineRow } from './chat-tool-preview'
+import { isRenderable } from '../../shared/chat-presentation'
 
 export const TIMELINE_PAGE_ROWS = 256
+/** Smaller wire pages reuse the stored rows and indexes. */
+const WINDOW_PAGE_ROWS = 16
+const WINDOW_PAGE_BUDGET = 96 * 1024
 /** Sealed pages kept in memory besides the tail, most recently used. */
 const RESIDENT_PAGES = 8
 /** Row changes remembered, so rows can be served as they were at an earlier seq. */
@@ -153,6 +157,7 @@ export interface TimelineOpen {
   /** The requesting client opted into large tool result previews. */
   toolPreviews?: true
   displaySettings?: typeof CHAT_HISTORY_DISPLAY_VERSION
+  windowed?: true
 }
 
 /**
@@ -179,6 +184,38 @@ interface CheckpointData {
   sealed: number
   state: string
   hydrate: HydrateCheckpoint
+}
+
+function windowSummaries(
+  stored: readonly TimelinePageSummary[],
+  timeline: Readonly<TimelineRows>,
+  tailFrom: number
+): TimelinePageSummary[] {
+  const out: TimelinePageSummary[] = []
+  for (const [page, summary] of stored.entries()) {
+    const from = page * TIMELINE_PAGE_ROWS
+    for (let offset = 0; offset < TIMELINE_PAGE_ROWS; offset += WINDOW_PAGE_ROWS) {
+      const start = from + offset
+      const end = start + WINDOW_PAGE_ROWS
+      const contains = ({ row }: { row: number }) => row >= start && row < end
+      out.push({
+        users: summary.users.filter(contains),
+        ends: summary.ends.filter(contains),
+        branches: summary.branches.filter(contains),
+        files: summary.files.filter(contains),
+        boundaries: summary.boundaries.filter((row) => row >= start && row < end),
+        asks: summary.asks.filter(contains),
+        rootRows:
+          Math.floor(((offset + WINDOW_PAGE_ROWS) * summary.rootRows) / TIMELINE_PAGE_ROWS) -
+          Math.floor((offset * summary.rootRows) / TIMELINE_PAGE_ROWS)
+      })
+    }
+  }
+  for (let start = out.length * WINDOW_PAGE_ROWS; start < tailFrom; start += WINDOW_PAGE_ROWS) {
+    const rows = timeline.slice(start, start + WINDOW_PAGE_ROWS) as TimelineItem[]
+    out.push(summarizeRows(rows, start))
+  }
+  return out
 }
 
 export class TimelineProjection {
@@ -417,7 +454,23 @@ export class TimelineProjection {
   openSnapshot(toolPreviewInstance?: string, display?: ChatHistoryDisplay): Promise<TimelineOpen> {
     return this.enqueue(async () => {
       if (this.failed) throw new Error('the timeline projection failed')
-      const tailFrom = this.sealed * TIMELINE_PAGE_ROWS
+      const storedTailFrom = this.sealed * TIMELINE_PAGE_ROWS
+      const windowed = !!toolPreviewInstance && display?.windowed === true
+      let tailFrom = windowed
+        ? Math.floor(
+            Math.max(0, this.state.timeline.length - WINDOW_PAGE_ROWS) / WINDOW_PAGE_ROWS
+          ) * WINDOW_PAGE_ROWS
+        : storedTailFrom
+      if (windowed) {
+        // A cluster of sub-agent children can fill the entire small window.
+        // Keep its latest visible root when it is still in the resident tail.
+        for (let row = this.state.timeline.length - 1; row >= storedTailFrom; row--) {
+          const item = this.state.timeline[row]
+          if (!item || item.parentToolUseId != null || !isRenderable(item)) continue
+          tailFrom = Math.min(tailFrom, Math.floor(row / WINDOW_PAGE_ROWS) * WINDOW_PAGE_ROWS)
+          break
+        }
+      }
       const hideMessages = display?.hideActivityMessages || display?.hideActivities
       const hiddenText =
         toolPreviewInstance && hideMessages
@@ -425,14 +478,14 @@ export class TimelineProjection {
           : undefined
       const result = this.state.lastResult
       const wireState =
-        toolPreviewInstance && hideMessages && result?.copyText
+        toolPreviewInstance && (hideMessages || windowed) && result?.copyText
           ? { ...this.state, lastResult: { ...result, copyText: null } }
           : this.state
       return {
         version: TIMELINE_PROJECTION_VERSION,
         seq: this.seq,
         epoch: this.state.rowsEpoch,
-        pageRows: TIMELINE_PAGE_ROWS,
+        pageRows: windowed ? WINDOW_PAGE_ROWS : TIMELINE_PAGE_ROWS,
         state: encodeTimelineState(
           wireState,
           tailFrom,
@@ -449,7 +502,10 @@ export class TimelineProjection {
                 )
             : undefined
         ),
-        summaries: this.summaries,
+        summaries: windowed
+          ? windowSummaries(this.summaries, this.state.timeline, tailFrom)
+          : this.summaries,
+        ...(windowed ? { windowed: true as const } : {}),
         ...(toolPreviewInstance
           ? { toolPreviews: true as const, displaySettings: CHAT_HISTORY_DISPLAY_VERSION }
           : {})
@@ -485,7 +541,13 @@ export class TimelineProjection {
       ) {
         return { expired: true }
       }
-      const wanted = pages.filter((p) => p >= 0 && p < this.sealed)
+      const windowed = !!toolPreviewInstance && display?.windowed === true && startRow !== undefined
+      const pageRows = windowed ? WINDOW_PAGE_ROWS : TIMELINE_PAGE_ROWS
+      const pageCount = windowed ? Math.floor(this.state.timeline.length / pageRows) : this.sealed
+      const budget = windowed
+        ? Math.min(WINDOW_PAGE_BUDGET, this.pageBudgetBytes)
+        : this.pageBudgetBytes
+      const wanted = pages.filter((p) => p >= 0 && p < pageCount)
       // Resolve historical values before choosing the byte boundary. A late
       // result may have shrunk a row; sizing today's value would overfill an
       // answer after undo. Newest first, so the oldest applicable value wins.
@@ -507,29 +569,38 @@ export class TimelineProjection {
       let bytes = 0
       let next: number | undefined
       try {
-        if (startRow !== undefined)
+        if (startRow !== undefined) {
+          // Adjacent wire pages often reuse one physical page.
+          let cachedPage = -1
+          let cachedRows: TimelineItem[] = []
+          let hiddenText: ReadonlySet<number> | undefined
           for (const page of wanted) {
             if (omitted.length > 0) {
               omitted.push(page)
               continue
             }
-            const from = page * TIMELINE_PAGE_ROWS
-            const rows = restore(
-              page,
-              this.resident.includes(page)
-                ? this.pageRows(page)
-                : (JSON.parse(await this.readStoredPage(page)) as TimelineItem[])
-            )
-            const skip = startRow > from && startRow < from + rows.length ? startRow - from : 0
-            const hiddenText =
-              display?.hideActivityMessages || display?.hideActivities
-                ? hiddenActivityTextRows(rows, 0, from)
-                : undefined
+            const from = page * pageRows
+            const physicalPage = Math.floor(from / TIMELINE_PAGE_ROWS)
+            const storedFrom = physicalPage * TIMELINE_PAGE_ROWS
+            if (cachedPage !== physicalPage) {
+              const resident = physicalPage >= this.sealed || this.resident.includes(physicalPage)
+              cachedRows = restore(
+                physicalPage,
+                resident ? this.pageRows(physicalPage) : await this.readPage(physicalPage)
+              )
+              hiddenText =
+                display?.hideActivityMessages || display?.hideActivities
+                  ? hiddenActivityTextRows(cachedRows, 0, storedFrom)
+                  : undefined
+              cachedPage = physicalPage
+            }
+            const skip = startRow > from && startRow < from + pageRows ? startRow - from : 0
             const taken: TimelineItem[] = []
-            for (let k = skip; k < rows.length; k++) {
+            for (let k = skip; k < pageRows; k++) {
+              const item = cachedRows[from + k - storedFrom]
               const row = toolPreviewInstance
                 ? previewTimelineRow(
-                    rows[k],
+                    item,
                     from + k,
                     epoch,
                     toolPreviewInstance,
@@ -537,20 +608,20 @@ export class TimelineProjection {
                     hiddenText?.has(from + k),
                     asOfSeq === this.seq && from + k < this.state.turnStart
                   )
-                : rows[k]
-              const size = jsonByteLength(row)
-              if ((out.length > 0 || taken.length > 0) && bytes + size > this.pageBudgetBytes) break
+                : item
+              const size = jsonByteLength(row) + 1
+              if ((out.length > 0 || taken.length > 0) && bytes + size > budget) break
               bytes += size
               taken.push(row)
             }
             if (taken.length > 0) out.push({ page, from: from + skip, rows: taken })
-            if (skip + taken.length < rows.length) {
+            if (skip + taken.length < pageRows) {
               // Not (completely) answered: asked again, from where it stopped.
               omitted.push(page)
               if (taken.length > 0) next = from + skip + taken.length
             }
           }
-        else
+        } else
           for (const page of wanted) {
             if (omitted.length > 0) {
               omitted.push(page)
@@ -673,13 +744,15 @@ export class TimelineProjection {
       const needle = caseSensitive ? query : query.toLowerCase()
       if (!needle || this.failed) return { pages, toolUseIds: [] }
       const textRows: number[] = []
+      const windowedPages = new Set<number>()
       const inspect = (rows: Readonly<TimelineRows>, from: number) => {
         rows.forEach((row, offset) => {
-          if (row?.kind !== 'tool' && row?.kind !== 'thinking' && row?.kind !== 'text') return
+          if (!row) return
           const text = searchableText(row)
           if (!(caseSensitive ? text : text.toLowerCase()).includes(needle)) return
+          windowedPages.add(Math.floor((from + offset) / WINDOW_PAGE_ROWS))
           if (row.kind === 'tool') toolUseIds.add(row.invocation.id)
-          else textRows.push(from + offset)
+          else if (row.kind === 'thinking' || row.kind === 'text') textRows.push(from + offset)
         })
       }
       for (const page of pages) {
@@ -692,6 +765,7 @@ export class TimelineProjection {
       inspect(this.state.timeline.slice(tailFrom), tailFrom)
       return {
         pages,
+        windowedPages: [...windowedPages],
         toolUseIds: [...toolUseIds],
         ...(textRows.length ? { textMatches: { epoch: this.state.rowsEpoch, rows: textRows } } : {})
       }

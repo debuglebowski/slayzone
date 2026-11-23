@@ -222,8 +222,8 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   })
   const chatIo = useMemo(
     () =>
-      chatViaDirect(trpcClient, direct?.client ?? null, directLost, () =>
-        hubSupportsToolPreviews(trpcClient)
+      chatViaDirect(trpcClient, direct?.client ?? null, directLost, (withDisplay) =>
+        hubSupportsToolPreviews(trpcClient, withDisplay)
       ),
     [trpcClient, direct, directLost]
   )
@@ -482,7 +482,8 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
             asOfSeq,
             epoch,
             pageRows,
-            ...(paging.toolPreviews ? { toolPreviews: true } : {})
+            ...(paging.toolPreviews ? { toolPreviews: true } : {}),
+            ...(paging.windowed ? { display: { windowed: true } } : {})
           },
           stale
         )

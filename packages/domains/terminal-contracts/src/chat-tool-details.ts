@@ -5,19 +5,21 @@ export const chatHistoryDisplaySchema = z.object({
   hideThinking: z.literal(true).optional(),
   hideActivities: z.literal(true).optional(),
   hideActivityMessages: z.literal(true).optional(),
-  hideActivityTools: z.literal(true).optional()
+  hideActivityTools: z.literal(true).optional(),
+  windowed: z.literal(true).optional()
 })
 export type ChatHistoryDisplay = z.infer<typeof chatHistoryDisplaySchema>
 
 /** The computer must acknowledge support before a client uses settings to page history. */
-export const CHAT_HISTORY_DISPLAY_VERSION = 2
+export const CHAT_HISTORY_DISPLAY_VERSION = 3
 
 export function toolPreviewVersion(version: string, display?: ChatHistoryDisplay): string {
   const thinking = display?.hideThinking ? '+hide-thinking' : ''
   const activities = display?.hideActivities ? '+hide-activities' : ''
   const messages = display?.hideActivityMessages ? '+hide-activity-messages' : ''
   const tools = display?.hideActivityTools ? '+hide-activity-tools' : ''
-  return `${version}+tool-previews-2${thinking}${activities}${messages}${tools}`
+  const window = display?.windowed ? '+windowed' : ''
+  return `${version}+tool-previews-2${thinking}${activities}${messages}${tools}${window}`
 }
 
 export function parseToolPreviewVersion(
@@ -27,16 +29,17 @@ export function parseToolPreviewVersion(
   const base = toolPreviewVersion(version)
   if (!requested.startsWith(base)) return null
   const flags =
-    /^(\+hide-thinking)?(\+hide-activities)?(\+hide-activity-messages)?(\+hide-activity-tools)?$/.exec(
+    /^(\+hide-thinking)?(\+hide-activities)?(\+hide-activity-messages)?(\+hide-activity-tools)?(\+windowed)?$/.exec(
       requested.slice(base.length)
     )
   if (!flags) return null
-  const [, thinking, activities, messages, tools] = flags
+  const [, thinking, activities, messages, tools, window] = flags
   return {
     ...(thinking ? { hideThinking: true } : {}),
     ...(activities ? { hideActivities: true } : {}),
     ...(messages ? { hideActivityMessages: true } : {}),
-    ...(tools ? { hideActivityTools: true } : {})
+    ...(tools ? { hideActivityTools: true } : {}),
+    ...(window ? { windowed: true } : {})
   }
 }
 
@@ -98,6 +101,7 @@ export type ChatToolDetailChunk = z.infer<typeof chatToolDetailChunkSchema>
 
 export interface ChatToolSearchResult {
   pages: number[]
+  windowedPages?: number[]
   toolUseIds: string[]
   textMatches?: { epoch: number; rows: number[] }
 }

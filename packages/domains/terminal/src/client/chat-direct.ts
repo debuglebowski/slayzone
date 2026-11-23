@@ -236,7 +236,8 @@ interface OpenedPaged {
     state: string
     summaries: unknown[]
     toolPreviews?: true
-    displaySettings?: typeof CHAT_HISTORY_DISPLAY_VERSION
+    displaySettings?: 2 | typeof CHAT_HISTORY_DISPLAY_VERSION
+    windowed?: true
   }
   events: Array<{ seq: number; event: unknown; at?: number }>
   live: { afterSeq: number; liveSeq: number; events: unknown[] }
@@ -254,6 +255,11 @@ export async function openChatTimeline(
   try {
     const input = { tabId, version: TIMELINE_PROJECTION_VERSION }
     const compact = { ...input, toolPreviews: true }
+    const windowed = (await io.openTimeline({
+      ...compact,
+      display: { ...display, windowed: true }
+    })) as OpenedPaged | { kind: 'full' }
+    if (windowed.kind === 'paged') return windowed
     if (display) {
       const configured = (await io.openTimeline({ ...compact, display })) as
         | OpenedPaged
@@ -285,7 +291,8 @@ export interface ChatPaging {
   pageRows: number
   sealed: number
   toolPreviews?: true
-  displaySettings?: typeof CHAT_HISTORY_DISPLAY_VERSION
+  displaySettings?: 2 | typeof CHAT_HISTORY_DISPLAY_VERSION
+  windowed?: true
   summaries: TimelinePageSummary[]
 }
 
@@ -329,6 +336,7 @@ export async function readInitialChatHistory(
       sealed: snapshot.summaries.length,
       toolPreviews: snapshot.toolPreviews,
       displaySettings: snapshot.displaySettings,
+      windowed: snapshot.windowed,
       summaries: snapshot.summaries as TimelinePageSummary[]
     },
     events: events as ChatHistoryPageEvent[],
@@ -372,6 +380,18 @@ export async function timelinePagesAll(
     const res = (await io.timelinePages({ ...ask, pages: wanted, startRow })) as PagesAnswer
     if (stale()) return null
     if (res.expired) return res
+    if (
+      ask.display?.windowed &&
+      (res.pages.length === 0 ||
+        res.pages.some(
+          ({ page, from, rows }) =>
+            !wanted.includes(page) ||
+            rows.length === 0 ||
+            from < page * pageRows ||
+            from + rows.length > (page + 1) * pageRows
+        ))
+    )
+      return { expired: true }
     pages.push(...res.pages)
     const asked = wanted
     const again = (res.omitted ?? []).filter((page) => asked.includes(page))

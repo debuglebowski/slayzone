@@ -322,7 +322,7 @@ export function previewTimelineRow(
     }
   }
   if (
-    (display?.hideActivityMessages || display?.hideActivities) &&
+    (display?.hideActivityMessages || display?.hideActivities || display?.windowed) &&
     item.kind === 'result' &&
     item.copyText
   ) {

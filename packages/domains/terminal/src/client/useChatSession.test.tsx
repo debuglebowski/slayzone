@@ -1088,7 +1088,9 @@ describe('paged history (opened from the hub projection)', () => {
     const pages = vi.spyOn(client.chat.timelinePages, 'query')
     const { result, rerender } = setup(true)
     await openPaged(0)
-    expect(opens).toHaveBeenCalledWith(expect.objectContaining({ display: { hideThinking: true } }))
+    expect(opens).toHaveBeenCalledWith(
+      expect.objectContaining({ display: { hideThinking: true, windowed: true } })
+    )
     act(() => result.current.loadPages([0]))
     await settle()
     expect(pages).toHaveBeenLastCalledWith(

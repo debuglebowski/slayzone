@@ -158,6 +158,23 @@ test('a 25k-event chat keeps completed command output out of the open indexes', 
       const deflateBytes = (value: unknown) =>
         deflateRawSync(JSON.stringify(value), { level: 3, memLevel: 6 }).length
       expect(deflateBytes(compact)).toBeLessThan(80 * KIB)
+      const display = { windowed: true } as const
+      const window = await projection.openSnapshot('benchmark', display)
+      expect(window.windowed).toBe(true)
+      expect(decodeTimelineState(window.state).timeline.filter(Boolean).length).toBeLessThan(32)
+      expect(deflateBytes(window)).toBeLessThan(deflateBytes(compact))
+      const newestPage = window.summaries.length - 1
+      const windowPage = await projection.pagesAsOf(
+        [newestPage],
+        window.seq,
+        window.epoch,
+        newestPage * window.pageRows,
+        'benchmark',
+        display
+      )
+      expect(windowPage.expired).toBe(false)
+      expect(jsonByteLength(windowPage)).toBeLessThan(100 * KIB)
+      expect(deflateBytes(windowPage)).toBeLessThan(12 * KIB)
       const sealed = snapshot.summaries.length - 1
       const page = await projection.pagesAsOf(
         [sealed],

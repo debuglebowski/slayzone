@@ -14,6 +14,7 @@
  *  - one older page: `pagesAsOf` time and bytes;
  *  - mobile open: the whole replay's bytes (raw / gzip) and its one reducer batch.
  * Writes JSON lines to SLZ_PERF_OUT (default /tmp/slz-chat-bench/results.jsonl).
+ * Set SLZ_PERF_ALL_OPENS=1 to measure windowed payloads over every current tab.
  */
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { cpus, loadavg } from 'node:os'
@@ -32,6 +33,7 @@ import {
   type TimelineProjectionStore
 } from '@slayzone/terminal/timeline-projection'
 import { decodeTimelineState } from '@slayzone/terminal/timeline-checkpoint'
+import { timelineStoreFromRecords } from '@slayzone/terminal/timeline-records'
 import { initialState, reducer } from '@slayzone/terminal/reducer'
 import { openChatStorage } from '../storage'
 import { createLocalChatData } from '../local-data'
@@ -39,6 +41,7 @@ import { createLocalChatData } from '../local-data'
 const STATE_DIR = process.env.SLZ_PERF_STATE_DIR ?? ''
 const OUT = process.env.SLZ_PERF_OUT ?? '/tmp/slz-chat-bench/results.jsonl'
 const PICK = Number(process.env.SLZ_PERF_PICK ?? 6)
+const ALL_OPENS = process.env.SLZ_PERF_ALL_OPENS === '1'
 const BUDGET = { maxBytes: CHAT_HISTORY_PAGE_MAX_BYTES, maxEvents: CHAT_HISTORY_PAGE_MAX_EVENTS }
 
 type Stored = { seq: number; event: AgentEvent; at?: number }
@@ -80,12 +83,20 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
     const all = store.compose((db) =>
       db
         .prepare(
-          `SELECT c.id, c.tab_id AS tabId, c.mode, COUNT(*) AS n, SUM(LENGTH(CAST(e.event AS BLOB))) AS bytes
+          `SELECT c.id, c.tab_id AS tabId, c.mode, COUNT(*) AS n, MAX(e.seq) AS lastSeq,
+                  SUM(LENGTH(CAST(e.event AS BLOB))) AS bytes
            FROM conversations c JOIN events e ON e.conversation_id = c.id
            GROUP BY c.id ORDER BY bytes DESC`
         )
         .all()
-    ) as Array<{ id: string; tabId: string; mode: string; n: number; bytes: number }>
+    ) as Array<{
+      id: string
+      tabId: string
+      mode: string
+      n: number
+      lastSeq: number
+      bytes: number
+    }>
     // Distribution of the whole store (what a mobile replay would ship, per chat).
     const sizes = all.map((c) => c.bytes).sort((a, b) => a - b)
     const pct = (p: number) =>
@@ -109,10 +120,56 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
       (c, i, a) => c && a.findIndex((x) => x.id === c.id) === i
     )
 
-    for (const c of picked) {
+    for (const c of ALL_OPENS ? all : picked) {
       const owner = store.forTab(c.tabId)?.identity
       if (!owner || owner.id !== c.id) {
         console.log('[open-perf] skip (not the tab conversation)', c.id)
+        continue
+      }
+      if (ALL_OPENS) {
+        const projection = await TimelineProjection.open({
+          store: timelineStoreFromRecords(data.timelineRecords!(c.tabId)),
+          history: {
+            lastSeq: c.lastSeq,
+            async *pages(afterSeq) {
+              for (let after = afterSeq; ; ) {
+                const page = store.readPage(c.id, after, c.lastSeq + 1, BUDGET)
+                if (page.events.length === 0) return
+                yield page.events
+                if (!page.more) return
+                after = page.events[page.events.length - 1].seq
+              }
+            }
+          },
+          agentStartedTurns: chatCapabilitiesForMode(c.mode).agentStartedTurns
+        })
+        try {
+          const window = await projection.openSnapshot('benchmark', { windowed: true })
+          const wire = JSON.stringify(window)
+          const page = window.summaries.length - 1
+          const older =
+            page < 0
+              ? null
+              : await projection.pagesAsOf(
+                  [page],
+                  window.seq,
+                  window.epoch,
+                  page * window.pageRows,
+                  'benchmark',
+                  { windowed: true }
+                )
+          appendFileSync(
+            OUT,
+            JSON.stringify({
+              kind: 'open',
+              openBytes: Buffer.byteLength(wire),
+              deflateBytes: deflateRawSync(wire, { level: 3, memLevel: 6 }).length,
+              olderPageBytes: older ? Buffer.byteLength(JSON.stringify(older)) : null
+            }) + '\n'
+          )
+        } finally {
+          await projection.close()
+        }
         continue
       }
       // 1. Cold hydrate: every saved event, a page at a time (as `ChatEventLog.pages`).
@@ -187,6 +244,30 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
       t = performance.now()
       const wsBytes = deflateRawSync(previewWire, { level: 3, memLevel: 6 }).length
       const deflateMs = performance.now() - t
+      t = performance.now()
+      const window = await restored.openSnapshot('benchmark', { windowed: true })
+      const windowWire = JSON.stringify(window)
+      const windowSnapshotMs = performance.now() - t
+      t = performance.now()
+      const windowState = decodeTimelineState(window.state)
+      const windowDecodeMs = performance.now() - t
+      t = performance.now()
+      const windowWsBytes = deflateRawSync(windowWire, { level: 3, memLevel: 6 }).length
+      const windowDeflateMs = performance.now() - t
+      const windowPage = window.summaries.length - 1
+      const olderWindow =
+        windowPage >= 0
+          ? await restored.pagesAsOf(
+              [windowPage],
+              window.seq,
+              window.epoch,
+              windowPage * window.pageRows,
+              'benchmark',
+              { windowed: true }
+            )
+          : null
+      const windowPageWire = olderWindow ? JSON.stringify(olderWindow) : ''
+      const windowRows = windowState.timeline.filter((row) => row !== undefined)
 
       // 5. One older page (the newest sealed one), as scrolling up asks for it.
       let pageMs = 0,
@@ -247,6 +328,20 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
         previewDecodeMs: ms(previewDecodeMs),
         previewWebSocketKB: kb(wsBytes),
         previewDeflateMs: ms(deflateMs),
+        windowSnapshotKB: kb(Buffer.byteLength(windowWire)),
+        windowWebSocketKB: kb(windowWsBytes),
+        windowWsBytes,
+        windowSnapshotMs: ms(windowSnapshotMs),
+        windowDecodeMs: ms(windowDecodeMs),
+        windowDeflateMs: ms(windowDeflateMs),
+        windowPageKB: kb(Buffer.byteLength(windowPageWire)),
+        windowPageWebSocketKB: kb(deflateRawSync(windowPageWire, { level: 3, memLevel: 6 }).length),
+        windowRows: windowRows.length,
+        windowTopRowKB: kb(
+          Math.max(0, ...windowRows.map((row) => Buffer.byteLength(JSON.stringify(row))))
+        ),
+        windowIndexesKB: kb(Buffer.byteLength(JSON.stringify(JSON.parse(window.state).state))),
+        windowSummariesKB: kb(Buffer.byteLength(JSON.stringify(window.summaries))),
         snapshotGzipKB: kb(gzipSync(wire).length),
         snapshotStateKB: kb(Buffer.byteLength(snapshot.state)),
         summaries: sealed,

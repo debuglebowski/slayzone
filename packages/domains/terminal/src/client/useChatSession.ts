@@ -611,8 +611,11 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      const display =
-        paging?.displaySettings === CHAT_HISTORY_DISPLAY_VERSION ? historyDisplay() : undefined
+      const settings =
+        paging?.displaySettings === CHAT_HISTORY_DISPLAY_VERSION || paging?.displaySettings === 2
+          ? historyDisplay()
+          : undefined
+      const display = paging?.windowed ? { ...settings, windowed: true as const } : settings
       timelinePagesAll(
         chatIo,
         {
@@ -668,7 +671,13 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const searchPages = useStableCallback(
     (query: string, caseSensitive?: boolean): Promise<number[] | ChatToolSearchResult> =>
       paging
-        ? chatIo.searchTimeline({ tabId: opts.tabId, query, caseSensitive }).catch(() => [])
+        ? chatIo.searchTimeline({ tabId: opts.tabId, query, caseSensitive }).then(
+            (matches) =>
+              paging.windowed && !Array.isArray(matches) && matches.windowedPages
+                ? { ...matches, pages: matches.windowedPages }
+                : matches,
+            () => []
+          )
         : Promise.resolve([])
   )
   const unloadPages = useStableCallback((pages: readonly number[]): void => {
