@@ -87,8 +87,36 @@ describe('HubFeedSource', () => {
     await waitFor(() => expect(last()?.board.data?.tasks[0].title).toBe('Before'))
 
     titles = ['After']
+    await act(async () => emit({ taskIds: null }))
+    await waitFor(() => expect(last()?.board.data?.tasks[0].title).toBe('After'))
+  })
+
+  it('patches named task changes without another full board load', async () => {
+    const { onFeed, last } = recorder()
+    const loadBoard = jest.fn(() => boardOf('Before', 'Unchanged'))
+    const loadRows = jest.fn(() => ({
+      tasks: boardOf('After').tasks,
+      taskTags: {},
+      blockedTaskIds: []
+    }))
+    let emit: (data: unknown) => void = () => undefined
+    const { wrapper } = hubBackend({
+      procedures: { 'task.loadBoardData': loadBoard, 'task.loadBoardRows': loadRows },
+      subscriptions: {
+        'notify.onTasksChanged': (_input, push) => {
+          emit = push
+        }
+      }
+    })
+    await render(<HubFeedSource hub={hub} connection={OPEN} onFeed={onFeed} />, { wrapper })
+    await waitFor(() => expect(last()?.board.data?.tasks[0].title).toBe('Before'))
+    const other = last()?.board.data?.tasks[1]
+
     await act(async () => emit({ taskIds: ['t0'] }))
     await waitFor(() => expect(last()?.board.data?.tasks[0].title).toBe('After'))
+    expect(last()?.board.data?.tasks[1]).toBe(other)
+    expect(loadRows).toHaveBeenCalledWith({ ids: ['t0'] })
+    expect(loadBoard).toHaveBeenCalledTimes(1)
   })
 
   it('reports why the board failed to load', async () => {
