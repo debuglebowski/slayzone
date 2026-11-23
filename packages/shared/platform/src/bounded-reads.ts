@@ -120,6 +120,9 @@ export interface ByteRangePage {
   etag: string
 }
 
+/** A range on a link that can deliver the bytes directly. */
+export type ByteRangeReply = Omit<ByteRangePage, 'data'> & { data: string | Uint8Array }
+
 /** The source changed between two ranges of one read (other `etag` or `size`). Retry from 0. */
 export class ByteSourceChangedError extends Error {
   override name = 'ByteSourceChangedError'
@@ -183,7 +186,7 @@ function decodeBase64(data: string): Uint8Array {
  * so an integrity failure cannot complete a streamed Content-Length response.
  */
 export async function* readByteRanges(
-  fetch: (offset: number, length: number) => Promise<ByteRangePage>,
+  fetch: (offset: number, length: number) => Promise<ByteRangeReply>,
   opts: ReadByteRangesOptions = {}
 ): AsyncGenerator<Uint8Array, void, void> {
   const chunk = Math.max(1, Math.min(opts.chunkBytes ?? BYTE_RANGE_MAX_CHUNK, BYTE_RANGE_MAX_CHUNK))
@@ -197,7 +200,7 @@ export async function* readByteRanges(
     if (!identity) identity = { size: page.size, etag: page.etag }
     else if (page.size !== identity.size || page.etag !== identity.etag)
       throw new ByteSourceChangedError('byte read: the source changed while it was read')
-    const bytes = decodeBase64(page.data)
+    const bytes = typeof page.data === 'string' ? decodeBase64(page.data) : page.data
     if (offset + bytes.length > identity.size) throw new Error('byte read: data beyond its size')
     if (bytes.length === 0 && !page.eof) throw new Error('byte read: range made no progress')
     offset += bytes.length
@@ -224,7 +227,7 @@ export async function* readByteRanges(
 
 /** {@link readByteRanges}, assembled into one buffer. */
 export async function collectByteRanges(
-  fetch: (offset: number, length: number) => Promise<ByteRangePage>,
+  fetch: (offset: number, length: number) => Promise<ByteRangeReply>,
   opts: ReadByteRangesOptions = {}
 ): Promise<Uint8Array> {
   const parts: Uint8Array[] = []

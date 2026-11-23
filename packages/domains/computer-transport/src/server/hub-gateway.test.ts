@@ -263,6 +263,21 @@ describe('reconnect auth (hello)', () => {
 })
 
 describe('hub → computer requests', () => {
+  it('returns binary artifact ranges over the socket and leaves other replies alone', async () => {
+    const bytes = Buffer.from([0, 23, 128, 255])
+    const result = { data: bytes.toString('base64'), size: bytes.length, offset: 0, eof: true }
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, { onHubRequest: async () => result })
+    dialer.start()
+    await dialer.events.once('connected')
+    const range = { kind: 'artifact.invoke', value: { method: 'readRange' } }
+
+    await expect(
+      hub.gateway.request('computer-1', HubToComputerMethods.chatRequest, range)
+    ).resolves.toEqual({ ...result, data: bytes })
+    await expect(hub.gateway.request('computer-1', 'other', range)).resolves.toEqual(result)
+  })
+
   it('exec commands round-trip and correlate out-of-order responses', async () => {
     const hub = await startHub()
     const resolvers = new Map<string, (v: unknown) => void>()

@@ -30,7 +30,7 @@ import {
 import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
 import { wsCompression } from '../shared/ws-compression'
 import { DuplexRpc, JSON_RPC_INTERNAL_ERROR, RpcError } from '../shared/rpc'
-import { isWsMessageTooLargeError, wsDataToText } from '../shared/ws-data'
+import { isArtifactRangeRequest, isWsMessageTooLargeError, wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
 import type { ComputerCredentialStore } from './credential-store'
 
@@ -316,6 +316,7 @@ export class HubDialer {
       write: (line) => {
         ws.send(line)
       },
+      writeBinary: (packet) => ws.send(packet),
       onPeerRequest: (method, params, id, actor, signal) =>
         this.handleHubRequest(conn, method, params, id, actor, signal),
       onNotification: (method, params) => this.events.emit('notification', { method, params }),
@@ -642,6 +643,17 @@ export class HubDialer {
     void (async () => {
       try {
         const result = await handler(method, params, actor, signal)
+        if (
+          isArtifactRangeRequest(method, params) &&
+          params.binaryReply === true &&
+          result &&
+          typeof result === 'object' &&
+          'data' in result &&
+          typeof result.data === 'string'
+        ) {
+          const { data, ...metadata } = result
+          if (conn.rpc.respondBinary(id, metadata, Buffer.from(data, 'base64'))) return
+        }
         conn.rpc.respond(id, result ?? null)
       } catch (err) {
         if (err instanceof RpcError) {
