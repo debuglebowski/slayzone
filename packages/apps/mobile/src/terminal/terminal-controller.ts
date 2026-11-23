@@ -113,7 +113,7 @@ export class TerminalController {
    * Keystrokes: direct while there is a link, else the hub (see `viaDirect`), in the
    * order typed across both (`createOrderedPtyWriter`).
    */
-  write(data: string): Promise<unknown> {
+  write(data: string): Promise<boolean> {
     return this.writer.write(data)
   }
 

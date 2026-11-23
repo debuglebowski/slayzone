@@ -287,10 +287,8 @@ function seqGapSkip(entry: SeqGapState): OutputGap | null {
 }
 
 /**
- * Terminal input is fire-and-forget; most failures (the computer went away) need
- * no word here. A write REFUSED by the frame limit (`frameTooLarge`: input over
- * 100 MiB in one write) is input the user typed or pasted that never arrived —
- * recorded, never silently dropped.
+ * The caller handles delivery failures. Also record frame-limit refusals to
+ * diagnose oversize writes without logging the user's input.
  */
 function reportWriteRefused(
   computerId: string,
@@ -1030,6 +1028,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // `null`, not 0 — the pid is UNKNOWN until the computer replies, and a
     // placeholder that reads as a number invites callers to treat it as one.
     let pid: number | null = null
+    let pendingWrite: Promise<boolean> | undefined
     const handle: PtyHandle = {
       get pid(): number | null {
         return pid
@@ -1048,8 +1047,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             ...(event.detail ? { detail: event.detail } : {})
           })
         ),
-      write: (data: string, opts?: PtyWriteOptions): void => {
-        void send(HubToComputerMethods.ptyWrite, {
+      write: (data: string, opts?: PtyWriteOptions): Promise<boolean> => {
+        const params = {
           sessionId,
           ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
           data,
@@ -1057,7 +1056,39 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           ...(opts?.watchConversationId && entry.detectsOutput
             ? { watchConversationId: true as const }
             : {})
-        }).catch((err: unknown) => reportWriteRefused(computerId, sessionId, data.length, err))
+        }
+        const deliver = async (): Promise<boolean> => {
+          if (entry.disposed) return false
+          const request = () =>
+            send(HubToComputerMethods.ptyWrite, params) as Promise<{ ok: boolean } | undefined>
+          const reply = await request()
+          if (reply?.ok !== false) return true
+          // A write can reach the gateway before the spawn passes its async
+          // checks. Retry only a refused write, against the same attempt.
+          const whenSpawned = handle.whenSpawned
+          if (!entry.spawnInFlight || !whenSpawned) return false
+          let exitSubscription: ExecDisposable | undefined
+          try {
+            const exited = new Promise<false>((resolve) => {
+              exitSubscription = handle.onExit(() => resolve(false))
+            })
+            const started = await Promise.race([whenSpawned.then(() => true), exited])
+            return started && !entry.disposed && (await request())?.ok !== false
+          } finally {
+            exitSubscription?.dispose()
+          }
+        }
+        // Async gateway checks can reorder requests from an ordered socket.
+        const write = pendingWrite ? pendingWrite.then(deliver, deliver) : deliver()
+        pendingWrite = write
+        const clear = () => {
+          if (pendingWrite === write) pendingWrite = undefined
+        }
+        void write.then(clear, (err: unknown) => {
+          clear()
+          reportWriteRefused(computerId, sessionId, data.length, err)
+        })
+        return write
       },
       get detectsOutput(): boolean {
         return entry.detectsOutput

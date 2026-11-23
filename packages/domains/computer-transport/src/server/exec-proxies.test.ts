@@ -160,6 +160,67 @@ const procSpec = (over: Partial<ProcSpawnSpec> = {}): ProcSpawnSpec => ({
 // ===========================================================================
 
 describe('createRoutingPtyBackend', () => {
+  it('keeps Enter behind prompt text stalled in the relay', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 4242 }))
+    const submitted: string[] = []
+    let draft = ''
+    let releasePrompt!: () => void
+    const pendingPrompt = new Promise<void>((resolve) => {
+      releasePrompt = resolve
+    })
+    gateway.onMethod('pty.write', async (params) => {
+      const { data } = params as { data: string }
+      if (data === 'review this change') await pendingPrompt
+      if (data === '\r') {
+        if (draft) submitted.push(draft)
+        draft = ''
+      } else {
+        draft += data
+      }
+      return { ok: true }
+    })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId
+    })
+    const agent = (await backend.spawn(ptySpec())) as PtyHandle
+    await agent.whenSpawned
+
+    agent.write('review this change', { writeId: 'prompt' })
+    agent.write('\r', { writeId: 'enter' })
+    releasePrompt()
+    await vi.waitFor(() => expect(gateway.requestsOf('pty.write')).toHaveLength(2))
+    expect(submitted.join('') + draft).toBe('review this change')
+    expect(submitted).toEqual(['review this change'])
+  })
+
+  it('retries a refused early Enter once after the same spawn is confirmed', async () => {
+    const gateway = new FakeGateway()
+    let confirmSpawn!: (result: { pid: number }) => void
+    gateway.onMethod(
+      'pty.spawn',
+      () =>
+        new Promise((resolve) => {
+          confirmSpawn = resolve
+        })
+    )
+    const receive = vi.fn().mockReturnValueOnce({ ok: false }).mockReturnValueOnce({ ok: true })
+    gateway.onMethod('pty.write', receive)
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId
+    })
+    const agent = (await backend.spawn(ptySpec())) as PtyHandle
+    const delivered = agent.write('\r', { writeId: 'enter' })
+    expect(receive).toHaveBeenCalledTimes(1)
+    confirmSpawn({ pid: 4242 })
+
+    expect(await delivered).toBe(true)
+    expect(receive).toHaveBeenCalledTimes(2)
+    expect(receive.mock.calls[0]).toEqual(receive.mock.calls[1])
+  })
+
   it('throws NoComputerAvailableError when no computer resolves (never spawns on the hub)', () => {
     const gateway = new FakeGateway()
     const backend = createRoutingPtyBackend({

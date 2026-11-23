@@ -1343,6 +1343,63 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 
+  it('delivers Enter to the replacement agent while the old process is exiting', async () => {
+    const { ctx } = makeCtx()
+    const previous = controlledPty(9995)
+    const replacement = controlledPty(9996)
+    const stopping = new Promise<void>((resolve) => {
+      vi.mocked(previous.proc.kill).mockImplementation(() => resolve())
+    })
+    const admission = oneSlot()
+    const pty = createPtyHandlers(ctx, undefined, {
+      admission,
+      spawnPty: vi.fn().mockReturnValueOnce(previous.proc).mockReturnValueOnce(replacement.proc)
+    })
+    const spec = {
+      sessionId: 'agent',
+      taskId: 'task',
+      command: 'cat',
+      cwd,
+      admission: 'foreground'
+    }
+    let starting: Promise<unknown> | undefined
+    try {
+      await pty.handlers['pty.spawn']({ ...spec, spawnId: 'previous' })
+      starting = Promise.resolve(pty.handlers['pty.spawn']({ ...spec, spawnId: 'replacement' }))
+      expect(admission.stats().queued).toBe(1)
+      await pty.handlers['pty.write']({
+        sessionId: spec.sessionId,
+        spawnId: 'replacement',
+        data: 'review this change',
+        writeId: 'prompt'
+      })
+      previous.emit('ready')
+      // The replacement has its slot but cannot start until the old PTY exits.
+      await stopping
+      await pty.handlers['pty.write']({
+        sessionId: spec.sessionId,
+        spawnId: 'replacement',
+        data: '\r',
+        writeId: 'enter'
+      })
+      previous.exit()
+      await starting
+
+      expect(previous.proc.write).not.toHaveBeenCalled()
+      const stdin = vi
+        .mocked(replacement.proc.write)
+        .mock.calls.map(([data]) => data)
+        .join('')
+      expect(stdin).toContain('review this change')
+      expect(stdin).toBe('review this change\r')
+    } finally {
+      previous.exit()
+      replacement.exit()
+      pty.disposeAll()
+      await starting?.catch(() => undefined)
+    }
+  })
+
   it('a keystroke sent DIRECT to a session still waiting for its slot is queued, once, not dropped', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })

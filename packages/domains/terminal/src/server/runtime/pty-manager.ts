@@ -390,7 +390,12 @@ interface PtySession {
   // Set while this session's agent is being resumed in place (it died
   // unexpectedly): input typed meanwhile, held for the resumed process instead of
   // being written to the dead one (`writePty`, flushed on adoption).
-  heldInput?: string[]
+  heldInput?: Array<{
+    data: string
+    writeId?: string
+    resolve: (accepted: boolean | PromiseLike<boolean>) => void
+    reject: (reason: unknown) => void
+  }>
   /**
    * Set when this session is a process the computer was ALREADY running (a previous
    * hub run's), taken over rather than started (`adoptAttached`). A later ordinary
@@ -2559,7 +2564,13 @@ async function createPtyImpl(
       // process (an owner queues it until its process has started).
       const held = carried.heldInput ?? []
       carried.heldInput = undefined
-      for (const data of held) writePty(sessionId, data)
+      for (const { data, writeId, resolve, reject } of held) {
+        try {
+          resolve(writePty(sessionId, data, writeId))
+        } catch (error) {
+          reject(error)
+        }
+      }
     }
     // An AGENT's start is tracked for the startup card: `queued` until its owner
     // confirms the launch (after any wait for an admission slot), then `booting`
@@ -2608,7 +2619,10 @@ async function createPtyImpl(
       if (finalized) return
       finalized = true
       const exiting = sessions.get(sessionId)
-      if (exiting && exiting.pty === ptyProcess) exiting.exited = true
+      if (exiting && exiting.pty === ptyProcess) {
+        exiting.exited = true
+        refuseHeldInput(exiting)
+      }
       // Drop THIS launch's pending-spawn provenance row (by id: a sibling tab of
       // the same mode keeps its own). A row that isn't pruned here cannot match
       // a later launch's token, but pruning keeps the ledger small.
@@ -3235,7 +3249,6 @@ async function createPtyImpl(
           // A second exit report for the process being resumed (its kill raced the
           // resume): nothing left to decide — report it once.
           if (resumeInFlight) {
-            session.heldInput = undefined
             finalizeSessionExit(exitCode)
             return
           }
@@ -3647,8 +3660,7 @@ async function createPtyImpl(
               if (res.success) return
               resumeInFlight = false
               // Never typed into a recovery shell: it would run as commands.
-              const heldWrites = session.heldInput?.length ?? 0
-              session.heldInput = undefined
+              const heldWrites = refuseHeldInput(session)
               if (finalized) return
               // Ended (closed, restarted, quitting) while the resume was starting:
               // report the exit, never a recovery shell nobody asked for.
@@ -3935,7 +3947,7 @@ async function createPtyImpl(
  * Single canonical entry for "fire prompt" — used by REST `/submit`, IPC
  * `pty:submit`, future MCP submit tool. Differs from `writePty`, which is raw.
  */
-export function submitPty(sessionId: string, text: string): boolean {
+export function submitPty(sessionId: string, text: string): boolean | Promise<boolean> {
   const session = sessions.get(sessionId)
   if (!session) return false
   return writePty(sessionId, session.adapter.encodeSubmit(text))
@@ -3944,16 +3956,30 @@ export function submitPty(sessionId: string, text: string): boolean {
 /** Input held for a resuming agent is bounded: a runaway paste is cut, not kept. */
 const HELD_INPUT_MAX_CHARS = 64 * 1024
 
-export function writePty(sessionId: string, data: string, writeId?: string): boolean {
+function refuseHeldInput(session: PtySession): number {
+  const pending = session.heldInput ?? []
+  session.heldInput = undefined
+  for (const write of pending) write.resolve(false)
+  return pending.length
+}
+
+export function writePty(
+  sessionId: string,
+  data: string,
+  writeId?: string
+): boolean | Promise<boolean> {
   const session = sessions.get(sessionId)
-  if (!session) return false
+  if (!session || session.exited || session.killRequested) return false
 
   // Its agent is being resumed in place: hold the input for the new process (the
   // dead one would swallow it).
-  if (session.heldInput) {
-    const held = session.heldInput.reduce((n, d) => n + d.length, 0)
-    if (held + data.length <= HELD_INPUT_MAX_CHARS) session.heldInput.push(data)
-    return true
+  const pending = session.heldInput
+  if (pending) {
+    const held = pending.reduce((n, write) => n + write.data.length, 0)
+    if (held + data.length > HELD_INPUT_MAX_CHARS) return false
+    return new Promise<boolean>((resolve, reject) => {
+      pending.push({ data, writeId, resolve, reject })
+    })
   }
 
   // A session a computer runs (docs/direct-link.md): the computer analyses EVERY
@@ -3964,8 +3990,7 @@ export function writePty(sessionId: string, data: string, writeId?: string): boo
   // retried keystroke twice.
   const handle = session.pty as unknown as PtyHandle
   if (handle.computerId !== undefined) {
-    handle.write(data, { writeId: writeId ?? `hub-${randomUUID()}` })
-    return true
+    return handle.write(data, { writeId: writeId ?? `hub-${randomUUID()}` }) ?? true
   }
 
   // NOTE: writePty does NOT touch the idle-close clock. PTY input is a noisy
@@ -4150,6 +4175,7 @@ export function killPty(sessionId: string): boolean {
     taskId: session.taskId
   })
   session.killRequested = true
+  refuseHeldInput(session)
   // Clear any pending timeouts to prevent orphaned callbacks
   stopSessionTimers(session)
   // Note: we intentionally do NOT eagerly delete from sessions/dataListeners

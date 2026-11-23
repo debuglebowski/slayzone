@@ -1706,6 +1706,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/useUnattachedSession.test.tsx \
   packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
+  packages/domains/terminal/src/client/terminal-focus-watch.test.ts \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/terminal/src/client/useAgents.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \

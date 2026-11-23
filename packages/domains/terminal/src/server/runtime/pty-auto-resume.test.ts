@@ -419,13 +419,65 @@ test('while the resume starts: the tab shows starting and the info line, typing 
   // Before the new process exists.
   expect(states).toContain('starting')
   expect((await getBuffer(sid)) ?? '').toContain('exited unexpectedly (code 129)')
-  expect(writePty(sid, 'hello')).toBe(true)
+  const text = writePty(sid, 'hello')
+  const enter = writePty(sid, '\r')
   expect(b.handles[0].written).toEqual([])
   release()
+  expect(await text).toBe(true)
+  expect(await enter).toBe(true)
   await until(() => b.handles.length === 2)
   await settle()
-  expect(b.handles[1].written.join('')).toContain('hello')
+  expect(b.handles[1].written.join('')).toBe('hello\r')
   expect(exits).toEqual([])
+})
+
+test('auto-resume does not report success for Enter dropped by a full input buffer', async () => {
+  const b = fakeBackend()
+  const sid = await openAgent()
+  b.handles[0].print('ready\r\n')
+  skew += 11_000
+  let release!: () => void
+  b.hold = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  try {
+    b.handles[0].exit({ exitCode: 129 })
+    await until(() => b.specs.length === 2)
+    const prompt = 'x'.repeat(64 * 1024)
+    const acceptedPrompt = writePty(sid, prompt)
+    const enter = writePty(sid, '\r')
+    expect(b.handles[0].written).toEqual([])
+    release()
+    expect(await acceptedPrompt).toBe(true)
+    const acceptedEnter = await enter
+    await until(() => b.handles[1]?.written.length > 0)
+    const input = b.handles[1].written.join('')
+    expect(input.startsWith(prompt)).toBe(true)
+    expect(acceptedEnter && !input.endsWith('\r')).toBe(false)
+  } finally {
+    release()
+  }
+})
+
+test('failed auto-resume reports the discarded prompt without typing it into the recovery shell', async () => {
+  const b = fakeBackend()
+  const sid = await openAgent()
+  b.handles[0].print('ready\r\n')
+  skew += 11_000
+  let refuseResume!: (error: Error) => void
+  b.hold = new Promise<void>((_, reject) => {
+    refuseResume = reject
+  })
+  b.handles[0].exit({ exitCode: 129 })
+  await until(() => b.specs.length === 2)
+  const accepted = writePty(sid, 'hello\r')
+  b.hold = null
+  refuseResume(new Error('resume refused'))
+  await until(() => events('pty.shell_fallback').length > 0)
+  expect(await accepted).toBe(false)
+  expect(events('pty.auto_resume_failed')[0]?.payload).toMatchObject({ droppedInputWrites: 1 })
+  expect(b.handles).toHaveLength(2)
+  expect(b.handles.map((handle) => handle.written.join(''))).not.toContain('hello\r')
 })
 
 test('a resume its computer refuses to start falls back to the recovery shell', async () => {

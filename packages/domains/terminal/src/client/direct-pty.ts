@@ -27,6 +27,7 @@ import {
   type OrderedPtyWriter,
   type PtyWritePath
 } from '@slayzone/transport/direct-client'
+import { toast } from '@slayzone/ui'
 import { taskIdFromSessionId } from './session-id'
 
 type DirectPtyClient = DirectLease['client']
@@ -199,7 +200,7 @@ interface HubPtyBuffer {
  * may not have landed (refused, not taken, socket gone, no answer in time) goes to the hub with
  * the same id — the computer applies it once, so it is neither lost nor typed twice;
  * a transport failure also drops the lease. Keys reach the computer in the order
- * typed: one typed while a direct write is in flight waits for it.
+ * typed: one typed while any write is in flight waits for it.
  */
 export function ptyWrite(hub: HubPtyWrite, sessionId: string, data: string): Promise<boolean> {
   let entry = writers.get(sessionId)
@@ -283,11 +284,18 @@ export async function ptyBufferSince(
 }
 
 /**
- * For `void`-style call sites (keystrokes from xterm handlers): a write neither path
- * could deliver is reported, never an unhandled rejection.
+ * Report a refusal or an uncertain delivery to the person typing.
  */
-export function reportPtyWriteFailure(err: unknown): void {
-  console.warn('[terminal] keystroke not delivered', err)
+export function notifyOnPtyWriteFailure(sessionId: string, write: Promise<boolean>): void {
+  const report = (error: unknown): void => {
+    console.warn('[terminal] input delivery could not be confirmed', error)
+    toast.error('Terminal input delivery could not be confirmed', {
+      id: `terminal-write-${sessionId}`
+    })
+  }
+  void write.then((accepted) => {
+    if (!accepted) report('The terminal declined the write')
+  }, report)
 }
 
 /** Test seam. */

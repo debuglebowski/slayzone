@@ -2,14 +2,9 @@
  * Keystrokes in the order they were typed, across the direct link and the hub
  * (docs/direct-link.md).
  *
- * A direct write that does not land (no answer in time, refused, not taken) is sent
- * again through the hub, seconds later. A key typed meanwhile must not overtake it on
- * the direct socket. So:
- *  - a direct write goes out only when nothing else is in flight for the session;
- *    keys typed while it is in flight wait, and go next as ONE write (no throughput
- *    is lost to the wait);
- *  - hub writes pipeline as they always did (one ordered socket, no fallback), but a
- *    write on the other path waits until the in-flight ones settled.
+ * Each write waits for the previous one to settle. A direct write can fall back
+ * through the hub, and async hub checks can reorder requests from an ordered
+ * socket. Input typed during the wait goes next as one write.
  *
  * Each caller's promise settles with the write that carried its data.
  *
@@ -42,40 +37,31 @@ interface Waiting {
 
 export function createOrderedPtyWriter(opts: OrderedPtyWriterOptions): OrderedPtyWriter {
   const queue: Waiting[] = []
-  let inflight = 0
-  let inflightPath: PtyWritePath | null = null
+  let inFlight = false
 
-  function pump(): void {
-    if (queue.length === 0) return
+  async function pump(): Promise<void> {
+    if (inFlight || queue.length === 0) return
     const path: PtyWritePath = opts.isDirect() ? 'direct' : 'hub'
-    if (inflight > 0 && (path === 'direct' || inflightPath !== path)) return
     const batch = queue.splice(0)
-    inflight++
-    inflightPath = path
-    opts
-      .send(path, batch.map((w) => w.data).join(''))
-      .then(
-        (written) => {
-          for (const w of batch) w.resolve(written)
-        },
-        (err: unknown) => {
-          for (const w of batch) w.reject(err)
-        }
-      )
-      .finally(() => {
-        inflight--
-        if (inflight === 0) inflightPath = null
-        pump()
-      })
+    inFlight = true
+    try {
+      const written = await opts.send(path, batch.map((w) => w.data).join(''))
+      for (const write of batch) write.resolve(written)
+    } catch (error) {
+      for (const write of batch) write.reject(error)
+    } finally {
+      inFlight = false
+      void pump()
+    }
   }
 
   return {
     write(data) {
       return new Promise<boolean>((resolve, reject) => {
         queue.push({ data, resolve, reject })
-        pump()
+        void pump()
       })
     },
-    idle: () => queue.length === 0 && inflight === 0
+    idle: () => queue.length === 0 && !inFlight
   }
 }

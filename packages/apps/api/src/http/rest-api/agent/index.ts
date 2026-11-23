@@ -169,8 +169,8 @@ export function registerAgentRoutes(app: Express, deps: RestApiDeps): void {
         return
       }
       const started = await ensurePty(deps, agent)
-      if (!agent.pty.submitPty(agent.sessionId, body.text))
-        throw new ChatRouteError(404, 'PTY session not found')
+      if (!(await agent.pty.submitPty(agent.sessionId, body.text)))
+        throw new ChatRouteError(404, 'PTY session could not accept input')
       res.json({
         ok: true,
         data: { kind: 'pty', taskId: agent.taskId, sessionId: agent.sessionId, started }
@@ -252,7 +252,7 @@ export function registerAgentRoutes(app: Express, deps: RestApiDeps): void {
         return
       }
       const ok =
-        agent.pty.hasLivePty(agent.sessionId) && agent.pty.writePty(agent.sessionId, '\x03')
+        agent.pty.hasLivePty(agent.sessionId) && (await agent.pty.writePty(agent.sessionId, '\x03'))
       res.json({ ok: true, data: { kind: 'pty', interrupted: ok } })
     })
   )

@@ -68,17 +68,19 @@ export function watchTerminalFocusLoss({
     // FAST self-heal. Clicking non-focusable app chrome (tree status headers,
     // layout divs, bare icons) clears focus to <body> via Chromium's focus-fixup,
     // leaving the terminal unfocused until the user clicks back in — the actual
-    // bug behind the reports. Reclaim it on the next task: sub-frame, no
-    // perceptible blur, no lost keystrokes. Gated hard so legitimate moves are
+    // bug behind the reports. Reclaim it after blur settles, before the next
+    // keyboard event. Gated hard so legitimate moves are
     // untouched — only when focus went NOWHERE (a move to a real control is
     // intentional) and the window still has focus (not alt-tab). terminalRef
     // .focus() no-ops on a hidden/inert/detached textarea, so genuine
     // "can't refocus" failures still fall through to the 300ms reporter below.
-    window.setTimeout(() => {
+    const restoreFocus = (): void => {
       try {
         const active = document.activeElement
         if (ownsHelperTextarea(active)) return // already healed natively
         if (!document.hasFocus()) return // alt-tab / window blur
+        if (immediate && immediate !== document.body && immediate !== document.documentElement)
+          return
         const wentNowhere =
           active == null || active === document.body || active === document.documentElement
         if (!wentNowhere) return // focus moved to a real control — leave it
@@ -112,7 +114,9 @@ export function watchTerminalFocusLoss({
       } catch {
         /* self-heal must never break the terminal */
       }
-    }, 0)
+    }
+    queueMicrotask(restoreFocus)
+    window.setTimeout(restoreFocus, 0)
     window.setTimeout(() => {
       // Wrap the whole confirm+report path: a capture bug must never throw on
       // a timer (lost signal + noisy console) — degrade to a marker event.

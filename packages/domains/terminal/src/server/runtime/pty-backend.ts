@@ -289,7 +289,8 @@ export interface PtyHandle {
   /** `seq`: the owner's seq for the chunk, when it {@link ownsOutput}. */
   onData(cb: (data: string, seq?: number) => void): { dispose(): void }
   onExit(cb: (e: PtyExit) => void): { dispose(): void }
-  write(data: string, opts?: PtyWriteOptions): void
+  /** Local handles write synchronously. Routed handles acknowledge acceptance. */
+  write(data: string, opts?: PtyWriteOptions): void | Promise<boolean>
   resize(cols: number, rows: number): void
   kill(signal?: string): void
   /**

@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { startMainPty, extractMainTaskId } from './_start-main'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
+import { sendChatError } from '../chat/_chat'
 
 const AUTO_START_TIMEOUT_MS = 5_000
 
@@ -33,11 +34,15 @@ export function registerPtyWriteRoute(app: Express, deps: RestApiDeps): void {
         // id) lands at the writePty 404 below, preserving existing semantics.
       }
     }
-    const ok = pty.writePty(id, req.body.data)
-    if (!ok) {
-      res.status(404).json({ error: 'PTY session not found' })
-      return
+    try {
+      const ok = await pty.writePty(id, req.body.data)
+      if (!ok) {
+        res.status(404).json({ error: 'PTY session could not accept input' })
+        return
+      }
+      res.json({ ok: true })
+    } catch (error) {
+      sendChatError(res, error)
     }
-    res.json({ ok: true })
   })
 }
