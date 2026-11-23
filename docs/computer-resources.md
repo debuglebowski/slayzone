@@ -53,10 +53,13 @@ opt the desktop app's local computer in, add `agentResources` to its
 - `pinnedTaskIds` adds machine-local exceptions to idle reclamation.
 
 SlayZone's Linux systemd units delegate cgroup v2 memory control to the computer.
-Agents share a hard memory limit of 80% of available RAM capacity. Each agent and
-its subprocesses form an OOM group, so a kernel kill stays in the agent workload.
-Linux hosts without delegation still use admission, idle reclamation, and agent
-OOM score adjustment. Settings → Connections shows the current health report or
+Agents share a soft memory limit (`memory.high`) of 80% of available RAM capacity:
+past it the kernel reclaims their memory, into swap where the host has it, and slows
+them down, but never kills them for it. Each agent and its subprocesses get their
+own cgroup so stopping an agent reaches every process it started. If an agent's
+cgroup cannot be created or joined, the agent starts without it and the computer
+logs why. Linux hosts without delegation still use admission, idle reclamation, and
+agent OOM score adjustment. Settings → Connections shows the current health report or
 the last report received before disconnect.
 
 On existing Linux installs, `slay computer restart <name> --upgrade` refreshes the

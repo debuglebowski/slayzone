@@ -1,19 +1,40 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const CGROUP_ROOT = '/sys/fs/cgroup'
-const PREFER_AGENT_FOR_OOM = '{ printf 300 > /proc/self/oom_score_adj; } 2>/dev/null || :'
-const ISOLATED_AGENT_LAUNCHER = [
+/**
+ * Linux agent memory isolation (cgroup v2, under a systemd unit that delegates the
+ * memory controller — see `renderSystemdUnit`).
+ *
+ * Agents share one `agents` cgroup with a SOFT limit (`memory.high`): past it the
+ * kernel reclaims their memory (swap included) and slows them down, it never kills
+ * them. A hard `memory.max` with swap off used to OOM-kill an agent mid-turn where
+ * swap would have absorbed the peak. Each agent gets its own leaf cgroup so `close`
+ * reaches every descendant (`cgroup.kill`), including ones that left its process
+ * group.
+ *
+ * Isolation is best effort at every step: a host where it cannot be set up runs
+ * agents without it, an agent whose cgroup cannot be created starts without one,
+ * and an agent whose launcher cannot join its cgroup still runs. Each is logged.
+ */
+
+export const PREFER_AGENT_FOR_OOM = '{ printf 300 > /proc/self/oom_score_adj; } 2>/dev/null || :'
+/** Joining the cgroup is best effort: an agent that cannot join still starts (and
+ *  the computer logs it, see `started`). It used to exit 125, unexplained. */
+export const ISOLATED_AGENT_LAUNCHER = [
   'group=$1',
   'shift',
-  'printf "%s" "$$" > "$group/cgroup.procs" || exit 125',
+  '{ printf "%s" "$$" > "$group/cgroup.procs"; } 2>/dev/null || :',
   PREFER_AGENT_FOR_OOM,
   'exec "$@"'
 ].join('\n')
+/** How long after a spawn the computer checks the agent joined its cgroup. */
+export const AGENT_JOIN_CHECK_MS = 2_000
 
 export interface AgentLaunch {
   file: string
   args: string[]
+  /** The spawn succeeded with this pid. */
+  started(pid: number): void
   close(): void
 }
 
@@ -25,27 +46,56 @@ export interface AgentIsolation {
 
 export type AgentLauncher = (file: string, args: string[]) => AgentLaunch
 
-export function agentLauncher(isolation: AgentIsolation | null): AgentLauncher | undefined {
-  if (isolation) return isolation.launch
-  if (process.platform !== 'linux') return undefined
-  return (file, args) => ({
+type Log = (message: string, details?: Record<string, unknown>) => void
+
+/** Where the kernel interfaces live; tests point them at a scratch directory. */
+export interface AgentIsolationHost {
+  platform: NodeJS.Platform
+  cgroupRoot: string
+  procRoot: string
+}
+
+const LINUX_HOST: AgentIsolationHost = {
+  platform: process.platform,
+  cgroupRoot: '/sys/fs/cgroup',
+  procRoot: '/proc'
+}
+
+/** The agent runs as is, preferred by the kernel's OOM killer over the computer. */
+function unisolatedLaunch(file: string, args: string[]): AgentLaunch {
+  return {
     file: '/bin/sh',
     args: ['-c', `${PREFER_AGENT_FOR_OOM}\nexec "$@"`, 'sh', file, ...args],
+    started() {
+      // Nothing to check: no cgroup to join.
+    },
     close() {
       // Nothing to release: the shell prefix holds no resources.
     }
-  })
+  }
+}
+
+export function agentLauncher(
+  isolation: AgentIsolation | null,
+  platform: NodeJS.Platform = process.platform
+): AgentLauncher | undefined {
+  if (isolation) return isolation.launch
+  if (platform !== 'linux') return undefined
+  return unisolatedLaunch
 }
 
 /** Find the enclosing SlayZone service, including when systemd already moved its main PID. */
-export function slayzoneServiceCgroup(membership: string): string | null {
+export function slayzoneServiceCgroup(
+  membership: string,
+  cgroupRoot: string = LINUX_HOST.cgroupRoot
+): string | null {
   const path = /^0::(\/[^\n]*)/m.exec(membership)?.[1]
   const parts = path?.split('/').filter(Boolean)
   const service = parts?.findIndex((part) =>
     /^slayzone-(?:computer|session-host)(?:-[^/]+)?\.service$/.test(part)
   )
   return parts && service !== undefined && service >= 0
-    ? join(CGROUP_ROOT, ...parts.slice(0, service + 1))
+    ? join(cgroupRoot, ...parts.slice(0, service + 1))
     : null
 }
 
@@ -65,19 +115,33 @@ function directory(path: string): void {
   }
 }
 
+/** Lift a hard limit; a kernel without the file (no swap accounting) has none to lift. */
+function unlimited(path: string): void {
+  try {
+    writeFileSync(path, 'max')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
 export function createAgentIsolation(
   totalMemory: number,
-  log: (message: string, details?: Record<string, unknown>) => void
+  log: Log,
+  host: AgentIsolationHost = LINUX_HOST
 ): AgentIsolation | null {
-  if (process.platform !== 'linux') return null
+  if (host.platform !== 'linux') return null
+  const { cgroupRoot, procRoot } = host
   let agents: string
   let memoryLimit: number
   let operation = 'find service cgroup'
   try {
-    const service = slayzoneServiceCgroup(readFileSync('/proc/self/cgroup', 'utf8'))
+    const service = slayzoneServiceCgroup(
+      readFileSync(join(procRoot, 'self', 'cgroup'), 'utf8'),
+      cgroupRoot
+    )
     if (!service) return null
     let available = totalMemory
-    for (let path = service; path !== CGROUP_ROOT; path = join(path, '..')) {
+    for (let path = service; path.length > cgroupRoot.length; path = join(path, '..')) {
       const limit = fileNumber(join(path, 'memory.max'))
       if (limit > 0) available = Math.min(available, limit)
     }
@@ -101,14 +165,12 @@ export function createAgentIsolation(
     operation = 'configure the agent memory cgroup'
     directory(agents)
     writeFileSync(join(agents, 'cgroup.subtree_control'), '+memory')
-    writeFileSync(join(agents, 'memory.max'), String(memoryLimit))
-    writeFileSync(join(agents, 'memory.high'), String(Math.floor(memoryLimit * 0.95)))
-    // The limit applies to RAM on swap-enabled hosts as well.
-    try {
-      writeFileSync(join(agents, 'memory.swap.max'), '0')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
+    // Soft limit only: reclaim and throttling, never an OOM kill of our making.
+    writeFileSync(join(agents, 'memory.high'), String(memoryLimit))
+    // A cgroup kept from an earlier computer (upgraded in place under the same
+    // service) still has the hard limit and no swap: lift both.
+    unlimited(join(agents, 'memory.max'))
+    unlimited(join(agents, 'memory.swap.max'))
   } catch (error) {
     log('Linux agent memory isolation unavailable', { operation, error: String(error) })
     return null
@@ -126,8 +188,18 @@ export function createAgentIsolation(
       }
     },
     launch(file, args) {
-      const group = mkdtempSync(join(agents, 'agent-'))
+      let group: string
+      try {
+        group = mkdtempSync(join(agents, 'agent-'))
+      } catch (error) {
+        log('agent memory cgroup unavailable, starting the agent without it', {
+          error: String(error)
+        })
+        return unisolatedLaunch(file, args)
+      }
+      let closed = false
       const close = () => {
+        closed = true
         // Include descendants that escaped the agent's process group.
         try {
           writeFileSync(join(group, 'cgroup.kill'), '1')
@@ -146,17 +218,29 @@ export function createAgentIsolation(
         }
         remove(8)
       }
-      try {
-        writeFileSync(join(group, 'memory.oom.group'), '1')
-      } catch (error) {
-        close()
-        throw error
+      // The launcher joins the cgroup before it execs the agent; it cannot report a
+      // failure itself (the agent's stdout/stderr are the agent's), so check here.
+      const expected = group.slice(cgroupRoot.length)
+      const started = (pid: number) => {
+        setTimeout(() => {
+          if (closed) return
+          let membership: string
+          try {
+            membership = readFileSync(join(procRoot, String(pid), 'cgroup'), 'utf8')
+          } catch {
+            return // Already gone.
+          }
+          const actual = /^0::(\/[^\n]*)/m.exec(membership)?.[1]
+          if (actual === expected || actual?.startsWith(`${expected}/`)) return
+          log('agent runs outside its memory cgroup', { pid, group, cgroup: actual ?? null })
+        }, AGENT_JOIN_CHECK_MS).unref()
       }
       // Keep the spawned PID and process group stable. Arguments stay separate
       // from the script and are delivered unchanged to the executable.
       return {
         file: '/bin/sh',
         args: ['-c', ISOLATED_AGENT_LAUNCHER, 'sh', group, file, ...args],
+        started,
         close
       }
     }

@@ -587,6 +587,7 @@ export function createPtyHandlers(
       capability?.revoke()
       throw explainSpawnFailure(err)
     }
+    launch?.started(proc.pid)
 
     const buffer = opts.buffer ?? new RingBuffer(MAX_BUFFER_SIZE)
     let resolveExit!: () => void

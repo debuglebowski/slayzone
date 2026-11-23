@@ -435,6 +435,7 @@ export function createProcHandlers(
       capability?.revoke()
       throw error
     }
+    if (child.pid !== undefined) launch?.started(child.pid)
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: ProcSession = {
       cwd,
