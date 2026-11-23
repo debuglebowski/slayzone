@@ -158,7 +158,7 @@ test.describe('Warm pool (computer-hosted)', () => {
       (pid) =>
         window.getTrpcVanillaClient().task.create.mutate({
           projectId: pid,
-          title: 'Terminal 1',
+          title: 'Temporary 1',
           isTemporary: true,
           openAfterCreate: true
         }),

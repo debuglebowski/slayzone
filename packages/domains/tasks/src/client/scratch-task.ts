@@ -1,6 +1,6 @@
 /**
  * Temporary ("scratch") tasks: a throwaway agent session in a project, named
- * "Terminal N", hidden from the board. Desktop opens one as a tab (⌘T), mobile from
+ * "Temporary N", hidden from the board. Desktop opens one as a tab (⌘T), mobile from
  * the board's ＋. "Keep as task" turns one into a regular, started task.
  *
  * DOM- and React-free: exported through `@slayzone/tasks/board` for the mobile app.
@@ -8,7 +8,7 @@
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
 import { type ColumnConfig, getDefaultStatus, getStatusByCategory } from '@slayzone/workflow'
 
-const SCRATCH_TITLE = /^Terminal (\d+)$/
+const SCRATCH_TITLE = /^Temporary (\d+)$/
 
 /** The `task.create` input of a new temporary task in `project`. */
 export function scratchTaskInput(
@@ -23,7 +23,7 @@ export function scratchTaskInput(
   }
   return {
     projectId: project.id,
-    title: `Terminal ${highest + 1}`,
+    title: `Temporary ${highest + 1}`,
     status: getDefaultStatus(project.columns_config),
     isTemporary: true,
     // Opened right away — lets the hub hand it the project's warm agent.

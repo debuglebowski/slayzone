@@ -34,7 +34,7 @@ test.describe('Git worktree operations', () => {
   // Open + activate the worktree task deterministically by id (shared fixture). The
   // prior card-click / search-dialog heuristic was the root of this describe's
   // flakiness: its open could leave a DIFFERENT task active (incl. a stray temporary
-  // "Terminal N" scratch task), and the globally-matched "Branch to worktree" button
+  // "Temporary N"), and the globally-matched "Branch to worktree" button
   // (only the active tab's panel is visible) then created the worktree on the WRONG
   // task — leaving this task's worktree_path null and losing the whole describe.
   const activateWorktreeTask = (page: import('@playwright/test').Page) => openTaskById(page, taskId)

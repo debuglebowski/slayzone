@@ -509,7 +509,7 @@ describe('BoardHome: the board (phone)', () => {
     expect(work.createTask).toEqual([
       {
         projectId: 'p',
-        title: 'Terminal 1',
+        title: 'Temporary 1',
         status: 'queued',
         isTemporary: true,
         openAfterCreate: true

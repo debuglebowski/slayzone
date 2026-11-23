@@ -1,5 +1,5 @@
 /**
- * The board's ＋ tap: a temporary task in the shown project ("Terminal N", desktop's
+ * The board's ＋ tap: a temporary task in the shown project ("Temporary N", desktop's
  * ⌘T), opened straight away on its agent. Hidden from the board; "Keep as task" in the
  * task's ⋯ menu turns it into a regular one. Call inside the project's `HubScope`.
  */

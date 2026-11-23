@@ -131,7 +131,7 @@ test('a temporary task made permanent is pushed as a new task', async () => {
 })
 
 test('a new temporary task is not pushed', async () => {
-  // Scratch terminals ("Terminal 1") are temporary; in a two-way-synced project
+  // Scratch terminals ("Temporary 1") are temporary; in a two-way-synced project
   // each one used to become a Linear/GitHub issue.
   const tempId = crypto.randomUUID()
   h.db

@@ -108,7 +108,7 @@ describe('useTabStore.reopenClosedTab', () => {
   const REGULAR: TaskLookupTask = { id: 'tReg', title: 'Regular', project_id: 'pA' }
   const TEMP: TaskLookupTask = {
     id: 'tTemp',
-    title: 'Terminal 1',
+    title: 'Temporary 1',
     project_id: 'pA',
     is_temporary: true
   }
@@ -119,7 +119,7 @@ describe('useTabStore.reopenClosedTab', () => {
       tabs: [
         { type: 'home' },
         { type: 'task', taskId: 'tReg', title: 'Regular' },
-        { type: 'task', taskId: 'tTemp', title: 'Terminal 1', isTemporary: true }
+        { type: 'task', taskId: 'tTemp', title: 'Temporary 1', isTemporary: true }
       ],
       activeTabIndex: 2,
       _taskLookup: { tasks: [REGULAR, TEMP], projects: [] }

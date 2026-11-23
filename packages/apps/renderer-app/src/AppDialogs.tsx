@@ -52,6 +52,7 @@ import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/cl
 import { useTRPCClient, getClientForHub } from './trpc'
 import { useChangelogAutoOpen } from '@slayzone/onboarding'
 import { useGlobalAgentPanelState } from '@slayzone/agent-panels'
+import { scratchTaskInput } from '@slayzone/tasks/board'
 import { insertCreatedRow, type useTasksData } from '@slayzone/tasks/client'
 import { markSessionUnspawned, traceSessionOpen } from '@slayzone/terminal/client'
 import type { Project } from '@slayzone/projects-contracts'
@@ -205,28 +206,22 @@ export function AppDialogs({
     return at?.type === 'task' ? at.taskId : null
   }, [tabs, activeTabIndex])
 
-  // Scratch terminal: create a temporary "Terminal N" task and open it. Status is
-  // omitted → the sidecar resolves the project default. Optimistic patch lands on
-  // the lifted board; openTask routes to the new tab (mirrors handleTaskCreatedAndOpen).
+  // Scratch terminal: create a "Temporary N" and open it. Optimistic patch
+  // lands on the lifted board; openTask routes to the new tab (mirrors
+  // handleTaskCreatedAndOpen).
   const handleNewTemporaryTask = useCallback(async () => {
     if (!selectedProjectId) return
-    const existing = data.tasks
-      .filter((t) => t.project_id === selectedProjectId)
-      .map((t) => /^Terminal (\d+)$/.exec(t.title))
-      .filter((m): m is RegExpExecArray => m !== null)
-      .map((m) => parseInt(m[1], 10))
-    const nextNum = existing.length ? Math.max(...existing) + 1 : 1
+    const project = data.projects.find((p) => p.id === selectedProjectId)
     // Create on the hub that owns the project (a task INSERT is FK-bound to it),
     // and record the new id's hub before its tab opens. Single-hub → the ambient
     // client, unchanged.
     const projectHubId = getHubIdForProject(selectedProjectId)
-    const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
-      projectId: selectedProjectId,
-      title: `Terminal ${nextNum}`,
-      isTemporary: true,
-      // Opened right below — lets the hub hand it the project's warm agent.
-      openAfterCreate: true
-    })
+    const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate(
+      scratchTaskInput(
+        { id: selectedProjectId, columns_config: project?.columns_config ?? null },
+        data.tasks
+      )
+    )
     if (!task) return
     if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
     data.setTasks((prev) => insertCreatedRow(prev, task, 'start'))

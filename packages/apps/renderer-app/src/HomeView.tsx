@@ -66,7 +66,8 @@ import { useTRPCClient, getClientForHub } from './trpc'
 import { TerminalStatusButton } from '@slayzone/terminal'
 import type { AgentId } from '@slayzone/terminal-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
-import { getDefaultStatus, defaultProjectRoot } from '@slayzone/projects-contracts'
+import { defaultProjectRoot } from '@slayzone/projects-contracts'
+import { scratchTaskInput } from '@slayzone/tasks/board'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 import {
   useGlobalAgentPanelState,
@@ -268,9 +269,8 @@ export function HomeView({
     { push: pushUndo, undo }
   )
 
-  // Scratch terminal — create a temporary `Terminal N` task and open it (mirrors
-  // the Electron App.tsx handleCreateScratchTerminal). Temp tasks auto-delete on
-  // close via closeTab above. No project-duration lock in the fork.
+  // Scratch terminal — create a "Temporary N" and open it (mirrors the
+  // Electron App.tsx handleCreateScratchTerminal). No project-duration lock in the fork.
   const handleCreateScratchTerminal = useCallback(
     async (projectIdArg?: string): Promise<void> => {
       // The tree sidebar's per-project "+" passes its project; the header button
@@ -278,24 +278,16 @@ export function HomeView({
       const projectId = projectIdArg ?? selectedProjectId
       if (!projectId) return
       const project = projects.find((p) => p.id === projectId)
-      const existing = data.tasks
-        .filter((t) => t.project_id === projectId)
-        .map((t) => t.title.match(/^Terminal (\d+)$/))
-        .filter(Boolean)
-        .map((m) => parseInt(m![1], 10))
-      const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
       // Create on the hub that owns the project (a task INSERT is FK-bound to it),
       // and record the new id's hub before its tab opens. Single-hub → the ambient
       // client, unchanged.
       const projectHubId = getHubIdForProject(projectId)
-      const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
-        projectId,
-        title: `Terminal ${next}`,
-        status: getDefaultStatus(project?.columns_config),
-        isTemporary: true,
-        // Opened right below — lets the hub hand it the project's warm agent.
-        openAfterCreate: true
-      })
+      const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate(
+        scratchTaskInput(
+          { id: projectId, columns_config: project?.columns_config ?? null },
+          data.tasks
+        )
+      )
       if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
       data.setTasks((prev) => [task, ...prev])
       const lookup = useTabStore.getState()._taskLookup

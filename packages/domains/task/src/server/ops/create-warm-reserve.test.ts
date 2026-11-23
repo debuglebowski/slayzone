@@ -65,7 +65,7 @@ test('temporary task opened at once takes the reserved id', async () => {
   const s = await setup()
   const task = await createTaskOp(
     s.h.slayDb,
-    { projectId: s.projectId, title: 'Terminal 1', isTemporary: true, openAfterCreate: true },
+    { projectId: s.projectId, title: 'Temporary 1', isTemporary: true, openAfterCreate: true },
     s.deps
   )
   expect(task?.id).toBe(s.reservedId)
@@ -107,7 +107,7 @@ test('no warm agent available → a fresh id, task still created', async () => {
   s.setAnswer(null)
   const task = await createTaskOp(
     s.h.slayDb,
-    { projectId: s.projectId, title: 'Terminal 1', isTemporary: true, openAfterCreate: true },
+    { projectId: s.projectId, title: 'Temporary 1', isTemporary: true, openAfterCreate: true },
     s.deps
   )
   expect(s.calls.length).toBe(1)
@@ -182,7 +182,7 @@ test('no reserve dep wired (REST, MCP, Electron host) → a fresh id', async () 
   const s = await setup()
   const task = await createTaskOp(
     s.h.slayDb,
-    { projectId: s.projectId, title: 'Terminal 1', isTemporary: true, openAfterCreate: true },
+    { projectId: s.projectId, title: 'Temporary 1', isTemporary: true, openAfterCreate: true },
     {}
   )
   expect(!!task?.id && task.id !== s.reservedId).toBe(true)

@@ -61,14 +61,14 @@ export function ProjectTaskLibrary({
         <DialogTrigger asChild>
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs">
             <Terminal className="size-3.5" />
-            Scratch terminals{scratch.length > 0 ? ` (${scratch.length})` : ''}
+            Temporary tasks{scratch.length > 0 ? ` (${scratch.length})` : ''}
           </Button>
         </DialogTrigger>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{project.name}</DialogTitle>
             <DialogDescription>
-              Scratch terminals stay saved when you close their tabs.
+              Temporary tasks stay saved when you close their tabs.
             </DialogDescription>
           </DialogHeader>
           {error ? (
@@ -129,7 +129,7 @@ export function ProjectTaskLibrary({
               </div>
             ))}
             {scratch.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No saved scratch terminals.</p>
+              <p className="text-sm text-muted-foreground">No saved temporary tasks.</p>
             ) : null}
           </div>
         </DialogContent>

@@ -51,7 +51,7 @@ export const ACTION_DEFS: {
   {
     id: 'new-temp-task',
     label: 'New temporary task',
-    sublabel: 'Open a scratch terminal',
+    sublabel: 'Quick agent session, hidden from the board',
     shortcutId: 'new-temp-task',
     featured: true
   },

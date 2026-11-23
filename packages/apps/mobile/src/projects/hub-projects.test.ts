@@ -60,7 +60,7 @@ describe('projectTasks', () => {
           taskOf('a', { project_id: 'p' }),
           taskOf('other', { project_id: 'q' }),
           taskOf('sub', { project_id: 'p', parent_id: 'a' }),
-          // A temporary task (an agent session, "Terminal 1"): hidden like on the board.
+          // A temporary task (an agent session, "Temporary 1"): hidden like on the board.
           taskOf('tmp', { project_id: 'p', is_temporary: true }),
           taskOf('b', { project_id: 'p' })
         ]

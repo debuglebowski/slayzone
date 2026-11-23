@@ -361,7 +361,7 @@ export function LayoutSettingsTab() {
               />
               <ToggleRow
                 label="Show temporary"
-                tip="Include temporary scratch tasks"
+                tip="Include temporary tasks"
                 checked={treeShowTemporary}
                 onChange={setTreeShowTemporary}
               />

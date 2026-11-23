@@ -181,7 +181,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     await clickProject(mainWindow, 'RE')
     await mainWindow
       .locator('#home-detail')
-      .getByRole('button', { name: /^Scratch terminals/ })
+      .getByRole('button', { name: /^Temporary tasks/ })
       .click()
     const dialog = mainWindow.getByRole('dialog', { name: 'Reopen Temp' })
     const row = dialog.getByText('Saved scratch', { exact: true }).locator('..')
@@ -190,7 +190,7 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     await goHome(mainWindow)
     await mainWindow
       .locator('#home-detail')
-      .getByRole('button', { name: /^Scratch terminals/ })
+      .getByRole('button', { name: /^Temporary tasks/ })
       .click()
     await row.getByRole('button', { name: 'Save as task', exact: true }).click()
     await expect(row).not.toBeVisible()

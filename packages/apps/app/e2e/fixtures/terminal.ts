@@ -72,7 +72,7 @@ export async function openTaskTerminal(
 ): Promise<void> {
   // Deterministic open by id (resolved from title). The old goHome→clickProject→
   // card-click/search-dialog open flaked under full-suite load: a wrong or stray
-  // active task (incl. temporary "Terminal N" scratch tasks) meant the INTENDED task's
+  // active task (incl. "Temporary N"s) meant the INTENDED task's
   // terminal never mounted and its PTY never spawned — surfacing downstream as
   // `waitForPtySession` timeouts that look like "PTY spawn latency" but are really a
   // wrong-task open. See openTaskByTitle. `projectAbbrev` is no longer needed but is

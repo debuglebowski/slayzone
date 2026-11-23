@@ -25,7 +25,7 @@ vi.mock('@slayzone/transport/client', () => ({
 }))
 const { ProjectTaskLibrary } = await import('./ProjectTaskLibrary')
 const project = { id: 'p', name: 'Dummy', columns_config: null } as Project
-const scratch = { id: 't', project_id: 'p', title: 'Terminal 1', is_temporary: true } as Task
+const scratch = { id: 't', project_id: 'p', title: 'Temporary 1', is_temporary: true } as Task
 const deleted = { ...scratch, id: 'deleted', title: 'Deleted terminal', deleted_at: '2026-11-02' }
 
 function setup(tasks: Task[] = [scratch]) {
@@ -45,7 +45,7 @@ function setup(tasks: Task[] = [scratch]) {
       />
     </QueryClientProvider>
   )
-  fireEvent.click(screen.getByRole('button', { name: 'Scratch terminals (1)' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Temporary tasks (1)' }))
   return { onOpen, onUpdate, onDelete }
 }
 beforeEach(() => {

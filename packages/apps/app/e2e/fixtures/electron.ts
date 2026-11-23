@@ -1489,7 +1489,7 @@ export async function goHome(page: Page) {
  * .click(): under full-suite load that open is flaky in two ways —
  *   1. the project board may not be the visible view, so the task card resolves
  *      `hidden` (toBeVisible→hidden) and the whole describe's beforeAll throws; and
- *   2. a temporary "Terminal N" scratch task can be created + steal the active tab, so
+ *   2. a "Temporary N" can be created + steal the active tab, so
  *      a later UNSCOPED panel/button interaction (only the active tab's panel is
  *      visible) lands on the WRONG task.
  * Opening by id can't target the wrong task and surfaces no dialog, so it is immune to
@@ -1555,8 +1555,8 @@ export async function showProjectBoard(
  * Drop-in deterministic replacement for the old "type the title into the search
  * dialog + press Enter" open used across the git/terminal specs — that path was flaky
  * under full-suite load (Enter could select the wrong result, or the search flow could
- * spawn + activate a temporary "Terminal N" scratch task that captured the active tab).
- * Match is by EXACT title, which already excludes the auto-named "Terminal N" scratch
+ * spawn + activate a "Temporary N" that captured the active tab).
+ * Match is by EXACT title, which already excludes the auto-named "Temporary N"
  * task; the most-recently-created match wins so re-used titles across describes resolve
  * to the freshly-seeded one. NOTE: do NOT filter out `is_temporary` — specs that
  * deliberately seed temporary tasks (e.g. 22-agent-switching) open them by

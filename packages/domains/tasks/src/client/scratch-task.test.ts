@@ -26,16 +26,17 @@ const columns = [
 ]
 
 describe('scratchTaskInput', () => {
-  it('numbers past the highest "Terminal N" in the project', () => {
+  it('numbers past the highest "Temporary N" in the project', () => {
     const tasks = [
-      { project_id: 'p', title: 'Terminal 2' },
-      { project_id: 'p', title: 'Terminal 7' },
-      { project_id: 'p', title: 'Terminal 7 notes' },
-      { project_id: 'other', title: 'Terminal 40' }
+      { project_id: 'p', title: 'Temporary 2' },
+      { project_id: 'p', title: 'Terminal 9' },
+      { project_id: 'p', title: 'Temporary 7' },
+      { project_id: 'p', title: 'Temporary 7 notes' },
+      { project_id: 'other', title: 'Temporary 40' }
     ]
     expect(scratchTaskInput({ id: 'p', columns_config: columns }, tasks)).toEqual({
       projectId: 'p',
-      title: 'Terminal 8',
+      title: 'Temporary 8',
       status: 'inbox',
       isTemporary: true,
       openAfterCreate: true
@@ -43,7 +44,7 @@ describe('scratchTaskInput', () => {
   })
 
   it('starts at 1 in a project with none', () => {
-    expect(scratchTaskInput({ id: 'p', columns_config: null }, []).title).toBe('Terminal 1')
+    expect(scratchTaskInput({ id: 'p', columns_config: null }, []).title).toBe('Temporary 1')
   })
 })
 

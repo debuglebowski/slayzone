@@ -207,7 +207,7 @@ export function TreeDisplaySettings() {
             <Row
               id="tree-show-temporary"
               label="Show temporary"
-              hint="Include temporary scratch tasks"
+              hint="Include temporary tasks"
               checked={treeShowTemporary}
               onChange={setTreeShowTemporary}
             />

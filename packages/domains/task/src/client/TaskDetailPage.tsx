@@ -2649,7 +2649,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               title={task.is_temporary || !canEdit ? undefined : 'Double-click to rename'}
               data-testid="compact-title"
             >
-              {task.is_temporary ? 'Scratch terminal' : task.title}
+              {task.title}
             </span>
           )}
           {!task.is_temporary && (
@@ -2723,11 +2723,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           <Info className="size-5 text-muted-foreground/55 shrink-0" />
                         </TooltipTrigger>
                         <TooltipContent>
-                          Saved in Scratch terminals until you delete it
+                          Saved in Temporary tasks until you delete it
                         </TooltipContent>
                       </Tooltip>
                       <span className="text-2xl italic text-muted-foreground">
-                        Scratch terminal
+                        {task.title}
                       </span>
                       <Button
                         variant="outline"

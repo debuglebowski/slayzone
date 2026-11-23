@@ -667,7 +667,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         for (const n of [1, 2]) {
           const task = (await client.task.create.mutate({
             projectId: project.id,
-            title: `Terminal ${n}`,
+            title: `Temporary ${n}`,
             status: 'in_progress',
             agentId: 'terminal',
             isTemporary: true

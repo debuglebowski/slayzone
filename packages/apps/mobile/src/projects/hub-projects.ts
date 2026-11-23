@@ -68,7 +68,7 @@ export function findProjectRow(feed: HubFeed, projectId: string): ProjectRow | n
 
 /**
  * A project's top-level tasks, in board order, as rows of its hub. Temporary tasks (an
- * agent session's "Terminal N", the board's ＋ long-press) are left out, as on the board.
+ * agent session's "Temporary N", the board's ＋ long-press) are left out, as on the board.
  */
 export function projectTasks(feed: HubFeed, projectId: string): TaskRow[] {
   const data = feed.board.data
