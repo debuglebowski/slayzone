@@ -281,15 +281,10 @@ function AssistantText({ item, s }: { item: Item<'text'>; s: Styles }) {
   const onLongPress = useMessageLongPress(text)
   if (!text) return null
   return (
-    // Not one element to VoiceOver: its links stay reachable on their own.
-    <Pressable
-      style={s.assistant}
-      onLongPress={onLongPress}
-      disabled={!onLongPress}
-      accessible={false}
-    >
-      <Markdown text={text} />
-    </Pressable>
+    // A pressable ancestor would block iOS's nested horizontal scroll views.
+    <View style={s.assistant}>
+      <Markdown text={text} onLongPress={onLongPress} />
+    </View>
   )
 }
 

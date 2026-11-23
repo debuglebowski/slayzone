@@ -18,29 +18,36 @@ import { type ChromeColors, useTheme } from '../theme'
 export const Markdown = memo(function Markdown({
   text,
   muted = false,
-  onLink
+  onLink,
+  onLongPress
 }: {
   text: string
   /** Secondary text (thinking): the muted foreground. */
   muted?: boolean
   /** A link was pressed: true = handled here, else it opens as a web link. */
   onLink?: (href: string) => boolean
+  /** Opens the message menu from its text. Attach it inside any horizontal scroller. */
+  onLongPress?: () => void
 }) {
   const theme = useTheme()
   const styles = useMemo<Styles>(
     () => ({
       ...makeStyles(theme, muted),
+      onLongPress,
       openLink: (href: string) => {
         if (!onLink?.(href)) openWebLink(href)
       }
     }),
-    [theme, muted, onLink]
+    [theme, muted, onLink, onLongPress]
   )
   const tokens = useMemo(() => lexer(text), [text])
   return <View>{blocks(tokens, styles, 'b')}</View>
 })
 
-type Styles = ReturnType<typeof makeStyles> & { openLink: (href: string) => void }
+type Styles = ReturnType<typeof makeStyles> & {
+  openLink: (href: string) => void
+  onLongPress: (() => void) | undefined
+}
 
 function blocks(tokens: readonly Token[], s: Styles, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = []
@@ -63,6 +70,7 @@ function block(token: Token, s: Styles, key: string): ReactNode {
           key={key}
           style={[s.text, s.heading, headingSize(t.depth)]}
           accessibilityRole="header"
+          onLongPress={s.onLongPress}
         >
           {inline(t.tokens, s, key)}
         </Text>
@@ -70,7 +78,7 @@ function block(token: Token, s: Styles, key: string): ReactNode {
     }
     case 'paragraph':
       return (
-        <Text key={key} style={[s.text, s.block]}>
+        <Text key={key} style={[s.text, s.block]} onLongPress={s.onLongPress}>
           {inline((token as Tokens.Paragraph).tokens, s, key)}
         </Text>
       )
@@ -78,7 +86,7 @@ function block(token: Token, s: Styles, key: string): ReactNode {
       // Block-level text (a tight list item's content).
       const t = token as Tokens.Text
       return (
-        <Text key={key} style={s.text}>
+        <Text key={key} style={s.text} onLongPress={s.onLongPress}>
           {t.tokens ? inline(t.tokens, s, key) : decode(t.text)}
         </Text>
       )
@@ -92,7 +100,7 @@ function block(token: Token, s: Styles, key: string): ReactNode {
           style={[s.codeBlock, s.block]}
           contentContainerStyle={s.codePad}
         >
-          <Text style={s.codeText} selectable>
+          <Text style={s.codeText} selectable onLongPress={s.onLongPress}>
             {t.text}
           </Text>
         </ScrollView>
@@ -111,7 +119,7 @@ function block(token: Token, s: Styles, key: string): ReactNode {
         <View key={key} style={s.block}>
           {t.items.map((item, i) => (
             <View key={i} style={s.listItem}>
-              <Text style={[s.text, s.bullet]}>
+              <Text style={[s.text, s.bullet]} onLongPress={s.onLongPress}>
                 {t.ordered ? `${start + i}.` : item.task ? (item.checked ? '☑' : '☐') : '•'}
               </Text>
               <View style={s.listBody}>
@@ -134,7 +142,10 @@ function block(token: Token, s: Styles, key: string): ReactNode {
         <View key={rowKey} style={s.tableRow}>
           {cells.map((cell, i) => (
             <View key={i} style={[s.tableCell, { width: widths[i] }]}>
-              <Text style={[s.text, header && s.strong, alignOf(t.align[i] ?? cell.align)]}>
+              <Text
+                style={[s.text, header && s.strong, alignOf(t.align[i] ?? cell.align)]}
+                onLongPress={s.onLongPress}
+              >
                 {inline(cell.tokens, s, `${rowKey}.${i}`)}
               </Text>
             </View>
@@ -160,13 +171,13 @@ function block(token: Token, s: Styles, key: string): ReactNode {
       return <View key={key} style={[s.hr, s.block]} />
     case 'html':
       return (
-        <Text key={key} style={[s.text, s.block]}>
+        <Text key={key} style={[s.text, s.block]} onLongPress={s.onLongPress}>
           {(token as Tokens.HTML).text}
         </Text>
       )
     default:
       return 'raw' in token && typeof token.raw === 'string' ? (
-        <Text key={key} style={[s.text, s.block]}>
+        <Text key={key} style={[s.text, s.block]} onLongPress={s.onLongPress}>
           {token.raw}
         </Text>
       ) : null

@@ -93,6 +93,19 @@ describe('ChatTimeline', () => {
     expect(share).toHaveBeenLastCalledWith({ message: text })
   })
 
+  it('opens message actions from table cells without blocking the scroll view', async () => {
+    await show([answer(1, '| Name | Value |\n| --- | --- |\n| Limit | 123 |')])
+    let parent = screen.getByTestId('markdown-table-scroll').parent
+    while (parent && parent.props.testID !== 'chat-timeline') {
+      expect(parent.props.onResponderGrant).toBeUndefined()
+      parent = parent.parent
+    }
+    await userEvent.setup().longPress(screen.getByText('Limit'))
+    expect(
+      within(await screen.findByTestId('message-actions')).getByText('Copy text')
+    ).toBeOnTheScreen()
+  })
+
   it('an answer without code offers no "code" action', async () => {
     await show([answer(1, 'Plain words.')])
     await userEvent.setup().longPress(screen.getByText('Plain words.'))
