@@ -47,8 +47,11 @@ export function getCliBinTarget(): string {
  *
  * - `installed: false` — no `slay` on the login-shell PATH, none at the app's own
  *   install target either: offer to install.
- * - `outdated: true` — a `slay` resolves, but `slay --version` differs from
+ * - `outdated: true` — a `slay` resolves, but `slay --version` is OLDER than
  *   `expectedVersion` (e.g. a stale npm global copy shadowing the app's).
+ * - `newer: true` — it is newer than this app's. Every release channel (and the
+ *   dev app) shares one install target, so an app that lags behind the channel
+ *   that last installed it must not call that out of date, nor offer a downgrade.
  * - otherwise current, or its version could not be read (`version: null`, never
  *   counted as outdated — a slow box must not nag).
  */
@@ -61,6 +64,8 @@ export interface CliStatus {
   /** The version this app ships; null = unknown (no outdated verdict). */
   expectedVersion?: string | null
   outdated?: boolean
+  /** `version` is newer than `expectedVersion` (no action: never offer a downgrade). */
+  newer?: boolean
   /** `path` is the app's own install target, so reinstalling updates it. */
   appManaged?: boolean
   /** `path` is the install target but its dir is not on the login-shell PATH. */
@@ -112,6 +117,42 @@ export function parseCliVersion(stdout: string): string | null {
   return stdout.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/)?.[0] ?? null
 }
 
+/**
+ * Semver precedence of two `parseCliVersion` results: <0, 0, >0. Numeric cores,
+ * then a prerelease sorts before its release (identifiers numeric-or-lexical per
+ * semver §11); build metadata is ignored.
+ */
+export function compareCliVersions(a: string, b: string): number {
+  const split = (v: string) => {
+    const [core, ...pre] = v.split('+')[0].split('-')
+    return { core: core.split('.').map(Number), pre: pre.length ? pre.join('-').split('.') : [] }
+  }
+  const x = split(a)
+  const y = split(b)
+  for (let i = 0; i < 3; i++) {
+    const d = (x.core[i] ?? 0) - (y.core[i] ?? 0)
+    if (d !== 0) return d
+  }
+  if (!x.pre.length || !y.pre.length) return y.pre.length - x.pre.length
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i]
+    const q = y.pre[i]
+    if (p === undefined) return -1
+    if (q === undefined) return 1
+    const pn = /^\d+$/.test(p)
+    const qn = /^\d+$/.test(q)
+    if (pn && qn) {
+      const d = Number(p) - Number(q)
+      if (d !== 0) return d
+    } else if (pn !== qn) {
+      return pn ? -1 : 1
+    } else if (p !== q) {
+      return p < q ? -1 : 1
+    }
+  }
+  return 0
+}
+
 function samePath(a: string, b: string): boolean {
   const norm = (p: string) => {
     const r = path.resolve(p)
@@ -132,12 +173,14 @@ export async function checkCliInstalled(opts: CheckCliOptions = {}): Promise<Cli
 
   const version = await readCliVersion(resolved, env)
   const appManaged = samePath(resolved, target)
+  const order = expectedVersion && version ? compareCliVersions(version, expectedVersion) : 0
   return {
     installed: true,
     path: resolved,
     version,
     expectedVersion,
-    outdated: !!expectedVersion && !!version && version !== expectedVersion,
+    outdated: order < 0,
+    newer: order > 0,
     appManaged,
     pathNotInPATH: onPath ? undefined : true
   }

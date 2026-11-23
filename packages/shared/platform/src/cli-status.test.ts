@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { checkCliInstalled, parseCliVersion } from './cli-install'
+import { checkCliInstalled, compareCliVersions, parseCliVersion } from './cli-install'
 
 // Real exec against fake `slay` scripts on a controlled PATH. The app's own install
 // target is injected into a temp dir we own: on darwin the real default is
@@ -46,6 +46,23 @@ describe('parseCliVersion', () => {
   })
 })
 
+describe('compareCliVersions', () => {
+  test('numeric, not lexical', () => {
+    expect(compareCliVersions('0.9.0', '0.10.0')).toBeLessThan(0)
+    expect(compareCliVersions('0.43.0', '0.42.0')).toBeGreaterThan(0)
+    expect(compareCliVersions('1.2.3', '1.2.3')).toBe(0)
+  })
+  test('prerelease sorts before its release', () => {
+    expect(compareCliVersions('0.43.0-beta.1', '0.43.0')).toBeLessThan(0)
+    expect(compareCliVersions('0.43.0-beta.2', '0.43.0-beta.10')).toBeLessThan(0)
+    expect(compareCliVersions('0.43.0-alpha', '0.43.0-beta')).toBeLessThan(0)
+    expect(compareCliVersions('0.43.0-beta.1', '0.42.9')).toBeGreaterThan(0)
+  })
+  test('build metadata ignored', () => {
+    expect(compareCliVersions('1.0.0+abc', '1.0.0')).toBe(0)
+  })
+})
+
 describe('checkCliInstalled', () => {
   posixOnly('missing everywhere → not installed', async () => {
     const r = await checkCliInstalled({
@@ -77,6 +94,19 @@ describe('checkCliInstalled', () => {
       resolvePath: onPath(npmBin)
     })
     expect(r).toMatchObject({ installed: true, version: '0.9.0', outdated: true })
+  })
+
+  // Every release channel (and the dev app) symlinks the same /usr/local/bin/slay:
+  // an app older than the CLI must not call it out of date, nor offer a downgrade.
+  posixOnly('newer copy → not outdated, flagged newer', async () => {
+    const npmBin = path.join(tmp, 'npm', 'bin')
+    fakeSlay(npmBin, '1.1.0')
+    const r = await checkCliInstalled({
+      expectedVersion: '1.0.0',
+      cliTarget: target,
+      resolvePath: onPath(npmBin)
+    })
+    expect(r).toMatchObject({ installed: true, version: '1.1.0', outdated: false, newer: true })
   })
 
   posixOnly('no expected version → never outdated', async () => {

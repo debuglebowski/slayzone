@@ -123,6 +123,7 @@ export {
   installCliSync,
   checkCliInstalled,
   checkCliInstalledAtTarget,
+  compareCliVersions,
   parseCliVersion,
   getCliBinTarget,
   getManualInstallHint,

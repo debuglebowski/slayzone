@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'motion/react'
 import { Terminal } from 'lucide-react'
-import { Button, Checkbox, Dialog, DialogContent, toast } from '@slayzone/ui'
+import { Button, Checkbox, Dialog, DialogContent } from '@slayzone/ui'
 import { useTRPCClient } from './trpc'
+import { showCliUpdateNotice } from './CliUpdateNotice'
 
 export function CliInstallDialog() {
   const trpcClient = useTRPCClient()
@@ -200,50 +201,4 @@ export function CliInstallDialog() {
       </DialogContent>
     </Dialog>
   )
-}
-
-interface OutdatedCliStatus {
-  path?: string
-  version?: string | null
-  expectedVersion?: string | null
-  appManaged?: boolean
-}
-
-/**
- * Non-blocking: a stale `slay` still works for most commands, so it gets a toast,
- * not a modal. An app-managed install (the app's own symlink/shim) can be refreshed
- * in place; anything else (npm global, a copy elsewhere on PATH) belongs to whatever
- * put it there, so the notice says where it is instead of touching it.
- */
-function showCliUpdateNotice(
-  status: OutdatedCliStatus,
-  actions: {
-    update: () => Promise<{ ok: boolean; error?: string; pathNotInPATH?: boolean }>
-    dismiss: () => void
-  }
-): void {
-  const description = status.appManaged
-    ? `This app ships v${status.expectedVersion}.`
-    : `This app ships v${status.expectedVersion}. ${status.path} is not managed by SlayZone — update or remove it with the tool that installed it.`
-  toast(`slay CLI v${status.version} is out of date`, {
-    id: 'cli-update-notice',
-    description,
-    duration: 15000,
-    action: status.appManaged
-      ? {
-          label: 'Update',
-          onClick: () => {
-            void actions.update().then(
-              (r) =>
-                r.ok
-                  ? toast.success('slay CLI updated.')
-                  : toast.error(r.error ?? 'Updating the slay CLI failed.'),
-              (err: unknown) =>
-                toast.error(err instanceof Error ? err.message : 'Updating the slay CLI failed.')
-            )
-          }
-        }
-      : undefined,
-    cancel: { label: "Don't show again", onClick: actions.dismiss }
-  })
 }

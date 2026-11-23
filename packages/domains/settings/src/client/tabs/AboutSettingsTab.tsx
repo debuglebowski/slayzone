@@ -38,7 +38,9 @@ export function AboutSettingsTab() {
     probed?.installed && probed.path === cliPath && probed.version
       ? probed.outdated
         ? `v${probed.version} — out of date (app ships v${probed.expectedVersion})`
-        : `v${probed.version}`
+        : probed.newer
+          ? `v${probed.version} — newer than this app (v${probed.expectedVersion})`
+          : `v${probed.version}`
       : null
 
   const handleInstallCli = async () => {
