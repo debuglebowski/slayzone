@@ -387,6 +387,7 @@ export function TerminalView({
       {sendError ? <Text style={styles.problem}>Not sent: {sendError}</Text> : null}
       <View testID="terminal-controls" style={inlineKeys ? styles.inlineControls : undefined}>
         <ScrollView
+          testID="terminal-shortcuts"
           horizontal
           keyboardShouldPersistTaps="always"
           showsHorizontalScrollIndicator={false}
@@ -506,7 +507,7 @@ const makeStyles = (t: ChromeColors) =>
       backgroundColor: t.surface1
     },
     inlineControls: { flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface1 },
-    inlineKeys: { flex: 1, borderTopWidth: 0 },
+    inlineKeys: { width: '33%', flexShrink: 0, borderTopWidth: 0 },
     inlineKeysContent: { alignItems: 'center', paddingVertical: 2 },
     inlineKey: { minHeight: 36 },
     keysContent: { paddingHorizontal: 8, paddingVertical: 4, gap: 6 },
@@ -530,8 +531,8 @@ const makeStyles = (t: ChromeColors) =>
       paddingVertical: 6,
       backgroundColor: t.surface1
     },
-    inlineInputRow: { flex: 2, paddingVertical: 0, paddingHorizontal: 6 },
-    inlineInput: { minHeight: 36, maxHeight: 44, paddingTop: 4, paddingBottom: 4 },
+    inlineInputRow: { flex: 1, minWidth: 0, paddingVertical: 0, paddingHorizontal: 6 },
+    inlineInput: { minWidth: 0, minHeight: 36, maxHeight: 44, paddingTop: 4, paddingBottom: 4 },
     input: {
       flex: 1,
       minHeight: 40,

@@ -232,6 +232,7 @@ describe('TerminalView', () => {
     try {
       await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: hub().wrapper })
       expect(screen.getByTestId('terminal-area')).toBeOnTheScreen()
+      expect(screen.getByTestId('terminal-shortcuts')).toHaveStyle({ width: '33%', flexShrink: 0 })
       expect(screen.getByLabelText('Escape')).toBeOnTheScreen()
       expect(screen.getByLabelText('Message to the agent')).toBeOnTheScreen()
       expect(StyleSheet.flatten(screen.getByTestId('terminal-view').props.style)).toMatchObject({
