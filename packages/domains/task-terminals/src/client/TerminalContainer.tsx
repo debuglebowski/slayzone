@@ -79,6 +79,7 @@ interface TerminalContainerProps {
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onOpenArtifact?: (artifactId: string) => void
+  onOpenTask?: (taskRef: string) => void
   onMainReset?: () => void
   /**
    * The main agent's conversation moves to its chat ↔ terminal partner
@@ -151,6 +152,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onOpenUrl,
       onOpenFile,
       onOpenArtifact,
+      onOpenTask,
       onMainReset,
       onMainHandoff,
       onSwitchSession,
@@ -781,6 +783,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
                       onOpenUrl={onOpenUrl}
                       onOpenFile={onOpenFile}
                       onOpenArtifact={onOpenArtifact}
+                      onOpenTask={onOpenTask}
                     />
                   </div>
                 )

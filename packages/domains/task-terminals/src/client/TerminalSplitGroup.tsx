@@ -62,11 +62,22 @@ interface TerminalSplitGroupProps {
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onOpenArtifact?: (artifactId: string) => void
+  onOpenTask?: (taskRef: string) => void
 }
 
 export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalSplitGroupProps>(
   function TerminalSplitGroup(
-    { panes, isActive, prefetchOnly, paused, onAttached, onOpenUrl, onOpenFile, onOpenArtifact },
+    {
+      panes,
+      isActive,
+      prefetchOnly,
+      paused,
+      onAttached,
+      onOpenUrl,
+      onOpenFile,
+      onOpenArtifact,
+      onOpenTask
+    },
     ref
   ) {
     const hubId = useHubId()
@@ -167,6 +178,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
             onOpenUrl={onOpenUrl}
             onOpenFile={onOpenFile}
             onOpenArtifact={onOpenArtifact}
+            onOpenTask={onOpenTask}
             agentState={pane.tab.agentState}
             isMain={pane.tab.isMain}
             isTemporary={pane.isTemporary}

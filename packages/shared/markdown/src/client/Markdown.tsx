@@ -3,6 +3,7 @@ import ReactMarkdown, { type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { mermaidCodeOverride } from './mermaidCodeOverride'
+import { markdownUrlTransform } from './markdown-url'
 
 const baseComponents = { code: mermaidCodeOverride }
 
@@ -49,7 +50,12 @@ export function Markdown({
     ? { ...sourceLineComponents, ...baseComponents }
     : baseComponents
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw]}
+      components={components}
+      urlTransform={markdownUrlTransform}
+    >
       {children}
     </ReactMarkdown>
   )

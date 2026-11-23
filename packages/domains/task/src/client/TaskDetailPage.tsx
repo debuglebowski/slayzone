@@ -157,7 +157,8 @@ import type { LoopConfig } from '@slayzone/terminal-contracts'
 import {
   TerminalContainer,
   type TerminalContainerHandle,
-  MODE_ICONS
+  MODE_ICONS,
+  resolveIdRef
 } from '@slayzone/task-terminals'
 import {
   buildStatusOptions,
@@ -1404,8 +1405,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       else pendingArtifactRef.current = artifactId
     }
   )
-  const handleChatOpenArtifact = useStableCallback((artifactId: string) => {
+  // Chat links name an artifact by full id or a short prefix (`artifact:416b87b4`).
+  const handleChatOpenArtifact = useStableCallback((artifactRef: string) => {
+    const artifactId =
+      resolveIdRef(
+        artifactRef,
+        artifacts.map((a) => a.id)
+      ) ?? artifactRef
     handleOpenArtifact({ taskId, artifactId })
+  })
+  const handleChatOpenTask = useStableCallback((taskRef: string) => {
+    onNavigateToTask?.(taskRef)
   })
   useSubscription(
     trpc.menu.onOpenArtifact.subscriptionOptions(undefined, { onData: handleOpenArtifact })
@@ -3282,6 +3292,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onOpenUrl={openDevServerInBrowser}
                           onOpenFile={handleQuickOpenFile}
                           onOpenArtifact={handleChatOpenArtifact}
+                          onOpenTask={handleChatOpenTask}
                           onMainReset={handleResetTerminal}
                           onSwitchSession={handleSwitchSession}
                           {...(handoffMode ? { onMainHandoff: () => void handleHandoff() } : {})}

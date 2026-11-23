@@ -12,12 +12,16 @@ function parse(url: string): URL | null {
   }
 }
 
-/** Same app document: the packaged `file://` renderer page, or the dev server origin. */
+/**
+ * Same app document: the packaged `file://` renderer page, or the same page of
+ * the dev server. The path counts in dev too: the dev server answers any path
+ * (a chat link to `/Users/…/a.ts:105` loaded it in place of the app).
+ */
 function isSameApp(current: URL, target: URL): boolean {
   if (current.protocol === 'file:') {
     return target.protocol === 'file:' && target.pathname === current.pathname
   }
-  return target.origin === current.origin
+  return target.origin === current.origin && target.pathname === current.pathname
 }
 
 /** Is `url` the app's own document? `appUrl` is the renderer entry (packaged file or dev server). */
@@ -45,6 +49,8 @@ export function resolveAppWindowNavigation(
   if (!target) return 'block'
   const current = parse(currentUrl)
   if (current && isSameApp(current, target)) return 'allow'
+  // Another page of the app's own server is not a website to hand the OS.
+  if (current && current.protocol !== 'file:' && target.origin === current.origin) return 'block'
   return EXTERNAL_PROTOCOLS.has(target.protocol) ? 'open-external' : 'block'
 }
 

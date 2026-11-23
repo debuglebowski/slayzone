@@ -9,6 +9,7 @@ export {
   markForceStart,
   requestAgentStart,
   chatsLoadingCount,
-  subscribeChatsLoading
+  subscribeChatsLoading,
+  resolveIdRef
 } from './client'
 export type { TerminalContainerHandle } from './client'

@@ -9,6 +9,7 @@ Shared markdown helpers consumed by `file-editor`, `worktrees`, `task`, and `tas
 - `mermaidCodeOverride` — drop-in `code` component override for `react-markdown`. Renders mermaid for `language-mermaid` fences and auto-detects bare fences whose body matches mermaid keywords.
 - `MERMAID_KEYWORDS` — exported regex used by `mermaidCodeOverride` for auto-detection.
 - `GhMarkdown` — `Markdown` wrapped in GitHub-style `prose` typography (PR bodies, review comments, chat text/plans). Its classes are scanned by `@slayzone/theme-css` file-by-file; the rest of this package is not scanned.
+- `Markdown` link hrefs go through `markdownUrlTransform` (`markdown-url.ts`): react-markdown's safe set plus the app schemes `artifact:`, `slayzone:`, `file:` (its default blanked them to `href=""`, a reload of the app). The host opens them — e.g. chat's `chat-link.ts`.
 
 ## Usage
 

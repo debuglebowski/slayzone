@@ -60,6 +60,7 @@ import {
 import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
 import { setTabWorktreePathResolver, useTabStore } from '@slayzone/tabs-state'
 import { peekTaskPath, useTaskPathChanges } from '@slayzone/task/client/useTaskPath'
+import { resolveIdRef } from '@slayzone/task-terminals'
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
 import {
@@ -637,6 +638,19 @@ function App(): React.JSX.Element {
       guardTaskOpen(taskId, (id) => startTransition(() => rawOpenTask(id)), projectOverride)
     },
     [guardTaskOpen, rawOpenTask, startTransition]
+  )
+  // A task page's links (chat `slayzone://task/<id>`) may name a task by a short
+  // id prefix; the tab store looks tasks up by exact id only.
+  const openTaskRef = useCallback(
+    (taskRef: string) => {
+      openTask(
+        resolveIdRef(
+          taskRef,
+          tasks.map((t) => t.id)
+        ) ?? taskRef
+      )
+    },
+    [openTask, tasks]
   )
 
   // Tab management (declared early so IPC-listener refs below can close over closeTab).
@@ -1751,7 +1765,7 @@ function App(): React.JSX.Element {
                         onTaskUpdated={updateTask}
                         onArchiveTask={archiveTask}
                         onDeleteTask={deleteTask}
-                        onNavigateToTask={openTask}
+                        onNavigateToTask={openTaskRef}
                         onConvertTask={handleConvertTask}
                         onCloseTab={closeTabByTaskId}
                         onTerminalFocusRequestHandled={handleTerminalFocusRequestHandled}

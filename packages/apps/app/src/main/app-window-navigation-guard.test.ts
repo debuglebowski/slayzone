@@ -19,6 +19,11 @@ describe('resolveAppWindowNavigation', () => {
     expect(resolveAppWindowNavigation(DEV, 'http://localhost:5173/?taskId=t1')).toBe('allow')
   })
 
+  test('another page of the dev server is not the app (a chat file-path link)', () => {
+    expect(resolveAppWindowNavigation(DEV, 'http://localhost:5173/Users/me/a.ts:105')).toBe('block')
+    expect(resolveAppWindowNavigation(DEV, 'http://localhost:5173/packages/x.ts')).toBe('block')
+  })
+
   test('the dev server origin is the app only on its exact port', () => {
     expect(resolveAppWindowNavigation(DEV, 'http://localhost:3000/')).toBe('open-external')
   })

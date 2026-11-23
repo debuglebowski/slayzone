@@ -22,7 +22,7 @@ import {
 } from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
 import { ChatOpenFailure } from './ChatOpenFailure'
-import { resolveCitedPath } from './codex-file-citations'
+import { openChatLink } from './chat-link'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
 import { useSideQuestions } from './side-questions/useSideQuestions'
@@ -133,6 +133,8 @@ export interface ChatPanelProps {
   /** Cmd+Click on a file:line:col reference → editor pane. */
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onOpenArtifact?: (artifactId: string) => void
+  /** A `slayzone://task/<id>` link in a message (full id or unique prefix). */
+  onOpenTask?: (taskRef: string) => void
   /**
    * From `terminal_tabs.agent_state`: how this tab's agent last ended. With the
    * startup mode it decides whether chat.start runs after hydrate (see
@@ -198,6 +200,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       onOpenUrl,
       onOpenFile,
       onOpenArtifact,
+      onOpenTask,
       agentState,
       isMain,
       isTemporary,
@@ -944,42 +947,43 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           composer.textareaRef.current?.focus()
                         }}
                         onClickCapture={(e) => {
-                          // Event-delegated link interception for markdown-rendered anchors only.
+                          // Event-delegated link interception for markdown-rendered anchors.
                           // Skip LinkifiedText anchors — they own their click semantics via
                           // `data-linkified` and would otherwise double-fire (capture-phase parent
-                          // before child onClick).
-                          // Mirrors terminal modifier semantics:
-                          //   ⌘+Click       → in-app slay browser (onOpenUrl)
-                          //   ⌘+Shift+Click → external
-                          //   bare click    → external (markdown anchors are click affordances;
-                          //                  doing nothing on bare click would feel broken).
+                          // before child onClick). Every other anchor's default is cancelled: a
+                          // followed link replaces the whole app window (`chat-link.ts`).
+                          // Web links mirror terminal modifier semantics (⌘ → in-app browser,
+                          // ⌘⇧ / bare → external); files, artifacts and tasks open in-app.
                           const target = e.target as HTMLElement | null
                           const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
                           if (!anchor) return
                           if (anchor.dataset.linkified === 'true') return
-                          const href = anchor.getAttribute('href') ?? ''
-                          if (href.startsWith('#chat-thread:')) {
-                            e.preventDefault()
-                            const id = href.slice('#chat-thread:'.length)
-                            const thread = threadApi.threads.find((thread) => thread.id === id)
-                            if (thread) void threadApi.view?.open(thread)
-                            return
-                          }
-                          // Codex file-citation chip pointing at a local file → editor.
-                          const citedPath = anchor.dataset.fileCitationPath
-                          if (citedPath && !/^https?:\/\//i.test(citedPath)) {
-                            e.preventDefault()
-                            const absPath = resolveCitedPath(citedPath, cwd)
-                            if (handleOpenFile) handleOpenFile(absPath)
-                            else navigate.openFile(absPath)
-                            return
-                          }
-                          if (!/^https?:\/\//i.test(href)) return
                           e.preventDefault()
-                          const mod = e.metaKey || e.ctrlKey
-                          if (mod && e.shiftKey) navigate.openExternal(href)
-                          else if (mod && onOpenUrl) onOpenUrl(href)
-                          else navigate.openExternal(href)
+                          openChatLink(
+                            {
+                              href: anchor.getAttribute('href') ?? '',
+                              citedPath: anchor.dataset.fileCitationPath,
+                              base: anchor.closest<HTMLElement>('[data-link-base]')?.dataset
+                                .linkBase,
+                              mod: e.metaKey || e.ctrlKey,
+                              shift: e.shiftKey
+                            },
+                            {
+                              cwd,
+                              openThread: (id) => {
+                                const thread = threadApi.threads.find((t) => t.id === id)
+                                if (thread) void threadApi.view?.open(thread)
+                              },
+                              openFile: (absPath, line, col) => {
+                                if (handleOpenFile) handleOpenFile(absPath, line, col)
+                                else navigate.openFile(absPath)
+                              },
+                              openArtifact: onOpenArtifact,
+                              openTask: onOpenTask,
+                              openUrl: onOpenUrl,
+                              openExternal: navigate.openExternal
+                            }
+                          )
                         }}
                       >
                         {/* Panel-wide drop overlay */}
@@ -1291,6 +1295,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                               onOpenUrl={onOpenUrl}
                               onOpenFile={onOpenFile}
                               onOpenArtifact={onOpenArtifact}
+                              onOpenTask={onOpenTask}
                               onQuoteReply={quoteReply}
                               onReturnAnswer={(text) =>
                                 setReturnDraft({ threadId: thread.id, text })

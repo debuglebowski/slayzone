@@ -61,7 +61,12 @@ export function WebFetchCard({ invocation, timestamp }: ToolProps) {
         )}
         {error && <pre className="font-mono whitespace-pre-wrap text-destructive">{error}</pre>}
         {view.summary && (
-          <div className="text-sm leading-relaxed [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:font-mono [&_code]:text-[0.85em]">
+          <div
+            // The summary's site-relative links belong to the fetched page (ChatPanel's
+            // link router resolves them against it, not the chat cwd).
+            data-link-base={view.url || undefined}
+            className="text-sm leading-relaxed [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_code]:font-mono [&_code]:text-[0.85em]"
+          >
             <GhMarkdown>{view.summary}</GhMarkdown>
           </div>
         )}
