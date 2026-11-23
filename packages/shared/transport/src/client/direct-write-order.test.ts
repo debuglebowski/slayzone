@@ -46,19 +46,25 @@ describe('ordered pty writer', () => {
     expect(await c).toBe(true)
   })
 
-  it('hub-only writes are not held back: they pipeline, as before', async () => {
+  it('holds Enter behind prompt text while the hub checks the earlier write', async () => {
     const sent: string[] = []
+    const prompt = deferred<boolean>()
     const writer = createOrderedPtyWriter({
       isDirect: () => false,
       send: (_path, data) => {
         sent.push(data)
-        return new Promise<boolean>(() => undefined)
+        return sent.length === 1 ? prompt.promise : Promise.resolve(true)
       }
     })
-    void writer.write('a')
-    void writer.write('b')
-    await flush()
-    expect(sent).toEqual(['a', 'b'])
+    const text = writer.write('review this')
+    const rest = writer.write(' change')
+    const enter = writer.write('\r')
+    const sentBeforePromptAcknowledged = [...sent]
+    prompt.resolve(true)
+    expect(await Promise.all([text, rest, enter])).toEqual([true, true, true])
+    expect(sentBeforePromptAcknowledged).toEqual(['review this'])
+    expect(sent).toEqual(['review this', ' change\r'])
+    expect(writer.idle()).toBe(true)
   })
 
   it('a key that goes direct waits for hub writes still in flight', async () => {

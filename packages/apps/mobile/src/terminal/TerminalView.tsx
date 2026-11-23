@@ -203,10 +203,14 @@ export function TerminalView({
 
   const send = (write: () => Promise<unknown>, restore?: string): void => {
     setSendError(null)
-    write().catch((error: unknown) => {
-      setSendError(messageOf(error))
-      if (restore) setText(restore)
-    })
+    write()
+      .then((accepted) => {
+        if (accepted === false) throw new Error('The terminal could not accept input')
+      })
+      .catch((error: unknown) => {
+        setSendError(messageOf(error))
+        if (restore) setText((current) => (current ? `${restore}\n${current}` : restore))
+      })
   }
 
   /** Bytes for the agent, in the order typed (key bar, Ctrl+letter, touch scroll). */
@@ -226,7 +230,7 @@ export function TerminalView({
     touch()
     const data = keyBytes(key, modes)
     send(async () => {
-      await controller.write(data)
+      if (!(await controller.write(data))) return false
       if (key.interrupts) await client.pty.interrupt.mutate({ sessionId })
     })
   }
@@ -251,7 +255,7 @@ export function TerminalView({
     touch()
     const value = stripOscReplies(text)
     setText('')
-    if (value.length > 0) send(() => client.pty.submit.mutate({ sessionId, text: value }), value)
+    if (value.length > 0) send(() => client.pty.submit.mutate({ sessionId, text: value }), text)
     else send(() => controller.write(ENTER))
   }
 

@@ -2,7 +2,7 @@
  * Keys typed between "open a new terminal" and that terminal existing (early-input.ts).
  */
 import { expect, test } from 'vitest'
-import { createEarlyInputCapture, keyToTerminalData } from './early-input'
+import { createEarlyInputCapture, EARLY_INPUT_TTL_MS, keyToTerminalData } from './early-input'
 
 const key = (
   k: string,
@@ -72,6 +72,18 @@ test('an expired or cancelled capture delivers nothing and stops capturing', () 
   cap.onKey(key('z'))
   c2.cancel()
   expect(cap.onKey(key('y')), 'cancelled: not captured').toBe(false)
+})
+
+test('a slow terminal mount expires even a complete prompt captured with Enter', () => {
+  let now = 0
+  const capture = createEarlyInputCapture({ now: () => now, ttlMs: EARLY_INPUT_TTL_MS })
+  capture.start().bind('new-agent')
+  for (const letter of 'hello') expect(capture.onKey(key(letter))).toBe(true)
+  expect(capture.onKey(key('Enter'))).toBe(true)
+
+  now = EARLY_INPUT_TTL_MS + 1
+  expect(capture.take('new-agent')).toBe('')
+  expect(capture.capturing()).toBe(false)
 })
 
 test('a new capture replaces an older one', () => {

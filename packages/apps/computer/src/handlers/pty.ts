@@ -251,6 +251,11 @@ interface PtySession {
   adopted?: boolean
 }
 
+interface PendingPtyInput {
+  writes: Array<{ data: string; writeId?: string }>
+  watchConversationId?: boolean
+}
+
 /**
  * A spawn waiting for an agent-start slot. The hub already holds a handle for it
  * and talks to it like any session, so whatever it sends meanwhile is applied
@@ -259,7 +264,7 @@ interface PtySession {
  * a kill cancels it. Never listed by `pty.list` — it has no process yet; a hub
  * that loses its reply re-sends it (same `spawnId`), which re-attaches here.
  */
-interface QueuedSpawn {
+interface QueuedSpawn extends PendingPtyInput {
   /** Session key (`sessionId`, or `warmId` for a warm spawn). */
   id: string
   taskId?: string
@@ -267,10 +272,6 @@ interface QueuedSpawn {
   ticket: AdmissionTicket
   cols?: number
   rows?: number
-  /** Input that arrived while this waited; a client's carries its id (see `applyClientWrite`). */
-  writes: Array<{ data: string; writeId?: string }>
-  /** A queued write submitted `/status`: watch for a conversation id once started. */
-  watchConversationId?: boolean
   /** Starts the process once admitted; returns the reply. */
   run: (slot: AdmissionSlot) => unknown
   promise: Promise<unknown>
@@ -378,7 +379,13 @@ export function createPtyHandlers(
   const queued = new Map<string, QueuedSpawn>()
   const starts = new Map<
     string,
-    { spawnId?: string; taskId?: string; promise: Promise<unknown>; cancelled: boolean }
+    {
+      spawnId?: string
+      taskId?: string
+      promise: Promise<unknown>
+      cancelled: boolean
+      input: PendingPtyInput | null
+    }
   >()
   /**
    * `pty.relay` for an attempt that has no session yet (queued for a slot, or
@@ -397,14 +404,16 @@ export function createPtyHandlers(
     id: string,
     spawnId: string | undefined,
     taskId: string | undefined,
-    run: (assertActive: () => void) => Promise<T>
+    run: (assertActive: () => void) => Promise<T>,
+    input: PendingPtyInput = { writes: [] }
   ): Promise<T> {
     const prior = starts.get(id)?.promise ?? Promise.resolve()
     const record = {
       spawnId,
       taskId,
       promise: undefined as unknown as Promise<T>,
-      cancelled: false
+      cancelled: false,
+      input: input as PendingPtyInput | null
     }
     const assertActive = (): void => {
       if (disposed) throw new Error(`pty ${id}: handler disposed`)
@@ -421,10 +430,16 @@ export function createPtyHandlers(
           if (taskId && options.taskAdmission) permit = await options.taskAdmission.acquire(taskId)
           assertActive()
           permit?.assert()
-          return await run(() => {
+          const result = await run(() => {
             assertActive()
             permit?.assert()
           })
+          // The process now exists. Drain before yielding so a subsequent write
+          // cannot overtake input buffered during admission or replacement.
+          record.input = null
+          const session = sessions.get(id)
+          if (session && session.spawnId === spawnId) flushPendingInput(session, input)
+          return result
         } finally {
           permit?.release()
         }
@@ -1178,8 +1193,8 @@ export function createPtyHandlers(
       }
       return reply
     }
-    return enqueueSpawn(params.sessionId, params.admission, params, async (slot, item) => {
-      const reply = await serializeStart(
+    return enqueueSpawn(params.sessionId, params.admission, params, (slot, item) =>
+      serializeStart(
         params.sessionId,
         params.spawnId,
         params.taskId,
@@ -1195,22 +1210,10 @@ export function createPtyHandlers(
             replaced,
             slot
           )
-        }
+        },
+        item
       )
-      const session = sessions.get(params.sessionId)!
-      if (!session || session.admissionSlot !== slot) {
-        slot.release()
-        return reply
-      }
-      // Input the hub sent while this waited, in order — where it would have
-      // landed had the spawn been immediate.
-      for (const w of item.writes) {
-        if (w.writeId !== undefined) applyClientWrite(session, w.data, w.writeId)
-        else session.proc.write(w.data)
-      }
-      if (item.watchConversationId) session.signals?.watchConversationId()
-      return reply
-    })
+    )
   }
 
   function startWarm(
@@ -1565,8 +1568,15 @@ export function createPtyHandlers(
    * Esc, `/status`) are reported to the hub from here, once, for either path.
    */
   function applyClientWrite(session: PtySession, data: string, writeId?: string): void {
+    if (writeId !== undefined && session.clientWriteIds.has(writeId)) return
+    const { buffer, facts } = analyzePtyInput(
+      session.directInput,
+      data,
+      session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
+    )
+    session.proc.write(data)
+    session.directInput = buffer
     if (writeId !== undefined) {
-      if (session.clientWriteIds.has(writeId)) return
       session.clientWriteIds.add(writeId)
       // A bounded window: a retry follows its original within seconds.
       if (session.clientWriteIds.size > CLIENT_WRITE_ID_WINDOW) {
@@ -1574,13 +1584,6 @@ export function createPtyHandlers(
         if (oldest !== undefined) session.clientWriteIds.delete(oldest)
       }
     }
-    const { buffer, facts } = analyzePtyInput(
-      session.directInput,
-      data,
-      session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
-    )
-    session.directInput = buffer
-    session.proc.write(data)
     // What a relayed write tells this computer with `watchConversationId`.
     if (facts.statusCommand) session.signals?.watchConversationId()
     if (facts.esc || facts.submitted !== null || facts.interrupt) {
@@ -1604,35 +1607,56 @@ export function createPtyHandlers(
    * right after the spawn (see `QueuedSpawn`). A client write arriving twice (direct,
    * then through the hub with the same id) is queued once.
    */
-  function queueWrite(waiting: QueuedSpawn, data: string, writeId?: string): void {
+  function queueWrite(waiting: PendingPtyInput, data: string, writeId?: string): void {
     if (writeId !== undefined && waiting.writes.some((w) => w.writeId === writeId)) return
     waiting.writes.push({ data, ...(writeId !== undefined ? { writeId } : {}) })
   }
 
-  function write(rawParams: unknown): { ok: true } {
-    const params = ptyWriteParamsSchema.parse(rawParams)
+  function flushPendingInput(session: PtySession, input: PendingPtyInput): void {
+    for (const write of input.writes) {
+      if (write.writeId !== undefined) applyClientWrite(session, write.data, write.writeId)
+      else session.proc.write(write.data)
+    }
+    if (input.watchConversationId) session.signals?.watchConversationId()
+  }
+
+  function writeInput(
+    params: {
+      sessionId: string
+      spawnId?: string
+      data: string
+      writeId?: string
+      watchConversationId?: boolean
+    },
+    direct = false
+  ): boolean {
     const waiting = queued.get(params.sessionId)
-    if (waiting) {
-      if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
-      queueWrite(waiting, params.data, params.writeId)
-      if (params.watchConversationId) waiting.watchConversationId = true
-      return { ok: true }
+    const starting = starts.get(params.sessionId)
+    const input = waiting ?? starting?.input
+    if (input) {
+      const spawnId = waiting ? waiting.spawnId : starting?.spawnId
+      if (!waiting && starting?.cancelled) return false
+      if (params.spawnId !== undefined && spawnId !== params.spawnId) return false
+      queueWrite(input, params.data, params.writeId)
+      if (params.watchConversationId) input.watchConversationId = true
+      return true
     }
+
     const session = sessions.get(params.sessionId)
-    if (session && params.spawnId !== undefined && session.spawnId !== params.spawnId)
-      return { ok: true }
-    if (!session) {
-      ctx.log('pty write on unknown session', { sessionId: params.sessionId })
-      return { ok: true }
-    }
-    if (params.writeId !== undefined) {
+    if (!session || session.stopping || (direct && session.warm)) return false
+    if (params.spawnId !== undefined && session.spawnId !== params.spawnId) return false
+    if (direct || params.writeId !== undefined) {
       // A client's write relayed by the hub: once, with its facts reported from here.
       applyClientWrite(session, params.data, params.writeId)
-      return { ok: true }
+      return true
     }
     session.proc.write(params.data)
     if (params.watchConversationId) session.signals?.watchConversationId()
-    return { ok: true }
+    return true
+  }
+
+  function write(rawParams: unknown): { ok: boolean } {
+    return { ok: writeInput(ptyWriteParamsSchema.parse(rawParams)) }
   }
 
   /**
@@ -1841,15 +1865,7 @@ export function createPtyHandlers(
       )
     },
     write(sessionId, data, writeId) {
-      const waiting = queued.get(sessionId)
-      if (waiting) {
-        queueWrite(waiting, data, writeId)
-        return true
-      }
-      const session = sessions.get(sessionId)
-      if (!session || session.warm) return false
-      applyClientWrite(session, data, writeId)
-      return true
+      return writeInput({ sessionId, data, writeId }, true)
     },
     watch(sessionId, onData, onEnd) {
       const session = sessions.get(sessionId)

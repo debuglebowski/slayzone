@@ -99,8 +99,8 @@ export interface PtyAccess {
   getBuffer: (sessionId: string) => Promise<string | null>
   /** Replay after `afterSeq` (-1 = all), with the seq it reached. */
   getBufferSince: (sessionId: string, afterSeq: number) => Promise<BufferSinceResult | null>
-  writePty: (sessionId: string, data: string) => boolean
-  submitPty: (sessionId: string, data: string) => boolean
+  writePty: (sessionId: string, data: string) => boolean | Promise<boolean>
+  submitPty: (sessionId: string, data: string) => boolean | Promise<boolean>
   killPty: (sessionId: string) => boolean
   requestEnsureAlive: (
     taskId: string,

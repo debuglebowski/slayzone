@@ -1,18 +1,26 @@
 import { userInfo } from 'node:os'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { setShellOverride } from '@slayzone/platform'
+import { createMemoryCredentialStore, HubDialer } from '@slayzone/computer-transport/client'
 import { TypedEventEmitter } from '@slayzone/computer-transport/shared'
 import { createRoutingPtyBackend, type RoutingGateway } from '@slayzone/computer-transport/server'
 import type { ComputerGatewayEvents } from '@slayzone/computer-transport/server'
+import { startLoopbackHub } from '@slayzone/computer-transport/testing'
 import type { PtyHandle, PtySignal, PtySpawnSpec } from '@slayzone/terminal/server'
-import { createPtyHandlers } from './pty'
+import { createSpawnAdmission } from '../spawn-admission'
 import type { ComputerConfig } from '../config'
+import { createPtyHandlers } from './pty'
 import type { ComputerDialer } from './types'
 
 const computerId = 'remote-computer'
 const sessionId = 'task:tab'
+const promptReader =
+  'stty -echo; printf "agent-ready\\n"; while IFS= read -r line; do printf "submitted <%s>\\n" "$line"; done'
 
-function setup() {
+const submittedLines = (output: string) =>
+  [...output.matchAll(/submitted <([^>]*)>/g)].map((match) => match[1])
+
+function setup(options?: Parameters<typeof createPtyHandlers>[2]) {
   const events = new TypedEventEmitter<ComputerGatewayEvents>()
   const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
@@ -32,7 +40,7 @@ function setup() {
       return true
     }
   }
-  const computer = createPtyHandlers({ dialer, config, log: () => {} })
+  const computer = createPtyHandlers({ dialer, config, log: () => {} }, undefined, options)
   const gateway = {
     events,
     listComputers: () => [],
@@ -74,6 +82,157 @@ describe('desktop hub to remote computer PTY', () => {
   // oh-my-zsh "update? [Y/n]" prompt) blocked the command. /bin/sh reads none.
   beforeAll(() => setShellOverride('/bin/sh'))
   afterAll(() => setShellOverride(null))
+
+  it('submits a prompt when Enter arrives during cold-start task admission', async () => {
+    const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 60_000 })
+    const releaseSlot = await new Promise<() => void>((resolve) => {
+      admission.enqueue('foreground', (holder) => resolve(() => holder.release()))
+    })
+    let checkStarted!: () => void
+    let allowStart!: () => void
+    const checkingTask = new Promise<void>((resolve) => {
+      checkStarted = resolve
+    })
+    const taskCheck = new Promise<void>((resolve) => {
+      allowStart = resolve
+    })
+    const { backend, computer, spec } = setup({
+      admission,
+      taskAdmission: {
+        async acquire() {
+          checkStarted()
+          await taskCheck
+          return { assert() {}, release() {} }
+        }
+      }
+    })
+    try {
+      const agent = (await backend.spawn({
+        ...spec,
+        admission: 'foreground',
+        detection: { mode: 'codex', resuming: false },
+        computerShellCommand: promptReader
+      })) as PtyHandle
+      const output: string[] = []
+      agent.onData((data) => output.push(data))
+      expect(admission.stats().queued).toBe(1)
+      agent.write('review this change', { writeId: 'prompt' })
+      releaseSlot()
+      // The slot is granted, but task admission still prevents the PTY from existing.
+      await checkingTask
+      expect(agent.pid).toBeNull()
+      agent.write('\r', { writeId: 'enter' })
+      allowStart()
+      await agent.whenSpawned
+      await vi.waitFor(() => expect(output.join('')).toContain('agent-ready'), { timeout: 5_000 })
+
+      // Only the process prints the marker after reading a complete line. The
+      // follow-up proves the PTY is responsive even when the first Enter is lost.
+      agent.write('follow-up\r', { writeId: 'follow-up' })
+      await vi.waitFor(() => expect(output.join('')).toContain('follow-up>'), { timeout: 5_000 })
+      const submitted = submittedLines(output.join(''))
+      expect(submitted.join('')).toBe('review this changefollow-up')
+      expect(submitted).toEqual(['review this change', 'follow-up'])
+    } finally {
+      allowStart()
+      releaseSlot()
+      computer.disposeAll()
+    }
+  }, 15_000)
+
+  it('does not silently drop Enter when the relay disconnects from a live PTY', async () => {
+    const hub = await startLoopbackHub()
+    const credentialStore = createMemoryCredentialStore()
+    let dialer: HubDialer | undefined
+    const computer = createPtyHandlers({
+      dialer: { notify: (method, params) => dialer?.notify(method, params) ?? false },
+      config: {
+        hubUrl: hub.url,
+        name: 'terminal-test',
+        allowedRoots: [process.cwd()],
+        capabilities: ['pty']
+      },
+      log() {}
+    })
+    const connect = async () => {
+      dialer = new HubDialer({
+        url: hub.url,
+        identity: {
+          name: 'terminal-test',
+          platform: process.platform,
+          version: '0.0.0',
+          capabilities: ['pty']
+        },
+        credentialStore,
+        joinToken: 'jt-valid',
+        epoch: 'same-computer',
+        heartbeatIntervalMs: 0,
+        onHubRequest: (method, params) => computer.handlers[method]!(params)
+      })
+      const connected = dialer.events.once('connected')
+      dialer.start()
+      await connected
+      return dialer
+    }
+    const output = () =>
+      (
+        computer.handlers['pty.getBufferSince']({ sessionId, seq: -1 }) as {
+          frames: Array<{ data: string }>
+        }
+      ).frames
+        .map(({ data }) => data)
+        .join('')
+    const id = 'computer-1'
+    try {
+      const firstConnection = await connect()
+      const backend = createRoutingPtyBackend({
+        gateway: hub.gateway,
+        resolveComputerId: (spec) => spec.computerId
+      })
+      const agent = (await backend.spawn({
+        sessionId,
+        taskId: 'task',
+        computerId: id,
+        projectId: null,
+        transport: true,
+        file: '/bin/sh',
+        args: ['-c', promptReader],
+        options: { cwd: process.cwd(), env: {}, cols: 80, rows: 24, name: 'xterm-256color' }
+      })) as PtyHandle
+      await agent.whenSpawned
+      const pid = agent.pid
+      expect(pid).not.toBeNull()
+      await vi.waitFor(() => expect(output()).toContain('agent-ready'), { timeout: 5_000 })
+      // Await receipt of the text before cutting the relay for the Enter write.
+      await hub.gateway.request(id, 'pty.write', { sessionId, data: 'review this change' })
+      const disconnected = hub.gateway.events.once('computer-disconnected')
+      await firstConnection.stop()
+      await disconnected
+      const enterWritten = Promise.resolve(agent.write('\r', { writeId: 'enter' })).then(
+        (result) => result !== false,
+        () => false
+      )
+
+      await connect()
+      expect(computer.handlers['pty.list']({})).toMatchObject({
+        sessions: [{ sessionId, pid }]
+      })
+      // A refused Enter is safe to retry. A write accepted during the fault
+      // must survive reconnect without the user having to press Enter again.
+      if (!(await enterWritten)) {
+        await hub.gateway.request(id, 'pty.write', { sessionId, data: '\r' })
+      }
+      await hub.gateway.request(id, 'pty.write', { sessionId, data: 'follow-up\r' })
+      await vi.waitFor(() => expect(output()).toContain('follow-up>'), { timeout: 5_000 })
+      const submitted = submittedLines(output())
+      expect(submitted.join('')).toBe('review this changefollow-up')
+      expect(submitted).toEqual(['review this change', 'follow-up'])
+    } finally {
+      computer.disposeAll()
+      await dialer?.stop()
+      await hub.close()
+    }
+  }, 15_000)
 
   it('uses computer identity and keeps one live process across reload', async () => {
     const { backend, computer, spec } = setup()

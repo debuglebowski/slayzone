@@ -218,10 +218,15 @@ export function ProcessesPanel({
     (proc: ProcessEntry) => {
       if (proc.logBuffer.length === 0) return
       const output = `\r\n--- ${proc.label} output ---\r\n${proc.logBuffer.join('\r\n')}\r\n---\r\n`
-      void trpcClient.pty.write.mutate({
-        sessionId: terminalSessionId ?? `${taskId}:${taskId}`,
-        data: output
-      })
+      const reportFailure = () => toast.error('Could not confirm terminal received process output')
+      void trpcClient.pty.write
+        .mutate({
+          sessionId: terminalSessionId ?? `${taskId}:${taskId}`,
+          data: output
+        })
+        .then((accepted) => {
+          if (!accepted) reportFailure()
+        }, reportFailure)
     },
     [taskId, terminalSessionId, trpcClient]
   )

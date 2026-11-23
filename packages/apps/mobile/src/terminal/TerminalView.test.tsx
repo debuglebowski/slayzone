@@ -93,7 +93,9 @@ function withoutWriteId(input: unknown): unknown {
   return rest
 }
 
-function hub(opts: { offline?: () => boolean; attach?: () => unknown } = {}) {
+function hub(
+  opts: { offline?: () => boolean; attach?: () => unknown; submitResult?: boolean } = {}
+) {
   const calls: Array<[string, unknown]> = []
   let emitData: (data: unknown) => void = () => undefined
   let emitResize: (data: unknown) => void = () => undefined
@@ -126,7 +128,7 @@ function hub(opts: { offline?: () => boolean; attach?: () => unknown } = {}) {
               },
       'pty.getBufferSince': () => ({ chunks: [], currentSeq: 0, prelude: '' }),
       'pty.write': record('pty.write'),
-      'pty.submit': record('pty.submit'),
+      'pty.submit': record('pty.submit', opts.submitResult),
       'pty.interrupt': record('pty.interrupt'),
       'pty.touch': record('pty.touch')
     },
@@ -442,6 +444,21 @@ describe('TerminalView', () => {
 
     await user.press(screen.getByLabelText('Send'))
     await waitFor(() => expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\r' }]))
+  })
+
+  it('keeps the draft when the terminal exits before the server accepts Send', async () => {
+    const h = hub({ submitResult: false })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    const user = userEvent.setup()
+    const input = screen.getByLabelText('Message to the agent')
+    await user.type(input, 'retry this prompt')
+    expect(input.props.value).toBe('retry this prompt')
+    await user.press(screen.getByLabelText('Send'))
+    await waitFor(() =>
+      expect(h.of('pty.submit')).toEqual([{ sessionId: SID, text: 'retry this prompt' }])
+    )
+    expect(screen.getByLabelText('Message to the agent').props.value).toBe('retry this prompt')
+    expect(screen.getByText('Not sent: The terminal could not accept input')).toBeTruthy()
   })
 
   it('closes the keyboard: its own button while typing, or touching the terminal', async () => {

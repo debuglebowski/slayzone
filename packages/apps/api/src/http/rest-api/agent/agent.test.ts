@@ -3,7 +3,7 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/api/src/http/rest-api/agent/agent.test.ts
  */
 import express from 'express'
-import { afterAll, beforeEach, describe, expect, test } from 'vitest'
+import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { TypedEmitter } from '@slayzone/platform/events'
 import type { ChatTurnStatus, TerminalState } from '@slayzone/terminal-contracts'
 import { createTestHarness } from '../../../../../../shared/test-utils/ipc-harness.js'
@@ -177,6 +177,18 @@ describe('a terminal task', () => {
     })
     expect(res.body.data.kind).toBe('pty')
     expect(calls).toContainEqual(['pty.submit', ptySession, 'ls'])
+  })
+
+  test('send reports a refusal returned asynchronously by the terminal', async () => {
+    const submit = vi.spyOn(pty, 'submitPty').mockResolvedValue(false)
+    try {
+      const res = await rest.request('POST', `/api/agent/${ptyTask}/send`, { text: 'ls' })
+      expect(res.status).toBe(404)
+      expect(res.body).toMatchObject({ ok: false, error: 'PTY session could not accept input' })
+      expect(submit).toHaveBeenCalledWith(ptySession, 'ls')
+    } finally {
+      submit.mockRestore()
+    }
   })
 
   test('start spawns a cold main terminal without submitting anything', async () => {
