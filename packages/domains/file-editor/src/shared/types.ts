@@ -1,3 +1,15 @@
+import { z } from 'zod'
+
+export const textRevisionSchema = z.string().regex(/^[a-f0-9]{64}$/)
+export const MAX_TEXT_EDIT_BYTES = 10 * 1024 * 1024
+export const textEditSchema = z.object({
+  revision: textRevisionSchema,
+  from: z.number().int().nonnegative().max(MAX_TEXT_EDIT_BYTES),
+  to: z.number().int().nonnegative().max(MAX_TEXT_EDIT_BYTES),
+  text: z.string().max(MAX_TEXT_EDIT_BYTES)
+})
+export type TextEdit = z.infer<typeof textEditSchema>
+
 export interface DirEntry {
   name: string
   /** Relative path from project root (e.g. "src/main/index.ts") */
@@ -13,6 +25,9 @@ export interface ReadFileResult {
   content: string | null
   tooLarge?: boolean
   sizeBytes?: number
+  revision?: string
+  /** The requested revision still applies. The content was omitted. */
+  unchanged?: true
 }
 
 export interface FileSearchMatch {

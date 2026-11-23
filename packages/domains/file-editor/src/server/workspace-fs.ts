@@ -71,7 +71,8 @@ import type {
   FileSearchResult,
   GitStatusMap,
   ReadFileResult,
-  SearchFilesOptions
+  SearchFilesOptions,
+  TextEdit
 } from '../shared'
 
 /** Where a picker may start browsing, described in the target machine's idiom. */
@@ -155,7 +156,7 @@ export interface LocalWorkspaceFs {
   forgetProjectPath(projectId: string): void
 
   readDir(rootPath: string, dirPath: string): DirEntry[]
-  readFile(rootPath: string, filePath: string, force?: boolean): ReadFileResult
+  readFile(rootPath: string, filePath: string, force?: boolean, revision?: string): ReadFileResult
   /** `length` bytes at `offset` (1..`WORKSPACE_READ_BYTES_MAX_CHUNK`); see `readBytesAt`. */
   readBytes(
     rootPath: string,
@@ -163,7 +164,7 @@ export interface LocalWorkspaceFs {
     offset: number,
     length: number
   ): Promise<ReadBytesResult>
-  writeFile(rootPath: string, filePath: string, content: string): void
+  writeFile(rootPath: string, filePath: string, content: string | TextEdit): string | void
   createFile(rootPath: string, filePath: string): void
   createDir(rootPath: string, dirPath: string): void
   rename(rootPath: string, oldPath: string, newPath: string): void
@@ -225,7 +226,8 @@ export interface WorkspaceFsAdapters {
     computerId: string | null,
     rootPath: string,
     filePath: string,
-    force?: boolean
+    force?: boolean,
+    revision?: string
   ): Promise<ReadFileResult>
   /**
    * One raw slice of a file (binary-exact) — previews stream a file by pulling these
@@ -244,8 +246,8 @@ export interface WorkspaceFsAdapters {
     computerId: string | null,
     rootPath: string,
     filePath: string,
-    content: string
-  ): Promise<void>
+    content: string | TextEdit
+  ): Promise<string | void>
   createFile(computerId: string | null, rootPath: string, filePath: string): Promise<void>
   createDir(computerId: string | null, rootPath: string, dirPath: string): Promise<void>
   rename(

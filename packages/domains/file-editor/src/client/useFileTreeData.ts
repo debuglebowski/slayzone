@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useInsertionEffect, useRef, useMemo } from 'react'
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from './trpc'
+import { useTRPC } from './trpc'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { STATUS_PRIORITY, compactChildren } from './EditorFileTree.utils'
@@ -46,7 +46,6 @@ export function useFileTreeData({
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
   const scope = useWorkspaceScope()
-  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   // Map of dirPath -> children entries (lazy loaded)
   const [dirContents, setDirContents] = useState<Map<string, DirEntry[]>>(new Map())
@@ -146,8 +145,9 @@ export function useFileTreeData({
   const loadDir = useCallback(
     async (dirPath: string) => {
       const input = { ...requireScope(scope), rootPath: projectPath, dirPath }
-      const items = await trpcClient.fileEditor.readDir.query(input)
-      queryClient.setQueryData(trpc.fileEditor.readDir.queryKey(input), items)
+      const items = await queryClient.fetchQuery(
+        trpc.fileEditor.readDir.queryOptions(input, { staleTime: 0, retry: false })
+      )
       setDirContents((prev) => {
         const next = new Map(prev)
         next.set(dirPath, items)
@@ -155,19 +155,32 @@ export function useFileTreeData({
       })
       return items
     },
-    [projectPath, queryClient, trpc, trpcClient, scope]
+    [projectPath, queryClient, trpc, scope]
   )
   const loadDirRef = useRef(loadDir)
   useInsertionEffect(() => {
     loadDirRef.current = loadDir
   })
+  const rootReady = useRef(false)
   const loadRoot = useStableCallback(() => {
     loadDirRef.current('').then(
-      () => onRootStatusRef.current?.({ kind: 'ready' }),
-      (err: unknown) => onRootStatusRef.current?.({ kind: 'error', message: errorMessage(err) })
+      () => {
+        rootReady.current = true
+        onRootStatusRef.current?.({ kind: 'ready' })
+      },
+      (err: unknown) => {
+        rootReady.current = false
+        onRootStatusRef.current?.({ kind: 'error', message: errorMessage(err) })
+      }
     )
   })
   const watchRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const changedDirs = useRef(new Set<string>())
+  const pollIndex = useRef(0)
+  const refreshDir = useStableCallback((dir: string) => {
+    if (dir === '') loadRoot()
+    else void loadDirRef.current(dir).catch(() => undefined)
+  })
 
   const onWatchEvent = useStableCallback(
     (event: { type: 'changed' | 'deleted'; root: string; relPath: string }) => {
@@ -176,16 +189,23 @@ export function useFileTreeData({
 
       const slash = event.relPath.lastIndexOf('/')
       const parentDir = slash >= 0 ? event.relPath.slice(0, slash) : ''
-      const dirsToRefresh = new Set<string>([''])
-      if (parentDir && dirContentsRef.current.has(parentDir)) {
-        dirsToRefresh.add(parentDir)
+      const known = dirContentsRef.current
+      if (!parentDir || known.has(parentDir) || expandedFoldersRef.current.has(parentDir)) {
+        changedDirs.current.add(parentDir)
       }
-      for (const dir of expandedFoldersRef.current) dirsToRefresh.add(dir)
+      if (known.has(event.relPath)) changedDirs.current.add(event.relPath)
+      if (event.relPath === '.gitignore' || event.relPath.endsWith('/.gitignore')) {
+        for (const dir of known.keys())
+          if (!parentDir || dir.startsWith(parentDir + '/')) changedDirs.current.add(dir)
+      }
 
-      if (watchRefreshTimer.current) clearTimeout(watchRefreshTimer.current)
+      if (watchRefreshTimer.current) return
       watchRefreshTimer.current = setTimeout(() => {
-        void queryClient.invalidateQueries(trpc.fileEditor.readDir.queryFilter())
-        for (const dir of dirsToRefresh) void loadDirRef.current(dir)
+        watchRefreshTimer.current = null
+        const dirs = [...changedDirs.current]
+        changedDirs.current.clear()
+        for (const dir of dirs) refreshDir(dir)
+        void refetchGitStatus()
       }, 100)
     }
   )
@@ -202,25 +222,31 @@ export function useFileTreeData({
   useEffect(() => {
     return () => {
       if (watchRefreshTimer.current) clearTimeout(watchRefreshTimer.current)
+      watchRefreshTimer.current = null
+      changedDirs.current.clear()
     }
-  }, [])
+  }, [loadDir])
 
   // fs.watch can miss early create/delete events on some platforms while the
   // WebSocket subscription is settling. Keep a cheap polling fallback for the
-  // visible directories only; watcher events still provide fast refreshes.
-  // The root goes through `loadRoot`, so a tree whose first load failed recovers
-  // here on its own once the directory becomes readable.
+  // visible directories only, one per tick. Keep quick recovery for root errors.
   useVisibleInterval(() => {
-    loadRoot()
-    for (const dir of expandedFoldersRef.current) void loadDirRef.current(dir)
-  }, 1_500)
+    if (!rootReady.current) loadRoot()
+  }, 1500)
+  useVisibleInterval(() => {
+    if (!rootReady.current) return
+    const visible = ['', ...expandedFoldersRef.current]
+    const index = pollIndex.current % visible.length
+    pollIndex.current = index + 1
+    refreshDir(visible[index])
+  }, 5000)
 
   // Load root + persisted expanded folders on mount (and whenever loadDir's
   // identity changes). Stable-callback body: reads the current expandedFolders
   // without making it a trigger.
   const loadInitialDirs = useStableCallback(() => {
     loadRoot()
-    expandedFolders.forEach((dir) => loadDir(dir))
+    expandedFolders.forEach(refreshDir)
   })
   useEffect(() => {
     loadInitialDirs()
@@ -235,8 +261,8 @@ export function useFileTreeData({
       void queryClient.invalidateQueries(
         trpc.fileEditor.gitStatus.queryFilter({ ...scope, rootPath: projectPath })
       )
-    loadDir('')
-    expandedFolders.forEach((dir) => loadDir(dir))
+    loadRoot()
+    expandedFolders.forEach(refreshDir)
     setDirContents((prev) => {
       const keep = new Set(['', ...expandedFolders])
       let changed = false

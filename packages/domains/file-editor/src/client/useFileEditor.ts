@@ -12,17 +12,23 @@ import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/tran
 import { useTRPC, useTRPCClient } from './trpc'
 import { useTrack, type Tracker } from '@slayzone/telemetry/client'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
-import type {
-  EditorOpenFilesState,
-  OpenFileOptions,
-  ReadFileResult
+import {
+  MAX_TEXT_EDIT_BYTES,
+  type EditorOpenFilesState,
+  type OpenFileOptions,
+  type ReadFileResult,
+  type TextEdit
 } from '@slayzone/file-editor/shared'
+import { utf8ByteLength } from '@slayzone/platform/bounded-reads'
 import { requireScope, useWorkspaceScope } from './workspace-target'
 
 export interface OpenFile {
   path: string
   content: string | null
   originalContent: string | null
+  revision?: string
+  /** A restored tab that hasn't been selected since the panel opened. */
+  needsRead?: true
   tooLarge?: boolean
   sizeBytes?: number
   diskChanged?: boolean
@@ -131,7 +137,15 @@ async function openFileImpl(
     }
     setOpenFilesAndRef((prev) => {
       if (prev.some((f) => f.path === filePath)) return prev
-      return [...prev, { path: filePath, content: result.content, originalContent: result.content }]
+      return [
+        ...prev,
+        {
+          path: filePath,
+          content: result.content,
+          originalContent: result.content,
+          revision: result.revision
+        }
+      ]
     })
     activateFile(filePath)
     track('editor_file_opened', { from })
@@ -173,7 +187,7 @@ interface ReloadFileDeps {
   setOpenFiles: Dispatch<SetStateAction<OpenFile[]>>
   setActiveFilePath: Dispatch<SetStateAction<string | null>>
   setFileVersions: Dispatch<SetStateAction<Map<string, number>>>
-  readFile: (filePath: string) => Promise<ReadFileResult>
+  readFile: (filePath: string, revision?: string) => Promise<ReadFileResult>
 }
 
 // Plain module function (not compiled by React Compiler, which can't lower
@@ -198,15 +212,30 @@ async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<v
       return
     }
 
-    const result = await readFile(filePath)
-    if (result.tooLarge || result.content == null) return
-    const disk = result.content
+    const base = openFilesRef.current.find((file) => file.path === filePath)
+    const result = await readFile(filePath, base?.revision)
     const current = openFilesRef.current.find((f) => f.path === filePath)
     if (!current) return
+    if (current.needsRead && result.tooLarge) {
+      setOpenFiles((prev) =>
+        prev.map((file) =>
+          file.path === filePath && file.needsRead
+            ? { ...file, needsRead: undefined, tooLarge: true, sizeBytes: result.sizeBytes }
+            : file
+        )
+      )
+      return
+    }
+    if (result.content == null) return
+    const disk = result.content
     // Read the in-flight write AFTER the read resolved: a save that finished in
     // the meantime already moved the baseline, so the plain rules cover it.
     const ownWrite = inFlightWrites.get(filePath)
-    if (reconcileWithDisk(current, disk, ownWrite) === current) return
+    if (
+      reconcileWithDisk(current, disk, ownWrite) === current &&
+      current.revision === result.revision
+    )
+      return
     // Reconcile against the state at apply time (`prev`), not the snapshot the
     // read started from — keys typed while the read was in flight are kept.
     setOpenFiles((prev) => {
@@ -214,8 +243,9 @@ async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<v
       const next = prev.map((f) => {
         if (f.path !== filePath) return f
         const reconciled = reconcileWithDisk(f, disk, ownWrite)
-        if (reconciled !== f) changed = true
-        return reconciled
+        if (reconciled === f && f.revision === result.revision) return f
+        changed = true
+        return { ...reconciled, needsRead: undefined, revision: result.revision }
       })
       return changed ? next : prev
     })
@@ -265,7 +295,29 @@ interface SaveFileDeps {
   openFilesRef: { current: OpenFile[] }
   inFlightWrites: Map<string, string>
   setOpenFiles: Dispatch<SetStateAction<OpenFile[]>>
-  writeFile: (filePath: string, content: string) => Promise<unknown>
+  writeFile: (
+    filePath: string,
+    data: { content: string } | { edit: TextEdit }
+  ) => Promise<{ revision: string } | undefined>
+  reloadFile: (filePath: string) => Promise<void>
+}
+
+function textEdit(file: OpenFile, written: string): TextEdit | null {
+  const { originalContent: base, revision } = file
+  if (!revision || base === null || file.deleted || file.diskChanged) return null
+  if (written.length * 3 > MAX_TEXT_EDIT_BYTES && utf8ByteLength(written) > MAX_TEXT_EDIT_BYTES)
+    return null
+  let from = 0
+  while (from < base.length && from < written.length && base[from] === written[from]) from++
+  let to = base.length
+  let end = written.length
+  while (to > from && end > from && base[to - 1] === written[end - 1]) {
+    to--
+    end--
+  }
+  return end - from + 160 < written.length
+    ? { revision, from, to, text: written.slice(from, end) }
+    : null
 }
 
 // Plain module function (React Compiler can't lower try/finally). Reads the
@@ -273,20 +325,25 @@ interface SaveFileDeps {
 // caller), and moves the baseline to exactly what was written — keys typed
 // while the write was in flight stay dirty.
 async function saveFileImpl(deps: SaveFileDeps, filePath: string): Promise<void> {
-  const { openFilesRef, inFlightWrites, setOpenFiles, writeFile } = deps
+  const { openFilesRef, inFlightWrites, setOpenFiles, writeFile, reloadFile } = deps
   const file = openFilesRef.current.find((f) => f.path === filePath)
   if (!file || file.content == null || file.content === file.originalContent) return
   const written = file.content
+  const edit = textEdit(file, written)
   inFlightWrites.set(filePath, written)
+  let revision: string | undefined
   try {
-    await writeFile(filePath, written)
+    revision = (await writeFile(filePath, edit ? { edit } : { content: written }))?.revision
+  } catch (error) {
+    if (edit) void reloadFile(filePath)
+    throw error
   } finally {
     if (inFlightWrites.get(filePath) === written) inFlightWrites.delete(filePath)
   }
   setOpenFiles((prev) =>
     prev.map((f) =>
       f.path === filePath
-        ? { ...f, originalContent: written, diskChanged: false, deleted: false }
+        ? { ...f, originalContent: written, revision, diskChanged: false, deleted: false }
         : f
     )
   )
@@ -306,15 +363,23 @@ export function useFileEditor(
   const queryClient = useQueryClient()
   // mutateAsync is identity-stable across renders (the mutation object is not).
   const { mutateAsync: writeFile } = useMutation(trpc.fileEditor.writeFile.mutationOptions())
-  const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>(() =>
+    [...new Set(initialEditorState?.files)].map((path) => ({
+      path,
+      content: null,
+      originalContent: null,
+      ...(isBinaryFile(path) ? { binary: true } : { needsRead: true })
+    }))
+  )
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(
+    () => initialEditorState?.activeFile ?? null
+  )
   // One-shot signal bumped whenever openFile activates a file. Lets the view
   // focus the editor on open (incl. plain Cmd+K opens with no position). Not
   // bumped by restore/file-watcher paths, so reopening a task never steals focus.
   const [focusToken, setFocusToken] = useState(0)
   const [treeRefreshKey, setTreeRefreshKey] = useState(0)
   const pendingOpen = useRef<string | null>(null)
-  const treeRefreshTimer = useRef<NodeJS.Timeout | null>(null)
   // Track version per file for CodeMirror external content reload
   const [fileVersions, setFileVersions] = useState<Map<string, number>>(new Map())
   const [goToPosition, setGoToPosition] = useState<{
@@ -322,66 +387,6 @@ export function useFileEditor(
     line: number
     col: number
   } | null>(null)
-
-  // --- Restore persisted state on mount ---
-  const [isRestoring, setIsRestoring] = useState(!!initialEditorState?.files?.length)
-  const hasRestored = useRef(false)
-  useEffect(() => {
-    if (hasRestored.current || !initialEditorState?.files?.length) return
-    hasRestored.current = true
-    ;(async () => {
-      for (const filePath of initialEditorState.files) {
-        try {
-          if (isBinaryFile(filePath)) {
-            setOpenFiles((prev) => {
-              if (prev.some((f) => f.path === filePath)) return prev
-              return [
-                ...prev,
-                { path: filePath, content: null, originalContent: null, binary: true }
-              ]
-            })
-            continue
-          }
-          const result = await queryClient.fetchQuery(
-            trpc.fileEditor.readFile.queryOptions({
-              ...requireScope(scope),
-              rootPath: projectPath,
-              filePath
-            })
-          )
-          if (result.tooLarge) {
-            setOpenFiles((prev) => {
-              if (prev.some((f) => f.path === filePath)) return prev
-              return [
-                ...prev,
-                {
-                  path: filePath,
-                  content: null,
-                  originalContent: null,
-                  tooLarge: true,
-                  sizeBytes: result.sizeBytes
-                }
-              ]
-            })
-          } else {
-            setOpenFiles((prev) => {
-              if (prev.some((f) => f.path === filePath)) return prev
-              return [
-                ...prev,
-                { path: filePath, content: result.content, originalContent: result.content }
-              ]
-            })
-          }
-        } catch {
-          // File deleted since last session — skip
-        }
-      }
-      if (initialEditorState.activeFile) {
-        setActiveFilePath(initialEditorState.activeFile)
-      }
-      setIsRestoring(false)
-    })()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- mount only
 
   const projectPathRef = useRef(projectPath)
   const openFilesRef = useRef(openFiles)
@@ -405,16 +410,26 @@ export function useFileEditor(
         setOpenFiles,
         setActiveFilePath,
         setFileVersions,
-        readFile: async (path) =>
+        readFile: async (path, revision) =>
           trpcClient.fileEditor.readFile.query({
             ...requireScope(scope),
             rootPath: projectPath,
-            filePath: path
+            filePath: path,
+            revision: revision ?? 'initial'
           })
       },
       filePath
     )
   )
+
+  const isRestoring = openFiles.some((file) => file.path === activeFilePath && file.needsRead)
+  const restores = useRef(new Set<string>())
+  useEffect(() => {
+    if (!activeFilePath || !isRestoring || restores.current.has(activeFilePath)) return
+    const pending = restores.current
+    pending.add(activeFilePath)
+    void reloadFile(activeFilePath).finally(() => pending.delete(activeFilePath))
+  }, [activeFilePath, isRestoring, reloadFile])
 
   const setOpenFilesAndRef = useCallback((updater: (prev: OpenFile[]) => OpenFile[]) => {
     setOpenFiles((prev) => {
@@ -478,24 +493,14 @@ export function useFileEditor(
           })
         }
 
-        if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
-        treeRefreshTimer.current = setTimeout(() => {
-          setTreeRefreshKey((k) => k + 1)
-        }, 500)
         return
       }
-
-      // event.type === 'changed'
-      // Schedule tree refresh (debounced 500ms)
-      if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
-      treeRefreshTimer.current = setTimeout(() => {
-        setTreeRefreshKey((k) => k + 1)
-      }, 500)
 
       // Open text tab → read and reconcile. Clean tabs reload silently; dirty tabs
       // keep their buffer and get `diskChanged` only if disk really differs (the
       // save's own echo is recognised by content, not treated as outside change).
-      if (openFilesRef.current.some((f) => f.path === relPath)) void reloadFile(relPath)
+      if (openFilesRef.current.some((f) => f.path === relPath && !f.needsRead))
+        void reloadFile(relPath)
     }
   )
   const watch = useSubscription(
@@ -507,19 +512,12 @@ export function useFileEditor(
   // Refused before any computer was there ("connect a computer"): start again on a connect.
   useResubscribeOnComputerConnect(watch)
 
-  // Cleanup the shared debounce timer on unmount (the file-watch subscription
-  // owned this previously).
-  useEffect(() => {
-    return () => {
-      if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
-    }
-  }, [])
-
   // Low-frequency fallback for missed watcher events. Only clean text files are
   // auto-reloaded; dirty tabs keep their draft and rely on the changed marker.
   useVisibleInterval(() => {
     for (const file of openFilesRef.current) {
-      if (file.binary || file.tooLarge || file.content !== file.originalContent) continue
+      if (file.binary || file.needsRead || file.tooLarge || file.content !== file.originalContent)
+        continue
       void reloadFile(file.path)
     }
   }, 1_500)
@@ -540,6 +538,7 @@ export function useFileEditor(
               trpc.fileEditor.readFile.queryOptions({
                 ...requireScope(scope),
                 rootPath: projectPath,
+                revision: 'initial',
                 ...input
               })
             ),
@@ -559,6 +558,7 @@ export function useFileEditor(
             ...requireScope(scope),
             rootPath: projectPath,
             filePath,
+            revision: 'initial',
             force: true
           })
         )
@@ -570,6 +570,7 @@ export function useFileEditor(
                   ...f,
                   content: result.content,
                   originalContent: result.content,
+                  revision: result.revision,
                   tooLarge: false,
                   sizeBytes: undefined
                 }
@@ -603,12 +604,13 @@ export function useFileEditor(
               openFilesRef,
               inFlightWrites: inFlightWrites.current,
               setOpenFiles,
-              writeFile: async (path, content) =>
+              reloadFile,
+              writeFile: async (path, data) =>
                 writeFile({
                   ...requireScope(scope),
                   rootPath: projectPath,
                   filePath: path,
-                  content
+                  ...data
                 })
             },
             filePath
@@ -621,7 +623,7 @@ export function useFileEditor(
       run.then(release, release)
       return run
     },
-    [projectPath, writeFile, scope]
+    [projectPath, writeFile, reloadFile, scope]
   )
 
   const closeFile = useCallback(
