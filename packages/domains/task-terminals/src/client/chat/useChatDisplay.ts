@@ -18,7 +18,6 @@ import { isRenderable, stableAnchorKey } from '@slayzone/terminal/chat-presentat
 import { useVirtualTimeline } from './useVirtualTimeline'
 import type { TimelineFollow } from './virtual-timeline'
 import type { FollowBottomApi } from './useFollowBottom'
-import { getFollowBottomOffset } from './useFollowBottom'
 import { activityView } from './activity-view'
 import { unifiedChangeRows } from './files-changed/turn-changes'
 
@@ -49,8 +48,11 @@ export interface UseChatDisplayOpts {
   cwd?: string
 }
 
-/** Pages of a paged history kept loaded besides the tail, at most (~6,000 rows). */
-const MAX_LOADED_PAGES = 24
+/**
+ * Rows of a paged history kept loaded besides the tail, at most — counted in
+ * rows, so the budget is the same for 256-row pages and 8-row windowed ones.
+ */
+const MAX_LOADED_ROWS = 24 * 256
 
 /** Typing settles this long before a search asks the hub for pages. */
 const SEARCH_PAGES_DELAY_MS = 150
@@ -345,12 +347,10 @@ export function useChatDisplay({
     loadPages([...new Set(rows.map((r) => Math.floor(r / paging.pageRows)))])
   })
   const onGapVisible = useStableCallback((gap: HistoryGap, row: number): void => {
-    // At the end, following it, a placeholder is never really in view (the
-    // tail is over a page of rows). Away from the end it loads, followed or not
-    // (a scroll event can lag behind the end while it is still followed).
+    // `HistoryGapRow` only calls this with the placeholder in (or near) the
+    // view — at the end too: a windowed open's tail is a few rows, often
+    // shorter than the view, so the rows above it load there, followed or not.
     if (!paging || !loadPages) return
-    const el = follow.scrollRef.current
-    if (follow.isStuck() && el && getFollowBottomOffset(el) - el.scrollTop <= 2) return
     const at = Math.floor(row / paging.pageRows)
     const inGap = new Set(pagesOf(gap.from, gap.to, paging.pageRows))
     loadPages([at, at - 1, at + 1].filter((p) => inGap.has(p)))
@@ -604,7 +604,8 @@ export function useChatDisplay({
     for (let p = 0; p < paging.sealed; p++) {
       if (timeline[p * paging.pageRows] !== undefined) loaded.push(p)
     }
-    if (loaded.length <= MAX_LOADED_PAGES) return
+    const maxPages = Math.ceil(MAX_LOADED_ROWS / paging.pageRows)
+    if (loaded.length <= maxPages) return
     const held = new Set<number>()
     for (const pages of pins.values()) for (const p of pages) held.add(p)
     const top = displayedTimeline[Math.max(0, virtual.topIndex())]
@@ -613,7 +614,7 @@ export function useChatDisplay({
     const drop = loaded
       .filter((p) => !held.has(p))
       .sort((a, b) => Math.abs(b - viewPage) - Math.abs(a - viewPage))
-      .slice(0, loaded.length - MAX_LOADED_PAGES)
+      .slice(0, loaded.length - maxPages)
     if (drop.length > 0) unloadPages(drop)
   }, [timeline, paging, unloadPages, pins, displayedTimeline, rowOf, virtual])
   useEffect(() => {

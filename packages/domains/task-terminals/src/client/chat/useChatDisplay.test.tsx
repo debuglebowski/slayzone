@@ -493,3 +493,70 @@ it('copies the original reasoning when the device hid it during open', async () 
     write.mockRestore()
   }
 })
+
+describe('useChatDisplay paged history', () => {
+  /** `loaded` rows at the end of `total`; the rows before them not loaded here. */
+  const paged = (total: number, loaded: number): Array<TimelineItem | undefined> =>
+    Array.from({ length: total }, (_, i) =>
+      i >= total - loaded ? text(`item ${i}`, i) : undefined
+    )
+
+  function PagedHarness(props: {
+    items: Array<TimelineItem | undefined>
+    paging: { pageRows: number; sealed: number }
+    loadPages?: (pages: readonly number[]) => void
+    unloadPages?: (pages: readonly number[]) => void
+  }) {
+    const follow = useFollowBottom()
+    const d = useChatDisplay({
+      timeline: props.items,
+      finalOnly: false,
+      showLastMessageTools: false,
+      follow,
+      paging: { ...props.paging, summaries: [] },
+      loadPages: props.loadPages,
+      unloadPages: props.unloadPages
+    })
+    display = d
+    return (
+      <TimelineScroller scrollRef={d.virtual.bindScroller} contentRef={follow.contentRef}>
+        <VirtualTimelineRows
+          controller={d.virtual}
+          items={d.displayedTimeline}
+          itemKey={d.itemKey}
+          renderRow={(item) => <p>{(item as { text?: string }).text}</p>}
+        />
+      </TimelineScroller>
+    )
+  }
+
+  it('loads a placeholder in view at the end, followed (a tail shorter than the view)', async () => {
+    const loadPages = vi.fn()
+    render(
+      <PagedHarness
+        items={paged(20, 4)}
+        paging={{ pageRows: 8, sealed: 2 }}
+        loadPages={loadPages}
+      />
+    )
+    await settle()
+    const gap = display.displayedTimeline[0]
+    expect(gap?.kind).toBe('history-gap')
+    act(() => display.history.onGapVisible(gap as never, 15))
+    expect(loadPages).toHaveBeenCalledWith([1, 0])
+  })
+
+  it('keeps as many rows loaded with small pages as with large ones', async () => {
+    const unloadPages = vi.fn()
+    // 40 loaded pages of 8 rows (320 rows): far below the row budget.
+    render(
+      <PagedHarness
+        items={paged(328, 328)}
+        paging={{ pageRows: 8, sealed: 40 }}
+        unloadPages={unloadPages}
+      />
+    )
+    await settle()
+    expect(unloadPages).not.toHaveBeenCalled()
+  })
+})
