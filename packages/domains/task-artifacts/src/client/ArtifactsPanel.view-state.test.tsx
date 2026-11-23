@@ -479,6 +479,14 @@ describe('ArtifactsPanel sidebar persistence (per task)', () => {
     expect(sidebarHeader().style.width).toBe('220px')
   })
 
+  it('shows the selected artifact title in the header only while the sidebar is hidden', async () => {
+    renderWith({ visible: false, width: 220 })
+    await idle()
+    expect(screen.getByTestId('artifacts-header-title').textContent).toBe('a1.md')
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }))
+    expect(screen.queryByTestId('artifacts-header-title')).toBeNull()
+  })
+
   it('defaults to visible at the default width with nothing saved', async () => {
     const { onSidebarStateChange } = renderWith(null)
     await idle()

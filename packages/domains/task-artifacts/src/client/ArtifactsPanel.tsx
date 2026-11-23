@@ -829,7 +829,17 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   {withShortcut(sidebarVisible ? 'Hide sidebar' : 'Show sidebar', sidebarShortcut)}
                 </TooltipContent>
               </Tooltip>
-              <div className="flex-1" />
+              {!sidebarVisible && selectedArtifact ? (
+                <span
+                  data-testid="artifacts-header-title"
+                  className="flex-1 min-w-0 truncate text-sm font-medium text-foreground"
+                  title={selectedArtifact.title}
+                >
+                  {selectedArtifact.title}
+                </span>
+              ) : (
+                <div className="flex-1" />
+              )}
               {selectedArtifact && selectedRenderMode && (
                 <div className="flex items-center gap-1.5">
                   {selectedArtifact && selectedRenderMode === 'markdown' && (
