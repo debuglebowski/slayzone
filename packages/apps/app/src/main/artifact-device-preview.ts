@@ -2,7 +2,10 @@ import { session, type WebContents, type WebPreferences } from 'electron'
 import { z } from 'zod'
 import {
   ARTIFACT_DEVICE_PARTITION,
+  ARTIFACT_DEVICE_TOUCH_INPUT,
+  ARTIFACT_DEVICE_TOUCH_MODE,
   MAX_DEVICE_VIEWPORT_SIZE,
+  type ArtifactDeviceTouchInput,
   type DeviceViewport
 } from '@slayzone/platform/preview-devices'
 import { parseHtmlArtifactPreviewUrl, SLZ_ARTIFACT_SCHEME } from '@slayzone/platform/slz-file-url'
@@ -31,6 +34,12 @@ const viewportSchema = z
     return displayFeature.offset + displayFeature.maskLength < size
   })
 
+const touchInputSchema = z.object({
+  type: z.enum(['touchStart', 'touchMove', 'touchEnd', 'touchCancel']),
+  x: z.number().min(-MAX_DEVICE_VIEWPORT_SIZE).max(MAX_DEVICE_VIEWPORT_SIZE),
+  y: z.number().min(-MAX_DEVICE_VIEWPORT_SIZE).max(MAX_DEVICE_VIEWPORT_SIZE)
+}) satisfies z.ZodType<ArtifactDeviceTouchInput>
+
 async function applyDeviceViewport(guest: WebContents, viewport: DeviceViewport) {
   const { debugger: cdp } = guest
   if (!cdp.isAttached()) cdp.attach()
@@ -50,13 +59,14 @@ async function applyDeviceViewport(guest: WebContents, viewport: DeviceViewport)
     displayFeature: viewport.displayFeature,
     devicePosture: { type: viewport.posture ?? 'continuous' }
   })
+  // Touch support only (maxTouchPoints, pointer: coarse). Never
+  // Emulation.setEmitTouchEventsForMouse: Chromium has one touch emulator per
+  // window, so on a <webview> it turns the whole app's mouse into touch, and the
+  // guest can't turn it off again once it is gone. The preload forwards the mouse
+  // instead (see ARTIFACT_DEVICE_TOUCH_INPUT).
   await cdp.sendCommand('Emulation.setTouchEmulationEnabled', {
     enabled: viewport.mobile,
     ...(viewport.mobile ? { maxTouchPoints: 5 } : {})
-  })
-  await cdp.sendCommand('Emulation.setEmitTouchEventsForMouse', {
-    enabled: viewport.mobile,
-    configuration: viewport.mobile ? 'mobile' : 'desktop'
   })
   await cdp.sendCommand('Emulation.setUserAgentOverride', { userAgent: viewport.userAgent ?? '' })
 }
@@ -66,6 +76,55 @@ interface PreviewGuest {
   contents: WebContents
   url?: string
   pending: Promise<boolean>
+  /** Mouse input becomes touch: the applied viewport is mobile. */
+  touch: boolean
+  /** A forwarded touch is down. */
+  touching: boolean
+  /** Touch events replay in order. */
+  touchQueue: Promise<void>
+}
+
+function dispatchTouch(guest: PreviewGuest, input: ArtifactDeviceTouchInput) {
+  const { contents } = guest
+  guest.touchQueue = guest.touchQueue
+    .then(async () => {
+      if (contents.isDestroyed() || !contents.debugger.isAttached()) return
+      await contents.debugger.sendCommand('Input.dispatchTouchEvent', {
+        type: input.type,
+        touchPoints:
+          input.type === 'touchStart' || input.type === 'touchMove'
+            ? [{ x: input.x, y: input.y }]
+            : []
+      })
+    })
+    .catch(() => {
+      // The guest navigated, crashed or closed mid-gesture; the next touchStart starts over.
+    })
+}
+
+function setTouchMode(guest: PreviewGuest, touch: boolean) {
+  if (guest.touch === touch) return
+  guest.touch = touch
+  if (!touch && guest.touching) {
+    guest.touching = false
+    dispatchTouch(guest, { type: 'touchCancel', x: 0, y: 0 })
+  }
+  if (!guest.contents.isDestroyed()) guest.contents.send(ARTIFACT_DEVICE_TOUCH_MODE, touch)
+}
+
+function forwardTouch(guest: PreviewGuest, input: unknown) {
+  const parsed = touchInputSchema.safeParse(input)
+  if (!guest.touch || !parsed.success) return
+  const touch = parsed.data
+  if (touch.type === 'touchStart') {
+    if (guest.touching) dispatchTouch(guest, { ...touch, type: 'touchCancel' })
+    guest.touching = true
+  } else if (!guest.touching) {
+    return
+  } else if (touch.type !== 'touchMove') {
+    guest.touching = false
+  }
+  dispatchTouch(guest, touch)
 }
 
 export function createArtifactDevicePreviews(
@@ -108,8 +167,21 @@ export function createArtifactDevicePreviews(
     attach(owner: WebContents, contents: WebContents): boolean {
       if (contents.session !== isolatedSession) return false
       const { id } = contents
-      guests.set(id, { owner, contents, pending: Promise.resolve(true) })
+      const guest: PreviewGuest = {
+        owner,
+        contents,
+        pending: Promise.resolve(true),
+        touch: false,
+        touching: false,
+        touchQueue: Promise.resolve()
+      }
+      guests.set(id, guest)
       contents.once('destroyed', () => guests.delete(id))
+      // Scoped to this guest's IPC: only its own preload can ask or send.
+      contents.ipc.handle(ARTIFACT_DEVICE_TOUCH_MODE, () => guest.touch)
+      contents.ipc.on(ARTIFACT_DEVICE_TOUCH_INPUT, (_event, input: unknown) =>
+        forwardTouch(guest, input)
+      )
       contents.setWindowOpenHandler(() => ({ action: 'deny' }))
       contents.on('will-navigate', (event) => event.preventDefault())
       contents.on('will-redirect', (event) => event.preventDefault())
@@ -133,6 +205,7 @@ export function createArtifactDevicePreviews(
             return false
           }
           await applyDeviceViewport(contents, viewport.data)
+          setTouchMode(guest, viewport.data.mobile)
           if (!guest.url) {
             guest.url = url
             void contents.loadURL(url).catch(() => {

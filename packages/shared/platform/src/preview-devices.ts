@@ -34,6 +34,23 @@ export interface DeviceViewport extends Omit<DeviceScreen, 'name'> {
 export const MAX_DEVICE_VIEWPORT_SIZE = 4096
 export const ARTIFACT_DEVICE_PARTITION = 'persist:artifact-device-previews'
 
+/**
+ * Mobile previews turn the mouse into touch inside the preview only. Chromium's own
+ * mouse-to-touch emulation is shared by the whole window, so the guest preload
+ * forwards primary-button mouse input and main replays it as touch on that guest.
+ */
+/** Guest → main (invoke) and main → guest (send): whether mouse input becomes touch. */
+export const ARTIFACT_DEVICE_TOUCH_MODE = 'artifact-device-preview:touch-mode'
+/** Guest → main: one {@link ArtifactDeviceTouchInput} to replay as touch. */
+export const ARTIFACT_DEVICE_TOUCH_INPUT = 'artifact-device-preview:touch-input'
+
+export interface ArtifactDeviceTouchInput {
+  type: 'touchStart' | 'touchMove' | 'touchEnd' | 'touchCancel'
+  /** CSS pixels relative to the preview's viewport. */
+  x: number
+  y: number
+}
+
 export const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 
