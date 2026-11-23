@@ -20,7 +20,7 @@ export function UserMessageStatus({
       <div
         data-delivery="failed"
         role="status"
-        className="px-4 -mt-1 pb-1 flex justify-end items-center gap-1.5 text-[11px] text-destructive"
+        className="px-4 -mt-1 pb-1 flex justify-end items-center gap-1.5 text-2xs text-destructive"
       >
         <AlertCircle className="size-3 shrink-0" />
         <span className="min-w-0 truncate" title={item.deliveryError}>
@@ -43,7 +43,7 @@ export function UserMessageStatus({
     <div
       data-delivery={state}
       role="status"
-      className="px-4 -mt-1 pb-1 flex justify-end items-center gap-1 text-[11px] text-muted-foreground"
+      className="px-4 -mt-1 pb-1 flex justify-end items-center gap-1 text-2xs text-muted-foreground"
     >
       <Clock className="size-3" />
       <span>{label}</span>

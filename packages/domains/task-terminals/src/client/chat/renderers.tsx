@@ -113,7 +113,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
     >
       <UserMessageActions item={item} />
       <PinToggleButton item={item} reveal />
-      <span className="shrink-0 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+      <span className="shrink-0 text-2xs text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
         {appearance.chatShowMessageMeta && formatTime(item.timestamp)}
       </span>
       <UserMessageContent text={displayText} attachments={item.attachments}>
@@ -179,7 +179,7 @@ export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 't
         <AssistantMessageBody item={item} />
         <PinToggleButton item={item} reveal className="self-center" />
         {appearance.chatShowMessageMeta && (
-          <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+          <span className="shrink-0 self-center text-2xs text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
             {formatTime(item.timestamp)}
           </span>
         )}
@@ -232,7 +232,7 @@ export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 't
     >
       <button
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 hover:text-foreground rounded px-1.5 py-0.5 hover:bg-muted/60"
+        className="inline-flex items-center gap-1.5 text-2xs text-muted-foreground/70 hover:text-foreground rounded px-1.5 py-0.5 hover:bg-muted/60"
       >
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <Brain className={cn('size-3', streaming && 'animate-pulse')} />
@@ -264,7 +264,7 @@ export function ThinkingBlock({ item }: { item: Extract<TimelineItem, { kind: 't
 
 export function SystemInit({ item }: { item: Extract<TimelineItem, { kind: 'session-start' }> }) {
   return (
-    <div className="px-4 py-3 flex items-center justify-center gap-2 text-[11px] text-muted-foreground/60">
+    <div className="px-4 py-3 flex items-center justify-center gap-2 text-2xs text-muted-foreground/60">
       <span className="font-mono">{item.model}</span>
       <span>·</span>
       <span>{item.tools.length} tools</span>
@@ -296,7 +296,7 @@ export function ApiRetryBanner({ item }: { item: Extract<TimelineItem, { kind: '
       <div
         data-testid="api-retry"
         data-live="false"
-        className="mx-4 my-1 px-3 py-1 text-[11px] text-muted-foreground flex items-center gap-2"
+        className="mx-4 my-1 px-3 py-1 text-2xs text-muted-foreground flex items-center gap-2"
       >
         <RotateCw className="size-3 shrink-0" />
         <span>
@@ -395,7 +395,7 @@ export function PlanBlock({ item }: { item: Extract<TimelineItem, { kind: 'plan'
   const done = item.steps.filter((s) => s.status === 'completed').length
   return (
     <div className="mx-4 my-1 rounded-md border border-border/60 bg-muted/20">
-      <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-muted-foreground border-b border-border/40">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 text-2xs font-medium text-muted-foreground border-b border-border/40">
         <ListChecks className="size-3" />
         <span>Plan</span>
         <span className="ml-auto tabular-nums">
@@ -403,7 +403,7 @@ export function PlanBlock({ item }: { item: Extract<TimelineItem, { kind: 'plan'
         </span>
       </div>
       {item.explanation ? (
-        <div className="px-3 pt-2 text-[11px] text-muted-foreground">{item.explanation}</div>
+        <div className="px-3 pt-2 text-2xs text-muted-foreground">{item.explanation}</div>
       ) : null}
       <ul className="p-3 text-xs grid gap-1.5">
         {item.steps.map((s, i) => (
@@ -433,7 +433,7 @@ export function PlanBlock({ item }: { item: Extract<TimelineItem, { kind: 'plan'
 
 export function UnknownBlock({ item }: { item: Extract<TimelineItem, { kind: 'unknown' }> }) {
   return (
-    <div className="mx-4 my-1 px-3 py-1.5 text-[11px] rounded-md border border-border/50 bg-muted/30 text-muted-foreground">
+    <div className="mx-4 my-1 px-3 py-1.5 text-2xs rounded-md border border-border/50 bg-muted/30 text-muted-foreground">
       <HelpCircle className="inline size-3 mr-1" />
       unsupported event ({item.reason})
     </div>
@@ -510,7 +510,7 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
             )}
             <Bot className="size-3 shrink-0 text-muted-foreground" />
             <span className="font-medium shrink-0">Sub-agent</span>
-            <span className="text-muted-foreground truncate min-w-0 font-mono text-[11px] flex items-center gap-2">
+            <span className="text-muted-foreground truncate min-w-0 font-mono text-2xs flex items-center gap-2">
               {item.description && (
                 <>
                   <span className="text-muted-foreground/40">·</span>
@@ -850,7 +850,7 @@ export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
             type="button"
             onClick={() => setCollapsed(!collapsed)}
             className={cn(
-              'w-full flex items-center gap-2 bg-info/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-info-foreground hover:bg-info/15 transition-colors',
+              'w-full flex items-center gap-2 bg-info/10 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-info-foreground hover:bg-info/15 transition-colors',
               !collapsed && 'border-b border-info/20'
             )}
           >
@@ -1121,7 +1121,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <ApiRetryBanner key={key} item={item} />
     case 'rate-limit':
       return item.status === 'allowed' ? null : (
-        <div key={key} className="mx-4 my-1 text-[11px] text-warning-foreground">
+        <div key={key} className="mx-4 my-1 text-2xs text-warning-foreground">
           rate limit: {item.status}
         </div>
       )

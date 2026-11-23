@@ -252,7 +252,7 @@ export function PermissionPrompt({
           <span className="font-normal text-muted-foreground">· {view.agentLabel}</span>
         )}
       </div>
-      {view.tip && <div className="text-[11px] text-muted-foreground">{view.tip}</div>}
+      {view.tip && <div className="text-2xs text-muted-foreground">{view.tip}</div>}
       {view.subtitle && (
         <div
           className="text-xs text-foreground/90"
@@ -293,7 +293,7 @@ export function PermissionPrompt({
           className="w-full rounded-md border border-input bg-input/30 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring"
         />
       )}
-      {view.footer && <div className="text-[11px] text-muted-foreground">{view.footer}</div>}
+      {view.footer && <div className="text-2xs text-muted-foreground">{view.footer}</div>}
     </div>
   )
 }

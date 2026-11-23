@@ -59,7 +59,7 @@ export function PinnedMessagesPopover({
         align="end"
         className="w-[360px] max-w-[calc(100vw-2rem)] max-h-[min(420px,var(--radix-popover-content-available-height))] overflow-y-auto p-1"
       >
-        <h3 className="px-2 pb-1 pt-1.5 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+        <h3 className="px-2 pb-1 pt-1.5 text-4xs font-medium uppercase tracking-widest text-muted-foreground">
           Pinned messages
         </h3>
         <ul aria-label="Pinned messages">
@@ -86,14 +86,14 @@ export function PinnedMessagesPopover({
                       {pin.excerpt || '(empty message)'}
                     </span>
                     {elsewhere && (
-                      <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span className="mt-0.5 flex items-center gap-1 text-3xs text-muted-foreground">
                         <GitBranch className="size-2.5" />
                         Not in the current branch
                       </span>
                     )}
                   </span>
                   <time
-                    className="shrink-0 text-[10px] text-muted-foreground tabular-nums"
+                    className="shrink-0 text-3xs text-muted-foreground tabular-nums"
                     dateTime={new Date(pin.pinnedAt).toISOString()}
                     title={`Pinned ${new Date(pin.pinnedAt).toLocaleString()}`}
                   >

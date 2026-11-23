@@ -228,11 +228,11 @@ export function AgentModePill({
           'inline-flex items-center gap-1 transition-colors',
           variant === 'pill'
             ? cn(
-                'gap-1.5 rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium',
+                'gap-1.5 rounded-full ring-1 px-2 py-0.5 text-2xs font-medium',
                 meta.chip,
                 meta.chipHover
               )
-            : cn('rounded px-1 py-0.5 text-[10px] hover:bg-muted/60', meta.text),
+            : cn('rounded px-1 py-0.5 text-3xs hover:bg-muted/60', meta.text),
           disabled && 'opacity-50 cursor-not-allowed',
           className
         )}
@@ -278,7 +278,7 @@ export function AgentModePill({
                 <div className="flex-1 min-w-0">
                   <div className={cn('text-xs font-medium', itemMeta.text)}>{itemMeta.label}</div>
                   {optInHint && (
-                    <div className="text-[11px] text-muted-foreground leading-snug">
+                    <div className="text-2xs text-muted-foreground leading-snug">
                       {optInHint}
                     </div>
                   )}

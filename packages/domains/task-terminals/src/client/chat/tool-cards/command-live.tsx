@@ -57,7 +57,7 @@ export function RunningTask({
             <Button
               size="sm"
               variant="outline"
-              className="h-6 px-2 text-[11px]"
+              className="h-6 px-2 text-2xs"
               disabled={actions.pending}
               onClick={() => actions.background(toolUseId)}
             >
@@ -68,7 +68,7 @@ export function RunningTask({
             <Button
               size="sm"
               variant="outline"
-              className="h-6 px-2 text-[11px]"
+              className="h-6 px-2 text-2xs"
               disabled={actions.pending}
               onClick={() => actions.stop(task.taskId)}
             >
@@ -99,7 +99,7 @@ function LiveOutput({
   return (
     <div className="px-3 pt-1">
       {truncated && (
-        <div className="text-[10px] text-muted-foreground/80 pb-0.5">
+        <div className="text-3xs text-muted-foreground/80 pb-0.5">
           Showing the last 8 KB of {formatBytes(totalBytes)}
         </div>
       )}

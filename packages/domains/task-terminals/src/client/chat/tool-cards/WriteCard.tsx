@@ -75,7 +75,7 @@ export function WriteCard({ invocation, timestamp }: ToolProps) {
                 <button
                   type="button"
                   onClick={() => setShowAll(true)}
-                  className="mx-2 my-1 text-[11px] text-primary hover:underline"
+                  className="mx-2 my-1 text-2xs text-primary hover:underline"
                 >
                   Show all {lineCount} lines
                 </button>

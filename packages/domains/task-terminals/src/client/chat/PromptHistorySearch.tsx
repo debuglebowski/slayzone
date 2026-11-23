@@ -62,7 +62,7 @@ export function PromptHistorySearch({
           placeholder="Search prompt history…"
           className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
         />
-        <span className="shrink-0 text-[10px] text-muted-foreground">↵ use · esc close</span>
+        <span className="shrink-0 text-3xs text-muted-foreground">↵ use · esc close</span>
       </div>
       {matches.length === 0 ? (
         <div className="px-3 py-2 text-xs text-muted-foreground">No matching prompts</div>

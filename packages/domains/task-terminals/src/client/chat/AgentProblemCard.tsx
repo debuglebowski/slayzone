@@ -25,7 +25,7 @@ export function AgentProblemCard({
           <AlertTriangle className="size-3.5 shrink-0" />
           <span>{title}</span>
         </div>
-        <p className="mt-1 font-mono text-[11px] break-words">{item.message}</p>
+        <p className="mt-1 font-mono text-2xs break-words">{item.message}</p>
         <p className="mt-1">The agent started after this.</p>
       </div>
     )
@@ -41,7 +41,7 @@ export function AgentProblemCard({
         <span>{title}</span>
       </div>
       <p className="mt-1 text-foreground">{hint}</p>
-      <p className="mt-1 font-mono text-[11px] text-muted-foreground break-words">{item.message}</p>
+      <p className="mt-1 font-mono text-2xs text-muted-foreground break-words">{item.message}</p>
       <div className="mt-2 flex gap-2">
         {inUse && takeOver ? (
           <button

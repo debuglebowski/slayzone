@@ -136,5 +136,5 @@ export function useToolApproval(invocation: ToolInvocation): ToolApproval | null
 }
 
 function StatusText({ children }: { children: ReactNode }) {
-  return <div className="text-[11px] text-muted-foreground">{children}</div>
+  return <div className="text-2xs text-muted-foreground">{children}</div>
 }

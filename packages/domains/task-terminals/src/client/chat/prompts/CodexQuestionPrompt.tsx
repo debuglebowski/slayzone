@@ -70,7 +70,7 @@ export function CodexQuestionPrompt({
       {questions.map((q) => (
         <div key={q.id} className="space-y-2">
           {questions.length > 1 && q.header && (
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
               {q.header}
             </div>
           )}
@@ -133,7 +133,7 @@ export function CodexQuestionPrompt({
         >
           Skip
         </Button>
-        <span className="ml-auto text-[11px] text-muted-foreground">Esc to stop the turn</span>
+        <span className="ml-auto text-2xs text-muted-foreground">Esc to stop the turn</span>
       </div>
     </div>
   )

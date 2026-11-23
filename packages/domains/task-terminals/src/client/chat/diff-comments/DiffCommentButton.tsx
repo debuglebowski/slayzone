@@ -64,7 +64,7 @@ export function DiffCommentButton({
           if (addedRef.current) e.preventDefault()
         }}
       >
-        <div className="mb-1 truncate text-[11px] text-muted-foreground">
+        <div className="mb-1 truncate text-2xs text-muted-foreground">
           Comment on {name}
           {lineNo != null ? `:${lineNo}` : ''}
           {line.type === 'delete' ? ' (removed line)' : ''}

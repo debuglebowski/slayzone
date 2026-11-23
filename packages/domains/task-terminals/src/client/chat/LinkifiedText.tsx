@@ -70,7 +70,7 @@ export function LinkifiedText({ text, onOpenUrl, onOpenFile }: LinkifiedTextProp
             {m.text}
           </a>
         </TooltipTrigger>
-        <TooltipContent side="top" className="font-mono text-[11px]">
+        <TooltipContent side="top" className="font-mono text-2xs">
           {isUrl
             ? `${modKey}+Click open · ${modShiftKey}+Click external`
             : `${modKey}+Click open: ${label}`}

@@ -173,7 +173,7 @@ function FilesSummary({ preview }: { preview: FilesPreviewState }): React.JSX.El
         )}
       </p>
       {value.filesChanged.length > 0 && (
-        <ul className="max-h-28 overflow-y-auto font-mono text-[11px] text-muted-foreground">
+        <ul className="max-h-28 overflow-y-auto font-mono text-2xs text-muted-foreground">
           {value.filesChanged.map((f) => (
             <li key={f} className="truncate" title={f}>
               {f}

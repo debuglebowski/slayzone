@@ -31,7 +31,7 @@ export function SideQuestionCard({
       // Same column as the composer it docks onto (ChatComposer's fixed maximum).
       className="mx-auto mb-2 w-full max-w-[60rem] rounded-2xl border border-border bg-card shadow-sm"
     >
-      <div className="flex items-center gap-1.5 px-3 pt-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-1.5 px-3 pt-2 text-2xs text-muted-foreground">
         <MessageCircleMore className="size-3" />
         <span>Side question · not added to the conversation</span>
         <span className="ml-auto">Esc to close</span>

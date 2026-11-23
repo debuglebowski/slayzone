@@ -65,7 +65,7 @@ export function MessageDetails({
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         className={cn(
-          'inline-flex min-h-7 flex-wrap items-center gap-x-1.5 gap-y-1 text-left text-[11px] text-muted-foreground/70 hover:text-foreground tabular-nums',
+          'inline-flex min-h-7 flex-wrap items-center gap-x-1.5 gap-y-1 text-left text-2xs text-muted-foreground/70 hover:text-foreground tabular-nums',
           item.isError && 'text-destructive'
         )}
       >
@@ -120,7 +120,7 @@ export function MessageDetails({
       {standalone && (item.copyText || item.copyDetail || item.copySources) && (
         <button
           type="button"
-          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground"
           aria-label="Copy assistant reply"
           disabled={copying}
           onClick={() => void copy()}

@@ -55,7 +55,7 @@ export function HookOutputRow({ item }: { item: HookItem }) {
           <EffectIcon effect={item.effect} />
           <span className="font-medium min-w-0 truncate">{hookLabel(item, provider.agent)}</span>
           {item.effect !== 'context' && hasText && (
-            <span className="shrink-0 rounded-sm border border-current/30 px-1 text-[10px] uppercase tracking-wide opacity-80">
+            <span className="shrink-0 rounded-sm border border-current/30 px-1 text-3xs uppercase tracking-wide opacity-80">
               {item.audience === 'agent' ? `Sent to ${provider.agent}` : 'Shown only to you'}
             </span>
           )}

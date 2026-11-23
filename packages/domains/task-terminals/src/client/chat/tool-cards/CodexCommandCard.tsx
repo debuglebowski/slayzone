@@ -43,7 +43,7 @@ export function CodexCommandCard({ invocation, timestamp }: ToolProps) {
         {showCwd && (
           <div
             data-testid="codex-command-cwd"
-            className="px-3 pt-1 text-[11px] text-muted-foreground flex items-center gap-1 font-mono"
+            className="px-3 pt-1 text-2xs text-muted-foreground flex items-center gap-1 font-mono"
           >
             <Folder className="size-3 shrink-0" />
             <LinkText text={view.cwd ?? ''} />
@@ -65,7 +65,7 @@ export function CodexCommandCard({ invocation, timestamp }: ToolProps) {
             <LinkText text={view.output} />
           </pre>
         )}
-        <div className="px-3 pb-2 pt-1 flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
+        <div className="px-3 pb-2 pt-1 flex items-center gap-2 text-2xs text-muted-foreground tabular-nums">
           {running && startedAt !== undefined && (
             <span>
               Running ·{' '}

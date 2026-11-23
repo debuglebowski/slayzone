@@ -23,7 +23,7 @@ export function ConversationBranchRow({
     <div
       data-testid="chat-branch"
       data-reason={item.reason}
-      className="mx-4 my-2 flex items-center gap-2 text-[11px] text-muted-foreground"
+      className="mx-4 my-2 flex items-center gap-2 text-2xs text-muted-foreground"
     >
       <div className="h-px flex-1 bg-border" />
       <Icon className="size-3 shrink-0" />

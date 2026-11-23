@@ -36,7 +36,7 @@ function OutputBlock({ block, isError }: { block: McpBlock; isError: boolean }) 
   if (block.kind === 'resource') {
     return (
       <div className="grid gap-1">
-        <span className="font-mono text-[11px]">
+        <span className="font-mono text-2xs">
           <LinkText text={block.uri} />
         </span>
         {block.text && <pre className="font-mono whitespace-pre-wrap">{block.text}</pre>}
@@ -91,7 +91,7 @@ export function McpToolCard({ invocation: call, timestamp }: ToolProps) {
         <span className="inline-flex items-center gap-1.5">
           <span>{name?.tool ?? invocation.name}</span>
           {name && (
-            <span className="rounded-sm bg-muted px-1 text-[10px] font-normal text-muted-foreground">
+            <span className="rounded-sm bg-muted px-1 text-3xs font-normal text-muted-foreground">
               {name.server}
             </span>
           )}
@@ -104,7 +104,7 @@ export function McpToolCard({ invocation: call, timestamp }: ToolProps) {
       <div className="p-3 grid gap-3 text-xs">
         {entries.length > 0 && (
           <div className="grid gap-1">
-            <div className="text-[11px] text-muted-foreground/70">Input</div>
+            <div className="text-2xs text-muted-foreground/70">Input</div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
               {entries.map(([k, v]) => (
                 <div key={k} className="contents">
@@ -119,7 +119,7 @@ export function McpToolCard({ invocation: call, timestamp }: ToolProps) {
         )}
         {blocks.length > 0 && (
           <div className="grid gap-1">
-            <div className="text-[11px] text-muted-foreground/70">
+            <div className="text-2xs text-muted-foreground/70">
               {isError ? 'Error' : 'Output'}
             </div>
             {blocks.map((b, i) => (

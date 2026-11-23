@@ -18,7 +18,7 @@ export function CompactionRow({ item }: { item: Extract<TimelineItem, { kind: 'c
   return (
     <div
       role="separator"
-      className="mx-4 my-3 flex items-center gap-3 text-[11px] text-muted-foreground"
+      className="mx-4 my-3 flex items-center gap-3 text-2xs text-muted-foreground"
     >
       <div className="h-px flex-1 bg-border" />
       <span>

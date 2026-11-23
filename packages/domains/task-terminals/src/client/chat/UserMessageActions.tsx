@@ -21,7 +21,7 @@ export function UserMessageActions({
   if (!item.id) {
     return (
       <span
-        className={`shrink-0 text-[10px] text-muted-foreground ${reveal}`}
+        className={`shrink-0 text-3xs text-muted-foreground ${reveal}`}
         title="Edit and rewind work on messages sent since they carry an id."
       >
         No rewind for older messages

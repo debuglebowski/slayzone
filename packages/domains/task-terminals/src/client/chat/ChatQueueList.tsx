@@ -182,7 +182,7 @@ export function ChatQueueList(props: ChatQueueListProps): React.JSX.Element | nu
 
   return (
     <div className="mb-2" data-testid="chat-queue">
-      <div className="px-1 mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+      <div className="px-1 mb-1 text-3xs uppercase tracking-wide text-muted-foreground/60">
         Up next · {items.length + unconfirmed.length}
       </div>
       {editable ? (
@@ -295,12 +295,12 @@ function QueueRowBody({
         data-steering="true"
         className="group flex items-center gap-2 px-3 py-1.5 text-xs bg-muted/20"
       >
-        <span className="shrink-0 text-muted-foreground/50 font-mono text-[10px] tabular-nums">
+        <span className="shrink-0 text-muted-foreground/50 font-mono text-3xs tabular-nums">
           {index + 1}.
         </span>
         {label}
         <RowTip label="Sent: the agent reads it after its current step">
-          <span className="shrink-0 text-[10px] text-muted-foreground animate-pulse">
+          <span className="shrink-0 text-3xs text-muted-foreground animate-pulse">
             With agent…
           </span>
         </RowTip>
@@ -363,7 +363,7 @@ function QueueRowBody({
           }}
           className="w-full resize-none rounded-md bg-background px-2 py-1 text-xs text-foreground outline-none ring-1 ring-border/60 focus:ring-ring"
         />
-        <div className="text-[10px] text-muted-foreground/60">Enter to save · Esc to cancel</div>
+        <div className="text-3xs text-muted-foreground/60">Enter to save · Esc to cancel</div>
       </li>
     )
   }
@@ -389,7 +389,7 @@ function QueueRowBody({
       )}
     >
       {handle}
-      <span className="shrink-0 text-muted-foreground/50 font-mono text-[10px] tabular-nums">
+      <span className="shrink-0 text-muted-foreground/50 font-mono text-3xs tabular-nums">
         {index + 1}.
       </span>
       {label}
@@ -466,7 +466,7 @@ function PendingRow({
       data-unconfirmed="true"
       className="flex items-center gap-2 px-3 py-1.5 text-xs"
     >
-      <span className="shrink-0 text-muted-foreground/50 font-mono text-[10px] tabular-nums">
+      <span className="shrink-0 text-muted-foreground/50 font-mono text-3xs tabular-nums">
         {index + 1}.
       </span>
       <span className="flex-1 min-w-0">
@@ -479,7 +479,7 @@ function PendingRow({
           {entry.original || entry.send}
         </span>
         {failed && entry.error && (
-          <span className="block truncate text-[10px] text-destructive" role="status">
+          <span className="block truncate text-3xs text-destructive" role="status">
             {entry.error}
           </span>
         )}
@@ -489,7 +489,7 @@ function PendingRow({
           <button
             type="button"
             onClick={() => void onRetry(entry.id).catch(() => undefined)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] hover:bg-muted transition-colors"
+            className="shrink-0 rounded px-1.5 py-0.5 text-3xs hover:bg-muted transition-colors"
           >
             Retry
           </button>
@@ -500,7 +500,7 @@ function PendingRow({
           <button
             type="button"
             onClick={() => void onDismiss(entry.id).catch(() => undefined)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+            className="shrink-0 rounded px-1.5 py-0.5 text-3xs text-muted-foreground hover:bg-muted transition-colors"
           >
             Dismiss
           </button>

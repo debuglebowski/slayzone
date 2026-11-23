@@ -182,7 +182,7 @@ export function FilesChangedRow({
                     title={file.path}
                     className="flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left hover:bg-muted/40"
                   >
-                    <span className="truncate font-mono text-[11px] [direction:rtl]">
+                    <span className="truncate font-mono text-2xs [direction:rtl]">
                       <bdi>{relativeToCwd(file.path, cwd)}</bdi>
                     </span>
                     {file.created && <CardBadge>New</CardBadge>}
@@ -198,7 +198,7 @@ export function FilesChangedRow({
               {item.shellCommands > 0 && (
                 <li
                   data-testid="chat-files-changed-shell-note"
-                  className="px-3 py-1 text-[11px] text-muted-foreground"
+                  className="px-3 py-1 text-2xs text-muted-foreground"
                 >
                   {item.shellCommands} shell command{item.shellCommands === 1 ? '' : 's'} ran in
                   this turn too: files they changed are not listed.

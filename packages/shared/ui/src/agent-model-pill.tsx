@@ -111,11 +111,11 @@ export function AgentModelPill({
           'inline-flex items-center transition-colors',
           variant === 'pill'
             ? cn(
-                'gap-1.5 rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium',
+                'gap-1.5 rounded-full ring-1 px-2 py-0.5 text-2xs font-medium',
                 look.tone.chip,
                 look.tone.chipHover
               )
-            : cn('gap-1 rounded px-1 py-0.5 text-[10px] hover:bg-muted/60', look.tone.text),
+            : cn('gap-1 rounded px-1 py-0.5 text-3xs hover:bg-muted/60', look.tone.text),
           disabled && 'opacity-50 cursor-not-allowed',
           className
         )}
@@ -129,7 +129,7 @@ export function AgentModelPill({
       <DropdownMenuContent align="end" className="flex w-auto p-0">
         <div className="w-56 p-1">
           {unlisted && emptyHint && (
-            <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{emptyHint}</div>
+            <div className="px-2 py-1.5 text-2xs text-muted-foreground">{emptyHint}</div>
           )}
           {list.map((m, i) => {
             const selected = m.id === model

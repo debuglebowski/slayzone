@@ -67,7 +67,7 @@ export function ChatOpenFailure({
         </button>
       </div>
       {detailsOpen && (
-        <p className="max-w-sm select-text break-words rounded-md border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
+        <p className="max-w-sm select-text break-words rounded-md border bg-muted/40 px-2.5 py-1.5 font-mono text-2xs text-muted-foreground">
           {error}
         </p>
       )}

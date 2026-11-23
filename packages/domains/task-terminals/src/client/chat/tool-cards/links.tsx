@@ -23,7 +23,7 @@ export function FileLink({
       data-testid="tool-file-link"
       onClick={open}
       title={`Open ${path}`}
-      className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-primary hover:underline"
+      className="inline-flex min-w-0 items-center gap-1 font-mono text-2xs text-primary hover:underline"
     >
       <FileText className="size-3 shrink-0" />
       {/* Truncate from the start so the file name stays visible. */}
@@ -75,7 +75,7 @@ export function ExternalLink({
 /** Small label next to a card's file link (e.g. "New file"). */
 export function CardBadge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="shrink-0 rounded-sm border border-border/60 px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+    <span className="shrink-0 rounded-sm border border-border/60 px-1 text-3xs uppercase tracking-wide text-muted-foreground">
       {children}
     </span>
   )

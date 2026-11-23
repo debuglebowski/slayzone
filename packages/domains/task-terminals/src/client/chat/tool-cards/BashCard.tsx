@@ -42,7 +42,7 @@ export function BashCard({ invocation, timestamp }: ToolProps) {
           <span className="inline-flex items-center gap-1.5">
             Bash
             {task?.backgrounded && (
-              <span className="rounded px-1 py-px text-[10px] font-normal bg-muted text-muted-foreground">
+              <span className="rounded px-1 py-px text-3xs font-normal bg-muted text-muted-foreground">
                 Background
               </span>
             )}
@@ -77,12 +77,12 @@ export function BashCard({ invocation, timestamp }: ToolProps) {
           </pre>
         )}
         {running && startedAt !== undefined && (
-          <div className="px-3 pb-2 pt-1 text-[11px] text-muted-foreground tabular-nums">
+          <div className="px-3 pb-2 pt-1 text-2xs text-muted-foreground tabular-nums">
             Running · <span data-testid="bash-elapsed">{formatSeconds(now - startedAt)}</span>
           </div>
         )}
         {!running && task?.startedAt !== undefined && task.endedAt !== undefined && (
-          <div className="px-3 pb-2 text-[11px] text-muted-foreground tabular-nums">
+          <div className="px-3 pb-2 text-2xs text-muted-foreground tabular-nums">
             <span data-testid="bash-duration">
               ran {formatSeconds(task.endedAt - task.startedAt)}
             </span>

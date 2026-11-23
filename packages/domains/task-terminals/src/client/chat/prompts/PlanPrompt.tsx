@@ -124,7 +124,7 @@ export function PlanPrompt({
             }}
             className="w-full rounded-md border border-input bg-input/30 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring"
           />
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-2xs text-muted-foreground">
             Enter to send · shift+tab to approve with this feedback
           </div>
         </div>

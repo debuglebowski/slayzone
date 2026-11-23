@@ -70,7 +70,7 @@ export function AttachmentChip({
   )
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 py-0.5 pl-0.5 pr-1 text-[11px] text-muted-foreground"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 py-0.5 pl-0.5 pr-1 text-2xs text-muted-foreground"
       title={preview ? undefined : attachment.name}
       data-testid="chat-attachment-chip"
       data-kind={attachment.kind}

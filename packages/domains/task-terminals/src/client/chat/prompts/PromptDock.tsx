@@ -144,7 +144,7 @@ export function PromptDock({
       aria-label={`${provider.agent} is waiting for your answer`}
       className="mx-auto mb-2 max-h-[55vh] w-[calc(100%-1.5rem)] max-w-3xl overflow-y-auto rounded-2xl border border-border bg-card px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="mb-1.5 flex items-center gap-1.5 text-2xs text-muted-foreground">
         <MessageCircleQuestion className="size-3" />
         <span>{provider.agent} is waiting for your answer</span>
         {pending.length > 1 && <span className="ml-auto">1 of {pending.length}</span>}

@@ -163,14 +163,14 @@ export function FilesChangedPanel({
             ))}
             {files.length > 0 || !sources.size ? (
               <>
-                <p className="px-3 pt-2 text-[11px] text-muted-foreground">
+                <p className="px-3 pt-2 text-2xs text-muted-foreground">
                   Recorded edits only. What the agent's file tools changed in this conversation, one
                   diff per file.
                 </p>
                 {shellCommands > 0 && !sources.size && (
                   <p
                     data-testid="chat-files-panel-shell-note"
-                    className="px-3 pt-1 text-[11px] text-muted-foreground"
+                    className="px-3 pt-1 text-2xs text-muted-foreground"
                   >
                     {shellCommands} shell command{shellCommands === 1 ? '' : 's'} ran too: files
                     changed by shell commands can't be seen here.
@@ -368,13 +368,13 @@ function FileSection({
           ) : (
             <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate font-mono text-[11px] [direction:rtl]">
+          <span className="truncate font-mono text-2xs [direction:rtl]">
             <bdi>{relativeToCwd(change.path, cwd)}</bdi>
           </span>
         </button>
         {change.created && <CardBadge>New</CardBadge>}
         <LineCounts {...counts} />
-        <span className="shrink-0 text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-2xs text-muted-foreground">
           {edits} edit{edits === 1 ? '' : 's'}
         </span>
         <div className="flex-1" />
@@ -407,7 +407,7 @@ function FileBody({ combined }: { combined: CombinedFileDiff }) {
         {combined.outsideChanges && (
           <p
             data-testid="chat-files-panel-outside-note"
-            className="px-2 pb-1 text-[11px] text-warning-foreground"
+            className="px-2 pb-1 text-2xs text-warning-foreground"
           >
             The file also changed between the agent's edits (a shell command, or you); the diff
             includes that.
@@ -421,7 +421,7 @@ function FileBody({ combined }: { combined: CombinedFileDiff }) {
     <div className="px-1 pb-2">
       <p
         data-testid="chat-files-panel-separate-note"
-        className="px-2 pb-1 text-[11px] text-muted-foreground"
+        className="px-2 pb-1 text-2xs text-muted-foreground"
       >
         {combined.why === 'notebook'
           ? 'Notebook cell edits, one by one.'
@@ -432,7 +432,7 @@ function FileBody({ combined }: { combined: CombinedFileDiff }) {
           diff ? (
             <ChatDiffView key={edit.toolUseId} diff={diff} />
           ) : (
-            <p key={edit.toolUseId} className="px-2 text-[11px] text-muted-foreground">
+            <p key={edit.toolUseId} className="px-2 text-2xs text-muted-foreground">
               No diff for this edit.
             </p>
           )

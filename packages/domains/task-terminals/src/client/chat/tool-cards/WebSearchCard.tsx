@@ -37,7 +37,7 @@ export function WebSearchCard({ invocation, timestamp }: ToolProps) {
     >
       <div className="p-3 grid gap-2 text-xs">
         {(allowed.length > 0 || blocked.length > 0) && (
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-2xs text-muted-foreground">
             {allowed.length > 0 && <span>Only {allowed.join(', ')}</span>}
             {allowed.length > 0 && blocked.length > 0 && <span> · </span>}
             {blocked.length > 0 && <span>Excluding {blocked.join(', ')}</span>}
@@ -49,7 +49,7 @@ export function WebSearchCard({ invocation, timestamp }: ToolProps) {
               <li key={l.url} className="min-w-0">
                 <ExternalLink url={l.url} className="max-w-full">
                   <span className="truncate text-foreground">{l.title}</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{host(l.url)}</span>
+                  <span className="shrink-0 text-2xs text-muted-foreground">{host(l.url)}</span>
                 </ExternalLink>
               </li>
             ))}

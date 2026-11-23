@@ -91,7 +91,7 @@ export function ChatFontSizeControl({
             <Plus className="size-3.5" />
           </IconButton>
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <p className="mt-2 text-2xs text-muted-foreground">
           {override === null
             ? `This chat uses the default (${defaultSize}px).`
             : `This chat only. Default is ${defaultSize}px.`}

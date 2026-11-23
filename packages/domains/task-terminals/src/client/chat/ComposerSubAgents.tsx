@@ -79,7 +79,7 @@ export function ComposerSubAgents({
                     <Loader2 className="size-3 shrink-0 animate-spin text-agent" />
                     <Bot className="size-3 shrink-0 text-muted-foreground" />
                     <span className="shrink-0 font-medium">Sub-agent</span>
-                    <span className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-muted-foreground">
+                    <span className="flex min-w-0 items-center gap-2 truncate font-mono text-2xs text-muted-foreground">
                       {name && (
                         <>
                           <span className="text-muted-foreground/40">·</span>

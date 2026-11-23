@@ -6,7 +6,7 @@ export function renderAgentItem(agent: AgentInfo): React.JSX.Element {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs">@{agent.name}</span>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+          <span className="text-3xs text-muted-foreground uppercase tracking-wide">
             {agent.source === 'project' ? 'project agent' : 'user agent'}
           </span>
         </div>

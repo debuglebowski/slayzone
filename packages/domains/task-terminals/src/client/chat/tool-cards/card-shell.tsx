@@ -59,7 +59,7 @@ interface ToolProps {
 function HoverTimestamp({ timestamp }: { timestamp?: number }) {
   if (timestamp == null) return null
   return (
-    <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+    <span className="shrink-0 self-center text-2xs text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
       {formatTime(timestamp)}
     </span>
   )
@@ -103,12 +103,12 @@ function BlockedByHook({ block }: { block: NonNullable<ToolInvocation['blockedBy
             provider.agent
           )}
         </span>
-        <span className="shrink-0 rounded-sm border border-current/30 px-1 text-[10px] uppercase tracking-wide opacity-80">
+        <span className="shrink-0 rounded-sm border border-current/30 px-1 text-3xs uppercase tracking-wide opacity-80">
           {block.audience === 'agent' ? `Sent to ${provider.agent}` : 'Shown only to you'}
         </span>
       </div>
       {block.text && (
-        <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] opacity-90">
+        <pre className="mt-1 whitespace-pre-wrap font-mono text-2xs opacity-90">
           <HighlightedText text={block.text} />
         </pre>
       )}
@@ -149,7 +149,7 @@ function ApprovalRuleChip({ rule }: { rule: string }) {
     <span
       data-approval="rule"
       title={`Allowed · ${rule}`}
-      className="flex min-w-0 shrink items-center gap-1 rounded-sm border border-border/60 px-1 text-[10px] text-muted-foreground"
+      className="flex min-w-0 shrink items-center gap-1 rounded-sm border border-border/60 px-1 text-3xs text-muted-foreground"
     >
       <ShieldCheck className="size-2.5 shrink-0 text-success" />
       <span className="truncate">{rule}</span>
@@ -251,7 +251,7 @@ function ToolShell({
           <span className="shrink-0 text-muted-foreground">{icon}</span>
           <span className="font-medium shrink-0">{title}</span>
           {summary !== undefined && summary !== '' && (
-            <span className="text-muted-foreground truncate min-w-0 font-mono text-[11px]">
+            <span className="text-muted-foreground truncate min-w-0 font-mono text-2xs">
               {summary}
             </span>
           )}
@@ -264,7 +264,7 @@ function ToolShell({
         </button>
         {invocation.blockedBy && <BlockedByHook block={invocation.blockedBy} />}
         {approval?.state === 'rejected' && approval.feedback !== null && (
-          <div className="border-t border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground whitespace-pre-wrap">
+          <div className="border-t border-border/40 px-3 py-1.5 text-2xs text-muted-foreground whitespace-pre-wrap">
             {`Rejected · ${approval.feedback}`}
           </div>
         )}

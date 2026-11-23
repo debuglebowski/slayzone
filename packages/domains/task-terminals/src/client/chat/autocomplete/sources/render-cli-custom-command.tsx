@@ -8,11 +8,11 @@ export function renderCliCustomCommandItem(cmd: CommandInfo): React.JSX.Element 
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-mono text-xs shrink-0">/{cmd.name}</span>
           {cmd.argumentHint && (
-            <span className="font-mono text-[11px] text-muted-foreground truncate">
+            <span className="font-mono text-2xs text-muted-foreground truncate">
               {cmd.argumentHint}
             </span>
           )}
-          <span className="shrink-0 text-[10px] text-muted-foreground uppercase tracking-wide">
+          <span className="shrink-0 text-3xs text-muted-foreground uppercase tracking-wide">
             {cmd.source === 'project' ? 'project cmd' : 'user cmd'}
           </span>
         </div>

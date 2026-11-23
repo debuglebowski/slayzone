@@ -37,18 +37,18 @@ export function WebFetchCard({ invocation, timestamp }: ToolProps) {
             <ExternalLink
               url={view.url}
               testId="tool-url-link"
-              className="font-mono text-[11px] text-primary"
+              className="font-mono text-2xs text-primary"
             >
               <span className="truncate">{view.url}</span>
             </ExternalLink>
           )}
           {view.status && (
-            <span className="rounded-sm border border-border/60 px-1 font-mono text-[10px]">
+            <span className="rounded-sm border border-border/60 px-1 font-mono text-3xs">
               {view.status}
             </span>
           )}
           {view.details?.map((d) => (
-            <span key={d} className="text-[11px] text-muted-foreground">
+            <span key={d} className="text-2xs text-muted-foreground">
               {d}
             </span>
           ))}

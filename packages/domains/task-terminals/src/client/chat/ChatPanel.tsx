@@ -45,6 +45,7 @@ import {
   cn
 } from '@slayzone/ui'
 import { CHAT_PANEL_GUTTER_CLASS } from './chat-layout'
+import { chatTypeScaleStyle } from './chat-type-scale'
 import {
   hasPendingPrompt,
   isAwaitingUserQuestion,
@@ -925,7 +926,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           'relative flex flex-col h-full min-w-0 flex-1 bg-background',
                           CHAT_PANEL_GUTTER_CLASS
                         )}
-                        style={{ fontSize: `${fontSize}px` }}
+                        style={chatTypeScaleStyle(fontSize)}
                         onFocus={palette.claim}
                         onDragEnter={attachmentsApi.onDragEnter}
                         onDragOver={attachmentsApi.onDragOver}
@@ -1106,7 +1107,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           <div className="px-4 pt-2">
                             <button
                               type="button"
-                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                              className="inline-flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground"
                               onClick={() => {
                                 for (let i = timeline.length - 1; i >= 0; i--) {
                                   const item = timeline[i]

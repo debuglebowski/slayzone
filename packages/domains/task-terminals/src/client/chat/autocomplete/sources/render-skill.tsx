@@ -12,7 +12,7 @@ export function renderSkillItem(skill: SkillInfo): React.JSX.Element {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs">/{skill.name}</span>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+          <span className="text-3xs text-muted-foreground uppercase tracking-wide">
             {sourceLabel[skill.source]}
           </span>
         </div>

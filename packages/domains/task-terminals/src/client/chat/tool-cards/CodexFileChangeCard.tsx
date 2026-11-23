@@ -80,7 +80,7 @@ export function CodexFileChangeCard({ invocation, timestamp }: ToolProps) {
             {files.map(({ change, diff, counts }, i) => (
               <div key={`${change.path}:${i}`} data-testid="codex-file-change-file">
                 {!only && (
-                  <div className="flex items-center gap-2 px-2 py-1 text-[11px] text-muted-foreground font-mono">
+                  <div className="flex items-center gap-2 px-2 py-1 text-2xs text-muted-foreground font-mono">
                     <span className="shrink-0">{KIND_LABEL[change.kind]}</span>
                     <FileLink path={change.path} label={relativeToCwd(change.path, cwd)} />
                     <span className="shrink-0 tabular-nums">
@@ -89,14 +89,14 @@ export function CodexFileChangeCard({ invocation, timestamp }: ToolProps) {
                   </div>
                 )}
                 {change.movedFrom && (
-                  <div className="px-2 py-0.5 text-[11px] text-muted-foreground font-mono">
+                  <div className="px-2 py-0.5 text-2xs text-muted-foreground font-mono">
                     moved from {relativeToCwd(change.movedFrom, cwd)}
                   </div>
                 )}
                 {diff ? (
                   <ChatDiffView diff={diff} />
                 ) : (
-                  <div className="px-2 py-1 text-[11px] italic text-muted-foreground">
+                  <div className="px-2 py-1 text-2xs italic text-muted-foreground">
                     No changes
                   </div>
                 )}

@@ -28,7 +28,7 @@ export function CommandOutputBlock({
             role="alert"
             className="min-w-0 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2"
           >
-            <div className="mb-1 font-mono text-[11px] text-destructive">
+            <div className="mb-1 font-mono text-2xs text-destructive">
               {item.command ? `/${item.command} failed` : 'Command failed'}
             </div>
             <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-destructive">
@@ -47,7 +47,7 @@ export function CommandOutputBlock({
         </div>
         <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 px-3 py-2">
           {item.command && (
-            <div className="mb-1 font-mono text-[11px] text-muted-foreground">/{item.command}</div>
+            <div className="mb-1 font-mono text-2xs text-muted-foreground">/{item.command}</div>
           )}
           {looksLikeMarkdown(item.text) ? (
             <div className="text-sm leading-relaxed [&_table]:my-2 [&_table]:text-xs [&_th]:px-2 [&_td]:px-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_h3]:mt-3 [&_p]:my-2">

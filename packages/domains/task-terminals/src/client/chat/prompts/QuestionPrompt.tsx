@@ -198,7 +198,7 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
         return (
           <div key={qi} className="space-y-1.5">
             {q.header && (
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-info-foreground">
+              <div className="text-2xs font-semibold uppercase tracking-wide text-info-foreground">
                 {q.header}
               </div>
             )}
@@ -241,7 +241,7 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
                         <div className="min-w-0">
                           <div className="font-medium">{opt.label}</div>
                           {opt.description && (
-                            <div className="text-muted-foreground text-[11px] mt-0.5">
+                            <div className="text-muted-foreground text-2xs mt-0.5">
                               {opt.description}
                             </div>
                           )}
@@ -290,7 +290,7 @@ export function QuestionPrompt({ prompt, submitting, answer, keysRef }: Question
               </div>
               {showPreview && (
                 <div className="space-y-1.5 min-w-0">
-                  <pre className="rounded-md border border-border bg-surface-1 px-2 py-1.5 font-mono text-[11px] whitespace-pre overflow-auto max-h-48">
+                  <pre className="rounded-md border border-border bg-surface-1 px-2 py-1.5 font-mono text-2xs whitespace-pre overflow-auto max-h-48">
                     {preview ?? 'No preview available'}
                   </pre>
                   <textarea

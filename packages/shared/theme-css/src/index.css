@@ -78,6 +78,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Text sizes below Tailwind's xs. A plain (not inline) @theme block, so the
+ * utilities read var(--text-*) and a scope can rescale them (chat font size). */
+@theme {
+  --text-2xs: 0.6875rem;
+  --text-3xs: 0.625rem;
+  --text-4xs: 0.5625rem;
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

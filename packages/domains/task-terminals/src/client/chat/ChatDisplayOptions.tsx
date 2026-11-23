@@ -23,7 +23,7 @@ export function ChatDisplayOptions({ appearance }: { appearance: AppearanceSetti
   return (
     <div className="space-y-2">
       <section aria-label="Layout">
-        <h3 className="px-2 pb-1 pt-2 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+        <h3 className="px-2 pb-1 pt-2 text-4xs font-medium uppercase tracking-widest text-muted-foreground">
           Layout
         </h3>
         <Option
@@ -46,7 +46,7 @@ export function ChatDisplayOptions({ appearance }: { appearance: AppearanceSetti
         />
       </section>
       <section aria-label="Conversation">
-        <h3 className="px-2 pb-1 pt-2 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+        <h3 className="px-2 pb-1 pt-2 text-4xs font-medium uppercase tracking-widest text-muted-foreground">
           Conversation
         </h3>
         <Option
@@ -63,7 +63,7 @@ export function ChatDisplayOptions({ appearance }: { appearance: AppearanceSetti
         />
       </section>
       <section aria-label="Activity">
-        <h3 className="px-2 pb-1 pt-2 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+        <h3 className="px-2 pb-1 pt-2 text-4xs font-medium uppercase tracking-widest text-muted-foreground">
           Activity
         </h3>
         <Option
@@ -102,7 +102,7 @@ export function ChatDisplayOptions({ appearance }: { appearance: AppearanceSetti
         )}
       </section>
       <section aria-label="Scrolling">
-        <h3 className="px-2 pb-1 pt-2 text-[9px] font-medium uppercase tracking-widest text-muted-foreground">
+        <h3 className="px-2 pb-1 pt-2 text-4xs font-medium uppercase tracking-widest text-muted-foreground">
           Scrolling
         </h3>
         <Option

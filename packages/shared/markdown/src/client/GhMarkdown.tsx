@@ -1,10 +1,10 @@
 import { Markdown } from '@slayzone/markdown/client'
 
-const PROSE_CLASSES = `prose prose-sm dark:prose-invert max-w-none
+const PROSE_CLASSES = `prose prose-sm [font-size:var(--text-sm)] dark:prose-invert max-w-none
   [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
   prose-p:my-1.5 prose-p:leading-relaxed
-  prose-pre:my-2 prose-pre:text-[11px] prose-pre:rounded-md prose-pre:bg-muted prose-pre:text-foreground prose-pre:overflow-x-auto
-  prose-code:text-[11px] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:bg-muted
+  prose-pre:my-2 prose-pre:text-2xs prose-pre:rounded-md prose-pre:bg-muted prose-pre:text-foreground prose-pre:overflow-x-auto
+  prose-code:text-2xs prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:bg-muted
   [&_:not(pre)>code]:break-all
   [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:rounded-none
   prose-a:text-primary prose-a:no-underline prose-a:hover:underline
