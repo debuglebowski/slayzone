@@ -1463,7 +1463,14 @@ export function createChatTransport(
     if (tab.respawning || permissionChanges.has(tab.tabId)) return null
     if (tab.terminalState !== 'running' || tab.pendingPrompts.size > 0) return null
     const proc = liveProcess(tab.tabId)
-    if (!proc || !proc.ready || proc.stoppingTurn || !proc.driver.steerUserTurn) return null
+    if (
+      !proc ||
+      !proc.ready ||
+      proc.stoppingTurn ||
+      proc.stopsPending > 0 ||
+      !proc.driver.steerUserTurn
+    )
+      return null
     return proc
   }
 
@@ -3976,15 +3983,26 @@ export function createChatTransport(
    * Without `liveInterrupt` (Codex), or with no live process: the old path —
    * take the message back or mark the turn interrupted, then replace the process.
    */
-  async function stopTurn(
-    tabId: string,
-    opts: {
-      restorePrompt: boolean
-      /** Spawn settings for the replacement, read only if one is needed. */
-      respawnOpts: () => Promise<CreateChatOpts>
-      interruptTimeoutMs?: number
+  type StopTurnOpts = {
+    restorePrompt: boolean
+    /** Spawn settings for the replacement, read only if one is needed. */
+    respawnOpts: () => Promise<CreateChatOpts>
+    interruptTimeoutMs?: number
+  }
+
+  async function stopTurn(tabId: string, opts: StopTurnOpts): Promise<StopTurnResult> {
+    // Refuse "Send now" from here on: the stop reads history before it marks the
+    // turn as stopping, and a steer accepted meanwhile would join a dying turn.
+    const held = controlContinuation.getStore()?.proc ?? liveProcess(tabId)
+    if (held) held.stopsPending++
+    try {
+      return await stopTurnNow(tabId, opts)
+    } finally {
+      if (held) held.stopsPending--
     }
-  ): Promise<StopTurnResult> {
+  }
+
+  async function stopTurnNow(tabId: string, opts: StopTurnOpts): Promise<StopTurnResult> {
     const continuation = controlContinuation.getStore()
     if (continuation?.group.removed) return stopResult(null, 'interrupt')
     const tab = tabs.get(tabId)

@@ -95,6 +95,12 @@ export class ChatProcess implements OutboxProcess {
    */
   stoppingTurn = false
   /**
+   * `stopTurn` calls in progress on this process. Set before the stop's first
+   * await, so "Send now" is refused from the moment a Stop is asked for — not
+   * only once the interrupt is issued (`stoppingTurn`).
+   */
+  stopsPending = 0
+  /**
    * Decided interrupts issued to this process so far (`stopTurn`, `recordInterrupted`,
    * an explicit control interrupt; never a durable control's provisional ACK, which is
    * rolled back unless decided). A turn start that runs after output preceding it
