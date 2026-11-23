@@ -902,6 +902,9 @@ export function startComputer(
   const isolation = createAgentIsolation(totalmem(), log)
   const launchAgent = agentLauncher(isolation)
   const health = createComputerHealth({
+    // The desktop app's own computer admits starts as it always did unless its
+    // config file opts in (config.ts `agentMemoryManaged`).
+    managed: config.agentMemoryManaged !== false,
     config: config.agentResources ?? {},
     isolation,
     chats: () => dispatchByHub.values(),

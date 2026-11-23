@@ -22,8 +22,10 @@
  *     (The pty handler holds a warm start's slot past its shell's first output,
  *     since the agent boots after it.)
  *
- * Starts also wait for memory headroom and a live-agent slot. Plain shells
- * never come here (see `pty.spawn`'s `admission`).
+ * With `resources` (a computer that manages agent memory, see computer-health.ts),
+ * background and warm starts also wait for memory headroom and a live-agent slot.
+ * A foreground start never waits for either: the user is waiting on it. Plain
+ * shells never come here (see `pty.spawn`'s `admission`).
  *
  * One instance is shared by every hub this computer serves (`main.ts`), because
  * the contention is the machine's, not the connection's.
@@ -200,14 +202,20 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): Required
     if (resources && (resources.pressure || warmReservations() > resources.warmPoolSize)) {
       evictWarm()
     }
-    if (active.size >= concurrency || queue.length === 0 || resources?.pressure) return null
+    if (active.size >= concurrency || queue.length === 0) return null
+    const pressure = resources?.pressure === true
     const atCap = resources !== undefined && agents.size >= resources.cap
     let best: Ticket | null = null
     let waitingForCapacity = false
     for (const t of queue) {
-      if (atCap && !t.replacesAgent?.()) {
-        waitingForCapacity ||= t.lane !== 'warm'
-        continue
+      // A foreground start is the user waiting on it: memory and the cap never
+      // hold it back (it still counts toward the live agents).
+      if (t.lane !== 'foreground') {
+        if (pressure) continue
+        if (atCap && !t.replacesAgent?.()) {
+          waitingForCapacity ||= t.lane !== 'warm'
+          continue
+        }
       }
       if (
         !best ||
@@ -217,7 +225,12 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): Required
         best = t
       }
     }
-    if (!best && waitingForCapacity) evictWarm()
+    // Real work needs room past the cap: a warm agent gives up its slot.
+    if (
+      atCap &&
+      (best ? best.lane === 'foreground' && !best.replacesAgent?.() : waitingForCapacity)
+    )
+      evictWarm()
     if (!best || best.lane === 'foreground') return best
     if (
       best.lane === 'warm' &&

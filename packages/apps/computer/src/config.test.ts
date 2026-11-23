@@ -10,14 +10,17 @@ import {
   unlinkSync
 } from 'node:fs'
 import { homedir, hostname, tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
 import { STANDARD_COMPUTER_CAPABILITIES } from '@slayzone/computers/labels'
 import {
+  type ComputerConfig,
   DEFAULT_CAPABILITIES,
   effectiveHubUrls,
   ENV_VARS,
+  hostConfigurationKey,
   ignoredCertPinNotices,
   loadComputerConfig,
   supervisedComputerConfigFile
@@ -58,7 +61,9 @@ describe('loadComputerConfig', () => {
       // Direct link: listen on loopback only, advertise nothing public (opt-in).
       directListenAddress: '127.0.0.1:0',
       // Standalone: a hub may never edit its folder limits (T-27).
-      hubMayEditRoots: false
+      hubMayEditRoots: false,
+      // Standalone: agent memory is managed by default (docs/computer-resources.md).
+      agentMemoryManaged: true
     })
   })
 
@@ -476,6 +481,22 @@ describe('supervised computer: the folders it was given survive a restart', () =
     })
   })
 
+  it('manages agent memory only when its own config file opts in', () => {
+    withEnv(supervised(), () => {
+      expect(loadComputerConfig().agentMemoryManaged).toBe(false)
+    })
+    for (const agentResources of [{}, { hibernate: false }]) {
+      writeFileSync(join(dir, 'computer.config.json'), JSON.stringify({ agentResources }))
+      withEnv(supervised(), () => {
+        expect(loadComputerConfig().agentMemoryManaged).toBe(true)
+      })
+    }
+    // A standalone computer manages memory by default.
+    expect(loadComputerConfig({ [ENV_VARS.hubAddress]: 'hub.example' }).agentMemoryManaged).toBe(
+      true
+    )
+  })
+
   it('keeps [homedir()] with no usable list, and never reads the legacy shared config.json', () => {
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ allowedRoots: ['/legacy'] }))
     withEnv(supervised(), () => {
@@ -728,5 +749,34 @@ describe('DEFAULT_CAPABILITIES', () => {
   // computer must report exactly that set or every row would show a spurious diff.
   it('is the standard set the hub UI treats as unremarkable', () => {
     expect([...DEFAULT_CAPABILITIES]).toEqual([...STANDARD_COMPUTER_CAPABILITIES])
+  })
+})
+
+describe('hostConfigurationKey', () => {
+  const config = {
+    hubUrl: 'wss://hub.example',
+    name: 'box',
+    capabilities: ['shell'],
+    allowedRoots: ['/work']
+  } as unknown as ComputerConfig
+
+  it('is unchanged by an unset agentResources, so upgraded hosts are not seen as reconfigured', () => {
+    // The key every host computed before `agentResources` existed (v0.42.0).
+    const before = createHash('sha256')
+      .update(
+        JSON.stringify({
+          hubs: effectiveHubUrls(config),
+          name: config.name,
+          capabilities: config.capabilities,
+          binOverrideDir: null
+        })
+      )
+      .digest('hex')
+    expect(hostConfigurationKey(config)).toBe(before)
+  })
+
+  it('changes when agentResources is set', () => {
+    const tuned = { ...config, agentResources: { hibernate: false } } as unknown as ComputerConfig
+    expect(hostConfigurationKey(tuned)).not.toBe(hostConfigurationKey(config))
   })
 })

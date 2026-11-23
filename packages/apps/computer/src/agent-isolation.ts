@@ -31,7 +31,9 @@ export function agentLauncher(isolation: AgentIsolation | null): AgentLauncher |
   return (file, args) => ({
     file: '/bin/sh',
     args: ['-c', `${PREFER_AGENT_FOR_OOM}\nexec "$@"`, 'sh', file, ...args],
-    close() {}
+    close() {
+      // Nothing to release: the shell prefix holds no resources.
+    }
   })
 }
 

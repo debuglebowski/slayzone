@@ -993,16 +993,24 @@ function ComputerResources({
       data-testid="computer-health"
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="inline-flex items-center gap-1.5">
-          {health.live}/{health.cap} live
-          <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-muted">
-            <span
-              className="block h-full bg-current"
-              style={{ width: `${Math.min(100, (100 * health.live) / health.cap)}%` }}
-            />
-          </span>
-        </span>
-        <span>{health.hibernated} hibernated</span>
+        {/* An unmanaged computer (the desktop's own, unless it opts in) enforces no
+            cap and hibernates nothing: show only what it does. */}
+        {health.managed === false ? (
+          <span>{health.live} live</span>
+        ) : (
+          <>
+            <span className="inline-flex items-center gap-1.5">
+              {health.live}/{health.cap} live
+              <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-muted">
+                <span
+                  className="block h-full bg-current"
+                  style={{ width: `${Math.min(100, (100 * health.live) / health.cap)}%` }}
+                />
+              </span>
+            </span>
+            <span>{health.hibernated} hibernated</span>
+          </>
+        )}
         <span>{health.queued} queued</span>
         {showPressure && (
           <span className="font-medium text-amber-600 dark:text-amber-400">Under pressure</span>

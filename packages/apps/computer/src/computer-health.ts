@@ -47,7 +47,30 @@ export function parseLinuxMemory(meminfo: string, psi: string) {
   }
 }
 
-async function sampleHostMemory() {
+/**
+ * `sysctl -n kern.memorystatus_level kern.memorystatus_vm_pressure_level`: the
+ * percent of memory macOS counts as available (what `memory_pressure` prints as
+ * "System-wide memory free percentage") and its pressure level (1 normal, 2 warn,
+ * 4 critical). Null without a usable percent.
+ */
+export function parseDarwinMemoryStatus(
+  stdout: string
+): { freePercent: number; pressureLevel: number | null } | null {
+  const [level, pressure] = stdout.trim().split(/\s+/)
+  if (!level || !/^\d+$/.test(level) || Number(level) > 100) return null
+  return {
+    freePercent: Number(level),
+    pressureLevel: pressure && /^\d+$/.test(pressure) ? Number(pressure) : null
+  }
+}
+
+export interface HostMemorySample {
+  memory: ReturnType<typeof parseLinuxMemory>
+  nativePressure: boolean
+}
+
+/** Null when this sample could not be taken: the caller keeps its previous reading. */
+async function sampleHostMemory(): Promise<HostMemorySample | null> {
   let memory = parseLinuxMemory('', '')
   let nativePressure = false
   if (process.platform === 'linux') {
@@ -57,20 +80,17 @@ async function sampleHostMemory() {
     ])
     memory = parseLinuxMemory(meminfo, psi)
   } else if (process.platform === 'darwin') {
-    // os.freemem() counts empty pages. File-backed pages can be reclaimed too.
-    const [vm, level] = await Promise.all([
-      exec('/usr/bin/vm_stat', [], { timeout: 1_000 }).catch(() => null),
-      exec('/usr/sbin/sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], {
-        timeout: 1_000
-      }).catch(() => null)
-    ])
-    const stats = vm?.stdout ?? ''
-    const pageSize = Number(/page size of (\d+) bytes/.exec(stats)?.[1])
-    const free = Number(/^Pages free:\s+(\d+)/m.exec(stats)?.[1])
-    const fileBacked = Number(/^File-backed pages:\s+(\d+)/m.exec(stats)?.[1])
-    if (pageSize > 0 && Number.isFinite(free) && Number.isFinite(fileBacked))
-      memory.memoryAvailable = (free + fileBacked) * pageSize
-    nativePressure = Number(level?.stdout.trim()) >= 2
+    // Never os.freemem() here: macOS keeps RAM full of cache it can reclaim, so
+    // free pages alone read as pressure on an idle 64 GB Mac.
+    const status = await exec(
+      '/usr/sbin/sysctl',
+      ['-n', 'kern.memorystatus_level', 'kern.memorystatus_vm_pressure_level'],
+      { timeout: 1_000 }
+    ).catch(() => null)
+    const parsed = parseDarwinMemoryStatus(status?.stdout ?? '')
+    if (!parsed) return null
+    memory.memoryAvailable = Math.floor((memory.memoryTotal * parsed.freePercent) / 100)
+    nativePressure = (parsed.pressureLevel ?? 0) >= 2
   }
   const limit = process.constrainedMemory?.()
   if (limit && limit < memory.memoryTotal) {
@@ -92,6 +112,13 @@ function cpuTimes() {
 }
 
 export function createComputerHealth(opts: {
+  /**
+   * Act on what it measures: hold background and warm starts under pressure or at
+   * the cap, bound the warm pool, hibernate idle chats. False (the desktop app's
+   * own computer unless it opts in, `agentMemoryManaged`): starts are admitted as
+   * before, and the health report is measured only.
+   */
+  managed: boolean
   config: ComputerAgentResources
   isolation: AgentIsolation | null
   chats(): Iterable<ChatInventorySource>
@@ -107,6 +134,8 @@ export function createComputerHealth(opts: {
   const startConcurrency = config.startConcurrency ?? defaultAdmissionConcurrency()
   let footprint = MIN_AGENT_BYTES
   let sampledAt = 0
+  /** A sample was attempted. Starts wait for the first one, not for its success. */
+  let settled = false
   let memory = parseLinuxMemory('', '')
   let pressure = false
   let lastCpu = cpuTimes()
@@ -128,7 +157,9 @@ export function createComputerHealth(opts: {
 
   const admission = createSpawnAdmission({
     concurrency: startConcurrency,
-    resources: () => ({ cap: cap(), pressure: pressure || sampledAt === 0, warmPoolSize }),
+    ...(opts.managed
+      ? { resources: () => ({ cap: cap(), pressure: pressure || !settled, warmPoolSize }) }
+      : {}),
     onEvent: opts.onAdmissionEvent
   })
 
@@ -150,7 +181,7 @@ export function createComputerHealth(opts: {
   }
 
   function needsReclamation(): boolean {
-    if (stopped || config.hibernate === false) return false
+    if (stopped || !opts.managed || config.hibernate === false) return false
     const { reserved, queued } = admission.load()
     return pressure || reserved > cap() || (queued > 0 && reserved >= cap())
   }
@@ -186,24 +217,29 @@ export function createComputerHealth(opts: {
     try {
       const sample = await (opts.sampleMemory ?? sampleHostMemory)()
       if (stopped) return
-      memory = sample.memory
-      sampledAt = Date.now()
+      settled = true
+      const now = Date.now()
       const cpu = cpuTimes()
       const elapsed = cpu.total - lastCpu.total
       if (elapsed > 0)
         cpuPercent = Math.max(0, Math.min(100, 100 * (1 - (cpu.idle - lastCpu.idle) / elapsed)))
       lastCpu = cpu
       const use = isolation?.memoryUsage()
-      const minAvailable = threshold + (pressure ? 2 : 0)
-      pressure =
-        sample.nativePressure ||
-        memory.memoryAvailable * 100 < memory.memoryTotal * minAvailable ||
-        (memory.memoryPressure ?? 0) >= PSI_PRESSURE_PERCENT ||
-        (use !== undefined && isolation !== null && use >= isolation.memoryLimit * 0.95)
+      // A failed sample is skipped: memory and pressure keep their last reading.
+      if (sample) {
+        memory = sample.memory
+        sampledAt = now
+        const minAvailable = threshold + (pressure ? 2 : 0)
+        pressure =
+          sample.nativePressure ||
+          memory.memoryAvailable * 100 < memory.memoryTotal * minAvailable ||
+          (memory.memoryPressure ?? 0) >= PSI_PRESSURE_PERCENT ||
+          (use !== undefined && isolation !== null && use >= isolation.memoryLimit * 0.95)
+      }
       admission.recheck()
       const load = admission.load()
-      if (!measuring && !pressure && sampledAt >= sampleFootprintAt && load.pids.length > 0) {
-        sampleFootprintAt = sampledAt + FOOTPRINT_INTERVAL_MS
+      if (!measuring && !pressure && now >= sampleFootprintAt && load.pids.length > 0) {
+        sampleFootprintAt = now + FOOTPRINT_INTERVAL_MS
         void sampleFootprint(load.pids, use).catch((error) =>
           opts.log('agent memory estimate failed', { error: String(error) })
         )
@@ -247,6 +283,7 @@ export function createComputerHealth(opts: {
           0
         ),
         cap: cap(),
+        managed: opts.managed,
         oomIsolation: isolation !== null
       }
     },

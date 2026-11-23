@@ -61,6 +61,16 @@ export const computerConfigSchema = z.object({
   capabilities: z.array(z.string().min(1)),
   agentResources: z.unknown().transform(readComputerAgentResources).optional(),
   /**
+   * Does this computer manage agent memory — hold background and warm starts under
+   * memory pressure or at the live-agent cap, cap the warm pool, and hibernate idle
+   * chats (docs/computer-resources.md)?
+   *
+   * Derived only, in {@link loadComputerConfig}: yes for a standalone computer; for
+   * the desktop app's own supervised computer only when its config file sets
+   * `agentResources` (an explicit opt-in). Absent (a config built by hand): yes.
+   */
+  agentMemoryManaged: z.boolean().optional(),
+  /**
    * May a hub change `allowedRoots` (`computer.setAllowedRoots`)? T-27: folder
    * limits are the device user's decision, so NO by default — set them on the
    * device (`slay computer roots`, or `computer.config.json`).
@@ -320,6 +330,10 @@ export function loadComputerConfig(
     result.data.hubMayEditRoots =
       env.SLAYZONE_SUPERVISED === '1' &&
       effectiveHubUrls(result.data).every((url) => isLoopbackComputerUrl(url))
+    // See `agentMemoryManaged`: the desktop's own computer shares the machine with
+    // the user's apps, so it manages memory only when its own file asks for it.
+    result.data.agentMemoryManaged =
+      env.SLAYZONE_SUPERVISED !== '1' || result.data.agentResources !== undefined
   }
   if (!result.success) {
     const issues = result.error.issues
@@ -444,7 +458,9 @@ export function hostConfigurationKey(config: ComputerConfig): string {
         name: config.name,
         capabilities: config.capabilities,
         binOverrideDir: config.binOverrideDir ?? null,
-        agentResources: config.agentResources ?? null
+        // Only when set: an unset key must hash exactly as before it existed, or
+        // every upgraded host reads as reconfigured and restarts on its old release.
+        ...(config.agentResources ? { agentResources: config.agentResources } : {})
       })
     )
     .digest('hex')

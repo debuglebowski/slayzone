@@ -96,6 +96,58 @@ describe('spawn admission', () => {
     expect(started).toEqual(['foreground'])
   })
 
+  it('admits a foreground start under memory pressure; background and warm starts wait', () => {
+    let pressure = true
+    const admission = createSpawnAdmission({
+      resources: () => ({ cap: 10, warmPoolSize: 1, pressure }),
+      warmQuietMs: 0
+    })
+    const started: string[] = []
+    const start = (name: string) => (slot: AdmissionSlot) => {
+      started.push(name)
+      slot.track(started.length)
+      slot.release()
+    }
+    admission.enqueue('warm', start('warm'))
+    admission.enqueue('background', start('background'))
+    admission.enqueue('foreground', start('foreground'))
+    expect(started).toEqual(['foreground'])
+    // It still counts toward the computer's live agents.
+    expect(admission.load()).toMatchObject({ live: 1, queued: 1 })
+    pressure = false
+    admission.recheck()
+    expect(started).toEqual(['foreground', 'background', 'warm'])
+  })
+
+  it('admits a foreground start past the live-agent cap and evicts a warm agent for it', () => {
+    const admission = createSpawnAdmission({
+      resources: () => ({ cap: 2, warmPoolSize: 1, pressure: false }),
+      warmQuietMs: 0
+    })
+    const started: string[] = []
+    const evicted: string[] = []
+    const exits = new Map<string, () => void>()
+    const start =
+      (name: string, warm = false) =>
+      (slot: AdmissionSlot) => {
+        started.push(name)
+        const agent = slot.track(started.length, warm ? () => evicted.push(name) : undefined)
+        exits.set(name, agent.exit)
+        slot.release()
+      }
+    admission.enqueue('background', start('a'))
+    admission.enqueue('warm', start('warm', true))
+    expect(started).toEqual(['a', 'warm'])
+    admission.enqueue('foreground', start('user'))
+    admission.enqueue('background', start('b'))
+    expect(started).toEqual(['a', 'warm', 'user'])
+    expect(evicted).toEqual(['warm'])
+    expect(admission.load()).toMatchObject({ live: 3, queued: 1 })
+    exits.get('warm')!()
+    exits.get('a')!()
+    expect(started).toEqual(['a', 'warm', 'user', 'b'])
+  })
+
   // The record a slow restore is diagnosed from (computer.log): each start's wait
   // for its slot, how long it held it, and whether the agent or the cap freed it.
   it('reports each start: its wait, its hold, and what released it', () => {

@@ -393,6 +393,12 @@ export const computerHealthSchema = z.object({
   queued: z.number().int().nonnegative(),
   warm: z.number().int().nonnegative(),
   cap: z.number().int().positive(),
+  /**
+   * Whether the computer acts on this report (holds starts, hibernates chats) or
+   * only measures it: the desktop app's own computer unless it opts in. Absent
+   * from computers before it existed, which all managed memory.
+   */
+  managed: z.boolean().optional(),
   oomIsolation: z.boolean()
 })
 export type ComputerHealth = z.infer<typeof computerHealthSchema>

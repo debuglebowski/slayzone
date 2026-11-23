@@ -108,7 +108,8 @@ test('the standalone connector reports host limits and carries queued starts', a
           command: process.execPath,
           args: ['-e', 'setInterval(() => {}, 1000)'],
           cwd: root,
-          admission: 'foreground'
+          // Background: a foreground start is never held back by the cap.
+          admission: 'background'
         },
         0
       )
@@ -131,8 +132,10 @@ test('the standalone connector reports host limits and carries queued starts', a
       undefined,
       expect.any(AbortSignal)
     ])
-    await hub.gateway.request('computer-1', 'proc.kill', { sessionId: 'running' })
+    // Prioritized, it is a foreground start: admitted past the cap at once.
     await expect(queued).resolves.toMatchObject({ pid: expect.any(Number) })
+    await hub.gateway.request('computer-1', 'proc.kill', { sessionId: 'running' })
+    await hub.gateway.request('computer-1', 'proc.kill', { sessionId: 'queued' })
   } finally {
     localRequests.mockRestore()
     await connector?.stop()
