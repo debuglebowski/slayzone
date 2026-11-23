@@ -529,6 +529,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   }, [paging, state.timeline])
   const loadEarlier = useStableCallback(() => {
     if (stalledNeed !== null) loadHistoryRows([stalledNeed])
+    else if (paging?.windowed && paging.pageRows < 16) loadPages([olderPage, olderPage - 1])
     else loadPages([olderPage])
   })
 

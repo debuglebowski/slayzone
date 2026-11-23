@@ -5,7 +5,12 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { shareToolDetailReads } from './chat-tool-details'
-import { chatViaDirect, openChatTimeline } from './chat-direct'
+import { chatViaDirect, openChatTimeline, readInitialChatHistory } from './chat-direct'
+import { packTimelineOpen } from '../shared/chat-open-wire'
+import { createChatOpenTimer } from '../shared/chat-open-timing'
+import { encodeTimelineState } from '../shared/chat-timeline-checkpoint'
+import { initialState } from '../shared/chat-timeline'
+import { summarizeRows } from '../shared/timeline-summary'
 
 function hub() {
   const calls: string[] = []
@@ -169,13 +174,61 @@ it('tries ordinary previews before full history on a computer without display se
       .fn()
       .mockResolvedValueOnce({ kind: 'full' })
       .mockResolvedValueOnce({ kind: 'full' })
+      .mockResolvedValueOnce({ kind: 'full' })
       .mockResolvedValueOnce(paged)
   }
   expect(await openChatTimeline(io, 't', { hideThinking: true })).toBe(paged)
-  expect(io.openTimeline).toHaveBeenCalledTimes(3)
+  expect(io.openTimeline).toHaveBeenCalledTimes(4)
   expect(io.openTimeline.mock.calls[0][0]).toMatchObject({
+    display: { hideThinking: true, windowed: true, packedOpen: true }
+  })
+  expect(io.openTimeline.mock.calls[1][0]).toMatchObject({
     display: { hideThinking: true, windowed: true }
   })
-  expect(io.openTimeline.mock.calls[2][0]).toMatchObject({ tabId: 't', toolPreviews: true })
-  expect(io.openTimeline.mock.calls[2][0]).not.toHaveProperty('display')
+  expect(io.openTimeline.mock.calls[3][0]).toMatchObject({ tabId: 't', toolPreviews: true })
+  expect(io.openTimeline.mock.calls[3][0]).not.toHaveProperty('display')
+})
+
+it('restores the same reducer state and history summaries from either open format', async () => {
+  const empty = summarizeRows([], 0)
+  const summary = summarizeRows(
+    [{ kind: 'user-text', text: 'Find this entire prompt', id: 'msg', timestamp: 8 }],
+    8
+  )
+  const timeline = initialState({ agentStartedTurns: true })
+  const snapshot = {
+    state: encodeTimelineState(timeline, 0),
+    seq: 0,
+    epoch: 0,
+    pageRows: 8,
+    summaries: [empty, summary],
+    windowed: true as const
+  }
+  const packed = packTimelineOpen(snapshot)
+  expect(packed.summaries[0]).toBe(0)
+  expect(JSON.stringify(packed).length).toBeLessThan(JSON.stringify(snapshot).length)
+  const read = (value: typeof snapshot | typeof packed) =>
+    readInitialChatHistory(
+      {
+        openTimeline: async () => ({
+          kind: 'paged',
+          snapshot: JSON.parse(JSON.stringify(value)),
+          events: [],
+          live: { afterSeq: 0, liveSeq: 0, events: [] }
+        }),
+        getReplay: vi.fn()
+      },
+      't',
+      createChatOpenTimer(),
+      () => false
+    )
+  expect(await read(packed)).toEqual(await read(snapshot))
+})
+
+it('keeps tool input opaque when its JSON contains a reserved transport key', () => {
+  const snapshot = {
+    state: '{"tail":[{"input":{"constructor":"value","prototype":null}}]}',
+    summaries: []
+  }
+  expect(packTimelineOpen(snapshot)).toBe(snapshot)
 })

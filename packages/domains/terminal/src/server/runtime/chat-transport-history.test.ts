@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   CHAT_HISTORY_PAGE_MAX_BYTES,
   jsonByteLength,
+  toolPreviewVersion,
   type AgentEvent
 } from '@slayzone/terminal-contracts'
 import { CACHED_EVENTS_PER_TAB, pageOfRows, type BufferedEvent } from '../chat-events-store'
@@ -318,6 +319,20 @@ test('a burst of hydrates reads about one history page per event-loop turn in to
     const opened = await mgr.openTimeline(`tab-${i}`, TIMELINE_PROJECTION_VERSION)
     expect(opened.kind).toBe('paged')
   }
+  const plain = await mgr.openTimeline(
+    'tab-0',
+    toolPreviewVersion(TIMELINE_PROJECTION_VERSION, { windowed: true })
+  )
+  const packed = await mgr.openTimeline(
+    'tab-0',
+    toolPreviewVersion(TIMELINE_PROJECTION_VERSION, { windowed: true, packedOpen: true })
+  )
+  if (plain.kind !== 'paged' || packed.kind !== 'paged') throw new Error('missing paged history')
+  expect(packed.snapshot.windowed).toBe(true)
+  expect(typeof plain.snapshot.state).toBe('string')
+  expect(JSON.stringify(packed.snapshot.state)).toBe(plain.snapshot.state)
+  expect(packed.snapshot.summaries).toHaveLength(plain.snapshot.summaries.length)
+  expect(jsonByteLength(packed)).toBeLessThan(jsonByteLength(plain))
 })
 
 test('openTimeline answers the events saved while its snapshot waited within a page budget, consistent with the live part', async () => {

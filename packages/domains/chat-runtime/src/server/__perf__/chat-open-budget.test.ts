@@ -10,7 +10,7 @@ import {
   type AgentEvent
 } from '@slayzone/terminal-contracts'
 import { decodeTimelineState } from '@slayzone/terminal/timeline-checkpoint'
-import { TimelineProjection } from '@slayzone/terminal/timeline-projection'
+import { packTimelineOpen, TimelineProjection } from '@slayzone/terminal/timeline-projection'
 import { timelineStoreFromRecords } from '@slayzone/terminal/timeline-records'
 import { createLocalChatData } from '../local-data'
 import { openChatStorage, type ChatStorage } from '../storage'
@@ -161,8 +161,10 @@ test('a 25k-event chat keeps completed command output out of the open indexes', 
       const display = { windowed: true } as const
       const window = await projection.openSnapshot('benchmark', display)
       expect(window.windowed).toBe(true)
-      expect(decodeTimelineState(window.state).timeline.filter(Boolean).length).toBeLessThan(32)
-      expect(deflateBytes(window)).toBeLessThan(deflateBytes(compact))
+      expect(decodeTimelineState(window.state).timeline.filter(Boolean).length).toBeLessThan(16)
+      const packed = packTimelineOpen(window)
+      expect(jsonByteLength(packed)).toBeLessThan(jsonByteLength(window))
+      expect(deflateBytes(packed)).toBeLessThan(deflateBytes(compact))
       const newestPage = window.summaries.length - 1
       const windowPage = await projection.pagesAsOf(
         [newestPage],

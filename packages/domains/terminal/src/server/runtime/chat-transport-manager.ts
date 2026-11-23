@@ -35,6 +35,7 @@ import {
   historyOfEvents,
   type TimelineHistorySource,
   type TimelineOpen,
+  packTimelineOpen,
   type TimelinePagesResult,
   type TimelineProjectionStore,
   type TimelineProjectionHandle,
@@ -674,7 +675,7 @@ const OPEN_TIMELINE_ATTEMPTS = 3
 export type ChatTimelineOpenResult =
   | {
       kind: 'paged'
-      snapshot: TimelineOpen
+      snapshot: ReturnType<typeof packTimelineOpen<TimelineOpen>>
       events: BufferedEvent[]
       live: ChatReplay['live']
     }
@@ -4838,7 +4839,7 @@ export function createChatTransport(
       // the live part follows exactly the newest of them.
       return {
         kind: 'paged',
-        snapshot,
+        snapshot: display?.packedOpen ? packTimelineOpen(snapshot) : snapshot,
         events: tail.events,
         live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
       }

@@ -1089,7 +1089,7 @@ describe('paged history (opened from the hub projection)', () => {
     const { result, rerender } = setup(true)
     await openPaged(0)
     expect(opens).toHaveBeenCalledWith(
-      expect.objectContaining({ display: { hideThinking: true, windowed: true } })
+      expect.objectContaining({ display: { hideThinking: true, windowed: true, packedOpen: true } })
     )
     act(() => result.current.loadPages([0]))
     await settle()

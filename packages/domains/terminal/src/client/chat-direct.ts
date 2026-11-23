@@ -27,6 +27,7 @@ import type { TimelineRows } from '../shared/timeline-rows'
 import type { ChatTimelineState } from '../shared/chat-timeline'
 import type { ChatOpenTimer } from '../shared/chat-open-timing'
 import type { TimelinePageSummary } from '../shared/timeline-summary'
+import { unpackTimelineSummary } from '../shared/chat-open-wire'
 
 type Query<I, O> = { query(input: I): Promise<O> }
 type Mutation<I, O> = { mutate(input: I): Promise<O> }
@@ -233,7 +234,7 @@ interface OpenedPaged {
     seq: number
     epoch: number
     pageRows: number
-    state: string
+    state: string | object
     summaries: unknown[]
     toolPreviews?: true
     displaySettings?: 2 | typeof CHAT_HISTORY_DISPLAY_VERSION
@@ -255,21 +256,19 @@ export async function openChatTimeline(
   try {
     const input = { tabId, version: TIMELINE_PROJECTION_VERSION }
     const compact = { ...input, toolPreviews: true }
-    const windowed = (await io.openTimeline({
-      ...compact,
-      display: { ...display, windowed: true }
-    })) as OpenedPaged | { kind: 'full' }
-    if (windowed.kind === 'paged') return windowed
-    if (display) {
-      const configured = (await io.openTimeline({ ...compact, display })) as
-        | OpenedPaged
-        | { kind: 'full' }
+    const preferences: Array<ChatHistoryDisplay | undefined> = [
+      { ...display, windowed: true, packedOpen: true },
+      { ...display, windowed: true },
+      ...(display ? [display] : []),
+      undefined
+    ]
+    for (const preference of preferences) {
+      const configured = (await io.openTimeline(
+        preference ? { ...compact, display: preference } : compact
+      )) as OpenedPaged | { kind: 'full' }
       if (configured.kind === 'paged') return configured
     }
-    const projected = (await io.openTimeline(compact)) as OpenedPaged | { kind: 'full' }
-    return projected.kind === 'paged'
-      ? projected
-      : ((await io.openTimeline(input)) as OpenedPaged | { kind: 'full' })
+    return (await io.openTimeline(input)) as OpenedPaged | { kind: 'full' }
   } catch (error) {
     const code = (error as { data?: { code?: string } } | null)?.data?.code
     const message = error instanceof Error ? error.message : ''
@@ -324,12 +323,18 @@ export async function readInitialChatHistory(
   }
 
   const { snapshot, events, live } = opened
-  timer.set('stateChars', snapshot.state.length)
+  const checkpoint = snapshot.state
+  const plain = typeof checkpoint === 'string'
+  const state = timer.time('restoreMs', () => {
+    const encoded = plain ? checkpoint : JSON.stringify(checkpoint)
+    timer.set('stateChars', encoded.length)
+    return decodeTimelineState(encoded)
+  })
   timer.set('summaries', snapshot.summaries.length)
   timer.set('tailEvents', events.length)
   return {
     kind: 'paged',
-    state: timer.time('restoreMs', () => decodeTimelineState(snapshot.state)),
+    state,
     seq: snapshot.seq,
     paging: {
       pageRows: snapshot.pageRows,
@@ -337,7 +342,11 @@ export async function readInitialChatHistory(
       toolPreviews: snapshot.toolPreviews,
       displaySettings: snapshot.displaySettings,
       windowed: snapshot.windowed,
-      summaries: snapshot.summaries as TimelinePageSummary[]
+      summaries: plain
+        ? (snapshot.summaries as TimelinePageSummary[])
+        : (snapshot.summaries as Parameters<typeof unpackTimelineSummary>[0][]).map(
+            unpackTimelineSummary
+          )
     },
     events: events as ChatHistoryPageEvent[],
     live

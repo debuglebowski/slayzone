@@ -5,13 +5,11 @@ import { CODEX_FILE_CHANGE_TOOL } from '../../shared/codex-file-changes'
 import { FILE_TOOL_NAMES, SHELL_TOOL_NAMES, fileChangesOf } from '../../shared/turn-file-changes'
 
 const INLINE_BYTES = 4_096
+const WINDOW_INLINE_BYTES = 1_024
 const PREVIEW_CHARS = 384
 
-function exceedsInlineBudget(text: string): boolean {
-  return (
-    text.length > INLINE_BYTES ||
-    (text.length * 3 > INLINE_BYTES && utf8Length(text) > INLINE_BYTES)
-  )
+function exceedsInlineBudget(text: string, budget: number): boolean {
+  return text.length > budget || (text.length * 3 > budget && utf8Length(text) > budget)
 }
 
 function textPreview(text: string): string {
@@ -27,11 +25,11 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 /** Preserve tool-specific metadata used by collapsed headers and transcript features. */
-function resultPreview(invocation: ToolInvocation): ToolInvocation['result'] {
+function resultPreview(invocation: ToolInvocation, budget: number): ToolInvocation['result'] {
   const { result } = invocation
   if (!result) return result
   let { rawContent, structured } = result
-  if (typeof rawContent === 'string' && exceedsInlineBudget(rawContent)) {
+  if (typeof rawContent === 'string' && exceedsInlineBudget(rawContent, budget)) {
     rawContent = textPreview(rawContent)
   } else if (Array.isArray(rawContent)) {
     // Text-only SDK blocks can be previewed together. Keep other blocks intact
@@ -46,25 +44,24 @@ function resultPreview(invocation: ToolInvocation): ToolInvocation['result'] {
         textOnly = false
         break
       }
-      if (total <= INLINE_BYTES)
-        total += (text.length > INLINE_BYTES ? text.length : utf8Length(text)) + 1
+      if (total <= budget) total += (text.length > budget ? text.length : utf8Length(text)) + 1
       if (head.length <= PREVIEW_CHARS) head += text.slice(0, PREVIEW_CHARS + 1) + '\n'
     }
-    if (textOnly && total > INLINE_BYTES) {
+    if (textOnly && total > budget) {
       rawContent = [{ type: 'text', text: textPreview(head) }]
     }
   }
   const data = record(structured)
   if (invocation.name === 'Read') {
     const file = record(data?.file)
-    if (file && typeof file.content === 'string' && exceedsInlineBudget(file.content)) {
+    if (file && typeof file.content === 'string' && exceedsInlineBudget(file.content, budget)) {
       structured = { ...data, file: { ...file, content: textPreview(file.content) } }
     }
   }
   if (invocation.name === 'Write' && typeof data?.content === 'string') {
     // Write's renderer and file counts both read the input if the result mirrors it.
     const input = record(invocation.input)
-    if (exceedsInlineBudget(data.content) && data.content === input?.content) {
+    if (exceedsInlineBudget(data.content, budget) && data.content === input?.content) {
       const { content: _content, ...metadata } = data
       structured = metadata
     }
@@ -72,7 +69,7 @@ function resultPreview(invocation: ToolInvocation): ToolInvocation['result'] {
   if (invocation.name === 'codex/commandExecution' && data) {
     for (const key of ['aggregatedOutput', 'output', 'stdout', 'stderr']) {
       const text = data[key]
-      if (typeof text === 'string' && exceedsInlineBudget(text)) {
+      if (typeof text === 'string' && exceedsInlineBudget(text, budget)) {
         structured = { ...record(structured), [key]: textPreview(text) }
       }
     }
@@ -83,16 +80,16 @@ function resultPreview(invocation: ToolInvocation): ToolInvocation['result'] {
 }
 
 /** Keep header fields and file identities. The recorded edit is read in full when opened. */
-function fileInputPreview(input: unknown, name: string): unknown {
+function fileInputPreview(input: unknown, name: string, budget: number): unknown {
   const data = record(input)
   if (!data) return input
   switch (name) {
     case 'Write':
-      return previewTextFields(data, ['content'])
+      return previewTextFields(data, ['content'], budget)
     case 'Edit':
-      return previewTextFields(data, ['old_string', 'new_string'])
+      return previewTextFields(data, ['old_string', 'new_string'], budget)
     case 'MultiEdit':
-      return Array.isArray(data.edits) && jsonByteLength(data.edits) > INLINE_BYTES
+      return Array.isArray(data.edits) && jsonByteLength(data.edits) > budget
         ? {
             ...data,
             edits: data.edits.slice(0, 2).map((edit) => ({
@@ -102,9 +99,9 @@ function fileInputPreview(input: unknown, name: string): unknown {
           }
         : input
     case 'NotebookEdit':
-      return previewTextFields(data, ['new_source'])
+      return previewTextFields(data, ['new_source'], budget)
     case CODEX_FILE_CHANGE_TOOL:
-      return previewCodexDiffs(data)
+      return previewCodexDiffs(data, budget)
     default:
       return input
   }
@@ -114,18 +111,22 @@ function shortText(value: unknown): unknown {
   return typeof value === 'string' && value.length > PREVIEW_CHARS ? textPreview(value) : value
 }
 
-function previewTextFields(data: Record<string, unknown>, fields: readonly string[]) {
+function previewTextFields(
+  data: Record<string, unknown>,
+  fields: readonly string[],
+  budget: number
+) {
   let preview = data
   for (const field of fields) {
     const value = data[field]
-    if (typeof value === 'string' && exceedsInlineBudget(value))
+    if (typeof value === 'string' && exceedsInlineBudget(value, budget))
       preview = { ...preview, [field]: textPreview(value) }
   }
   return preview
 }
 
-function previewCodexDiffs(data: Record<string, unknown>) {
-  if (!Array.isArray(data.changes) || jsonByteLength(data.changes) <= INLINE_BYTES) return data
+function previewCodexDiffs(data: Record<string, unknown>, budget: number) {
+  if (!Array.isArray(data.changes) || jsonByteLength(data.changes) <= budget) return data
   return {
     ...data,
     changes: data.changes.flatMap((change) => {
@@ -135,21 +136,22 @@ function previewCodexDiffs(data: Record<string, unknown>) {
   }
 }
 
-function fileResultPreview(invocation: ToolInvocation, result: ToolInvocation['result']) {
+function fileResultPreview(
+  invocation: ToolInvocation,
+  result: ToolInvocation['result'],
+  budget: number
+) {
   const data = record(result?.structured)
   if (!result || !data) return result
   let structured =
     invocation.name === CODEX_FILE_CHANGE_TOOL
-      ? previewCodexDiffs(data)
-      : previewTextFields(data, [
-          'content',
-          'originalFile',
-          'oldString',
-          'newString',
-          'old_source',
-          'new_source'
-        ])
-  if (Array.isArray(data.structuredPatch) && jsonByteLength(data.structuredPatch) > INLINE_BYTES) {
+      ? previewCodexDiffs(data, budget)
+      : previewTextFields(
+          data,
+          ['content', 'originalFile', 'oldString', 'newString', 'old_source', 'new_source'],
+          budget
+        )
+  if (Array.isArray(data.structuredPatch) && jsonByteLength(data.structuredPatch) > budget) {
     structured = { ...structured, structuredPatch: [] }
   }
   return structured === data ? result : { ...result, structured }
@@ -161,7 +163,8 @@ function previewToolRow(
   row: number,
   epoch: number,
   instance: string,
-  hideActivityTools: boolean
+  hideActivityTools: boolean,
+  budget: number
 ): TimelineItem {
   if (item.kind !== 'tool' || item.inputStreaming) return item
   const { invocation } = item
@@ -214,20 +217,20 @@ function previewToolRow(
     }
   }
   const input = fileTool
-    ? fileInputPreview(invocation.input, invocation.name)
+    ? fileInputPreview(invocation.input, invocation.name, budget)
     : args
-      ? previewTextFields(args, Object.keys(args))
-      : typeof invocation.input === 'string' && exceedsInlineBudget(invocation.input)
+      ? previewTextFields(args, Object.keys(args), budget)
+      : typeof invocation.input === 'string' && exceedsInlineBudget(invocation.input, budget)
         ? textPreview(invocation.input)
         : invocation.input
-  const outputPreview = resultPreview(invocation)
-  const result = fileTool ? fileResultPreview(invocation, outputPreview) : outputPreview
+  const outputPreview = resultPreview(invocation, budget)
+  const result = fileTool ? fileResultPreview(invocation, outputPreview, budget) : outputPreview
   const inputChanged = input !== invocation.input
   const fileDetailChanged =
     fileTool && (inputChanged || result?.structured !== invocation.result?.structured)
   let { task } = invocation
   const finalOutput = task?.finalOutput
-  if (task && finalOutput && exceedsInlineBudget(finalOutput.output)) {
+  if (task && finalOutput && exceedsInlineBudget(finalOutput.output, budget)) {
     task = { ...task, finalOutput: { ...finalOutput, output: textPreview(finalOutput.output) } }
   }
   if (!inputChanged && result === invocation.result && task === invocation.task) return item
@@ -337,6 +340,7 @@ export function previewTimelineRow(
     row,
     epoch,
     instance,
-    display?.hideActivityTools === true || hideCompletedActivities
+    display?.hideActivityTools === true || hideCompletedActivities,
+    display?.windowed ? WINDOW_INLINE_BYTES : INLINE_BYTES
   )
 }

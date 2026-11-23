@@ -196,6 +196,36 @@ describe.each([
     expect(mem.writes.slice(writes).every((w) => w.dropPagesFrom === null)).toBe(true)
   })
 
+  test('large saved tool fields spend less of the small open window and remain expandable', async () => {
+    const output = 'sample output '.repeat(130) + 'original end'
+    const p = await TimelineProjection.open({
+      store: memoryStore().store,
+      history: buffered([
+        { kind: 'tool-call', id: 'x', name: 'Bash', input: { command: 'make test' } },
+        {
+          kind: 'tool-result',
+          toolUseId: 'x',
+          rawContent: output,
+          structured: null,
+          isError: false
+        }
+      ]),
+      agentStartedTurns
+    })
+    try {
+      const before = await p.openSnapshot('client')
+      const window = await p.openSnapshot('client', { windowed: true })
+      expect(before.state).toContain('original end')
+      expect(window.state).not.toContain('original end')
+      const row = decodeTimelineState(window.state).timeline[0]
+      if (row?.kind !== 'tool' || !row.invocation.toolDetail) throw new Error('missing tool detail')
+      const detail = await p.toolDetail(row.invocation.toolDetail, 0)
+      expect(JSON.parse(detail!.data).result.rawContent).toBe(output)
+    } finally {
+      await p.close()
+    }
+  })
+
   test('a small open window keeps older rows and summaries reachable across stored and in-memory pages', async () => {
     const mem = memoryStore()
     const history = buffered(events.slice(0, 6_000))
@@ -206,8 +236,8 @@ describe.each([
       const open = await p.openSnapshot('client', display)
       const state = decodeTimelineState(open.state)
       const oldState = decodeTimelineState(legacy.state)
-      expect(open.pageRows).toBe(16)
-      expect(resident(state)).toBeLessThan(32)
+      expect(open.pageRows).toBe(8)
+      expect(resident(state)).toBeLessThan(16)
       expect(jsonByteLength(open)).toBeLessThan(jsonByteLength(legacy))
       const last = open.summaries.length - 1
       const from = last * open.pageRows
@@ -967,7 +997,7 @@ test('file previews preserve change counts and search beyond the preview in seal
     expect(JSON.stringify(older)).not.toContain('HiddenSearchWord')
     expect(await projection.searchToolMatches('hiddensearchword', false)).toEqual({
       pages: [0],
-      windowedPages: [0, Math.floor((history.length - 2) / 16)],
+      windowedPages: [0, Math.floor((history.length - 2) / 8)],
       toolUseIds: ['older', 'newer']
     })
     expect(await projection.searchToolMatches('hiddensearchword', true)).toEqual({

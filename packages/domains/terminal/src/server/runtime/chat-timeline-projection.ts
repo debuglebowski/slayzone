@@ -45,6 +45,7 @@ import {
 } from '../../shared/chat-timeline-checkpoint'
 
 export { TIMELINE_PROJECTION_VERSION }
+export { packTimelineOpen } from '../../shared/chat-open-wire'
 import {
   pageSearchText,
   searchableText,
@@ -61,7 +62,7 @@ import { isRenderable } from '../../shared/chat-presentation'
 
 export const TIMELINE_PAGE_ROWS = 256
 /** Smaller wire pages reuse the stored rows and indexes. */
-const WINDOW_PAGE_ROWS = 16
+const WINDOW_PAGE_ROWS = 8
 const WINDOW_PAGE_BUDGET = 96 * 1024
 /** Sealed pages kept in memory besides the tail, most recently used. */
 const RESIDENT_PAGES = 8

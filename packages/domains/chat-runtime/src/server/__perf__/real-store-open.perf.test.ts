@@ -28,6 +28,7 @@ import {
   type AgentEvent
 } from '@slayzone/terminal-contracts'
 import {
+  packTimelineOpen,
   TimelineProjection,
   type TimelineHistorySource,
   type TimelineProjectionStore
@@ -145,7 +146,10 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
         })
         try {
           const window = await projection.openSnapshot('benchmark', { windowed: true })
-          const wire = JSON.stringify(window)
+          const packed = packTimelineOpen(window)
+          const wire = JSON.stringify(packed)
+          const checkpoint = JSON.parse(window.state)
+          const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
           const page = window.summaries.length - 1
           const older =
             page < 0
@@ -164,6 +168,11 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
               kind: 'open',
               openBytes: Buffer.byteLength(wire),
               deflateBytes: deflateRawSync(wire, { level: 3, memLevel: 6 }).length,
+              rowCount: checkpoint.tail.length,
+              tailBytes: bytes(checkpoint.tail),
+              summaryBytes: bytes(packed.summaries),
+              indexBytes: bytes(checkpoint.state),
+              legacyWindowBytes: bytes(window),
               olderPageBytes: older ? Buffer.byteLength(JSON.stringify(older)) : null
             }) + '\n'
           )
@@ -246,10 +255,15 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
       const deflateMs = performance.now() - t
       t = performance.now()
       const window = await restored.openSnapshot('benchmark', { windowed: true })
-      const windowWire = JSON.stringify(window)
+      const packedWindow = packTimelineOpen(window)
+      const windowWire = JSON.stringify(packedWindow)
       const windowSnapshotMs = performance.now() - t
       t = performance.now()
-      const windowState = decodeTimelineState(window.state)
+      const windowState = decodeTimelineState(
+        typeof packedWindow.state === 'string'
+          ? packedWindow.state
+          : JSON.stringify(packedWindow.state)
+      )
       const windowDecodeMs = performance.now() - t
       t = performance.now()
       const windowWsBytes = deflateRawSync(windowWire, { level: 3, memLevel: 6 }).length
@@ -341,7 +355,7 @@ test.skipIf(!STATE_DIR || !existsSync(STATE_DIR))(
           Math.max(0, ...windowRows.map((row) => Buffer.byteLength(JSON.stringify(row))))
         ),
         windowIndexesKB: kb(Buffer.byteLength(JSON.stringify(JSON.parse(window.state).state))),
-        windowSummariesKB: kb(Buffer.byteLength(JSON.stringify(window.summaries))),
+        windowSummariesKB: kb(Buffer.byteLength(JSON.stringify(packedWindow.summaries))),
         snapshotGzipKB: kb(gzipSync(wire).length),
         snapshotStateKB: kb(Buffer.byteLength(snapshot.state)),
         summaries: sealed,

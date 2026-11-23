@@ -6,7 +6,8 @@ export const chatHistoryDisplaySchema = z.object({
   hideActivities: z.literal(true).optional(),
   hideActivityMessages: z.literal(true).optional(),
   hideActivityTools: z.literal(true).optional(),
-  windowed: z.literal(true).optional()
+  windowed: z.literal(true).optional(),
+  packedOpen: z.literal(true).optional()
 })
 export type ChatHistoryDisplay = z.infer<typeof chatHistoryDisplaySchema>
 
@@ -19,7 +20,8 @@ export function toolPreviewVersion(version: string, display?: ChatHistoryDisplay
   const messages = display?.hideActivityMessages ? '+hide-activity-messages' : ''
   const tools = display?.hideActivityTools ? '+hide-activity-tools' : ''
   const window = display?.windowed ? '+windowed' : ''
-  return `${version}+tool-previews-2${thinking}${activities}${messages}${tools}${window}`
+  const packed = display?.packedOpen ? '+packed-open' : ''
+  return `${version}+tool-previews-2${thinking}${activities}${messages}${tools}${window}${packed}`
 }
 
 export function parseToolPreviewVersion(
@@ -29,17 +31,18 @@ export function parseToolPreviewVersion(
   const base = toolPreviewVersion(version)
   if (!requested.startsWith(base)) return null
   const flags =
-    /^(\+hide-thinking)?(\+hide-activities)?(\+hide-activity-messages)?(\+hide-activity-tools)?(\+windowed)?$/.exec(
+    /^(\+hide-thinking)?(\+hide-activities)?(\+hide-activity-messages)?(\+hide-activity-tools)?(\+windowed)?(\+packed-open)?$/.exec(
       requested.slice(base.length)
     )
   if (!flags) return null
-  const [, thinking, activities, messages, tools, window] = flags
+  const [, thinking, activities, messages, tools, window, packed] = flags
   return {
     ...(thinking ? { hideThinking: true } : {}),
     ...(activities ? { hideActivities: true } : {}),
     ...(messages ? { hideActivityMessages: true } : {}),
     ...(tools ? { hideActivityTools: true } : {}),
-    ...(window ? { windowed: true } : {})
+    ...(window ? { windowed: true } : {}),
+    ...(packed ? { packedOpen: true } : {})
   }
 }
 
