@@ -1,6 +1,51 @@
 # Changelog
 
 
+## v0.43.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.42.0...v0.43.0)
+
+### 🚀 Enhancements
+
+- **artifacts:** Isolate HTML preview storage ([b01836004](https://github.com/debuglebowski/slayzone/commit/b01836004))
+- **cli:** Chat send --deliver queue|steer, required mid-turn ([58b3e2760](https://github.com/debuglebowski/slayzone/commit/58b3e2760))
+- **computer:** Manage agent memory pressure ([10b1d5cb1](https://github.com/debuglebowski/slayzone/commit/10b1d5cb1))
+
+### 🔥 Performance
+
+- **chat:** Accelerate chat history opens ([6a5bb02dd](https://github.com/debuglebowski/slayzone/commit/6a5bb02dd))
+- **chat:** Trim cold reads and wire payloads ([8730c23d4](https://github.com/debuglebowski/slayzone/commit/8730c23d4))
+- **chat:** Send smaller history windows ([8cde72709](https://github.com/debuglebowski/slayzone/commit/8cde72709))
+- **editor:** Sync changed file content ([a4f4fc20b](https://github.com/debuglebowski/slayzone/commit/a4f4fc20b))
+- **mobile:** Patch changed board rows ([1a5edf3f2](https://github.com/debuglebowski/slayzone/commit/1a5edf3f2))
+- **artifacts:** Stream binary range replies ([ecb7a80b0](https://github.com/debuglebowski/slayzone/commit/ecb7a80b0))
+- **chat:** Pack open snapshots ([9378fd04f](https://github.com/debuglebowski/slayzone/commit/9378fd04f))
+
+### 🩹 Fixes
+
+- **terminal:** Reload task tabs after hub reconnect ([5a09c61ec](https://github.com/debuglebowski/slayzone/commit/5a09c61ec))
+- **web-shell:** Open links in viewer browser ([2f8cc6414](https://github.com/debuglebowski/slayzone/commit/2f8cc6414))
+- **agent-panels:** Run global agent on the project's own hub ([274fa7bd6](https://github.com/debuglebowski/slayzone/commit/274fa7bd6))
+- **chat:** Refuse steer while a stop is pending ([9b2758e07](https://github.com/debuglebowski/slayzone/commit/9b2758e07))
+- **editor:** Queued saves use prior result; no stale-offset edits after failed save ([646763cc5](https://github.com/debuglebowski/slayzone/commit/646763cc5))
+- **computer:** Memory gating remote-only, foreground never waits, stable host config key ([68b429109](https://github.com/debuglebowski/slayzone/commit/68b429109))
+
+### 🏡 Chore
+
+- **mobile:** Bump iOS build number to 4 ([181d322b6](https://github.com/debuglebowski/slayzone/commit/181d322b6))
+- **nix:** Update sources to 0.42.0 ([e5305f4fa](https://github.com/debuglebowski/slayzone/commit/e5305f4fa))
+- **mobile:** Pin Apple team id ([fd95fe040](https://github.com/debuglebowski/slayzone/commit/fd95fe040))
+
+### ✅ Tests
+
+- **migrations:** V0.42.0 persona ([7357f5c63](https://github.com/debuglebowski/slayzone/commit/7357f5c63))
+- Update stale expectations, register suite, fix lint ([8b1e2dec2](https://github.com/debuglebowski/slayzone/commit/8b1e2dec2))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Ubuntu
+
 ## v0.42.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.41.1...v0.42.0)

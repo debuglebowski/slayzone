@@ -1,5 +1,42 @@
 [
   {
+    "version": "0.43.0",
+    "date": "2026-11-23",
+    "tagline": "Snappier chats",
+    "items": [
+      {
+        "category": "breaking",
+        "title": "`slay chat send` needs --deliver mid-turn",
+        "description": "`--steer` is replaced by `--deliver queue|steer`, and sending while the agent is mid-turn now requires choosing one, so messages never silently queue behind a long turn."
+      },
+      {
+        "category": "feature",
+        "title": "HTML artifacts keep their storage",
+        "description": "Each HTML artifact preview gets its own persistent browser storage, so saved state survives reopening while staying sandboxed from other artifacts."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster chats and files",
+        "description": "Chat history opens faster and sends less data, open files sync only what changed, and large binary artifacts stream in pieces."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal tabs recover after reconnect",
+        "description": "Task tabs that failed to load after sleep or a dropped connection now reload on reopen and show a Retry instead of staying empty."
+      },
+      {
+        "category": "fix",
+        "title": "Safer file saves",
+        "description": "Edits made after a failed save no longer land at the wrong position, and queued saves build on the latest saved version."
+      },
+      {
+        "category": "fix",
+        "title": "Steer waits for Stop",
+        "description": "Steering a chat while a stop is still pending is refused instead of racing it."
+      }
+    ]
+  },
+  {
     "version": "0.42.0",
     "date": "2026-11-19",
     "tagline": "Steadier chats",
