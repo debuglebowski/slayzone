@@ -107,6 +107,7 @@ const REAP_ESCALATE_MS = 2_000
 const WRITE_ID_MEMORY = 256
 
 interface ProcSession {
+  admitted: boolean
   cwd: string
   taskId?: string
   erased?: boolean
@@ -248,6 +249,9 @@ export function createProcHandlers(
     // (its port is still taken) — wait for the reap.
     if (!reapDone) return orphansReaped.then(() => procSpawn(rawParams))
     if (!params.admission) return startProc(params, null)
+    const live = procs.get(params.sessionId)
+    if (live && params.spawnId !== undefined && live.spawnId === params.spawnId)
+      return { pid: live.child.pid ?? null }
     // An agent start: wait for a slot in the computer-wide queue (restoring many
     // chat tabs must not start every agent at once). The reply waits with it.
     const prior = queued.get(params.sessionId)
@@ -274,19 +278,23 @@ export function createProcHandlers(
       prior.resolve(promise)
     }
     queued.set(params.sessionId, item)
-    item.ticket = admission.enqueue(params.admission, (slot) => {
-      if (queued.get(params.sessionId) !== item) {
-        slot.release()
-        return
-      }
-      queued.delete(params.sessionId)
-      try {
-        item.resolve(startProc(params, slot))
-      } catch (err) {
-        slot.release()
-        item.reject(err)
-      }
-    })
+    item.ticket = admission.enqueue(
+      params.admission,
+      (slot) => {
+        if (queued.get(params.sessionId) !== item) {
+          slot.release()
+          return
+        }
+        queued.delete(params.sessionId)
+        try {
+          item.resolve(startProc(params, slot))
+        } catch (err) {
+          slot.release()
+          item.reject(err)
+        }
+      },
+      () => procs.get(params.sessionId)?.admitted === true
+    )
     return promise
   }
 
@@ -356,7 +364,10 @@ export function createProcHandlers(
     if (params.spawnId !== undefined) {
       const live = procs.get(params.sessionId)
       // The hub re-sent an attempt whose reply it lost: this process IS it.
-      if (live && live.spawnId === params.spawnId) return { pid: live.child.pid ?? null }
+      if (live && live.spawnId === params.spawnId) {
+        slot?.release()
+        return { pid: live.child.pid ?? null }
+      }
       if (tombstones.ran(params.sessionId, params.spawnId)) {
         throw new Error(
           `proc.spawn ${params.sessionId}: attempt ${params.spawnId} already ran and exited — not starting it twice`
@@ -406,9 +417,11 @@ export function createProcHandlers(
     const invocation = params.shell
       ? buildShellInvocation(params.command)
       : { file: params.command, args: params.args ?? [] }
+    let launch
     let child: ChildProcess
     try {
-      child = spawnProcess(invocation.file, invocation.args, {
+      launch = slot ? ctx.launchAgent?.(invocation.file, invocation.args) : undefined
+      child = spawnProcess(launch?.file ?? invocation.file, launch?.args ?? invocation.args, {
         ...(cwd ? { cwd } : {}),
         env,
         // stdin PIPED (was 'ignore') so `proc.write` can reach the child.
@@ -418,6 +431,7 @@ export function createProcHandlers(
         detached: PROCESS_TREE_DETACHED
       })
     } catch (error) {
+      launch?.close()
       capability?.revoke()
       throw error
     }
@@ -427,6 +441,7 @@ export function createProcHandlers(
       taskId,
       revokeCli: capability?.revoke,
       child,
+      admitted: slot !== null && child.pid !== undefined,
       buffer,
       ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {}),
       stdinBroken: null,
@@ -446,13 +461,18 @@ export function createProcHandlers(
     // for this sessionId. This dedupes the error+close double-fire on a failed
     // spawn (ENOENT emits both) and prevents a superseded process from tearing
     // down its replacement.
+    const agent = child.pid === undefined ? undefined : slot?.track(child.pid)
     let groupForgotten = false
+    let settled = false
     if (ledger && typeof child.pid === 'number') void ledger.record(child.pid)
     const settle = (payload: {
       exitCode: number | null
       signal: string | null
       error?: string
     }): void => {
+      if (settled) return
+      settled = true
+      launch?.close()
       capability?.revoke()
       releaseSlot(session)
       if (typeof child.pid === 'number' && !groupForgotten) {
@@ -461,9 +481,15 @@ export function createProcHandlers(
         // sweeps that), but the exit is reported: the hub can Start again.
         ledger?.forget(child.pid)
       }
-      if (procs.get(params.sessionId) !== session) return
+      if (procs.get(params.sessionId) !== session) {
+        agent?.exit()
+        return
+      }
       procs.delete(params.sessionId)
-      if (session.erased) return
+      if (session.erased) {
+        agent?.exit()
+        return
+      }
       const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
         sessionId: params.sessionId,
         ...tag,
@@ -478,6 +504,7 @@ export function createProcHandlers(
         // The hub never got this exit, so it may be missing stdout too.
         ...(delivered ? {} : { buffer: session.buffer })
       })
+      agent?.exit()
     }
 
     const stdoutDecoder = new StringDecoder('utf8')
@@ -564,6 +591,12 @@ export function createProcHandlers(
    */
   async function procKill(rawParams: unknown): Promise<{ ok: true; clean: boolean }> {
     const params = procKillParamsSchema.parse(rawParams)
+    const waiting = queued.get(params.sessionId)
+    if (waiting && (params.spawnId === undefined || waiting.spawnId === params.spawnId)) {
+      queued.delete(params.sessionId)
+      admission.cancel(waiting.ticket)
+      waiting.reject(new Error('Process start was cancelled'))
+    }
     const pending = starting.get(params.sessionId)
     if (pending && (params.spawnId === undefined || params.spawnId === pending.spawnId))
       pending.cancelled = true

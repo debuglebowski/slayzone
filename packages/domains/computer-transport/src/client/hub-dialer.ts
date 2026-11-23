@@ -22,6 +22,7 @@ import {
   enrollResultSchema,
   type EnrollResult,
   COMPUTER_PROTOCOL_VERSION,
+  type ComputerHealth,
   ComputerTransportErrorCodes,
   helloResultSchema,
   HubToComputerMethods,
@@ -138,6 +139,7 @@ export interface HubDialerOptions {
   ) => Promise<unknown> | unknown
   /** Default 15s; `0` disables the loop. */
   heartbeatIntervalMs?: number
+  computerHealth?: () => ComputerHealth | undefined | Promise<ComputerHealth | undefined>
   /** Reply window for one heartbeat before the socket is torn down. Default 10s. */
   heartbeatTimeoutMs?: number
   /** Default timeout for computer→hub requests. Default 30s. */
@@ -595,12 +597,20 @@ export class HubDialer {
     // so it is not callable here. The intent is also inverted: a heartbeat that
     // paused while the window is hidden would let the hub time the connection
     // out precisely when nobody is watching. This must run regardless.
-    // eslint-disable-next-line no-restricted-syntax
-    conn.heartbeatTimer = setInterval(() => {
+    const send = async () => {
+      let health: ComputerHealth | undefined
+      try {
+        health = await this.opts.computerHealth?.()
+      } catch {
+        // A slow or replaced session host cannot interrupt connector liveness.
+      }
+      if (conn.rpc.isDisposed) return
+      await conn.rpc.request(ComputerToHubMethods.heartbeat, { ts: Date.now(), health }, timeoutMs)
+    }
+    const tick = () => {
       if (conn.heartbeatInFlight || conn.rpc.isDisposed) return
       conn.heartbeatInFlight = true
-      conn.rpc
-        .request(ComputerToHubMethods.heartbeat, { ts: Date.now() }, timeoutMs)
+      void send()
         .then(() => {
           conn.heartbeatInFlight = false
         })
@@ -610,8 +620,11 @@ export class HubDialer {
           this.log('computer dialer heartbeat failed, dropping connection', { error: String(err) })
           conn.ws.terminate()
         })
-    }, intervalMs)
+    }
+    // eslint-disable-next-line no-restricted-syntax
+    conn.heartbeatTimer = setInterval(tick, intervalMs)
     conn.heartbeatTimer.unref?.()
+    if (this.opts.computerHealth) tick()
   }
 
   private handleHubRequest(

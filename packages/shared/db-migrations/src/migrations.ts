@@ -5961,6 +5961,12 @@ export const migrations: Migration[] = [
       // task_computer_moves carries a task_id: fenced like every such table.
       installContentErasureFences(db)
     }
+  },
+  {
+    version: 224,
+    up: (db) => {
+      db.exec('ALTER TABLE computers ADD COLUMN health_json TEXT')
+    }
   }
 ]
 

@@ -862,6 +862,20 @@ export function computerCommand(): Command {
       // without it the existing unit is reused verbatim.
       if (opts.upgrade) {
         const bin = resolveServiceBin('computer', root, true)
+        if (existsSync(unitPath('computer-host', name, backend))) {
+          writeUnit(
+            {
+              kind: 'computer-host',
+              name,
+              root,
+              command: bin.command,
+              args: [...bin.args, '--session-host'],
+              logDir,
+              ...(bin.env ? { env: bin.env } : {})
+            },
+            backend
+          )
+        }
         writeUnit(
           {
             kind: 'computer',

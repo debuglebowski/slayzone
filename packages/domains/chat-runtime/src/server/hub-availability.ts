@@ -8,6 +8,7 @@ import { computerStanding, type ComputerStanding } from '@slayzone/computers/ser
 import type { ChatOwnershipStore } from './hub-ownership'
 import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import { chatComputer } from './hub-chat-computer'
+import { parseComputerHealth } from '@slayzone/computer-transport/shared'
 
 /** 'unavailable', with why: its code, and the text for clients that predate codes. */
 const unavailable = (
@@ -46,8 +47,8 @@ export function createChatAvailability(opts: {
   heldBy?(conversationId: string, ownerId: string): string | null
 }) {
   return async (tabId: string): Promise<ChatAvailability> => {
-    const tab = await opts.db.get<{ task_id: string; state: string | null }>(
-      'SELECT t.task_id,l.state FROM terminal_tabs t LEFT JOIN chat_task_lifecycle l ON l.task_id=t.task_id WHERE t.id=?',
+    const tab = await opts.db.get<{ task_id: string; state: string | null; agent_state: string }>(
+      'SELECT t.task_id,t.agent_state,l.state FROM terminal_tabs t LEFT JOIN chat_task_lifecycle l ON l.task_id=t.task_id WHERE t.id=?',
       [tabId]
     )
     if (!tab) throw new Error('Unknown chat tab')
@@ -94,11 +95,26 @@ export function createChatAvailability(opts: {
       const held = holder
         ? await opts.db.get<{ name: string }>('SELECT name FROM computers WHERE id=?', [holder])
         : undefined
+      const last = await opts.db.get<{ last_seen_at: number | null; health_json: string | null }>(
+        'SELECT last_seen_at,health_json FROM computers WHERE id=?',
+        [computer.id]
+      )
+      const health = parseComputerHealth(last?.health_json)
       return {
         state: 'offline',
         computer,
         ...(opts.recovering?.(computer.id) ? { recovering: true } : {}),
-        ...(holder && held ? { heldBy: { id: holder, name: held.name } } : {})
+        ...(holder && held ? { heldBy: { id: holder, name: held.name } } : {}),
+        ...(last?.last_seen_at != null ? { lastSeenAt: last.last_seen_at } : {}),
+        ...(health
+          ? {
+              lastMemoryPercent: Math.round(
+                100 * (1 - health.memoryAvailable / health.memoryTotal)
+              ),
+              lastMemoryPressure: health.pressure,
+              lastLiveAgents: health.live
+            }
+          : {})
       }
     }
     if (opts.chatRuntimeReady?.(computer.id) === false) return { state: 'upgrading', computer }
@@ -112,6 +128,7 @@ export function createChatAvailability(opts: {
     return {
       state: 'ready',
       computer,
+      ...(tab.agent_state === 'auto_stopped' ? { hibernated: true } : {}),
       ...(generation ? { recoveryGeneration: generation } : {})
     }
   }

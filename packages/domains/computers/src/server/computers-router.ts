@@ -12,6 +12,7 @@ import {
   type DirectRtcConnectResult
 } from '../shared/direct-link'
 import { TRPCError } from '@trpc/server'
+import { parseComputerHealth } from '@slayzone/computer-transport/shared'
 import {
   router,
   publicProcedure,
@@ -203,6 +204,20 @@ export const computersRouter = router({
       // decoration, and a computer with no host id is legitimately ungrouped.
       const machines = await storeMachinesByHostId(ctx.db)
       const upgrades = await getComputerUpgradeStatuses(ctx.db)
+      // The agent state survives a computer restart even when its in-memory
+      // inventory is gone. Keep the persisted count visible until those tabs wake.
+      const hibernated = new Map(
+        (
+          await ctx.db.all<{ computer_id: string; count: number }>(
+            `SELECT o.computer_id, COUNT(*) AS count
+             FROM terminal_tabs t
+             JOIN chat_tab_bindings b ON b.tab_id = t.id
+             JOIN chat_ownership o ON o.id = b.conversation_id
+            WHERE t.agent_state = 'auto_stopped' AND o.state = 'active'
+            GROUP BY o.computer_id`
+          )
+        ).map((r) => [r.computer_id, r.count])
+      )
       const deps = getComputersDepsOrNull()
       const gateway = deps?.getGateway()
       const live = gateway?.listComputers() ?? []
@@ -212,6 +227,7 @@ export const computersRouter = router({
         .filter((row) => visible.has(row.id))
         .map((row) => {
           const conn = liveById.get(row.id)
+          const health = parseComputerHealth(row.health_json)
           return {
             id: row.id,
             name: row.name,
@@ -222,6 +238,14 @@ export const computersRouter = router({
               | undefined,
             capabilities: parseCapabilities(row.capabilities_json),
             lastSeenAt: row.last_seen_at,
+            ...(health
+              ? {
+                  health: {
+                    ...health,
+                    hibernated: Math.max(health.hibernated, hibernated.get(row.id) ?? 0)
+                  }
+                }
+              : {}),
             createdAt: row.created_at,
             connected: conn !== undefined,
             usable: usableIds.has(row.id),

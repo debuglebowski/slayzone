@@ -145,6 +145,49 @@ export interface ComputerConfig {
   directListenAddress?: string
   /** The authority clients dial for the direct link (opt-in; a front end terminates TLS). */
   directPublicAddress?: string
+  /** Device-local agent resource policy. Omitted fields use automatic defaults. */
+  agentResources?: ComputerAgentResources
+}
+
+export interface ComputerAgentResources {
+  maxLiveAgents?: 'auto' | number
+  hibernate?: boolean
+  minAvailableMemoryPercent?: number
+  idleBeforeHibernateMs?: number
+  warmPoolSize?: number
+  startConcurrency?: number
+  pinnedTaskIds?: string[]
+}
+
+export function readComputerAgentResources(value: unknown): ComputerAgentResources | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const policy: ComputerAgentResources = {}
+  const integer = (key: keyof ComputerAgentResources, min: number, max: number) => {
+    const value = raw[key]
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
+      ? value
+      : undefined
+  }
+  const maxLiveAgents = raw.maxLiveAgents === 'auto' ? 'auto' : integer('maxLiveAgents', 1, 10_000)
+  const minAvailableMemoryPercent = integer('minAvailableMemoryPercent', 1, 95)
+  const idleBeforeHibernateMs = integer('idleBeforeHibernateMs', 0, Number.MAX_SAFE_INTEGER)
+  const warmPoolSize = integer('warmPoolSize', 0, 10_000)
+  const startConcurrency = integer('startConcurrency', 1, 128)
+  if (maxLiveAgents !== undefined) policy.maxLiveAgents = maxLiveAgents
+  if (typeof raw.hibernate === 'boolean') policy.hibernate = raw.hibernate
+  if (minAvailableMemoryPercent !== undefined)
+    policy.minAvailableMemoryPercent = minAvailableMemoryPercent
+  if (idleBeforeHibernateMs !== undefined) policy.idleBeforeHibernateMs = idleBeforeHibernateMs
+  if (warmPoolSize !== undefined) policy.warmPoolSize = warmPoolSize
+  if (startConcurrency !== undefined) policy.startConcurrency = startConcurrency
+  if (Array.isArray(raw.pinnedTaskIds))
+    policy.pinnedTaskIds = [
+      ...new Set(
+        raw.pinnedTaskIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      )
+    ]
+  return policy
 }
 
 /**
@@ -299,6 +342,8 @@ function coerceComputerConfig(raw: Record<string, unknown>): ComputerConfig {
   // Coerced as-is; the computer's schema refuses anything but a bare authority.
   if (typeof raw.directListenAddress === 'string') cfg.directListenAddress = raw.directListenAddress
   if (typeof raw.directPublicAddress === 'string') cfg.directPublicAddress = raw.directPublicAddress
+  const agentResources = readComputerAgentResources(raw.agentResources)
+  if (agentResources) cfg.agentResources = agentResources
   return cfg
 }
 

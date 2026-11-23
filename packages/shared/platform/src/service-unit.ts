@@ -469,6 +469,8 @@ export function renderSystemdUnit(spec: ServiceUnitSpec): string {
   const envLines = unitEnv(spec)
     .map(([k, v]) => `Environment=${k}=${v}`)
     .join('\n')
+  const agentIsolation =
+    spec.kind === 'hub' ? '' : '\nDelegate=memory\nDelegateSubgroup=supervisor\nOOMPolicy=continue'
   return `[Unit]
 Description=${kind.description} (${spec.name})
 Documentation=https://github.com/debuglebowski/slayzone
@@ -481,6 +483,7 @@ ${envLines}
 ExecStart=${exec}
 Restart=on-failure
 RestartSec=2
+OOMScoreAdjust=-750${agentIsolation}
 # stdout/stderr go to journald; read them with \`${kind.logsCommand} ${spec.name}\`.
 StandardOutput=journal
 StandardError=journal

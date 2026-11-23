@@ -16,7 +16,10 @@ import {
   useChatRestorationTracker
 } from './chat-restoration'
 import { CornerDownLeft } from 'lucide-react'
-import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
+import {
+  useChatAvailability,
+  useResumeHibernatedChat
+} from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
 import { ChatOpenFailure } from './ChatOpenFailure'
 import { resolveCitedPath } from './codex-file-citations'
@@ -53,7 +56,8 @@ import {
   selectBackgroundSubAgents,
   type BackgroundSubAgent,
   selectCodexPlanReview,
-  useChatSession
+  useChatSession,
+  useSessionStateRaw
 } from '@slayzone/terminal/client'
 import {
   chatCapabilitiesForMode,
@@ -567,6 +571,19 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       },
       clearQueue: composer.clearQueue
     })
+    const liveAgentState = useSessionStateRaw(`${taskId}:${tabId}`)
+    const hibernated = liveAgentState === 'hibernated' ||
+      (liveAgentState === undefined && storage.status?.hibernated === true)
+    useResumeHibernatedChat({
+      tabId,
+      active: isActive,
+      ready: !hydrating && !loadError && !hydrateError && storage.status?.state === 'ready',
+      hibernated,
+      resume: () => {
+        void chatApi.start({ tabId, taskId, mode, cwd, providerFlagsOverride, reason: 'user' })
+          .catch(() => undefined)
+      }
+    })
     const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
     const handleReset = useCallback(() => {
       if (!resetting) setResetConfirmOpen(true)
@@ -963,6 +980,11 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           )
                         ) : (
                           <ChatStorageNotice status={storage.status} onRetry={storage.retry} />
+                        )}
+                        {hibernated && (
+                          <p role="status" className="border-b px-4 py-2 text-xs text-muted-foreground">
+                            Hibernated · resumes on open
+                          </p>
                         )}
                         <ChatTimeline
                           overrideNotice={overrideNotice}

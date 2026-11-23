@@ -24,6 +24,7 @@ export interface ComputerRecord {
   auth_key_id: string | null
   /** Last heartbeat, epoch ms. NULL until first seen. */
   last_seen_at: number | null
+  health_json?: string | null
   created_at: number
   revoked_at: number | null
   /** When it was disabled (v194): enrolled and connected, but given no new work.

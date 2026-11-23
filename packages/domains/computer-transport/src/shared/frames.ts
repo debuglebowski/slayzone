@@ -203,7 +203,8 @@ export type RequestActor = z.infer<typeof requestActorSchema>
 export const ComputerToHubMethods = {
   enroll: 'enroll',
   hello: 'hello',
-  heartbeat: 'heartbeat'
+  heartbeat: 'heartbeat',
+  chatHibernateCheck: 'chat.hibernateCheck'
 } as const
 
 /**
@@ -379,10 +380,40 @@ export const helloResultSchema = z.object({
 })
 export type HelloResult = z.infer<typeof helloResultSchema>
 
+export const computerHealthSchema = z.object({
+  sampledAt: z.number().int().nonnegative(),
+  memoryTotal: z.number().int().positive(),
+  memoryAvailable: z.number().int().nonnegative(),
+  memoryPressure: z.number().min(0).max(100).nullable(),
+  cpuPercent: z.number().min(0).max(100).nullable(),
+  pressure: z.boolean(),
+  live: z.number().int().nonnegative(),
+  hibernated: z.number().int().nonnegative(),
+  queued: z.number().int().nonnegative(),
+  warm: z.number().int().nonnegative(),
+  cap: z.number().int().positive(),
+  oomIsolation: z.boolean()
+})
+export type ComputerHealth = z.infer<typeof computerHealthSchema>
+
+export function parseComputerHealth(json: string | null | undefined): ComputerHealth | undefined {
+  if (!json) return undefined
+  try {
+    return computerHealthSchema.safeParse(JSON.parse(json)).data
+  } catch {
+    return undefined
+  }
+}
+
+export const chatHibernateCheckParamsSchema = z.object({
+  tabId: z.string().min(1).max(512)
+})
+
 /** Liveness probe; also lets the computer detect an unresponsive hub. */
 export const heartbeatParamsSchema = z.object({
   /** Sender wall-clock ms, for skew diagnostics. */
-  ts: z.number().optional()
+  ts: z.number().optional(),
+  health: computerHealthSchema.optional()
 })
 export type HeartbeatParams = z.infer<typeof heartbeatParamsSchema>
 
@@ -893,6 +924,31 @@ export const HubToComputerMethods = {
 
 /** Reserved method namespaces for future hub → computer exec commands. */
 export const RESERVED_HUB_METHOD_PREFIXES = ['pty.', 'fs.', 'git.', 'proc.', 'project.'] as const
+
+/** These requests can wait for memory or a live-agent slot before a process exists. */
+export function mayWaitForAgentAdmission(method: string, params: unknown): boolean {
+  if (method === HubToComputerMethods.ptyWarmSpawn) return true
+  if (!params || typeof params !== 'object') return false
+  if (method === HubToComputerMethods.procSpawn || method === HubToComputerMethods.ptySpawn)
+    return (
+      'admission' in params &&
+      (params.admission === 'foreground' || params.admission === 'background')
+    )
+  if (
+    method !== HubToComputerMethods.chatRequest ||
+    !('kind' in params) ||
+    params.kind !== 'invoke'
+  )
+    return false
+  const value = 'value' in params ? params.value : undefined
+  if (!value || typeof value !== 'object') return false
+  return (
+    'target' in value &&
+    value.target === 'ops' &&
+    'method' in value &&
+    (value.method === 'start' || value.method === 'restart')
+  )
+}
 
 /**
  * Idempotency key for ONE spawn attempt, minted by the hub.

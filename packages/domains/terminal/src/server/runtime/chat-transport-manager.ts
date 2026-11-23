@@ -128,7 +128,7 @@ export type { ChatTurnState }
  * (`reportedStateOf`); the turn state alone gates sends, the queue and the
  * watchdog, so background work never holds a message back.
  */
-export type ChatTerminalState = ChatTurnState | 'background'
+export type ChatTerminalState = ChatTurnState | 'background' | 'hibernated'
 
 /**
  * Where a tab's saved events live (insert-only; read back one bounded page at a
@@ -256,6 +256,8 @@ class HydrateScan {
 export interface TransportDeps {
   /** Recheck durable lifecycle/identity fences at the actual spawn boundary. */
   beforeSpawn?: (tabId: string) => void | Promise<void>
+  /** This host owns the admission queue. Its memory wait has no startup deadline. */
+  waitsForAdmission?: boolean
   userInputTracker: {
     mark(sessionId: string): void
     clear(sessionId: string): void
@@ -418,6 +420,7 @@ export interface ChatSessionInfo {
   /** Exact live process generation, for transient control requests. */
   spawnId?: string
   storageUnavailable?: boolean
+  hibernated?: true
   sessionId: string
   tabId: string
   taskId: string
@@ -486,6 +489,7 @@ interface ChatTab {
   startedAt: string
   /** Last event flow timestamp (ms). Drives idle-age threshold in agent-status panel. */
   lastOutputTime: number
+  hibernated?: boolean
   /** The turn state machine (gates sends, the queue drainer, the watchdog). */
   terminalState: ChatTurnState
   /** The state clients were last told (`reportedStateOf`). */
@@ -1266,11 +1270,11 @@ export function createChatTransport(
     return authorityOf(tab)?.state ?? tab.terminalState
   }
 
-  function reportedStateOf(tab: ChatTab): ChatTerminalState {
+  function reportedStateOf(tab: ChatTab): ChatTurnState | 'background' {
     return authorityOf(tab)?.reportedState ?? runtimeReportedState(tab)
   }
 
-  function runtimeReportedState(tab: ChatTab): ChatTerminalState {
+  function runtimeReportedState(tab: ChatTab): ChatTurnState | 'background' {
     if (
       tab.terminalState === 'idle' &&
       tab.pendingPrompts.size === 0 &&
@@ -1288,7 +1292,7 @@ export function createChatTransport(
       return
     }
     const sessionId = stateKey(tab)
-    const next = reportedStateOf(tab)
+    const next = tab.hibernated ? 'hibernated' : reportedStateOf(tab)
     const old = tab.reportedState
     if (next !== old) {
       tab.reportedState = next
@@ -1369,7 +1373,9 @@ export function createChatTransport(
    */
   function getSessionTerminalState(tabId: string): ChatTurnState | null {
     const tab = tabs.get(tabId)
-    return tab ? turnStateOf(tab) : null
+    if (!tab) return null
+    // The queue drainer starts a dormant process only when there's a message ready.
+    return tab.hibernated ? 'not-spawned' : turnStateOf(tab)
   }
 
   /**
@@ -1419,7 +1425,7 @@ export function createChatTransport(
   /** The status the server answers and publishes: the model's or the runtime's (`authorityOf`). */
   function statusOf(
     tab: ChatTab
-  ): ChatTurnStatus & { reportedState: ChatTerminalState; mainTurnOpen: boolean } {
+  ): ChatTurnStatus & { reportedState: ChatTurnState | 'background'; mainTurnOpen: boolean } {
     const model = authorityOf(tab)
     if (model)
       return {
@@ -1460,6 +1466,7 @@ export function createChatTransport(
       tab.closed ||
       tab.ended ||
       tab.storageFailed ||
+      tab.hibernated ||
       publicationBusy.has(tab) ||
       tab.respawning ||
       permissionChanges.has(tab.tabId)
@@ -2893,7 +2900,7 @@ export function createChatTransport(
       ensureReady: async () => {
         await permissionChanges.get(tab.tabId)
         if (tab.closed) throw new ChatTransportError('This chat tab was closed.')
-        await ensureSpawned(tab.tabId)
+        await ensureSpawned(tab.tabId, { prioritize: true })
         const proc = current()
         if (!proc || !proc.ready)
           throw new ChatTransportError(`${tab.backend.displayName} is not running.`)
@@ -2977,8 +2984,11 @@ export function createChatTransport(
         'Chat storage is unavailable. Restart chat after fixing storage.'
       )
     while (tab.respawning) await tab.respawning.catch(() => undefined)
+    if (tab.hibernated && opts.prioritize === false) return toInfo(tab)
+    if (tab.hibernated || opts.prioritize) tab.respawnOpts.admission = 'foreground'
     const proc = tab.proc
     if (proc && !proc.ended && !proc.replaced) {
+      if (!proc.spawned && opts.prioritize) deps.backend?.prioritize?.(stateKey(tab))
       await proc.readyPromise
       await flushEvents(tab)
       return toInfo(tab)
@@ -3055,10 +3065,11 @@ export function createChatTransport(
     }
 
     tab.ended = false
+    tab.hibernated = false
     // Move out of `not-spawned` / `dead`. `onSpawn` promotes to `idle` once the
     // process is confirmed to run.
     transitionState(tab, 'starting')
-    armWatchdog(tab)
+    if (!deps.waitsForAdmission) armWatchdog(tab)
 
     let handle: ChatProcHandle
     let rawChild: ChildProcess | null = null
@@ -3167,6 +3178,7 @@ export function createChatTransport(
         },
         onSpawned: async (p) => {
           if (tab.proc !== p || tab.closed) return
+          if (deps.waitsForAdmission) armWatchdog(tab)
           await routeHostEvent(tab, { kind: 'session-spawn', spawnId: p.spawnId })
           if (tab.proc !== p || tab.closed) return
           // Production leaves `starting` once the spawn row is published; the
@@ -4690,6 +4702,7 @@ export function createChatTransport(
     }
     tab.shadow?.close()
     tab.work.clear()
+    tab.hibernated = false
     transitionState(tab, 'dead')
     deps.userInputTracker.clear(stateKey(tab))
     tabs.delete(tabId)
@@ -4960,6 +4973,7 @@ export function createChatTransport(
       startedAt: tab.startedAt,
       ended: tab.ended,
       ...(tab.storageFailed ? { storageUnavailable: true } : {}),
+      ...(tab.hibernated ? { hibernated: true as const } : {}),
       chatMode: tab.chatMode,
       chatModel: tab.chatModel,
       chatEffort: tab.chatEffort,
@@ -5118,6 +5132,81 @@ export function createChatTransport(
     return result
   }
 
+  function canHibernate(tab: ChatTab): boolean {
+    return (
+      !isShuttingDown &&
+      !tab.closing &&
+      !tab.hibernated &&
+      tab.proc?.ready === true &&
+      !tab.proc.stopRequested &&
+      !tab.proc.ended &&
+      tab.sessionConfirmed &&
+      !tab.pendingFork &&
+      runtimeReadyForMessage(tab) &&
+      !turnOpen(tab) &&
+      tab.work.counts().jobs === 0 &&
+      tab.work.counts().subAgents === 0 &&
+      !pendingProcessControls.has(tab) &&
+      !dispatching.get(tab)?.size &&
+      !inFlightSpawns.has(tab.tabId) &&
+      queueGateOpen(tab)
+    )
+  }
+
+  function hibernationInventory() {
+    let hibernated = 0
+    const candidates = []
+    for (const tab of tabs.values()) {
+      if (tab.hibernated) hibernated++
+      if (!canHibernate(tab)) continue
+      const proc = tab.proc!
+      const idleSince = tab.lastOutputTime
+      candidates.push({
+        tabId: tab.tabId,
+        taskId: tab.taskId,
+        idleSince,
+        async hibernate(allowed: () => Promise<boolean>) {
+          if (!(await allowed())) return false
+          await flushEvents(tab)
+          if (tab.proc !== proc || tab.lastOutputTime !== idleSince || !canHibernate(tab)) return false
+          // Set the process fence before yielding so a concurrent send waits
+          // for the exit and starts a new generation with the same session id.
+          proc.retiring = true
+          const work = (async () => {
+            const outcome = await proc.stop()
+            await proc.exited
+            await flushEvents(tab)
+            if (tab.closed || tab.proc !== proc) return false
+            if (outcome === 'abandoned') {
+              proc.replaced = false
+              handleProcessExit(tab, proc, null, 'SIGKILL', true)
+              return false
+            }
+            tab.proc = null
+            tab.rawChild = null
+            tab.hibernated = true
+            try {
+              agentStateRecorder?.(tab.tabId, 'auto_stopped')
+            } catch (error) {
+              console.error('[chat-transport] agent state (auto_stopped) write failed:', error)
+            }
+            publishState(tab)
+            kickQueueDrainer(tab)
+            return true
+          })()
+          const settled = work.then(() => undefined, () => undefined)
+          tab.respawning = settled
+          try {
+            return await work
+          } finally {
+            if (tab.respawning === settled) tab.respawning = null
+          }
+        }
+      })
+    }
+    return { hibernated, candidates }
+  }
+
   /** Look up live state by broadcast-format sessionId (`${taskId}:${tabId}`). */
   function getChatSessionState(sessionId: string): ChatTerminalState | null {
     for (const tab of tabs.values()) {
@@ -5253,6 +5342,7 @@ export function createChatTransport(
     shutdownAll,
     killByTaskId,
     listChatSessions,
+    hibernationInventory,
     getChatSessionState,
     __resetForTests,
     __getSessionChildForTests,

@@ -8,7 +8,7 @@ import { expect, test, vi } from 'vitest'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { placeTestProject } from './project-scope.fixture'
 import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
-import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import { COMPUTER_PROTOCOL_VERSION, DuplexRpc } from '@slayzone/computer-transport/shared'
 import { startConnector } from './connector'
 import {
   connectorHost,
@@ -64,6 +64,86 @@ async function exitChild(child: ChildProcess) {
   await exited
   clearTimeout(timeout)
 }
+
+test('the standalone connector reports host limits and carries queued starts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'retained-health-'))
+  const previousRoot = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
+  const health = vi.fn()
+  const hub = await startLoopbackHub({ floodLimits: false, onComputerHealth: health })
+  placeTestProject(root, hub.url, 'p1', root)
+  const config = {
+    hubUrl: hub.url,
+    name: 'retained-health',
+    allowedRoots: [root],
+    capabilities: ['proc'],
+    joinToken: 'jt-valid',
+    autoUpgrade: false
+  }
+  const host = await startSessionHost(root, { ...config, agentResources: { maxLiveAgents: 1 } })
+  const control = await hostControl(root)
+  const grant = await control.rpc.request<ConnectorGrant>('reserve', { hubUrl: hub.url })
+  const localRequests = vi.spyOn(DuplexRpc.prototype, 'request')
+  let connector: Awaited<ReturnType<typeof startConnector>> | undefined
+  try {
+    connector = await startConnector(root, config, grant)
+    await vi.waitFor(
+      () => {
+        expect(health).toHaveBeenCalledWith(
+          'computer-1',
+          expect.objectContaining({ cap: 1, memoryTotal: expect.any(Number), live: 0 }),
+          expect.any(Number)
+        )
+      },
+      { timeout: 3_000 }
+    )
+
+    const start = (sessionId: string) =>
+      hub.gateway.request(
+        'computer-1',
+        'proc.spawn',
+        {
+          sessionId,
+          projectId: 'p1',
+          command: process.execPath,
+          args: ['-e', 'setInterval(() => {}, 1000)'],
+          cwd: root,
+          admission: 'foreground'
+        },
+        0
+      )
+    await expect(start('running')).resolves.toMatchObject({ pid: expect.any(Number) })
+    const queued = start('queued')
+    void queued.catch(() => undefined)
+    await vi.waitFor(async () => {
+      const status = await hub.gateway.request('computer-1', 'proc.prioritize', {
+        sessionId: 'queued'
+      })
+      expect(status).toMatchObject({ queued: true })
+    })
+    expect(localRequests.mock.calls.filter(([method]) => method === 'dispatch')).toContainEqual([
+      'dispatch',
+      expect.objectContaining({
+        method: 'proc.spawn',
+        params: expect.objectContaining({ sessionId: 'queued' })
+      }),
+      0,
+      undefined,
+      expect.any(AbortSignal)
+    ])
+    await hub.gateway.request('computer-1', 'proc.kill', { sessionId: 'running' })
+    await expect(queued).resolves.toMatchObject({ pid: expect.any(Number) })
+  } finally {
+    localRequests.mockRestore()
+    await connector?.stop()
+    control.close()
+    await host.stop()
+    await hub.close()
+    if (previousRoot === undefined) delete process.env.SLAYZONE_ROOT
+    else process.env.SLAYZONE_ROOT = previousRoot
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test.each([false, true])(
   'new connectors keep busy retained host on chat fallbacks at enroll and hello; raw controls=%s',

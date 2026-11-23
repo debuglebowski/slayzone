@@ -11,6 +11,7 @@
 import type { ChatSessionStateEntry } from '@slayzone/terminal-contracts'
 
 export type LocalChatState =
+  | 'hibernated'
   | 'not-spawned'
   | 'starting'
   | 'running'

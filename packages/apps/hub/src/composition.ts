@@ -352,6 +352,7 @@ import {
   gitWatchEventSchema,
   GIT_WATCH_EVENT,
   HubToComputerMethods,
+  mayWaitForAgentAdmission,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
 import {
@@ -1140,26 +1141,34 @@ export function composeServer(opts: {
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request, signal) => {
       if (!execGateway) throw new Error('Chat computer gateway is starting')
+      const method =
+        typeof request === 'object' &&
+        request !== null &&
+        'kind' in request &&
+        request.kind === 'invoke' &&
+        'value' in request &&
+        typeof request.value === 'object' &&
+        request.value !== null &&
+        'method' in request.value
+          ? request.value.method
+          : undefined
+      // An admission wait can outlast every request deadline. The computer
+      // starts the provider watchdog once a process has actually been admitted.
+      const timeout = mayWaitForAgentAdmission(HubToComputerMethods.chatRequest, request)
+        ? 0
+        : method === 'askSideQuestion'
+          ? SIDE_QUESTION_TIMEOUT_MS + 5_000
+          : typeof request === 'object' &&
+              request !== null &&
+              'kind' in request &&
+              ['backup.create', 'backup.restore'].includes(String(request.kind))
+            ? 120_000
+            : undefined
       return execGateway.request(
         computerId,
         HubToComputerMethods.chatRequest,
         request,
-        typeof request === 'object' &&
-          request !== null &&
-          'kind' in request &&
-          ['backup.create', 'backup.restore'].includes(String(request.kind))
-          ? 120_000
-          : typeof request === 'object' &&
-              request !== null &&
-              'kind' in request &&
-              request.kind === 'invoke' &&
-              'value' in request &&
-              typeof request.value === 'object' &&
-              request.value !== null &&
-              'method' in request.value &&
-              request.value.method === 'askSideQuestion'
-            ? SIDE_QUESTION_TIMEOUT_MS + 5_000
-            : undefined,
+        timeout,
         signal
       )
     },
@@ -1215,7 +1224,10 @@ export function composeServer(opts: {
       (await listPtys()).some((p) => p.taskId === taskId && hasLivePty(p.sessionId)) ||
       computerChat.relay.sessions
         .list()
-        .some((s) => s.taskId === taskId && !['not-spawned', 'dead', 'error'].includes(s.state)),
+        .some(
+          (s) =>
+            s.taskId === taskId && !['not-spawned', 'dead', 'error', 'hibernated'].includes(s.state)
+        ),
     onState: async (sessionId, state, previous, hasUserInput) => {
       if (hasUserInput && state !== 'dead') markSessionUserInput(sessionId)
       else clearSessionUserInputMark(sessionId)
@@ -2448,6 +2460,23 @@ export function composeServer(opts: {
         computerDataHandoff.flushTask(taskId, computerId, [TASK_PATH_KIND])
     })
     const computerGateway = createHubComputerGateway({
+      onComputerHealth: (computerId, health, receivedAt) => {
+        void db
+          .run(
+            'UPDATE computers SET health_json=?, last_seen_at=? WHERE id=? AND revoked_at IS NULL AND (last_seen_at IS NULL OR last_seen_at<=?)',
+            [JSON.stringify(health), receivedAt, computerId, receivedAt]
+          )
+          .catch(() => console.error('[computer-health] could not save heartbeat'))
+      },
+      canHibernateChat: async (computerId, tabId) => {
+        const owner = await computerChat.ownership.forTab(tabId)
+        if (owner?.computerId !== computerId || owner.state !== 'active') return false
+        const task = await db.get<{ pinned: number | null }>(
+          'SELECT pinned FROM tasks WHERE id=?',
+          [owner.taskId]
+        )
+        return task !== undefined && task !== null && !task.pinned
+      },
       diagnostic: (event, payload) =>
         recordDiagnosticEvent({
           // A refused oversized frame is a request that failed for the user.

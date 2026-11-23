@@ -397,6 +397,7 @@ export function createChatRuntimeHandlers(opts: {
       throw new Error('Chat runtime generation changed during startup')
     }
     instance = created
+    if (opts.admission) instance.transport.configureTransport({ waitsForAdmission: true })
     instance.transport.setAgentStateTabRecorder((tabId, state) => {
       void created.control
         .agentState(tabId, state)
@@ -1042,6 +1043,10 @@ export function createChatRuntimeHandlers(opts: {
     },
     /** Pids of this hub's chat agent processes (stall reports name only a hub's own). */
     ownedPids: (): number[] => localProcs?.ownedPids() ?? [],
+    hibernationInventory: () =>
+      instance && !resetting && !closed
+        ? instance.transport.hibernationInventory()
+        : { hibernated: 0, candidates: [] },
     hasWork: () =>
       Boolean(
         instance?.transport

@@ -437,7 +437,9 @@ export async function openComputerChatRuntime(opts: OpenComputerChatRuntimeOptio
           transport.isTurnOpen(i.tabId) ||
           transport
             .listChatSessions()
-            .some((s) => s.taskId === i.taskId && !['dead', 'error'].includes(s.state))
+            .some(
+              (s) => s.taskId === i.taskId && !['dead', 'error', 'hibernated'].includes(s.state)
+            )
         )
           return false
         let resolve: () => void = () => undefined

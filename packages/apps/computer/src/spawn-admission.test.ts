@@ -61,6 +61,41 @@ function harness(opts: { concurrency?: number; startCapMs?: number; warmQuietMs?
 }
 
 describe('spawn admission', () => {
+  it('holds queued work through memory pressure and counts agents until exit', () => {
+    let pressure = true
+    const admission = createSpawnAdmission({
+      resources: () => ({ cap: 1, warmPoolSize: 1, pressure })
+    })
+    const started: string[] = []
+    let exit!: () => void
+    admission.enqueue('background', (slot) => {
+      started.push('first')
+      exit = slot.track(10).exit
+      slot.release()
+    })
+    admission.enqueue('background', () => started.push('second'))
+    expect(started).toEqual([])
+    pressure = false
+    admission.recheck()
+    expect(started).toEqual(['first'])
+    expect(admission.load()).toMatchObject({ live: 1, queued: 1 })
+    exit()
+    expect(started).toEqual(['first', 'second'])
+  })
+
+  it('reclaims a warm slot for foreground work at the cap', () => {
+    const admission = createSpawnAdmission({
+      resources: () => ({ cap: 1, warmPoolSize: 1, pressure: false })
+    })
+    const started: string[] = []
+    admission.enqueue('warm', (slot) => {
+      const agent = slot.track(10, () => agent.exit())
+      slot.release()
+    })
+    admission.enqueue('foreground', () => started.push('foreground'))
+    expect(started).toEqual(['foreground'])
+  })
+
   // The record a slow restore is diagnosed from (computer.log): each start's wait
   // for its slot, how long it held it, and whether the agent or the cap freed it.
   it('reports each start: its wait, its hold, and what released it', () => {

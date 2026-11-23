@@ -204,3 +204,26 @@ export function useChatAvailability(opts: {
   )
   return { status: data ?? null, error: error ? error.message : null, retry }
 }
+
+/** Resume once on reveal. A chat hibernated while already visible waits for
+ * another reveal or a message. */
+export function useResumeHibernatedChat(opts: {
+  tabId: string
+  active: boolean
+  ready: boolean
+  hibernated: boolean
+  resume: () => void
+}) {
+  const opened = useRef<string | null>(null)
+  const resume = useStableCallback(opts.resume)
+  const { tabId, active, ready, hibernated } = opts
+  useEffect(() => {
+    if (!active) {
+      opened.current = null
+      return
+    }
+    if (!ready || opened.current === tabId) return
+    opened.current = tabId
+    if (hibernated) resume()
+  }, [tabId, active, ready, hibernated, resume])
+}

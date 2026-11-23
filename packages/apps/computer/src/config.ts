@@ -20,6 +20,7 @@ import {
   getComputerConfigFilePath,
   ignoredComputerConfigKeys,
   loadComputerConfigFile,
+  readComputerAgentResources,
   readComputerConfigSnapshot,
   readJsonObject,
   type ComputerConfig as ComputerConfigFile
@@ -58,6 +59,7 @@ export const computerConfigSchema = z.object({
   allowedRoots: z.array(z.string().min(1)),
   /** Capability tags advertised at enrollment. */
   capabilities: z.array(z.string().min(1)),
+  agentResources: z.unknown().transform(readComputerAgentResources).optional(),
   /**
    * May a hub change `allowedRoots` (`computer.setAllowedRoots`)? T-27: folder
    * limits are the device user's decision, so NO by default — set them on the
@@ -174,12 +176,13 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
   if (shared.allowedRoots !== undefined) out.allowedRoots = shared.allowedRoots
   if (shared.directListenAddress !== undefined) out.directListenAddress = shared.directListenAddress
   if (shared.directPublicAddress !== undefined) out.directPublicAddress = shared.directPublicAddress
+  if (shared.agentResources !== undefined) out.agentResources = shared.agentResources
   return out
 }
 
 /**
- * The ONE key a SUPERVISED computer (the desktop app's own) reads from its config
- * file: `allowedRoots`. Everything else in it — hubUrl, hubUrls, joinToken, name,
+ * A SUPERVISED computer (the desktop app's own) reads `allowedRoots` and
+ * `agentResources` from its own config file. Connection identity — hubUrl, hubUrls, joinToken, name,
  * direct-link addresses — stays ignored: the Electron host supplies those in full,
  * and a file must never point this computer at another hub or change whether its
  * hub may edit its roots (`hubMayEditRoots` is still derived only).
@@ -205,15 +208,18 @@ function fromSharedConfig(shared: ComputerConfigFile): Partial<ComputerConfig> {
  */
 export function supervisedComputerConfigFile(
   path: string = getComputerConfigFilePath()
-): Pick<ComputerConfigFile, 'allowedRoots'> {
-  const declared = readJsonObject(path)?.allowedRoots
-  if (!Array.isArray(declared)) return {}
+): Pick<ComputerConfigFile, 'allowedRoots' | 'agentResources'> {
+  const raw = readJsonObject(path)
+  const agentResources = readComputerAgentResources(raw?.agentResources)
+  const policy = agentResources ? { agentResources } : {}
+  const declared = raw?.allowedRoots
+  if (!Array.isArray(declared)) return policy
   const roots = [
     ...new Set(
       declared.filter((r): r is string => typeof r === 'string' && r.length > 0 && isAbsolute(r))
     )
   ]
-  return roots.length > 0 ? { allowedRoots: roots } : {}
+  return roots.length > 0 ? { ...policy, allowedRoots: roots } : policy
 }
 
 /**
@@ -437,7 +443,8 @@ export function hostConfigurationKey(config: ComputerConfig): string {
         hubs: effectiveHubUrls(config),
         name: config.name,
         capabilities: config.capabilities,
-        binOverrideDir: config.binOverrideDir ?? null
+        binOverrideDir: config.binOverrideDir ?? null,
+        agentResources: config.agentResources ?? null
       })
     )
     .digest('hex')

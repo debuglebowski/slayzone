@@ -94,6 +94,7 @@ import { stampWarmHookContext, type BufferSinceResult } from '@slayzone/terminal
 import { pageChunks } from '@slayzone/transport/direct'
 import {
   createSpawnAdmission,
+  type AdmittedAgent,
   type AdmissionLane,
   type AdmissionSlot,
   type AdmissionTicket,
@@ -236,6 +237,7 @@ interface PtySession {
   exitReason?: string
   /** The agent-start slot this session holds until its first output (admitted spawns only). */
   admissionSlot?: AdmissionSlot
+  admittedAgent?: AdmittedAgent
   /** Settled by node-pty onExit even after this object has been superseded. */
   exited: Promise<void>
   resolveExit: () => void
@@ -556,6 +558,7 @@ export function createPtyHandlers(
       taskId?: string
       detection?: PtyDetectionParams
       relay?: boolean
+      admissionSlot?: AdmissionSlot
       /** A continued buffer (`carryOutput`); absent = a fresh one. */
       buffer?: RingBuffer
     }
@@ -568,9 +571,11 @@ export function createPtyHandlers(
     if (sessions.has(id)) throw new Error(`pty ${id}: old process still live`)
 
     const capability = ctx.cliRelay?.issue()
+    let launch
     let proc: pty.IPty
     try {
-      proc = spawnPty(opts.command, opts.args ?? [], {
+      launch = opts.admissionSlot ? ctx.launchAgent?.(opts.command, opts.args ?? []) : undefined
+      proc = spawnPty(launch?.file ?? opts.command, launch?.args ?? opts.args ?? [], {
         name: 'xterm-color',
         cwd,
         env: buildPtySpawnEnv(ctx, opts.env, capability),
@@ -578,6 +583,7 @@ export function createPtyHandlers(
         rows: opts.rows ?? 24
       })
     } catch (err) {
+      launch?.close()
       capability?.revoke()
       throw explainSpawnFailure(err)
     }
@@ -593,6 +599,17 @@ export function createPtyHandlers(
       proc,
       buffer,
       id,
+      admissionSlot: opts.admissionSlot,
+      admittedAgent: opts.admissionSlot?.track(
+        proc.pid,
+        opts.warm
+          ? () => {
+              void warmKill({ warmId: id }).catch((error) => {
+                ctx.log('warm agent eviction failed', { warmId: id, error: String(error) })
+              })
+            }
+          : undefined
+      ),
       relay: relayAtStart(id, opts.spawnId, opts.relay),
       cwd,
       startedAt: Date.now(),
@@ -668,6 +685,7 @@ export function createPtyHandlers(
     })
 
     proc.onExit(({ exitCode, signal }) => {
+      launch?.close()
       capability?.revoke()
       session.resolveExit()
       reap(
@@ -675,6 +693,7 @@ export function createPtyHandlers(
         typeof exitCode === 'number' ? exitCode : null,
         signal != null ? String(signal) : null
       )
+      session.admittedAgent?.exit()
     })
 
     return session
@@ -833,7 +852,11 @@ export function createPtyHandlers(
    * `replaced`: the buffer of the session this spawn replaced, when its output was
    * being saved (see {@link stopBeforeReplacement}).
    */
-  function startSession(params: PtySpawnParams, replaced?: RingBuffer): SpawnReply {
+  function startSession(
+    params: PtySpawnParams,
+    replaced?: RingBuffer,
+    slot?: AdmissionSlot
+  ): SpawnReply {
     const shell = params.computerShell ? resolveUserShell() : params.command
     const args = params.computerShell
       ? [
@@ -889,6 +912,7 @@ export function createPtyHandlers(
       ...params,
       command: shell,
       args,
+      admissionSlot: slot,
       ...(carried ? { buffer: carried } : restored ? { buffer: restored } : {})
     })
     ctx.log('pty spawned', {
@@ -947,28 +971,33 @@ export function createPtyHandlers(
     }
     queued.set(id, item)
     const enqueuedAt = Date.now()
-    item.ticket = admission.enqueue(lane, (slot) => {
-      // Cancelled or superseded while the slot was being granted: hand it back.
-      if (queued.get(id) !== item) {
-        slot.release()
-        return
-      }
-      queued.delete(id)
-      let reply: unknown
-      try {
-        reply = item.run(slot)
-      } catch (err) {
-        slot.release()
-        item.reject(err)
-        return
-      }
-      const waitedMs = Date.now() - enqueuedAt
-      if (waitedMs >= 1_000) ctx.log('agent start admitted after queueing', { id, lane, waitedMs })
-      Promise.resolve(reply).then(item.resolve, (err) => {
-        slot.release()
-        item.reject(err)
-      })
-    })
+    item.ticket = admission.enqueue(
+      lane,
+      (slot) => {
+        // Cancelled or superseded while the slot was being granted: hand it back.
+        if (queued.get(id) !== item) {
+          slot.release()
+          return
+        }
+        queued.delete(id)
+        let reply: unknown
+        try {
+          reply = item.run(slot)
+        } catch (err) {
+          slot.release()
+          item.reject(err)
+          return
+        }
+        const waitedMs = Date.now() - enqueuedAt
+        if (waitedMs >= 1_000)
+          ctx.log('agent start admitted after queueing', { id, lane, waitedMs })
+        Promise.resolve(reply).then(item.resolve, (err) => {
+          slot.release()
+          item.reject(err)
+        })
+      },
+      () => lane !== 'warm' && sessions.get(id)?.admittedAgent !== undefined
+    )
     return promise
   }
 
@@ -1162,12 +1191,16 @@ export function createPtyHandlers(
               ...(item.cols !== undefined ? { cols: item.cols } : {}),
               ...(item.rows !== undefined ? { rows: item.rows } : {})
             },
-            replaced
+            replaced,
+            slot
           )
         }
       )
       const session = sessions.get(params.sessionId)!
-      session.admissionSlot = slot
+      if (!session || session.admissionSlot !== slot) {
+        slot.release()
+        return reply
+      }
       // Input the hub sent while this waited, in order — where it would have
       // landed had the spawn been immediate.
       for (const w of item.writes) {
@@ -1179,13 +1212,19 @@ export function createPtyHandlers(
     })
   }
 
-  function startWarm(params: PtyWarmSpawnParams, cols?: number, rows?: number): PtySession {
+  function startWarm(
+    params: PtyWarmSpawnParams,
+    slot: AdmissionSlot,
+    cols?: number,
+    rows?: number
+  ): PtySession {
     const shell = params.computerShell ? resolveUserShell() : params.command
     // The agent's hooks carry this process's key, so they stay attributable to it
     // after the hub has forgotten it (see warm-hook-origins.ts).
     const { env, bootTaskId } = stampWarmHookContext(params.env, params.warmId)
     const session = spawnSession(params.warmId, {
       ...params,
+      admissionSlot: slot,
       ...(env ? { env } : {}),
       command: shell,
       args: params.computerShell ? getShellStartupArgs(shell) : params.args,
@@ -1216,9 +1255,11 @@ export function createPtyHandlers(
     if (live?.warm) return Promise.resolve({ pid: live.proc.pid })
     const waiting = queued.get(params.warmId)
     if (waiting) return waiting.promise
+    if (admission.acceptsWarm?.() === false) {
+      return Promise.reject(new Error('This computer’s warm pool is full'))
+    }
     return enqueueSpawn(params.warmId, 'warm', params, (slot, item) => {
-      const session = startWarm(params, item.cols, item.rows)
-      session.admissionSlot = slot
+      const session = startWarm(params, slot, item.cols, item.rows)
       for (const w of item.writes) session.proc.write(w.data)
       return { pid: session.proc.pid }
     })
@@ -1338,7 +1379,7 @@ export function createPtyHandlers(
       }
     }
     const session = sessions.get(params.warmId)
-    if (!session || !session.warm) {
+    if (!session || !session.warm || session.stopping) {
       throw new RpcError(
         ComputerTransportErrorCodes.unknownComputer,
         `no warm session ${params.warmId} to adopt`
@@ -1362,6 +1403,7 @@ export function createPtyHandlers(
     session.id = params.sessionId
     session.taskId = params.taskId
     delete session.warm
+    session.admittedAgent?.adopt()
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
     if (params.taskId) taskOfSession.set(params.sessionId, params.taskId)

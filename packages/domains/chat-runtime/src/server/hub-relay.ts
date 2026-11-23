@@ -238,28 +238,42 @@ export function createHubChatRelay(opts: {
   const queueIngress = new Map<string, Promise<void>>()
   /**
    * Per tab: the call opening its session on the computer (hydrate, start, reset,
-   * refuseStart), from the moment it entered the hub until the computer answered.
+   * refuseStart), from the moment it entered the hub until the computer answered
+   * or published a starting state for the hydrated tab.
    * Calls take different ways through the hub (ownership, bootstrap, config reads),
    * so a send right behind its tab's hydrate could reach the computer first; it
    * waits here instead. A failed opening holds nothing back.
    */
-  const opening = new Map<string, Promise<void>>()
-  function openSession<T>(tabId: string, work: () => Promise<T>): Promise<T> {
+  const opening = new Map<string, { waiting: Promise<void>; hydrated?: () => void }>()
+  function openSession<T>(tabId: string, work: () => Promise<T>, starting: boolean): Promise<T> {
     const run = work()
-    const settled: Promise<void> = run.then(
+    const completed: Promise<void> = run.then(
       () => undefined,
       () => undefined
     )
-    opening.set(tabId, settled)
-    void settled.then(() => {
-      if (opening.get(tabId) === settled) opening.delete(tabId)
+    let hydrated: (() => void) | undefined
+    const waiting = starting
+      ? Promise.race([
+          completed,
+          new Promise<void>((resolve) => {
+            hydrated = resolve
+          })
+        ])
+      : completed
+    const entry = {
+      waiting,
+      hydrated
+    }
+    opening.set(tabId, entry)
+    void entry.waiting.then(() => {
+      if (opening.get(tabId) === entry) opening.delete(tabId)
     })
     return run
   }
   /** Until every opening of the tab settled, one started meanwhile included. */
   async function afterOpening(tabId: string): Promise<void> {
     for (let pending = opening.get(tabId); pending; pending = opening.get(tabId)) {
-      await pending
+      await pending.waiting
       if (opening.get(tabId) === pending) return
     }
   }
@@ -1306,7 +1320,11 @@ export function createHubChatRelay(opts: {
   ): Promise<unknown> {
     // Ordered per tab from the moment the call entered (no await before this).
     if (target === 'ops' && SESSION_OPENING_OPS.has(method))
-      return openSession(tabIdOf(args[0]), () => invokeNow(target, method, args, operationId))
+      return openSession(
+        tabIdOf(args[0]),
+        () => invokeNow(target, method, args, operationId),
+        method === 'start'
+      )
     if (target === 'ops' && method === 'send') {
       const tabId = tabIdOf(args[0])
       if (opening.has(tabId))
@@ -1799,7 +1817,10 @@ export function createHubChatRelay(opts: {
   const conversations = {
     isLive: (taskId: string, providerSessionId: string) =>
       [...sessionMirror.values()].some(
-        (r) => r.taskId === taskId && r.providerSessionId === providerSessionId
+        (r) =>
+          r.taskId === taskId &&
+          r.state !== 'hibernated' &&
+          r.providerSessionId === providerSessionId
       ),
     release: async (taskId: string, providerSessionId: string) => {
       for (const row of [...sessionMirror.values()])
@@ -1990,14 +2011,31 @@ export function createHubChatRelay(opts: {
         case 'state':
           if (
             p.sessionId !== `${owner.taskId}:${owner.tabId}` ||
-            !['not-spawned', 'starting', 'idle', 'running', 'background', 'error', 'dead'].includes(
-              String(p.newState)
-            ) ||
-            !['not-spawned', 'starting', 'idle', 'running', 'background', 'error', 'dead'].includes(
-              String(p.oldState)
-            )
+            ![
+              'not-spawned',
+              'starting',
+              'idle',
+              'running',
+              'background',
+              'hibernated',
+              'error',
+              'dead'
+            ].includes(String(p.newState)) ||
+            ![
+              'not-spawned',
+              'starting',
+              'idle',
+              'running',
+              'background',
+              'hibernated',
+              'error',
+              'dead'
+            ].includes(String(p.oldState))
           )
             throw new Error('Invalid chat state notification')
+          // The computer has hydrated this tab as soon as it queues the agent.
+          // An outbox write can now be saved while the process waits for RAM.
+          if (p.newState === 'starting') opening.get(owner.tabId)?.hydrated?.()
           if (p.newState !== 'not-spawned' && p.newState !== 'dead') {
             const jobs = sessionMirror.get(String(p.sessionId))?.backgroundJobs
             sessionMirror.set(String(p.sessionId), {

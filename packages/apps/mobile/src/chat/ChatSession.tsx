@@ -20,7 +20,10 @@ import {
   chatProviderForMode,
   type PermissionDecision
 } from '@slayzone/terminal-contracts'
-import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
+import {
+  useChatAvailability,
+  useResumeHibernatedChat
+} from '@slayzone/terminal/client/chat-availability'
 import { hasPendingPrompt } from '@slayzone/terminal/chat-prompts'
 import { LiveBlockStore, LiveBlockStoreContext } from '@slayzone/terminal/live-blocks'
 import { isAwaitingUserQuestion } from '@slayzone/terminal/reducer'
@@ -240,6 +243,13 @@ function ChatView({
       )
       .finally(() => setRestarting(false))
   }, [client, target, notify])
+  useResumeHibernatedChat({
+    tabId: target.tabId,
+    active: true,
+    ready: !session.hydrating && !session.loadError && storage.status?.state === 'ready',
+    hibernated: storage.status?.hibernated === true,
+    resume: restart
+  })
 
   const { respondPermission, sendMessage, retryMessage } = session
   const answer = useCallback(
@@ -347,6 +357,9 @@ function ChatView({
             <ChatControls mode={target.mode} settings={settings} models={models} />
           )}
           <BackgroundJobs state={state} tabId={target.tabId} onError={notify} />
+          {storage.status?.hibernated && !restarting && (
+            <Text style={s.note}>Hibernated · resumes on open</Text>
+          )}
           <ChatTimeline
             state={state}
             hydrating={session.hydrating}

@@ -262,8 +262,10 @@ export function useChatLifecycle({
     // 'shown', the user is looking at it: it goes first.
     const restore = startDecision === 'now' && !shown
     restoreStartRef.current = restore
-    trackRestoration(
-      chatApi.start({
+    // The computer tracks queued process starts. A full computer can wait
+    // indefinitely, so the renderer's history-restoration slots must be free.
+    void chatApi
+      .start({
         tabId,
         taskId,
         mode,
@@ -271,10 +273,10 @@ export function useChatLifecycle({
         providerFlagsOverride: providerFlagsOverride ?? null,
         reason: restore ? 'restore' : 'user'
       })
-    ).catch((err: unknown) => {
-      // Also shown in the chat itself (the start failure card); never silent.
-      toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
-    })
+      .catch((err: unknown) => {
+        // Also shown in the chat itself (the start failure card); never silent.
+        toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
+      })
   }, [
     startDecision,
     shown,
@@ -284,8 +286,7 @@ export function useChatLifecycle({
     taskId,
     mode,
     cwd,
-    providerFlagsOverride,
-    trackRestoration
+    providerFlagsOverride
   ])
 
   // Revealed while its restore still waits for an agent-start slot (the hub
@@ -296,8 +297,8 @@ export function useChatLifecycle({
   useEffect(() => {
     if (!shown || !restoreStartRef.current || !notStarted) return
     restoreStartRef.current = false
-    trackRestoration(
-      chatApi.start({
+    void chatApi
+      .start({
         tabId,
         taskId,
         mode,
@@ -305,20 +306,10 @@ export function useChatLifecycle({
         providerFlagsOverride: providerFlagsOverride ?? null,
         reason: 'user'
       })
-    ).catch(() => {
-      /* reported by the first start */
-    })
-  }, [
-    shown,
-    notStarted,
-    chatApi,
-    tabId,
-    taskId,
-    mode,
-    cwd,
-    providerFlagsOverride,
-    trackRestoration
-  ])
+      .catch(() => {
+        /* reported by the first start */
+      })
+  }, [shown, notStarted, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleRestart = useCallback(async () => {
     if (restarting) return

@@ -509,8 +509,10 @@ export async function startSessionHost(
             epoch,
             contract: HOST_CONTRACT_VERSION,
             protocolVersion: COMPUTER_PROTOCOL_VERSION,
+            reportsComputerHealth: typeof transport.options.computerHealth === 'function',
             version: COMPUTER_VERSION
           }
+        if (method === 'computer-health') return transport.options.computerHealth?.() ?? null
         if (method === 'hooks') {
           if (
             typeof params.directory !== 'string' ||

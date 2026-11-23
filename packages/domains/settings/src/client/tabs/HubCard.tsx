@@ -650,6 +650,9 @@ export function HubCard({
                       )}
                     </div>
                     <OutdatedNote computer={computer} />
+                    {computer.health && (
+                      <ComputerResources health={computer.health} online={computer.usable} />
+                    )}
                     <ComputerFaults computerId={computer.id} />
                     <ComputerUnattachedSessions computerId={computer.id} />
                   </td>
@@ -970,6 +973,57 @@ export function HubCard({
 }
 
 /** A computer whose release cannot confirm chat writes: which, and what to do. */
+function ComputerResources({
+  health,
+  online
+}: {
+  health: NonNullable<
+    Awaited<
+      ReturnType<ReturnType<typeof useTRPCClient>['computers']['list']['query']>
+    >[number]['health']
+  >
+  online: boolean
+}) {
+  const used = Math.max(0, Math.round(100 * (1 - health.memoryAvailable / health.memoryTotal)))
+  const ram = Math.round((health.memoryTotal / 1024 ** 3) * 10) / 10
+  const showPressure = online && health.pressure
+  return (
+    <div
+      className="mt-1.5 grid gap-y-1 text-xs text-muted-foreground"
+      data-testid="computer-health"
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="inline-flex items-center gap-1.5">
+          {health.live}/{health.cap} live
+          <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-muted">
+            <span
+              className="block h-full bg-current"
+              style={{ width: `${Math.min(100, (100 * health.live) / health.cap)}%` }}
+            />
+          </span>
+        </span>
+        <span>{health.hibernated} hibernated</span>
+        <span>{health.queued} queued</span>
+        {showPressure && (
+          <span className="font-medium text-amber-600 dark:text-amber-400">Under pressure</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="inline-flex items-center gap-1.5">
+          {online ? 'Memory' : 'Last reported memory'} {used}% of {ram} GiB
+          <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-muted">
+            <span
+              className={cn('block h-full', showPressure ? 'bg-amber-500' : 'bg-current')}
+              style={{ width: `${used}%` }}
+            />
+          </span>
+        </span>
+        {online && health.cpuPercent !== null && <span>CPU {Math.round(health.cpuPercent)}%</span>}
+      </div>
+    </div>
+  )
+}
+
 function OutdatedNote({ computer }: { computer: { name: string; version?: string | null } }) {
   const note = outdatedComputerNote(computer)
   if (!note) return null

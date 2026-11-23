@@ -219,6 +219,11 @@ export interface ChatAvailability {
    */
   reason?: string
   waitingForAgents?: boolean
+  hibernated?: true
+  lastSeenAt?: number
+  lastMemoryPercent?: number
+  lastMemoryPressure?: boolean
+  lastLiveAgents?: number
   /** Socket survived a hub freeze; liveness is being confirmed, not known offline. */
   recovering?: boolean
   /**
@@ -261,6 +266,19 @@ export function chatAvailabilityMessage(
               ? `Another computer named ${name} holds this chat, possibly this one enrolled again. If so, replace the offline ${name} with it in Settings → Connections.`
               : `${status.heldBy.name} holds this chat. If ${status.heldBy.name} is ${name} enrolled again, replace ${name} with it in Settings → Connections.`
         }
+      if (status.lastSeenAt !== undefined) {
+        const lastSeen = new Date(status.lastSeenAt).toLocaleString()
+        const agents =
+          status.lastLiveAgents === undefined ? '' : ` with ${status.lastLiveAgents} live agents`
+        const memory =
+          status.lastMemoryPercent === undefined
+            ? ''
+            : ` Last reported memory use was ${status.lastMemoryPercent}%${agents}${status.lastMemoryPressure ? ' (under pressure)' : ''}.`
+        return {
+          title: status.lastMemoryPressure ? `${name} stopped responding` : `${name} is offline`,
+          detail: `Last seen ${lastSeen}.${memory} Reconnect it to load history and send messages.`
+        }
+      }
       return {
         title: `${name} is offline`,
         detail: 'Chat is stored there. Connect that computer to load history and send messages.'

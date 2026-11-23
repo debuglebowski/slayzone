@@ -340,6 +340,16 @@ describe('service-unit: computer kind', () => {
     expect(unit, 'log hint names the computer command').toContain('slay computer logs builder')
   })
 
+  test('computer systemd units delegate memory with a separate supervisor cgroup', () => {
+    for (const kind of ['computer', 'computer-host'] as const) {
+      const unit = renderSystemdUnit({ ...COMPUTER_SPEC, kind })
+      expect(unit).toContain('Delegate=memory\n')
+      expect(unit).toContain('DelegateSubgroup=supervisor\n')
+      expect(unit).toContain('OOMPolicy=continue\n')
+      expect(unit).toContain('OOMScoreAdjust=-750\n')
+    }
+  })
+
   test('a computer unit carries SLAYZONE_ROOT and NOTHING hub-shaped', () => {
     // The computer's name, path-jail, join token and cert pin deliberately have NO env
     // channel (computer/src/config.ts) — they come from <ROOT>/config.json, which is

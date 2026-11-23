@@ -49,6 +49,8 @@ import {
   ComputerTransportErrorCodes,
   helloParamsSchema,
   heartbeatParamsSchema,
+  chatHibernateCheckParamsSchema,
+  type ComputerHealth,
   type ProcDataParams,
   type ProcExitParams,
   type PtyDataParams,
@@ -185,6 +187,8 @@ export interface HubComputerGatewayOptions {
   } | null>
   /** Drop authenticated computers silent for this long. `0` disables. Default 45s. */
   heartbeatTimeoutMs?: number
+  onComputerHealth?: (computerId: string, health: ComputerHealth, receivedAt: number) => void
+  canHibernateChat?: (computerId: string, tabId: string) => Promise<boolean>
   /** Drop sockets that never authenticate. Default 10s. */
   authTimeoutMs?: number
   /** Default timeout for hub→computer requests. Default 30s. */
@@ -1088,7 +1092,22 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
           protocolError(conn, 'malformed heartbeat params')
           return
         }
-        conn.rpc.respond(id, { ts: Date.now() })
+        const now = Date.now()
+        conn.rpc.respond(id, { ts: now })
+        if (parsed.data.health)
+          options.onComputerHealth?.(conn.descriptor.computerId, parsed.data.health, now)
+        return
+      }
+      case ComputerToHubMethods.chatHibernateCheck: {
+        const parsed = chatHibernateCheckParamsSchema.safeParse(params)
+        if (!parsed.success || !options.canHibernateChat) {
+          conn.rpc.respond(id, { allowed: false })
+          return
+        }
+        void options.canHibernateChat(conn.descriptor.computerId, parsed.data.tabId).then(
+          (allowed) => conn.rpc.respond(id, { allowed }),
+          () => conn.rpc.respond(id, { allowed: false })
+        )
         return
       }
       case ComputerToHubMethods.enroll:

@@ -27,6 +27,7 @@ import { assertChatControlScope, isChatControlRequest } from './chat-control-sco
 
 import { unwatchFile, watchFile } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { totalmem } from 'node:os'
 import {
   createFileCredentialStore,
   credentialsFilePath,
@@ -38,6 +39,7 @@ import {
 import {
   COMPUTER_EXIT_NEEDS_RE_ENROLLMENT,
   ComputerTransportErrorCodes,
+  ComputerToHubMethods,
   HubToComputerMethods,
   JSON_RPC_INTERNAL_ERROR,
   RpcError,
@@ -80,7 +82,9 @@ import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createWorkspaceMoveHandlers } from './handlers/workspace-move-handlers'
 import { createPtyHandlers } from './handlers/pty'
-import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
+import type { SpawnAdmission } from './spawn-admission'
+import { agentLauncher, createAgentIsolation, type AgentLauncher } from './agent-isolation'
+import { createComputerHealth, type ChatInventory } from './computer-health'
 import { COMPUTER_LOG_DIR_NAME } from './file-log'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
@@ -284,6 +288,7 @@ export interface HubRequestHandlerDeps {
    * computer serves (see spawn-admission.ts). Absent: a private one (tests).
    */
   admission?: SpawnAdmission
+  launchAgent?: AgentLauncher
   /** The local request log (T-27). Absent: nothing recorded (tests). */
   requestLog?: RequestLog
   /** Host of the hub this dispatch serves, for the request log. */
@@ -330,6 +335,8 @@ export interface HubRequestDispatch {
   hubDisconnected(reason: string): void
   /** Pids of the processes this hub's work runs (ptys, processes, chat agents). */
   ownedPids(): number[]
+  inventory(): ChatInventory
+  canHibernate(tabId: string): Promise<boolean>
   /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
   directPty: DirectPtyService
   /** This hub's chat, as direct-link clients reach it. */
@@ -353,6 +360,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     dialer: deps.dialer,
     hookDirectory: deps.hookDirectory,
     config: deps.config,
+    launchAgent: deps.launchAgent,
     log,
     hubMayEditRoots: deps.hubMayEditRoots ?? deps.config.hubMayEditRoots === true,
     ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {}),
@@ -746,6 +754,19 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     directPty: pty.direct,
     directChat: chat.direct,
     directTaskData: chat.directTaskData,
+    inventory: chat.hibernationInventory,
+    async canHibernate(tabId) {
+      try {
+        const result = await deps.dialer.request?.<{ allowed?: boolean }>(
+          ComputerToHubMethods.chatHibernateCheck,
+          { tabId },
+          1_500
+        )
+        return result?.allowed === true
+      } catch {
+        return false
+      }
+    },
     dispose,
     setAgentHookUrl,
     hubDisconnected,
@@ -877,9 +898,17 @@ export function startComputer(
   // ONE admission queue for every hub connection: agent starts contend for this
   // machine, whichever hub asked for them. Each start's wait goes to the log (the
   // computer's log file): the record a slow restore is diagnosed from.
-  const admission = createSpawnAdmission({
-    onEvent: (event) => log(`agent start ${event.type}`, { ...event })
+  const dispatchByHub = new Map<string, HubRequestDispatch>()
+  const isolation = createAgentIsolation(totalmem(), log)
+  const launchAgent = agentLauncher(isolation)
+  const health = createComputerHealth({
+    config: config.agentResources ?? {},
+    isolation,
+    chats: () => dispatchByHub.values(),
+    onAdmissionEvent: (event) => log(`agent start ${event.type}`, { ...event }),
+    log
   })
+  const admission = health.admission
   // ONE direct-link grant table: one listener serves every hub, and each hub's
   // grants stay keyed by the link that registered them.
   const directGrants = createDirectGrantStore()
@@ -891,7 +920,6 @@ export function startComputer(
   // Bound (or failed to): a hub added from now on dials at once.
   let directSettled = false
   // Which hub's handlers serve a grant: the hub key a grant is registered under.
-  const dispatchByHub = new Map<string, HubRequestDispatch>()
   const directReady: Promise<void> = createDirectListener({
     grants: directGrants,
     services: {
@@ -995,6 +1023,7 @@ export function startComputer(
     const dialer = (deps.createDialer ?? ((options) => new HubDialer(options)))({
       url: hubUrl,
       identity: hubIdentity,
+      computerHealth: health.snapshot,
       credentialStore,
       ...(joinToken ? { joinToken } : {}),
       ...(secondary && refreshJoinTokenFor
@@ -1050,6 +1079,7 @@ export function startComputer(
       getProjectPaths: () => projectPaths,
       projectPathsReady,
       admission,
+      launchAgent,
       requestLog,
       directGrants,
       getRtcAnswerer,
@@ -1315,6 +1345,7 @@ export function startComputer(
       // No hub change may start after this, and one in flight finishes first, so
       // no connection is created behind stop's back or left half torn down.
       stopped = true
+      health.stop()
       await hubChanges
       await hostIdReady
       hostIdStop?.()

@@ -947,6 +947,7 @@ run_harness packages/domains/terminal/src/server/adapters/codex-adapter.test.ts
 
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-hibernate.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts

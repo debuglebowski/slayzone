@@ -1006,13 +1006,11 @@ export function createChatOps(opts: ChatHandlerOpts) {
         // A restore starts in the computer's background lane: reopening a workspace
         // must not start every agent at once.
         const built = await buildHydrateOpts(data, o, { fresh: false })
-        await hydrateSession({
+        return hydrateSession({
           ...built,
           admission: o.reason === 'restore' ? 'background' : 'foreground'
         })
-        // A user start joining a queued restore moves it to the front.
-        return ensureSpawned(o.tabId, { prioritize: o.reason !== 'restore' })
-      }),
+      }).then(() => ensureSpawned(o.tabId, { prioritize: o.reason !== 'restore' })),
 
     /** Replace the running process while retaining this tab's conversation and events. */
     restart: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {

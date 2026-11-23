@@ -2,7 +2,12 @@ import {
   HOST_CONTRACT_VERSION,
   HOST_MAINTENANCE_MIN_CONTRACT_VERSION
 } from '@slayzone/computer-runtime'
-import { HubToComputerMethods, RpcError } from '@slayzone/computer-transport/shared'
+import {
+  HubToComputerMethods,
+  mayWaitForAgentAdmission,
+  RpcError,
+  type ComputerHealth
+} from '@slayzone/computer-transport/shared'
 import { stageComputerHooks } from './agent-hooks'
 import {
   HubDialer,
@@ -123,6 +128,7 @@ export async function startConnector(
       /** The host's direct link, as values (an older host sends neither). */
       directAddress?: string | null
       directRtc?: boolean
+      reportsComputerHealth?: boolean
     }
   >('identity')
   if (identity.contract !== grant.health.contract || identity.epoch !== grant.health.epoch) {
@@ -139,6 +145,9 @@ export async function startConnector(
     // The wire belongs to this connector; runtime capabilities come from its host,
     // whose release can be older. The local contract permits connector replacement
     // without stopping native sessions, independently of optional chat features.
+    computerHealth: identity.reportsComputerHealth
+      ? () => host.rpc.request<ComputerHealth | undefined>('computer-health', {}, 750)
+      : undefined,
     identity: {
       ...identity,
       version: COMPUTER_VERSION,
@@ -161,7 +170,8 @@ export async function startConnector(
           -32001,
           'Computer update pending. Stop its running agents to finish the update; chat and new work are unavailable until then.'
         )
-      return host.rpc.request('dispatch', { method, params, actor }, undefined, undefined, signal)
+      const timeout = mayWaitForAgentAdmission(method, params) ? 0 : undefined
+      return host.rpc.request('dispatch', { method, params, actor }, timeout, undefined, signal)
     },
     log: (message, meta) =>
       process.stdout.write(`[connector] ${message} ${JSON.stringify(meta ?? {})}\n`)

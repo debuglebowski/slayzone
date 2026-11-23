@@ -16,6 +16,81 @@ import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
 // Fails the test on a lifecycle model / runtime disagreement.
 import '../../../terminal/src/server/runtime/chat-lifecycle-strict-testkit'
 
+test('a queued start releases the send fence once the computer has hydrated the chat', async () => {
+  const h = await createTestHarness()
+  let release!: () => void
+  const admission = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let entered!: () => void
+  const starting = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  let start: Promise<unknown> | undefined
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const request: ChatComputerRequest = async (_computer, raw) => {
+      const r = raw as { kind: string; value?: { method?: string; identity?: unknown } }
+      if (r.kind === 'bootstrap') return { ok: true, identity: r.value?.identity }
+      if (r.kind === 'pendingMetadata') return []
+      if (r.value?.method === 'start') {
+        entered()
+        await admission
+        return { sessionId: 'provider', pid: 123 }
+      }
+      if (r.value?.method === 'send') return { id: 'message', state: 'queued' }
+      throw new Error(`Unexpected request ${r.kind}`)
+    }
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      request,
+      bootstrap: async (owner) => ({
+        identity: owner,
+        projectId: 'p',
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }),
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      migrate: async () => {
+        throw new Error('Unexpected migration')
+      }
+    })
+    start = relay.ops.start({ taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: '/tmp' })
+    await starting
+    const send = relay.ops.send('tab', { id: 'message', content: [{ type: 'text', text: 'hi' }] })
+    await relay.receive('pc', {
+      type: 'state',
+      conversationId: 'c',
+      epoch: 1,
+      tabId: 'tab',
+      sessionId: 'task:tab',
+      oldState: 'not-spawned',
+      newState: 'starting'
+    })
+    await expect(send).resolves.toEqual({ id: 'message', state: 'queued' })
+  } finally {
+    release()
+    await start?.catch(() => undefined)
+    h.cleanup()
+  }
+})
+
 test.each([undefined, false, true, 'legacy', 'idle'])(
   'public abort prepares only with host continuation capability (%s), then awaits durable pop result',
   async (capability) => {

@@ -10,11 +10,13 @@
 
 import type { ComputerConfig } from '../config'
 import type { ComputerCliRelay } from '../cli-relay'
+import type { AgentLauncher } from '../agent-isolation'
 
 /** Minimal slice of the HubDialer the handlers depend on (fire-and-forget). */
 export interface ComputerDialer {
   /** Fire-and-forget notification to the hub; returns false when offline. */
   notify(method: string, params?: unknown): boolean
+  request?<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
   /** Persistent hosts clear buffered hooks before acknowledging permanent erasure. */
   forgetTaskEvents?(taskId: string): Promise<void>
 }
@@ -26,6 +28,7 @@ export interface HandlerContext {
   assertWorkAllowed?: () => void
   hookDirectory?: string
   cliRelay?: ComputerCliRelay
+  launchAgent?: AgentLauncher
   dialer: ComputerDialer
   config: ComputerConfig
   log: ComputerLog

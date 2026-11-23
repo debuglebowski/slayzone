@@ -20,8 +20,8 @@
  *     (The pty handler holds a warm start's slot past its shell's first output,
  *     since the agent boots after it.)
  *
- * Nothing is dropped or deferred indefinitely: every queued start runs, in order,
- * as slots free up. Plain shells never come here (see `pty.spawn`'s `admission`).
+ * Starts also wait for memory headroom and a live-agent slot. Plain shells
+ * never come here (see `pty.spawn`'s `admission`).
  *
  * One instance is shared by every hub this computer serves (`main.ts`), because
  * the contention is the machine's, not the connection's.
@@ -36,6 +36,18 @@ export type AdmissionLane = 'foreground' | 'background' | 'warm'
 /** A started agent's hold on a slot. `release` is idempotent. */
 export interface AdmissionSlot {
   release(): void
+  track(pid: number, evict?: () => void): AdmittedAgent
+}
+
+export interface AdmittedAgent {
+  exit(): void
+  adopt(): void
+}
+
+export interface AdmissionResources {
+  cap: number
+  warmPoolSize: number
+  pressure: boolean
 }
 
 /** A queued start. Opaque to callers except for `cancel` / `prioritize`. */
@@ -49,7 +61,11 @@ export interface SpawnAdmission {
    * inside this call — and must hand the slot back (`release`) when the agent is
    * up, or let the cap do it. A throwing `start` releases its slot.
    */
-  enqueue(lane: AdmissionLane, start: (slot: AdmissionSlot) => void): AdmissionTicket
+  enqueue(
+    lane: AdmissionLane,
+    start: (slot: AdmissionSlot) => void,
+    replacesAgent?: () => boolean
+  ): AdmissionTicket
   /** Remove a still-queued start. False when it already started (or was removed). */
   cancel(ticket: AdmissionTicket): boolean
   /** Move a still-queued start to the front of the foreground lane. */
@@ -57,6 +73,7 @@ export interface SpawnAdmission {
   /** Is this ticket still waiting? */
   isQueued(ticket: AdmissionTicket): boolean
   stats(): { queued: number; active: number; concurrency: number }
+  acceptsWarm?(): boolean
 }
 
 /** How long a start may hold its slot without printing anything. */
@@ -89,6 +106,7 @@ export type AdmissionEvent =
 
 export interface SpawnAdmissionOptions {
   concurrency?: number
+  resources?: () => AdmissionResources
   startCapMs?: number
   warmQuietMs?: number
   /** Told of every admission and release. Must not throw (it is guarded anyway). */
@@ -105,17 +123,23 @@ interface Ticket extends AdmissionTicket {
   /** When it was queued. */
   at: number
   start: (slot: AdmissionSlot) => void
+  replacesAgent?: () => boolean
 }
 
 interface ActiveSlot {
   warm: boolean
   released: boolean
   cap: unknown
+  pid?: number
+  evict?: () => void
 }
 
 const LANE_RANK: Record<AdmissionLane, number> = { foreground: 0, background: 1, warm: 2 }
 
-export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdmission {
+export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdmission & {
+  load(): { live: number; warm: number; queued: number; reserved: number; pids: number[] }
+  recheck(): void
+} {
   const concurrency = Math.max(1, opts.concurrency ?? defaultAdmissionConcurrency())
   const startCapMs = opts.startCapMs ?? DEFAULT_START_CAP_MS
   const warmQuietMs = opts.warmQuietMs ?? DEFAULT_WARM_QUIET_MS
@@ -139,6 +163,7 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
 
   const queue: Ticket[] = []
   const active = new Set<ActiveSlot>()
+  const agents = new Set<ActiveSlot>()
   let arrivals = 0
   let promotions = 0
   /** Last time an agent start was queued or finished starting; gates the warm lane. */
@@ -149,11 +174,30 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
 
   const activeAgents = (): number => [...active].filter((s) => !s.warm).length
   const activeWarm = (): number => [...active].filter((s) => s.warm).length
+  const warmReservations = (): number => [...agents].filter((s) => s.warm).length
+
+  function evictWarm(): void {
+    const agent = [...agents].find((s) => s.warm && s.evict)
+    const evict = agent?.evict
+    if (!agent || !evict) return
+    delete agent.evict
+    evict()
+  }
 
   function next(): Ticket | null {
-    if (active.size >= concurrency || queue.length === 0) return null
+    const resources = opts.resources?.()
+    if (resources && (resources.pressure || warmReservations() > resources.warmPoolSize)) {
+      evictWarm()
+    }
+    if (active.size >= concurrency || queue.length === 0 || resources?.pressure) return null
+    const atCap = resources !== undefined && agents.size >= resources.cap
     let best: Ticket | null = null
+    let waitingForCapacity = false
     for (const t of queue) {
+      if (atCap && !t.replacesAgent?.()) {
+        waitingForCapacity ||= t.lane !== 'warm'
+        continue
+      }
       if (
         !best ||
         LANE_RANK[t.lane] < LANE_RANK[best.lane] ||
@@ -162,7 +206,9 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
         best = t
       }
     }
+    if (!best && waitingForCapacity) evictWarm()
     if (!best || best.lane !== 'warm') return best
+    if (resources && warmReservations() >= resources.warmPoolSize) return null
     // Only warm starts are left. They wait for the agent starts to be over.
     if (activeAgents() > 0 || activeWarm() > 0) return null
     const quietLeft = lastAgentActivity + warmQuietMs - now()
@@ -184,6 +230,8 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
     const held: ActiveSlot = { warm, released: false, cap: null }
     const admittedAt = now()
     const release = (by: 'agent' | 'cap' = 'agent'): void => {
+      const unreserved = by === 'agent' && held.pid === undefined && agents.delete(held)
+      if (unreserved && held.released) pump()
       if (held.released) return
       held.released = true
       clearTimer(held.cap)
@@ -194,6 +242,7 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
     }
     held.cap = setTimer(() => release('cap'), startCapMs)
     active.add(held)
+    agents.add(held)
     report({
       type: 'admitted',
       lane: ticket.lane,
@@ -202,7 +251,23 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
       active: active.size
     })
     try {
-      ticket.start({ release: () => release('agent') })
+      ticket.start({
+        release: () => release('agent'),
+        track(pid, evict) {
+          held.pid = pid
+          held.evict = evict
+          return {
+            exit() {
+              if (agents.delete(held)) pump()
+            },
+            adopt() {
+              held.warm = false
+              delete held.evict
+              pump()
+            }
+          }
+        }
+      })
     } catch {
       release('agent')
     }
@@ -226,8 +291,8 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
   }
 
   return {
-    enqueue(lane, start) {
-      const ticket: Ticket = { lane, order: ++arrivals, at: now(), start }
+    enqueue(lane, start, replacesAgent) {
+      const ticket: Ticket = { lane, order: ++arrivals, at: now(), start, replacesAgent }
       queue.push(ticket)
       if (lane !== 'warm') lastAgentActivity = now()
       pump()
@@ -254,6 +319,24 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
     },
     stats() {
       return { queued: queue.length, active: active.size, concurrency }
-    }
+    },
+    load() {
+      const live = [...agents].filter((s) => s.pid !== undefined)
+      return {
+        live: live.length,
+        warm: live.filter((s) => s.warm).length,
+        queued: queue.filter((t) => t.lane !== 'warm').length,
+        reserved: agents.size,
+        pids: live.map((s) => s.pid!)
+      }
+    },
+    acceptsWarm() {
+      const limit = opts.resources?.().warmPoolSize
+      return (
+        limit === undefined ||
+        warmReservations() + queue.filter((t) => t.lane === 'warm').length < limit
+      )
+    },
+    recheck: pump
   }
 }

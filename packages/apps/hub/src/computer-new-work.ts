@@ -98,7 +98,7 @@ export function startsNewWork(method: string, params: unknown): boolean {
 }
 
 /** Chat session states in which nothing runs. */
-const IDLE_CHAT_STATES = new Set(['not-spawned', 'dead', 'error'])
+const IDLE_CHAT_STATES = new Set(['not-spawned', 'dead', 'error', 'hibernated'])
 
 /**
  * How much work runs on a computer right now: its live ptys, less the pre-warmed
