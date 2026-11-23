@@ -40,6 +40,7 @@ import {
 } from '../shared/text-read'
 import { Download, FileQuestion } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
+import type { ArtifactDeviceFrame } from './ArtifactDeviceFrame'
 import { HtmlPreviewFrame } from './ArtifactHtmlPreview'
 import { MediaPlayerViewer } from './MediaPlayerViewer'
 import { ArchiveViewer } from './ArchiveViewer'
@@ -246,6 +247,7 @@ export function ArtifactContentEditor({
   zoomPct,
   htmlTheme,
   deviceViewport,
+  deviceFrame,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -268,6 +270,7 @@ export function ArtifactContentEditor({
   zoomPct: number
   htmlTheme: HtmlArtifactTheme
   deviceViewport?: DeviceViewport
+  deviceFrame?: ArtifactDeviceFrame
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -786,6 +789,7 @@ export function ArtifactContentEditor({
             zoom={zoom}
             htmlTheme={htmlTheme}
             deviceViewport={deviceViewport}
+            deviceFrame={deviceFrame}
             onOpenLink={handleOpenLink}
           />
         </div>
@@ -822,6 +826,7 @@ export function ArtifactContentEditor({
               zoom={zoom}
               htmlTheme={htmlTheme}
               deviceViewport={deviceViewport}
+              deviceFrame={deviceFrame}
               onOpenLink={handleOpenLink}
             />
           </div>
@@ -897,6 +902,7 @@ function ArtifactPreview({
   zoom,
   htmlTheme,
   deviceViewport,
+  deviceFrame,
   onOpenLink
 }: {
   renderMode: RenderMode
@@ -907,6 +913,7 @@ function ArtifactPreview({
   zoom: number
   htmlTheme: HtmlArtifactTheme
   deviceViewport?: DeviceViewport
+  deviceFrame?: ArtifactDeviceFrame
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   if (renderMode === 'html-preview')
@@ -924,6 +931,7 @@ function ArtifactPreview({
         zoom={zoom}
         htmlTheme={htmlTheme}
         deviceViewport={deviceViewport}
+        deviceFrame={deviceFrame}
         onOpenLink={onOpenLink}
       />
     )

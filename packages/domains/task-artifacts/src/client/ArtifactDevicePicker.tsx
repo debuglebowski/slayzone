@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { Check, ChevronDown, MonitorSmartphone, RotateCw } from 'lucide-react'
 import {
   Button,
@@ -9,9 +9,11 @@ import {
   CommandItem,
   CommandList,
   Input,
+  Label,
   Popover,
   PopoverContent,
-  PopoverTrigger
+  PopoverTrigger,
+  Switch
 } from '@slayzone/ui'
 import {
   DEVICE_CATEGORIES,
@@ -39,13 +41,18 @@ export function artifactDeviceViewport(
 
 export function ArtifactDevicePicker({
   selection,
-  onChange
+  onChange,
+  showDeviceFrame,
+  onShowDeviceFrameChange
 }: {
   selection: ArtifactDeviceSelection
   onChange: (selection: ArtifactDeviceSelection) => void
+  showDeviceFrame: boolean
+  onShowDeviceFrameChange: (show: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
   const [custom, setCustom] = useState(false)
+  const frameSwitchId = useId()
   const viewport = artifactDeviceViewport(selection)
   const screen =
     selection?.kind === 'preset' ? selection.device.screens[selection.screen] : undefined
@@ -106,10 +113,24 @@ export function ArtifactDevicePicker({
             <ChevronDown className="size-3 opacity-60" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-72 p-0">
+        <PopoverContent
+          align="end"
+          collisionPadding={8}
+          className="flex max-h-[var(--radix-popover-content-available-height)] flex-col overflow-hidden p-0"
+        >
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
+            <Label htmlFor={frameSwitchId} className="cursor-pointer text-xs">
+              Show device frame
+            </Label>
+            <Switch
+              id={frameSwitchId}
+              checked={showDeviceFrame}
+              onCheckedChange={onShowDeviceFrameChange}
+            />
+          </div>
           {selection?.kind === 'preset' && selection.device.screens.length > 1 && (
             <div
-              className="flex flex-wrap gap-1 border-b border-border p-2"
+              className="flex shrink-0 flex-wrap gap-1 border-b border-border p-2"
               role="group"
               aria-label="Device screen"
             >
@@ -131,9 +152,9 @@ export function ArtifactDevicePicker({
               ))}
             </div>
           )}
-          <Command>
+          <Command className="h-auto min-h-0 [&_[cmdk-input-wrapper]]:shrink-0">
             <CommandInput placeholder="Search devices…" aria-label="Search devices" />
-            <CommandList className="max-h-64">
+            <CommandList className="min-h-0 max-h-none">
               <CommandEmpty>No matching devices.</CommandEmpty>
               <CommandItem
                 value="Fit to pane"
@@ -170,7 +191,7 @@ export function ArtifactDevicePicker({
               ))}
             </CommandList>
           </Command>
-          <div className="border-t border-border p-2">
+          <div className="shrink-0 border-t border-border p-2">
             {custom ? (
               <form onSubmit={applyCustom} className="flex items-center gap-1.5">
                 <Input

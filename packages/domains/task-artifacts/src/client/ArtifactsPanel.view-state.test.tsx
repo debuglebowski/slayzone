@@ -111,18 +111,21 @@ vi.mock('./ArtifactContentEditor', () => ({
     artifact,
     viewMode,
     searchQuery,
-    deviceViewport
+    deviceViewport,
+    deviceFrame
   }: {
     artifact: TaskArtifact
     viewMode: string
     searchQuery: string
     deviceViewport?: DeviceViewport
+    deviceFrame?: { device: { id: string } }
   }) => (
     <div
       data-testid="viewer"
       data-artifact={artifact.id}
       data-view-mode={viewMode}
       data-search={searchQuery}
+      data-device-frame={deviceFrame?.device.id}
       data-viewport={
         deviceViewport ? `${deviceViewport.width}×${deviceViewport.height}` : undefined
       }
@@ -251,6 +254,14 @@ it('selects and rotates both iPhone Duo screens and keeps the choice with its ar
     fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
     fireEvent.click(await screen.findByRole('option', { name: 'iPhone Duo' }))
     expect(viewer().dataset.viewport).toBe('466×678')
+    expect(viewer().dataset.deviceFrame).toBe('iphone-duo')
+    const showFrame = screen.getByRole('switch', { name: 'Show device frame' })
+    expect(showFrame.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(showFrame)
+    expect(viewer().dataset.deviceFrame).toBeUndefined()
+    expect(viewer().dataset.viewport).toBe('466×678')
+    fireEvent.click(showFrame)
+    expect(viewer().dataset.deviceFrame).toBe('iphone-duo')
 
     fireEvent.click(screen.getByRole('button', { name: 'Unfolded' }))
     expect(viewer().dataset.viewport).toBe('890×626')

@@ -84,6 +84,7 @@ import {
   artifactDeviceViewport,
   type ArtifactDeviceSelection
 } from './ArtifactDevicePicker'
+import { setShowDeviceFrame, useShowDeviceFrame } from './device-frame-preference'
 import { VersionsPanel } from './VersionsPanel'
 import { TreeSidebar } from './TreeSidebar'
 import { useArtifactTree } from './useArtifactTree'
@@ -264,6 +265,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const [deviceSelections, setDeviceSelections] = useState<
       Record<string, ArtifactDeviceSelection>
     >({})
+    const showDeviceFrame = useShowDeviceFrame()
     const [dragOver, setDragOver] = useState(false)
     const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
     const dragArtifactIdsRef = useRef<string[]>([])
@@ -357,6 +359,10 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       ? (deviceSelections[selectedArtifact.id] ?? null)
       : null
     const deviceViewport = useMemo(() => artifactDeviceViewport(deviceSelection), [deviceSelection])
+    const deviceFrame =
+      showDeviceFrame && deviceSelection?.kind === 'preset'
+        ? { device: deviceSelection.device, screen: deviceSelection.screen }
+        : undefined
     const HtmlViewIcon = viewMode === 'preview' ? Eye : viewMode === 'split' ? Columns2 : Code2
 
     const applyViewMode = (mode: typeof viewMode) => {
@@ -974,6 +980,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   {showHtmlDevice && (
                     <ArtifactDevicePicker
                       selection={deviceSelection}
+                      showDeviceFrame={showDeviceFrame}
+                      onShowDeviceFrameChange={setShowDeviceFrame}
                       onChange={(next) =>
                         setDeviceSelections((current) => ({
                           ...current,
@@ -1326,6 +1334,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   zoomPct={zoomPct}
                   htmlTheme={htmlTheme}
                   deviceViewport={deviceViewport}
+                  deviceFrame={deviceFrame}
                   searchQuery={findOpen ? findQuery : ''}
                   searchActiveIndex={findActiveIndex}
                   searchMatchCase={findMatchCase}

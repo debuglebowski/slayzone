@@ -16,6 +16,12 @@ import {
   parseHtmlPreviewLinkMessage
 } from '@slayzone/platform/html-preview-links'
 import { ARTIFACT_DEVICE_PARTITION, type DeviceViewport } from '@slayzone/platform/preview-devices'
+import {
+  deviceChassisLayout,
+  DeviceCameraCutout,
+  DeviceChassisBody,
+  type ArtifactDeviceFrame
+} from './ArtifactDeviceFrame'
 import type { HtmlArtifactTheme } from './ArtifactsPanel.constants'
 
 // Hub HTML previews get an origin per artifact so browser storage stays private
@@ -38,6 +44,7 @@ export function HtmlPreviewFrame({
   zoom,
   htmlTheme,
   deviceViewport,
+  deviceFrame,
   onOpenLink
 }: {
   artifactId: string
@@ -46,6 +53,7 @@ export function HtmlPreviewFrame({
   zoom: number
   htmlTheme: HtmlArtifactTheme
   deviceViewport?: DeviceViewport
+  deviceFrame?: ArtifactDeviceFrame
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   const hubId = useHubId()
@@ -127,7 +135,7 @@ export function HtmlPreviewFrame({
     const configure = isArtifactOrigin ? electronBootstrap.artifactDevicePreview() : null
     const emulationFailed = failedViewport === deviceViewport
     return (
-      <DevicePreviewCanvas viewport={deviceViewport} zoom={zoom}>
+      <DevicePreviewCanvas viewport={deviceViewport} frame={deviceFrame} zoom={zoom}>
         {configure && !emulationFailed ? (
           <ArtifactDeviceGuest
             src={src}
@@ -179,10 +187,12 @@ const CANVAS_PADDING = 12
 
 function DevicePreviewCanvas({
   viewport,
+  frame,
   zoom,
   children
 }: {
   viewport: DeviceViewport
+  frame?: ArtifactDeviceFrame
   zoom: number
   children: ReactNode
 }) {
@@ -196,11 +206,14 @@ function DevicePreviewCanvas({
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
+  const chassis = frame ? deviceChassisLayout(frame, viewport) : undefined
+  const width = chassis?.width ?? viewport.width
+  const height = chassis?.height ?? viewport.height
   const fit = available
     ? Math.min(
         1,
-        Math.max(1, available.width - CANVAS_PADDING * 2) / viewport.width,
-        Math.max(1, available.height - CANVAS_PADDING * 2) / viewport.height
+        Math.max(1, available.width - CANVAS_PADDING * 2) / width,
+        Math.max(1, available.height - CANVAS_PADDING * 2) / height
       )
     : 1
   const scale = fit * zoom
@@ -210,29 +223,49 @@ function DevicePreviewCanvas({
     <div ref={measure} className="relative min-h-0 min-w-0 flex-1 overflow-auto bg-surface-0">
       <div className="flex min-h-full min-w-full w-max" style={{ padding: CANVAS_PADDING }}>
         <div
-          className="relative m-auto shrink-0 overflow-hidden rounded-sm outline-1 outline-border bg-background"
-          style={{ width: viewport.width * scale, height: viewport.height * scale }}
+          className="relative m-auto shrink-0 overflow-hidden"
+          style={{ width: width * scale, height: height * scale }}
         >
           <div
             className="absolute left-0 top-0 origin-top-left"
-            style={{ transform: `scale(${scale})` }}
+            style={{ width, height, transform: `scale(${scale})` }}
           >
-            {children}
-            {hinge && (
-              <div
-                aria-hidden="true"
-                className={
-                  hinge.maskLength
-                    ? 'absolute bg-surface-0'
-                    : 'pointer-events-none absolute bg-border/50'
-                }
-                style={
-                  hinge.orientation === 'vertical'
-                    ? { top: 0, bottom: 0, left: hinge.offset, width: hingeSize }
-                    : { left: 0, right: 0, top: hinge.offset, height: hingeSize }
-                }
-              />
-            )}
+            {frame && chassis && <DeviceChassisBody model={frame.device.id} layout={chassis} />}
+            <div
+              key="live-screen"
+              className={
+                chassis
+                  ? 'absolute overflow-hidden bg-background'
+                  : 'absolute overflow-hidden rounded-sm outline-1 -outline-offset-1 outline-border bg-background'
+              }
+              style={{
+                left: chassis?.screenLeft ?? 0,
+                top: chassis?.screenTop ?? 0,
+                width: viewport.width,
+                height: viewport.height,
+                borderRadius: chassis?.chassis.radius
+              }}
+            >
+              {children}
+              {hinge && (
+                <div
+                  aria-hidden="true"
+                  className={
+                    hinge.maskLength
+                      ? chassis
+                        ? 'absolute bg-black'
+                        : 'absolute bg-surface-0'
+                      : 'pointer-events-none absolute bg-border/50'
+                  }
+                  style={
+                    hinge.orientation === 'vertical'
+                      ? { top: 0, bottom: 0, left: hinge.offset, width: hingeSize }
+                      : { left: 0, right: 0, top: hinge.offset, height: hingeSize }
+                  }
+                />
+              )}
+            </div>
+            {chassis && <DeviceCameraCutout layout={chassis} />}
           </div>
         </div>
       </div>
