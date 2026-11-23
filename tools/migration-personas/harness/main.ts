@@ -483,12 +483,23 @@ function settleIdleUpgradeCheck(s: string): string {
   return s.replace(/(\\?"phase\\?": ?\\?")checking(\\?")/g, '$1connected$2')
 }
 
+/**
+ * A diagnostic record this run wrote (its id normalized to `diagnostic:<new-uuid>`)
+ * carries wall-clock durations of this boot (chat open timings: `ms`, `totalMs`, `scanMs`,
+ * …). They vary run to run and no migration reads or writes them; the event, its
+ * counts and its flags are kept. Diagnostics carried in from the input keep every value.
+ */
+function maskRunDiagnosticDurations(s: string): string {
+  if (!s.includes('"id":"diagnostic:<new-uuid>"')) return s
+  return s.replace(/(\\"(?:[A-Za-z]+Ms|ms)\\":)\d+(\.\d+)?/g, '$1"<run-duration>"')
+}
+
 /** Replace values minted by THIS run (ids, keys, wall-clock times) with stable tokens. */
 const HOSTNAME_RE = new RegExp(`\\b${hostname().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')
 
 function normalize(s: string): string {
   const known = (v: string) => inputValues.has(v) || inputValues.has(v.toLowerCase())
-  return (
+  return maskRunDiagnosticDurations(
     settleIdleUpgradeCheck(s)
       .replace(UUID_RE, (u) => (known(u) ? u : '<new-uuid>'))
       // This run's container hostname (a random id; e.g. a shell prompt in saved scrollback).
@@ -528,7 +539,11 @@ const RUNTIME_LOG_TABLES = new Set([
   'machines'
 ])
 /** Columns that are runtime state, by table (same reasons as above). */
-const RUNTIME_COLUMNS: Record<string, string[]> = { computers: ['host_id'] }
+const RUNTIME_COLUMNS: Record<string, string[]> = {
+  // health_json: the computer's last health sample (memory, CPU, live agents), rewritten
+  // on every heartbeat (apps/computer memory management); no migration carries it.
+  computers: ['host_id', 'health_json']
+}
 
 function sortKeys(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeys)
