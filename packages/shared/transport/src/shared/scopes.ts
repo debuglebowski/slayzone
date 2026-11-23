@@ -658,6 +658,13 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'notify.onEmbeddedServerFailed': 'never',
   'notify.onSettingsChanged': 'never',
   'notify.onTasksChanged': 'read',
+  // The caller's own open task tabs (a tab bar shared by their clients): reading
+  // them is observing; opening, closing and reordering edit only their own view.
+  'openTabs.close': 'tasks',
+  'openTabs.list': 'read',
+  'openTabs.onChanged': 'read',
+  'openTabs.open': 'tasks',
+  'openTabs.reorder': 'tasks',
   'processes.create': 'never',
   'processes.listAll': 'never',
   'processes.listForTask': 'never',

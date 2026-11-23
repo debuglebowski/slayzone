@@ -36,9 +36,16 @@ jest.mock('../artifacts/ArtifactSearchScreen', () => ({ ArtifactSearchScreen: ()
 jest.mock('../hub-theme', () => ({
   HubThemeProvider: ({ children }: { children: ReactNode }) => children
 }))
+// A hub scope with no hub behind it: whatever asks the hub fails, so the iPad's tab bar
+// keeps the tabs opened on this device (a hub without shared open tabs).
+let mockEmptyHub: { wrapper: (p: { children: ReactNode }) => ReactNode } | null = null
 jest.mock('@slayzone/transport/client', () => ({
   ...jest.requireActual('@slayzone/transport/client'),
-  HubScope: ({ children }: { children: ReactNode }) => children
+  HubScope: ({ children }: { children: ReactNode }) => {
+    mockEmptyHub ??= jest.requireActual('../testing').trpcTest({})
+    const Wrapper = mockEmptyHub!.wrapper
+    return <Wrapper>{children}</Wrapper>
+  }
 }))
 jest.mock('../hubs/HubDetails', () => ({ HubDetails: () => null }))
 // The board's columns write to its hub (`board/*.test.tsx`); here only the task's route.

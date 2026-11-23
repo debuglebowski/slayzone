@@ -71,6 +71,7 @@ import {
 } from '@slayzone/projects/server'
 import { computersRouter, type ComputersMounts } from '@slayzone/computers/server'
 import { settingsRouter, type SettingsMounts } from '@slayzone/settings-core/server'
+import { openTabsRouter, type OpenTabsMounts } from '@slayzone/tabs-state/server'
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import {
   taskRouter,
@@ -104,6 +105,8 @@ export const appRouter = router({
   integrations: integrationsRouter,
   menu: menuRouter,
   notify: notifyRouter,
+  // The signed-in user's open task tabs of this hub's tasks, shared by their clients.
+  openTabs: openTabsRouter,
   processes: processesRouter,
   projects: projectsRouter,
   projectGroups: projectGroupsRouter,
@@ -175,6 +178,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<IntegrationsMounts>>,
   AssertAppSlice<IsAppSlice<MenuMounts>>,
   AssertAppSlice<IsAppSlice<NotifyMounts>>,
+  AssertAppSlice<IsAppSlice<OpenTabsMounts>>,
   AssertAppSlice<IsAppSlice<ProcessesMounts>>,
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<ProjectsMounts>>,

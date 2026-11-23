@@ -6,18 +6,26 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/platform": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/settings-core": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "@trpc/server": "^11.24.0",
+    "zod": "^4.6.6",
     "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@slayzone/test-utils": "workspace:*"
   }
 }

@@ -87,9 +87,16 @@ jest.mock('./artifacts/ArtifactSearchScreen', () => ({
 jest.mock('./hub-theme', () => ({
   HubThemeProvider: ({ children }: { children: ReactNode }) => children
 }))
+// A hub scope with no hub behind it: whatever asks the hub fails, so the iPad's tab bar
+// keeps the tabs opened on this device (a hub without shared open tabs).
+let mockEmptyHub: { wrapper: (p: { children: ReactNode }) => ReactNode } | null = null
 jest.mock('@slayzone/transport/client', () => ({
   ...jest.requireActual('@slayzone/transport/client'),
-  HubScope: ({ children }: { children: ReactNode }) => children
+  HubScope: ({ children }: { children: ReactNode }) => {
+    mockEmptyHub ??= jest.requireActual('./testing').trpcTest({})
+    const Wrapper = mockEmptyHub!.wrapper
+    return <Wrapper>{children}</Wrapper>
+  }
 }))
 // A hub card's account and computers talk to that hub (tRPC); here only which screen a
 // route opens matters.

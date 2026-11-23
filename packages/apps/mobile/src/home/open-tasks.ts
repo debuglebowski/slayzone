@@ -29,3 +29,25 @@ export function closeTask(state: OpenTasks, ref: TaskRef): OpenTasks {
   if (!sameTask(state.active, ref)) return { tabs, active: state.active }
   return { tabs, active: tabs[at] ?? tabs[at - 1] ?? null }
 }
+
+/**
+ * The tab bar when hubs keep the tabs (`openTabs`, shared with the user's desktop):
+ * hub by hub in `hubIds` order, a hub that keeps them shows its list (`synced`), a hub
+ * that does not (older than `openTabs`, or not loaded yet) the tabs opened on this
+ * device (`local`).
+ */
+export function combineOpenTasks(
+  hubIds: readonly string[],
+  synced: ReadonlyMap<string, readonly string[]>,
+  local: readonly TaskRef[]
+): TaskRef[] {
+  return hubIds.flatMap((hubId) => {
+    const list = synced.get(hubId)
+    return list ? list.map((taskId) => ({ hubId, taskId })) : local.filter((t) => t.hubId === hubId)
+  })
+}
+
+/** The tab to show: `active` while it is still a tab (closed elsewhere = the board). */
+export function shownTab(tabs: readonly TaskRef[], active: TaskRef | null): TaskRef | null {
+  return active && tabs.some((t) => sameTask(t, active)) ? active : null
+}

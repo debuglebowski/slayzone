@@ -53,6 +53,17 @@ async function fixture() {
   return { h, root, version }
 }
 
+test("erasing a user drops their open tabs, even on another owner's task; others keep theirs", async () => {
+  const { h, root } = await fixture()
+  const tab = h.db.prepare('INSERT INTO open_task_tabs(user_id,task_id,position) VALUES(?,?,0)')
+  tab.run('alice', 'task-bob')
+  tab.run('bob', 'task-bob')
+  await eraseContent(h.slayDb, root, { kind: 'user', userId: 'alice' })
+  expect(h.db.prepare('SELECT user_id, task_id FROM open_task_tabs').all()).toEqual([
+    { user_id: 'bob', task_id: 'task-bob' }
+  ])
+})
+
 test('erases projects, archived tasks, originals, legacy files and every named version; preserves another owner', async () => {
   const { h, root, version } = await fixture()
   const a = version('alice', 'alice historical secret')

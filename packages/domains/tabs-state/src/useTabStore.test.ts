@@ -9,6 +9,7 @@ import {
   computeWarmTabCounts,
   pushWarmTabCounts,
   loadTabStoreState,
+  resolveTaskTabHubs,
   type ClosedTab,
   type TaskLookupTask
 } from './useTabStore.js'
@@ -428,5 +429,35 @@ describe('loadTabStoreState when the saved tabs cannot be read yet', () => {
       vi.useRealTimers()
       _setTrpcClientSingleton({ settings: { set: { mutate: async () => {} } } } as never)
     }
+  })
+})
+
+describe('resolveTaskTabHubs: the hub each task tab belongs to (for the shared open tabs)', () => {
+  const lookup = {
+    tasks: [
+      { id: 't-local', project_id: 'p-local' },
+      { id: 't-remote', project_id: 'p-remote' }
+    ],
+    projects: [{ id: 'p-local' }, { id: 'p-remote', hubId: 'remote' }]
+  }
+  test('recorded hub first, else its project’s hub, else the default hub; unknown task = unknown', () => {
+    expect(
+      resolveTaskTabHubs(
+        [
+          { type: 'home' },
+          { type: 'task', taskId: 't-local', title: 'L' },
+          { type: 'task', taskId: 't-remote', title: 'R' },
+          { type: 'task', taskId: 't-recorded', title: 'X', hubId: 'other' },
+          { type: 'task', taskId: 't-unseen', title: 'U' }
+        ],
+        lookup,
+        'local'
+      )
+    ).toEqual([
+      { taskId: 't-local', hubId: 'local' },
+      { taskId: 't-remote', hubId: 'remote' },
+      { taskId: 't-recorded', hubId: 'other' },
+      { taskId: 't-unseen', hubId: undefined }
+    ])
   })
 })

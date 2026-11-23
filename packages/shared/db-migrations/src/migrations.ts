@@ -5983,6 +5983,50 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    // Open task tabs, per user, of this hub's own tasks: the tab bar every client of
+    // that user shares (desktop, iPad). user_id '' = a hub without login. Seeded from
+    // the tab layouts already saved here (`viewState`, global and per user): their
+    // task tabs whose task lives on this hub, in tab-bar order.
+    version: 226,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE open_task_tabs (
+          user_id  TEXT NOT NULL,
+          task_id  TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          PRIMARY KEY (user_id, task_id)
+        );
+        CREATE INDEX idx_open_task_tabs_task ON open_task_tabs(task_id);
+      `)
+      const layouts = db
+        .prepare(
+          `SELECT '' AS user_id, value FROM settings WHERE key = 'viewState'
+           UNION ALL SELECT user_id, value FROM user_settings WHERE key = 'viewState'`
+        )
+        .all() as { user_id: string; value: string | null }[]
+      const insert = db.prepare(
+        `INSERT OR IGNORE INTO open_task_tabs (user_id, task_id, position)
+         SELECT ?, id, ? FROM tasks WHERE id = ?`
+      )
+      for (const layout of layouts) {
+        let tabs: unknown
+        try {
+          tabs = (JSON.parse(layout.value ?? '') as { tabs?: unknown })?.tabs
+        } catch {
+          continue
+        }
+        if (!Array.isArray(tabs)) continue
+        let position = 0
+        for (const tab of tabs as { type?: unknown; taskId?: unknown }[]) {
+          if (tab?.type !== 'task' || typeof tab.taskId !== 'string') continue
+          insert.run(layout.user_id, position++, tab.taskId)
+        }
+      }
+      // open_task_tabs carries a task_id: fenced like every such table.
+      installContentErasureFences(db)
+    }
   }
 ]
 

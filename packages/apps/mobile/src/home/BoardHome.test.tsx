@@ -5,9 +5,17 @@
  * backend behind a stand-in for `HubScope` (`createFakeHubs`); both have a project `p`
  * (ids are per hub), so a write that went to the wrong hub shows in that hub's calls.
  */
-import { act, fireEvent, render, screen, userEvent, within } from '@testing-library/react-native'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  userEvent,
+  waitFor,
+  within
+} from '@testing-library/react-native'
 import type { ReactNode } from 'react'
-import { ActionSheetIOS, Alert, Dimensions } from 'react-native'
+import { ActionSheetIOS, Alert, Dimensions, Platform } from 'react-native'
 import { createBoardPrefs } from '../board/board-prefs'
 import type { Rect } from '../board/drag'
 import type { Measure } from '../board/ProjectBoard'
@@ -103,7 +111,15 @@ const hubTests = new Map<
   { queryClient: { refetchQueries: (f: object) => Promise<void> } }
 >()
 
-function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
+function serve(
+  hubId: string,
+  board: () => BoardData,
+  fail?: string,
+  extra: {
+    procedures?: Record<string, (input: never) => unknown>
+    subscriptions?: Record<string, (input: never, emit: (data: unknown) => void) => void>
+  } = {}
+): Calls {
   const calls: Calls = {
     create: [],
     createTask: [],
@@ -134,14 +150,16 @@ function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
         calls.create.push(input)
         return { id: 'new-p' }
       },
-      'taskTerminals.listHibernatedSessions': () => []
+      'taskTerminals.listHibernatedSessions': () => [],
+      ...extra.procedures
     },
     subscriptions: {
       'notify.onTasksChanged': () => undefined,
       'pty.onStateChange': () => undefined,
       'pty.onExit': () => undefined,
       'pty.onBackgroundJobs': () => undefined,
-      'pty.onHibernated': () => undefined
+      'pty.onHibernated': () => undefined,
+      ...extra.subscriptions
     }
   })
   hubTests.set(hubId, test)
@@ -1112,5 +1130,97 @@ describe('BoardHome: hubs', () => {
     await inApp(<BoardHome {...base({ feeds: [feedOf(workHub, boardOf({}))] })} />)
     expect(screen.getByText('No projects yet')).toBeOnTheScreen()
     expect(screen.queryByTestId('board-unreachable')).toBeNull()
+  })
+})
+
+describe('BoardHome: the tabs shared with the desktop (iPad)', () => {
+  let padIdiom: jest.SpyInstance | null = null
+  beforeEach(() => {
+    padIdiom = jest
+      .spyOn(Platform as { readonly isPad: boolean }, 'isPad', 'get')
+      .mockReturnValue(true)
+    const window = { width: 1024, height: 1366, scale: 2, fontScale: 1 }
+    Dimensions.set({ window, screen: window })
+  })
+  afterEach(() => {
+    padIdiom?.mockRestore()
+    const window = { width: 390, height: 844, scale: 3, fontScale: 1 }
+    Dimensions.set({ window, screen: window })
+  })
+
+  /** Home keeps the user's open tabs; another client of theirs can change them. */
+  function serveShared(initial: string[], board: () => BoardData = homeBoard) {
+    const hub = { list: [...initial], calls: [] as string[], ping: () => {} }
+    serve(homeHub.id, board, undefined, {
+      procedures: {
+        'openTabs.list': () => [...hub.list],
+        'openTabs.open': ({ taskId }: { taskId: string }) => {
+          hub.calls.push(`open ${taskId}`)
+          if (!hub.list.includes(taskId)) hub.list.push(taskId)
+        },
+        'openTabs.close': ({ taskId }: { taskId: string }) => {
+          hub.calls.push(`close ${taskId}`)
+          hub.list = hub.list.filter((id) => id !== taskId)
+        },
+        'pty.killTask': ({ taskId }: { taskId: string }) => {
+          hub.calls.push(`kill ${taskId}`)
+        }
+      },
+      subscriptions: {
+        'openTabs.onChanged': (_: never, emit: (data: unknown) => void) => {
+          hub.ping = () => emit({})
+        }
+      }
+    })
+    return hub
+  }
+
+  it('shows the tasks open on the desktop, and follows it opening and closing them', async () => {
+    const hub = serveShared(['h1'])
+    await render(app({ prefs: createBoardPrefs(memory()), wide: true }))
+    expect(await screen.findByTestId('open-tab-task-h1')).toBeOnTheScreen()
+    // Closed on the desktop: gone here.
+    hub.list = []
+    await act(async () => hub.ping())
+    await waitFor(() => expect(screen.queryByTestId('open-tab-task-h1')).toBeNull())
+    // Opened on the desktop again: back here.
+    hub.list = ['h1']
+    await act(async () => hub.ping())
+    expect(await screen.findByTestId('open-tab-task-h1')).toBeOnTheScreen()
+  })
+
+  it('a task opened or closed here is opened or closed on the hub (so on the desktop)', async () => {
+    const hub = serveShared([])
+    await render(app({ prefs: createBoardPrefs(memory()), wide: true }))
+    await screen.findByText('Home task')
+    const user = userEvent.setup()
+    await user.press(screen.getByText('Home task'))
+    expect(await screen.findByText('task page h1 details')).toBeOnTheScreen()
+    expect(hub.calls).toEqual(['open h1'])
+    await user.press(screen.getByLabelText('Close Home task'))
+    expect(screen.queryByTestId('open-tab-task-h1')).toBeNull()
+    expect(hub.calls).toEqual(['open h1', 'close h1'])
+    expect(hub.list).toEqual([])
+  })
+
+  it("closing a temporary task's tab keeps the task and stops its terminals, as desktop does", async () => {
+    const hub = serveShared(['s1'], () =>
+      boardOf({
+        projects: [projectOf('p', { name: 'Site' })],
+        tasks: [
+          taskOf('s1', {
+            title: 'Terminal 1',
+            status: 'todo',
+            is_temporary: true
+          })
+        ]
+      })
+    )
+    await render(app({ prefs: createBoardPrefs(memory()), wide: true }))
+    const user = userEvent.setup()
+    await user.press(await screen.findByLabelText('Close Terminal 1'))
+    expect(screen.queryByTestId('open-tab-task-s1')).toBeNull()
+    await act(async () => {})
+    expect(hub.calls.sort()).toEqual(['close s1', 'kill s1'])
   })
 })

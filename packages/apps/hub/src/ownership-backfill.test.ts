@@ -52,6 +52,8 @@ async function seededHarness(): Promise<TestHarness> {
   set.run('panel_config', '{"webPanels":[]}')
   set.run('default_agent_id', 'claude-code')
   set.run('integration:credential:ref-1', 'plain:secret')
+  // The open tab that viewState names, as the hub without login keeps it (user '').
+  h.db.prepare(`INSERT INTO open_task_tabs (user_id, task_id, position) VALUES ('', 't1', 0)`).run()
   return h
 }
 
@@ -64,6 +66,11 @@ const owners = (h: TestHarness): Record<string, string | null> =>
       }[]
     ).map((r) => [r.id, r.owner_user_id])
   )
+const openTabs = (h: TestHarness): { user_id: string; task_id: string }[] =>
+  h.db.prepare('SELECT user_id, task_id FROM open_task_tabs ORDER BY user_id').all() as {
+    user_id: string
+    task_id: string
+  }[]
 const settingKeys = (h: TestHarness): string[] =>
   (h.db.prepare('SELECT key FROM settings ORDER BY key').all() as { key: string }[]).map(
     (r) => r.key
@@ -100,6 +107,7 @@ test('login off (the desktop hub): nothing changes, not even with an admin prese
   expect(owners(h), 'owners untouched').toEqual(before.owners)
   expect(settingKeys(h), 'settings untouched').toEqual(before.keys)
   expect(userSettings(h), 'no per-user rows').toEqual([])
+  expect(openTabs(h), 'open tab stays the no-login one').toEqual([{ user_id: '', task_id: 't1' }])
   expect(lines.length, 'no audit line').toBe(0)
 })
 
@@ -113,7 +121,12 @@ test('login on, no account yet: nothing assigned, nothing lost, logged', async (
     requireLogin: true,
     log: (m) => logs.push(m)
   })
-  expect(result, 'no admin → no owner').toEqual({ ownerUserId: null, projects: 0, settings: 0 })
+  expect(result, 'no admin → no owner').toEqual({
+    ownerUserId: null,
+    projects: 0,
+    settings: 0,
+    openTabs: 0
+  })
   expect(owners(h)['p-legacy-1'], 'still unowned').toBe(null)
   expect(settingKeys(h), 'global viewState kept').toContain('viewState')
   expect(
@@ -133,7 +146,12 @@ test('login on: unowned projects + pre-login user settings → first admin, once
   const { result, lines } = await captureAudit(() =>
     backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
   )
-  expect(result, 'counts').toEqual({ ownerUserId: admin.id, projects: 2, settings: 2 })
+  expect(result, 'counts').toEqual({
+    ownerUserId: admin.id,
+    projects: 2,
+    settings: 2,
+    openTabs: 1
+  })
   expect(owners(h), 'unowned → admin; an owned project keeps its owner').toEqual({
     'p-legacy-1': admin.id,
     'p-legacy-2': admin.id,
@@ -156,6 +174,9 @@ test('login on: unowned projects + pre-login user settings → first admin, once
       value: '{"tabs":[{"type":"task","taskId":"t1","title":"T"}]}'
     }
   ])
+  expect(openTabs(h), 'the open tab moved to the admin').toEqual([
+    { user_id: admin.id, task_id: 't1' }
+  ])
 
   expect(lines.length, 'one audit line').toBe(1)
   const line = lines[0]!
@@ -163,13 +184,22 @@ test('login on: unowned projects + pre-login user settings → first admin, once
   expect(line.outcome, 'outcome').toBe('success')
   expect(line.targetKind, 'target kind').toBe('user')
   expect(line.targetId, 'target = the new owner').toEqual(admin.id)
-  expect(line.detail, 'counts in detail').toEqual({ projectCount: 2, settingCount: 2 })
+  expect(line.detail, 'counts in detail').toEqual({
+    projectCount: 2,
+    settingCount: 2,
+    openTabCount: 1
+  })
 
   // Second boot: nothing left, nothing logged.
   const again = await captureAudit(() =>
     backfillOwnership({ db: h.slayDb, hubAuth: auth, requireLogin: true })
   )
-  expect(again.result, 'idempotent').toEqual({ ownerUserId: admin.id, projects: 0, settings: 0 })
+  expect(again.result, 'idempotent').toEqual({
+    ownerUserId: admin.id,
+    projects: 0,
+    settings: 0,
+    openTabs: 0
+  })
   expect(again.lines.length, 'no audit line when nothing changed').toBe(0)
 })
 

@@ -312,6 +312,9 @@ importers:
       '@slayzone/settings-core':
         specifier: workspace:*
         version: link:../../shared/settings-core
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../../domains/tabs-state
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
@@ -948,6 +951,9 @@ importers:
       '@slayzone/settings-core':
         specifier: workspace:*
         version: link:../../shared/settings-core
+      '@slayzone/tabs-state':
+        specifier: workspace:*
+        version: link:../../domains/tabs-state
       '@slayzone/task':
         specifier: workspace:*
         version: link:../../domains/task
@@ -2621,6 +2627,9 @@ importers:
 
   packages/domains/tabs-state:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../projects-contracts
@@ -2639,9 +2648,22 @@ importers:
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
+      '@trpc/server':
+        specifier: ^11.24.0
+        version: 11.24.0(patch_hash=692768755fd726c4b994698b0b889c88cf5efd4e20c4b3a27d80fc0b8736465f)(@types/express@5.0.6)(@types/ws@8.18.2)(typescript@7.1.0-dev.20261111.1)
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
       zustand:
         specifier: ^5.0.16
         version: 5.0.16(@types/react@19.3.0)(immer@11.2.7)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1))
+    devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
 
   packages/domains/tags:
     dependencies:

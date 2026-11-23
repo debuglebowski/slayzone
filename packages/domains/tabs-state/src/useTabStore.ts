@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
-import { hubAllows } from '@slayzone/transport/client'
+import { hubAllows, useHubRegistryStore } from '@slayzone/transport/client'
 import { getHubClient, getTrpcClient, type TabsStateTrpcClient } from './trpc'
+import { startOpenTabsSync } from './open-tabs-sync'
 import type { TaskStatus } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
 
@@ -112,6 +113,12 @@ interface TabState {
   activeView: ActiveView
   selectedProjectId: string
   closedTabs: ClosedTab[]
+  /**
+   * Per hub: its open task tabs as this client and the hub last agreed on (tab-bar
+   * order). The base of the three-way merge in `open-tabs-sync.ts`; absent = never
+   * synced with that hub.
+   */
+  openTabsSync: Record<string, string[]>
   projectScopedTabs: boolean
   isLoaded: boolean
   // Registry id of the currently selected sidebar view (default 'projects').
@@ -294,6 +301,7 @@ interface TabState {
     taskHeaderTitleAlign?: TaskHeaderAlign
     projectLastActiveTab?: Record<string, string>
     closedTabs?: ClosedTab[]
+    openTabsSync?: Record<string, unknown>
   }) => void
 }
 
@@ -333,6 +341,16 @@ function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup
   return lastSibling >= 0 ? lastSibling + 1 : tabs.length
 }
 
+/** The persisted `openTabsSync`: hub id → task ids; anything else is dropped. */
+function parseOpenTabsSync(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, string[]> = {}
+  for (const [hubId, ids] of Object.entries(value as Record<string, unknown>)) {
+    if (Array.isArray(ids)) out[hubId] = ids.filter((id): id is string => typeof id === 'string')
+  }
+  return out
+}
+
 export const useTabStore = create<TabState>()(
   subscribeWithSelector((set, get) => ({
     tabs: [{ type: 'home' }],
@@ -340,6 +358,7 @@ export const useTabStore = create<TabState>()(
     activeView: 'tabs' as ActiveView,
     selectedProjectId: '',
     closedTabs: [],
+    openTabsSync: {},
     projectScopedTabs: false,
     isLoaded: false,
     sidebarView: 'projects',
@@ -702,6 +721,7 @@ export const useTabStore = create<TabState>()(
               .filter((t): t is ClosedTab => t !== null)
               .slice(-20)
           : [],
+        openTabsSync: parseOpenTabsSync(state.openTabsSync),
         isLoaded: true
       })
     }
@@ -723,7 +743,57 @@ export async function loadTabStoreState(): Promise<void> {
   } finally {
     performance.mark('sz:tabStore:end')
   }
+  if (!_persistenceBlocked) startTabSync()
   await restoreActiveSessionTabs()
+}
+
+let _stopTabSync: (() => void) | null = null
+
+/**
+ * Each task tab with the hub it belongs to: the hub recorded on the tab, else its
+ * task's project's hub (`_taskLookup`; a project with none is the default hub's), else
+ * unknown — a task not seen yet. A tab opened after the task list loaded has no hub
+ * recorded until the list changes again, so the recorded one alone is not enough.
+ */
+export function resolveTaskTabHubs(
+  tabs: readonly Tab[],
+  lookup: TaskLookup,
+  defaultHubId: string
+): { taskId: string; hubId: string | undefined }[] {
+  const projectOf = new Map(lookup.tasks.map((t) => [t.id, t.project_id]))
+  const hubOfProject = new Map(lookup.projects.map((p) => [p.id, p.hubId ?? defaultHubId]))
+  return tabs.flatMap((t) => {
+    if (t.type !== 'task') return []
+    const projectId = projectOf.get(t.taskId)
+    const hubId = t.hubId ?? (projectId ? hubOfProject.get(projectId) : undefined)
+    return [{ taskId: t.taskId, hubId }]
+  })
+}
+
+/**
+ * Keep this window's task tabs and each hub's open tabs agreeing (`open-tabs-sync.ts`),
+ * from the moment the saved tabs are in — before, the empty boot list would only add
+ * every hub's tabs on top of the ones about to load. Once per window.
+ */
+function startTabSync(): void {
+  if (_stopTabSync || _persistenceStopped) return
+  const taskTabs = (state: TabState) =>
+    resolveTaskTabHubs(state.tabs, state._taskLookup, useHubRegistryStore.getState().defaultHubId)
+  // Only a change to which task tabs are open, their order or their hub reaches the
+  // sync — not a title or status update.
+  const taskTabsKey = (state: TabState): string =>
+    taskTabs(state)
+      .map((t) => `${t.taskId}@${t.hubId ?? ''}`)
+      .join(',')
+  _stopTabSync = startOpenTabsSync({
+    taskTabs: () => taskTabs(useTabStore.getState()),
+    openInBackground: (taskId) => useTabStore.getState().openTaskInBackground(taskId),
+    close: (taskId) => useTabStore.getState().closeTabByTaskId(taskId),
+    base: (hubId) => useTabStore.getState().openTabsSync[hubId],
+    setBase: (hubId, taskIds) =>
+      useTabStore.setState((s) => ({ openTabsSync: { ...s.openTabsSync, [hubId]: taskIds } })),
+    onTabsChanged: (listener) => useTabStore.subscribe(taskTabsKey, listener)
+  })
 }
 
 function applySavedViewState(value: string | null | undefined): void {
@@ -761,6 +831,7 @@ async function retrySavedViewState(): Promise<void> {
       .tabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : []))
     applySavedViewState(value)
     _persistenceBlocked = false
+    startTabSync()
     const open = new Set(
       useTabStore.getState().tabs.flatMap((t) => (t.type === 'task' ? [t.taskId] : []))
     )
@@ -813,6 +884,10 @@ let _persistenceBlocked = false
  */
 export async function stopViewStatePersistence(): Promise<void> {
   _persistenceStopped = true
+  // Nor change any hub's open tabs: a window that stops saving its layout (a test's
+  // teardown) must not close tabs elsewhere as it empties.
+  _stopTabSync?.()
+  _stopTabSync = null
   if (_debounceTimer) clearTimeout(_debounceTimer)
   _debounceTimer = null
   await _inflightWrite.catch(() => {
@@ -861,7 +936,8 @@ useTabStore.subscribe(
     taskHeaderPanelAlign: state.taskHeaderPanelAlign,
     taskHeaderTitleAlign: state.taskHeaderTitleAlign,
     projectLastActiveTab: state.projectLastActiveTab,
-    closedTabs: state.closedTabs
+    closedTabs: state.closedTabs,
+    openTabsSync: state.openTabsSync
   }),
   (slice) => {
     if (!useTabStore.getState().isLoaded || _persistenceStopped || _persistenceBlocked) return

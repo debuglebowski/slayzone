@@ -201,6 +201,8 @@ export const MOVE_DROPPED_TABLES: Readonly<Record<string, string>> = {
   project_members: "sharing with the source hub's accounts: users are per hub",
   task_grants: "sharing with the source hub's accounts: users are per hub",
   artifact_grants: "sharing with the source hub's accounts: users are per hub",
+  open_task_tabs:
+    "open tabs of the source hub's accounts: users are per hub; a client re-keys its tab to the moved task and opens it on the target",
   task_workspaces:
     "other users' personal workspaces (computer, folders) on the source hub's computers: users are per hub",
   // A project's

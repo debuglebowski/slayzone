@@ -538,6 +538,8 @@ const HUB_HOST = "the hub host's own CLI config (~/.claude, ~/.codex …), not a
 const BACKUP =
   "the hub's database backups (T-101, O-22): files on the hub's disk under its state directory, which no route serves (access.ts refuses that directory as a `path`); this answers their names and sizes only, and restore is refused off the desktop's own hub"
 const IMPORT = 'creates projects owned by the caller from a bundle the hub opens; reads nothing'
+const OWN_TABS =
+  "the caller's own open-tab rows (`open_task_tabs`, keyed by their user id): an id that is not one of them changes nothing"
 
 // ── the policy ────────────────────────────────────────────────────────────────
 
@@ -1165,6 +1167,16 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'notify.onTasksChanged': streamed(tasksChangedEvents),
   'notify.onSettingsChanged': streamed(byActor),
   'notify.onEmbeddedServerFailed': none(`${HOST} (the desktop's sidecar supervisor)`),
+
+  // ── openTabs ── the caller's own tab rows (user_id = the caller): opening one needs
+  // view on its task; the list is cut to the tasks they may still see. Closing and
+  // reordering touch only their own rows, so a task they lost access to can still be
+  // closed (an id check would refuse it and strand the tab).
+  'openTabs.list': listed(ids('task')),
+  'openTabs.open': needing('view', checked(task('taskId'))),
+  'openTabs.close': none(OWN_TABS),
+  'openTabs.reorder': none(OWN_TABS),
+  'openTabs.onChanged': streamed(byActor),
   'settings.onThemeChanged': streamed(byActor),
   'telemetry.onIpcEvent': none(`${HOST} (the desktop main process's IPC telemetry)`),
 

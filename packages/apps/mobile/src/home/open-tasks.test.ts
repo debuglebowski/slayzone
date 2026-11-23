@@ -1,4 +1,4 @@
-import { closeTask, openTask, type OpenTasks } from './open-tasks'
+import { closeTask, combineOpenTasks, openTask, shownTab, type OpenTasks } from './open-tasks'
 
 const ref = (hubId: string, taskId: string) => ({ hubId, taskId })
 const empty: OpenTasks = { tabs: [], active: null }
@@ -28,5 +28,25 @@ describe('open tasks (iPad tab bar)', () => {
     expect(closedOther.active).toEqual(ref('h', 'c'))
     const last = closeTask({ tabs: [ref('h', 'a')], active: ref('h', 'a') }, ref('h', 'a'))
     expect(last).toEqual(empty)
+  })
+})
+
+describe('shared open tasks (each hub keeps the user’s tabs of its tasks)', () => {
+  it('a synced hub shows its list; a hub that does not keep one shows the tabs opened here', () => {
+    const tabs = combineOpenTasks(
+      ['h', 'old', 'w'],
+      new Map([
+        ['h', ['a', 'b']],
+        ['w', ['c']]
+      ]),
+      [ref('old', 'x'), ref('h', 'stale')]
+    )
+    expect(tabs).toEqual([ref('h', 'a'), ref('h', 'b'), ref('old', 'x'), ref('w', 'c')])
+  })
+
+  it('the shown tab, once closed elsewhere, shows the board', () => {
+    expect(shownTab([ref('h', 'a')], ref('h', 'a'))).toEqual(ref('h', 'a'))
+    expect(shownTab([ref('h', 'a')], ref('h', 'gone'))).toBeNull()
+    expect(shownTab([], null)).toBeNull()
   })
 })
