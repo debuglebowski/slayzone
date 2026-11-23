@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { webcrypto } from 'node:crypto'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
+import { deviceViewport, PREVIEW_DEVICES } from '@slayzone/platform/preview-devices'
 import type { TaskArtifact } from '@slayzone/task-contracts'
 import { RICH_TEXT_MAX_BYTES, type ArtifactTextRead } from '../shared/text-read'
 
@@ -125,13 +126,15 @@ function Tab({
   art = NOTES,
   viewMode = 'raw',
   siblings = [],
-  deviceViewport
+  deviceViewport,
+  deviceFrame
 }: {
   mode: 'visible' | 'hidden'
   art?: TaskArtifact
   viewMode?: 'preview' | 'split' | 'raw'
   siblings?: TaskArtifact[]
   deviceViewport?: React.ComponentProps<typeof ArtifactContentEditor>['deviceViewport']
+  deviceFrame?: React.ComponentProps<typeof ArtifactContentEditor>['deviceFrame']
 }) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
     artifact: art,
@@ -145,6 +148,7 @@ function Tab({
     zoomPct: 100,
     htmlTheme: 'system',
     deviceViewport,
+    deviceFrame,
     searchQuery: '',
     searchActiveIndex: 0,
     searchMatchCase: false,
@@ -232,6 +236,33 @@ it.each(['preview', 'split'] as const)(
     expect(await screen.findByTitle('HTML preview')).toHaveProperty('style.width', '100%')
   }
 )
+
+it('toggles a device frame around the same live HTML viewport', async () => {
+  vi.useRealTimers()
+  const html = artifact('page', 'page.html')
+  disk.content.page = '<p>Hello</p>'
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const viewport = deviceViewport(device, 1)
+  const view = render(
+    <Tab
+      mode="visible"
+      art={html}
+      viewMode="preview"
+      deviceViewport={viewport}
+      deviceFrame={{ device, screen: 1 }}
+    />
+  )
+  const frame = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
+  expect(screen.getByTestId('artifact-device-frame').getAttribute('data-device')).toBe('iphone-duo')
+  expect(frame.style.width).toBe('890px')
+  expect(frame.style.height).toBe('626px')
+
+  view.rerender(<Tab mode="visible" art={html} viewMode="preview" deviceViewport={viewport} />)
+  expect(screen.queryByTestId('artifact-device-frame')).toBeNull()
+  expect(screen.getByTitle('HTML preview')).toBe(frame)
+  expect(frame.style.width).toBe('890px')
+  expect(frame.style.height).toBe('626px')
+})
 
 describe('ArtifactContentEditor across a tab switch', () => {
   it('hiding flushes an unsaved edit at once; the debounced save does not run after', async () => {
