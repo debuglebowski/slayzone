@@ -102,6 +102,9 @@ export const electronBootstrap = {
   exportArtifact: (request: ArtifactExportRequest): Promise<ArtifactExportResult> =>
     api().app.exportArtifact?.(request) ??
     Promise.resolve({ ok: false as const, error: 'Export is not supported in this app' }),
+  artifactDevicePreview: () =>
+    (typeof window !== 'undefined' ? window.api?.app.configureArtifactDevicePreview : undefined) ??
+    null,
   /** Open a streaming save target on this device (desktop: dialogs + disk; web: download). */
   saveTargetOpen: (request: SaveTargetRequest): Promise<SaveTargetOpenResult> =>
     api().app.saveTargetOpen?.(request) ??

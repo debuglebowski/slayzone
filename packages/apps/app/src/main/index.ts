@@ -121,6 +121,8 @@ import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
 import { createSlzFileHandler } from './slz-file-handler'
+import { createArtifactDevicePreviews } from './artifact-device-preview'
+import { ARTIFACT_DEVICE_PARTITION } from '@slayzone/platform/preview-devices'
 import { SLZ_ARTIFACT_SCHEME } from '@slayzone/platform/slz-file-url'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
@@ -616,7 +618,11 @@ import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handler
 import { createLastDirStore, createRememberingDialog } from './dialog-last-dir'
 import { discoverBrowserExtensions } from './browser-extension-discovery'
 import { extensionIdFromManifestKey } from './extension-id'
-import { attachDocumentLinkBridges, setDocumentShortcutKeysResolver } from './document-link-bridge'
+import {
+  attachDocumentLinkBridges,
+  attachDocumentPreviewShortcuts,
+  setDocumentShortcutKeysResolver
+} from './document-link-bridge'
 import { setBrowserViewScreenshotKeysResolver } from './browser-view-keys'
 import { attachAppWindowNavigationGuard } from './app-window-navigation-guard'
 import {
@@ -813,6 +819,7 @@ let splashWindow: BrowserWindow | null = null
 let mainWindow: BrowserWindow | null = null
 const browserViewManager = new BrowserViewManager()
 /** Set once the panel sessions are configured (whenReady); validates + sets up a partition. */
+let artifactDevicePreviews: ReturnType<typeof createArtifactDevicePreviews> | null = null
 let ensurePanelPartition: ((partition: string) => Electron.Session) | null = null
 /** User acts (input events main received) per web contents: the panel page's link
  *  bridge acts only on one (panel-link-bridge.ts). */
@@ -3127,6 +3134,10 @@ app
     webPanelSession.protocol.handle('slz-file', slzFileHandler)
     session.defaultSession.protocol.handle('slz-file', slzFileHandler)
     session.defaultSession.protocol.handle(SLZ_ARTIFACT_SCHEME, slzFileHandler)
+    artifactDevicePreviews = createArtifactDevicePreviews(
+      slzFileHandler,
+      join(__dirname, '../preload/artifact-device-preview.js')
+    )
 
     // Emit the renderer Content-Security-Policy as a response header so it can
     // name the dynamic in-process tRPC WS port exactly (a static meta tag
@@ -4003,6 +4014,11 @@ app
           ? (globalThis as { __e2eExportTimings?: ExportTimings }).__e2eExportTimings
           : undefined
       })
+    )
+    ipcMain.handle(
+      'app:configure-artifact-device-preview',
+      (event, id: number, url: unknown, viewport: unknown) =>
+        artifactDevicePreviews?.configure(event.sender, id, url, viewport) ?? false
     )
     // Downloads land on THIS machine too: the renderer streams the pieces it reads
     // from the hub, main writes them (client-save.ts). A target belongs to the window
@@ -4909,16 +4925,23 @@ app.on('web-contents-created', (_, wc) => {
     panelGestures.forget(wc.id)
     userLocalAccess.forget(wc.id)
   })
-  // A DOM <webview> (multi-device emulation) only on a browser-panel partition, set up
-  // like the panel's own views (marker header, network guard).
-  wc.on('will-attach-webview', (event, _prefs, params) => {
+  // Artifact device previews have a dedicated partition. Browser-panel guests
+  // keep the panel's marker header and network policy.
+  wc.on('will-attach-webview', (event, preferences, params) => {
     const partition = params.partition
     if (!partition) return
+    if (partition === ARTIFACT_DEVICE_PARTITION) {
+      if (!artifactDevicePreviews?.prepare(preferences, params.src)) event.preventDefault()
+      return
+    }
     try {
       ensurePanelPartition?.(partition)
     } catch {
       event.preventDefault()
     }
+  })
+  wc.on('did-attach-webview', (_event, guest) => {
+    if (artifactDevicePreviews?.attach(wc, guest)) attachDocumentPreviewShortcuts(guest, wc)
   })
   // No page can veto its unload: Electron has no dialog for it, so a veto silently
   // cancels the close — and an app quit with it (see lifecycle/unload-veto.ts).

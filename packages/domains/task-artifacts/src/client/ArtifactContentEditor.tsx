@@ -14,14 +14,10 @@ import {
   RichTextEditor,
   resolveReadOnlyLinkClickTarget,
   usePdfViewerLinks,
-  useHtmlPreviewLinks,
   type LinkOpenTarget
 } from '@slayzone/editor'
-import {
-  SLZ_ARTIFACT_SCHEME,
-  toArtifactFileUrl,
-  toHtmlArtifactPreviewUrl
-} from '@slayzone/platform/slz-file-url'
+import { toArtifactFileUrl } from '@slayzone/platform/slz-file-url'
+import type { DeviceViewport } from '@slayzone/platform/preview-devices'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact } from '@slayzone/task-contracts'
 import {
@@ -44,6 +40,7 @@ import {
 } from '../shared/text-read'
 import { Download, FileQuestion } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
+import { HtmlPreviewFrame } from './ArtifactHtmlPreview'
 import { MediaPlayerViewer } from './MediaPlayerViewer'
 import { ArchiveViewer } from './ArchiveViewer'
 import { FontViewer } from './FontViewer'
@@ -248,6 +245,7 @@ export function ArtifactContentEditor({
   effectiveWidth,
   zoomPct,
   htmlTheme,
+  deviceViewport,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -269,6 +267,7 @@ export function ArtifactContentEditor({
   effectiveWidth: 'narrow' | 'wide'
   zoomPct: number
   htmlTheme: HtmlArtifactTheme
+  deviceViewport?: DeviceViewport
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -786,6 +785,7 @@ export function ArtifactContentEditor({
             getFilePath={getFilePath}
             zoom={zoom}
             htmlTheme={htmlTheme}
+            deviceViewport={deviceViewport}
             onOpenLink={handleOpenLink}
           />
         </div>
@@ -821,6 +821,7 @@ export function ArtifactContentEditor({
               getFilePath={getFilePath}
               zoom={zoom}
               htmlTheme={htmlTheme}
+              deviceViewport={deviceViewport}
               onOpenLink={handleOpenLink}
             />
           </div>
@@ -895,6 +896,7 @@ function ArtifactPreview({
   getFilePath,
   zoom,
   htmlTheme,
+  deviceViewport,
   onOpenLink
 }: {
   renderMode: RenderMode
@@ -904,6 +906,7 @@ function ArtifactPreview({
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
   htmlTheme: HtmlArtifactTheme
+  deviceViewport?: DeviceViewport
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   if (renderMode === 'html-preview')
@@ -920,6 +923,7 @@ function ArtifactPreview({
         getFilePath={getFilePath}
         zoom={zoom}
         htmlTheme={htmlTheme}
+        deviceViewport={deviceViewport}
         onOpenLink={onOpenLink}
       />
     )
@@ -933,128 +937,4 @@ function ArtifactPreview({
     return <MermaidBlock code={content} fill />
   if (renderMode === 'diff') return <DiffPreview content={content} />
   return null
-}
-
-// Hub HTML previews get an origin per artifact so browser storage stays private
-// to it. Standalone previews keep the opaque-origin sandbox on slz-file://.
-// `contentVersion` cache-busts on each save so the iframe reloads after edits.
-//
-// The parent is cross-origin, so the main-process protocol handler injects
-// the theme CSS before the document loads, using the URL's `?theme=` param.
-//
-// Zoom cannot go through CSS `zoom` here the way it does for the DOM panes: the
-// frame is a separate document on its own origin behind `sandbox`, so the parent
-// can neither restyle it nor rely on a layout-scale crossing the frame boundary.
-// Shrinking the frame's layout viewport by the zoom factor and scaling the
-// element back up by the same factor reproduces browser zoom exactly — the inner
-// document reflows to the narrower viewport, then paints enlarged.
-function HtmlPreviewFrame({
-  artifactId,
-  contentVersion,
-  getFilePath,
-  zoom,
-  htmlTheme,
-  onOpenLink
-}: {
-  artifactId: string
-  contentVersion: number
-  getFilePath: (id: string) => Promise<string | null>
-  zoom: number
-  htmlTheme: HtmlArtifactTheme
-  onOpenLink: (href: string, target: LinkOpenTarget) => void
-}) {
-  const hubId = useHubId()
-  const [src, setSrc] = useState<string | null>(null)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-  // Links: the sandbox drops popups and a bare click would navigate the preview
-  // itself — main's bridge relays them here instead (html-preview-links.ts).
-  useHtmlPreviewLinks(iframeRef, onOpenLink)
-  // `null` while in flight or resolved; a string once the path could not be
-  // resolved. Previously there was no error branch at all: `getFilePath` had no
-  // `.catch` and no null handling, so a rejection OR a null path left `src` null
-  // forever and the pane sat on "Loading..." with no retry and no way to tell a
-  // slow load from a dead one. That indefinite state is what the e2e preview
-  // "flake" was — it never resolved, so no timeout could have saved it.
-  const [error, setError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    // Guard the late resolution. The `key` at the call site already remounts this
-    // component per artifact/version, so there is no state to reset here; this
-    // covers the remaining in-mount case (a `Retry` issued while the previous
-    // lookup is still in flight).
-    let cancelled = false
-    getFilePath(artifactId)
-      .then(async (p) => {
-        if (cancelled) return
-        if (!p) {
-          setError('This artifact has no file on disk yet.')
-          return
-        }
-        const theme = htmlTheme === 'system' ? undefined : htmlTheme
-        const url = hubId
-          ? await toHtmlArtifactPreviewUrl(hubId, artifactId, p, contentVersion, theme)
-          : toArtifactFileUrl(null, artifactId, p, contentVersion, theme)
-        if (!cancelled) setSrc(url)
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setError(e instanceof Error ? e.message : 'Could not load the preview.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [hubId, artifactId, contentVersion, getFilePath, htmlTheme, attempt])
-
-  if (error)
-    return (
-      <div
-        data-testid="html-preview-error"
-        className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground"
-      >
-        <span className="text-destructive">{error}</span>
-        <button
-          type="button"
-          className="underline hover:text-foreground"
-          onClick={() => setAttempt((n) => n + 1)}
-        >
-          Retry
-        </button>
-      </div>
-    )
-  if (!src)
-    return (
-      <div
-        data-testid="html-preview-loading"
-        className="flex-1 flex items-center justify-center text-xs text-muted-foreground"
-      >
-        Loading...
-      </div>
-    )
-  return (
-    // Theme background, not white: this shows through before the frame's first
-    // paint (every artifact switch/save remounts it), so white flashed between
-    // dark pages. Unstyled pages still get a browser-correct canvas — Chromium
-    // paints an iframe's canvas opaque in the page's own scheme whenever it
-    // differs from ours, and with matching schemes the page wants our canvas.
-    <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-background">
-      <iframe
-        ref={iframeRef}
-        src={src}
-        sandbox={
-          src.startsWith(`${SLZ_ARTIFACT_SCHEME}://`)
-            ? 'allow-scripts allow-same-origin'
-            : 'allow-scripts'
-        }
-        className="absolute top-0 left-0 border-0"
-        style={{
-          width: `${100 / zoom}%`,
-          height: `${100 / zoom}%`,
-          transform: `scale(${zoom})`,
-          transformOrigin: '0 0'
-        }}
-        title="HTML preview"
-      />
-    </div>
-  )
 }

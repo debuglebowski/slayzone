@@ -1,3 +1,4 @@
+import type { DeviceViewport } from './preview-devices'
 /**
  * The bootstrap-only `window.api` preload contract: the few calls the renderer
  * needs before (or outside) the tRPC connection. Domain/backend calls go over
@@ -144,6 +145,12 @@ export interface ElectronBootstrapApp {
    * Optional: a host without it reports export as unsupported.
    */
   exportArtifact?: (request: ArtifactExportRequest) => Promise<ArtifactExportResult>
+  /** Emulate a device on a guest owned by this window, then load its HTML artifact. */
+  configureArtifactDevicePreview?: (
+    webContentsId: number,
+    url: string,
+    viewport: DeviceViewport
+  ) => Promise<boolean>
   /**
    * Save a download on THIS device in pieces: open (asks where), then write each
    * file's bytes in order, then close. Optional, like `exportArtifact`.

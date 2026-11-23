@@ -1,87 +1,20 @@
+import { PREVIEW_DEVICES } from '@slayzone/platform/preview-devices'
 import type { BrowserDeviceDefaults } from '@slayzone/ui'
 import type { DeviceEmulation, DeviceSlot, MultiDeviceConfig } from '../shared'
 
-export const MOBILE_UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+export { MOBILE_UA, IPAD_UA } from '@slayzone/platform/preview-devices'
 
-export const IPAD_UA =
-  'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-
-const ANDROID_UA =
-  'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
-
-export const DEVICE_PRESETS: DeviceEmulation[] = [
-  {
-    name: 'Desktop 1080p',
-    width: 1920,
-    height: 1080,
-    deviceScaleFactor: 1,
-    mobile: false,
-    category: 'Desktop'
-  },
-  {
-    name: 'Desktop 1440p',
-    width: 2560,
-    height: 1440,
-    deviceScaleFactor: 1,
-    mobile: false,
-    category: 'Desktop'
-  },
-  {
-    name: 'iPad Mini',
-    width: 768,
-    height: 1024,
-    deviceScaleFactor: 2,
-    mobile: true,
-    userAgent: IPAD_UA,
-    category: 'Tablet'
-  },
-  {
-    name: 'iPad Pro 12.9"',
-    width: 1024,
-    height: 1366,
-    deviceScaleFactor: 2,
-    mobile: true,
-    userAgent: IPAD_UA,
-    category: 'Tablet'
-  },
-  {
-    name: 'iPhone SE',
-    width: 375,
-    height: 667,
-    deviceScaleFactor: 2,
-    mobile: true,
-    userAgent: MOBILE_UA,
-    category: 'Mobile'
-  },
-  {
-    name: 'iPhone 15 Pro',
-    width: 393,
-    height: 852,
-    deviceScaleFactor: 3,
-    mobile: true,
-    userAgent: MOBILE_UA,
-    category: 'Mobile'
-  },
-  {
-    name: 'iPhone 15 Pro Max',
-    width: 430,
-    height: 932,
-    deviceScaleFactor: 3,
-    mobile: true,
-    userAgent: MOBILE_UA,
-    category: 'Mobile'
-  },
-  {
-    name: 'Pixel 7',
-    width: 412,
-    height: 915,
-    deviceScaleFactor: 2.625,
-    mobile: true,
-    userAgent: ANDROID_UA,
-    category: 'Mobile'
-  }
-]
+const DEVICE_PRESETS: DeviceEmulation[] = PREVIEW_DEVICES.filter(
+  (device) => device.category !== 'Foldable'
+).map(({ name, category, mobile, deviceScaleFactor, userAgent, screens }) => ({
+  name,
+  category: category === 'Phone' ? 'Mobile' : category,
+  mobile,
+  deviceScaleFactor,
+  userAgent,
+  width: screens[0].width,
+  height: screens[0].height
+}))
 
 /** Default presets per device slot, optionally overridden by user settings */
 export function defaultMultiDeviceConfig(

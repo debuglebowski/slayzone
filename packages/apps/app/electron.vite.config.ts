@@ -124,6 +124,7 @@ export default defineConfig(({ mode, command }) => {
         rolldownOptions: {
           input: {
             index: resolve('src/preload/index.ts'),
+            'artifact-device-preview': resolve('src/preload/artifact-device-preview.ts'),
             'webview-preload': resolve('src/preload/webview-preload.ts'),
             'browser-chrome-preload': resolve('src/preload/browser-chrome-preload.ts')
           },

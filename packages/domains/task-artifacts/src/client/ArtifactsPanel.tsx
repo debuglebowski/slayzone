@@ -1,6 +1,7 @@
 import {
   useState,
   useEffect,
+  useMemo,
   useCallback,
   useRef,
   useImperativeHandle,
@@ -78,6 +79,11 @@ import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'
 import { ArtifactSearchPanel } from './ArtifactSearchPanel'
 import { ArtifactContentEditor } from './ArtifactContentEditor'
+import {
+  ArtifactDevicePicker,
+  artifactDeviceViewport,
+  type ArtifactDeviceSelection
+} from './ArtifactDevicePicker'
 import { VersionsPanel } from './VersionsPanel'
 import { TreeSidebar } from './TreeSidebar'
 import { useArtifactTree } from './useArtifactTree'
@@ -255,6 +261,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
           ? 'split'
           : 'preview'
     const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
+    const [deviceSelections, setDeviceSelections] = useState<
+      Record<string, ArtifactDeviceSelection>
+    >({})
     const [dragOver, setDragOver] = useState(false)
     const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
     const dragArtifactIdsRef = useRef<string[]>([])
@@ -343,6 +352,19 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const showZoom = selectedRenderMode ? hasZoomableSurface(selectedRenderMode, viewMode) : false
     const htmlTheme = selectedArtifact?.html_theme_override ?? 'system'
     const showHtmlTheme = selectedRenderMode === 'html-preview'
+    const showHtmlDevice = showHtmlTheme && viewMode !== 'raw'
+    const deviceSelection = selectedArtifact
+      ? (deviceSelections[selectedArtifact.id] ?? null)
+      : null
+    const deviceViewport = useMemo(() => artifactDeviceViewport(deviceSelection), [deviceSelection])
+    const HtmlViewIcon = viewMode === 'preview' ? Eye : viewMode === 'split' ? Columns2 : Code2
+
+    const applyViewMode = (mode: typeof viewMode) => {
+      setViewMode(mode)
+      if (selectedArtifact && !readOnly) {
+        void updateArtifact({ id: selectedArtifact.id, viewMode: mode })
+      }
+    }
 
     // Plain functions (no manual useCallback): they only feed DOM onClick props, and
     // the compiler memoizes them itself. A manual memo can't be preserved here because
@@ -802,10 +824,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                                   ? 'bg-foreground text-background'
                                   : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                               )}
-                              onClick={() => {
-                                setViewMode(mode)
-                                updateArtifact({ id: selectedArtifact.id, viewMode: mode })
-                              }}
+                              onClick={() => applyViewMode(mode)}
                             >
                               <Icon className="size-5" />
                               {label}
@@ -922,6 +941,46 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                         </div>
                       </div>
                     </MarkdownSettingsPopover>
+                  )}
+                  {showHtmlTheme && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="size-7"
+                          title="HTML view mode"
+                          aria-label="HTML view mode"
+                        >
+                          <HtmlViewIcon className="size-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {(
+                          [
+                            ['preview', 'Preview'],
+                            ['split', 'Split'],
+                            ['raw', 'Raw']
+                          ] as const
+                        ).map(([mode, label]) => (
+                          <DropdownMenuItem key={mode} onSelect={() => applyViewMode(mode)}>
+                            {label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {showHtmlDevice && (
+                    <ArtifactDevicePicker
+                      selection={deviceSelection}
+                      onChange={(next) =>
+                        setDeviceSelections((current) => ({
+                          ...current,
+                          [selectedArtifact.id]: next
+                        }))
+                      }
+                    />
                   )}
                   {showZoom && (
                     <div
@@ -1266,6 +1325,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   effectiveWidth={effectiveWidth}
                   zoomPct={zoomPct}
                   htmlTheme={htmlTheme}
+                  deviceViewport={deviceViewport}
                   searchQuery={findOpen ? findQuery : ''}
                   searchActiveIndex={findActiveIndex}
                   searchMatchCase={findMatchCase}

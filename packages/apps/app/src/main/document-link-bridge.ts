@@ -20,19 +20,17 @@ export function setDocumentShortcutKeysResolver(resolve: () => (string | null)[]
 }
 
 /**
- * Make links in PDF and HTML artifacts clickable in an app window (see
- * `pdf-viewer-links.ts` / `html-preview-links.ts` for why each drops them
- * otherwise). App windows only: in a browser-panel view `window.top` is a
- * website, which must never learn what the user clicked in a document.
+ * Forward the app's configured document shortcuts from iframe and device
+ * previews back to their owning renderer.
  */
-export function attachDocumentLinkBridges(wc: WebContents): void {
+export function attachDocumentPreviewShortcuts(wc: WebContents, renderer = wc): void {
   // Frame key events never bubble into the app DOM. Relay only opted-in app
   // shortcuts from document previews, directly to this window's renderer; no
   // broadcast to other task windows and no untrusted postMessage command channel.
   wc.on('before-input-event', (event, input) => {
-    if (wc.isDestroyed()) return
+    if (wc.isDestroyed() || renderer.isDestroyed()) return
     const frame = wc.focusedFrame
-    if (!frame || frame === wc.mainFrame) return
+    if (!frame || (renderer === wc && frame === wc.mainFrame)) return
     if (frame.origin !== PDF_VIEWER_EXTENSION_ORIGIN && !isHtmlPreviewFrameUrl(frame.url)) return
     if (!getDocumentShortcutKeys().some((keys) => matchesElectronInput(input, keys))) return
     event.preventDefault()
@@ -46,7 +44,7 @@ export function attachDocumentLinkBridges(wc: WebContents): void {
       bubbles: true,
       cancelable: true
     }
-    wc.mainFrame
+    renderer.mainFrame
       .executeJavaScript(
         `document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify(init)}))`
       )
@@ -54,6 +52,14 @@ export function attachDocumentLinkBridges(wc: WebContents): void {
         // Navigation or a window close can destroy the frame after the keypress.
       })
   })
+}
+
+/**
+ * Make links in PDF and HTML artifact iframes clickable. App windows only:
+ * a browser-panel view must never learn what the user clicked in a document.
+ */
+export function attachDocumentLinkBridges(wc: WebContents): void {
+  attachDocumentPreviewShortcuts(wc)
   const inject = (frame: WebFrameMain): void => {
     if (wc.isDestroyed() || frame.isDestroyed()) return
     let script: string | null = null

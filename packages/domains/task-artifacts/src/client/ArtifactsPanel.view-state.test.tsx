@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ArtifactsSidebarState, TaskArtifact } from '@slayzone/task-contracts'
+import type { DeviceViewport } from '@slayzone/platform/preview-devices'
 import type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
 import { detectPlatform, useShortcutStore } from '@slayzone/ui'
 
@@ -109,17 +110,22 @@ vi.mock('./ArtifactContentEditor', () => ({
   ArtifactContentEditor: ({
     artifact,
     viewMode,
-    searchQuery
+    searchQuery,
+    deviceViewport
   }: {
     artifact: TaskArtifact
     viewMode: string
     searchQuery: string
+    deviceViewport?: DeviceViewport
   }) => (
     <div
       data-testid="viewer"
       data-artifact={artifact.id}
       data-view-mode={viewMode}
       data-search={searchQuery}
+      data-viewport={
+        deviceViewport ? `${deviceViewport.width}×${deviceViewport.height}` : undefined
+      }
     />
   )
 }))
@@ -222,6 +228,44 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   client.clear()
+})
+
+it('selects and rotates both iPhone Duo screens and keeps the choice with its artifact', async () => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+  const scrollIntoView = HTMLElement.prototype.scrollIntoView
+  HTMLElement.prototype.scrollIntoView ??= () => undefined
+  try {
+    server.rows = [
+      { ...row('a1', 'split'), title: 'first.html' },
+      { ...row('a2'), title: 'other.html' }
+    ]
+    await mountLoaded()
+    expect(viewer().dataset.viewMode).toBe('split')
+    fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'iPhone Duo' }))
+    expect(viewer().dataset.viewport).toBe('466×678')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unfolded' }))
+    expect(viewer().dataset.viewport).toBe('890×626')
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate device' }))
+    expect(viewer().dataset.viewport).toBe('626×890')
+
+    select('a2')
+    expect(viewer().dataset.viewport).toBeUndefined()
+    select('a1')
+    expect(viewer().dataset.viewport).toBe('626×890')
+  } finally {
+    cleanup()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    vi.unstubAllGlobals()
+  }
 })
 
 function pressSidebarShortcut(key = 's') {

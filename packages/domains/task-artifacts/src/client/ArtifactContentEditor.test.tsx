@@ -38,7 +38,8 @@ vi.mock('@slayzone/transport/client', () => ({
     contentChanged = opts?.onData
   },
   // No hub scope: previews are plain local `slz-file://` paths (`toArtifactFileUrl`).
-  useHubId: () => hubId
+  useHubId: () => hubId,
+  electronBootstrap: { artifactDevicePreview: () => null }
 }))
 const appearance = {
   notesFontFamily: 'sans',
@@ -123,12 +124,14 @@ function Tab({
   mode,
   art = NOTES,
   viewMode = 'raw',
-  siblings = []
+  siblings = [],
+  deviceViewport
 }: {
   mode: 'visible' | 'hidden'
   art?: TaskArtifact
   viewMode?: 'preview' | 'split' | 'raw'
   siblings?: TaskArtifact[]
+  deviceViewport?: React.ComponentProps<typeof ArtifactContentEditor>['deviceViewport']
 }) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
     artifact: art,
@@ -141,6 +144,7 @@ function Tab({
     effectiveWidth: 'wide',
     zoomPct: 100,
     htmlTheme: 'system',
+    deviceViewport,
     searchQuery: '',
     searchActiveIndex: 0,
     searchMatchCase: false,
@@ -187,6 +191,47 @@ it('gives a hub HTML preview a storage origin with the other sandbox flags intac
   expect(new URL((frame as HTMLIFrameElement).src).protocol).toBe('slz-artifact:')
   expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
 })
+
+it.each(['preview', 'split'] as const)(
+  'sizes the sandboxed HTML viewport in %s',
+  async (viewMode) => {
+    vi.useRealTimers()
+    vi.stubGlobal('crypto', webcrypto)
+    hubId = 'hub'
+    const html = artifact('page', 'page.html')
+    disk.content.page = '<p>Hello</p>'
+    const viewport = {
+      width: 466,
+      height: 678,
+      deviceScaleFactor: 3,
+      mobile: true,
+      angle: 0 as const
+    }
+    const view = render(
+      <Tab mode="visible" art={html} viewMode={viewMode} deviceViewport={viewport} />
+    )
+
+    const frame = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
+    expect(frame.style.width).toBe('466px')
+    expect(frame.style.height).toBe('678px')
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
+
+    view.rerender(
+      <Tab
+        mode="visible"
+        art={html}
+        viewMode={viewMode}
+        deviceViewport={{ ...viewport, width: 890, height: 626 }}
+      />
+    )
+    expect(screen.getByTitle('HTML preview')).toBe(frame)
+    expect(frame.style.width).toBe('890px')
+    expect(frame.style.height).toBe('626px')
+
+    view.rerender(<Tab mode="visible" art={html} viewMode={viewMode} />)
+    expect(await screen.findByTitle('HTML preview')).toHaveProperty('style.width', '100%')
+  }
+)
 
 describe('ArtifactContentEditor across a tab switch', () => {
   it('hiding flushes an unsaved edit at once; the debounced save does not run after', async () => {
