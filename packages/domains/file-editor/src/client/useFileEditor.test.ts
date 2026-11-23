@@ -619,3 +619,120 @@ describe('useFileEditor — binary files', () => {
     expect(fs.readFile).not.toHaveBeenCalledWith(ROOT, 'doc.pdf')
   })
 })
+
+describe('useFileEditor — revision-checked edit saves', () => {
+  /** A backend that checks edits against the disk revision, like a real computer. */
+  function revisionBackend(initial: string) {
+    const state = { content: initial, gen: 0 }
+    const rev = () => state.gen.toString(16).padStart(64, '0')
+    const failures: Array<'after-write'> = []
+    const gates: Array<Promise<void>> = []
+    /** Held between the bytes landing and the reply. */
+    const replyGates: Array<Promise<void>> = []
+    let emit: (event: FileWatchEvent) => void = () => undefined
+    const read = vi.fn((input: { revision?: string }) =>
+      input.revision === rev()
+        ? { content: null, revision: rev(), unchanged: true }
+        : { content: state.content, revision: rev() }
+    )
+    const write = vi.fn(
+      async (input: {
+        content?: string
+        edit?: { revision: string; from: number; to: number; text: string }
+      }) => {
+        const gate = gates.shift()
+        if (gate) await gate
+        if (input.edit) {
+          if (input.edit.revision !== rev()) throw new Error('File changed on disk before save')
+          const { from, to, text } = input.edit
+          state.content = state.content.slice(0, from) + text + state.content.slice(to)
+        } else state.content = input.content ?? ''
+        state.gen++
+        const reply = replyGates.shift()
+        if (reply) await reply
+        if (failures.shift() === 'after-write') throw new Error('reply lost')
+        return { revision: rev() }
+      }
+    )
+    const backend = createTrpcTest({
+      procedures: { 'fileEditor.readFile': read, 'fileEditor.writeFile': write },
+      subscriptions: {
+        'fileEditor.watch': (_input, push) => {
+          emit = push
+        }
+      }
+    })
+    return {
+      state,
+      write,
+      failures,
+      gates,
+      replyGates,
+      echo: () => emit({ type: 'changed', root: ROOT, relPath: 'a.ts' }),
+      wrapper: scopedWrapper(backend.wrapper)
+    }
+  }
+  const big = 'line\n'.repeat(200)
+
+  it('a save queued behind an in-flight edit save is written too', async () => {
+    const be = revisionBackend(big)
+    const gate = deferred()
+    be.gates.push(gate.promise)
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: be.wrapper })
+    await act(async () => result.current.openFile('a.ts'))
+    act(() => result.current.updateContent('a.ts', 'X' + big))
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.saveFile('a.ts')
+    })
+    await settle()
+    act(() => result.current.updateContent('a.ts', 'XY' + big))
+    let second!: Promise<void>
+    act(() => {
+      second = result.current.saveFile('a.ts')
+    })
+    gate.resolve()
+    await act(async () => {
+      await first
+      await second
+    })
+    expect(be.state.content).toBe('XY' + big)
+    expect(result.current.isDirty('a.ts')).toBe(false)
+  })
+
+  it('a save that failed after reaching disk never makes the next edit land at stale offsets', async () => {
+    const be = revisionBackend(big)
+    const reply = deferred()
+    be.replyGates.push(reply.promise)
+    be.failures.push('after-write')
+    const { result } = renderHook(() => useFileEditor(ROOT), { wrapper: be.wrapper })
+    await act(async () => result.current.openFile('a.ts'))
+    act(() => result.current.updateContent('a.ts', 'X' + big))
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.saveFile('a.ts')
+    })
+    await settle()
+    // The bytes land, the watcher echo is read, then the reply is lost.
+    await act(async () => be.echo())
+    await settle()
+    reply.resolve()
+    await settle()
+    await act(async () => {
+      await first.catch(() => undefined)
+    })
+    await settle()
+    act(() => result.current.updateContent('a.ts', 'XZ' + big))
+    await act(async () => {
+      await result.current.saveFile('a.ts').catch(() => undefined)
+    })
+    await settle()
+    if (result.current.isDirty('a.ts'))
+      await act(async () => {
+        await result.current.saveFile('a.ts').catch(() => undefined)
+      })
+    // Disk holds exactly the buffer, or is untouched by the failed save — never a mix.
+    expect(['XZ' + big, 'X' + big]).toContain(be.state.content)
+    expect(be.state.content).toBe(result.current.isDirty('a.ts') ? 'X' + big : 'XZ' + big)
+  })
+})

@@ -231,9 +231,10 @@ async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<v
     // Read the in-flight write AFTER the read resolved: a save that finished in
     // the meantime already moved the baseline, so the plain rules cover it.
     const ownWrite = inFlightWrites.get(filePath)
+    const settled = reconcileWithDisk(current, disk, ownWrite)
     if (
-      reconcileWithDisk(current, disk, ownWrite) === current &&
-      current.revision === result.revision
+      settled === current &&
+      current.revision === (settled.originalContent === disk ? result.revision : undefined)
     )
       return
     // Reconcile against the state at apply time (`prev`), not the snapshot the
@@ -243,9 +244,13 @@ async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<v
       const next = prev.map((f) => {
         if (f.path !== filePath) return f
         const reconciled = reconcileWithDisk(f, disk, ownWrite)
-        if (reconciled === f && f.revision === result.revision) return f
+        // A revision names one disk content: keep it only with that content as the
+        // baseline. A kept older baseline (the echo of a save still in flight) gets
+        // none, so the next save writes in full instead of at stale offsets.
+        const revision = reconciled.originalContent === disk ? result.revision : undefined
+        if (reconciled === f && f.revision === revision) return f
         changed = true
-        return { ...reconciled, needsRead: undefined, revision: result.revision }
+        return { ...reconciled, needsRead: undefined, revision }
       })
       return changed ? next : prev
     })
@@ -331,22 +336,30 @@ async function saveFileImpl(deps: SaveFileDeps, filePath: string): Promise<void>
   const written = file.content
   const edit = textEdit(file, written)
   inFlightWrites.set(filePath, written)
+  // The ref moves with the state at once: a save queued behind this one starts
+  // before React commits, and must build its edit from this save's result.
+  const update = (patch: (f: OpenFile) => OpenFile) => {
+    const apply = (files: OpenFile[]) => files.map((f) => (f.path === filePath ? patch(f) : f))
+    openFilesRef.current = apply(openFilesRef.current)
+    setOpenFiles((prev) => {
+      const next = apply(prev)
+      openFilesRef.current = next
+      return next
+    })
+  }
   let revision: string | undefined
   try {
     revision = (await writeFile(filePath, edit ? { edit } : { content: written }))?.revision
   } catch (error) {
+    // Whether the bytes landed is unknown: no revision is trusted until a read
+    // pairs one with the disk content again (the next save writes in full).
+    update((f) => (f.revision === undefined ? f : { ...f, revision: undefined }))
     if (edit) void reloadFile(filePath)
     throw error
   } finally {
     if (inFlightWrites.get(filePath) === written) inFlightWrites.delete(filePath)
   }
-  setOpenFiles((prev) =>
-    prev.map((f) =>
-      f.path === filePath
-        ? { ...f, originalContent: written, revision, diskChanged: false, deleted: false }
-        : f
-    )
-  )
+  update((f) => ({ ...f, originalContent: written, revision, diskChanged: false, deleted: false }))
 }
 
 export function useFileEditor(
