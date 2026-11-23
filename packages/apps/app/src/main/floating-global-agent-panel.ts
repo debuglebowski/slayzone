@@ -506,6 +506,9 @@ export const floatingGlobalAgentPanelOps = {
     dispatch({ kind: 'user-reset-size' })
     return { kind: state.kind }
   },
+  bootFailed: () => {
+    dispatch({ kind: 'floating-boot-failed' })
+  },
   /** The session's folder, agent and hub come with `setSessionId`. */
   detach: () => {
     dispatch({ kind: 'user-detach' })
@@ -582,6 +585,11 @@ export function setupFloatingGlobalAgentPanel(
 ): void {
   if (overridesGetter) getShortcutOverrides = overridesGetter
   if (options?.enableIpcHandlers !== false) setupFloatingGlobalAgentPanelIpc()
+  // Not one of the legacy handlers above: the floating renderer calls it (preload
+  // `floatingAgentBootFailed`) when it could not boot, so has no tRPC to say so with.
+  ipcMain.handle('floating-global-agent-panel:boot-failed', () =>
+    floatingGlobalAgentPanelOps.bootFailed()
+  )
 
   // did-resign-active = app-level signal, fires only when user leaves our
   // app entirely (ignores menu/tooltip transient blur). Detach trigger.

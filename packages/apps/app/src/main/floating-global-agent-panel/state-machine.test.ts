@@ -220,6 +220,25 @@ describe('reduce — user toggle', () => {
     expect(setResizable.resizable).toBe(true)
   })
 
+  // The floating window's renderer could not boot (no hub list): its message needs
+  // more than the collapsed widget's 220×80 / 60×60.
+  it('boot failure while detached + collapsed → expand, as a toggle would', () => {
+    const detached = { kind: 'detached', sessionId: 'session-1', mode: 'auto' } as const
+    const r = fire(detached, { kind: 'floating-boot-failed' }, { collapsed: true })
+    expect(r.state).toEqual(detached)
+    expect(r.actions).toEqual(
+      fire(detached, { kind: 'user-toggle-collapse' }, { collapsed: true }).actions
+    )
+  })
+
+  it('boot failure while already expanded, or attached → no-op', () => {
+    const detached = { kind: 'detached', sessionId: 'session-1', mode: 'auto' } as const
+    expect(fire(detached, { kind: 'floating-boot-failed' }, { collapsed: false }).actions).toEqual(
+      []
+    )
+    expect(fire({ kind: 'attached' }, { kind: 'floating-boot-failed' }).actions).toEqual([])
+  })
+
   it('toggle-collapse while detached + expanded → collapse + non-resizable', () => {
     const r = fire(
       { kind: 'detached', sessionId: 'session-1', mode: 'auto' },

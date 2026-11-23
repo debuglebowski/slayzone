@@ -10,6 +10,7 @@ import {
   GLOBAL_AGENT_PANEL_MIN_WIDTH,
   GLOBAL_AGENT_PANEL_MAX_WIDTH,
   DEFAULT_GLOBAL_AGENT_PANEL_WIDTH,
+  GlobalAgentHubUnavailable,
   type GlobalAgentPanelState,
   AGENT_STATUS_PANEL_MIN_WIDTH,
   AGENT_STATUS_PANEL_MAX_WIDTH,
@@ -112,7 +113,15 @@ export function AppSidePanels({
               start the agent on this machine's computer with that hub's folder
               (#183). The detach/reattach callbacks stay on the shell's client:
               the floating window is this desktop's. */}
-          <HubScope hubId={selectedProjectHubId}>
+          <HubScope
+            hubId={selectedProjectHubId}
+            fallback={
+              <GlobalAgentHubUnavailable
+                hubId={selectedProjectHubId}
+                width={globalAgentPanelState.panelWidth}
+              />
+            }
+          >
             <Suspense fallback={null}>
               <GlobalAgentSidePanel
                 width={globalAgentPanelState.panelWidth}

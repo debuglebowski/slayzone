@@ -23,10 +23,18 @@ vi.mock('../trpc', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutate: () => {} })
 }))
+// `hub:gone` stands for a hub this window cannot resolve: HubScope renders its fallback.
 vi.mock('@slayzone/transport/client', () => ({
-  HubScope: ({ hubId, children }: { hubId: string; children: ReactNode }) => (
-    <div data-testid={`hub-${hubId}`}>{children}</div>
-  )
+  HubScope: ({
+    hubId,
+    fallback,
+    children
+  }: {
+    hubId: string
+    fallback?: ReactNode
+    children: ReactNode
+  }) =>
+    hubId === 'hub:gone' ? <>{fallback}</> : <div data-testid={`hub-${hubId}`}>{children}</div>
 }))
 vi.mock('@slayzone/agent-panels', () => ({
   GLOBAL_AGENT_PANEL_MIN_WIDTH: 200,
@@ -34,7 +42,12 @@ vi.mock('@slayzone/agent-panels', () => ({
   DEFAULT_GLOBAL_AGENT_PANEL_WIDTH: 400,
   AGENT_STATUS_PANEL_MIN_WIDTH: 200,
   AGENT_STATUS_PANEL_MAX_WIDTH: 800,
-  DEFAULT_AGENT_STATUS_PANEL_WIDTH: 300
+  DEFAULT_AGENT_STATUS_PANEL_WIDTH: 300,
+  GlobalAgentHubUnavailable: ({ hubId, width }: { hubId?: string; width?: number }) => (
+    <div data-testid="hub-unavailable">
+      {hubId}|{width}
+    </div>
+  )
 }))
 vi.mock('@slayzone/task/client/ResizeHandle', () => ({
   ResizeHandle: () => null
@@ -88,5 +101,13 @@ describe("the global agent panel runs on the project's own hub", () => {
     const panel = await screen.findByTestId('global-agent')
     expect(screen.getByTestId('hub-hub:wss://remote').contains(panel)).toBe(true)
     expect(panel.textContent).toBe('/home/ci/proj')
+  })
+})
+
+describe("the project's hub can't be reached", () => {
+  it('the panel says so instead of rendering nothing', async () => {
+    renderPanels('hub:gone')
+    expect((await screen.findByTestId('hub-unavailable')).textContent).toBe('hub:gone|400')
+    expect(screen.queryByTestId('global-agent')).toBeNull()
   })
 })

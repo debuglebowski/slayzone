@@ -28,6 +28,8 @@ export type Event =
   | { kind: 'user-set-enabled'; enabled: boolean }
   | { kind: 'user-toggle-collapse' }
   | { kind: 'user-reset-size' }
+  // The floating window's renderer could not boot: it shows why, which needs room.
+  | { kind: 'floating-boot-failed' }
   | { kind: 'user-detach' }
   | { kind: 'user-reattach' }
   // Context updates
@@ -217,6 +219,12 @@ export function reduce(state: State, event: Event, ctx: Context): Result {
           { kind: 'log-diagnostic', event: 'floating.reset_size' }
         ]
       }
+    }
+
+    case 'floating-boot-failed': {
+      // Expand a collapsed widget (220×80 / 60×60) so the failure and its Retry fit.
+      if (state.kind !== 'detached' || !ctx.collapsed) return noop(state)
+      return reduce(state, { kind: 'user-toggle-collapse' }, ctx)
     }
 
     case 'user-toggle-collapse': {

@@ -15,9 +15,17 @@ vi.mock('@slayzone/terminal/client/LazyTerminal', () => ({
 // The session runs on the hub that owns its project: the terminal is scoped to it.
 vi.mock('@slayzone/transport/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@slayzone/transport/client')>()),
-  HubScope: ({ hubId, children }: { hubId: string; children: React.ReactNode }) => (
-    <div data-testid={`hub-${hubId}`}>{children}</div>
-  ),
+  // `hub:gone` stands for a hub this window cannot resolve: HubScope renders its fallback.
+  HubScope: ({
+    hubId,
+    fallback,
+    children
+  }: {
+    hubId: string
+    fallback?: React.ReactNode
+    children: React.ReactNode
+  }) =>
+    hubId === 'hub:gone' ? <>{fallback}</> : <div data-testid={`hub-${hubId}`}>{children}</div>,
   useHubRegistryStore: (pick: (s: { defaultHubId: string }) => unknown) =>
     pick({ defaultHubId: 'local' })
 }))
@@ -147,6 +155,19 @@ describe('FloatingGlobalAgentPanel hub', () => {
     await expand()
     const terminal = screen.getByTestId('terminal')
     expect(screen.getByTestId('hub-hub:wss://r').contains(terminal)).toBe(true)
+  })
+
+  it("a hub this window can't reach: says so and offers a retry, not a blank window", async () => {
+    session = { sessionId: 's4', cwd: '/home/ci/p', mode: 'claude-code', hubId: 'hub:gone' }
+    act(() => {
+      for (const push of [...sessionChanged]) push(undefined)
+    })
+    await flush()
+    await expand()
+    expect(screen.queryByTestId('terminal')).toBeNull()
+    const state = screen.getByTestId('global-agent-hub-unavailable')
+    expect(state.textContent).toContain("Can't reach this project's hub")
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
   })
 
   it('a session without a hub runs on the default hub', async () => {

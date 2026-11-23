@@ -34,7 +34,7 @@ import { useDetectedRepos } from '@slayzone/worktrees/hooks'
 import { registerArtifactUploader } from '@slayzone/editor/hooks'
 import { useArtifactUploader } from '@slayzone/task-artifacts/artifact-uploader'
 import App from './App'
-import { FloatingGlobalAgentPanel } from '@slayzone/agent-panels'
+import { bootFloatingGlobalAgentPanel } from './floatingGlobalAgentBoot'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
 import {
@@ -132,31 +132,14 @@ window.addEventListener('unhandledrejection', (event) => {
   })
 })
 
-// Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
-// Still needs TrpcProvider: ThemeProvider (and PtyProvider) now talk tRPC.
-// Federated like the main window: the session it shows runs on the hub that owns
-// its project, which may not be this desktop's own (#183). The default hub reuses
-// the boot client, exactly as in the main window.
+// Floating global agent panel: its own minimal boot (floatingGlobalAgentBoot.tsx).
 if (isFloatingGlobalAgentPanel) {
-  Promise.all([electronBootstrap.getServerUrl(), electronBootstrap.getWindowId()]).then(
-    async ([server, windowId]) => {
-      const { defaultHubId } = await seedHubRegistry(server, electronBootstrap)
-      initTrpcClient(withWindowId(server.url, windowId))
-      createRoot(document.getElementById('root')!).render(
-        <FederatedRoot decorateUrl={(url) => withWindowId(url, windowId)}>
-          <HubScope hubId={defaultHubId}>
-            <PtyProvider>
-              <ThemeProvider>
-                <TooltipProvider delayDuration={0}>
-                  <FloatingGlobalAgentPanel />
-                </TooltipProvider>
-              </ThemeProvider>
-            </PtyProvider>
-          </HubScope>
-        </FederatedRoot>
-      )
-    }
-  )
+  void bootFloatingGlobalAgentPanel(createRoot(document.getElementById('root')!), {
+    bootstrap: electronBootstrap,
+    withWindowId,
+    // Diagnostics go through the tRPC client, which this boot had not created yet.
+    onError: (error) => console.error('[floating-global-agent] boot failed', error)
+  })
 } else if (taskWindowId) {
   // Secondary task window: full TaskDetailPage scoped to one task. No tab store / sidebar.
   // No RemoteConfigScreen fallback here — secondary windows can only be opened

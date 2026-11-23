@@ -93,6 +93,8 @@ const api: ElectronAPI = {
         authRequired?: boolean
         signIn?: { sso: boolean; password: boolean }
       }>,
+    floatingAgentBootFailed: () =>
+      ipcRenderer.invoke('floating-global-agent-panel:boot-failed') as Promise<void>,
     prepareDirectLink: (address: string, hubId: string) =>
       ipcRenderer.invoke('app:direct-link-prepare', address, hubId) as Promise<
         { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }

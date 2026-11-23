@@ -7,6 +7,7 @@ import { HubScope, useHubRegistryStore, useSubscription } from '@slayzone/transp
 import { useTRPC, useTRPCClient } from '../trpc'
 import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
 import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPanelCollapsedIcon'
+import { GlobalAgentHubUnavailable } from './GlobalAgentHubUnavailable'
 
 interface FloatingSession {
   sessionId: string
@@ -192,7 +193,10 @@ export function FloatingGlobalAgentPanel() {
         {session && showTerminal ? (
           // On the hub that owns the session: another hub's project is unknown to
           // this window's default hub, which would start it on this machine (#183).
-          <HubScope hubId={session.hubId ?? defaultHubId}>
+          <HubScope
+            hubId={session.hubId ?? defaultHubId}
+            fallback={<GlobalAgentHubUnavailable hubId={session.hubId ?? defaultHubId} />}
+          >
             <Terminal
               key={session.sessionId}
               sessionId={session.sessionId}

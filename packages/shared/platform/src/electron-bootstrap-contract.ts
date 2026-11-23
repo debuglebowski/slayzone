@@ -132,6 +132,12 @@ export interface ElectronBootstrapApp {
    * (`@slayzone/platform/direct-link`) outside a hub scope. Optional: an older or
    * non-Electron host has none.
    */
+  /**
+   * The floating global agent window could not boot (no server url / hub list): the
+   * host expands it, if collapsed, so the failure it shows fits. Optional: only the
+   * desktop app has that window.
+   */
+  floatingAgentBootFailed?: () => Promise<void>
   prepareDirectLink?: (
     address: string,
     hubId: string

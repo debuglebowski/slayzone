@@ -1593,9 +1593,11 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/app-shell/useProjectPathGuard.hub.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/AppSidePanels.hub.test.tsx \
+  packages/apps/app/src/renderer/src/floatingGlobalAgentBoot.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
+  packages/domains/agent-panels/src/global-agent-panel/GlobalAgentHubUnavailable.test.tsx \
   packages/domains/automations/src/client/automation-dialog/AutomationDialog.test.tsx \
   packages/domains/feedback/src/client/FeedbackDialog.test.tsx \
   packages/domains/search/src/SearchDialog.test.tsx \

@@ -94,6 +94,8 @@ export const electronBootstrap = {
   probeServerHealth: (url: string) =>
     api().app.probeServerHealth?.(url) ??
     Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
+  /** The floating agent window could not boot: the host makes room for its message. */
+  floatingAgentBootFailed: () => api().app.floatingAgentBootFailed?.() ?? Promise.resolve(),
   /** Direct link: may this document open a socket to `address` from hub `hubId` now? */
   prepareDirectLink: (address: string, hubId: string) =>
     api().app.prepareDirectLink?.(address, hubId) ??
