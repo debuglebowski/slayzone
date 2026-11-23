@@ -16,7 +16,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ArtifactsSidebarState, TaskArtifact } from '@slayzone/task-contracts'
 import type { DeviceViewport } from '@slayzone/platform/preview-devices'
 import type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
-import { detectPlatform, useShortcutStore } from '@slayzone/ui'
+import { detectPlatform, toast, useShortcutStore } from '@slayzone/ui'
+
+const uploads = vi.hoisted(() => ({
+  hubId: 'local',
+  uploadPath: vi.fn(),
+  uploadBlob: vi.fn(),
+  showOpenDialog: vi.fn()
+}))
 
 type Row = Pick<TaskArtifact, 'id' | 'task_id' | 'title' | 'folder_id' | 'render_mode'> & {
   view_mode: string | null
@@ -40,6 +47,9 @@ vi.mock('./trpc', () => {
     return null
   }
   const mutationFn = (path: string) => async (input: { id?: string; viewMode?: string }) => {
+    if (path === 'artifacts.upload') return uploads.uploadPath(input)
+    if (path === 'artifacts.uploadBlob') return uploads.uploadBlob(input)
+    if (path === 'app.dialog.showOpenDialog') return uploads.showOpenDialog(input)
     if (path !== 'artifacts.update') return null
     if (server.updateGate) await server.updateGate
     const row = server.rows.find((r) => r.id === input.id)
@@ -77,7 +87,18 @@ vi.mock('@slayzone/telemetry/client', () => {
   }
   return { useTrack: () => tracker }
 })
-vi.mock('@slayzone/transport/client', () => ({ electronBootstrap: { getDropPaths: () => [] } }))
+vi.mock('@slayzone/transport/client', () => ({
+  electronBootstrap: { getDropPaths: () => [] },
+  useHubId: () => uploads.hubId,
+  useHubRegistryStore: (select: (state: object) => unknown) =>
+    select({
+      defaultHubId: 'local',
+      hubs: [
+        { id: 'local', kind: 'local' },
+        { id: 'remote', kind: 'remote' }
+      ]
+    })
+}))
 const appearance = {
   editorMarkdownViewMode: 'rich',
   notesReadability: 'normal',
@@ -222,6 +243,10 @@ async function switchAwayAndBack(view: ReturnType<typeof render>, saved = 'a1') 
 }
 
 beforeEach(() => {
+  uploads.hubId = 'local'
+  uploads.uploadPath.mockReset()
+  uploads.uploadBlob.mockReset()
+  uploads.showOpenDialog.mockReset()
   useShortcutStore.setState({ overrides: {}, isRecording: false })
   server.rows = [row('a1'), row('a2', 'raw'), row('a3')]
   server.folders = []
@@ -277,6 +302,86 @@ it('selects and rotates both iPhone Duo screens and keeps the choice with its ar
     HTMLElement.prototype.scrollIntoView = scrollIntoView
     vi.unstubAllGlobals()
   }
+})
+
+describe('ArtifactsPanel uploads to a remote hub', () => {
+  function binaryFile() {
+    const bytes = new Uint8Array([0, 128, 255])
+    const file = new File([bytes], 'picked.bin')
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: async () => bytes.buffer
+    })
+    return { file, bytes }
+  }
+
+  it('sends picked bytes to the task and opens the returned artifact', async () => {
+    uploads.hubId = 'remote'
+    uploads.uploadBlob.mockResolvedValue({
+      ...row('picked'),
+      title: 'picked.bin'
+    })
+    const { file, bytes } = binaryFile()
+    await mountLoaded()
+
+    const picker = screen.getByTestId<HTMLInputElement>('artifacts-upload-input')
+    const openPicker = vi.spyOn(picker, 'click')
+    fireEvent.click(screen.getByTestId('artifacts-upload-btn'))
+    expect(openPicker).toHaveBeenCalledOnce()
+    fireEvent.change(picker, { target: { files: [file] } })
+
+    await waitFor(() => expect(viewer().dataset.artifact).toBe('picked'))
+    expect(uploads.uploadBlob).toHaveBeenCalledWith({
+      taskId: 't1',
+      title: file.name,
+      bytes
+    })
+    expect(uploads.uploadPath).not.toHaveBeenCalled()
+    expect(uploads.showOpenDialog).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed dropped file and uploads the next one', async () => {
+    uploads.hubId = 'remote'
+    uploads.uploadBlob.mockRejectedValueOnce(new Error('Hub unavailable'))
+    uploads.uploadBlob.mockResolvedValueOnce({
+      ...row('picked'),
+      title: 'picked.bin'
+    })
+    const toastError = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    try {
+      await mountLoaded()
+      const { file } = binaryFile()
+      fireEvent.drop(viewer(), { dataTransfer: { files: [file, file] } })
+
+      await waitFor(() => expect(viewer().dataset.artifact).toBe('picked'))
+      expect(uploads.uploadBlob).toHaveBeenCalledTimes(2)
+      expect(toastError).toHaveBeenCalledWith('Upload failed', {
+        description: 'picked.bin: Hub unavailable'
+      })
+    } finally {
+      toastError.mockRestore()
+    }
+  })
+})
+
+it('keeps the native file picker and path upload for a local task', async () => {
+  uploads.showOpenDialog.mockResolvedValue({
+    canceled: false,
+    filePaths: ['/tmp/picked.bin']
+  })
+  uploads.uploadPath.mockResolvedValue({
+    ...row('picked'),
+    title: 'picked.bin'
+  })
+  await mountLoaded()
+
+  fireEvent.click(screen.getByTestId('artifacts-upload-btn'))
+
+  await waitFor(() => expect(viewer().dataset.artifact).toBe('picked'))
+  expect(uploads.uploadPath).toHaveBeenCalledWith({
+    taskId: 't1',
+    sourcePath: '/tmp/picked.bin'
+  })
+  expect(uploads.uploadBlob).not.toHaveBeenCalled()
 })
 
 function pressSidebarShortcut(key = 's') {

@@ -62,7 +62,7 @@ import {
 } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
-import { electronBootstrap } from '@slayzone/transport/client'
+import { electronBootstrap, useHubId, useHubRegistryStore } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import {
@@ -74,7 +74,7 @@ import {
   canExportAsPng,
   canExportAsHtml
 } from '@slayzone/task-contracts'
-import { useAppearance, safeClipboardWriteText } from '@slayzone/ui'
+import { useAppearance, safeClipboardWriteText, toast } from '@slayzone/ui'
 import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'
 import { ArtifactSearchPanel } from './ArtifactSearchPanel'
@@ -155,6 +155,12 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const { mutateAsync: showOpenDialog } = useMutation(
       trpc.app.dialog.showOpenDialog.mutationOptions()
     )
+    const hubId = useHubId()
+    // Only the co-located hub can read paths picked on this device.
+    const canUploadLocalPaths = useHubRegistryStore(({ hubs, defaultHubId }) =>
+      hubs.some((hub) => hub.id === (hubId ?? defaultHubId) && hub.kind === 'local')
+    )
+    const uploadInputRef = useRef<HTMLInputElement>(null)
     const {
       artifacts,
       folders,
@@ -492,32 +498,59 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
 
     // --- Upload / drop ---
 
-    const handleUpload = useCallback(async () => {
-      const result = await showOpenDialog({
-        title: 'Upload Artifact',
-        properties: ['openFile', 'multiSelections']
-      })
-      if (result.canceled || !result.filePaths.length) return
-      for (const filePath of result.filePaths) {
-        await uploadArtifact(filePath)
-      }
-    }, [uploadArtifact, showOpenDialog])
-
-    const handleFileDrop = useCallback(
-      async (e: DragEvent) => {
-        e.preventDefault()
-        setDragOver(false)
-        if (dragArtifactIdsRef.current.length) return
-        const filePaths = electronBootstrap.getDropPaths()
-        for (const fp of filePaths) {
+    const uploadSources = useCallback(
+      async (sources: readonly (string | File)[], allowDirectories = false) => {
+        for (const source of sources) {
           try {
-            await uploadDir(fp)
-          } catch {
-            await uploadArtifact(fp)
+            if (allowDirectories && typeof source === 'string') {
+              try {
+                await uploadDir(source)
+                continue
+              } catch {
+                // A dropped path may be a regular file.
+              }
+            }
+            await uploadArtifact(source)
+          } catch (err) {
+            const name = typeof source === 'string' ? source.split(/[/\\]/).pop() : source.name
+            toast.error('Upload failed', {
+              description: `${name}: ${err instanceof Error ? err.message : String(err)}`
+            })
           }
         }
       },
       [uploadArtifact, uploadDir]
+    )
+
+    const handleUpload = useCallback(async () => {
+      if (!canUploadLocalPaths) {
+        uploadInputRef.current?.click()
+        return
+      }
+      try {
+        const result = await showOpenDialog({
+          title: 'Upload Artifact',
+          properties: ['openFile', 'multiSelections']
+        })
+        if (!result.canceled) await uploadSources(result.filePaths)
+      } catch (err) {
+        toast.error('Could not open the file picker', {
+          description: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }, [showOpenDialog, uploadSources, canUploadLocalPaths])
+
+    const handleFileDrop = useCallback(
+      (e: DragEvent) => {
+        e.preventDefault()
+        setDragOver(false)
+        if (dragArtifactIdsRef.current.length || !e.dataTransfer.files.length) return
+        const files = Array.from(e.dataTransfer.files)
+        const paths = canUploadLocalPaths ? electronBootstrap.getDropPaths().filter(Boolean) : []
+        if (paths.length === files.length) void uploadSources(paths, true)
+        else void uploadSources(files)
+      },
+      [uploadSources, canUploadLocalPaths]
     )
 
     // --- Drag-to-folder handlers ---
@@ -1275,6 +1308,20 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                     <Upload className="size-3 shrink-0" />
                     {sidebarWidth >= 180 && <span className="ml-1 truncate">Upload</span>}
                   </Button>
+                  {!canUploadLocalPaths && (
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      multiple
+                      hidden
+                      data-testid="artifacts-upload-input"
+                      onChange={(e) => {
+                        const files = Array.from(e.currentTarget.files ?? [])
+                        e.currentTarget.value = ''
+                        void uploadSources(files)
+                      }}
+                    />
+                  )}
                 </div>
               )}
             </div>

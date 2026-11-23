@@ -77,7 +77,7 @@ export interface UseArtifactsReturn {
   /** The in-app editor's read: the text, or why it is not shown as text. Always fresh from disk. */
   readText: (id: string) => Promise<ArtifactTextRead | null>
   saveContent: (id: string, content: string) => Promise<void>
-  uploadArtifact: (sourcePath: string, title?: string) => Promise<TaskArtifact | null>
+  uploadArtifact: (source: string | File, title?: string) => Promise<TaskArtifact | null>
   uploadDir: (dirPath: string, parentFolderId?: string | null) => Promise<void>
   getFilePath: (id: string) => Promise<string | null>
   downloadFile: (id: string) => Promise<boolean>
@@ -227,6 +227,7 @@ export function useArtifacts(
   const { mutateAsync: updateMutate } = useMutation(trpc.artifacts.update.mutationOptions())
   const { mutateAsync: deleteMutate } = useMutation(trpc.artifacts.delete.mutationOptions())
   const { mutateAsync: uploadMutate } = useMutation(trpc.artifacts.upload.mutationOptions())
+  const { mutateAsync: uploadBlobMutate } = useMutation(trpc.artifacts.uploadBlob.mutationOptions())
   const { mutateAsync: uploadDirMutate } = useMutation(trpc.artifacts.uploadDir.mutationOptions())
   const { mutateAsync: versionsCreateMutate } = useMutation(
     trpc.artifacts.versionsCreate.mutationOptions()
@@ -383,17 +384,23 @@ export function useArtifacts(
   )
 
   const uploadArtifact = useCallback(
-    async (sourcePath: string, title?: string): Promise<TaskArtifact | null> => {
+    async (source: string | File, title?: string): Promise<TaskArtifact | null> => {
       if (!taskId) return null
-      const artifact = await uploadMutate({ taskId, sourcePath, title })
-      if (artifact) {
-        setArtifacts((prev) => [...prev, artifact])
-        setSelectedId(artifact.id)
-        trackTask(taskId, 'asset_created')
-      }
+      const artifact =
+        typeof source === 'string'
+          ? await uploadMutate({ taskId, sourcePath: source, title })
+          : await uploadBlobMutate({
+              taskId,
+              title: title ?? source.name,
+              bytes: new Uint8Array(await source.arrayBuffer())
+            })
+      if (!artifact) throw new Error('The hub did not return an artifact')
+      setArtifacts((prev) => (prev.some((a) => a.id === artifact.id) ? prev : [...prev, artifact]))
+      setSelectedId(artifact.id)
+      trackTask(taskId, 'asset_created')
       return artifact
     },
-    [taskId, uploadMutate, setSelectedId, trackTask]
+    [taskId, uploadMutate, uploadBlobMutate, setSelectedId, trackTask]
   )
 
   const getFilePath = useCallback(
