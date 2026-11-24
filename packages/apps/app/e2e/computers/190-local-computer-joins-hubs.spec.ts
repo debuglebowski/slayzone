@@ -97,9 +97,9 @@ base.describe('local computer on every hub', () => {
       expect((await listComputers(hub)).some((r) => r.name === 'local-computer')).toBe(false)
 
       await clickSettings(page)
-      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      const dialog = page.getByTestId('settings-view').first()
       await expect(dialog).toBeVisible({ timeout: 10_000 })
-      await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+      await dialog.getByTestId('settings-nav-hubs').click()
       const group = page.locator('[data-testid="hub-group-remote-b"]')
       const ownRow = group.locator('[data-testid="computer-row"]').filter({
         has: page.locator('[data-testid="computer-own"]')

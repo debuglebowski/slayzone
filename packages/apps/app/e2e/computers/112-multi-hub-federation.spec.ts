@@ -1512,9 +1512,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       // Open Settings → click the Hubs nav item; assert both hub rows.
       await clickSettings(page)
-      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      const dialog = page.getByTestId('settings-view').first()
       await expect(dialog).toBeVisible({ timeout: 10_000 })
-      await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+      await dialog.getByTestId('settings-nav-hubs').click()
       await expect(page.locator('[data-testid="hub-row-local"]')).toBeVisible({ timeout: 10_000 })
       await expect(page.locator('[data-testid="hub-row-remote"]')).toBeVisible({ timeout: 10_000 })
 
@@ -1578,92 +1578,106 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
-  base("Settings hub picker edits the picked hub's hub-wide settings only", async () => {
-    base.setTimeout(180_000)
+  base(
+    "a hub's Settings page edits that hub; personal settings stay on the default hub",
+    async () => {
+      base.setTimeout(180_000)
 
-    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-settings-hub-'))
-    let hub: SecondHub | null = null
-    let hubComputer: HubComputer | null = null
-    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
-    try {
-      hub = await spawnSecondHub(secondStore)
-      await waitForHubHealth(hub.port)
-      const remoteHubUrl = hub.url
-      hubComputer = await attachDefaultComputer(hub, secondStore)
+      const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-settings-hub-'))
+      let hub: SecondHub | null = null
+      let hubComputer: HubComputer | null = null
+      let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+      try {
+        hub = await spawnSecondHub(secondStore)
+        await waitForHubHealth(hub.port)
+        const remoteHubUrl = hub.url
+        hubComputer = await attachDefaultComputer(hub, secondStore)
 
-      launched = await launchIsolatedElectron({
-        name: 'multi-hub-settings-picker',
-        seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
-          fs.writeFileSync(
-            bootConfigPath(userDataDir),
-            JSON.stringify({
-              server_mode: 'local',
-              multi_hub: true,
-              hubs: [{ id: 'remote-b', kind: 'remote', label: 'Hub B', url: remoteHubUrl }],
-              default_hub_id: 'local'
-            })
+        launched = await launchIsolatedElectron({
+          name: 'multi-hub-settings-picker',
+          seedUserData: (userDataDir) => {
+            fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+            fs.writeFileSync(
+              bootConfigPath(userDataDir),
+              JSON.stringify({
+                server_mode: 'local',
+                multi_hub: true,
+                hubs: [{ id: 'remote-b', kind: 'remote', label: 'Hub B', url: remoteHubUrl }],
+                default_hub_id: 'local'
+              })
+            )
+          },
+          extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+        })
+        const page = launched.page
+        await page.waitForSelector('#root', { timeout: 20_000 })
+        await authorizeHubInApp(page, 'remote-b', hub.token)
+
+        const remoteSetting = (key: string) =>
+          withHubClient(
+            remoteHubUrl,
+            (c) => c.settings.get.query({ key }) as Promise<string | null>
           )
-        },
-        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
-      })
-      const page = launched.page
-      await page.waitForSelector('#root', { timeout: 20_000 })
-      await authorizeHubInApp(page, 'remote-b', hub.token)
+        const localSetting = (key: string) =>
+          page.evaluate(
+            (k) =>
+              window.getTrpcVanillaClient().settings.get.query({ key: k }) as Promise<
+                string | null
+              >,
+            key
+          )
 
-      const remoteSetting = (key: string) =>
-        withHubClient(remoteHubUrl, (c) => c.settings.get.query({ key }) as Promise<string | null>)
-      const localSetting = (key: string) =>
-        page.evaluate(
-          (k) =>
-            window.getTrpcVanillaClient().settings.get.query({ key: k }) as Promise<string | null>,
-          key
+        await clickSettings(page)
+        const dialog = page.getByTestId('settings-view').first()
+        await expect(dialog).toBeVisible({ timeout: 10_000 })
+
+        // Hub B's own page (nav: each hub, then its computers and projects).
+        const hubB = dialog.locator(
+          '[data-testid="settings-nav-hub-group"][data-hub-id="remote-b"]'
         )
+        await hubB.getByTestId('settings-nav-hub').click()
+        await expect(dialog.getByTestId('settings-hub-page')).toContainText('Hub B')
 
-      await clickSettings(page)
-      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
-      await expect(dialog).toBeVisible({ timeout: 10_000 })
+        // Worktrees: edit the base path → lands on Hub B only.
+        await dialog.getByTestId('hub-tab-worktrees').click()
+        const basePath = dialog.getByPlaceholder('../{project-folder-name}-workspaces')
+        await basePath.fill('../remote-wt')
+        await basePath.blur()
+        await expect
+          .poll(() => remoteSetting('worktree_base_path'), { timeout: 15_000 })
+          .toBe('../remote-wt')
+        expect(await localSetting('worktree_base_path')).not.toBe('../remote-wt')
 
-      // Worktrees: pick Hub B, edit the base path → lands on Hub B only.
-      await dialog.locator('aside button').filter({ hasText: 'Worktrees' }).first().click()
-      await dialog.getByTestId('settings-hub-picker').click()
-      await page.getByRole('option', { name: /Hub B/ }).click()
-      await expect(dialog.getByTestId('hub-wide-note')).toContainText('Hub B')
-      const basePath = dialog.getByPlaceholder('../{project-folder-name}-workspaces')
-      await basePath.fill('../remote-wt')
-      await basePath.blur()
-      await expect
-        .poll(() => remoteSetting('worktree_base_path'), { timeout: 15_000 })
-        .toBe('../remote-wt')
-      expect(await localSetting('worktree_base_path')).not.toBe('../remote-wt')
+        // Agents: startup mode (hub-wide) → Hub B.
+        await dialog.getByTestId('hub-tab-agents').click()
+        await dialog.getByTestId('agent-startup-mode').click()
+        await page.getByRole('option', { name: 'Manual', exact: true }).click()
+        await expect
+          .poll(() => remoteSetting('terminal_agent_startup'), { timeout: 15_000 })
+          .toBe('manual')
+        expect(await localSetting('terminal_agent_startup')).not.toBe('manual')
 
-      // Agent panel: the pick carries across tabs. Startup mode (hub-wide) → Hub B;
-      // scrollback (this client's own UI) → the default hub.
-      await dialog.locator('aside button').filter({ hasText: 'Panels' }).first().click()
-      await dialog.locator('aside button').filter({ hasText: 'Agent' }).first().click()
-      await expect(dialog.getByTestId('hub-wide-note')).toContainText('Hub B')
-      await dialog.getByTestId('agent-startup-mode').click()
-      await page.getByRole('option', { name: 'Manual', exact: true }).click()
-      await expect
-        .poll(() => remoteSetting('terminal_agent_startup'), { timeout: 15_000 })
-        .toBe('manual')
-      expect(await localSetting('terminal_agent_startup')).not.toBe('manual')
-
-      const scrollback = dialog
-        .getByText('Scrollback', { exact: true })
-        .locator('xpath=..')
-        .locator('input')
-      await scrollback.fill('4321')
-      await scrollback.blur()
-      await expect.poll(() => localSetting('terminal_scrollback'), { timeout: 15_000 }).toBe('4321')
-      expect(await remoteSetting('terminal_scrollback')).not.toBe('4321')
-    } finally {
-      if (launched) await launched.close()
-      if (hubComputer) await hubComputer.stop()
-      if (hub) await hub.stop()
-      fs.rmSync(secondStore, { recursive: true, force: true })
+        // Scrollback is this client's own UI: Preferences → Panels → Agent, default hub.
+        await dialog.getByTestId('settings-nav-panels').click()
+        await dialog.locator('.space-y-2 > *').filter({ hasText: 'Agent' }).first().click()
+        const scrollback = dialog
+          .getByText('Scrollback', { exact: true })
+          .locator('xpath=..')
+          .locator('input')
+        await scrollback.fill('4321')
+        await scrollback.blur()
+        await expect
+          .poll(() => localSetting('terminal_scrollback'), { timeout: 15_000 })
+          .toBe('4321')
+        expect(await remoteSetting('terminal_scrollback')).not.toBe('4321')
+      } finally {
+        if (launched) await launched.close()
+        if (hubComputer) await hubComputer.stop()
+        if (hub) await hub.stop()
+        fs.rmSync(secondStore, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   base("create dialog lists the chosen hub's computers and browses their disk", async () => {
     base.setTimeout(240_000)
@@ -1950,9 +1964,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await authorizeHubInApp(page, 'remote-b', hub.token)
 
       await clickSettings(page)
-      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      const dialog = page.getByTestId('settings-view').first()
       await expect(dialog).toBeVisible({ timeout: 10_000 })
-      await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+      await dialog.getByTestId('settings-nav-hubs').click()
 
       // Computers are listed INSIDE their hub — one block per connected hub, since a
       // computer belongs to exactly one. Both hubs are connected here.
@@ -2179,9 +2193,9 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(projectBlob(page, 'LI')).not.toBeVisible({ timeout: 2_000 })
 
       await clickSettings(page)
-      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      const dialog = page.getByTestId('settings-view').first()
       await expect(dialog).toBeVisible({ timeout: 10_000 })
-      await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+      await dialog.getByTestId('settings-nav-hubs').click()
 
       await page.locator('[data-testid="hub-add-open"]').click()
       await page.locator('[data-testid="hub-add-url"]').fill(addedHubUrl)
@@ -2199,7 +2213,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         page.locator('[data-testid="hubs-save-relaunch"]').click()
       ])
       await page.waitForSelector('#root', { timeout: 20_000 })
-      await expect(page.locator('[role="dialog"][aria-label="Settings"]').first()).toBeVisible({
+      await expect(page.getByTestId('settings-view').first()).toBeVisible({
         timeout: 15_000
       })
 

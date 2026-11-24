@@ -1,12 +1,11 @@
-import { test, expect, seed, clickSettings, resetApp } from '../fixtures/electron'
+import { test, expect, seed, clickSettings, resetApp, settingsView } from '../fixtures/electron'
 
 test.describe('Settings', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
   })
 
-  const settingsDialog = (mainWindow: import('@playwright/test').Page) =>
-    mainWindow.getByRole('dialog').last()
+  const settingsDialog = (mainWindow: import('@playwright/test').Page) => settingsView(mainWindow)
 
   const openSettingsDialog = async (mainWindow: import('@playwright/test').Page) => {
     const dialog = settingsDialog(mainWindow)
@@ -19,9 +18,6 @@ test.describe('Settings', () => {
     return dialog
   }
 
-  const findCard = (dialog: import('@playwright/test').Locator, name: string) =>
-    dialog.locator('.space-y-2 > *').filter({ hasText: name }).first()
-
   const openTerminalSettings = async (mainWindow: import('@playwright/test').Page) => {
     const dialog = settingsDialog(mainWindow)
     if (await dialog.isVisible().catch(() => false)) {
@@ -29,11 +25,8 @@ test.describe('Settings', () => {
       await expect(dialog).not.toBeVisible({ timeout: 5_000 })
     }
     await openSettingsDialog(mainWindow)
-    await dialog.locator('aside button').filter({ hasText: 'Panels' }).first().click()
-    // Terminal panel was relabeled "Agent" in the panels list.
-    await expect(findCard(settingsDialog(mainWindow), 'Agent')).toBeVisible({ timeout: 5_000 })
-    const terminalCard = findCard(dialog, 'Agent')
-    await terminalCard.click()
+    // The default agent is a hub setting: the hub's Agents & providers page.
+    await dialog.getByTestId('settings-nav-hub').first().click()
     await expect(dialog.getByText('Default agent provider')).toBeVisible({ timeout: 5_000 })
   }
 

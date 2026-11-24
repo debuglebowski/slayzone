@@ -3,7 +3,7 @@ import { IntegrationsTab } from './IntegrationsTab'
 import { useStatusSyncLockLookup } from './useStatusSyncLockLookup'
 
 /**
- * This feature's half of ProjectSettingsDialog's injected tabs (see projects'
+ * This feature's half of ProjectSettingsPanel's injected tabs (see projects'
  * ProjectSettingsTabs.ts). The app spreads it into what it passes to
  * registerProjectSettingsTabs.
  */

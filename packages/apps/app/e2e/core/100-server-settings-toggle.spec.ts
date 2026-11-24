@@ -1,5 +1,12 @@
 import fs from 'fs'
-import { test, expect, clickSettings, resetApp, bootConfigPath } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  clickSettings,
+  resetApp,
+  bootConfigPath,
+  settingsView
+} from '../fixtures/electron'
 
 /**
  * Connections → Hubs: the "Run a local hub" toggle (replaces the old Server-tab
@@ -47,12 +54,12 @@ test.describe('Run-local-hub toggle', () => {
   }
 
   const openHubsTab = async (mainWindow: import('@playwright/test').Page) => {
-    const dialog = mainWindow.getByRole('dialog').last()
+    const dialog = settingsView(mainWindow)
     if (!(await dialog.isVisible().catch(() => false))) {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
-    await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+    await dialog.getByTestId('settings-nav-hubs').click()
     await expect(dialog.getByTestId('hub-row-local')).toBeVisible({ timeout: 5_000 })
     // The add-hub form lives in a collapsed "＋ Add new hub" row now — expand it so
     // the url/probe/add fields are reachable (idempotent across tests).

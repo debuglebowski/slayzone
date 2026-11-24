@@ -31,27 +31,22 @@ import {
   EditTaskDialog,
   DeleteTaskDialog,
   CreateProjectDialog,
-  ProjectSettingsDialog,
   RelocateProjectDialog,
   DeleteProjectDialog,
   MoveProjectToHubDialog,
   GroupSettingsDialog,
-  UserSettingsDialog,
   SearchDialog,
   OnboardingDialog,
   CliInstallDialog,
   TutorialAnimationModal,
   ChangelogDialog,
-  TemplatesSettingsTab,
   TerminalStatusDialog
 } from './lazy'
-import type { ProjectIntegrationOnboardingProvider } from './constants'
 
 type CreateTaskProps = ComponentProps<typeof CreateTaskDialog>
 type EditTaskProps = ComponentProps<typeof EditTaskDialog>
 type DeleteTaskProps = ComponentProps<typeof DeleteTaskDialog>
 type CreateProjectProps = ComponentProps<typeof CreateProjectDialog>
-type ProjectSettingsProps = ComponentProps<typeof ProjectSettingsDialog>
 type DeleteProjectProps = ComponentProps<typeof DeleteProjectDialog>
 type GroupSettingsProps = ComponentProps<typeof GroupSettingsDialog>
 type SearchDialogProps = ComponentProps<typeof SearchDialog>
@@ -75,28 +70,13 @@ interface AppDialogsProps {
   // Project dialogs
   createProjectOpen: boolean
   handleProjectCreated: CreateProjectProps['onCreated']
-  editingProject: ProjectSettingsProps['project']
-  closeProjectSettings: () => void
-  projectSettingsInitialTab: ProjectSettingsProps['initialTab']
-  testGroupBy: 'none' | 'path' | 'label'
-  setTestGroupBy: Dispatch<SetStateAction<'none' | 'path' | 'label'>>
-  projectSettingsOnboardingProvider: ProjectIntegrationOnboardingProvider | null
-  setProjectSettingsOnboardingProvider: Dispatch<
-    SetStateAction<ProjectIntegrationOnboardingProvider | null>
-  >
-  handleProjectUpdated: ProjectSettingsProps['onUpdated']
-  handleProjectChanged: ProjectSettingsProps['onChanged']
+  handleProjectUpdated: (project: Project) => void
   deletingProject: DeleteProjectProps['project']
   handleProjectDeleted: DeleteProjectProps['onDeleted']
   groupSettingsTarget: GroupSettingsProps['group'] | null
   renameProjectGroup: (id: string, name: string) => void
   deleteProjectGroup: (id: string) => void
   // User settings
-  settingsOpen: boolean
-  setSettingsOpen: Dispatch<SetStateAction<boolean>>
-  setSettingsRevision: Dispatch<SetStateAction<number>>
-  settingsInitialTab: string
-  setSettingsInitialTab: Dispatch<SetStateAction<string>>
   // Search
   searchOpen: boolean
   tasks: Task[]
@@ -161,25 +141,12 @@ export function AppDialogs({
   handleTaskDeleted,
   createProjectOpen,
   handleProjectCreated,
-  editingProject,
-  closeProjectSettings,
-  projectSettingsInitialTab,
-  testGroupBy,
-  setTestGroupBy,
-  projectSettingsOnboardingProvider,
-  setProjectSettingsOnboardingProvider,
   handleProjectUpdated,
-  handleProjectChanged,
   deletingProject,
   handleProjectDeleted,
   groupSettingsTarget,
   renameProjectGroup,
   deleteProjectGroup,
-  settingsOpen,
-  setSettingsOpen,
-  setSettingsRevision,
-  settingsInitialTab,
-  setSettingsInitialTab,
   searchOpen,
   tasks,
   projects,
@@ -218,7 +185,6 @@ export function AppDialogs({
   const ownerHubIds = {
     editTask: useOwnerHubId({ taskId: editingTask?.id }),
     deleteTask: useOwnerHubId({ taskId: deletingTask?.id }),
-    projectSettings: useOwnerHubId({ projectId: editingProject?.id }),
     deleteProject: useOwnerHubId({ projectId: deletingProject?.id })
   }
   const trpc = useTRPC()
@@ -283,25 +249,6 @@ export function AppDialogs({
           />
         </Suspense>
       )}
-      {shouldMount('projectSettings', !!editingProject) && (
-        <Suspense fallback={null}>
-          <OwnerHubScope hubId={ownerHubIds.projectSettings}>
-            <ProjectSettingsDialog
-              project={editingProject}
-              open={!!editingProject}
-              onOpenChange={(open) => !open && closeProjectSettings()}
-              initialTab={projectSettingsInitialTab}
-              groupBy={testGroupBy}
-              onGroupByChange={setTestGroupBy}
-              integrationOnboardingProvider={projectSettingsOnboardingProvider}
-              onIntegrationOnboardingHandled={() => setProjectSettingsOnboardingProvider(null)}
-              onUpdated={handleProjectUpdated}
-              onChanged={handleProjectChanged}
-              renderTemplatesTab={(projectId) => <TemplatesSettingsTab projectId={projectId} />}
-            />
-          </OwnerHubScope>
-        </Suspense>
-      )}
       {shouldMount('deleteProject', !!deletingProject) && (
         <Suspense fallback={null}>
           <OwnerHubScope hubId={ownerHubIds.deleteProject}>
@@ -346,20 +293,6 @@ export function AppDialogs({
             onClose={() => useDialogStore.getState().closeGroupSettings()}
             onRename={(name) => renameProjectGroup(groupSettingsTarget.id, name)}
             onDelete={() => deleteProjectGroup(groupSettingsTarget.id)}
-          />
-        </Suspense>
-      )}
-      {shouldMount('settings', settingsOpen) && (
-        <Suspense fallback={null}>
-          <UserSettingsDialog
-            open={settingsOpen}
-            onOpenChange={(open) => {
-              setSettingsOpen(open)
-              if (!open) setSettingsRevision((r) => r + 1)
-            }}
-            initialTab={settingsInitialTab}
-            onTabChange={setSettingsInitialTab}
-            appBadgeProjects={projects}
           />
         </Suspense>
       )}

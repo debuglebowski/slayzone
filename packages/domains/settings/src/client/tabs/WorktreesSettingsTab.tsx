@@ -18,7 +18,6 @@ import {
 } from '@slayzone/ui'
 import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './SettingsTabIntro'
-import { HubWideSection } from '../settings-hub'
 
 interface CopyPreset {
   id: string
@@ -53,10 +52,8 @@ export function WorktreesSettingsTab() {
         title="Worktrees"
         description="Configure how git worktrees are created and what files are carried over."
       />
-      <HubWideSection>
-        <WorktreeHubSettings />
-        <WorktreeCopyPresets />
-      </HubWideSection>
+      <WorktreeHubSettings />
+      <WorktreeCopyPresets />
     </>
   )
 }

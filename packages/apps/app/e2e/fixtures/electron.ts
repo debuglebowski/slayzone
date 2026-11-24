@@ -1413,7 +1413,7 @@ export async function clickAddProject(page: Page) {
  * Every trigger only opens, never toggles, so a slow first one is harmless.
  */
 export async function clickSettings(page: Page) {
-  const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+  const dialog = settingsView(page)
   const opened = (timeout: number) =>
     dialog
       .waitFor({ state: 'visible', timeout })
@@ -1434,6 +1434,30 @@ export async function clickSettings(page: Page) {
     .click({ timeout: 5_000 })
     .catch(() => {})
   await opened(5_000)
+}
+
+/** The full-window Settings view (`@slayzone/settings` `SettingsView`). */
+export function settingsView(page: Page) {
+  return page.getByTestId('settings-view').first()
+}
+
+/**
+ * Open Settings on a route (a `SettingsRoute` object or a legacy tab key such as
+ * `'panels/terminal'`) the way the app's own links do: the `open-settings` event.
+ */
+export async function openSettingsRoute(page: Page, route: string | Record<string, unknown>) {
+  await page.evaluate((detail) => {
+    window.dispatchEvent(new CustomEvent('open-settings', { detail }))
+  }, route)
+  await settingsView(page).waitFor({ state: 'visible', timeout: 10_000 })
+}
+
+/** Close the Settings view with its "Back to app" button. */
+export async function closeSettingsView(page: Page) {
+  const view = settingsView(page)
+  if (!(await view.isVisible())) return
+  await page.getByTestId('settings-back').click()
+  await view.waitFor({ state: 'hidden', timeout: 5_000 })
 }
 
 /**
@@ -1574,19 +1598,17 @@ export function projectBlob(page: Page, abbrev: string) {
  * run were this: four direct victims plus one cascade.
  *
  * `tab` selects the settings tab up front, which also removes the caller's need to
- * click a tab and retry that too.
+ * click a tab and retry that too. Returns the project's page in the Settings view.
  */
 export async function openProjectSettings(
   page: Page,
   abbrev: string,
   tab?: string
 ): Promise<Locator> {
-  const dialog = page
-    .getByRole('dialog')
-    .filter({ has: page.getByRole('heading', { name: 'Project Settings' }) })
-    .last()
+  // The project's page in the full-window Settings view (it replaced the dialog).
+  const dialog = page.getByTestId('settings-project-page').first()
 
-  // Fast path: dialog is already open from a prior action in the same test flow.
+  // Fast path: already open from a prior action in the same test flow.
   if (await dialog.isVisible({ timeout: 400 }).catch(() => false)) {
     return dialog
   }

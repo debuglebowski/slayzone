@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from 'react'
+import { useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
@@ -14,7 +14,9 @@ import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task-contracts'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { type GlobalAgentPanelState, type AgentStatusState } from '@slayzone/agent-panels'
-import type { ProjectSettingsTab, ProjectIntegrationOnboardingProvider } from './constants'
+import type { ProjectSettingsTab } from './constants'
+
+import { openSettings } from '@slayzone/settings'
 
 export interface AppIpcListenersDeps {
   closeTab: (index: number) => void
@@ -27,14 +29,8 @@ export interface AppIpcListenersDeps {
   setGlobalAgentPanelState: (updates: Partial<GlobalAgentPanelState>) => void
   agentStatusState: AgentStatusState
   setAgentStatusState: (updates: Partial<AgentStatusState>) => void
-  setSettingsInitialTab: Dispatch<SetStateAction<string>>
-  setSettingsOpen: Dispatch<SetStateAction<boolean>>
   projects: Project[]
-  setProjectSettingsInitialTab: Dispatch<SetStateAction<ProjectSettingsTab>>
-  setProjectSettingsOnboardingProvider: Dispatch<
-    SetStateAction<ProjectIntegrationOnboardingProvider | null>
-  >
-  setEditingProject: Dispatch<SetStateAction<Project | null>>
+  openProjectSettings: (project: Project, options?: { initialTab?: ProjectSettingsTab }) => void
   tasksMap: Map<string, Task>
 }
 
@@ -53,12 +49,8 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     setGlobalAgentPanelState,
     agentStatusState,
     setAgentStatusState,
-    setSettingsInitialTab,
-    setSettingsOpen,
     projects,
-    setProjectSettingsInitialTab,
-    setProjectSettingsOnboardingProvider,
-    setEditingProject,
+    openProjectSettings,
     tasksMap
   } = deps
 
@@ -125,10 +117,7 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   )
   useSubscription(
     trpc.menu.onOpenSettings.subscriptionOptions(undefined, {
-      onData: () => {
-        setSettingsInitialTab('appearance')
-        setSettingsOpen(true)
-      }
+      onData: () => openSettings()
     })
   )
   useSubscription(
@@ -137,9 +126,7 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
         if (!selectedProjectId) return
         const project = projects.find((p) => p.id === selectedProjectId)
         if (!project) return
-        setProjectSettingsInitialTab('general')
-        setProjectSettingsOnboardingProvider(null)
-        setEditingProject(project)
+        openProjectSettings(project)
       }
     })
   )

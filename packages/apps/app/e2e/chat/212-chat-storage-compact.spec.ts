@@ -37,8 +37,10 @@ test('chat storage: free space is reclaimed from Settings and the chat stays rea
   expect(before).toMatchObject({ supported: true, worthIt: true, autoVacuum: 'none' })
 
   await clickSettings(mainWindow)
-  const dialog = mainWindow.locator('[role="dialog"][aria-label="Settings"]').first()
-  await dialog.locator('aside button').filter({ hasText: 'Backup' }).first().click()
+  const dialog = mainWindow.getByTestId('settings-view').first()
+  // Backups are the default hub's: its page, Backups tab.
+  await dialog.getByTestId('settings-nav-hub').first().click()
+  await dialog.getByTestId('hub-tab-backups').click()
   const reclaim = dialog.getByRole('button', { name: /^Reclaim / })
   await expect(reclaim).toBeEnabled({ timeout: 30_000 })
   await reclaim.click()

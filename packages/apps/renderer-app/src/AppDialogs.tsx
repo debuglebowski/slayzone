@@ -7,7 +7,7 @@
 // Open-state is store-driven: each dialog reads its own slice straight from
 // useDialogStore, so an entry point opens a dialog by flipping store state
 // (openCreateTask / openEditTask / openDeleteTask / openCreateProject /
-// openDeleteProject / openGroupSettings / openProjectSettings) with no prop
+// openDeleteProject / openGroupSettings) with no prop
 // threading — the sidebar "+", board "add", and context menus already do this.
 // Dialogs that mutate the SHARED board (task + project CRUD, group rename/delete)
 // additionally receive the ONE lifted useTasksData instance + selection +
@@ -18,6 +18,12 @@
 // Register a leaf dialog by mirroring an existing block: read its open-flag from
 // the store, gate the <Suspense> with shouldMount(key, open), and route
 // onOpenChange(false) → the store's close action.
+import {
+  closeSettings,
+  openProjectSettings,
+  openSettings,
+  useSettingsViewStore
+} from '@slayzone/settings'
 import {
   Suspense,
   lazy,
@@ -55,16 +61,8 @@ import type { Task } from '@slayzone/task-contracts'
 // AI-provider editors, integration + test panels) stays out of the initial
 // bundle and loads only on first open. Barrel exports named components → adapt
 // to a default export for React.lazy.
-const UserSettingsDialog = lazy(() =>
-  import('@slayzone/settings/client/UserSettingsDialog').then((m) => ({
-    default: m.UserSettingsDialog
-  }))
-)
 const CreateProjectDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.CreateProjectDialog }))
-)
-const ProjectSettingsDialog = lazy(() =>
-  import('@slayzone/projects/client').then((m) => ({ default: m.ProjectSettingsDialog }))
 )
 const RelocateProjectDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.ScopedRelocateProjectDialog }))
@@ -124,7 +122,6 @@ const TerminalStatusDialog = lazy(() =>
 )
 
 type CreateProjectProps = ComponentProps<typeof CreateProjectDialog>
-type ProjectSettingsProps = ComponentProps<typeof ProjectSettingsDialog>
 
 interface AppDialogsProps {
   // The ONE lifted board-data instance from HomeView (NOT a fresh useTasksData()).
@@ -180,14 +177,7 @@ export function AppDialogs({
   const createTaskDraft = useDialogStore((s) => s.createTaskDraft)
   const editingTask = useDialogStore((s) => s.editingTask)
   const deletingTask = useDialogStore((s) => s.deletingTask)
-  const settingsOpen = useDialogStore((s) => s.settingsOpen)
-  const settingsInitialTab = useDialogStore((s) => s.settingsInitialTab)
   const createProjectOpen = useDialogStore((s) => s.createProjectOpen)
-  const projectSettingsTarget = useDialogStore((s) => s.projectSettingsTarget)
-  const projectSettingsInitialTab = useDialogStore((s) => s.projectSettingsInitialTab)
-  const projectSettingsOnboardingProvider = useDialogStore(
-    (s) => s.projectSettingsOnboardingProvider
-  )
   const deletingProject = useDialogStore((s) => s.deletingProject)
   const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
@@ -285,28 +275,20 @@ export function AppDialogs({
     // Integrations tab with the provider's onboarding primed (degrades to the
     // plain Integrations tab if the fork sidecar lacks the backend).
     if (context.startMode === 'github' || context.startMode === 'linear') {
-      store.openProjectSettings(project, {
-        initialTab: 'integrations',
-        integrationOnboardingProvider: context.startMode
-      })
+      openProjectSettings(project.id, 'integrations', context.startMode)
     }
   }
   const handleProjectUpdated = (project: Project): void => {
     data.updateProject(project)
-    useDialogStore.getState().closeProjectSettings()
-  }
-  // In-place update without closing — patch the board + refresh the dialog's
-  // target object. Set the target directly (not openProjectSettings) so the
-  // active tab + onboarding context survive the update.
-  const handleProjectChanged = (project: Project): void => {
-    data.updateProject(project)
-    useDialogStore.setState({ projectSettingsTarget: project })
   }
   const handleProjectDeleted = (): void => {
     const store = useDialogStore.getState()
     const deleting = store.deletingProject
     if (!deleting) return
-    if (store.projectSettingsTarget?.id === deleting.id) store.closeProjectSettings()
+    const view = useSettingsViewStore.getState()
+    if (view.open && view.route.kind === 'project' && view.route.projectId === deleting.id) {
+      closeSettings()
+    }
     data.deleteProject(deleting.id, selectedProjectId, onSelectProject)
     store.closeDeleteProject()
   }
@@ -407,23 +389,6 @@ export function AppDialogs({
         </Suspense>
       )}
 
-      {/* App-level (user) Settings. Store-driven: onSettings (HomeView) →
-          openSettings() flips settingsOpen; closing routes back to
-          closeSettings(). initialTab is null in the store → undefined so the
-          dialog falls back to its own 'appearance' default. */}
-      {shouldMount('settings', settingsOpen) && (
-        <Suspense fallback={null}>
-          <UserSettingsDialog
-            open={settingsOpen}
-            onOpenChange={(open) => {
-              if (!open) useDialogStore.getState().closeSettings()
-            }}
-            initialTab={settingsInitialTab ?? undefined}
-            onTabChange={(tab) => useDialogStore.getState().openSettings({ initialTab: tab })}
-          />
-        </Suspense>
-      )}
-
       {/* Create Project. Sidebar's "+" → openCreateProject(). onCreated appends
           to the board + selects the new project; an integration start mode also
           deep-links into project settings. */}
@@ -435,34 +400,6 @@ export function AppDialogs({
               if (!open) useDialogStore.getState().closeCreateProject()
             }}
             onCreated={handleProjectCreated}
-          />
-        </Suspense>
-      )}
-
-      {/* Project Settings. Sidebar context-menu / onProjectSettings →
-          openProjectSettings(project[, {initialTab}]). Templates tab is omitted
-          (renderTemplatesTab unset) — the fork has no template editor yet, so the
-          tab simply doesn't appear. Tabs that hit fork-absent backends degrade
-          gracefully (integration-lock check is try/caught inside the dialog). */}
-      {shouldMount('projectSettings', !!projectSettingsTarget) && (
-        <Suspense fallback={null}>
-          <ProjectSettingsDialog
-            project={projectSettingsTarget}
-            open={!!projectSettingsTarget}
-            onOpenChange={(open) => {
-              if (!open) useDialogStore.getState().closeProjectSettings()
-            }}
-            initialTab={
-              (projectSettingsInitialTab ?? undefined) as ProjectSettingsProps['initialTab']
-            }
-            integrationOnboardingProvider={
-              projectSettingsOnboardingProvider as ProjectSettingsProps['integrationOnboardingProvider']
-            }
-            onIntegrationOnboardingHandled={() =>
-              useDialogStore.setState({ projectSettingsOnboardingProvider: null })
-            }
-            onUpdated={handleProjectUpdated}
-            onChanged={handleProjectChanged}
           />
         </Suspense>
       )}
@@ -551,7 +488,7 @@ export function AppDialogs({
             }}
             onToggleGlobalAgentPanel={() => setAgentPanel({ isOpen: !agentPanel.isOpen })}
             onOpenChangelog={() => useDialogStore.getState().openChangelog()}
-            onOpenSettings={() => useDialogStore.getState().openSettings()}
+            onOpenSettings={() => openSettings()}
           />
         </Suspense>
       )}

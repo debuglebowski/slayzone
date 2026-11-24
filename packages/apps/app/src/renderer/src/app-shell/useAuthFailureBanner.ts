@@ -12,18 +12,18 @@ export interface AuthFailureBannerApi {
 }
 
 // Integration auth-expiry banner: tracks failed connections, filters to the
-// selected project, and dismiss/reconnect actions. Refetches when the project
-// settings dialog (where a reconnect happens) closes.
+// selected project, and dismiss/reconnect actions. Refetches when the Settings
+// view (where a reconnect happens, on the project's Integrations tab) closes.
 export function useAuthFailureBanner(
-  editingProject: Project | null,
+  settingsOpen: boolean,
   selectedProjectId: string,
   projects: Project[],
   openProjectSettings: (project: Project, options?: { initialTab?: ProjectSettingsTab }) => void
 ): AuthFailureBannerApi {
   const { failed: authFailedConnections, refetch: refetchAuthFailures } = useAuthFailedConnections()
   useEffect(() => {
-    if (!editingProject) refetchAuthFailures()
-  }, [editingProject, refetchAuthFailures])
+    if (!settingsOpen) refetchAuthFailures()
+  }, [settingsOpen, refetchAuthFailures])
   const [dismissedAuthFailureIds, setDismissedAuthFailureIds] = useState<Set<string>>(new Set())
   const visibleAuthFailures = useMemo(
     () =>

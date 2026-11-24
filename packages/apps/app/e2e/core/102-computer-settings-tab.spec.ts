@@ -23,11 +23,10 @@ test.describe('Computer settings tab', () => {
   })
 
   const openComputersTab = async (mainWindow: import('@playwright/test').Page) => {
-    // Target the Settings dialog EXPLICITLY — the same selector `clickSettings`
-    // waits on. `getByRole('dialog').last()` is not reliably the settings surface
-    // once this file opens a second dialog (the restart confirm below).
-    const dialog = mainWindow.locator('[role="dialog"][aria-label="Settings"]').first()
-    const connections = dialog.locator('aside button').filter({ hasText: 'Connections' }).first()
+    // Target the Settings view EXPLICITLY — the same element `clickSettings` waits
+    // on — not "the last dialog", which is the restart confirm once that opens.
+    const dialog = mainWindow.getByTestId('settings-view').first()
+    const connections = dialog.getByTestId('settings-nav-hubs')
     // Open AND navigate as one retried unit. A preceding test ends by pressing
     // Escape, so this can arrive while the dialog is mid-close: a visibility
     // snapshot then reads "open", the reopen is skipped, and the click resolves
@@ -79,6 +78,27 @@ test.describe('Computer settings tab', () => {
     await expect(group.getByTestId('computer-disable')).toHaveCount(0)
 
     await mainWindow.keyboard.press('Escape')
+  })
+
+  test("the computer's own Settings page offers the same actions as its row", async ({
+    mainWindow
+  }) => {
+    await clickSettings(mainWindow)
+    const view = mainWindow.getByTestId('settings-view').first()
+    await expect(view).toBeVisible({ timeout: 10_000 })
+    // Hubs nav: each hub, then its computers. The local hub's one computer.
+    await view.getByTestId('settings-nav-computer').first().click()
+    const page = view.getByTestId('settings-computer-page')
+    await expect(page).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('computer-edit-roots')).toBeVisible()
+    await expect(page.getByTestId('computer-local-restart')).toBeVisible()
+    await expect(page.getByTestId('computer-delete')).toHaveCount(0)
+    await expect(page.getByTestId('computer-disable')).toHaveCount(0)
+    await page.getByTestId('computer-tab-backups').click()
+    await expect(page.getByLabel('Chat backup computer')).toHaveCount(0)
+
+    await mainWindow.keyboard.press('Escape')
+    await expect(view).toBeHidden({ timeout: 5_000 })
   })
 
   /**

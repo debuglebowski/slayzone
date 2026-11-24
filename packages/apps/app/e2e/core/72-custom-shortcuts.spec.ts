@@ -304,7 +304,7 @@ test.describe
       await mainWindow.keyboard.press('Meta+,')
       await mainWindow.waitForTimeout(500)
       const settingsVisible = await mainWindow
-        .getByRole('dialog')
+        .getByTestId('settings-view')
         .isVisible()
         .catch(() => false)
 

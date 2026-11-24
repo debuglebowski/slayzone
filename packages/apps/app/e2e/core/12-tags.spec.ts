@@ -8,7 +8,7 @@ test.describe('Tag management', () => {
   const tagB = `e2e-tag-2-${Date.now().toString().slice(-6)}`
 
   const projectSettingsDialog = (mainWindow: import('@playwright/test').Page) =>
-    mainWindow.getByRole('dialog').filter({ hasText: 'Project Settings' }).last()
+    mainWindow.getByTestId('settings-project-page').first()
 
   const openTagsSection = async (mainWindow: import('@playwright/test').Page) => {
     await mainWindow.evaluate((id) => {

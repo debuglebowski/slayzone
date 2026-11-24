@@ -101,8 +101,8 @@ test.describe('Project execution context settings', () => {
     await mainWindow.locator('#exec-shell').fill('/bin/zsh')
 
     await mainWindow.getByRole('button', { name: 'Save' }).click()
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).not.toBeVisible({
-      timeout: 3_000
+    await expect(mainWindow.getByText('Saved', { exact: true }).first()).toBeVisible({
+      timeout: 5_000
     })
 
     // Verify DB
@@ -162,8 +162,8 @@ test.describe('Project execution context settings', () => {
     await mainWindow.locator('#exec-workdir-ssh').fill('/home/user/project')
 
     await mainWindow.getByRole('button', { name: 'Save' }).click()
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).not.toBeVisible({
-      timeout: 3_000
+    await expect(mainWindow.getByText('Saved', { exact: true }).first()).toBeVisible({
+      timeout: 5_000
     })
 
     const projects = await seed(mainWindow).getProjects()
@@ -185,8 +185,8 @@ test.describe('Project execution context settings', () => {
     await selectExecutionContext(mainWindow, 'This machine')
 
     await mainWindow.getByRole('button', { name: 'Save' }).click()
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).not.toBeVisible({
-      timeout: 3_000
+    await expect(mainWindow.getByText('Saved', { exact: true }).first()).toBeVisible({
+      timeout: 5_000
     })
 
     const projects = await seed(mainWindow).getProjects()

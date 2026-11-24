@@ -15,9 +15,9 @@ export const TaskDetailDataLoader = lazyWithPreload(() =>
 export const FileEditorView: PreloadableLazy<typeof FileEditorViewComponent> = lazyWithPreload(() =>
   import('@slayzone/file-editor/client/FileEditorView').then((m) => ({ default: m.FileEditorView }))
 )
-export const UserSettingsDialog = lazyWithPreload(() =>
-  import('@slayzone/settings/client/UserSettingsDialog').then((m) => ({
-    default: m.UserSettingsDialog
+export const SettingsView = lazyWithPreload(() =>
+  import('@slayzone/settings/client/SettingsView').then((m) => ({
+    default: m.SettingsView
   }))
 )
 export const TutorialAnimationModal = lazyWithPreload(() =>
@@ -63,9 +63,6 @@ export const TemplatesSettingsTab = lazyWithPreload(() =>
 )
 export const CreateProjectDialog = lazyWithPreload(() =>
   import('@slayzone/projects').then((m) => ({ default: m.CreateProjectDialog }))
-)
-export const ProjectSettingsDialog = lazyWithPreload(() =>
-  import('@slayzone/projects').then((m) => ({ default: m.ProjectSettingsDialog }))
 )
 export const RelocateProjectDialog = lazyWithPreload(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.ScopedRelocateProjectDialog }))

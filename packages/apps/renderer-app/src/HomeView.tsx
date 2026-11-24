@@ -18,7 +18,22 @@
 // the Electron app's SecondaryTaskWindow, which omits the header actions). So
 // keeping the toggles + panels confined to HomeView IS the gate; never wire
 // them into any task-detail / secondary surface.
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
+import {
+  installSettingsEventBridge,
+  openProjectSettings,
+  openSettings,
+  useSettingsViewStore
+} from '@slayzone/settings'
 import {
   SidebarProvider,
   useGuardedHotkeys,
@@ -103,6 +118,10 @@ const testWindow = window as unknown as Record<string, unknown>
 testWindow.__slayzone_tabStore ??= useTabStore
 testWindow.__slayzone_dialogStore ??= useDialogStore
 
+const SettingsView = lazy(() =>
+  import('@slayzone/settings/client/SettingsView').then((m) => ({ default: m.SettingsView }))
+)
+
 export function HomeView({
   onboarding
 }: {
@@ -110,6 +129,8 @@ export function HomeView({
   onboarding: boolean
 }): React.JSX.Element {
   const rawData = useTasksData()
+  const settingsViewOpen = useSettingsViewStore((s) => s.open)
+  useEffect(() => installSettingsEventBridge({ projects: true }), [])
   const trpcClient = useTRPCClient()
   // Convex backend configured for this host — gates the leaderboard + feedback entry points.
   const convexConfigured = useLeaderboardAuth().configured
@@ -701,7 +722,7 @@ export function HomeView({
 
   return (
     <FaultedTasksProvider>
-      <SidebarProvider defaultOpen className="h-svh min-h-0 bg-background text-foreground">
+      <SidebarProvider defaultOpen className="relative h-svh min-h-0 bg-background text-foreground">
         <AppSidebar
           projects={projects}
           projectGroups={data.projectGroups}
@@ -714,8 +735,8 @@ export function HomeView({
           // registered in AppDialogs; the sidebar's create/delete/group-settings
           // buttons flip the store directly (ProjectsRailView/TreeView), so only
           // onProjectSettings is routed through here.
-          onProjectSettings={(project) => useDialogStore.getState().openProjectSettings(project)}
-          onSettings={() => useDialogStore.getState().openSettings()}
+          onProjectSettings={(project) => openProjectSettings(project.id)}
+          onSettings={() => openSettings()}
           onUsageAnalytics={() => useTabStore.getState().setActiveView('usage-analytics')}
           onLeaderboard={() => useTabStore.getState().setActiveView('leaderboard')}
           onTaskClick={openTask}
@@ -968,6 +989,12 @@ export function HomeView({
           startTour={startTour}
           markSetupGuideCompleted={markSetupGuideCompleted}
         />
+        {/* Full-window Settings: covers sidebar + tab bar, panes stay mounted below. */}
+        {settingsViewOpen && (
+          <Suspense fallback={null}>
+            <SettingsView projects={projects} />
+          </Suspense>
+        )}
       </SidebarProvider>
     </FaultedTasksProvider>
   )

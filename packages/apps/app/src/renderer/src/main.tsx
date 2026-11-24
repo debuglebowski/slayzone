@@ -54,7 +54,7 @@ registerTaskPanels(taskPanels)
 // registered before any render.
 registerTaskSessionsSource(taskSessionsSource)
 // Settings' tag editor, integrations' tab and worktrees' repo detection
-// ProjectSettingsDialog embeds — registered before any render.
+// ProjectSettingsPanel embeds — registered before any render.
 registerProjectSettingsTabs({
   TagsSettingsTab,
   ...integrationsProjectSettingsTabs,

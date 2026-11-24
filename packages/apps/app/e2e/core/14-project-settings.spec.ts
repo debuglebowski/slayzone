@@ -244,7 +244,7 @@ test.describe('Project settings & context menu', () => {
     entry: 'github_projects' | 'github_issues' = 'github_projects',
     ensureRepoCard = true
   ) => {
-    const settingsHeading = mainWindow.getByRole('heading', { name: 'Project Settings' })
+    const settingsHeading = mainWindow.getByTestId('settings-project-page')
     if (await settingsHeading.isVisible().catch(() => false)) {
       // Dismiss dialog — may need multiple attempts because Escape can be
       // swallowed by focused sub-elements (dropdowns, popovers, etc.)
@@ -272,7 +272,7 @@ test.describe('Project settings & context menu', () => {
         : mainWindow.getByTestId('project-integration-provider-github-issues')
     await clickSettingsTab(
       mainWindow,
-      mainWindow.getByTestId('settings-tab-integrations'),
+      mainWindow.getByTestId('project-settings-tab-integrations'),
       integrationsReady
     )
     await integrationsReady.click()
@@ -321,7 +321,7 @@ test.describe('Project settings & context menu', () => {
     await blob.click({ button: 'right' })
     await mainWindow.getByRole('menuitem', { name: 'Settings' }).click()
 
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).toBeVisible({
+    await expect(mainWindow.getByTestId('settings-project-page')).toBeVisible({
       timeout: 5_000
     })
     // General tab is default — verify name input exists
@@ -330,7 +330,7 @@ test.describe('Project settings & context menu', () => {
     const githubProjectsProvider = mainWindow.getByTestId('project-integration-provider-github')
     await clickSettingsTab(
       mainWindow,
-      mainWindow.getByTestId('settings-tab-integrations'),
+      mainWindow.getByTestId('project-settings-tab-integrations'),
       githubProjectsProvider
     )
     if (await githubProjectsProvider.isEnabled().catch(() => false)) {
@@ -342,7 +342,7 @@ test.describe('Project settings & context menu', () => {
     // Switch back to General for the next test (edit name)
     await clickSettingsTab(
       mainWindow,
-      mainWindow.getByTestId('settings-tab-general'),
+      mainWindow.getByTestId('project-settings-tab-general'),
       mainWindow.locator('#edit-name')
     )
   })
@@ -458,7 +458,7 @@ test.describe('Project settings & context menu', () => {
     )
     await setGithubRepoIssues(mainWindow, GITHUB_REPOSITORY_ISSUES_REMOTE_AHEAD)
 
-    /** Wait for button to be enabled, click it, then wait for result text in dialog. */
+    /** Wait for button to be enabled, click it, then wait for result text on the project page. */
     const clickSyncButton = async (testId: string, resultText?: string) => {
       await mainWindow.waitForFunction(
         (tid) => {
@@ -472,8 +472,8 @@ test.describe('Project settings & context menu', () => {
       if (!resultText) return
       await mainWindow.waitForFunction(
         (text) => {
-          const dialog = document.querySelector('[role="dialog"]')
-          return dialog?.textContent?.includes(text) ?? false
+          const page = document.querySelector('[data-testid="settings-project-page"]')
+          return page?.textContent?.includes(text) ?? false
         },
         resultText,
         { timeout: 5_000 }
@@ -557,7 +557,7 @@ test.describe('Project settings & context menu', () => {
     })
     await s.refreshData()
 
-    const settingsHeading = mainWindow.getByRole('heading', { name: 'Project Settings' })
+    const settingsHeading = mainWindow.getByTestId('settings-project-page')
     const isOpen = await settingsHeading.isVisible().catch(() => false)
     if (!isOpen) {
       const blob = projectBlob(mainWindow, projectAbbrev)
@@ -568,7 +568,7 @@ test.describe('Project settings & context menu', () => {
 
     await clickSettingsTab(
       mainWindow,
-      mainWindow.getByTestId('settings-tab-tasks/statuses'),
+      mainWindow.getByTestId('project-settings-tab-tasks/statuses'),
       mainWindow.getByTestId('project-column-review')
     )
     await mainWindow.getByTestId('delete-project-column-review').click()
@@ -598,11 +598,16 @@ test.describe('Project settings & context menu', () => {
 
   test('edit project name in settings dialog', async ({ mainWindow }) => {
     const nameInput = mainWindow.locator('#edit-name')
+    const projectPage = mainWindow.getByTestId('settings-project-page')
+    // Still on this project's Settings page from the previous test: its General tab.
+    if (await projectPage.isVisible().catch(() => false)) {
+      await projectPage.getByTestId('project-settings-tab-general').click()
+    }
     if (!(await nameInput.isVisible().catch(() => false))) {
       const blob = projectBlob(mainWindow, projectAbbrev)
       await blob.click({ button: 'right' })
       await mainWindow.getByRole('menuitem', { name: 'Settings' }).click()
-      await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).toBeVisible({
+      await expect(mainWindow.getByTestId('settings-project-page')).toBeVisible({
         timeout: 5_000
       })
       await clickSettingsTab(
@@ -617,10 +622,11 @@ test.describe('Project settings & context menu', () => {
 
     await mainWindow.getByRole('button', { name: 'Save' }).click()
 
-    // Dialog should close
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).not.toBeVisible({
-      timeout: 3_000
+    // Saving keeps Settings open; go back to the app to see the sidebar.
+    await expect(mainWindow.getByText('Saved', { exact: true }).first()).toBeVisible({
+      timeout: 5_000
     })
+    await mainWindow.getByTestId('settings-back').click()
 
     // Sidebar should show new abbreviation
     projectAbbrev = 'XY'

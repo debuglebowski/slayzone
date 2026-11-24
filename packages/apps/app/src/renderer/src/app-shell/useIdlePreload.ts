@@ -19,13 +19,12 @@ import {
   EditTaskDialog,
   GroupSettingsDialog,
   OnboardingDialog,
-  ProjectSettingsDialog,
   SearchDialog,
   TaskDetailDataLoader,
   TemplatesSettingsTab,
   TerminalStatusDialog,
   TutorialAnimationModal,
-  UserSettingsDialog
+  SettingsView
 } from './lazy'
 
 // Warm lazy chunks while the renderer is idle, so the first open of a modal, page
@@ -43,7 +42,7 @@ const PRELOADS: Array<() => Promise<unknown>> = [
   CreateTaskDialog.preload,
   EditTaskDialog.preload,
   DeleteTaskDialog.preload,
-  UserSettingsDialog.preload,
+  SettingsView.preload,
   TemplatesSettingsTab.preload,
   // material-file-icons (~500KB) — first FileIcon render lands warm.
   () => import('@slayzone/icons').then((m) => m.loadFileIcons()),
@@ -55,7 +54,6 @@ const PRELOADS: Array<() => Promise<unknown>> = [
   DescriptionDialog.preload,
   // Remaining modals.
   CreateProjectDialog.preload,
-  ProjectSettingsDialog.preload,
   DeleteProjectDialog.preload,
   GroupSettingsDialog.preload,
   TerminalStatusDialog.preload,

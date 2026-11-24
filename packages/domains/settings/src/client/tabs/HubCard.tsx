@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { electronBootstrap, useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from '../trpc'
+import { electronBootstrap } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 // Leaf subpath, deliberately not `@slayzone/platform/slayzone-config`: that one
 // imports node:fs/node:path, which rollup externalizes out of the renderer bundle
 // and then fails to resolve. Same constant, browser-safe module.
@@ -14,25 +14,15 @@ import {
   outdatedComputerNote
 } from '@slayzone/computers/labels'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
-import {
-  ArrowLeftRight,
-  FolderCog,
-  Loader2,
-  Plus,
-  Power,
-  PowerOff,
-  RefreshCw,
-  RotateCw,
-  Trash2,
-  X
-} from 'lucide-react'
+import { Loader2, Plus, RefreshCw, RotateCw, X } from 'lucide-react'
 import { useComputerActions } from './ComputerActions'
 import { MachineLabel } from './MachineLabel'
 import { ComputerName } from './ComputerName'
 import { ComputerFaults } from './ComputerFaults'
 import { ComputerUnattachedSessions } from './ComputerUnattachedSessions'
-import { ComputerTakeovers, computerLabel } from './ComputerTakeovers'
+import { ComputerTakeovers } from './ComputerTakeovers'
 import { HubUsersSection } from './HubUsersSection'
+import { ComputerActionButtons, LOCAL_COMPUTER_STATUS_KEY, useHubComputers } from './hub-computers'
 
 /**
  * A hub, as a card that owns its computers.
@@ -324,11 +314,6 @@ function Rail({ last = false }: { last?: boolean }) {
   )
 }
 
-/** Main-process supervisor state of the app's own computer — not hub-scoped. */
-const LOCAL_COMPUTER_STATUS_KEY = ['local-computer-status'] as const
-/** Where the app's own computer stands on each remote hub — main-process state. */
-const LOCAL_COMPUTER_HUBS_KEY = ['local-computer-hubs'] as const
-
 export function HubCard({
   hubId,
   hubLabel,
@@ -342,20 +327,7 @@ export function HubCard({
 }: HubCardProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  // The vanilla client, not the query proxy: the roots dialog lives OUTSIDE this
-  // hub's scope (one instance for all hubs), so it is handed thunks bound to this
-  // hub's client rather than resolving one itself. Same reason delete is a thunk.
-  const trpcClient = useTRPCClient()
-  const {
-    showMintedToken,
-    requestDelete,
-    requestReplace,
-    requestEditRoots,
-    requestRestart,
-    requestStart,
-    restarting,
-    computerRevision
-  } = useComputerActions()
+  const { showMintedToken, requestStart, computerRevision, restarting } = useComputerActions()
 
   const [adding, setAdding] = useState(false)
   const [label, setLabel] = useState('')
@@ -363,39 +335,9 @@ export function HubCard({
   // naming someone else is an admin's. Always blank on a hub without login.
   const [forUser, setForUser] = useState('')
 
-  // A hub always accepts computers, so the list is always available (no mode to
-  // enable). `list` merges live connection status when a computer is connected;
-  // it's a plain DB read otherwise.
-  const computersQuery = useQuery({ ...trpc.computers.list.queryOptions(), refetchInterval: 5000 })
+  const hubComputers = useHubComputers({ hubId, isLocalHub, ownComputerId: ownComputerIdProp })
+  const { computersQuery, computers, ownOnThisHub, isOwnComputer, askReplace } = hubComputers
 
-  // Connection changes push immediately; polling also refreshes independent upgrade reports. The hub already knows the moment a computer connects, drops
-  // or is reaped by the heartbeat watchdog — before this the list refreshed only
-  // when a human clicked refresh, so an offline computer looked connected
-  // indefinitely. Invalidate rather than patch the cache: the row also carries
-  // machine and ownership fields this event knows nothing about.
-  useSubscription(
-    trpc.computers.onStatusChange.subscriptionOptions(undefined, {
-      onData: () => {
-        void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
-        void queryClient.invalidateQueries({ queryKey: LOCAL_COMPUTER_STATUS_KEY })
-      }
-    })
-  )
-  const computers = computersQuery.data ?? []
-
-  // Where THIS app's own computer stands on this (remote) hub — it joins every hub the
-  // client lists. Main-process state, like the local computer's status below.
-  const ownHubQuery = useQuery({
-    queryKey: [...LOCAL_COMPUTER_HUBS_KEY],
-    queryFn: () => electronBootstrap.getLocalComputerHubs(),
-    enabled: !isLocalHub,
-    refetchInterval: 5000
-  })
-  const ownOnThisHub = isLocalHub ? null : (ownHubQuery.data?.[hubId] ?? null)
-  const ownComputerId = ownComputerIdProp ?? ownOnThisHub?.computerId ?? null
-
-  const deleteMutation = useMutation(trpc.computers.delete.mutationOptions())
-  const replaceMutation = useMutation(trpc.computers.replace.mutationOptions())
   // Offers to replace an offline computer with the one holding its chats (the same
   // machine enrolled again). Polled like the list: a reconnect is what produces them.
   // A hub older than this offers none (the query fails quietly).
@@ -406,44 +348,6 @@ export function HubCard({
   })
   const takeovers = takeoversQuery.data ?? []
 
-  /**
-   * Replace `former` with a successor the user picks among this hub's other computers
-   * (`preselect`: the one a takeover offer names). Hub-bound like delete.
-   */
-  const askReplace = (former: { id: string; name: string }, preselect?: string): void => {
-    requestReplace({
-      former: { id: former.id, label: computerLabel(former, computers) },
-      options: computers
-        .filter((c) => c.id !== former.id)
-        .map((c) => ({ id: c.id, label: computerLabel(c, computers), connected: c.connected })),
-      preselect,
-      replace: async (successorId) => {
-        await replaceMutation.mutateAsync({ computerId: former.id, successorId })
-        void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
-        void queryClient.invalidateQueries(trpc.computers.takeovers.queryFilter())
-      }
-    })
-  }
-  const setDisabledMutation = useMutation(trpc.computers.setDisabled.mutationOptions())
-
-  /** This app's own computer on this hub: never deleted, and on the local hub never
-   *  disabled either (nothing on this machine could run without it). */
-  const isOwnComputer = (computer: { id: string; name: string }): boolean =>
-    computer.id === ownComputerId || (isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME)
-
-  const toggleDisabled = async (computer: {
-    id: string
-    name: string
-    disabledAt: number | null
-  }): Promise<void> => {
-    const disable = computer.disabledAt == null
-    await setDisabledMutation.mutateAsync({ computerId: computer.id, disabled: disable }).then(
-      () => toast.success(`${disable ? 'Disabled' : 'Enabled'} ${computer.name}`),
-      // The hub says why — most often terminals or agents still running there.
-      (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
-    )
-    void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
-  }
   const mintMutation = useMutation(trpc.computers.mintJoinToken.mutationOptions())
 
   // Refetch after the local computer is restarted/started. The computer re-dials
@@ -674,120 +578,7 @@ export function HubCard({
                     />
                   </td>
                   <td className={ROW_ACTIONS}>
-                    <div className="flex items-center justify-end">
-                      {/* Which folders this computer may touch. Offered for EVERY
-                        computer, local included: the app's filesystem work now runs
-                        on the computer that owns the workspace, so a project outside
-                        these roots is one the UI genuinely cannot open — and the
-                        local computer's default jail is only $HOME. */}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Folders this computer may access"
-                        onClick={() =>
-                          requestEditRoots({
-                            id: computer.id,
-                            name: computer.name,
-                            load: () =>
-                              trpcClient.workspace.listRoots.query({ computerId: computer.id }),
-                            save: (roots) =>
-                              trpcClient.workspace.setAllowedRoots.mutate({
-                                computerId: computer.id,
-                                roots
-                              })
-                          })
-                        }
-                        data-testid="computer-edit-roots"
-                      >
-                        <FolderCog className="size-3.5" />
-                      </Button>
-                      {/* The app's OWN supervised child — the one computer it can cycle
-                        as a process. Restarting kills every agent pty on this
-                        machine, so the provider gates it behind a confirm. */}
-                      {isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          disabled={restarting}
-                          title="Restart local computer (stops running agents + terminals; reconnects automatically)"
-                          onClick={requestRestart}
-                          data-testid="computer-local-restart"
-                        >
-                          <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
-                        </Button>
-                      )}
-                      {/* Disable: kept and connected, but given no new work. Every
-                        computer except the app's own on the local hub, without which
-                        nothing on this machine could run. The hub refuses while
-                        terminals or agents run there, and says so. */}
-                      {!(isLocalHub && isOwnComputer(computer)) && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          disabled={setDisabledMutation.isPending}
-                          title={
-                            computer.disabledAt != null
-                              ? 'Enable — let this computer take work again'
-                              : 'Disable — keep this computer, but send it no new work'
-                          }
-                          aria-pressed={computer.disabledAt != null}
-                          onClick={() => void toggleDisabled(computer)}
-                          data-testid={
-                            computer.disabledAt != null ? 'computer-enable' : 'computer-disable'
-                          }
-                        >
-                          {computer.disabledAt != null ? (
-                            <Power className="size-3.5" />
-                          ) : (
-                            <PowerOff className="size-3.5" />
-                          )}
-                        </Button>
-                      )}
-                      {/* Replace: an OFFLINE computer whose machine enrolled again under a
-                        new id (its credentials lost) — its work moves to the new row. Not
-                        a connected one (it is still itself), not the app's own. */}
-                      {!computer.connected &&
-                        !isOwnComputer(computer) &&
-                        computers.some((c) => c.id !== computer.id) && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title="Replace with… — this machine was enrolled again under a new id"
-                            onClick={() => askReplace(computer)}
-                            data-testid="computer-replace"
-                          >
-                            <ArrowLeftRight className="size-3.5" />
-                          </Button>
-                        )}
-                      {/* The app's own computer is never deleted, on any hub: the app
-                        joins every hub it lists, so it would only enroll it again —
-                        and on the local hub nothing on this machine could run until
-                        it did. Disable it instead. Every OTHER computer can go. */}
-                      {!isOwnComputer(computer) && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title="Delete this computer from the hub"
-                          onClick={() =>
-                            requestDelete({
-                              id: computer.id,
-                              name: computer.name,
-                              // Closed over this hub's mutation + QueryClient, so a
-                              // delete cannot be routed to the wrong hub.
-                              remove: async () => {
-                                await deleteMutation.mutateAsync({ computerId: computer.id })
-                                void queryClient.invalidateQueries(
-                                  trpc.computers.list.queryFilter()
-                                )
-                              }
-                            })
-                          }
-                          data-testid="computer-delete"
-                        >
-                          <Trash2 className="text-destructive size-3.5" />
-                        </Button>
-                      )}
-                    </div>
+                    <ComputerActionButtons computer={computer} hub={hubComputers} />
                   </td>
                 </tr>
               ))}

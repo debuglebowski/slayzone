@@ -8,8 +8,8 @@ const KEY = 'default_agent_id'
 
 /**
  * The hub's default agent provider (`default_agent_id`, a `hub` key read by task
- * create). Bound to the ambient hub, so a section inside `<HubWideSection>` reads and
- * writes the picked hub's.
+ * create). Bound to the ambient hub, so on a hub page it reads and
+ * writes that hub's.
  *
  * A new stored value re-seeds the pick (which a local pick overrides in between). A
  * pick broadcasts `sz:settings-changed` so every other reader in this window refetches.

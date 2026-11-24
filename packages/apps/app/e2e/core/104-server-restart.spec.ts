@@ -1,4 +1,4 @@
-import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
+import { test, expect, clickSettings, resetApp, settingsView } from '../fixtures/electron'
 
 type SidecarStatus = {
   health: 'starting' | 'ready' | 'restarting' | 'failed'
@@ -31,12 +31,12 @@ test.describe('Server restart button', () => {
     const before = await status()
     expect(before.pid).toBeTruthy()
 
-    const dialog = mainWindow.getByRole('dialog').last()
+    const dialog = settingsView(mainWindow)
     if (!(await dialog.isVisible().catch(() => false))) {
       await clickSettings(mainWindow)
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
-    await dialog.locator('aside button').filter({ hasText: 'Connections' }).first().click()
+    await dialog.getByTestId('settings-nav-hubs').click()
 
     const button = dialog.getByTestId('hub-local-restart')
     await expect(button).toBeEnabled({ timeout: 5_000 })

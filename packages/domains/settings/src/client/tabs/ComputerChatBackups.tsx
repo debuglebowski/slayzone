@@ -89,7 +89,14 @@ export function ComputerChatBackups() {
     </Card>
   )
 }
-function ComputerBackupList({ computerId, usable }: { computerId: string; usable: boolean }) {
+/** One computer's chat backups (the Settings view's computer page uses it directly). */
+export function ComputerBackupList({
+  computerId,
+  usable
+}: {
+  computerId: string
+  usable: boolean
+}) {
   const trpc = useTRPC(),
     client = useQueryClient(),
     target = { computerId }

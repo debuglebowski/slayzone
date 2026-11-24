@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import type { DetectedRepo, Project } from '@slayzone/projects-contracts'
 
 /**
- * Tabs (and the data hooks behind them) ProjectSettingsDialog embeds from features
+ * Tabs (and the data hooks behind them) ProjectSettingsPanel embeds from features
  * built ON TOP of projects (settings' tag editor, integrations). Projects owns this
  * contract; the composing app injects the real implementations once via
  * registerProjectSettingsTabs() — so projects never imports those features. Each

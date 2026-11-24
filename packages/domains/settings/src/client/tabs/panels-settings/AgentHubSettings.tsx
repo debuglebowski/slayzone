@@ -47,9 +47,9 @@ const AGENT_STARTUP_OPTIONS: Array<{
 ]
 
 /**
- * The Agent panel's hub-wide rows: read by the hub's own server code (task create,
+ * A hub's agent defaults: read by the hub's own server code (task create,
  * the warm pool and boot restore, the idle-close sweep — `scope.ts` `hub` keys), so
- * they sit inside `<HubWideSection>` and edit the picked hub. Owns its own reads (the
+ * they render on a hub page and edit that hub. Owns its own reads (the
  * terminal panel's `usePanelSettings` is the default hub's, for this client's UI).
  */
 export function AgentHubSettings() {

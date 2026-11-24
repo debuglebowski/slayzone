@@ -1,6 +1,6 @@
-// UserSettingsDialog / CliInstallDialog are NOT re-exported here: this barrel is
-// on the startup path (theme), and the dialogs (all settings tabs) load
-// lazily via their own entries — `@slayzone/settings/client/UserSettingsDialog`,
+// SettingsView / CliInstallDialog are NOT re-exported here: this barrel is on the
+// startup path (theme), and the view (all settings pages) loads lazily via its own
+// entries — `@slayzone/settings/client/SettingsView`,
 // `@slayzone/settings/client/CliInstallDialog`.
 export { ThemeProvider, useTheme } from './ThemeContext'
 export { applyTheme } from './apply-theme'
@@ -8,6 +8,14 @@ export { readThemeCache, resolveThemeCache } from './theme-cache'
 export { AppearanceProvider } from './AppearanceContext'
 export { requestSettingsReopen } from './settings-reopen'
 export { useSettingsReopenTab } from './useSettingsReopenTab'
+export {
+  openSettings,
+  openProjectSettings,
+  closeSettings,
+  installSettingsEventBridge,
+  useSettingsViewStore
+} from './settings-view-store'
+export type { SettingsRoute } from './settings-route'
 export { HubIssueBanners } from './HubIssueBanners'
 export { useAppearance, type AppearanceSettings } from '@slayzone/ui'
 export type { CreateTaskDraft } from '@slayzone/task-contracts'

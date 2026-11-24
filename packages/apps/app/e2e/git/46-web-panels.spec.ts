@@ -25,7 +25,7 @@ test.describe('Web panels', () => {
   let rootDir = ''
 
   const settingsDialog = (page: import('@playwright/test').Page) =>
-    page.locator('[role="dialog"][aria-label="Settings"]').last()
+    page.getByTestId('settings-view').first()
 
   /** Find a panel card in settings by name. */
   const findCard = (dialog: import('@playwright/test').Locator, name: string) =>
@@ -46,7 +46,7 @@ test.describe('Web panels', () => {
       await expect(dialog).toBeVisible({ timeout: 3_000 })
     }
     // Navigate to panels tab; handle being in a sub-config by clicking back first
-    const panelsTab = dialog.getByTestId('settings-tab-panels')
+    const panelsTab = dialog.getByTestId('settings-nav-panels')
     await panelsTab.click()
     if (
       !(await dialog
@@ -205,7 +205,7 @@ test.describe('Web panels', () => {
       await saveButton.click()
       figmaPanelName = nextFigmaName
     }
-    await dialog.getByTestId('settings-tab-panels').click()
+    await dialog.getByTestId('settings-nav-panels').click()
     await expect(findCard(dialog, figmaPanelName)).toBeVisible({
       timeout: 3_000
     })
@@ -382,11 +382,9 @@ test.describe('Web panels', () => {
     await expect(card).toBeVisible({ timeout: 5_000 })
 
     await card.click()
-    // Label renamed from "Default mode" → "Default agent provider".
-    await expect(dialog.getByText('Default agent provider')).toBeVisible({
-      timeout: 5_000
-    })
-    await dialog.getByTestId('settings-tab-panels').click()
+    // The terminal's own rendering settings (the default agent moved to the hub page).
+    await expect(dialog.getByText('Font family')).toBeVisible({ timeout: 5_000 })
+    await dialog.getByTestId('settings-nav-panels').click()
     await expect(findCard(dialog, 'Agent')).toBeVisible({ timeout: 5_000 })
   })
 
@@ -400,7 +398,7 @@ test.describe('Web panels', () => {
     await expect(dialog.getByText('Show toast when detected')).toBeVisible({
       timeout: 5_000
     })
-    await dialog.getByTestId('settings-tab-panels').click()
+    await dialog.getByTestId('settings-nav-panels').click()
     await expect(findCard(dialog, 'Browser')).toBeVisible({ timeout: 5_000 })
   })
 

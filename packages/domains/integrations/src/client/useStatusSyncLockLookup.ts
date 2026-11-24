@@ -26,7 +26,7 @@ export async function fetchStatusSyncLock(
 }
 
 /**
- * The status-sync lock lookup ProjectSettingsDialog runs (projects'
+ * The status-sync lock lookup ProjectSettingsPanel runs (projects'
  * `ProjectSettingsTabs.useStatusSyncLockLookup`). Its identity follows the query
  * client and the hub's tRPC proxy, so the dialog re-checks when either changes.
  */

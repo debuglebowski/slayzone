@@ -10,8 +10,7 @@ import {
   parseTerminalOptionAsMeta,
   type TerminalOptionAsMeta
 } from '@slayzone/ui'
-import { HubWideSection } from '../../settings-hub'
-import { AgentHubSettings } from './AgentHubSettings'
+import { useSettingsViewStore } from '../../settings-view-store'
 import { CARD_CLASS } from './panels-settings.constants'
 import { PanelLayoutControls } from './PanelLayoutControls'
 import type { PanelSettingsState } from './usePanelSettings'
@@ -66,13 +65,21 @@ export function TerminalPanelSettings({ state }: { state: PanelSettingsState }) 
     terminalOptionAsMeta,
     setTerminalOptionAsMeta
   } = state
+  const navigate = useSettingsViewStore((st) => st.navigate)
   return (
     <>
       <div className={CARD_CLASS}>
         <Label className="text-base font-semibold">Agents</Label>
-        <HubWideSection>
-          <AgentHubSettings />
-        </HubWideSection>
+        <p className="text-sm text-muted-foreground">
+          The default agent, agent startup and idle close are set per hub.{' '}
+          <button
+            type="button"
+            className="text-foreground underline underline-offset-2"
+            onClick={() => navigate({ kind: 'hub', hubId: null, tab: 'agents' })}
+          >
+            Open hub settings
+          </button>
+        </p>
       </div>
       <div className={CARD_CLASS}>
         <Label className="text-base font-semibold">Terminal</Label>

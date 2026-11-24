@@ -12,7 +12,7 @@
     "./electron": "./src/electron/index.ts",
     "./theme": "./src/electron/theme-core.ts",
     "./client": "./src/client/index.ts",
-    "./client/UserSettingsDialog": "./src/client/UserSettingsDialog.tsx",
+    "./client/SettingsView": "./src/client/view/SettingsView.tsx",
     "./client/CliInstallDialog": "./src/client/CliInstallDialog.tsx",
     "./client/tabs/TagsSettingsTab": "./src/client/tabs/TagsSettingsTab.tsx"
   },

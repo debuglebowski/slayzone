@@ -5,7 +5,8 @@ import {
   goHome,
   clickProject,
   clickSettings,
-  resetApp
+  resetApp,
+  settingsView
 } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
@@ -54,7 +55,7 @@ test.describe('Home panel shortcut follows the Tests panel lab flag', () => {
   test('enabling the Tests panel makes Mod+U toggle it', async ({ mainWindow }) => {
     // The user path: Settings → Labs → Tests panel on → close Settings.
     await clickSettings(mainWindow)
-    const dialog = mainWindow.getByRole('dialog').last()
+    const dialog = settingsView(mainWindow)
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     await dialog.locator('aside button').filter({ hasText: 'Labs' }).first().click()
     const toggle = dialog.locator('#labs_tests_panel')

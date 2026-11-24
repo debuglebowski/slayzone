@@ -5,7 +5,8 @@ import {
   resetApp,
   clickSettings,
   openTaskById,
-  TEST_PROJECT_PATH
+  TEST_PROJECT_PATH,
+  settingsView
 } from '../fixtures/electron'
 
 // An already-open task picks up the Loop command lab flag as soon as it's turned
@@ -59,7 +60,7 @@ test.describe('Loop command lab flag reaches an open task', () => {
 
     // The user path, with the task still open behind Settings.
     await clickSettings(mainWindow)
-    const dialog = mainWindow.getByRole('dialog').last()
+    const dialog = settingsView(mainWindow)
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     await dialog.locator('aside button').filter({ hasText: 'Labs' }).first().click()
     const toggle = dialog.locator('#labs_loop_mode')

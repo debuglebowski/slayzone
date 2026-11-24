@@ -57,7 +57,16 @@ import {
   useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
+import {
+  AppearanceProvider,
+  HubIssueBanners,
+  closeSettings,
+  installSettingsEventBridge,
+  openProjectSettings as openProjectSettingsView,
+  openSettings,
+  useSettingsReopenTab,
+  useSettingsViewStore
+} from '@slayzone/settings'
 import { setTabWorktreePathResolver, useTabStore } from '@slayzone/tabs-state'
 import { peekTaskPath, useTaskPathChanges } from '@slayzone/task/client/useTaskPath'
 import { resolveIdRef } from '@slayzone/task-terminals'
@@ -124,6 +133,8 @@ import {
   LeaderboardPage,
   UsageAnalyticsPage,
   ContextManagerPage,
+  SettingsView,
+  TemplatesSettingsTab,
   useLazyMounted,
   AppHeaderActions,
   CompactFooter,
@@ -264,26 +275,41 @@ function App(): React.JSX.Element {
   const editingTask = useDialogStore((s) => s.editingTask)
   const deletingTask = useDialogStore((s) => s.deletingTask)
   const createProjectOpen = useDialogStore((s) => s.createProjectOpen)
-  const [editingProject, setEditingProject] = useState<Project | null>(null)
   // A file shared with the user on its own (T-100): opened outside its task.
   const [sharedArtifactId, setSharedArtifactId] = useState<string | null>(null)
-  const [projectSettingsInitialTab, setProjectSettingsInitialTab] =
-    useState<ProjectSettingsTab>('general')
   const [testGroupBy, setTestGroupBy] = useState<'none' | 'path' | 'label'>('none')
-  const [projectSettingsOnboardingProvider, setProjectSettingsOnboardingProvider] =
-    useState<ProjectIntegrationOnboardingProvider | null>(null)
   const deletingProject = useDialogStore((s) => s.deletingProject)
   const groupSettingsTarget = useDialogStore((s) => s.groupSettingsTarget)
   // A settings save that had to reload the window (e.g. adding a hub, #161) asks
   // to land back on its tab: Settings then starts open on it.
   const settingsReopenTab = useSettingsReopenTab()
-  const [settingsOpen, setSettingsOpen] = useState(settingsReopenTab !== null)
-  const [settingsRevision, setSettingsRevision] = useState(0)
+  const [initialSettingsReopen] = useState(settingsReopenTab)
+  useEffect(() => {
+    if (initialSettingsReopen !== null) openSettings(initialSettingsReopen)
+  }, [initialSettingsReopen])
+  // Bumped each time the Settings view closes: cached settings re-read.
+  const settingsRevision = useSettingsViewStore((s) => s.revision)
+  const settingsViewOpen = useSettingsViewStore((s) => s.open)
+
+  // Project settings open in the Settings view, on the project's page.
+  const openProjectSettings = useCallback(
+    (
+      project: Project,
+      options?: {
+        initialTab?: ProjectSettingsTab
+        integrationOnboardingProvider?: ProjectIntegrationOnboardingProvider | null
+      }
+    ): void => {
+      openProjectSettingsView(
+        project.id,
+        options?.initialTab ?? 'general',
+        options?.integrationOnboardingProvider ?? null
+      )
+    },
+    []
+  )
   const [colorTintsEnabled, setColorTintsEnabled] = useState(true)
   const [showContextManager, setShowContextManager] = useState(true)
-  const [settingsInitialTab, setSettingsInitialTab] = useState<string>(
-    settingsReopenTab ?? 'appearance'
-  )
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
   const [shouldMountOnboarding, setShouldMountOnboarding] = useState(onboardingOpen)
   const changelogOpen = useDialogStore((s) => s.changelogOpen)
@@ -935,12 +961,8 @@ function App(): React.JSX.Element {
     setGlobalAgentPanelState,
     agentStatusState,
     setAgentStatusState,
-    setSettingsInitialTab,
-    setSettingsOpen,
     projects,
-    setProjectSettingsInitialTab,
-    setProjectSettingsOnboardingProvider,
-    setEditingProject,
+    openProjectSettings,
     tasksMap
   })
 
@@ -1177,30 +1199,8 @@ function App(): React.JSX.Element {
     }
   }, [bulkContextMenuUpdate, archiveTasks, bulkDelete, undo])
 
-  // Project handlers
-  const openProjectSettings = useCallback(
-    (
-      project: Project,
-      options?: {
-        initialTab?: ProjectSettingsTab
-        integrationOnboardingProvider?: ProjectIntegrationOnboardingProvider | null
-      }
-    ): void => {
-      setProjectSettingsInitialTab(options?.initialTab ?? 'general')
-      setProjectSettingsOnboardingProvider(options?.integrationOnboardingProvider ?? null)
-      setEditingProject(project)
-    },
-    []
-  )
-
-  const closeProjectSettings = useCallback((): void => {
-    setEditingProject(null)
-    setProjectSettingsInitialTab('general')
-    setProjectSettingsOnboardingProvider(null)
-  }, [])
-
   const { visibleAuthFailures, reconnectAuthFailure, dismissAuthFailures } = useAuthFailureBanner(
-    editingProject,
+    settingsViewOpen,
     selectedProjectId,
     projects,
     openProjectSettings
@@ -1219,12 +1219,6 @@ function App(): React.JSX.Element {
 
   const handleProjectUpdated = (project: Project): void => {
     updateProject(project)
-    closeProjectSettings()
-    validateProjectPath(project)
-  }
-  const handleProjectChanged = (project: Project): void => {
-    updateProject(project)
-    setEditingProject(project)
     validateProjectPath(project)
   }
 
@@ -1265,7 +1259,9 @@ function App(): React.JSX.Element {
 
   const handleProjectDeleted = (): void => {
     if (deletingProject) {
-      if (editingProject?.id === deletingProject.id) closeProjectSettings()
+      const { open, route } = useSettingsViewStore.getState()
+      if (open && route.kind === 'project' && route.projectId === deletingProject.id)
+        closeSettings()
       deleteProject(deletingProject.id, selectedProjectId, setSelectedProjectId)
       useDialogStore.getState().closeDeleteProject()
     }
@@ -1274,31 +1270,9 @@ function App(): React.JSX.Element {
     trackProject(projectId, 'project_switched')
     useTabStore.getState().selectProject(projectId, opts)
   }
-  const handleOpenSettings = (): void => {
-    setSettingsInitialTab('appearance')
-    setSettingsOpen(true)
-  }
-
-  // Custom event listeners for settings
-  useEffect(() => {
-    const handleGlobal = (e: Event) => {
-      const tab = (e as CustomEvent<string>).detail || 'appearance'
-      setSettingsInitialTab(tab)
-      setSettingsOpen(true)
-    }
-    const handleProject = (e: Event) => {
-      const { projectId, tab } = (e as CustomEvent<{ projectId: string; tab?: string }>).detail
-      const project = projects.find((p) => p.id === projectId)
-      if (project)
-        openProjectSettings(project, { initialTab: (tab ?? 'general') as ProjectSettingsTab })
-    }
-    window.addEventListener('open-settings', handleGlobal)
-    window.addEventListener('open-project-settings', handleProject)
-    return () => {
-      window.removeEventListener('open-settings', handleGlobal)
-      window.removeEventListener('open-project-settings', handleProject)
-    }
-  }, [projects, openProjectSettings])
+  const handleOpenSettings = (): void => openSettings()
+  // `open-settings` and `open-project-settings` → the Settings view.
+  useEffect(() => installSettingsEventBridge({ projects: true }), [])
 
   const renderHome = (isViewActive: boolean, isHomeTabActive: boolean): React.JSX.Element => (
     <HomeDetail
@@ -1427,7 +1401,7 @@ function App(): React.JSX.Element {
   return (
     <AppearanceProvider settingsRevision={settingsRevision}>
       <SidebarProvider defaultOpen={true}>
-        <div id="app-shell" className="h-full w-full flex">
+        <div id="app-shell" className="relative h-full w-full flex">
           <AppSidebar
             projects={projects}
             projectGroups={projectGroups}
@@ -1830,6 +1804,22 @@ function App(): React.JSX.Element {
             </div>
           </div>
 
+          {/* Full-window Settings: covers sidebar + tab bar, panes stay mounted below. */}
+          {settingsViewOpen && (
+            <Suspense fallback={null}>
+              <SettingsView
+                appBadgeProjects={projects}
+                projects={projects}
+                projectHost={{
+                  onUpdated: handleProjectUpdated,
+                  groupBy: testGroupBy,
+                  onGroupByChange: setTestGroupBy,
+                  renderTemplatesTab: (projectId) => <TemplatesSettingsTab projectId={projectId} />
+                }}
+              />
+            </Suspense>
+          )}
+
           <ActiveTabSync
             tabs={tabs}
             tasksMap={tasksMap}
@@ -1862,25 +1852,12 @@ function App(): React.JSX.Element {
             handleTaskDeleted={handleTaskDeleted}
             createProjectOpen={createProjectOpen}
             handleProjectCreated={handleProjectCreated}
-            editingProject={editingProject}
-            closeProjectSettings={closeProjectSettings}
-            projectSettingsInitialTab={projectSettingsInitialTab}
-            testGroupBy={testGroupBy}
-            setTestGroupBy={setTestGroupBy}
-            projectSettingsOnboardingProvider={projectSettingsOnboardingProvider}
-            setProjectSettingsOnboardingProvider={setProjectSettingsOnboardingProvider}
             handleProjectUpdated={handleProjectUpdated}
-            handleProjectChanged={handleProjectChanged}
             deletingProject={deletingProject}
             handleProjectDeleted={handleProjectDeleted}
             groupSettingsTarget={groupSettingsTarget}
             renameProjectGroup={renameProjectGroup}
             deleteProjectGroup={deleteProjectGroup}
-            settingsOpen={settingsOpen}
-            setSettingsOpen={setSettingsOpen}
-            setSettingsRevision={setSettingsRevision}
-            settingsInitialTab={settingsInitialTab}
-            setSettingsInitialTab={setSettingsInitialTab}
             searchOpen={searchOpen}
             tasks={tasks}
             projects={projects}

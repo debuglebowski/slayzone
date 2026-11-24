@@ -66,9 +66,7 @@ test('Relocate moves files, Update path locates a manual move, and settings draf
     await dialog.getByLabel('New folder path').fill(destination)
     await dialog.getByRole('button', { name: 'Move folder', exact: true }).click()
     await expect(dialog).not.toBeVisible({ timeout: 20_000 })
-    await expect(
-      mainWindow.getByRole('heading', { name: 'Project Settings', exact: true })
-    ).not.toBeVisible()
+    await expect(mainWindow.getByTestId('settings-project-page')).not.toBeVisible()
     expect(existsSync(source)).toBe(false)
     expect(readFileSync(join(destination, 'uncommitted.txt'), 'utf8')).toBe('keep this file')
     await expect
@@ -84,9 +82,7 @@ test('Relocate moves files, Update path locates a manual move, and settings draf
     await dialog.getByLabel('Existing folder path').fill(manual)
     await dialog.getByRole('button', { name: 'Update path', exact: true }).click()
     await expect(dialog).not.toBeVisible({ timeout: 20_000 })
-    await expect(
-      mainWindow.getByRole('heading', { name: 'Project Settings', exact: true })
-    ).not.toBeVisible()
+    await expect(mainWindow.getByTestId('settings-project-page')).not.toBeVisible()
     expect(readFileSync(join(manual, 'uncommitted.txt'), 'utf8')).toBe('keep this file')
     expect(existsSync(destination)).toBe(false)
     await expect
@@ -106,7 +102,12 @@ test('Relocate moves files, Update path locates a manual move, and settings draf
     await expect(settings.locator('#edit-icon-letters')).toHaveValue('XY')
     await expect(settings.getByLabel('Repository Path')).toHaveValue(final)
     await settings.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(settings).not.toBeVisible()
+    await expect(mainWindow.getByText('Saved', { exact: true }).first()).toBeVisible({
+      timeout: 5_000
+    })
+    await expect
+      .poll(async () => (await s.getProjects()).find((p) => p.id === project.id)?.name)
+      .toBe('Edited label')
     const saved = (await s.getProjects()).find((p) => p.id === project.id)
     expect(saved).toMatchObject({ name: 'Edited label', icon_letters: 'XY' })
     expect((await s.getTasks()).find((t) => t.id === task.id)).toMatchObject({

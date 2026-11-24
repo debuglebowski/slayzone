@@ -4,7 +4,6 @@ import { ProviderListView } from './ai-providers/ProviderListView'
 import { ProviderDetailView } from './ai-providers/ProviderDetailView'
 import { useAiProviderForm } from './ai-providers/useAiProviderForm'
 import { useDefaultAgent } from './use-default-agent'
-import { HubWideSection } from '../settings-hub'
 
 interface AiProvidersSettingsTabProps {
   activeTab: string
@@ -18,9 +17,7 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
         title="Providers"
         description="Configure AI coding assistants and custom agents. Each provider can have its own root command and default flags."
       />
-      <HubWideSection>
-        <Providers {...props} />
-      </HubWideSection>
+      <Providers {...props} />
     </>
   )
 }
@@ -28,7 +25,7 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
 /**
  * Agent definitions, the default agent and per-provider chat defaults all live on a
  * hub and are read by its task create / spawn, so the whole list follows the
- * Settings hub picker (`HubWideSection`).
+ * hub page they render on (the Settings view scopes it to that hub).
  */
 function Providers({ activeTab, navigateTo }: AiProvidersSettingsTabProps) {
   const {

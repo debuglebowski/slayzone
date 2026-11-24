@@ -28,14 +28,8 @@ vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: { isPlaywright: () => isPlaywright }
 }))
 
-type Kids = { children?: React.ReactNode }
-vi.mock('@slayzone/ui', async () => ({
-  ...(await vi.importActual<object>('../../../../shared/ui/src/use-deps-changed')),
-  Dialog: ({ open, children }: Kids & { open: boolean }) => (open ? <>{children}</> : null),
-  DialogContent: ({ children }: Kids) => <>{children}</>,
-  DialogHeader: ({ children }: Kids) => <>{children}</>,
-  DialogTitle: ({ children }: Kids) => <>{children}</>,
-  SettingsLayout: ({ children }: Kids) => <>{children}</>
+vi.mock('@slayzone/ui', () => ({
+  cn: (...xs: unknown[]) => xs.filter(Boolean).join(' ')
 }))
 
 vi.mock('@slayzone/telemetry/client', () => {
@@ -70,7 +64,7 @@ vi.mock('./ReposTab', () => ({ ReposTab: () => null }))
 vi.mock('./TasksGeneralTab', () => ({ TasksGeneralTab: () => null }))
 vi.mock('@slayzone/test-panel/client', () => ({ TestsTab: () => null }))
 
-import { ProjectSettingsDialog } from './ProjectSettingsDialog'
+import { ProjectSettingsPanel } from './ProjectSettingsPanel'
 import { registerProjectSettingsTabs } from './ProjectSettingsTabs'
 
 // The app registers settings' tag editor, integrations' tab + lock lookup and worktrees'
@@ -87,12 +81,12 @@ registerProjectSettingsTabs({
 })
 
 const project = (id: string) => ({ id, path: `/tmp/${id}` }) as unknown as Project
-const ui = (p: Project | null, open = true) => (
-  <ProjectSettingsDialog
+const ui = (p: Project) => (
+  <ProjectSettingsPanel
     project={p}
-    open={open}
-    onOpenChange={vi.fn()}
-    initialTab="tasks/statuses"
+    tab="tasks/statuses"
+    onTabChange={vi.fn()}
+    onClose={vi.fn()}
     onUpdated={vi.fn()}
   />
 )
@@ -107,7 +101,7 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-describe('ProjectSettingsDialog status lock', () => {
+describe('ProjectSettingsPanel status lock', () => {
   // Which provider wins and how a failed lookup reads live with the lookup itself
   // (@slayzone/integrations useStatusSyncLockLookup.test.ts).
   it('reports the provider the lookup returns', async () => {
@@ -117,7 +111,7 @@ describe('ProjectSettingsDialog status lock', () => {
     expect(lookup).toHaveBeenCalledWith('p1')
   })
 
-  it('re-checks when the project changes while open', async () => {
+  it('re-checks when the project changes', async () => {
     locks = { p1: 'Linear' }
     const { rerender } = render(ui(project('p1')))
     await waitFor(() => expect(lockText()).toBe('Linear'))
@@ -125,11 +119,6 @@ describe('ProjectSettingsDialog status lock', () => {
     rerender(ui(project('p2')))
     await waitFor(() => expect(lockText()).toBe('unlocked'))
     expect(lookup).toHaveBeenCalledWith('p2')
-  })
-
-  it('does not look anything up while closed', () => {
-    render(ui(project('p1'), false))
-    expect(lookup).not.toHaveBeenCalled()
   })
 
   it('skips the lookup under Playwright', async () => {
@@ -141,47 +130,40 @@ describe('ProjectSettingsDialog status lock', () => {
   })
 })
 
-describe('ProjectSettingsDialog active tab', () => {
-  type Tab = React.ComponentProps<typeof ProjectSettingsDialog>['initialTab']
-  const dialog = (
-    open: boolean,
-    initialTab: Tab,
-    integrationOnboardingProvider: 'linear' | null = null
-  ) => (
-    <ProjectSettingsDialog
+describe('ProjectSettingsPanel active tab', () => {
+  const panel = (tab: string, integrationOnboardingProvider: 'linear' | null = null) => (
+    <ProjectSettingsPanel
       project={project('p1')}
-      open={open}
-      onOpenChange={vi.fn()}
-      initialTab={initialTab}
+      tab={tab}
+      onTabChange={vi.fn()}
+      onClose={vi.fn()}
       integrationOnboardingProvider={integrationOnboardingProvider}
       onUpdated={vi.fn()}
     />
   )
 
-  it('first open mounts only the initial tab', () => {
-    render(dialog(true, 'environment'))
+  it('mounts only the routed tab', () => {
+    render(panel('environment'))
     expect(mountedTabs).toEqual(['environment'])
   })
 
-  it('reopening mounts only the new initial tab, not the previously active one', () => {
-    const { rerender } = render(dialog(true, 'tasks/statuses'))
-    rerender(dialog(false, 'tasks/statuses'))
+  it('a route change mounts only the new tab', () => {
+    const { rerender } = render(panel('tasks/statuses'))
     mountedTabs = []
-
-    rerender(dialog(true, 'environment'))
+    rerender(panel('environment'))
     expect(mountedTabs).toEqual(['environment'])
+  })
+
+  it('the old "tasks" group key opens its first page', () => {
+    render(panel('tasks'))
+    expect(mountedTabs).toEqual([])
+    expect(
+      screen.getByTestId('project-settings-tab-tasks/general').getAttribute('aria-selected')
+    ).toBe('true')
   })
 
   it('an onboarding provider opens straight on Integrations', () => {
-    render(dialog(true, 'environment', 'linear'))
+    render(panel('environment', 'linear'))
     expect(mountedTabs).toEqual(['integrations'])
-  })
-
-  it('initialTab changing while open switches to it, even with an onboarding provider set', () => {
-    const { rerender } = render(dialog(true, 'environment', 'linear'))
-    mountedTabs = []
-
-    rerender(dialog(true, 'tasks/statuses', 'linear'))
-    expect(mountedTabs).toEqual(['tasks/statuses'])
   })
 })
