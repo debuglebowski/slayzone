@@ -5,15 +5,20 @@ export function chatColumnClass(width: AppearanceSettings['chatWidth']): string 
   return width === 'wide' ? 'mx-auto w-full' : 'mx-auto w-full max-w-[60rem]'
 }
 
-/** Side gutter of the chat panel. */
-export const CHAT_PANEL_GUTTER_CLASS = 'px-14'
+/**
+ * Side gutter of the chat panel, narrower in a narrow pane. Queries the
+ * `@container` wrapping the panel in ChatPanel. Never below px-6: answer hover
+ * insets (turnBlockClass, -mx-5) must fit inside it.
+ */
+export const CHAT_PANEL_GUTTER_CLASS = 'px-6 @min-[36rem]:px-10 @min-[48rem]:px-14'
 
 /**
  * Timeline scroller bleeds through the panel gutter so its scrollbar sits at
  * the panel's right edge; the same padding back keeps content (and answer
  * hover insets) where they were. Must mirror CHAT_PANEL_GUTTER_CLASS.
  */
-export const CHAT_SCROLLER_BLEED_CLASS = '-mx-14 px-14'
+export const CHAT_SCROLLER_BLEED_CLASS =
+  '-mx-6 px-6 @min-[36rem]:-mx-10 @min-[36rem]:px-10 @min-[48rem]:-mx-14 @min-[48rem]:px-14'
 
 /**
  * A turn's block under its prompt — a finished answer, or a running turn's
