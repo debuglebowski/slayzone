@@ -209,6 +209,18 @@ export const gitOpsContract = {
     ['targetPath', 'repoPath']
   ),
   getResolvedUpstreamGraph: op(z.object({ repoPath: s, branch: s }), ['repoPath']),
+  // The panel's batched reads (`gitPanelReads` computers; the hub assembles them from
+  // the single ops for older ones — see panel-reads.ts). The header: repo check →
+  // branch / remote / checkout branch / status → upstream of the active branch.
+  getGitSummary: op(z.object({ path: s, checkoutPath: s.optional(), statusPath: s.optional() }), [
+    'path',
+    'checkoutPath',
+    'statusPath'
+  ]),
+  // The commit graph: branch → child branches → the graph of all of them.
+  getBranchGraph: op(z.object({ path: s, limit: n, showBranches: b, baseBranch: s.optional() }), [
+    'path'
+  ]),
   getResolvedRecentCommits: op(z.object({ path: s, count: n, branchName: s }), ['path']),
 
   listStashes: op(repo, ['repoPath']),

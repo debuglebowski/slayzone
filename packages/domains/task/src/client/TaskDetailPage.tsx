@@ -228,6 +228,7 @@ import {
   useTaskTerminalSession,
   useWorkspacePathProbe,
   TaskCompletedScreen,
+  gitViewPath,
   getTaskPanels,
   useTaskArtifacts,
   useTaskProjectRepos,
@@ -511,21 +512,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
   // Worktree if present, else resolved child / project root (a worktree not read yet: none).
   const taskBoundRepoForView = task?.has_worktree ? worktreePath : resolvedRepo.path
-  const { repos: viewableRepos } = useTaskProjectRepos(
+  const { repos: viewableRepos, settled: viewableReposSettled } = useTaskProjectRepos(
     projectRoot,
     taskBoundRepoForView,
     project?.id
   )
   const [gitViewRepoPath, setGitViewRepoPath] = useState<string | null>(null)
-  // Resolve the active git-panel target. Prefer explicit user pick; fall back to task-bound if it's a real git repo;
-  // else first viewable repo (covers wrapper-folder projects). Recomputed on each render so disk changes self-heal.
-  const resolvedGitViewPath = useMemo(() => {
-    if (gitViewRepoPath && viewableRepos.some((r) => r.path === gitViewRepoPath))
-      return gitViewRepoPath
-    if (taskBoundRepoForView && viewableRepos.some((r) => r.path === taskBoundRepoForView))
-      return taskBoundRepoForView
-    return viewableRepos[0]?.path ?? taskBoundRepoForView
-  }, [gitViewRepoPath, viewableRepos, taskBoundRepoForView])
+  // Resolve the active git-panel target (see gitViewPath). Recomputed on each render so
+  // disk changes self-heal.
+  const resolvedGitViewPath = gitViewPath({
+    picked: gitViewRepoPath,
+    repos: viewableRepos,
+    reposSettled: viewableReposSettled,
+    taskBound: taskBoundRepoForView,
+    hasWorktree: !!task?.has_worktree
+  })
   const handleRepoChange = useCallback(
     (repoName: string) => {
       // Ephemeral: pick by name from discovered repos. Does NOT persist to task.repo_name.

@@ -2800,10 +2800,9 @@ export function composeServer(opts: {
     setGitOpTransport({
       // Additive op families a computer advertised in this connection's handshake.
       supports: (computerId, feature) =>
-        feature === 'boundedReads' &&
         computerGateway
           .listComputers()
-          .some((c) => c.computerId === computerId && c.boundedReads === true),
+          .some((c) => c.computerId === computerId && c[feature] === true),
       request: async (computerId, params, timeoutMs, target) => {
         // A caller's op is gated as what it works on; the hub's own reads pass.
         await gateGitOp(computerId, target)

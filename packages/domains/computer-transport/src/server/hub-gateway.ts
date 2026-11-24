@@ -125,6 +125,8 @@ export interface ComputerDescriptor {
   /** Whether it answers the bounded reads (paged/chunked/staged), from this connection's
    *  frame. Absent = no. */
   boundedReads?: boolean
+  /** Whether it answers the git panel's batched reads, from this connection's frame. */
+  gitPanelReads?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -868,6 +870,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatControlInvocations: parsed.data.chatControlInvocations === true,
       chatControlLeases: parsed.data.chatControlLeases === true,
       boundedReads: parsed.data.boundedReads === true,
+      gitPanelReads: parsed.data.gitPanelReads === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -1041,6 +1044,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatControlInvocations: parsed.data.chatControlInvocations === true,
       chatControlLeases: parsed.data.chatControlLeases === true,
       boundedReads: parsed.data.boundedReads === true,
+      gitPanelReads: parsed.data.gitPanelReads === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

@@ -109,32 +109,17 @@ export function useBranchGraph(
       if (loadedPath !== projectPath) setLoadedPath(projectPath)
     }
     try {
+      // ONE request: the branch, its child branches and the graph of them all run on
+      // the computer as one chain (each its own round trip made a remote panel wait).
       // staleTime:0 — a poll / git change must read git, not a cached answer.
-      const branch = await queryClient.fetchQuery(
-        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath }, { staleTime: 0 })
-      )
-      const baseBranch = config.baseBranch || defaultBaseBranch || branch || 'main'
-
-      const branchSet = new Set<string>([baseBranch])
-
-      if (config.showBranches) {
-        const result = await queryClient.fetchQuery(
-          trpc.worktrees.resolveChildBranches.queryOptions(
-            { path: projectPath, baseBranch },
-            { staleTime: 0 }
-          )
-        )
-        for (const child of result.children) branchSet.add(child)
-        for (const merged of result.merged) branchSet.add(merged)
-      }
-
-      const graph = await queryClient.fetchQuery(
-        trpc.worktrees.getResolvedCommitDag.queryOptions(
+      const baseBranch = config.baseBranch || defaultBaseBranch || undefined
+      const { branch, graph } = await queryClient.fetchQuery(
+        trpc.worktrees.getBranchGraph.queryOptions(
           {
             path: projectPath,
             limit: FETCH_LIMIT,
-            branches: [...branchSet],
-            baseBranch
+            showBranches: config.showBranches,
+            ...(baseBranch ? { baseBranch } : {})
           },
           { staleTime: 0 }
         )

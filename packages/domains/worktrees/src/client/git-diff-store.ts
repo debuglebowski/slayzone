@@ -38,7 +38,7 @@
  */
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useHubId, useSubscription } from '@slayzone/transport/client'
+import { useHubId } from '@slayzone/transport/client'
 import { useGitScope, useUnscopedTRPC, useUnscopedTRPCClient, type GitScopeTarget } from './trpc'
 import type { GitDiffSnapshot } from '../shared/types'
 
@@ -58,8 +58,8 @@ export type GitStoreScope = GitScopeTarget | null
  * One per hub (see {@link transportFor}): a hub's client reaches only that hub.
  *
  * The fs-watcher broadcasts (`onDiffChanged` / `onDiffWatchFailed`) are NOT here
- * — those flow in via `useSubscription` in the hook and are routed to the store
- * through `notifyDiffChanged` / `notifyDiffWatchFailed`.
+ * — those flow in through the hub's one event subscription ({@link holdHubEvents})
+ * and are routed to the store through `notifyDiffChanged` / `notifyDiffWatchFailed`.
  */
 interface StoreTransport {
   getWorkingDiff: (
@@ -92,6 +92,53 @@ let injectedTransport: StoreTransport | null = null
 /** The transport that reaches `hub`, or null before a panel of that hub wired one. */
 function transportFor(hub: HubKey): StoreTransport | null {
   return injectedTransport ?? hubTransports.get(hub)?.transport ?? null
+}
+
+type UnscopedClient = ReturnType<typeof useUnscopedTRPCClient>
+
+/**
+ * Each hub's fs-watcher broadcasts, subscribed ONCE while any hook of that hub is
+ * mounted. One subscription per hook delivered every event once per mounted hook,
+ * and each delivery re-ran the reads of every listener on that path.
+ */
+const hubEvents = new Map<HubKey, { source: UnscopedClient; holders: number; stop: () => void }>()
+
+function subscribeHubEvents(hub: HubKey, client: UnscopedClient): () => void {
+  const changed = client.worktrees.onDiffChanged.subscribe(undefined, {
+    onData: ({ worktreePath, refsChanged }) => notifyDiffChanged(worktreePath, refsChanged, hub)
+  })
+  const failed = client.worktrees.onDiffWatchFailed.subscribe(undefined, {
+    onData: ({ worktreePath }) => notifyDiffWatchFailed(worktreePath, hub)
+  })
+  return () => {
+    changed.unsubscribe()
+    failed.unsubscribe()
+  }
+}
+
+/** Hold `hub`'s event subscription (made on the first hold, or anew on a new client
+ *  — a hub signed out and in again); the returned release ends it with the last. */
+function holdHubEvents(hub: HubKey, client: UnscopedClient): () => void {
+  const held = hubEvents.get(hub)
+  if (!held) {
+    hubEvents.set(hub, { source: client, holders: 1, stop: subscribeHubEvents(hub, client) })
+  } else {
+    held.holders++
+    if (held.source !== client) {
+      held.stop()
+      held.source = client
+      held.stop = subscribeHubEvents(hub, client)
+    }
+  }
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const entry = hubEvents.get(hub)
+    if (!entry || --entry.holders > 0) return
+    hubEvents.delete(hub)
+    entry.stop()
+  }
 }
 
 /**
@@ -152,8 +199,8 @@ interface StoreEntry {
  * share ONE computer-side fs watcher (via tRPC refcount there too). When the watcher is
  * active we slow the poll timer to a safety net.
  *
- * The fs-watcher broadcasts (`onDiffChanged` / `onDiffWatchFailed`) arrive via
- * `useSubscription` in `useGitDiffSnapshot` and are routed here through the
+ * The fs-watcher broadcasts (`onDiffChanged` / `onDiffWatchFailed`) arrive through
+ * the hub's one event subscription ({@link holdHubEvents}) and are routed here through the
  * exported `notifyDiffChanged` / `notifyDiffWatchFailed` dispatchers — so this
  * struct no longer owns listener teardown.
  */
@@ -432,7 +479,7 @@ function handleDiffChanged(worktreePath: string, change: GitPathChange, hub?: Hu
 }
 
 /**
- * Routes an `onDiffChanged` broadcast (delivered by the hook's useSubscription)
+ * Routes an `onDiffChanged` broadcast (delivered by the hub's event subscription)
  * into the store. Only re-fetches when an entry for that exact path exists, so
  * unrelated worktrees ignore the event — same gate as the old IPC listener.
  * `hub`: the hub whose subscription delivered it (omitted → every hub's watchers).
@@ -493,9 +540,9 @@ function acquirePath(
   join(state)
   if (before > 0 || pathRefCount(state) === 0) return // already kicked off
 
-  // The fs-watcher broadcast listeners are registered by useSubscription in the
-  // hooks (one per mounted hook) and routed via notifyDiffChanged /
-  // notifyDiffWatchFailed. Here we only manage the refcounted watch start/stop.
+  // The fs-watcher broadcasts arrive through the hub's one event subscription
+  // (holdHubEvents) and are routed via notifyDiffChanged / notifyDiffWatchFailed.
+  // Here we only manage the refcounted watch start/stop.
   startWatch(watchKey, state)
 }
 
@@ -739,18 +786,10 @@ function useGitStoreTransport(): HubKey {
     hubTransports.set(hub, { transport, source: trpcClient })
   }, [hub, trpc, trpcClient, queryClient])
 
-  // Route fs-watcher broadcasts into the store. The store gates on whether a
-  // path entry exists, so events for unrelated worktrees are dropped cheaply.
-  useSubscription(
-    trpc.worktrees.onDiffChanged.subscriptionOptions(undefined, {
-      onData: ({ worktreePath, refsChanged }) => notifyDiffChanged(worktreePath, refsChanged, hub)
-    })
-  )
-  useSubscription(
-    trpc.worktrees.onDiffWatchFailed.subscriptionOptions(undefined, {
-      onData: ({ worktreePath }) => notifyDiffWatchFailed(worktreePath, hub)
-    })
-  )
+  // Route fs-watcher broadcasts into the store: ONE subscription per hub, however
+  // many hooks are mounted. The store gates on whether a path entry exists, so
+  // events for unrelated worktrees are dropped cheaply.
+  useEffect(() => holdHubEvents(hub, trpcClient), [hub, trpcClient])
   return hub
 }
 

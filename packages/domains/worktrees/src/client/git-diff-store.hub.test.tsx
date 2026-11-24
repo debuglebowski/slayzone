@@ -43,6 +43,15 @@ const proc = (hub: string, name: string) => ({
   }),
   mutate: async (input: unknown) => {
     seen.push([hub, name, input])
+  },
+  subscribe: (_input: unknown, opts: { onData: (d: unknown) => void }) => {
+    const sub = { hub, name, onData: opts.onData }
+    subscribers.push(sub)
+    return {
+      unsubscribe: () => {
+        subscribers.splice(subscribers.indexOf(sub), 1)
+      }
+    }
   }
 })
 const roots = new Map<string, unknown>()
@@ -115,6 +124,35 @@ afterEach(() => {
 const flush = () => act(async () => await new Promise((r) => setTimeout(r, 0)))
 const callsOf = (name: string) =>
   seen.filter(([, n]) => n === name).map(([hub, , input]) => ({ hub, input }))
+
+describe('the git-diff store: one change-event stream per hub', () => {
+  it('every panel on a hub shares one subscription to each event', async () => {
+    for (const path of ['/a', '/b', '/c']) {
+      renderHook(() => useGitDiffSnapshot(path, params), {
+        wrapper: panel('local', { taskId: `t${path}` })
+      })
+    }
+    await flush()
+    const names = subscribers.filter((s) => s.hub === 'local').map((s) => s.name)
+    expect(names.sort()).toEqual(['onDiffChanged', 'onDiffWatchFailed'])
+  })
+
+  it('one event refreshes a watched path once, however many panels hold it', async () => {
+    for (let i = 0; i < 3; i++) {
+      renderHook(() => useGitDiffSnapshot('/repo', params), {
+        wrapper: panel('local', { taskId: 't-local' })
+      })
+    }
+    await flush()
+    seen.length = 0
+    await act(async () => {
+      for (const s of subscribers.filter((x) => x.name === 'onDiffChanged'))
+        s.onData({ worktreePath: '/repo', refsChanged: false })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(callsOf('getWorkingDiff')).toHaveLength(1)
+  })
+})
 
 describe('the git-diff store: each panel on its own hub', () => {
   it("a remote hub task's diff and watch go to the remote hub, not the first panel's", async () => {

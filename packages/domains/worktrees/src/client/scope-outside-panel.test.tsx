@@ -48,10 +48,7 @@ afterEach(() => {
 describe('worktrees / file editor callers outside any scope provider', () => {
   it('App-level useProjectRepos renders (with and without a project)', () => {
     expect(() => renderHook(() => useProjectRepos('/p', null, 'p1'), { wrapper })).not.toThrow()
-    expect(seen).toContainEqual([
-      'listProjectRepos',
-      { projectPath: '/p', projectId: 'p1', opts: { taskBoundPath: null } }
-    ])
+    expect(seen).toContainEqual(['listProjectRepos', { projectPath: '/p', projectId: 'p1' }])
     expect(() => renderHook(() => useProjectRepos('/p', null), { wrapper })).not.toThrow()
     expect(() => renderHook(() => useDetectedRepos('/p'), { wrapper })).not.toThrow()
   })

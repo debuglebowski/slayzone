@@ -20,8 +20,8 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-// The branch read is the one the tests hold: it carries what the tab shows (the
-// branch name). Everything else answers at once.
+// The summary read is the one the tests hold, by its branch: it carries what the
+// tab shows (the branch name).
 let branchCalls: Array<{ path: string; d: Deferred<string> }> = []
 const repoChecks: string[] = []
 const CLEAN = { staged: 0, unstaged: 0, untracked: 0 }
@@ -40,25 +40,28 @@ vi.mock('@slayzone/transport/client', () => {
       init: { mutationOptions: () => ({}) },
       checkoutBranch: { mutationOptions: () => ({}) },
       createBranch: { mutationOptions: () => ({}) },
-      isGitRepo: q(async (input) => {
+      // One request: the summary (repo check, branch, status, remote, upstream). Its
+      // branch is the part the tests hold: it carries what the tab shows.
+      getGitSummary: q((input) => {
         repoChecks.push(input.path!)
-        return true
-      }),
-      getCurrentBranch: q((input) => {
+        const status = statusNow
         const d = deferred<string>()
         branchCalls.push({ path: input.path!, d })
-        return d.promise
-      }),
-      getStatusSummary: q(async () => statusNow),
-      getRemoteUrl: q(async () => 'https://example.com/r.git'),
-      getAheadBehindUpstream: q(async () => ({ ahead: 0, behind: 0 })),
-      // The fs-watcher broadcasts: the tests deliver them via `notifyDiffChanged`.
-      onDiffChanged: { subscriptionOptions: () => ({}) },
-      onDiffWatchFailed: { subscriptionOptions: () => ({}) }
+        return d.promise.then((branch) => ({
+          kind: 'repo',
+          branch,
+          remoteUrl: 'https://example.com/r.git',
+          checkoutBranch: null,
+          status,
+          upstream: { ahead: 0, behind: 0 }
+        }))
+      })
     },
     settings: { get: q(async () => null), set: { mutationOptions: () => ({}) } }
   }
-  const trpcClient = {}
+  // The store's one event subscription per hub (events here go in via notifyDiffChanged).
+  const sub = { subscribe: () => ({ unsubscribe: () => {} }) }
+  const trpcClient = { worktrees: { onDiffChanged: sub, onDiffWatchFailed: sub } }
   return {
     useHubId: () => null,
     useTRPC: () => trpc,

@@ -34,7 +34,8 @@ const proc = (name: string) => ({
   subscriptionOptions: () => ({}),
   mutate: async (input: unknown) => {
     seen.push([name, input])
-  }
+  },
+  subscribe: () => ({ unsubscribe: () => undefined })
 })
 const ns = new Proxy({}, { get: (_t, name: string) => proc(name) })
 const root = { worktrees: ns }

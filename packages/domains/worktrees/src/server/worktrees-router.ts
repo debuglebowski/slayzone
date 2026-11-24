@@ -44,6 +44,7 @@ import {
   getResolvedForkGraphRouted,
   getResolvedUpstreamGraphRouted
 } from './commits-routing'
+import { getBranchGraphRouted, getGitSummaryRouted } from './panel-reads-routing'
 import {
   listIgnoredTreeRouted,
   matchIgnoredTreeRouted,
@@ -344,6 +345,13 @@ export const worktreesRouter = router({
   getResolvedUpstreamGraph: publicProcedure
     .input(gitOpsContract.getResolvedUpstreamGraph.input.extend({ target: gitTarget }))
     .query(({ ctx, input }) => getResolvedUpstreamGraphRouted(input, ctx.db)),
+  // The panel's batched reads: one request to a computer that answers them.
+  getGitSummary: publicProcedure
+    .input(gitOpsContract.getGitSummary.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => getGitSummaryRouted(input, ctx.db)),
+  getBranchGraph: publicProcedure
+    .input(gitOpsContract.getBranchGraph.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => getBranchGraphRouted(input, ctx.db)),
   getResolvedRecentCommits: gitQuery('getResolvedRecentCommits'),
   // Stashes
   listStashes: gitQuery('listStashes'),

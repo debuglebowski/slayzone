@@ -336,6 +336,37 @@ export interface ResolvedGraph {
   branches: string[]
 }
 
+/**
+ * The git panel's header read in one answer (`getGitSummary`): the repo check, the
+ * project checkout's branch and remote, the task checkout's branch, the status and
+ * the upstream ahead/behind of the active branch.
+ * - `checkFailed`: the repo check itself failed (git could not be started, the
+ *   request could not reach the computer) — not the same as "not a repo".
+ * - `readFailed`: a repo, but a read after the check failed — keep what is shown.
+ */
+export type GitSummary =
+  | {
+      kind: 'repo'
+      branch: string | null
+      remoteUrl: string | null
+      /** The branch at `checkoutPath`; null without one. */
+      checkoutBranch: string | null
+      /** Of `statusPath`; null without one. */
+      status: StatusSummary | null
+      /** Of the active branch (the checkout's, else the project's) at `statusPath`. */
+      upstream: AheadBehind | null
+    }
+  | { kind: 'notRepo' }
+  | { kind: 'readFailed' }
+  | { kind: 'checkFailed'; message: string }
+
+/** The commit graph read in one answer (`getBranchGraph`), with the branch it is of. */
+export interface BranchGraphRead {
+  /** The checked-out branch (null: detached / unknown). */
+  branch: string | null
+  graph: ResolvedGraph
+}
+
 export interface ForkGraphResult {
   graph: ResolvedGraph
   forkPoint: string

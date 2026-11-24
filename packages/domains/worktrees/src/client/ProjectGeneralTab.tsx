@@ -14,7 +14,7 @@ import {
   useStablePoll,
   safeClipboardWriteText
 } from '@slayzone/ui'
-import type { StatusSummary, AheadBehind } from '../shared/types'
+import type { StatusSummary, AheadBehind, GitSummary } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
 import { GitUnavailableFallback } from './general-tab-shared'
 import { useGitPathChanges } from './git-diff-store'
@@ -94,9 +94,11 @@ export function ProjectGeneralTab({
     }),
     [projectId, queryClient, trpc, setSetting, setSettingAsync]
   )
+  // Read alongside the first summary, not after it (a second round trip): only a
+  // known non-repo, or a first check that failed, holds it back.
   const branchGraph = useBranchGraph(
     projectPath,
-    visible && isGitRepo === true,
+    visible && (isGitRepo === true || (isGitRepo === null && gitError === null)),
     undefined,
     graphPersistence
   )
@@ -114,65 +116,53 @@ export function ProjectGeneralTab({
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     const superseded = () => shownPathRef.current !== projectPath
-    try {
-      let isRepo: boolean
-      try {
-        isRepo = await queryClient.fetchQuery(
-          trpc.worktrees.isGitRepo.queryOptions({ path: projectPath }, FRESH)
+    // ONE request: the repo check, branch, status, remote and upstream run on the
+    // computer as one chain (each its own round trip made a remote panel wait).
+    const summary: GitSummary = await queryClient
+      .fetchQuery(
+        trpc.worktrees.getGitSummary.queryOptions(
+          { path: projectPath, statusPath: projectPath },
+          FRESH
         )
-      } catch (err) {
-        if (superseded()) return null
-        // The check itself failed (git could not be started) — not the same as "not a
-        // repo", which would offer `git init` on a healthy repo.
-        const message = err instanceof Error ? err.message : String(err)
-        const hash = JSON.stringify({ gitError: message })
-        if (hash !== lastHashRef.current) {
-          lastHashRef.current = hash
-          setGitError(message)
-        }
-        return hash
+      )
+      .catch((err: unknown) => ({
+        // Not answered at all: as a failed repo check.
+        kind: 'checkFailed' as const,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+    if (superseded()) return null
+    if (summary.kind === 'readFailed') return null
+    if (summary.kind === 'checkFailed') {
+      // The check itself failed (git could not be started) — not the same as "not a
+      // repo", which would offer `git init` on a healthy repo.
+      const hash = JSON.stringify({ gitError: summary.message })
+      if (hash !== lastHashRef.current) {
+        lastHashRef.current = hash
+        setGitError(summary.message)
       }
-      if (superseded()) return null
-      if (!isRepo) {
-        const hash = JSON.stringify({ isRepo: false })
-        if (hash !== lastHashRef.current) {
-          lastHashRef.current = hash
-          setGitError(null)
-          setIsGitRepo(false)
-        }
-        return hash
-      }
-      const [branch, status, remote] = await Promise.all([
-        queryClient.fetchQuery(
-          trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath }, FRESH)
-        ),
-        queryClient.fetchQuery(
-          trpc.worktrees.getStatusSummary.queryOptions({ repoPath: projectPath }, FRESH)
-        ),
-        queryClient.fetchQuery(
-          trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }, FRESH)
-        )
-      ])
-      const uab = branch
-        ? await queryClient.fetchQuery(
-            trpc.worktrees.getAheadBehindUpstream.queryOptions({ path: projectPath, branch }, FRESH)
-          )
-        : null
-      if (superseded()) return null
-      const hash = JSON.stringify({ isRepo: true, branch, status, remote, uab })
+      return hash
+    }
+    if (summary.kind === 'notRepo') {
+      const hash = JSON.stringify({ isRepo: false })
       if (hash !== lastHashRef.current) {
         lastHashRef.current = hash
         setGitError(null)
-        setIsGitRepo(true)
-        setCurrentBranch(branch)
-        setStatusSummary(status)
-        setRemoteUrl(remote)
-        setUpstreamAB(uab)
+        setIsGitRepo(false)
       }
       return hash
-    } catch {
-      return null
     }
+    const { branch, status, remoteUrl: remote, upstream: uab } = summary
+    const hash = JSON.stringify({ isRepo: true, branch, status, remote, uab })
+    if (hash !== lastHashRef.current) {
+      lastHashRef.current = hash
+      setGitError(null)
+      setIsGitRepo(true)
+      setCurrentBranch(branch)
+      setStatusSummary(status)
+      setRemoteUrl(remote)
+      setUpstreamAB(uab)
+    }
+    return hash
   }, [projectPath, queryClient, trpc])
 
   // Restarted per path: a new path is read at once (not on the old path's backed-off

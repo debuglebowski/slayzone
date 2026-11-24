@@ -815,6 +815,7 @@ export function startComputer(
     chatControlInvocations: true,
     chatControlLeases: true,
     boundedReads: true,
+    gitPanelReads: true,
     capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own

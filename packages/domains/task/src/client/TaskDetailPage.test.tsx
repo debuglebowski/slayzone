@@ -359,7 +359,7 @@ import { detectPlatform } from '@slayzone/ui'
 // sync card; stub them.
 // Stable singleton returns so their values don't churn dep arrays.
 const NO_ARTIFACTS = { artifacts: [] }
-const NO_REPOS = { repos: [] }
+const NO_REPOS = { repos: [], settled: true }
 const NO_DETECTED_REPOS: never[] = []
 registerTaskPanels({
   ArtifactsPanel: React.forwardRef(() => null),

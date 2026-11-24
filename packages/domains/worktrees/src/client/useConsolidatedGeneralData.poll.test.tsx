@@ -45,8 +45,14 @@ const procs = new Proxy(
   }
 )
 const trpc = { worktrees: procs, settings: procs }
+const noSub = { subscribe: () => ({ unsubscribe: () => {} }) }
 const trpcClient = {
-  worktrees: { watchStart: { mutate: async () => {} }, watchStop: { mutate: async () => {} } }
+  worktrees: {
+    watchStart: { mutate: async () => {} },
+    watchStop: { mutate: async () => {} },
+    onDiffChanged: noSub,
+    onDiffWatchFailed: noSub
+  }
 }
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
@@ -80,8 +86,9 @@ const { _setGitDiffStoreTransport, _resetStore, notifyDiffChanged } = await impo
   './git-diff-store'
 )
 
-// The held reads: the git poll's status read (only it reads status) and the branch
-// poll's fork-graph read. Everything else answers at once.
+// The held reads: the git poll's one read (`getGitSummary`, which carries the status
+// of `statusPath` — the task checkout, else the project) and the branch poll's
+// fork-graph read. Everything else answers at once.
 type Status = { staged: number; unstaged: number; untracked: number }
 type Fork = { forkPoint: string; featureCount: number; baseCount: number }
 let statusCalls: Array<{ repoPath: string; d: Deferred<Status> }> = []
@@ -89,14 +96,19 @@ let forkCalls: Array<{ targetPath: string; compareBranch: string; d: Deferred<Fo
 
 function answer(key: string, input: Record<string, unknown>): Promise<unknown> {
   switch (key) {
-    case 'isGitRepo':
-      return Promise.resolve(true)
     case 'getCurrentBranch':
       return Promise.resolve(input.path === '/repo' || input.path === '/repo2' ? 'main' : 'feat')
-    case 'getStatusSummary': {
+    case 'getGitSummary': {
       const d = deferred<Status>()
-      statusCalls.push({ repoPath: input.repoPath as string, d })
-      return d.promise
+      statusCalls.push({ repoPath: input.statusPath as string, d })
+      return d.promise.then((status) => ({
+        kind: 'repo',
+        branch: 'main',
+        remoteUrl: null,
+        checkoutBranch: input.checkoutPath ? 'feat' : null,
+        status,
+        upstream: null
+      }))
     }
     case 'getResolvedForkGraph': {
       const d = deferred<Fork>()

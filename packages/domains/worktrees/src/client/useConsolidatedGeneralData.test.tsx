@@ -76,7 +76,9 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => ({
     worktrees: {
       watchStart: { mutate: async () => {} },
-      watchStop: { mutate: async () => {} }
+      watchStop: { mutate: async () => {} },
+      onDiffChanged: { subscribe: () => ({ unsubscribe: () => {} }) },
+      onDiffWatchFailed: { subscribe: () => ({ unsubscribe: () => {} }) }
     }
   }),
   useSubscription: () => undefined
@@ -97,7 +99,18 @@ const task = withPaths({
   pr_url: null
 }) as unknown as Task
 
+/** The header's one read (getGitSummary): a repo on `main`. */
+const REPO_SUMMARY = {
+  kind: 'repo',
+  branch: 'main',
+  remoteUrl: null,
+  checkoutBranch: 'feature',
+  status: { staged: 0, unstaged: 0, untracked: 0 },
+  upstream: null
+}
+
 const queryResults: Record<string, unknown> = {
+  getGitSummary: REPO_SUMMARY,
   getCurrentBranch: 'feature',
   getWorktreeMetadata: null,
   getPrForCheckout: null,
@@ -186,7 +199,8 @@ describe('useConsolidatedGeneralData — action handlers', () => {
       ]
     ])
     expect(onUpdateTask).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'task-0001', worktreeParentBranch: null })
+      // The new worktree branches from the project checkout's branch (`main`).
+      expect.objectContaining({ id: 'task-0001', worktreeParentBranch: 'main' })
     )
   })
 })
@@ -389,7 +403,7 @@ describe('useConsolidatedGeneralData — repo check failure', () => {
     const client = new QueryClient()
     vi.spyOn(client, 'fetchQuery').mockImplementation(((o: { queryKey: unknown[] }) => {
       const key = String(o.queryKey[0])
-      if (key === 'isGitRepo') return answer()
+      if (key === 'getGitSummary') return answer()
       return Promise.resolve(queryResults[key] ?? null)
     }) as never)
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -403,16 +417,28 @@ describe('useConsolidatedGeneralData — repo check failure', () => {
     return hook
   }
 
-  it('a check that throws sets gitError and leaves isGitRepo unknown', async () => {
+  it('a check that fails sets gitError and leaves isGitRepo unknown', async () => {
     const { result } = await setupIsGitRepo(() =>
-      Promise.reject(new Error('Could not start git: spawn git EMFILE'))
+      Promise.resolve({ kind: 'checkFailed', message: 'Could not start git: spawn git EMFILE' })
     )
     expect(result.current.gitError).toBe('Could not start git: spawn git EMFILE')
     expect(result.current.isGitRepo).toBeNull()
   })
 
+  it('a summary request that is not answered at all is a failed check too', async () => {
+    const { result } = await setupIsGitRepo(() => Promise.reject(new Error('Connect a computer')))
+    expect(result.current.gitError).toBe('Connect a computer')
+    expect(result.current.isGitRepo).toBeNull()
+  })
+
+  it('a read after the check failing keeps what is shown (no gitError, no verdict)', async () => {
+    const { result } = await setupIsGitRepo(() => Promise.resolve({ kind: 'readFailed' }))
+    expect(result.current.gitError).toBeNull()
+    expect(result.current.isGitRepo).toBeNull()
+  })
+
   it('git answering no is "not a repo", with no gitError', async () => {
-    const { result } = await setupIsGitRepo(() => Promise.resolve(false))
+    const { result } = await setupIsGitRepo(() => Promise.resolve({ kind: 'notRepo' }))
     expect(result.current.isGitRepo).toBe(false)
     expect(result.current.gitError).toBeNull()
   })
@@ -429,7 +455,8 @@ describe('useConsolidatedGeneralData — custom working directory', () => {
     vi.spyOn(client, 'fetchQuery').mockImplementation((async (o: { queryKey: unknown[] }) => {
       const [key, input] = o.queryKey as [string, { path?: string }]
       fetched.push([key, input])
-      if (key === 'isGitRepo') return true
+      if (key === 'getGitSummary')
+        return { ...REPO_SUMMARY, branch: 'main', checkoutBranch: 'feat' }
       if (key === 'getCurrentBranch') return input.path === '/bd' ? 'feat' : 'main'
       return queryResults[key] ?? null
     }) as never)
@@ -451,8 +478,10 @@ describe('useConsolidatedGeneralData — custom working directory', () => {
     expect(result.current.activeBranch).toBe('feat')
     expect(result.current.worktreeBranch).toBe(null)
     expect(result.current.currentBranch).toBe('main')
-    const aheadBehind = fetched.filter(([k]) => k === 'getAheadBehindUpstream').map(([, i]) => i)
-    expect(aheadBehind.at(-1)).toEqual({ path: '/bd', branch: 'feat' })
+    // The summary reads the checkout's branch, status and upstream (of the checkout's
+    // branch, on the computer): the checkout is named as both.
+    const summaries = fetched.filter(([k]) => k === 'getGitSummary').map(([, i]) => i)
+    expect(summaries.at(-1)).toEqual({ path: '/repo', checkoutPath: '/bd', statusPath: '/bd' })
   })
 })
 
@@ -466,8 +495,7 @@ describe('useConsolidatedGeneralData — freshness', () => {
   })
 
   function setupFetched(
-    answer: (key: string) => Promise<unknown> = async (k) =>
-      queryResults[k] ?? (k === 'isGitRepo' ? true : null)
+    answer: (key: string) => Promise<unknown> = async (k) => queryResults[k] ?? null
   ) {
     const client = new QueryClient()
     const fetched: Array<{ key: string; input: unknown; staleTime?: number }> = []
@@ -493,25 +521,33 @@ describe('useConsolidatedGeneralData — freshness', () => {
     const { fetched } = setupFetched()
     await act(async () => {})
     await act(async () => {})
-    for (const key of ['getStatusSummary', 'getAheadBehindUpstream', 'getResolvedForkGraph']) {
+    for (const key of ['getGitSummary', 'getResolvedForkGraph']) {
       const reads = fetched.filter((f) => f.key === key)
       expect(reads.length, key).toBeGreaterThan(0)
       for (const r of reads) expect(r.staleTime, key).toBe(0)
     }
   })
 
-  it('reads status without waiting for the repo check', async () => {
-    let answerRepo!: (v: boolean) => void
-    const { fetched } = setupFetched((key) =>
-      key === 'isGitRepo'
-        ? new Promise((r) => {
-            answerRepo = r
-          })
-        : Promise.resolve(queryResults[key] ?? null)
-    )
+  it('reads the repo check, branches, status and upstream in ONE request', async () => {
+    const { fetched, result } = setupFetched()
     await act(async () => {})
-    expect(fetched.some((f) => f.key === 'getStatusSummary')).toBe(true)
-    await act(async () => answerRepo(true))
+    await act(async () => {})
+    const header = [
+      'isGitRepo',
+      'getRemoteUrl',
+      'getStatusSummary',
+      'getAheadBehindUpstream',
+      'getGitSummary'
+    ]
+    expect(fetched.filter((f) => header.includes(f.key))).toEqual([
+      {
+        key: 'getGitSummary',
+        input: { path: '/repo', checkoutPath: '/wt', statusPath: '/wt' },
+        staleTime: 0
+      }
+    ])
+    expect(result.current.isGitRepo).toBe(true)
+    expect(result.current.statusSummary).toEqual(REPO_SUMMARY.status)
   })
 
   it('a git change under the task checkout refreshes at once', async () => {
@@ -523,13 +559,13 @@ describe('useConsolidatedGeneralData — freshness', () => {
     const { fetched } = setupFetched()
     await act(async () => {})
     await act(async () => {})
-    const before = fetched.filter((f) => f.key === 'getStatusSummary').length
+    const before = fetched.filter((f) => f.key === 'getGitSummary').length
     await act(async () => notifyDiffChanged('/wt'))
     await act(async () => {})
-    expect(fetched.filter((f) => f.key === 'getStatusSummary').length).toBe(before + 1)
+    expect(fetched.filter((f) => f.key === 'getGitSummary').length).toBe(before + 1)
   })
 
-  it('while the project is not a repo, only the repo check runs; `git init` reads the rest', async () => {
+  it('a project that is not a repo: each change re-reads; after `git init` it is one', async () => {
     _setGitDiffStoreTransport({
       getWorkingDiff: () => new Promise(() => {}),
       watchStart: async () => {},
@@ -537,23 +573,30 @@ describe('useConsolidatedGeneralData — freshness', () => {
     })
     let isRepo = false
     const { fetched, result } = setupFetched(async (k) =>
-      k === 'isGitRepo' ? isRepo : (queryResults[k] ?? null)
+      k === 'getGitSummary'
+        ? isRepo
+          ? REPO_SUMMARY
+          : { kind: 'notRepo' }
+        : (queryResults[k] ?? null)
     )
     await act(async () => {})
     await act(async () => {})
     expect(result.current.isGitRepo).toBe(false)
-    const statusReads = () => fetched.filter((f) => f.key === 'getStatusSummary').length
-    const before = statusReads()
+    expect(result.current.statusSummary).toBeNull()
+    const summaryReads = () => fetched.filter((f) => f.key === 'getGitSummary').length
+    const before = summaryReads()
 
     await act(async () => notifyDiffChanged('/wt'))
     await act(async () => {})
-    expect(statusReads()).toBe(before)
+    expect(summaryReads()).toBe(before + 1)
+    expect(result.current.isGitRepo).toBe(false)
 
     isRepo = true
     await act(async () => notifyDiffChanged('/wt'))
     await act(async () => {})
     await act(async () => {})
     expect(result.current.isGitRepo).toBe(true)
-    expect(statusReads()).toBe(before + 1)
+    expect(result.current.statusSummary).toEqual(REPO_SUMMARY.status)
+    expect(summaryReads()).toBe(before + 2)
   })
 })

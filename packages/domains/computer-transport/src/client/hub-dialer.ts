@@ -61,6 +61,8 @@ export interface ComputerIdentity {
   chatControlLeases?: boolean
   /** Host implements the paged git and ranged/staged chat operations. Absent: legacy. */
   boundedReads?: boolean
+  /** Host answers the git panel's batched reads (`getGitSummary`, `getBranchGraph`). */
+  gitPanelReads?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -388,7 +390,8 @@ export class HubDialer {
       chatControlInvocations: this.opts.identity.chatControlInvocations === true,
       chatControlLeases: this.opts.identity.chatControlLeases === true,
       // The runtime host may predate this connector's paged/chunked operations.
-      boundedReads: this.opts.identity.boundedReads === true
+      boundedReads: this.opts.identity.boundedReads === true,
+      gitPanelReads: this.opts.identity.gitPanelReads === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -441,7 +444,8 @@ export class HubDialer {
             chatProcessControls: this.opts.identity.chatProcessControls === true,
             chatControlInvocations: this.opts.identity.chatControlInvocations === true,
             chatControlLeases: this.opts.identity.chatControlLeases === true,
-            boundedReads: this.opts.identity.boundedReads === true
+            boundedReads: this.opts.identity.boundedReads === true,
+            gitPanelReads: this.opts.identity.gitPanelReads === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

@@ -13,9 +13,21 @@ import { gitTextSpools, readGitText } from './git-text-spool'
 import { gitTextSourceOf } from '../shared/git-text'
 import { scanIgnoredIndex } from './ignored-scan'
 import { ignoredTrees } from './ignored-trees'
+import { readBranchGraph, readGitSummary, type PanelReadOps } from './panel-reads'
 
 type Opts = Parameters<typeof git.getWorkingDiff>[1]
 type FileDiffOpts = Parameters<typeof git.getFileDiff>[3]
+
+/** The panel's batched reads, run here: each step on this machine's disk. */
+const localPanelReads: PanelReadOps = {
+  isGitRepo: git.isGitRepo,
+  getCurrentBranch: git.getCurrentBranch,
+  getRemoteUrl: git.getRemoteUrl,
+  getStatusSummary: git.getStatusSummary,
+  getAheadBehindUpstream: git.getAheadBehindUpstream,
+  resolveChildBranches: git.resolveChildBranches,
+  getResolvedCommitDag: git.getResolvedCommitDag
+}
 
 export const gitOpImpls = {
   isGitRepo: (i: GitOpInput<'isGitRepo'>) => git.isGitRepo(i.path),
@@ -129,6 +141,9 @@ export const gitOpImpls = {
     ),
   getResolvedUpstreamGraph: (i: GitOpInput<'getResolvedUpstreamGraph'>) =>
     git.getResolvedUpstreamGraph(i.repoPath, i.branch),
+  getGitSummary: (i: GitOpInput<'getGitSummary'>) =>
+    readGitSummary(localPanelReads, i, { overlap: false }),
+  getBranchGraph: (i: GitOpInput<'getBranchGraph'>) => readBranchGraph(localPanelReads, i),
   getResolvedRecentCommits: (i: GitOpInput<'getResolvedRecentCommits'>) =>
     git.getResolvedRecentCommits(i.path, i.count, i.branchName),
 

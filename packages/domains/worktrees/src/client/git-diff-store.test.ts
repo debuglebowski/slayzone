@@ -26,8 +26,8 @@ import {
 } from './git-diff-store'
 import type { GitDiffSnapshot } from '../shared/types'
 
-// useGitDiffSnapshot now reads useTRPC/useTRPCClient/useQueryClient/useSubscription
-// to wire the store transport + fs-watcher subscriptions. The store itself uses
+// useGitDiffSnapshot reads useTRPC/useTRPCClient/useQueryClient to wire the store
+// transport + the hub's fs-watcher subscription. The store itself uses
 // only the injected transport (set below), so stub the transport hooks to inert
 // no-ops — the test drives the store directly via _setGitDiffStoreTransport +
 // notifyDiffChanged.
@@ -45,9 +45,15 @@ vi.mock('@slayzone/transport/client', () => ({
       onDiffWatchFailed: { subscriptionOptions: () => ({}) }
     }
   }),
-  useTRPCClient: () => ({}),
+  // The store's one event subscription per hub (holdHubEvents): inert here — the
+  // test drives events through notifyDiffChanged.
+  useTRPCClient: () => inertClient,
   useSubscription: () => undefined
 }))
+const inertClient = vi.hoisted(() => {
+  const sub = { subscribe: () => ({ unsubscribe: () => undefined }) }
+  return { worktrees: { onDiffChanged: sub, onDiffWatchFailed: sub } }
+})
 vi.mock('@tanstack/react-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-query')>()
   return { ...actual, useQueryClient: () => ({ fetchQuery: () => Promise.resolve(undefined) }) }

@@ -43,19 +43,18 @@ vi.mock('@slayzone/transport/client', () => {
   const trpc = {
     worktrees: {
       fetch: { mutationOptions: () => ({}) },
-      getCurrentBranch: q(async () => 'main'),
-      resolveChildBranches: q(async () => ({ children: [], merged: [] })),
-      getResolvedCommitDag: q((input) => {
+      // One request: the branch and its graph (`{ branch, graph }`).
+      getBranchGraph: q((input) => {
         const d = deferred<Dag>()
         dagCalls.push({ path: input.path, d })
-        return d.promise
-      }),
-      onDiffChanged: { subscriptionOptions: () => ({}) },
-      onDiffWatchFailed: { subscriptionOptions: () => ({}) }
+        return d.promise.then((graph) => ({ branch: 'main', graph }))
+      })
     },
     settings: { get: q(async () => null) }
   }
-  const client = {}
+  // The store's one event subscription per hub (events here go in via notifyDiffChanged).
+  const sub = { subscribe: () => ({ unsubscribe: () => {} }) }
+  const client = { worktrees: { onDiffChanged: sub, onDiffWatchFailed: sub } }
   return {
     useHubId: () => null,
     useTRPC: () => trpc,

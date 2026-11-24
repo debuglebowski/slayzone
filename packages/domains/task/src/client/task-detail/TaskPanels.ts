@@ -77,7 +77,11 @@ export interface TaskPanels {
     projectPath: string | null,
     taskBoundPath: string | null,
     projectId?: string
-  ) => { repos: readonly DetectedRepo[] }
+  ) => {
+    repos: readonly DetectedRepo[]
+    /** The list answered (or failed), or there is no project to list. */
+    settled: boolean
+  }
   /**
    * Child repos of a project directory, discovered on the machine that owns it
    * (`projectId` routes the scan there). Empty while `projectPath` is null.
@@ -119,7 +123,7 @@ export function useTaskProjectRepos(
   projectPath: string | null,
   taskBoundPath: string | null,
   projectId?: string
-): { repos: readonly DetectedRepo[] } {
+): ReturnType<TaskPanels['useProjectRepos']> {
   return getTaskPanels().useProjectRepos(projectPath, taskBoundPath, projectId)
 }
 

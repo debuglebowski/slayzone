@@ -5,6 +5,7 @@ import { useTRPC } from './trpc'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import type {
   AheadBehind,
+  GitSummary,
   StatusSummary,
   DiffStatsSummary,
   WorktreeMetadata,
@@ -200,101 +201,60 @@ export function useConsolidatedGeneralData(
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     const superseded = () => shownKeysRef.current.git !== gitKey
-    try {
-      // Everything that doesn't depend on another answer goes out at once (one round
-      // trip, not three): the repo check, both branches, the remote and the status.
-      // Not a repo → the other answers are discarded; while the last poll said "not a
-      // repo", only the check runs.
-      const knownNotRepo = lastGitHashRef.current === NOT_A_REPO_HASH
-      const repoCheck = queryClient
-        .fetchQuery(trpc.worktrees.isGitRepo.queryOptions({ path: projectPath }, FRESH))
-        .then(
-          (isRepo) => ({ isRepo, error: null }),
-          (err: unknown) => ({
-            isRepo: false,
-            error: err instanceof Error ? err.message : String(err)
-          })
+    // ONE request: the repo check, both branches, the remote, the status and the
+    // upstream of the active branch run on the computer as one chain — each step a
+    // round trip of its own made the panel wait them out in turn on a remote hub.
+    const summary: GitSummary = await queryClient
+      .fetchQuery(
+        trpc.worktrees.getGitSummary.queryOptions(
+          {
+            path: projectPath,
+            ...(ownCheckout ? { checkoutPath: ownCheckout } : {}),
+            ...(targetPath ? { statusPath: targetPath } : {})
+          },
+          FRESH
         )
-      const readAll = () =>
-        Promise.all([
-          queryClient.fetchQuery(
-            trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath }, FRESH)
-          ),
-          queryClient.fetchQuery(
-            trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }, FRESH)
-          ),
-          // Read here rather than from state, so the first poll already syncs the
-          // checkout's branch instead of waiting for the next one.
-          ownCheckout
-            ? queryClient.fetchQuery(
-                trpc.worktrees.getCurrentBranch.queryOptions({ path: ownCheckout }, FRESH)
-              )
-            : Promise.resolve(null),
-          targetPath
-            ? queryClient.fetchQuery(
-                trpc.worktrees.getStatusSummary.queryOptions({ repoPath: targetPath }, FRESH)
-              )
-            : Promise.resolve(null)
-        ])
-      // Settled together but checked first: a failed/negative repo check wins over
-      // whatever the other reads did.
-      const [check, parallelReads] = await Promise.all([
-        repoCheck,
-        knownNotRepo ? null : readAll().catch(() => null)
-      ])
-      if (superseded()) return null
-      if (check.error !== null) {
-        // The check itself failed (git could not be started) — not the same as "not a
-        // repo", which would offer `git init` on a healthy repo.
-        const hash = JSON.stringify({ gitError: check.error })
-        if (hash !== lastGitHashRef.current) {
-          lastGitHashRef.current = hash
-          setGitError(check.error)
-        }
-        return hash
+      )
+      .catch((err: unknown) => ({
+        // Not answered at all: as a failed repo check.
+        kind: 'checkFailed' as const,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+    if (superseded()) return null
+    if (summary.kind === 'readFailed') return null
+    if (summary.kind === 'checkFailed') {
+      // The check itself failed (git could not be started) — not the same as "not a
+      // repo", which would offer `git init` on a healthy repo.
+      const hash = JSON.stringify({ gitError: summary.message })
+      if (hash !== lastGitHashRef.current) {
+        lastGitHashRef.current = hash
+        setGitError(summary.message)
       }
-      if (!check.isRepo) {
-        const hash = NOT_A_REPO_HASH
-        if (hash !== lastGitHashRef.current) {
-          lastGitHashRef.current = hash
-          setGitError(null)
-          setIsGitRepo(false)
-        }
-        return hash
-      }
-      // Became a repo since the last poll (`git init`): read the rest now.
-      const settledReads = knownNotRepo ? await readAll().catch(() => null) : parallelReads
-      if (!settledReads || superseded()) return null
-      const [branch, remote, ownBranch, status] = settledReads
-
-      let uab: AheadBehind | null = null
-      const activeBranch = ownCheckout ? ownBranch : branch
-      if (targetPath && activeBranch) {
-        uab = await queryClient.fetchQuery(
-          trpc.worktrees.getAheadBehindUpstream.queryOptions(
-            { path: targetPath, branch: activeBranch },
-            FRESH
-          )
-        )
-      }
-      if (superseded()) return null
-
-      const hash = JSON.stringify({ isRepo: true, branch, remote, status, uab })
+      return hash
+    }
+    if (summary.kind === 'notRepo') {
+      const hash = NOT_A_REPO_HASH
       if (hash !== lastGitHashRef.current) {
         lastGitHashRef.current = hash
         setGitError(null)
-        setIsGitRepo(true)
-        setCurrentBranch(branch)
-        setRemoteUrl(remote)
-        if (targetPath) {
-          setStatusSummary(status)
-          setUpstreamAB(uab)
-        }
+        setIsGitRepo(false)
       }
       return hash
-    } catch {
-      return null
     }
+    const { branch, remoteUrl: remote, status, upstream: uab } = summary
+    const hash = JSON.stringify({ isRepo: true, branch, remote, status, uab })
+    if (hash !== lastGitHashRef.current) {
+      lastGitHashRef.current = hash
+      setGitError(null)
+      setIsGitRepo(true)
+      setCurrentBranch(branch)
+      setRemoteUrl(remote)
+      if (targetPath) {
+        setStatusSummary(status)
+        setUpstreamAB(uab)
+      }
+    }
+    return hash
   }, [projectPath, targetPath, ownCheckout, gitKey, queryClient, trpc])
 
   // Fetch branch comparison data

@@ -274,6 +274,13 @@ export const enrollParamsSchema = z.object({
    * the backstop). Additive; no protocol bump.
    */
   boundedReads: z.boolean().optional(),
+  /**
+   * Whether this computer answers the git panel's batched reads (`getGitSummary`,
+   * `getBranchGraph` git ops): each a chain of dependent git reads run here in ONE
+   * request. Absent = an older computer: the hub assembles them from the single ops.
+   * Additive; no protocol bump.
+   */
+  gitPanelReads: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -348,6 +355,13 @@ export const helloParamsSchema = z.object({
    * the backstop). Additive; no protocol bump.
    */
   boundedReads: z.boolean().optional(),
+  /**
+   * Whether this computer answers the git panel's batched reads (`getGitSummary`,
+   * `getBranchGraph` git ops): each a chain of dependent git reads run here in ONE
+   * request. Absent = an older computer: the hub assembles them from the single ops.
+   * Additive; no protocol bump.
+   */
+  gitPanelReads: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

@@ -37,14 +37,15 @@ export interface GitOpTransport {
   watchStop(computerId: string, params: { watchId: string }): Promise<void>
   /**
    * Whether `computerId` answers an additive op family — `boundedReads`: the paged
-   * git ops (`openIgnoredTree`, …). Absent or false = an older computer: the hub
-   * uses the whole-value op it knows instead.
+   * git ops (`openIgnoredTree`, …); `gitPanelReads`: the panel's batched reads
+   * (`getGitSummary`, `getBranchGraph`). Absent or false = an older computer: the
+   * hub uses the ops it knows instead.
    */
   supports?(computerId: string, feature: GitComputerFeature): boolean
 }
 
 /** Op families a computer advertises in its handshake. */
-export type GitComputerFeature = 'boundedReads'
+export type GitComputerFeature = 'boundedReads' | 'gitPanelReads'
 
 let transport: GitOpTransport | null = null
 

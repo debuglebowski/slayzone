@@ -29,25 +29,24 @@ vi.mock('@slayzone/transport/client', () => {
       init: { mutationOptions: () => ({}) },
       checkoutBranch: { mutationOptions: () => ({}) },
       createBranch: { mutationOptions: () => ({}) },
-      isGitRepo: q('isGitRepo', async () => true),
-      getCurrentBranch: q('getCurrentBranch', async () => 'main'),
-      getStatusSummary: q('getStatusSummary', async () => ({
-        staged: 0,
-        unstaged,
-        untracked: 0
-      })),
-      getRemoteUrl: q('getRemoteUrl', async () => 'https://example.com/r.git'),
-      getAheadBehindUpstream: q('getAheadBehindUpstream', async () => {
+      // One request: the summary (repo check, branch, status, remote, upstream).
+      getGitSummary: q('getGitSummary', async () => {
         aheadBehindReads.push(behind)
-        return { ahead: 0, behind }
-      }),
-      // The fs-watcher broadcasts: the test delivers them via `notifyDiffChanged`.
-      onDiffChanged: { subscriptionOptions: () => ({}) },
-      onDiffWatchFailed: { subscriptionOptions: () => ({}) }
+        return {
+          kind: 'repo',
+          branch: 'main',
+          remoteUrl: 'https://example.com/r.git',
+          checkoutBranch: null,
+          status: { staged: 0, unstaged, untracked: 0 },
+          upstream: { ahead: 0, behind }
+        }
+      })
     },
     settings: { get: q('settings.get', async () => null), set: { mutationOptions: () => ({}) } }
   }
-  const trpcClient = {}
+  // The store's one event subscription per hub (events here go in via notifyDiffChanged).
+  const sub = { subscribe: () => ({ unsubscribe: () => {} }) }
+  const trpcClient = { worktrees: { onDiffChanged: sub, onDiffWatchFailed: sub } }
   return {
     useHubId: () => null,
     useTRPC: () => trpc,

@@ -13,6 +13,7 @@ export { useDevServerDetection } from './useDevServerDetection'
 export { useTaskTerminalSession } from './useTaskTerminalSession'
 export { useWorkspacePathProbe } from './useWorkspacePathProbe'
 export { TaskCompletedScreen } from './TaskCompletedScreen'
+export { gitViewPath } from './gitViewPath'
 export {
   registerTaskPanels,
   getTaskPanels,
