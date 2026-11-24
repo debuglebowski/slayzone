@@ -30,7 +30,7 @@ export type SettingsRoute =
 export const DEFAULT_SETTINGS_ROUTE: SettingsRoute = { kind: 'prefs', page: 'appearance' }
 
 const PREFS_PAGES = new Set(['appearance', 'layout', 'panels', 'telemetry'])
-const APP_PAGES = new Set(['diagnostics', 'labs', 'about'])
+const APP_PAGES = new Set(['labs', 'about', 'cli'])
 /** Old dialog tab keys whose content is hub-wide. */
 const HUB_TABS: Record<string, string> = {
   worktrees: 'worktrees',
@@ -56,6 +56,8 @@ export function routeFromLegacyTab(tab: string | null | undefined): SettingsRout
   if (tab === 'panels' || tab.startsWith('panels/')) return { kind: 'prefs', page: tab }
   if (PREFS_PAGES.has(tab)) return { kind: 'prefs', page: tab }
   if (APP_PAGES.has(tab)) return { kind: 'app', page: tab }
+  // Diagnostics moved into About.
+  if (tab === 'diagnostics') return { kind: 'app', page: 'about' }
   if (HUBS_TABS.has(tab)) return { kind: 'hubs' }
   if (tab.startsWith('ai-providers/')) {
     return { kind: 'hub', hubId: null, tab: 'agents', sub: tab.slice('ai-providers/'.length) }

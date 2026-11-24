@@ -20,14 +20,19 @@ interface SettingsViewState {
   route: SettingsRoute
   /** Bumped on every close: consumers that cache settings (appearance) re-read them. */
   revision: number
+  /** Nav groups the user folded or unfolded (Panels, each hub); kept while the app runs. */
+  folds: Record<string, boolean>
   navigate: (route: SettingsRoute) => void
+  setFold: (group: string, open: boolean) => void
 }
 
 export const useSettingsViewStore = create<SettingsViewState>((set) => ({
   open: false,
   route: DEFAULT_SETTINGS_ROUTE,
   revision: 0,
-  navigate: (route) => set({ route })
+  folds: {},
+  navigate: (route) => set({ route }),
+  setFold: (group, open) => set((s) => ({ folds: { ...s.folds, [group]: open } }))
 }))
 
 function toRoute(target: SettingsRoute | string | null | undefined): SettingsRoute {

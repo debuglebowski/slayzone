@@ -19,6 +19,7 @@ import { DataSettingsTab } from '../tabs/DataSettingsTab'
 import { DiagnosticsSettingsTab } from '../tabs/DiagnosticsSettingsTab'
 import { LabsSettingsTab } from '../tabs/LabsSettingsTab'
 import { AboutSettingsTab } from '../tabs/AboutSettingsTab'
+import { CliSettingsTab } from '../tabs/CliSettingsTab'
 import { ConnectionsSettingsTab } from '../tabs/ConnectionsSettingsTab'
 import { HubsSettingsTab } from '../tabs/HubsSettingsTab'
 import { SettingsTabIntro } from '../tabs/SettingsTabIntro'
@@ -66,8 +67,14 @@ export function SettingsPage({
       )
     case 'app':
       if (route.page === 'labs') return <LabsSettingsTab />
-      if (route.page === 'about') return <AboutSettingsTab />
-      return <DiagnosticsSettingsTab />
+      if (route.page === 'cli') return <CliSettingsTab />
+      // About: this install's version and data, and its diagnostics.
+      return (
+        <>
+          <AboutSettingsTab />
+          <DiagnosticsSettingsTab />
+        </>
+      )
     case 'hubs':
       return <ConnectionsSettingsTab />
     case 'hub':
@@ -99,8 +106,8 @@ function DeviceNote() {
       className="rounded-md border px-3 py-2 text-xs text-muted-foreground"
       data-testid="settings-device-note"
     >
-      Theme, fonts, text sizes and terminal rendering are saved on this device. Your other
-      devices keep their own.
+      Theme, fonts, text sizes and terminal rendering are saved on this device. Your other devices
+      keep their own.
     </p>
   )
 }

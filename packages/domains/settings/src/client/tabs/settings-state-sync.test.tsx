@@ -161,6 +161,7 @@ const { LabsSettingsTab } = await import('./LabsSettingsTab')
 const { McpSettingsTab } = await import('./McpSettingsTab')
 const { WorktreesSettingsTab } = await import('./WorktreesSettingsTab')
 const { AboutSettingsTab } = await import('./AboutSettingsTab')
+const { CliSettingsTab } = await import('./CliSettingsTab')
 const { TagsSettingsTab } = await import('./TagsSettingsTab')
 const { DiagnosticsSettingsTab } = await import('./DiagnosticsSettingsTab')
 const { BackupSettingsTab } = await import('./BackupSettingsTab')
@@ -312,22 +313,36 @@ describe('WorktreesSettingsTab', () => {
 })
 
 describe('AboutSettingsTab', () => {
-  it('shows the database path and CLI status once loaded', async () => {
+  it('shows the version and the default database path once loaded', async () => {
     results['settings.get'] = null
-    results['app.meta.checkCliInstalled'] = { installed: true, path: '/usr/local/bin/slay' }
+    results['app.meta.getVersion'] = '1.2.3'
     renderTab(<AboutSettingsTab />)
-    expect(screen.getByText('Not installed')).toBeTruthy()
     await flush()
     expect(screen.getByText('Location: Default location (userData)')).toBeTruthy()
-    expect(screen.getByText('Installed at /usr/local/bin/slay')).toBeTruthy()
+    expect(screen.getByTestId('about-version').textContent).toBe('SlayZone 1.2.3')
   })
 
   it('shows an explicit database path', async () => {
     results['settings.get'] = '/data/slay.db'
-    results['app.meta.checkCliInstalled'] = { installed: false }
     renderTab(<AboutSettingsTab />)
     await flush()
     expect(screen.getByText('Location: /data/slay.db')).toBeTruthy()
+  })
+})
+
+describe('CliSettingsTab', () => {
+  it('shows the CLI status once loaded', async () => {
+    results['app.meta.checkCliInstalled'] = { installed: true, path: '/usr/local/bin/slay' }
+    renderTab(<CliSettingsTab />)
+    expect(screen.getByText('Not installed')).toBeTruthy()
+    await flush()
+    expect(screen.getByText('Installed at /usr/local/bin/slay')).toBeTruthy()
+  })
+
+  it('says when the CLI is not installed', async () => {
+    results['app.meta.checkCliInstalled'] = { installed: false }
+    renderTab(<CliSettingsTab />)
+    await flush()
     expect(screen.getByText('Not installed')).toBeTruthy()
   })
 })

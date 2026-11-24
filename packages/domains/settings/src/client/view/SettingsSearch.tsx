@@ -26,9 +26,13 @@ const PREFS: Array<[string, string, string]> = [
   ['telemetry', 'Privacy & telemetry', 'telemetry privacy analytics usage data']
 ]
 const APP: Array<[string, string, string]> = [
-  ['diagnostics', 'Diagnostics', 'logs logging verbose export bundle sidecar local hub process'],
-  ['labs', 'Labs', 'experimental loop tests panel'],
-  ['about', 'About', 'version slay cli install update database path']
+  [
+    'about',
+    'About',
+    'version database path diagnostics logs logging verbose export bundle sidecar local hub process'
+  ],
+  ['cli', 'CLI', 'slay command line terminal install'],
+  ['labs', 'Labs', 'experimental loop tests panel']
 ]
 /** A hub's tabs; `defaultOnly`: offered on the default hub only (`HubPage`). */
 const HUB_TABS: Array<[string, string, string, boolean]> = [

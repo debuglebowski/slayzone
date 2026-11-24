@@ -1,0 +1,93 @@
+import { useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '../trpc'
+import { Button, Label } from '@slayzone/ui'
+import { SettingsTabIntro } from './SettingsTabIntro'
+
+/** The `slay` command line tool: install status and (re)install. */
+export function CliSettingsTab() {
+  const trpc = useTRPC()
+  const [cliInstalled, setCliInstalled] = useState(false)
+  const [cliPath, setCliPath] = useState<string>('')
+  const [cliInstalling, setCliInstalling] = useState(false)
+  const [cliMessage, setCliMessage] = useState('')
+
+  const cliStatusQuery = useQuery(trpc.app.meta.checkCliInstalled.queryOptions())
+  const installCliMutation = useMutation(trpc.app.meta.installCli.mutationOptions())
+
+  // Each new CLI status result re-seeds the local install state (which an install
+  // overrides in between) — adjusted while rendering.
+  const [seenCliStatus, setSeenCliStatus] = useState<typeof cliStatusQuery.data>()
+  if (cliStatusQuery.data !== seenCliStatus) {
+    setSeenCliStatus(cliStatusQuery.data)
+    const status = cliStatusQuery.data
+    if (status) {
+      setCliInstalled(status.installed)
+      if (status.path) setCliPath(status.path)
+    }
+  }
+
+  // Version verdict from the last probe; an install in between doesn't re-probe, so
+  // it is shown only while the path is still the probed one.
+  const probed = cliStatusQuery.data
+  const cliVersionNote =
+    probed?.installed && probed.path === cliPath && probed.version
+      ? probed.outdated
+        ? `v${probed.version} — out of date (app ships v${probed.expectedVersion})`
+        : probed.newer
+          ? `v${probed.version} — newer than this app (v${probed.expectedVersion})`
+          : `v${probed.version}`
+      : null
+
+  const handleInstallCli = async () => {
+    setCliInstalling(true)
+    setCliMessage('')
+    try {
+      const result = await installCliMutation.mutateAsync()
+      if (result.ok) {
+        setCliInstalled(true)
+        if (result.path) setCliPath(result.path)
+        let msg = 'Installed successfully.'
+        if (result.pathNotInPATH)
+          msg +=
+            " Note: the install directory is not in your PATH. Add it to use 'slay' from any terminal."
+        setCliMessage(msg)
+      } else if (result.elevationCancelled) {
+        setCliMessage('Install cancelled. You can try again later from Settings.')
+      } else if (result.permissionDenied) {
+        setCliMessage(`Permission denied. Run in Terminal:\n${result.error}`)
+      } else {
+        setCliMessage(result.error ?? 'Install failed.')
+      }
+    } catch (err) {
+      setCliMessage(err instanceof Error ? err.message : 'Install failed.')
+    } finally {
+      setCliInstalling(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <SettingsTabIntro
+        title="CLI"
+        description="Use SlayZone from any terminal with the slay command, and let agents use it too."
+      />
+      <div className="space-y-3">
+        <Label className="text-base font-semibold">CLI Tool</Label>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+            <span className={cliInstalled ? 'text-green-500' : 'text-muted-foreground'}>●</span>
+            {cliInstalled ? `Installed at ${cliPath || 'unknown path'}` : 'Not installed'}
+            {cliInstalled && cliVersionNote && <span>· {cliVersionNote}</span>}
+          </span>
+          <Button size="sm" variant="outline" disabled={cliInstalling} onClick={handleInstallCli}>
+            {cliInstalling ? 'Installing…' : cliInstalled ? 'Reinstall' : 'Install'}
+          </Button>
+        </div>
+        {cliMessage && (
+          <pre className="text-xs text-muted-foreground whitespace-pre-wrap">{cliMessage}</pre>
+        )}
+      </div>
+    </div>
+  )
+}
