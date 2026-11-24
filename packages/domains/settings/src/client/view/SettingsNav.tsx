@@ -96,10 +96,24 @@ export function SettingsNav() {
         <NavItem
           route={prefs('panels')}
           testId="settings-nav-panels"
-          match={(r) => r.kind === 'prefs' && (r.page === 'panels' || r.page.startsWith('panels/'))}
+          match={(r) =>
+            r.kind === 'prefs' && (r.page === 'panels' || r.page.startsWith('panels/web:'))
+          }
         >
           Panels
         </NavItem>
+        {(
+          [
+            ['panels/terminal', 'Terminal'],
+            ['panels/editor', 'Editor'],
+            ['panels/git', 'Git & diff'],
+            ['panels/browser', 'Browser']
+          ] as const
+        ).map(([page, label]) => (
+          <NavItem key={page} route={prefs(page)} testId={`settings-nav-${page.replace('/', '-')}`}>
+            {label}
+          </NavItem>
+        ))}
         <NavItem route={prefs('telemetry')} testId="settings-nav-telemetry">
           Privacy & telemetry
         </NavItem>
