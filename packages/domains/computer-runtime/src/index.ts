@@ -97,6 +97,18 @@ export function describeLocalRequest(method: string, params: unknown): string {
   return typeof inner === 'string' && inner.length > 0 ? inner : method
 }
 
+/**
+ * Memory bound on what a local peer may fall behind by: two maximum frames, so the
+ * largest legal reply always fits behind a full one, and never under 256 MiB.
+ */
+export function localWriteCeilingBytes(frameLimitBytes: number): number {
+  return Math.max(256 * 1024 * 1024, 2 * frameLimitBytes)
+}
+
+function mib(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+
 export interface LocalPeer {
   socket: Socket
   rpc: DuplexRpc
@@ -131,16 +143,25 @@ export function socketPeer(
       signal: AbortSignal
     ) => unknown | Promise<unknown>
     notify?: (method: string, params: unknown) => void
+    /**
+     * Outbound bytes that may sit queued before the link is dropped — the memory
+     * bound. Default {@link localWriteCeilingBytes}.
+     */
+    writeCeilingBytes?: number
   } = {}
 ): LocalPeer {
   const decoder = new LineDecoder()
   const frameLimit = handlers.frameLimitBytes ?? COMPUTER_FRAME_MAX_BYTES
+  const ceiling = handlers.writeCeilingBytes ?? localWriteCeilingBytes(frameLimit)
   /** UTF-8 bytes of the frame being received (the decoder's unterminated tail). */
   let bytes = 0
   let closeReason: string | undefined
   /** End the link from this side; the first reason recorded is the one reported. */
   const drop = (reason: string): void => {
     closeReason ??= reason
+    // Settle at once, not on the socket's later 'close': writes after this are
+    // no-ops (notify) or rejected (request) instead of throwing into callers.
+    rpc.dispose(`local link dropped: ${reason}`)
     socket.destroy()
   }
   const rpc = new DuplexRpc({
@@ -148,10 +169,19 @@ export function socketPeer(
     maxFrameBytes: frameLimit,
     describeRequest: describeLocalRequest,
     ...(handlers.onFrameTooLarge ? { onFrameTooLarge: handlers.onFrameTooLarge } : {}),
+    // Never refuses a frame for being behind: a refused frame is lost mid-stream (a
+    // refused reply used to tear the whole link down under chat streaming). A busy
+    // reader's backlog is just queued; the link is dropped only when the backlog
+    // passes the memory ceiling. A hung peer is caught there or by the hub's own
+    // liveness checks — Node flushes the backlog as one batch, so the socket cannot
+    // tell a slow reader from a stopped one any sooner.
     write: (line) => {
-      if (socket.destroyed || socket.writableLength > 8 * 1024 * 1024)
-        throw new Error('local connector unavailable or backpressured')
-      socket.write(line + '\n')
+      if (socket.destroyed || !socket.writable)
+        throw new Error(`local link closed${closeReason ? ` (${closeReason})` : ''}`)
+      if (!socket.write(line + '\n') && socket.writableLength > ceiling)
+        drop(
+          `peer not reading fast enough: ${mib(socket.writableLength)} queued over the ${mib(ceiling)} ceiling`
+        )
     },
     onPeerRequest: (method, params, id, actor, signal) => {
       void Promise.resolve()
@@ -173,8 +203,8 @@ export function socketPeer(
                   err instanceof Error ? err.message : 'local request failed'
                 )
         )
+        // Only a link that is already gone refuses a reply now (see `write`).
         .catch((err: unknown) => {
-          rpc.dispose('local response could not be delivered')
           drop(
             `response to ${method} could not be delivered: ${err instanceof Error ? err.message : String(err)}`
           )

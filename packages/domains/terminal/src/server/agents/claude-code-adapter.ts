@@ -129,6 +129,11 @@ export const claudeCodeAdapter: AgentAdapter = {
         return parseControlCancelRequest(obj)
       case 'command_lifecycle':
         return parseCommandLifecycle(obj)
+      // A running tool's elapsed-time tick: no surface in the chat UI (the tool call
+      // and its result carry what the user sees). Dropped like `system/task_progress`
+      // so it is never buffered, persisted, streamed to the hub or logged per tick.
+      case 'tool_progress':
+        return null
       default:
         return { kind: 'unknown', reason: 'unknown-type', raw: obj }
     }

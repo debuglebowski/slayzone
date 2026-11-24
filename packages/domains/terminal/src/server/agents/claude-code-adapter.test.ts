@@ -192,6 +192,21 @@ describe('ClaudeCodeAdapter tests', () => {
     }
   })
 
+  test('top-level tool_progress tick → null (drop noise, never streamed or logged)', () => {
+    const out = claudeCodeAdapter.parseLine(
+      JSON.stringify({
+        type: 'tool_progress',
+        tool_use_id: 'toolu_1',
+        tool_name: 'Bash',
+        parent_tool_use_id: null,
+        elapsed_time_seconds: 3,
+        uuid: 'u',
+        session_id: 's'
+      })
+    )
+    expect(out).toBe(null)
+  })
+
   test('user/text record → null (dup of synthetic user-message)', () => {
     const out = claudeCodeAdapter.parseLine(
       JSON.stringify({

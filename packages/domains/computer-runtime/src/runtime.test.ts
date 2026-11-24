@@ -174,6 +174,86 @@ describe('socketPeer', () => {
   })
 })
 
+describe('local link write buffer (flow control)', () => {
+  const MiB = 1024 * 1024
+  const closed = (socket: Socket) =>
+    new Promise<void>((resolve) =>
+      socket.destroyed ? resolve() : socket.once('close', () => resolve())
+    )
+
+  it('a burst far over 8 MiB queued ahead of a reply still delivers the reply; the link stays up', async () => {
+    // golden-comet 2026-11-23: heavy chat streaming queued > 8 MiB on the host's side
+    // of the link, the host refused the next write, and a refused REPLY tore the whole
+    // connector link down. A healthy reader must get every frame, the reply included.
+    const [a, b] = await socketPair()
+    const chunk = 'x'.repeat(MiB)
+    const host = socketPeer(a, {
+      request: () => {
+        for (let i = 0; i < 24; i++) host.rpc.notify('event', { chunk })
+        return 'answered'
+      }
+    })
+    let received = 0
+    const connector = socketPeer(b, { notify: () => void received++ })
+    try {
+      await expect(connector.rpc.request('dispatch', {}, 10_000)).resolves.toBe('answered')
+      expect(received).toBe(24)
+      expect(host.closeReason()).toBeUndefined()
+      expect(connector.closeReason()).toBeUndefined()
+    } finally {
+      host.close()
+      connector.close()
+    }
+  })
+
+  it('a reader paused with a backlog under the ceiling keeps the link and gets every frame', async () => {
+    const [a, b] = await socketPair()
+    const host = socketPeer(a, { writeCeilingBytes: 64 * MiB })
+    let received = 0
+    const connector = socketPeer(b, { notify: () => void received++ })
+    b.pause()
+    try {
+      const chunk = 'x'.repeat(MiB)
+      for (let i = 0; i < 16; i++) host.rpc.notify('event', { chunk })
+      await new Promise((r) => setTimeout(r, 300))
+      expect(host.closeReason()).toBeUndefined()
+      b.resume()
+      while (received < 16) await new Promise((r) => setTimeout(r, 20))
+      expect(host.closeReason()).toBeUndefined()
+    } finally {
+      host.close()
+      connector.close()
+    }
+  })
+
+  it('queued bytes over the ceiling drop the link at once, with the reason', async () => {
+    const [a, b] = await socketPair()
+    const host = socketPeer(a, { writeCeilingBytes: 4 * MiB })
+    const connector = socketPeer(b)
+    b.pause()
+    try {
+      const chunk = 'x'.repeat(MiB)
+      for (let i = 0; i < 8; i++) host.rpc.notify('event', { chunk })
+      await closed(a)
+      expect(host.closeReason()).toMatch(
+        /peer not reading fast enough: .* MiB queued over the 4\.0 MiB ceiling/
+      )
+    } finally {
+      host.close()
+      connector.close()
+    }
+  })
+
+  it('a write after the link closed fails that write, not silently', async () => {
+    const [a, b] = await socketPair()
+    const host = socketPeer(a)
+    const connector = socketPeer(b)
+    host.close()
+    await expect(host.rpc.request('x')).rejects.toThrow()
+    connector.close()
+  })
+})
+
 it('local connector relay carries cancellation by request id into the host handler', async () => {
   const [a, b] = await socketPair()
   let entered!: () => void, finish!: () => void, signal: AbortSignal | undefined
