@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, Plus } from 'lucide-react'
+import { ChevronRight, Folders, Plus } from 'lucide-react'
 import { HubScope, useFederationOrNull, useHubConnection } from '@slayzone/transport/client'
 import { computerStatus } from '@slayzone/computers/labels'
 import { cn } from '@slayzone/ui'
@@ -53,7 +53,7 @@ function NavItem({
         navigate(route)
       }}
       className={cn(
-        'flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors',
+        'flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors',
         active
           ? 'bg-accent font-semibold text-foreground'
           : 'text-foreground hover:bg-accent/50'
@@ -94,7 +94,7 @@ function FoldRow({
         aria-expanded={open}
         aria-label={`${open ? 'Fold' : 'Unfold'} ${label}`}
         onClick={() => onToggle(!open)}
-        className="grid h-8 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        className="grid h-7 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground"
         data-testid="settings-nav-fold"
       >
         <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
@@ -110,38 +110,25 @@ const PANEL_PAGES = [
   ['panels/browser', 'Browser']
 ] as const
 
-function PanelsGroup() {
-  const route = useSettingsViewStore((s) => s.route)
-  const inside = route.kind === 'prefs' && route.page.startsWith('panels/')
-  const [open, setOpen] = useFold('panels', inside)
+/** The Panels section: the shared panels page, then one page per panel. */
+function PanelsSection() {
   return (
-    <>
-      <FoldRow open={open} onToggle={setOpen} label="Panels">
-        <NavItem
-          route={prefs('panels')}
-          testId="settings-nav-panels"
-          onOpen={() => setOpen(true)}
-          match={(r) =>
-            r.kind === 'prefs' && (r.page === 'panels' || r.page.startsWith('panels/web:'))
-          }
-        >
-          Panels
+    <Section title="Panels">
+      <NavItem
+        route={prefs('panels')}
+        testId="settings-nav-panels"
+        match={(r) =>
+          r.kind === 'prefs' && (r.page === 'panels' || r.page.startsWith('panels/web:'))
+        }
+      >
+        General
+      </NavItem>
+      {PANEL_PAGES.map(([page, label]) => (
+        <NavItem key={page} route={prefs(page)} testId={`settings-nav-${page.replace('/', '-')}`}>
+          {label}
         </NavItem>
-      </FoldRow>
-      {open && (
-        <div className="ml-3.5 border-l pl-1.5">
-          {PANEL_PAGES.map(([page, label]) => (
-            <NavItem
-              key={page}
-              route={prefs(page)}
-              testId={`settings-nav-${page.replace('/', '-')}`}
-            >
-              {label}
-            </NavItem>
-          ))}
-        </div>
-      )}
-    </>
+      ))}
+    </Section>
   )
 }
 
@@ -157,7 +144,7 @@ function Section({
   return (
     <div className="pb-9">
       {/* pr-0: the action's w-6 box lines up with the fold chevrons' w-6 box below */}
-      <div className="mb-1 flex h-7 items-center pl-2.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      <div className="flex h-6 items-center pl-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
         {title}
         {action && <span className="ml-auto">{action}</span>}
       </div>
@@ -173,7 +160,7 @@ export function SettingsNav() {
   const hubs = useNavHubs()
   const navigate = useSettingsViewStore((s) => s.navigate)
   return (
-    <nav className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-6" aria-label="Settings sections">
+    <nav className="min-h-0 flex-1 overflow-y-auto px-3 pt-6 pb-6" aria-label="Settings sections">
       <Section title="Preferences">
         <NavItem route={prefs('appearance')} testId="settings-nav-appearance">
           Appearance
@@ -181,11 +168,11 @@ export function SettingsNav() {
         <NavItem route={prefs('layout')} testId="settings-nav-layout">
           Layout
         </NavItem>
-        <PanelsGroup />
         <NavItem route={prefs('telemetry')} testId="settings-nav-telemetry">
           Privacy & telemetry
         </NavItem>
       </Section>
+      <PanelsSection />
       <Section title="App">
         <NavItem route={app('about')} testId="settings-nav-about">
           About
@@ -222,6 +209,9 @@ export function SettingsNav() {
           )
         )}
         <NavItem route={{ kind: 'projects' }} testId="settings-nav-all-projects">
+          <LeadSlot>
+            <Folders className="size-3.5 text-muted-foreground" />
+          </LeadSlot>
           All projects
         </NavItem>
       </Section>
@@ -229,9 +219,18 @@ export function SettingsNav() {
   )
 }
 
+/** A row's leading 18px box (dot, icon, project blob), so labels after it line up. */
+function LeadSlot({ children }: { children?: ReactNode }) {
+  return (
+    <span aria-hidden className="grid size-[18px] shrink-0 place-items-center">
+      {children}
+    </span>
+  )
+}
+
 /** Live connection dot of a federated hub. */
 function HubConnectionDot({ hubId }: { hubId: string }) {
-  return <StatusDot tone={toneOfConnection(useHubConnection(hubId))} className="ml-auto" />
+  return <StatusDot tone={toneOfConnection(useHubConnection(hubId))} />
 }
 
 function HubNavRow({ hub, onOpen }: { hub: NavHub; onOpen?: () => void }) {
@@ -243,13 +242,13 @@ function HubNavRow({ hub, onOpen }: { hub: NavHub; onOpen?: () => void }) {
       // a legacy deep link names no hub (`hubId: null`): it means the default one
       match={(r) => r.kind === 'hub' && (r.hubId === hub.id || (r.hubId === null && hub.isDefault))}
     >
+      <LeadSlot>{hub.id && <HubConnectionDot hubId={hub.id} />}</LeadSlot>
       <span className="truncate">{hub.label}</span>
       {hub.isDefault && (
         <span className="shrink-0 rounded-full border px-1.5 text-[10px] leading-4 text-muted-foreground">
           default
         </span>
       )}
-      {hub.id && <HubConnectionDot hubId={hub.id} />}
     </NavItem>
   )
 }
@@ -284,8 +283,10 @@ function HubNavGroup({ hub }: { hub: NavHub }) {
                 route={{ kind: 'computer', hubId: hub.id ?? '', computerId: c.id, tab: 'general' }}
                 match={(r) => r.kind === 'computer' && r.computerId === c.id}
               >
+                <LeadSlot>
+                  <StatusDot tone={computerStatus(c).tone} />
+                </LeadSlot>
                 <span className="truncate">{c.name}</span>
-                <StatusDot tone={computerStatus(c).tone} className="ml-auto" />
               </NavItem>
             ))}
           {(projects.data ?? []).map((p) => (

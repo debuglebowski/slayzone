@@ -67,8 +67,8 @@ export function SettingsView(pageProps: SettingsPagesProps) {
             </kbd>
           </button>
         </div>
-        <SettingsSearchBox />
         <SettingsNav />
+        <SettingsSearchBox />
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="window-drag-region h-11" />
@@ -81,7 +81,7 @@ export function SettingsView(pageProps: SettingsPagesProps) {
 }
 
 /**
- * Search box over the nav: typing shows results (a `search` route); clearing it
+ * Search box under the nav: typing shows results (a `search` route); clearing it
  * returns to the page that was open before.
  */
 function SettingsSearchBox() {
@@ -90,7 +90,7 @@ function SettingsSearchBox() {
   const [before, setBefore] = useState<SettingsRoute | null>(null)
   const query = route.kind === 'search' ? route.query : ''
   return (
-    <div className="px-3 pt-2">
+    <div className="shrink-0 px-3 pt-2 pb-3">
       <label className="flex h-8 items-center gap-2 rounded-md border border-input px-2.5 text-sm dark:bg-input/30">
         <Search className="size-3.5 text-muted-foreground" />
         <input

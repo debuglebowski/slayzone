@@ -61,13 +61,12 @@ test.describe('Settings', () => {
     await expect(mainWindow.locator('html')).not.toHaveClass(/dark/)
   })
 
-  test('Panels folds its pages: clicking it opens the page and unfolds them', async ({
-    mainWindow
-  }) => {
+  test('Panels section lists General and every panel page', async ({ mainWindow }) => {
     const view = await openSettingsDialog(mainWindow)
-    await expect(view.getByTestId('settings-nav-panels-terminal')).toHaveCount(0)
-    await view.getByTestId('settings-nav-panels').click()
+    await expect(view.getByTestId('settings-nav-panels')).toHaveText('General')
     await expect(view.getByTestId('settings-nav-panels-terminal')).toBeVisible()
+    await view.getByTestId('settings-nav-panels').click()
+    await expect(view.getByTestId('settings-nav-panels')).toHaveAttribute('aria-current', 'page')
     // About holds diagnostics; CLI has its own page.
     await view.getByTestId('settings-nav-about').click()
     await expect(view.getByText('Diagnostics enabled')).toBeVisible()
