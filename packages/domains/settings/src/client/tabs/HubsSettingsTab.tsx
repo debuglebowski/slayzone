@@ -121,7 +121,15 @@ type DeviceSignInState =
   | { kind: 'waiting'; flowId: string; userCode: string; verificationUri: string; opened: boolean }
   | { kind: 'fail'; error: string }
 
-export function HubsSettingsTab() {
+export function HubsSettingsTab({
+  onlyHubId
+}: {
+  /**
+   * Show just this hub's card (the Settings view's hub Overview tab). Same state and
+   * Save & relaunch as the full list; no add-hub slot.
+   */
+  onlyHubId?: string
+} = {}) {
   // OrNull: the Chromium fork renders this surface outside a FederationProvider.
   const fed = useFederationOrNull()
   const [remotes, setRemotes] = useState<HubEntry[]>([])
@@ -725,131 +733,36 @@ export function HubsSettingsTab() {
         <div className="space-y-3" data-testid="hubs-list">
           {/* Local hub — always listed; the toggle is the "run a local hub"
               switch (server_mode). Off requires ≥1 remote to fall back to. */}
-          {hubCardFor('local', 'Local', true, 'hub-row-local', {
-            identity: (
-              <>
-                {defaultStar('local', 'hub-default-local', !effectiveRunLocal)}
-                <span className="text-base font-semibold">Local</span>
-                <span className="text-muted-foreground truncate font-mono text-xs">
-                  this machine
-                </span>
-              </>
-            ),
-            status: effectiveRunLocal ? (
-              <HubStatus tone="ok" label="Running" />
-            ) : (
-              <HubStatus tone="idle" label="Off" />
-            ),
-            // Restarting is the main thing you do to a running local hub, so it
-            // takes the primary slot; when the hub is off there is nothing to cycle.
-            primary: effectiveRunLocal ? (
-              <IconButton
-                variant="ghost"
-                size="icon-sm"
-                disabled={restarting}
-                aria-label="Restart local hub"
-                title="Restart local hub (stops running agents + terminals; reconnects automatically)"
-                onClick={() => void restartLocal()}
-                data-testid="hub-local-restart"
-              >
-                <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
-              </IconButton>
-            ) : null,
-            more: (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="More local hub actions"
-                    data-testid="hub-more-local"
-                  >
-                    <MoreHorizontal className="size-3.5" />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {/* A checkbox item, not a plain action: "run a local hub" is a
-                    persistent setting, and the menu has to show which way it is
-                    set without being opened twice to find out. */}
-                  <DropdownMenuCheckboxItem
-                    checked={effectiveRunLocal}
-                    disabled={!canDisableLocal}
-                    onCheckedChange={(v) => {
-                      setRunLocalHub(v)
-                      if (!v && defaultHubId === 'local') setDefaultHubId(remotes[0]?.id ?? 'local')
-                      setDirty(true)
-                    }}
-                    data-testid="hub-local-toggle"
-                  >
-                    Run a local hub
-                  </DropdownMenuCheckboxItem>
-                  {bannerToggle('local', 'hub-banner-toggle-local')}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )
-          })}
-          {remotes.map((h) => {
-            const verifyState = verifyStates[h.id]
-            const authNeed = authNeeds[h.id]
-            // Offer Sign in only when this hub actually gates — or when we
-            // could not find out ('unknown': unreachable, or a hub too old to
-            // report it), where withholding the button would strip the only
-            // way to authenticate. An absent entry means the probe is still in
-            // flight; stay quiet rather than flash a button that may not apply.
-            // A stored sign-in the hub refused (`expired`) or that could not be
-            // confirmed (`unreachable`) needs a sign-in as much as none at all —
-            // withholding it there leaves no way out of the red state.
-            const sessionState = sessionOf(h.id)?.state
-            const showSignIn =
-              sessionState === 'expired' ||
-              sessionState === 'unreachable' ||
-              (!hasStoredSignIn(h.id) && (authNeed === 'gated' || authNeed === 'unknown'))
-            return hubCardFor(h.id, h.label, false, 'hub-row-remote', {
+          {(!onlyHubId || onlyHubId === 'local') &&
+            hubCardFor('local', 'Local', true, 'hub-row-local', {
               identity: (
                 <>
-                  {defaultStar(h.id, 'hub-default-remote')}
-                  <span
-                    className="truncate text-base font-semibold"
-                    title={h.label}
-                    data-testid="hub-label"
-                  >
-                    {h.label}
+                  {defaultStar('local', 'hub-default-local', !effectiveRunLocal)}
+                  <span className="text-base font-semibold">Local</span>
+                  <span className="text-muted-foreground truncate font-mono text-xs">
+                    this machine
                   </span>
-                  {/* The address no longer carries state spans appended to it — the
-                    signed-in / verify result the identity used to grow now live in
-                    the status slot, where they line up across cards. `hub-signed-in`
-                    stays as a marker so the fact remains separately assertable. */}
-                  <span className="text-muted-foreground truncate font-mono text-xs" title={h.url}>
-                    {h.url}
-                  </span>
-                  {hasStoredSignIn(h.id) && (
-                    <span className="sr-only" data-testid="hub-signed-in">
-                      signed in
-                    </span>
-                  )}
                 </>
               ),
-              status: remoteStatus(h),
-              // Sign in is the only remote action worth a labelled button — it is
-              // the one that unblocks everything else. Verify/Edit/Remove are
-              // occasional, so they go behind `⋯`.
-              primary: showSignIn ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                  title={
-                    sessionState === 'expired' || sessionState === 'unreachable'
-                      ? 'Sign in again to replace the stored sign-in'
-                      : authNeed === 'gated'
-                        ? 'This hub requires a signed-in account'
-                        : "Could not confirm whether this hub requires sign-in — it's offered just in case"
-                  }
-                  onClick={() => openSignIn(h.id)}
-                  data-testid="hub-signin-open"
+              status: effectiveRunLocal ? (
+                <HubStatus tone="ok" label="Running" />
+              ) : (
+                <HubStatus tone="idle" label="Off" />
+              ),
+              // Restarting is the main thing you do to a running local hub, so it
+              // takes the primary slot; when the hub is off there is nothing to cycle.
+              primary: effectiveRunLocal ? (
+                <IconButton
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={restarting}
+                  aria-label="Restart local hub"
+                  title="Restart local hub (stops running agents + terminals; reconnects automatically)"
+                  onClick={() => void restartLocal()}
+                  data-testid="hub-local-restart"
                 >
-                  Sign in
-                </Button>
+                  <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
+                </IconButton>
               ) : null,
               more: (
                 <DropdownMenu>
@@ -857,100 +770,207 @@ export function HubsSettingsTab() {
                     <IconButton
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`More actions for ${h.label}`}
-                      data-testid="hub-more-remote"
+                      aria-label="More local hub actions"
+                      data-testid="hub-more-local"
                     >
                       <MoreHorizontal className="size-3.5" />
                     </IconButton>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      disabled={verifyState?.kind === 'probing' || !h.url}
-                      onSelect={() => void verifyHub(h)}
-                      data-testid="hub-verify"
+                    {/* A checkbox item, not a plain action: "run a local hub" is a
+                    persistent setting, and the menu has to show which way it is
+                    set without being opened twice to find out. */}
+                    <DropdownMenuCheckboxItem
+                      checked={effectiveRunLocal}
+                      disabled={!canDisableLocal}
+                      onCheckedChange={(v) => {
+                        setRunLocalHub(v)
+                        if (!v && defaultHubId === 'local')
+                          setDefaultHubId(remotes[0]?.id ?? 'local')
+                        setDirty(true)
+                      }}
+                      data-testid="hub-local-toggle"
                     >
-                      <PlugZap className="size-3.5" />
-                      {verifyState?.kind === 'probing' ? 'Checking…' : 'Verify reachable'}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openEdit(h)} data-testid="hub-edit-open">
-                      <Pencil className="size-3.5" />
-                      Edit name &amp; address
-                    </DropdownMenuItem>
-                    {bannerToggle(h.id, 'hub-banner-toggle-remote')}
-                    {/* Separated: removing a hub is the one item here that destroys
-                      configuration, and it must not sit one slip away from Edit. */}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() => removeHub(h.id)}
-                      data-testid="hub-remove"
-                    >
-                      <Trash2 className="size-3.5" />
-                      Remove hub
-                    </DropdownMenuItem>
+                      Run a local hub
+                    </DropdownMenuCheckboxItem>
+                    {bannerToggle('local', 'hub-banner-toggle-local')}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )
-            })
-          })}
-          {/* Add-hub card — dashed, so it reads as a slot rather than a hub. */}
-          <div className="border-border rounded-lg border border-dashed" data-testid="hub-add-row">
-            {addingHub ? (
-              <div className="px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={newUrl}
-                    onChange={(e) => {
-                      setNewUrl(e.target.value)
-                      setProbe({ kind: 'idle' })
-                    }}
-                    placeholder="https://box.lan:7800 or wss://box.lan:7800/trpc"
-                    className="max-w-lg font-mono"
-                    data-testid="hub-add-url"
-                  />
+            })}
+          {remotes
+            .filter((h) => !onlyHubId || h.id === onlyHubId)
+            .map((h) => {
+              const verifyState = verifyStates[h.id]
+              const authNeed = authNeeds[h.id]
+              // Offer Sign in only when this hub actually gates — or when we
+              // could not find out ('unknown': unreachable, or a hub too old to
+              // report it), where withholding the button would strip the only
+              // way to authenticate. An absent entry means the probe is still in
+              // flight; stay quiet rather than flash a button that may not apply.
+              // A stored sign-in the hub refused (`expired`) or that could not be
+              // confirmed (`unreachable`) needs a sign-in as much as none at all —
+              // withholding it there leaves no way out of the red state.
+              const sessionState = sessionOf(h.id)?.state
+              const showSignIn =
+                sessionState === 'expired' ||
+                sessionState === 'unreachable' ||
+                (!hasStoredSignIn(h.id) && (authNeed === 'gated' || authNeed === 'unknown'))
+              return hubCardFor(h.id, h.label, false, 'hub-row-remote', {
+                identity: (
+                  <>
+                    {defaultStar(h.id, 'hub-default-remote')}
+                    <span
+                      className="truncate text-base font-semibold"
+                      title={h.label}
+                      data-testid="hub-label"
+                    >
+                      {h.label}
+                    </span>
+                    {/* The address no longer carries state spans appended to it — the
+                    signed-in / verify result the identity used to grow now live in
+                    the status slot, where they line up across cards. `hub-signed-in`
+                    stays as a marker so the fact remains separately assertable. */}
+                    <span
+                      className="text-muted-foreground truncate font-mono text-xs"
+                      title={h.url}
+                    >
+                      {h.url}
+                    </span>
+                    {hasStoredSignIn(h.id) && (
+                      <span className="sr-only" data-testid="hub-signed-in">
+                        signed in
+                      </span>
+                    )}
+                  </>
+                ),
+                status: remoteStatus(h),
+                // Sign in is the only remote action worth a labelled button — it is
+                // the one that unblocks everything else. Verify/Edit/Remove are
+                // occasional, so they go behind `⋯`.
+                primary: showSignIn ? (
                   <Button
                     variant="outline"
-                    disabled={probe.kind === 'probing' || !newUrl.trim()}
-                    onClick={() => {
-                      void probeUrl()
-                    }}
-                    data-testid="hub-probe"
+                    size="sm"
+                    className="text-xs"
+                    title={
+                      sessionState === 'expired' || sessionState === 'unreachable'
+                        ? 'Sign in again to replace the stored sign-in'
+                        : authNeed === 'gated'
+                          ? 'This hub requires a signed-in account'
+                          : "Could not confirm whether this hub requires sign-in — it's offered just in case"
+                    }
+                    onClick={() => openSignIn(h.id)}
+                    data-testid="hub-signin-open"
                   >
-                    {probe.kind === 'probing' ? 'Checking…' : 'Validate'}
+                    Sign in
                   </Button>
-                  <Button disabled={probe.kind !== 'ok'} onClick={addHub} data-testid="hub-add">
-                    Add
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={collapseAddHub}
-                    data-testid="hub-add-cancel"
-                  >
-                    <X className="size-4" />
-                  </Button>
+                ) : null,
+                more: (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <IconButton
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`More actions for ${h.label}`}
+                        data-testid="hub-more-remote"
+                      >
+                        <MoreHorizontal className="size-3.5" />
+                      </IconButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        disabled={verifyState?.kind === 'probing' || !h.url}
+                        onSelect={() => void verifyHub(h)}
+                        data-testid="hub-verify"
+                      >
+                        <PlugZap className="size-3.5" />
+                        {verifyState?.kind === 'probing' ? 'Checking…' : 'Verify reachable'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => openEdit(h)} data-testid="hub-edit-open">
+                        <Pencil className="size-3.5" />
+                        Edit name &amp; address
+                      </DropdownMenuItem>
+                      {bannerToggle(h.id, 'hub-banner-toggle-remote')}
+                      {/* Separated: removing a hub is the one item here that destroys
+                      configuration, and it must not sit one slip away from Edit. */}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => removeHub(h.id)}
+                        data-testid="hub-remove"
+                      >
+                        <Trash2 className="size-3.5" />
+                        Remove hub
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )
+              })
+            })}
+          {/* Add-hub card — dashed, so it reads as a slot rather than a hub. */}
+          {!onlyHubId && (
+            <div
+              className="border-border rounded-lg border border-dashed"
+              data-testid="hub-add-row"
+            >
+              {addingHub ? (
+                <div className="px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={newUrl}
+                      onChange={(e) => {
+                        setNewUrl(e.target.value)
+                        setProbe({ kind: 'idle' })
+                      }}
+                      placeholder="https://box.lan:7800 or wss://box.lan:7800/trpc"
+                      className="max-w-lg font-mono"
+                      data-testid="hub-add-url"
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={probe.kind === 'probing' || !newUrl.trim()}
+                      onClick={() => {
+                        void probeUrl()
+                      }}
+                      data-testid="hub-probe"
+                    >
+                      {probe.kind === 'probing' ? 'Checking…' : 'Validate'}
+                    </Button>
+                    <Button disabled={probe.kind !== 'ok'} onClick={addHub} data-testid="hub-add">
+                      Add
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={collapseAddHub}
+                      data-testid="hub-add-cancel"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="h-4 text-xs" data-testid="hub-probe-result">
+                    {probe.kind === 'ok' && (
+                      <span className="text-green-500">✓ reachable — {probe.normalizedUrl}</span>
+                    )}
+                    {probe.kind === 'fail' && (
+                      <span className="text-destructive">✗ {probe.reason}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="h-4 text-xs" data-testid="hub-probe-result">
-                  {probe.kind === 'ok' && (
-                    <span className="text-green-500">✓ reachable — {probe.normalizedUrl}</span>
-                  )}
-                  {probe.kind === 'fail' && (
-                    <span className="text-destructive">✗ {probe.reason}</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAddingHub(true)}
-                className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-3 py-2.5 text-sm"
-                data-testid="hub-add-open"
-              >
-                <Plus className="size-4" />
-                Add new hub
-              </button>
-            )}
-          </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddingHub(true)}
+                  className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-3 py-2.5 text-sm"
+                  data-testid="hub-add-open"
+                >
+                  <Plus className="size-4" />
+                  Add new hub
+                </button>
+              )}
+            </div>
+          )}
           {dirty && (
             <Button
               className="w-full"

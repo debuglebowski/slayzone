@@ -180,7 +180,9 @@ export const PROJECT_MOVE_TABLES = [
   'test_file_notes',
   'ai_config_items',
   'ai_config_project_selections',
-  'activity_events'
+  'activity_events',
+  // The project's own values for hub settings (plans/settings-by-scope.md).
+  'project_settings'
 ] as const
 export type ProjectMoveTable = (typeof PROJECT_MOVE_TABLES)[number]
 

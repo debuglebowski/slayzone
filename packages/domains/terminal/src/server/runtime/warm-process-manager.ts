@@ -154,6 +154,12 @@ interface WarmDeps {
   ops: WarmPoolDataOps
   isEnabled: () => boolean
   /**
+   * Whether ONE project wants a warm agent (its own startup mode, else the hub's —
+   * plans/settings-by-scope.md). Sync, a cache like `isEnabled`. Absent: every
+   * project follows `isEnabled`.
+   */
+  isEnabledForProject?: (projectId: string) => boolean
+  /**
    * Refresh whatever `isEnabled` reads, awaited before each reconcile.
    *
    * `isEnabled` must stay SYNC (it is consulted on the claim path), so the enabled
@@ -261,6 +267,7 @@ export async function reserveWarmTaskId(criteria: {
   flags: string | null
 }): Promise<string | null> {
   if (!deps || shuttingDown || !deps.isEnabled()) return null
+  if (deps.isEnabledForProject && !deps.isEnabledForProject(criteria.projectId)) return null
   if (criteria.mode !== WARM_MODE) return null
   const handle = warm.get(criteria.projectId)
   if (!handle || handle.state !== 'ready') return null
@@ -477,7 +484,7 @@ async function reconcile(): Promise<void> {
   const desired = new Set<string>()
   for (const counts of tabCountsByWindow.values()) {
     for (const [projectId, count] of Object.entries(counts)) {
-      if (count > 0) desired.add(projectId)
+      if (count > 0 && (deps.isEnabledForProject?.(projectId) ?? true)) desired.add(projectId)
     }
   }
   const willSpawn = [...desired].filter((p) => !warm.has(p) && !spawning.has(p))

@@ -28,6 +28,7 @@
     "test:e2e:chat": "node ../../../scripts/ci-lock.mjs test:e2e:chat -- npx playwright test --config playwright.config.ts e2e/chat/"
   },
   "dependencies": {
+    "@slayzone/settings-core": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@trpc/server": "^11.24.0",
     "better-sqlite3": "^13.0.3",

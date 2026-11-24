@@ -282,7 +282,9 @@ async function buildHydrateOpts(
   const pillsOwnFlags = chatOwnsSpawnFlags(opts.mode)
   if (pillsOwnFlags) {
     resolvedChatMode = await resolveSafeChatMode(
-      chatModeOverride ?? providerCfg.chatMode ?? (await data.getDefaultChatMode(opts.mode))
+      chatModeOverride ??
+        providerCfg.chatMode ??
+        (await data.getDefaultChatMode(opts.mode, opts.taskId))
     )
     providerFlags = chatModeToFlags(resolvedChatMode)
   } else if (chatModeOverride) {
@@ -296,7 +298,7 @@ async function buildHydrateOpts(
   } else if (providerCfg.flags) {
     providerFlags = parseShellArgs(providerCfg.flags)
   } else {
-    const stored = providerCfg.chatMode ?? (await data.getDefaultChatMode(opts.mode))
+    const stored = providerCfg.chatMode ?? (await data.getDefaultChatMode(opts.mode, opts.taskId))
     resolvedChatMode = await resolveSafeChatMode(stored)
     providerFlags = chatModeToFlags(resolvedChatMode)
   }
@@ -504,14 +506,14 @@ const CODEX_KNOWN_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'
  * project, Claude its fixed catalog. null = unset or no longer offered.
  */
 async function userDefaultModel(data: ChatDataOps, taskId: string, mode: string) {
-  const raw = await data.readSetting(defaultChatModelSettingKey(mode))
+  const raw = await data.readSetting(defaultChatModelSettingKey(mode), taskId)
   if (mode === 'codex-chat') return (await codexModelOffered(data, taskId, raw)) ? raw : null
   return isValidModelForMode(mode, raw) ? raw : null
 }
 
 /** The user's default reasoning effort for a mode, when still valid; else null. */
 async function userDefaultEffort(data: ChatDataOps, taskId: string, mode: string) {
-  const raw = await data.readSetting(defaultChatEffortSettingKey(mode))
+  const raw = await data.readSetting(defaultChatEffortSettingKey(mode), taskId)
   if (mode === 'codex-chat') return (await codexEffortOffered(data, taskId, raw)) ? raw : null
   return isChatEffort(raw) ? raw : null
 }
@@ -1537,7 +1539,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
     getMode: async (taskId: string, mode: string): Promise<string> => {
       const cfg = await data.readProviderConfig(taskId, mode)
-      const stored = cfg.chatMode ?? (await data.getDefaultChatMode(mode))
+      const stored = cfg.chatMode ?? (await data.getDefaultChatMode(mode, taskId))
       // Hide stale `auto` from UI when capability is gone — pill would otherwise
       // show violet, and the next mode change would attempt a forbidden flag.
       return resolveSafeChatMode(stored)

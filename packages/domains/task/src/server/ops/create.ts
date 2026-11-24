@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task-contracts'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects-contracts'
 import {
@@ -67,8 +68,8 @@ export async function createTaskOp(
   const agentId =
     data.agentId ??
     template?.agent_id ??
-    (await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'default_agent_id'"))
-      ?.value ??
+    // The project's own default agent, else the hub's (plans/settings-by-scope.md).
+    (await readEffectiveSettingValue(db, 'default_agent_id', data.projectId)) ??
     'claude-code'
 
   // Build provider_config from agents defaults + template + overrides
@@ -233,9 +234,9 @@ async function reserveWarmAgent(
 ): Promise<string | null> {
   if (!deps.reserveWarmTaskId || !data.openAfterCreate) return null
   if (data.parentId || data.repoName || task.selectedRepo) return null
-  const startup = await db.get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [
-    AGENT_STARTUP_SETTING
-  ])
+  const startup = {
+    value: await readEffectiveSettingValue(db, AGENT_STARTUP_SETTING, data.projectId)
+  }
   // The task's main tab is created `new` (insertTaskRow), so the same rule the task
   // view applies on open decides here whether that open will spawn.
   if (

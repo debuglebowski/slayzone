@@ -748,10 +748,15 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'pty.write': 'agent',
   'settings.get': 'read',
   'settings.getAll': 'read',
+  'settings.effective': 'read',
+  'settings.projectOverrides': 'read',
+  'settings.overridesOfKey': 'read',
   'settings.getEffectiveTheme': 'read',
   'settings.getThemeSource': 'read',
   'settings.onThemeChanged': 'read',
   'settings.set': 'tasks',
+  'settings.setProjectOverride': 'tasks',
+  'settings.clearProjectOverride': 'tasks',
   'settings.setTheme': 'read',
   // ── sharing (T-100): who else may reach a project, task or artifact. Reading it is
   // the board's reads; changing who gets in is a task write (the owner gate needs manage). ──

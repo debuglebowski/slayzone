@@ -128,3 +128,8 @@ export { useStableCallback } from './useStableCallback'
 // react-query instance the provider uses — avoids a duplicate module with its
 // own QueryClient context.
 export { useQuery } from '@tanstack/react-query'
+export {
+  deviceSettingsLink,
+  type DeviceSettingsLinkOpts,
+  type DeviceSettingsStorage
+} from './deviceSettingsLink'

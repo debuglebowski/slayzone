@@ -54,6 +54,7 @@ run_harness packages/shared/test-utils/vitest-workers.test.ts
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
 # in the Wave C2 split; repointed here.
 run_harness packages/shared/settings-core/src/server/router.test.ts
+run_harness packages/domains/task-terminals/src/server/tab-flags.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
 run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/domains/projects/src/server/projects-router.test.ts
@@ -1505,6 +1506,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
   packages/shared/transport/src/client/runtime.test.ts \
   packages/shared/transport/src/client/compactBytes.test.ts \
+  packages/shared/transport/src/client/deviceSettingsLink.test.ts \
   packages/apps/web-shell/src/window-api.test.ts \
   packages/apps/web-shell/src/artifact-export.test.ts \
   packages/apps/web-shell/src/client-save.test.ts \
@@ -1742,6 +1744,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
   packages/shared/settings-core/src/server/service.test.ts \
   packages/shared/settings-core/src/server/scope.test.ts \
+  packages/shared/settings-core/src/shared/registry.test.ts \
   packages/domains/projects/src/server/project-access.test.ts \
   packages/apps/hub/src/auth-db.test.ts \
   packages/apps/api/src/http/rest-api/agent-hook.test.ts \

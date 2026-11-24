@@ -814,7 +814,8 @@ async function exportProjectRows(
       ),
       activity_events: await all(
         'SELECT * FROM activity_events WHERE project_id = ? AND task_id IS NULL'
-      )
+      ),
+      project_settings: await all('SELECT * FROM project_settings WHERE project_id = ?')
     },
     ...(await projectSettings(db, projectId, userId)),
     folder

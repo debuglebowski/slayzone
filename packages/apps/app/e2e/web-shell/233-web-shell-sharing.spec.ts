@@ -169,9 +169,8 @@ test.describe('web shell sharing — two people, one login hub', () => {
       // The owner adds the member as View in Project Settings → Members.
       await signIn(ownerPage, hub, hub.owner.email, hub.owner.password)
       await expect(ownerPage.getByText('Secret Task').first()).toBeVisible({ timeout: 30_000 })
-      const dialog = ownerPage
-        .getByRole('dialog')
-        .filter({ has: ownerPage.getByRole('heading', { name: 'Project Settings' }) })
+      // The project's page in the full-window Settings view.
+      const dialog = ownerPage.getByTestId('settings-project-page')
       await ownerPage
         .locator('[data-slot="sidebar"]')
         .first()
@@ -179,9 +178,9 @@ test.describe('web shell sharing — two people, one login hub', () => {
         .last()
         .click({ button: 'right' })
       await ownerPage.getByRole('menuitem', { name: 'Settings', exact: true }).click()
-      await dialog.getByText('Members', { exact: true }).first().click()
+      await dialog.getByTestId('project-settings-tab-members').click()
       await expect(dialog.getByTestId('project-members-tab')).toBeVisible()
-      // Page-level test ids: an open Select hides the dialog from role queries.
+      // Page-level test ids: an open Select hides the page from role queries.
       const person = ownerPage.getByTestId('project-member-picker-person')
       await expect(async () => {
         if (!(await ownerPage.getByRole('listbox').isVisible())) await person.click()

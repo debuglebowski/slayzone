@@ -10,6 +10,7 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@slayzone/settings-core": "workspace:*",
     "@slayzone/agent-panels": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/api": "workspace:*",

@@ -559,7 +559,8 @@ export function createComputerChatServices(opts: {
               defaultChatModelSettingKey(mode),
               defaultChatEffortSettingKey(mode)
             ])
-            .map(async (key) => [key, await opts.legacyData.readSetting(key)])
+            // The task's project's own chat defaults, else the hub's.
+            .map(async (key) => [key, await opts.legacyData.readSetting(key, owner.taskId)])
         )
       ),
       terminalProviderConfig: await opts.legacyData.readProviderConfig(

@@ -29,103 +29,40 @@
  * So a migration that seeds a `user` key's default only seeds it for a hub without
  * login — put a per-user default in the client.
  */
-import { LEGACY_CHAT_TABLES_DROPPED_SETTING } from '@slayzone/platform/legacy-chat-tables'
+import {
+  LOCAL_COMPUTER_WORK_ROOTS_KEY,
+  POLICY_LOCK_PREFIX,
+  projectOfKeyedSetting,
+  settingRule
+} from '../shared/registry'
+
+export { LOCAL_COMPUTER_WORK_ROOTS_KEY, POLICY_LOCK_PREFIX }
 
 export type SettingScope = 'hub' | 'user' | 'internal'
 
-/** Read by hub server code (file named for the reader). */
-const HUB_KEYS: ReadonlySet<string> = new Set([
-  // task create (task ops, MCP create-subtask, REST subtasks + skills, ai-config)
-  'default_agent_id',
-  // task create (task ops shared.ts)
-  'auto_create_worktree_on_task_create',
-  'worktree_base_path',
-  // worktree create (worktrees composite-ops.ts)
-  'worktree_copy_behavior',
-  'worktree_copy_paths',
-  'worktree_submodule_init',
-  // idle-close sweep + warm pool (hub composition.ts)
-  'terminal_auto_close_idle',
-  'terminal_idle_close_value',
-  'terminal_idle_close_unit',
-  // agent startup mode (warm pool in hub composition.ts, task create's warm reserve,
-  // boot restore in task-terminals tab-flags.ts)
-  'terminal_agent_startup',
-  // test panel (test-panel-store.ts)
-  'test_profiles',
-  // diagnostics config (diagnostics-store.ts)
-  'diagnostics_enabled',
-  'diagnostics_verbose',
-  'diagnostics_include_pty_output',
-  'diagnostics_retention_days',
-  // ports (ws-server.ts, hub port-claim.ts)
-  'trpc_preferred_port',
-  'trpc_server_port',
-  'server_port',
-  // hub identity + backups (transport hub router, hub backup.ts)
-  'hub_label',
-  'backup_names',
-  // Legacy per-provider default flags: seeded by early migrations and read only by
-  // v61, which moved them to `terminal_modes.default_flags` (now `agents.default_flags`). Hub-wide by origin.
-  'default_claude_flags',
-  'default_codex_flags',
-  'default_cursor_flags',
-  'default_gemini_flags',
-  'default_opencode_flags'
-])
-
-/** Project-keyed config read by hub server code (ai-config handlers-store.ts, REST skills). */
-const HUB_PREFIXES: readonly string[] = ['ai_providers:', 'ai_instruction_variant:']
-
-/**
- * Per-provider chat defaults (`chat_default_mode:<agentId>` …) read by the
- * chat spawn (terminal chat-data-ops.ts) for tasks that never picked one. Not
- * project-keyed, so kept out of `HUB_PREFIXES` (`settingProjectId`).
- */
-const HUB_CHAT_DEFAULT_PREFIXES: readonly string[] = [
-  'chat_default_mode:',
-  'chat_default_model:',
-  'chat_default_effort:'
-]
-
-/** Server-only secrets (integrations credentials.ts). */
-const INTERNAL_PREFIXES: readonly string[] = ['integration:credential:']
-
-/**
- * The allowed roots the hub added to its own machine's local computer for worktree
- * bases and automation folders, so it can remove them again (hub
- * computer-project-sync.ts, final review M6). Server-only state.
- */
-export const LOCAL_COMPUTER_WORK_ROOTS_KEY = 'local_computer_work_roots'
-
 /**
  * Keys that describe this one machine, never another: left out of every export and
- * ignored by every import (final review round 3, R3-2). The local computer's id is
- * the same on every machine, so another machine's value would act on this one.
- * Also `internal`: the settings API neither serves nor writes them.
+ * ignored by every import (final review round 3, R3-2). Also `internal`: the settings
+ * API neither serves nor writes them. Declared in the registry (`machineLocal`).
  */
-const MACHINE_LOCAL_KEYS: ReadonlySet<string> = new Set([
-  LOCAL_COMPUTER_WORK_ROOTS_KEY,
-  // When THIS database dropped its legacy chat tables (robustness plan §9 Phase 8):
-  // a record of this install's schema, meaningless in any other.
-  LEGACY_CHAT_TABLES_DROPPED_SETTING
-])
-
 export function isMachineLocalSetting(key: string): boolean {
-  return MACHINE_LOCAL_KEYS.has(key)
+  return settingRule(key)?.machineLocal === true
 }
 
+/**
+ * Where a key is stored and who may write it, from the registry
+ * (`../shared/registry`). Device keys are stored like `user` keys: per user on a hub
+ * with login (each device keeps its own copy on top, `deviceSettingsLink`).
+ */
 export function settingScope(key: string): SettingScope {
-  if (INTERNAL_PREFIXES.some((p) => key.startsWith(p))) return 'internal'
-  if (MACHINE_LOCAL_KEYS.has(key)) return 'internal'
-  if (HUB_KEYS.has(key) || HUB_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
-  if (HUB_CHAT_DEFAULT_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
+  const kind = settingRule(key)?.kind
+  if (kind === 'internal') return 'internal'
+  if (kind === 'hub') return 'hub'
   return 'user'
 }
 
 /** The project a project-keyed hub key (`ai_providers:<projectId>` …) belongs to, or
  *  null for any other key. An export of one user's content (T-101) keeps only theirs. */
 export function settingProjectId(key: string): string | null {
-  const prefix = HUB_PREFIXES.find((p) => key.startsWith(p))
-  return prefix ? key.slice(prefix.length) || null : null
+  return projectOfKeyedSetting(key)
 }

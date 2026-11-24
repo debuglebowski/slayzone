@@ -11,11 +11,25 @@ export { settingsEvents, type SettingsEventMap } from './events'
 export {
   isMachineLocalSetting,
   LOCAL_COMPUTER_WORK_ROOTS_KEY,
+  POLICY_LOCK_PREFIX,
   settingProjectId,
   settingScope,
   type SettingScope
 } from './scope'
 export { adoptLegacyUserSettings } from './adopt-legacy'
+export {
+  clearProjectOverride,
+  isLockedForProjects,
+  isProjectOverridable,
+  listOverridesOfKey,
+  listProjectOverrides,
+  NotOverridableError,
+  readEffectiveSetting,
+  readEffectiveSettingValue,
+  setProjectOverride,
+  type EffectiveSetting,
+  type SettingSource
+} from './project-settings'
 export { settingsRouter, type SettingsRouter, type SettingsMounts } from './router'
 export { settingsWriteProcedure, settingWriteNeedsAdmin } from './settings-admin'
 export {

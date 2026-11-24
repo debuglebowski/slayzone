@@ -6,7 +6,9 @@
   "main": "./src/server/index.ts",
   "types": "./src/server/index.ts",
   "exports": {
-    "./server": "./src/server/index.ts"
+    "./server": "./src/server/index.ts",
+    "./device-keys": "./src/shared/device-keys.ts",
+    "./registry": "./src/shared/registry.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

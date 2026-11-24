@@ -27,6 +27,7 @@ test.describe('Settings', () => {
     await openSettingsDialog(mainWindow)
     // The default agent is a hub setting: the hub's Agents & providers page.
     await dialog.getByTestId('settings-nav-hub').first().click()
+    await dialog.getByTestId('hub-tab-agents').click()
     await expect(dialog.getByText('Default agent provider')).toBeVisible({ timeout: 5_000 })
   }
 
@@ -67,11 +68,7 @@ test.describe('Settings', () => {
 
     await openTerminalSettings(mainWindow)
 
-    const modeTrigger = settingsDialog(mainWindow)
-      .getByText('Default agent provider')
-      .locator('xpath=..')
-      .locator('[data-slot="select-trigger"]')
-      .first()
+    const modeTrigger = settingsDialog(mainWindow).getByTestId('default-agent-select')
     await modeTrigger.click()
     await mainWindow.getByRole('option', { name: 'Codex', exact: true }).click()
     await expect(modeTrigger).toHaveText(/Codex/)

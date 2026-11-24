@@ -1,10 +1,20 @@
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
+import { settingScope } from './scope'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
 import { settingsWriteProcedure } from './settings-admin'
 import { SettingsService } from './service'
 import { settingsEvents } from './events'
 import { getSettingsHostDeps, notifySettingsWritten } from './settings-host-deps'
+import {
+  clearProjectOverride,
+  isLockedForProjects,
+  listOverridesOfKey,
+  listProjectOverrides,
+  readEffectiveSetting,
+  setProjectOverride
+} from './project-settings'
 
 const themeInput = z.enum(['light', 'dark', 'system'])
 
@@ -54,6 +64,64 @@ export const settingsRouter = router({
     }),
 
   getAll: publicProcedure.query(({ ctx }) => settingsFor(ctx).getAll()),
+
+  // --- Project overrides of hub settings (plans/settings-by-scope.md, phase 3) ---
+
+  /** The value of hub setting `key` for work in `projectId`, and where it came from. */
+  effective: publicProcedure
+    .input(
+      z.object({
+        key: z.string(),
+        projectId: z.string().nullish(),
+        /** Instead of `projectId`: the project of this task (what a task view has). */
+        taskId: z.string().nullish()
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      // Hub keys only: per-user keys live per user (`settings.get`), and internal
+      // ones (credentials) are never served.
+      if (settingScope(input.key) !== 'hub') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `"${input.key}" is not a hub setting` })
+      }
+      const projectId =
+        input.projectId ??
+        (input.taskId
+          ? ((
+              await ctx.db.get<{ project_id: string }>(
+                'SELECT project_id FROM tasks WHERE id = ?',
+                [input.taskId]
+              )
+            )?.project_id ?? null)
+          : null)
+      return readEffectiveSetting(ctx.db, input.key, projectId)
+    }),
+
+  /** Every hub setting a project overrides (key → value). */
+  projectOverrides: publicProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(({ ctx, input }) => listProjectOverrides(ctx.db, input.projectId)),
+
+  /** Which projects on this hub override `key` (the hub page's "N projects override"). */
+  overridesOfKey: publicProcedure
+    .input(z.object({ key: z.string() }))
+    // Locked by the hub (phase 6): no project's own value applies, so none is listed.
+    .query(async ({ ctx, input }) =>
+      (await isLockedForProjects(ctx.db, input.key)) ? [] : listOverridesOfKey(ctx.db, input.key)
+    ),
+
+  setProjectOverride: publicProcedure
+    .input(z.object({ projectId: z.string(), key: z.string(), value: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await setProjectOverride(ctx.db, input.projectId, input.key, input.value)
+      notifySettingsWritten({ keys: [input.key] })
+    }),
+
+  clearProjectOverride: publicProcedure
+    .input(z.object({ projectId: z.string(), key: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await clearProjectOverride(ctx.db, input.projectId, input.key)
+      notifySettingsWritten({ keys: [input.key] })
+    }),
 
   // --- Theme (Electron nativeTheme — host-only, via injected host deps) ---
 

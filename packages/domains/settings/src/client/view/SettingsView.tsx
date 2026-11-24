@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowLeft, Search } from 'lucide-react'
+import type { SettingsRoute } from '../settings-route'
 import { closeSettings, useSettingsViewStore } from '../settings-view-store'
 import { SettingsNav } from './SettingsNav'
 import { SettingsPage, type SettingsPagesProps } from './SettingsPages'
@@ -66,6 +67,7 @@ export function SettingsView(pageProps: SettingsPagesProps) {
             </kbd>
           </button>
         </div>
+        <SettingsSearchBox />
         <SettingsNav />
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto">
@@ -74,6 +76,36 @@ export function SettingsView(pageProps: SettingsPagesProps) {
           <SettingsPage key={JSON.stringify(route)} route={route} {...pageProps} />
         </div>
       </main>
+    </div>
+  )
+}
+
+/**
+ * Search box over the nav: typing shows results (a `search` route); clearing it
+ * returns to the page that was open before.
+ */
+function SettingsSearchBox() {
+  const route = useSettingsViewStore((s) => s.route)
+  const navigate = useSettingsViewStore((s) => s.navigate)
+  const [before, setBefore] = useState<SettingsRoute | null>(null)
+  const query = route.kind === 'search' ? route.query : ''
+  return (
+    <div className="px-3 pt-2">
+      <label className="flex h-8 items-center gap-2 rounded-md border border-input px-2.5 text-sm dark:bg-input/30">
+        <Search className="size-3.5 text-muted-foreground" />
+        <input
+          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+          placeholder="Search settings"
+          value={query}
+          data-testid="settings-search"
+          onChange={(e) => {
+            const q = e.target.value
+            if (route.kind !== 'search') setBefore(route)
+            if (q) navigate({ kind: 'search', query: q })
+            else navigate(before ?? { kind: 'prefs', page: 'appearance' })
+          }}
+        />
+      </label>
     </div>
   )
 }

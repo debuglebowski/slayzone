@@ -1,4 +1,5 @@
 import type { TimelineRecordStore } from './chat-timeline-records'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   LegacyChatStorageRetiredError,
@@ -124,12 +125,16 @@ export interface ChatDataOps {
   /** `agents.default_flags` for a mode (PTY fallback flags). */
   getModeDefaultFlags(mode: string): Promise<string | null>
   /**
-   * Chat mode for a task with no stored `chatMode`: the user's default
-   * (`settings`, Settings → Providers) when valid, else the built-in default.
+   * Chat mode for a task with no stored `chatMode`: the default for `taskId`'s
+   * project (its own, else the hub's — Settings → a hub / a project) when valid,
+   * else the built-in default.
    */
-  getDefaultChatMode(mode: string): Promise<string>
-  /** Raw `settings` value (null when unset) — the chat model/effort defaults. */
-  readSetting(key: string): Promise<string | null>
+  getDefaultChatMode(mode: string, taskId?: string): Promise<string>
+  /**
+   * Raw hub setting (null when unset) — the chat model/effort defaults. With
+   * `taskId`, that task's project's own value wins (plans/settings-by-scope.md).
+   */
+  readSetting(key: string, taskId?: string): Promise<string | null>
   /** Append to the task_conversations ledger (+ transition-slice dual-writes). */
   recordConversation(input: RecordConversationInput): Promise<void>
   /** Did this task run `conversationId` in `mode` (honored, not deleted)? */
@@ -305,6 +310,15 @@ const PATCH_PROVIDER_CONFIG_SQL = `UPDATE tasks SET provider_config = (
 ) WHERE id = ?`
 
 export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore): ChatDataOps {
+  /** The project a task belongs to (null: no task, or it is gone): its overrides apply. */
+  const projectOfTask = async (taskId?: string): Promise<string | null> =>
+    taskId
+      ? ((
+          await db.get<{ project_id: string }>('SELECT project_id FROM tasks WHERE id = ?', [
+            taskId
+          ])
+        )?.project_id ?? null)
+      : null
   /** The computer a task's chat runs on — the one holding its sessions (the one resolver, S5). */
   const ledgerComputer = (taskId: string): Promise<string | null> =>
     resolveTaskComputerId(db, taskId)
@@ -402,19 +416,17 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       return row?.default_flags ?? null
     },
 
-    getDefaultChatMode: async (mode) => {
-      const row = (await db
-        .prepare('SELECT value FROM settings WHERE key = ?')
-        .get(defaultChatModeSettingKey(mode))) as { value: string | null } | undefined
-      return resolveDefaultChatMode(mode, row?.value)
+    getDefaultChatMode: async (mode, taskId) => {
+      const value = await readEffectiveSettingValue(
+        db,
+        defaultChatModeSettingKey(mode),
+        await projectOfTask(taskId)
+      )
+      return resolveDefaultChatMode(mode, value)
     },
 
-    readSetting: async (key) => {
-      const row = (await db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) as
-        | { value: string | null }
-        | undefined
-      return row?.value || null
-    },
+    readSetting: async (key, taskId) =>
+      (await readEffectiveSettingValue(db, key, await projectOfTask(taskId))) || null,
 
     // The session ledger lives on the computer holding the task's sessions.
     recordConversation: async (input) =>

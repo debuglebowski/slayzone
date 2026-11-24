@@ -3,6 +3,8 @@
 // eval read of `window.api` must happen after this assignment), then boot.
 // zod-jitless: the bundle's `zod` (vite.config.ts alias), so every schema module already
 // depends on it; imported here too so the eval probe is off even before any schema.
+import { deviceSettingsLink } from '@slayzone/transport/client'
+import { isDeviceSetting } from '@slayzone/settings-core/device-keys'
 import './zod-jitless'
 import './main.css'
 import { createRoot } from 'react-dom/client'
@@ -77,7 +79,14 @@ async function boot(): Promise<void> {
   //
   // No token (T-13): the browser sends the session cookie with the `/trpc` upgrade on
   // its own, and the hub honours it only from this page's Origin.
-  initTrpcClient(trpcUrl, { links: [browserOpenExternalLink, authInvalidationLink()] })
+  initTrpcClient(trpcUrl, {
+    links: [
+      browserOpenExternalLink,
+      authInvalidationLink(),
+      // Device-only preferences stay in this browser (plans/settings-by-scope.md, phase 4).
+      deviceSettingsLink({ isDeviceKey: isDeviceSetting, storage: window.localStorage })
+    ]
+  })
 
   const { mountApp } = await import('@slayzone/renderer-app')
   // The web shell has no onboarding (MountAppOptions in renderer-app's main.tsx).

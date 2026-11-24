@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { readSettingForTask } from '../effective-setting'
 import { useTRPCClient } from '../trpc'
 import { hubAllows } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
@@ -208,7 +209,7 @@ export function useChatLifecycle({
     // Not cancelled on re-render: the ref makes this one-shot, so a cancelled
     // query would never start the agent (`chatApi` identity can change per render).
     void Promise.all([
-      trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
+      readSettingForTask(trpcClient, AGENT_STARTUP_SETTING, taskId),
       hubAllows(trpcClient, 'chat.start'),
       computerCanStartNow(trpcClient, tabId)
     ])

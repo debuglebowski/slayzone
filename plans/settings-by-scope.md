@@ -68,6 +68,28 @@ Done (first slice):
 - Every project-settings entry point opens the view; `ProjectSettingsDialog` is gone
   (`ProjectSettingsPanel`, tests ported). Saving keeps the page open with a toast.
 
-Next:
-- Hub Overview tab (identity, status, default, sign in, disconnect) from `HubsSettingsTab`.
-- Fork: menu/shortcut parity (it has none today).
+- Hub Overview tab (the Hubs page's own card for that hub) and the fork's settings
+  shortcuts. Phase 1 done.
+
+## Phases 3–6 status
+
+- **3, project overrides:** `project_settings` (v225); `readEffectiveSetting` in
+  settings-core is the one resolver, used by task create (UI, import, REST subtasks, MCP
+  create-subtask), ai-config / skills provider lists, boot restore (`tab-flags`), the
+  warm pool, and chat defaults (hub-local spawn and the computer bootstrap).
+  Overridable: default agent, agent startup, chat mode/model/effort per provider.
+  `settings.effective / projectOverrides / overridesOfKey / setProjectOverride /
+  clearProjectOverride`; project page Agents tab; "N projects use their own value" on
+  hub rows. Overrides travel with a project moved between hubs. Not in the project
+  export file (that format already omits automations, templates …).
+- **4, device storage:** `deviceSettingsLink` (transport) on each shell's own hub
+  connection keeps `isDeviceSetting` keys (settings-core `device-keys`) in local
+  storage; first read copies the hub's value, writes still go to the hub too (older
+  apps, change events). Note on Appearance with 2+ hubs.
+- **5, all projects + search:** All projects page (per hub, own vs hub values, filter,
+  bulk set default agent / reset); search box over every page, hub tab, computer and
+  project.
+- **6, policy:** hub admins lock an overridable setting for projects
+  (`policy_lock:<key>`, a `hub` key so admin-only); locked = project values ignored and
+  refused, shown as "Locked by hub". Implemented at hub level (hub admins), not as a
+  separate org layer.

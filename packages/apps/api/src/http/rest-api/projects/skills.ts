@@ -1,4 +1,5 @@
 import type { Express } from 'express'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import { defaultProviderFromMode, filterConfigurableCliProviders } from '@slayzone/ai-config/shared'
 import type { CliProvider } from '@slayzone/ai-config/shared'
 import type { RestApiDeps } from '../types'
@@ -38,10 +39,8 @@ async function loadProjectProviders(
     }
   }
 
-  const modeRow = await db.get<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'default_agent_id' LIMIT 1`
-  )
-  return [defaultProviderFromMode(modeRow?.value)]
+  const mode = await readEffectiveSettingValue(db, 'default_agent_id', projectId)
+  return [defaultProviderFromMode(mode ?? undefined)]
 }
 
 /**

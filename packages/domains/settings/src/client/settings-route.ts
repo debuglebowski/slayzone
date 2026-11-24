@@ -13,6 +13,10 @@ export type SettingsRoute =
   | { kind: 'prefs'; page: string }
   | { kind: 'app'; page: string }
   | { kind: 'hubs' }
+  /** Every project on every hub, compared (phase 5). */
+  | { kind: 'projects' }
+  /** Search across every page, hub, computer and project. */
+  | { kind: 'search'; query: string }
   | { kind: 'hub'; hubId: string | null; tab: string; sub?: string }
   | { kind: 'computer'; hubId: string; computerId: string; tab: string }
   | {

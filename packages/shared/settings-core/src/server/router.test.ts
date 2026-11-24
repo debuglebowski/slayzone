@@ -146,3 +146,114 @@ test('settings router: integration credentials are never served or written, to a
     .get() as { value: string }
   expect(row.value).toBe('plain:ghp_secret')
 })
+
+// --- Project overrides (plans/settings-by-scope.md, phase 3) ---
+
+await h.slayDb.run(`INSERT INTO projects (id, name, color) VALUES ('p-ovr', 'Override', '#000')`)
+
+test('settings router: a project override wins over the hub value, clearing restores it', async () => {
+  await caller.set({ key: 'default_agent_id', value: 'claude-code' })
+  expect(await caller.effective({ key: 'default_agent_id', projectId: 'p-ovr' })).toEqual({
+    value: 'claude-code',
+    source: 'hub'
+  })
+  await caller.setProjectOverride({ projectId: 'p-ovr', key: 'default_agent_id', value: 'codex' })
+  expect(await caller.effective({ key: 'default_agent_id', projectId: 'p-ovr' })).toEqual({
+    value: 'codex',
+    source: 'project'
+  })
+  // The hub itself is untouched.
+  expect(await caller.effective({ key: 'default_agent_id' })).toEqual({
+    value: 'claude-code',
+    source: 'hub'
+  })
+  expect(await caller.projectOverrides({ projectId: 'p-ovr' })).toEqual({
+    default_agent_id: 'codex'
+  })
+  expect(await caller.overridesOfKey({ key: 'default_agent_id' })).toEqual([
+    { projectId: 'p-ovr', value: 'codex' }
+  ])
+  await caller.clearProjectOverride({ projectId: 'p-ovr', key: 'default_agent_id' })
+  expect(await caller.effective({ key: 'default_agent_id', projectId: 'p-ovr' })).toEqual({
+    value: 'claude-code',
+    source: 'hub'
+  })
+})
+
+test('settings router: chat defaults per provider are overridable; other keys are not', async () => {
+  await caller.setProjectOverride({
+    projectId: 'p-ovr',
+    key: 'chat_default_mode:claude-code',
+    value: 'plan'
+  })
+  expect(
+    (await caller.effective({ key: 'chat_default_mode:claude-code', projectId: 'p-ovr' })).source
+  ).toBe('project')
+  await expect(
+    caller.setProjectOverride({ projectId: 'p-ovr', key: 'terminal_font_size', value: '20' })
+  ).rejects.toThrow(/cannot override/)
+})
+
+test('settings router: effective resolves a task to its project', async () => {
+  await h.slayDb.run(`INSERT INTO projects (id, name, color) VALUES ('p-task', 'T', '#000')`)
+  await h.slayDb.run(
+    `INSERT INTO tasks (id, project_id, title, status) VALUES ('t-ovr', 'p-task', 'x', 'todo')`
+  )
+  await caller.setProjectOverride({
+    projectId: 'p-task',
+    key: 'terminal_agent_startup',
+    value: 'instant'
+  })
+  expect(await caller.effective({ key: 'terminal_agent_startup', taskId: 't-ovr' })).toEqual({
+    value: 'instant',
+    source: 'project'
+  })
+})
+
+test('settings router: an unset key reports the built-in default', async () => {
+  expect(await caller.effective({ key: 'chat_default_effort:codex', projectId: 'p-ovr' })).toEqual({
+    value: null,
+    source: 'default'
+  })
+})
+
+test('settings router: deleting a project drops its overrides', async () => {
+  await caller.setProjectOverride({
+    projectId: 'p-ovr',
+    key: 'terminal_agent_startup',
+    value: 'manual'
+  })
+  await h.slayDb.run(`DELETE FROM projects WHERE id = 'p-ovr'`)
+  expect(await h.slayDb.all(`SELECT * FROM project_settings WHERE project_id = 'p-ovr'`)).toEqual(
+    []
+  )
+})
+
+test('settings router: effective serves hub keys only', async () => {
+  await expect(caller.effective({ key: 'integration:credential:x' })).rejects.toThrow(
+    /not a hub setting/
+  )
+  await expect(caller.effective({ key: 'viewState' })).rejects.toThrow(/not a hub setting/)
+})
+
+test('settings router: a hub lock ignores project values and refuses new ones', async () => {
+  await h.slayDb.run(
+    `INSERT OR IGNORE INTO projects (id, name, color) VALUES ('p-lock', 'L', '#000')`
+  )
+  await caller.set({ key: 'default_agent_id', value: 'claude-code' })
+  await caller.setProjectOverride({ projectId: 'p-lock', key: 'default_agent_id', value: 'codex' })
+  await caller.set({ key: 'policy_lock:default_agent_id', value: '1' })
+  expect(await caller.effective({ key: 'default_agent_id', projectId: 'p-lock' })).toEqual({
+    value: 'claude-code',
+    source: 'hub',
+    locked: true
+  })
+  await expect(
+    caller.setProjectOverride({ projectId: 'p-lock', key: 'default_agent_id', value: 'gemini' })
+  ).rejects.toThrow(/locked by the hub/)
+  await caller.set({ key: 'policy_lock:default_agent_id', value: '0' })
+  expect(await caller.effective({ key: 'default_agent_id', projectId: 'p-lock' })).toEqual({
+    value: 'codex',
+    source: 'project'
+  })
+})

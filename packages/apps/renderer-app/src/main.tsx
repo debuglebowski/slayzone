@@ -1,4 +1,6 @@
 import { createRoot } from 'react-dom/client'
+import { deviceSettingsLink } from '@slayzone/transport/client'
+import { isDeviceSetting } from '@slayzone/settings-core/device-keys'
 import { TrpcProvider, electronBootstrap } from '@slayzone/transport/client'
 import { initTrpcClient } from './trpc'
 import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
@@ -100,7 +102,10 @@ export async function mountApp({ onboarding = true }: MountAppOptions = {}): Pro
   // The browser panel drives the native mojo host directly through
   // `window.api.browserHost` (window-api-shim) — nothing about it rides tRPC.
   // FIRST initTrpcClient call wins; TrpcProvider reuses the singleton.
-  initTrpcClient(trpcUrl)
+  // Device-only preferences stay on this device (plans/settings-by-scope.md, phase 4).
+  initTrpcClient(trpcUrl, {
+    links: [deviceSettingsLink({ isDeviceKey: isDeviceSetting, storage: window.localStorage })]
+  })
 
   // Provider stack mirrors the Electron renderer (packages/apps/app/src/renderer/
   // src/main.tsx): TrpcProvider OUTERMOST (Pty/Appearance/Telemetry providers call

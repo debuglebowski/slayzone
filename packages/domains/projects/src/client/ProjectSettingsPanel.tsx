@@ -45,12 +45,20 @@ export interface ProjectSettingsHost {
   renderTemplatesTab?: (projectId: string) => ReactNode
 }
 
+/** A tab another feature adds to a project's settings (shown after General). */
+export interface ProjectSettingsExtraTab {
+  key: string
+  label: string
+  render: () => ReactNode
+}
+
 export interface ProjectSettingsPanelProps extends ProjectSettingsHost {
   integrationOnboardingProvider?: IntegrationOnboardingProvider | null
   onIntegrationOnboardingHandled?: () => void
+  extraTabs?: ProjectSettingsExtraTab[]
   project: Project
   tab: string
-  onTabChange: (tab: ProjectSettingsTab) => void
+  onTabChange: (tab: string) => void
   /** A tab's "done" action (e.g. after relocating the folder). */
   onClose: () => void
 }
@@ -75,7 +83,8 @@ export function ProjectSettingsPanel({
   onGroupByChange,
   integrationOnboardingProvider = null,
   onIntegrationOnboardingHandled,
-  renderTemplatesTab
+  renderTemplatesTab,
+  extraTabs = []
 }: ProjectSettingsPanelProps) {
   const { trackProject } = useTrack()
   const lookupStatusSyncLock = useStatusSyncLockLookup()
@@ -94,10 +103,11 @@ export function ProjectSettingsPanel({
 
   // An onboarding provider (a project created from GitHub/Linear) lands on
   // Integrations, whatever tab the route named.
-  const tab = integrationOnboardingProvider ? 'integrations' : normalizeTab(rawTab)
+  const tab: string = integrationOnboardingProvider ? 'integrations' : normalizeTab(rawTab)
 
-  const tabs: Array<[ProjectSettingsTab, string]> = [
+  const tabs: Array<[string, string]> = [
     ['general', 'General'],
+    ...extraTabs.map((t): [string, string] => [t.key, t.label]),
     ['environment', 'Environment'],
     ['tasks/general', 'Tasks'],
     ['tasks/statuses', 'Statuses'],
@@ -141,6 +151,7 @@ export function ProjectSettingsPanel({
         ))}
       </div>
 
+      {extraTabs.find((t) => t.key === tab)?.render()}
       {tab === 'general' && (
         <GeneralTab
           project={project}

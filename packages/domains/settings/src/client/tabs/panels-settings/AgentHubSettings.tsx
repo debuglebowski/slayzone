@@ -21,6 +21,7 @@ import {
 import { getVisibleModes, getModeLabel, groupAgents, useAgents } from '@slayzone/terminal'
 import { useTRPC } from '../../trpc'
 import { useDefaultAgent } from '../use-default-agent'
+import { OverrideCount } from '../../view/OverrideCount'
 
 const AGENT_STARTUP_OPTIONS: Array<{
   value: AgentStartupMode
@@ -107,9 +108,12 @@ export function AgentHubSettings() {
   return (
     <>
       <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-        <span className="text-sm text-muted-foreground">Default agent provider</span>
+        <span className="flex flex-col items-start gap-1">
+          <span className="text-sm text-muted-foreground">Default agent provider</span>
+          <OverrideCount settingKey={'default_agent_id'} />
+        </span>
         <Select value={defaultAgentId} onValueChange={(v) => setDefaultAgentId(v as AgentId)}>
-          <SelectTrigger className="max-w-sm">
+          <SelectTrigger className="max-w-sm" data-testid="default-agent-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent
@@ -140,7 +144,10 @@ export function AgentHubSettings() {
         </Select>
       </div>
       <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-        <span className="text-sm text-muted-foreground">Agent startup</span>
+        <span className="flex flex-col items-start gap-1">
+          <span className="text-sm text-muted-foreground">Agent startup</span>
+          <OverrideCount settingKey={AGENT_STARTUP_SETTING} />
+        </span>
         <div className="flex items-center gap-2">
           <Select
             value={agentStartupMode}

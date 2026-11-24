@@ -391,6 +391,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(supports-color@7.2.0)(zod@4.6.7)
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@trpc/server':
         specifier: ^11.24.0
         version: 11.24.0(patch_hash=692768755fd726c4b994698b0b889c88cf5efd4e20c4b3a27d80fc0b8736465f)(@types/express@5.0.6)(@types/ws@8.18.2)(typescript@7.1.0-dev.20261111.1)
@@ -1265,6 +1268,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/sidebar':
         specifier: workspace:*
         version: link:../../domains/sidebar
@@ -1344,6 +1350,9 @@ importers:
       '@slayzone/renderer-app':
         specifier: workspace:*
         version: link:../renderer-app
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts

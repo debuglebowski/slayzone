@@ -113,3 +113,4 @@ export {
   hasPendingPrompt
 } from '../shared/chat-prompts'
 export * from './utils'
+export { taskIdFromSessionId } from './session-id'

@@ -5967,6 +5967,22 @@ export const migrations: Migration[] = [
     up: (db) => {
       db.exec('ALTER TABLE computers ADD COLUMN health_json TEXT')
     }
+  },
+  {
+    // A project's own value for a hub setting (plans/settings-by-scope.md, phase 3):
+    // the default agent, agent startup, chat defaults … Absent row = the hub's value.
+    // Which keys may be overridden is settings-core's `isProjectOverridable`.
+    version: 225,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE project_settings (
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          key        TEXT NOT NULL,
+          value      TEXT NOT NULL,
+          PRIMARY KEY (project_id, key)
+        );
+      `)
+    }
   }
 ]
 

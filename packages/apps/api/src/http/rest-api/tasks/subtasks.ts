@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import type { Express } from 'express'
 import { getDefaultStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
@@ -145,11 +146,7 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
 
       const agentId =
         parent.agent_id ??
-        (
-          await db.get<{ value: string }>(
-            `SELECT value FROM settings WHERE key = 'default_agent_id' LIMIT 1`
-          )
-        )?.value ??
+        (await readEffectiveSettingValue(db, 'default_agent_id', parent.project_id)) ??
         'claude-code'
 
       const providerConfig = await buildProviderConfig(db)

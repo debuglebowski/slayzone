@@ -318,6 +318,26 @@ export function HomeView({
     void useShortcutStore.getState().load()
   }, [])
   const searchKeys = resolveShortcutKeys(shortcutOverrides, 'search') ?? ''
+  // Settings shortcuts (mod+, / mod+shift+,). The Electron app gets these from its
+  // menu; this shell has no menu, so it binds them here.
+  const settingsKeys = resolveShortcutKeys(shortcutOverrides, 'global-settings') ?? ''
+  const projectSettingsKeys = resolveShortcutKeys(shortcutOverrides, 'project-settings') ?? ''
+  useGuardedHotkeys(
+    settingsKeys,
+    (e) => {
+      e.preventDefault()
+      openSettings()
+    },
+    { enableOnFormTags: true }
+  )
+  useGuardedHotkeys(
+    projectSettingsKeys,
+    (e) => {
+      e.preventDefault()
+      if (selectedProjectId) openProjectSettings(selectedProjectId)
+    },
+    { enableOnFormTags: true }
+  )
 
   // The palette's file results open in the Home editor: switch to the Home tab so
   // the file is visible, then drive the editor through HomeContainer's handle.

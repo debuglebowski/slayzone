@@ -1,5 +1,6 @@
 import './assets/main.css'
 
+import { isDeviceSetting } from '@slayzone/settings-core/device-keys'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from '@slayzone/settings'
 import { loadTabStoreState, stopViewStatePersistence, useTabStore } from '@slayzone/tabs-state'
@@ -16,7 +17,8 @@ import {
   getHubConnectTraces,
   setDirectLinkProbe,
   setDirectRtcPeerFactory,
-  seedHubRegistry
+  seedHubRegistry,
+  deviceSettingsLink
 } from '@slayzone/transport/client'
 import { getHubClient, getTrpcClient, initTrpcClient } from './trpc'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
@@ -46,6 +48,14 @@ import { isBenignWindowError } from './lib/benignWindowError'
 import { startBootTimingsReport } from './lib/bootTimings'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
+
+/**
+ * Links of this window's own hub connection: device-only preferences (fonts, theme,
+ * terminal rendering) are kept on this device (plans/settings-by-scope.md, phase 4).
+ */
+const deviceLinks = () => [
+  deviceSettingsLink({ isDeviceKey: isDeviceSetting, storage: window.localStorage })
+]
 
 // Artifacts + git panels TaskDetailPage embeds (main + secondary task windows) —
 // registered before any render.
@@ -207,7 +217,7 @@ if (isFloatingGlobalAgentPanel) {
     // Initialize the tRPC client singleton NOW (before prefetch / React mount) so
     // module-scope callers — incl. taskDetailCache.prefetch below and getTrpcClient()
     // in stores — work. TrpcProvider reuses this same client (one WS connection).
-    initTrpcClient(trpcUrl)
+    initTrpcClient(trpcUrl, { links: deviceLinks() })
     // Wire the shortcut store's persistence to tRPC (was the preload
     // global). @slayzone/ui has no transport dependency, so the host injects the
     // backend. Closures are lazy — they call getTrpcClient() only when invoked,

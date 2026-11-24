@@ -1,4 +1,6 @@
 import type { Root } from 'react-dom/client'
+import { isDeviceSetting } from '@slayzone/settings-core/device-keys'
+import { deviceSettingsLink } from '@slayzone/transport/client'
 import { ThemeProvider } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { FederatedRoot, HubScope, seedHubRegistry } from '@slayzone/transport/client'
@@ -34,7 +36,10 @@ export function bootFloatingGlobalAgentPanel(
   return Promise.all([bootstrap.getServerUrl(), bootstrap.getWindowId()])
     .then(async ([server, windowId]) => {
       const { defaultHubId } = await seedHubRegistry(server, bootstrap)
-      initTrpcClient(withWindowId(server.url, windowId))
+      // Device-only preferences stay on this device (plans/settings-by-scope.md, phase 4).
+      initTrpcClient(withWindowId(server.url, windowId), {
+        links: [deviceSettingsLink({ isDeviceKey: isDeviceSetting, storage: window.localStorage })]
+      })
       root.render(
         <FederatedRoot decorateUrl={(url) => withWindowId(url, windowId)}>
           <HubScope

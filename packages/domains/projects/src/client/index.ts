@@ -2,6 +2,7 @@ export { CreateProjectDialog } from './CreateProjectDialog'
 export type { ProjectCreationContext, ProjectStartMode } from './CreateProjectDialog'
 export {
   ProjectSettingsPanel,
+  type ProjectSettingsExtraTab,
   type ProjectSettingsHost,
   type ProjectSettingsPanelProps,
   type ProjectSettingsTab

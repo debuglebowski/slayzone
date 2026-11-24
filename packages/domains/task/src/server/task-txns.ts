@@ -386,7 +386,8 @@ const PROJECT_IMPORT_ORDER = [
   'test_file_notes',
   'ai_config_items',
   'ai_config_project_selections',
-  'activity_events'
+  'activity_events',
+  'project_settings'
 ] as const
 
 /**

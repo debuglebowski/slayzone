@@ -1,4 +1,5 @@
 import { RefreshCw, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { OverrideCount } from '../../view/OverrideCount'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   agentModeLabel,
@@ -323,7 +324,10 @@ function DefaultChatModeRow({ modeId }: { modeId: string }) {
   const value = resolveDefaultChatMode(modeId, query.data)
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
-      <Label className="text-sm">Default Permission Mode</Label>
+      <div className="flex flex-col items-start gap-1">
+        <Label className="text-sm">Default Permission Mode</Label>
+        <OverrideCount settingKey={key} />
+      </div>
       <div className="space-y-1">
         <Select
           value={value}

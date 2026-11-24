@@ -1315,6 +1315,12 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'settings.get': checked(settingKey('key')),
   'settings.set': checked(settingKey('key')),
   'settings.getAll': listed(settingsMap),
+  // Project overrides of hub settings: a project's own values, so its access applies.
+  'settings.effective': checked(settingKey('key'), project('projectId'), task('taskId')),
+  'settings.projectOverrides': checked(project('projectId')),
+  'settings.overridesOfKey': listed(rows('projectId', 'project')),
+  'settings.setProjectOverride': needing('manage', checked(project('projectId'))),
+  'settings.clearProjectOverride': needing('manage', checked(project('projectId'))),
   'settings.getEffectiveTheme': none(HOST),
   'settings.getThemeSource': none(HOST),
   'settings.setTheme': none(HOST),

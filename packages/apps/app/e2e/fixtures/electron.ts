@@ -282,6 +282,13 @@ export async function resetApp(page: Page): Promise<void> {
       ).__testInvoke('app:reset-for-test')
     )
   }).toPass({ timeout: 15_000 })
+  // Device-only preferences live in this window's storage, not the hub the reset
+  // wiped (plans/settings-by-scope.md, phase 4): clear them too, before the reload.
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('slayzone:device-setting:')) localStorage.removeItem(key)
+    }
+  })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root', { timeout: 10_000 })
 

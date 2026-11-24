@@ -1,4 +1,5 @@
 import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from 'react'
+import { readSettingForTask } from './effective-setting'
 import { Play, Moon } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useSubscription } from '@slayzone/transport/client'
@@ -8,7 +9,11 @@ import {
   type TerminalHandle,
   type TerminalProps
 } from '@slayzone/terminal/client/LazyTerminal'
-import { isSessionKnownUnspawned, markSkipCache } from '@slayzone/terminal/client'
+import {
+  isSessionKnownUnspawned,
+  markSkipCache,
+  taskIdFromSessionId
+} from '@slayzone/terminal/client'
 import {
   agentStartsOnOpen,
   AGENT_STARTUP_SETTING,
@@ -180,7 +185,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       }
       void Promise.all([
         trpcClient.pty.exists.query({ sessionId }),
-        trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING })
+        readSettingForTask(trpcClient, AGENT_STARTUP_SETTING, taskIdFromSessionId(sessionId))
       ]).then(([exists, rawMode]) => {
         if (cancelled) return
         const startup = parseAgentStartupMode(rawMode)

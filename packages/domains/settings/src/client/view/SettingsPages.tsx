@@ -20,9 +20,13 @@ import { DiagnosticsSettingsTab } from '../tabs/DiagnosticsSettingsTab'
 import { LabsSettingsTab } from '../tabs/LabsSettingsTab'
 import { AboutSettingsTab } from '../tabs/AboutSettingsTab'
 import { ConnectionsSettingsTab } from '../tabs/ConnectionsSettingsTab'
+import { HubsSettingsTab } from '../tabs/HubsSettingsTab'
 import { SettingsTabIntro } from '../tabs/SettingsTabIntro'
 import { AgentHubSettings } from '../tabs/panels-settings/AgentHubSettings'
+import { AllProjectsPage } from './AllProjectsPage'
 import { ComputerPage } from './ComputerPage'
+import { SettingsSearchResults } from './SettingsSearch'
+import { ProjectAgentSettings } from './ProjectAgentSettings'
 import { useNavHubs } from './SettingsNav'
 
 export interface SettingsPagesProps {
@@ -46,7 +50,12 @@ export function SettingsPage({
   switch (route.kind) {
     case 'prefs':
       if (route.page === 'appearance')
-        return <AppearanceSettingsTab appBadgeProjects={appBadgeProjects} />
+        return (
+          <>
+            <DeviceNote />
+            <AppearanceSettingsTab appBadgeProjects={appBadgeProjects} />
+          </>
+        )
       if (route.page === 'layout') return <LayoutSettingsTab />
       if (route.page === 'telemetry') return <TelemetryPage />
       return (
@@ -71,7 +80,29 @@ export function SettingsPage({
       )
     case 'project':
       return <ProjectPage route={route} host={projectHost} live={projects} />
+    case 'projects':
+      return <AllProjectsPage />
+    case 'search':
+      return <SettingsSearchResults query={route.query} />
   }
+}
+
+/**
+ * Theme, fonts and terminal rendering are kept per device (phase 4). Said only where
+ * it can surprise: with more than one hub, i.e. an account other devices sign in to.
+ */
+function DeviceNote() {
+  const federation = useFederationOrNull()
+  if (!federation || federation.hubs.length < 2) return null
+  return (
+    <p
+      className="rounded-md border px-3 py-2 text-xs text-muted-foreground"
+      data-testid="settings-device-note"
+    >
+      Theme, fonts, text sizes and terminal rendering are saved on this device. Your other
+      devices keep their own.
+    </p>
+  )
 }
 
 function TelemetryPage() {
@@ -174,6 +205,7 @@ function HubPage({ route }: { route: HubRoute }) {
   const hub = hubs.find((h) => h.id === route.hubId) ?? hubs.find((h) => h.isDefault) ?? hubs[0]
   const isDefault = !!hub?.isDefault
   const tabs: Array<[string, string]> = [
+    ['overview', 'Overview'],
     ['agents', 'Agents & providers'],
     ['worktrees', 'Worktrees'],
     ...(isDefault
@@ -184,13 +216,16 @@ function HubPage({ route }: { route: HubRoute }) {
         ] as Array<[string, string]>)
       : [])
   ]
-  const tab = tabs.some(([k]) => k === route.tab) ? route.tab : 'agents'
+  const tab = tabs.some(([k]) => k === route.tab) ? route.tab : 'overview'
   const go = (next: Partial<HubRoute>) =>
     navigate({ ...route, hubId: hub?.id ?? null, sub: undefined, ...next })
   return (
     <div className="space-y-6" data-testid="settings-hub-page">
       <PageHeader crumb="Hubs" title={hub?.label ?? 'Hub'} />
       <PageTabs tabs={tabs} active={tab} onSelect={(t) => go({ tab: t })} testIdPrefix="hub-tab" />
+      {/* Status, sign-in, default, edit, remove and this hub's computers: the Hubs
+          page's own card (it scopes itself). */}
+      {tab === 'overview' && <HubsSettingsTab onlyHubId={hub?.id ?? 'local'} />}
       <ScopeOf hubId={hub?.id ?? null}>
         {tab === 'agents' && (
           <div className="space-y-8">
@@ -245,6 +280,13 @@ function ProjectPageBody({ route, host, live }: ProjectPageProps) {
         {...host}
         project={project}
         tab={route.tab}
+        extraTabs={[
+          {
+            key: 'agents',
+            label: 'Agents',
+            render: () => <ProjectAgentSettings projectId={project.id} />
+          }
+        ]}
         integrationOnboardingProvider={route.onboarding ?? null}
         onIntegrationOnboardingHandled={() =>
           navigate({ kind: 'project', projectId: route.projectId, tab: 'integrations' })

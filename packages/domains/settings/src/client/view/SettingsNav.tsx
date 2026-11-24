@@ -139,6 +139,9 @@ export function SettingsNav() {
             <HubNavGroup key="ambient" hub={hub} />
           )
         )}
+        <NavItem route={{ kind: 'projects' }} testId="settings-nav-all-projects">
+          All projects
+        </NavItem>
       </Section>
     </nav>
   )
@@ -152,7 +155,7 @@ function HubConnectionDot({ hubId }: { hubId: string }) {
 function HubNavRow({ hub }: { hub: NavHub }) {
   return (
     <NavItem
-      route={{ kind: 'hub', hubId: hub.id, tab: 'agents' }}
+      route={{ kind: 'hub', hubId: hub.id, tab: 'overview' }}
       testId="settings-nav-hub"
       // a legacy deep link names no hub (`hubId: null`): it means the default one
       match={(r) => r.kind === 'hub' && (r.hubId === hub.id || (r.hubId === null && hub.isDefault))}

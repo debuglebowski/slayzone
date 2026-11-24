@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import {
   AGENT_STARTUP_SETTING,
   isChatSupported,
@@ -58,13 +59,10 @@ export async function listHibernatedSessionIds(db: SlayzoneDb): Promise<string[]
  * their agent on every boot.
  */
 export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> {
-  const setting = (await db
-    .prepare('SELECT value FROM settings WHERE key = ?')
-    .get(AGENT_STARTUP_SETTING)) as { value: string } | undefined
-  if (!restoresRunningAgentsOnBoot(parseAgentStartupMode(setting?.value))) return []
+  const restores = projectRestoresAgents(db)
   const rows = (await db
     .prepare(
-      `SELECT tt.task_id, t.status, p.columns_config FROM terminal_tabs tt
+      `SELECT tt.task_id, t.project_id, t.status, p.columns_config FROM terminal_tabs tt
        JOIN tasks t ON t.id = tt.task_id
        LEFT JOIN projects p ON p.id = t.project_id
        WHERE tt.is_main = 1 AND tt.mode != 'terminal'
@@ -72,10 +70,36 @@ export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> 
          AND t.deleted_at IS NULL
          AND t.archived_at IS NULL`
     )
-    .all()) as Array<{ task_id: string; status: string; columns_config: string | null }>
-  return rows
-    .filter((r) => !isTerminalStatus(r.status, parseColumnsConfig(r.columns_config)))
-    .map((r) => r.task_id)
+    .all()) as Array<{
+    task_id: string
+    project_id: string
+    status: string
+    columns_config: string | null
+  }>
+  const out: string[] = []
+  for (const r of rows) {
+    if (isTerminalStatus(r.status, parseColumnsConfig(r.columns_config))) continue
+    if (await restores(r.project_id)) out.push(r.task_id)
+  }
+  return out
+}
+
+/**
+ * Whether a project's startup mode restores running agents at boot: its own mode
+ * (a project override), else the hub's. Memoized per call site — one read per project.
+ */
+function projectRestoresAgents(db: SlayzoneDb): (projectId: string) => Promise<boolean> {
+  const memo = new Map<string, Promise<boolean>>()
+  return (projectId) => {
+    let hit = memo.get(projectId)
+    if (!hit) {
+      hit = readEffectiveSettingValue(db, AGENT_STARTUP_SETTING, projectId).then((v) =>
+        restoresRunningAgentsOnBoot(parseAgentStartupMode(v))
+      )
+      memo.set(projectId, hit)
+    }
+    return hit
+  }
 }
 
 /** A chat tab the hub restarts at boot (see {@link listAutoRestoreChatTabs}). */
@@ -104,13 +128,10 @@ export async function listAutoRestoreChatTabs(
 ): Promise<AutoRestoreChatTab[]> {
   const mainTaskIds = new Set(await listAutoRestoreTaskIds(db))
   if (mainTaskIds.size === 0 && openTaskIds.size === 0) return []
-  const setting = (await db
-    .prepare('SELECT value FROM settings WHERE key = ?')
-    .get(AGENT_STARTUP_SETTING)) as { value: string } | undefined
-  if (!restoresRunningAgentsOnBoot(parseAgentStartupMode(setting?.value))) return []
+  const restores = projectRestoresAgents(db)
   const rows = (await db
     .prepare(
-      `SELECT tt.id, tt.task_id, tt.is_main, tt.mode, t.status, p.columns_config FROM terminal_tabs tt
+      `SELECT tt.id, tt.task_id, tt.is_main, tt.mode, t.project_id, t.status, p.columns_config FROM terminal_tabs tt
        JOIN tasks t ON t.id = tt.task_id
        LEFT JOIN projects p ON p.id = t.project_id
        WHERE tt.agent_state = 'running'
@@ -123,16 +144,20 @@ export async function listAutoRestoreChatTabs(
     task_id: string
     is_main: number
     mode: string
+    project_id: string
     status: string
     columns_config: string | null
   }>
-  return rows
-    .filter((r) => isChatSupported(r.mode))
-    .filter((r) =>
-      r.is_main
-        ? mainTaskIds.has(r.task_id)
-        : mainTaskIds.has(r.task_id) || openTaskIds.has(r.task_id)
-    )
-    .filter((r) => !isTerminalStatus(r.status, parseColumnsConfig(r.columns_config)))
-    .map((r) => ({ tabId: r.id, taskId: r.task_id, isMain: r.is_main === 1 }))
+  const out: AutoRestoreChatTab[] = []
+  for (const r of rows) {
+    if (!isChatSupported(r.mode)) continue
+    const wanted = r.is_main
+      ? mainTaskIds.has(r.task_id)
+      : mainTaskIds.has(r.task_id) || openTaskIds.has(r.task_id)
+    if (!wanted || isTerminalStatus(r.status, parseColumnsConfig(r.columns_config))) continue
+    // `manual` (the project's, else the hub's): every agent waits for Start.
+    if (!(await restores(r.project_id))) continue
+    out.push({ tabId: r.id, taskId: r.task_id, isMain: r.is_main === 1 })
+  }
+  return out
 }

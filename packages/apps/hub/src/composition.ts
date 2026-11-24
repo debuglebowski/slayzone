@@ -1,3 +1,8 @@
+import {
+  isLockedForProjects,
+  listOverridesOfKey,
+  POLICY_LOCK_PREFIX
+} from '@slayzone/settings-core/server'
 import { createChatRelayWatch } from './chat-relay-watch'
 import { createChatDirectWriteHandler } from './chat-direct-write'
 import { createTabChangeCoalescer } from './tab-change-coalescer'
@@ -1051,13 +1056,26 @@ export function composeServer(opts: {
   // pty moved to the sidecar; this restores it. `isEnabled` reads a cached
   // `terminal_agent_startup` (sync; refreshed on settings change): the pool runs in
   // the `auto` and `instant` startup modes, not `manual` (`warmPoolEnabled`).
+  // A project may set its own startup mode (`project_settings`, plans/settings-by-scope.md):
+  // the pool runs when the hub's mode or any project's own one wants it, and per
+  // project by that project's mode.
+  let hubPrewarm = false
+  let projectPrewarm = new Map<string, boolean>()
   let prewarmEnabled = false
   const refreshPrewarm = async (): Promise<void> => {
     try {
       const row = await db.get<{ value?: string }>('SELECT value FROM settings WHERE key = ?', [
         AGENT_STARTUP_SETTING
       ])
-      prewarmEnabled = warmPoolEnabled(parseAgentStartupMode(row?.value))
+      hubPrewarm = warmPoolEnabled(parseAgentStartupMode(row?.value))
+      // A hub lock (phase 6) puts every project on the hub's mode.
+      const own = (await isLockedForProjects(db, AGENT_STARTUP_SETTING))
+        ? []
+        : await listOverridesOfKey(db, AGENT_STARTUP_SETTING)
+      projectPrewarm = new Map(
+        own.map((o) => [o.projectId, warmPoolEnabled(parseAgentStartupMode(o.value))])
+      )
+      prewarmEnabled = hubPrewarm || [...projectPrewarm.values()].some(Boolean)
     } catch {
       /* keep last-known value */
     }
@@ -1078,12 +1096,18 @@ export function composeServer(opts: {
   // Every `settings.set` signals its key now: re-read only for this setting (or an
   // unscoped ping, which may have written anything).
   notifyEvents.on('settings-changed', (change) => {
-    if (!change || change.keys.includes(AGENT_STARTUP_SETTING)) void refreshPrewarm()
+    if (
+      !change ||
+      change.keys.includes(AGENT_STARTUP_SETTING) ||
+      change.keys.includes(POLICY_LOCK_PREFIX + AGENT_STARTUP_SETTING)
+    )
+      void refreshPrewarm()
   })
   initWarmProcessManager({
     db,
     ops: createDbWarmPoolDataOps(db, sessionStore),
     isEnabled: () => prewarmEnabled,
+    isEnabledForProject: (projectId) => projectPrewarm.get(projectId) ?? hubPrewarm,
     // `settings.set` writes the row but emits no settings-changed, so the cache
     // above would otherwise stay stale until the next boot — i.e. changing the
     // startup mode in Settings did nothing until restart.

@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import type { ProviderConfig, Task } from '@slayzone/task-contracts'
 import { chatOwnsSpawnFlags } from '@slayzone/terminal-contracts'
 import { taskEvents } from '../events.js'
@@ -33,10 +34,9 @@ export async function createImportedTaskOp(
 ): Promise<Task | null> {
   const id = crypto.randomUUID()
 
-  // Default agent from settings (no template path for imports)
+  // Default agent: the project's own, else the hub's (no template path for imports)
   const agentId =
-    (await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'default_agent_id'"))
-      ?.value ?? 'claude-code'
+    (await readEffectiveSettingValue(db, 'default_agent_id', data.projectId)) ?? 'claude-code'
 
   // Provider config from agents defaults
   const providerConfig: ProviderConfig = {}

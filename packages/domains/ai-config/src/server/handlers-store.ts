@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import { createHash } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
@@ -350,13 +351,10 @@ export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfig
     }
   }
 
-  async function getDefaultProviderKind(): Promise<CliProvider> {
-    const mode = (
-      (await db.prepare("SELECT value FROM settings WHERE key = 'default_agent_id'").get()) as
-        | { value: string }
-        | undefined
-    )?.value
-    return defaultProviderFromMode(mode)
+  /** The default agent's provider: `projectId`'s own default agent, else the hub's. */
+  async function getDefaultProviderKind(projectId?: string): Promise<CliProvider> {
+    const mode = await readEffectiveSettingValue(db, 'default_agent_id', projectId)
+    return defaultProviderFromMode(mode ?? undefined)
   }
 
   async function getEnabledProviders(projectId: string): Promise<CliProvider[]> {
@@ -374,7 +372,7 @@ export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfig
       providers = filterConfigurableCliProviders(active.map((p) => p.kind))
     }
     // Always include the default agent's provider
-    const defaultKind = await getDefaultProviderKind()
+    const defaultKind = await getDefaultProviderKind(projectId)
     if (!providers.includes(defaultKind)) {
       providers.push(defaultKind)
     }

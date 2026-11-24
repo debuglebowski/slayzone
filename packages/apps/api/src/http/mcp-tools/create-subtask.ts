@@ -1,4 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import { insertTaskRow, updateTask } from '@slayzone/task/server'
@@ -64,11 +65,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       const id = randomUUID()
       const agentId =
         parent.agent_id ??
-        (
-          (await deps.db
-            .prepare("SELECT value FROM settings WHERE key = 'default_agent_id'")
-            .get()) as { value: string } | undefined
-        )?.value ??
+        (await readEffectiveSettingValue(deps.db, 'default_agent_id', parent.project_id)) ??
         'claude-code'
       const providerConfig = await buildDefaultProviderConfig(deps.db)
       const projectColumns = await getProjectColumns(deps.db, parent.project_id)
