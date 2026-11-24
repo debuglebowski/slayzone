@@ -1,6 +1,6 @@
 /** Persistent process owner. Connector loss only detaches transport, never sessions. */
-import { createHmac, randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto'
-import { createServer, type Server } from 'node:net'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createServer, type Server, type Socket } from 'node:net'
 import {
   mkdirSync,
   readFileSync,
@@ -13,7 +13,6 @@ import {
   closeSync
 } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
-import { tmpdir } from 'node:os'
 import {
   connectLocal,
   socketPeer,
@@ -36,6 +35,14 @@ import {
   isStorageFatal,
   StructuralFaultError
 } from '@slayzone/platform/isolation'
+import {
+  hostEndpoint,
+  hostEndpointDir,
+  prepareEndpointDir,
+  probeEndpoint,
+  releaseEndpointDir,
+  sweepStaleEndpointDirs
+} from '@slayzone/platform/computer-endpoints'
 import {
   eraseQuarantinedForTask,
   quarantineWrite,
@@ -77,12 +84,72 @@ export function atomicRuntimeJson(path: string, value: unknown): void {
     throw error
   }
 }
-export function hostEndpoint(root: string): string {
-  const key = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 24)
-  if (process.platform === 'win32') return `\\\\.\\pipe\\slay-computer-${key}`
-  const dir = join(tmpdir(), `slay-computer-${process.getuid?.() ?? 'user'}-${key}`)
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  return join(dir, 'control.sock')
+export { hostEndpoint }
+
+/**
+ * Another session host is live on this root's control endpoint. The starting one
+ * has touched nothing (it binds before any shared state) and exits with
+ * `HOST_SUPERSEDED_EXIT_CODE`, which its launcher treats as "stop", not "restart".
+ */
+export class HostSupersededError extends Error {
+  constructor(
+    readonly endpoint: string,
+    readonly live: { pid?: number; version?: string }
+  ) {
+    super(
+      `another session host is live on ${endpoint} (live session host pid=${live.pid ?? '?'} version=${live.version ?? '?'}); superseded`
+    )
+    this.name = 'HostSupersededError'
+  }
+}
+
+function readHostRecord(root: string): { pid?: number; version?: string } {
+  try {
+    // startup-json: strict — the LIVE host's record, read for a log line only: a bad one is ignored (caught), never quarantined by a superseded host
+    const record = JSON.parse(readFileSync(join(runtimeDir(root), 'host.json'), 'utf8'))
+    return { pid: record?.pid, version: record?.version }
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Bind `server` to the root's control endpoint — the act that makes this process the
+ * root's session host. A live owner means this host is superseded. A POSIX socket
+ * file nobody listens on (its host died) is replaced: safe because the root's
+ * launcher lock (launch.cjs) admits one starting host at a time.
+ */
+async function bindHostEndpoint(server: Server, root: string): Promise<string> {
+  const endpoint = hostEndpoint(root)
+  const dir = hostEndpointDir(root)
+  if (dir) prepareEndpointDir(dir)
+  const listen = (): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (err: Error): void => reject(err)
+      server.once('error', onError)
+      server.listen(endpoint, () => {
+        server.off('error', onError)
+        resolve()
+      })
+    })
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await listen()
+      return endpoint
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || attempt >= 2) throw err
+      const state = await probeEndpoint(endpoint)
+      if (state === 'live') throw new HostSupersededError(endpoint, readHostRecord(root))
+      if (state === 'stale') {
+        // Another host starting at once may have removed it first: that is fine.
+        try {
+          unlinkSync(endpoint)
+        } catch (unlinkErr) {
+          if ((unlinkErr as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkErr
+        }
+      }
+    }
+  }
 }
 function controlToken(root: string): string {
   const path = join(runtimeDir(root), 'control.key')
@@ -367,44 +434,79 @@ function parseGenerations(value: unknown): Record<string, number> {
 export async function startSessionHost(
   root: string,
   config: ComputerConfig,
-  log: (message: string, meta?: Record<string, unknown>) => void = () => undefined
+  log: (message: string, meta?: Record<string, unknown>) => void = () => undefined,
+  /** Test seam: runs once the endpoint is bound, before anything else starts. */
+  testHooks: { afterBind?: () => Promise<void> } = {}
 ) {
-  const secret = controlToken(root)
-  scrubChatJournals(root)
+  // Bind FIRST: a host that is superseded must exit before it touches anything the
+  // live host owns (hook journals, generations, listeners). Until this host is fully
+  // started, connections wait, unserved (paused), and are then served in order.
+  let serve: ((socket: Socket) => void) | undefined
+  const early = new Set<Socket>()
+  const server: Server = createServer((socket) => {
+    if (serve) return serve(socket)
+    socket.pause()
+    socket.on('error', () => undefined)
+    early.add(socket)
+    socket.once('close', () => early.delete(socket))
+  })
+  const endpoint = await bindHostEndpoint(server, root)
+  const endpointDir = hostEndpointDir(root)
   const epoch = randomUUID()
   const transports = new Map<string, SessionTransport>()
   const controls = new Set<LocalPeer>()
   const peers = new Set<LocalPeer>()
   const generationFile = join(runtimeDir(root), 'generations.json')
-  // A corrupt file is set aside (quarantine) and the host starts fresh: connectors
-  // then reserve new generations, never a reason not to boot.
-  const read = readJsonTolerant(generationFile, parseGenerations, {
-    root: runtimeDir(root),
-    pass: 'computer-generations'
-  })
-  if (read.status === 'corrupt')
-    log('generations file unreadable; quarantined and restarted', { error: read.error.message })
-  const generations: Record<string, number> = read.status === 'ok' ? read.value : {}
+  let secret!: string
+  let generations!: Record<string, number>
+  let handle: ReturnType<typeof startComputer> | undefined
+  // A startup that fails after binding: drop whoever is waiting, free the endpoint.
+  const abandon = async (err: unknown): Promise<never> => {
+    for (const socket of early) socket.destroy()
+    early.clear()
+    await handle?.stop().catch(() => undefined)
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    releaseEndpointDir(endpointDir)
+    throw err
+  }
+  try {
+    await testHooks.afterBind?.()
+    // Endpoint directories of roots that are gone (empty, untouched for an hour).
+    sweepStaleEndpointDirs({ keep: endpointDir })
+    secret = controlToken(root)
+    scrubChatJournals(root)
+    // A corrupt file is set aside (quarantine) and the host starts fresh: connectors
+    // then reserve new generations, never a reason not to boot.
+    const read = readJsonTolerant(generationFile, parseGenerations, {
+      root: runtimeDir(root),
+      pass: 'computer-generations'
+    })
+    if (read.status === 'corrupt')
+      log('generations file unreadable; quarantined and restarted', { error: read.error.message })
+    generations = read.status === 'ok' ? read.value : {}
+    handle = startComputer(config, {
+      log,
+      stateDir: root,
+      pathReady: adoptLoginShellPath(),
+      createDialer: (options) => {
+        const transport = new SessionTransport(options, root, (message) =>
+          log(message, { hubUrl: options.url })
+        )
+        transports.set(options.url, transport)
+        return transport
+      },
+      onShutdown: () => {
+        for (const peer of controls) peer.rpc.notify('host.shutdown', {})
+        void stop()
+      }
+    })
+  } catch (err) {
+    return abandon(err)
+  }
   const credential = (hub: string, generation: number): string =>
     createHmac('sha256', secret)
       .update(JSON.stringify([hub, generation]))
       .digest('hex')
-  const handle = startComputer(config, {
-    log,
-    stateDir: root,
-    pathReady: adoptLoginShellPath(),
-    createDialer: (options) => {
-      const transport = new SessionTransport(options, root, (message) =>
-        log(message, { hubUrl: options.url })
-      )
-      transports.set(options.url, transport)
-      return transport
-    },
-    onShutdown: () => {
-      for (const peer of controls) peer.rpc.notify('host.shutdown', {})
-      void stop()
-    }
-  })
   const health = (): HostHealth => ({
     entry: process.argv[1],
     contract: HOST_CONTRACT_VERSION,
@@ -412,7 +514,7 @@ export async function startSessionHost(
     pid: process.pid,
     version: COMPUTER_VERSION,
     buildId: COMPUTER_BUILD_ID,
-    idle: handle.isIdle(),
+    idle: handle!.isIdle(),
     configKey: hostConfigurationKey(config),
     hubUrls: effectiveHubUrls(config)
   })
@@ -421,8 +523,7 @@ export async function startSessionHost(
     const result = health()
     return result
   }
-  const endpoint = hostEndpoint(root)
-  const server: Server = createServer((socket) => {
+  const serveSocket = (socket: Socket, handle: ReturnType<typeof startComputer>): void => {
     let auth: Auth | undefined
     let authenticated = false
     const timer = setTimeout(() => socket.destroy(), 5000)
@@ -451,7 +552,10 @@ export async function startSessionHost(
             transport.hubOnline = false
             transport.peer = peer
           } else {
-            socket.destroy()
+            // Refuse in words, then hang up: the reply goes out before the close, so
+            // the peer learns why (a destroy here reached it as "connection closed").
+            setImmediate(() => socket.end())
+            setTimeout(() => socket.destroy(), 1000).unref()
             throw new Error('local authentication refused')
           }
           authenticated = true
@@ -567,33 +671,38 @@ export async function startSessionHost(
         }
       }
     })
-  })
+  }
+  const started = handle
   try {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(endpoint, resolve)
+    atomicRuntimeJson(join(runtimeDir(root), 'host.json'), {
+      endpoint,
+      pid: process.pid,
+      epoch,
+      version: COMPUTER_VERSION
     })
   } catch (err) {
-    await handle.stop()
-    throw err
+    return abandon(err)
   }
-  atomicRuntimeJson(join(runtimeDir(root), 'host.json'), {
-    endpoint,
-    pid: process.pid,
-    epoch,
-    version: COMPUTER_VERSION
-  })
+  // Fully started: serve whoever waited, in arrival order, then everyone else.
+  serve = (socket) => serveSocket(socket, started)
+  for (const socket of early) {
+    early.delete(socket)
+    if (socket.destroyed) continue
+    serve(socket)
+    socket.resume()
+  }
   let stopping: Promise<void> | undefined
   function stop(): Promise<void> {
     return (stopping ??= (async () => {
       for (const peer of peers) peer.close()
-      await handle.stop()
+      await started.stop()
       try {
         unlinkSync(join(runtimeDir(root), 'host.json'))
       } catch {
         /* Already removed. */
       }
       await new Promise<void>((resolve) => server.close(() => resolve()))
+      releaseEndpointDir(endpointDir)
     })())
   }
   const closed = new Promise<void>((resolve) => server.once('close', resolve))

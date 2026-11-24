@@ -1,44 +1,169 @@
 /** Stable, dependency-free entrypoint pinned by computer service units. */
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { HOST_SUPERSEDED_EXIT_CODE } from './computer-endpoints'
 export const COMPUTER_LAUNCHER = String.raw`#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path'), cp = require('node:child_process');
+const net = require('node:net'), os = require('node:os'), crypto = require('node:crypto');
 const root = process.env.SLAYZONE_ROOT;
 if (!root) throw Error('computer launcher requires SLAYZONE_ROOT');
 const role = process.argv.includes('--session-host') ? 'host' : 'supervisor';
 const dir = path.join(root, 'computer-runtime'), pointer = path.join(dir, role === 'host' ? 'host-release.json' : 'supervisor.json');
-let child, stopping = false, healthy = false, timer, probation, killTimer;
+// Restart delay after consecutive failures: 2s doubling to 60s, reset once a child is healthy.
+const BACKOFF_MIN_MS = 2000, BACKOFF_MAX_MS = 60000, LOG_MAX_BYTES = 5 * 1024 * 1024;
+// A session host that found another live host on its control endpoint (computer-endpoints.ts).
+const SUPERSEDED_EXIT = ${HOST_SUPERSEDED_EXIT_CODE};
+// This root's endpoints, derived exactly as computer-endpoints.ts derives them.
+const endpointKey = crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 24);
+const endpointDir = process.platform === 'win32' ? null : path.join(os.tmpdir(), 'slay-computer-' + (process.getuid ? process.getuid() : 'user') + '-' + endpointKey);
+const endpoints = endpointDir
+  ? {control: path.join(endpointDir, 'control.sock'), launcher: path.join(endpointDir, 'launcher.sock')}
+  : {control: '\\\\.\\pipe\\slay-computer-' + endpointKey, launcher: '\\\\.\\pipe\\slay-computer-launcher-' + endpointKey};
+if (process.argv.includes('--print-endpoints')) { process.stdout.write(JSON.stringify(endpoints) + '\n'); return; }
+let child, stopping = false, healthy = false, timer, probation, killTimer, failures = 0, nextTimer, lock;
+// What a waiting supervisor asks over the launcher endpoint (queryHostLauncher).
+const status = {state: 'starting', childPid: null, nextLaunchAt: null, lastExit: null};
 function read() { return JSON.parse(fs.readFileSync(pointer, 'utf8')); }
+// Every start and exit of the child, timestamped, to stderr and to logs/computer.log
+// (shared by every computer process). Before, an exit left no trace at all here.
+function log(msg) {
+  const line = new Date().toISOString() + ' [launcher ' + process.pid + '] ' + role + ' ' + msg + '\n';
+  try { process.stderr.write(line); } catch {}
+  try { const logs = path.join(root, 'logs'); fs.mkdirSync(logs, {recursive: true, mode: 0o700}); fs.appendFileSync(path.join(logs, 'computer.log'), line, {mode: 0o600}); } catch {}
+}
+// The session host's launcher writes, for its whole life, to the host.log it was started
+// with: rotated only when a host was spawned, it grew without bound (32 MB). Copy, then
+// truncate in place: every holder of the file appends, so all keep writing to its start.
+function rotateHostLog() {
+  if (role !== 'host') return;
+  try {
+    const file = path.join(dir, 'host.log'), out = fs.fstatSync(1), st = fs.statSync(file);
+    if (out.ino !== st.ino || out.dev !== st.dev || st.size <= LOG_MAX_BYTES) return;
+    fs.copyFileSync(file, file + '.1'); fs.truncateSync(file, 0);
+  } catch {}
+}
+setInterval(rotateHostLog, 600000).unref();
+// ── One session-host launcher per root ──────────────────────────────────────────
+// The launcher endpoint is held for this launcher's whole life: a second launcher for
+// the root finds it live and stops before starting any child. (Two once ran at once,
+// one restarting an EADDRINUSE-failing child forever, rolling back good releases.)
+function prepareEndpointDir() {
+  if (!endpointDir) return;
+  try { fs.mkdirSync(endpointDir, {mode: 0o700}); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  const st = fs.lstatSync(endpointDir);
+  if (st.isSymbolicLink() || !st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || (st.mode & 0o077))
+    throw Error('unsafe computer endpoint directory ' + endpointDir + ': must be a directory owned by this user with mode 0700');
+}
+function probe(cb) {
+  const s = net.connect(endpoints.launcher); let done = false;
+  const fin = (r) => { if (done) return; done = true; clearTimeout(t); s.destroy(); cb(r); };
+  const t = setTimeout(() => fin('live'), 2000);
+  s.once('connect', () => fin('live'));
+  s.once('error', (e) => fin(e.code === 'ENOENT' ? 'absent' : e.code === 'ECONNREFUSED' ? 'stale' : 'live'));
+}
+function serveStatus(socket) {
+  let buf = '';
+  socket.setEncoding('utf8'); socket.on('error', () => {}); socket.setTimeout(2000, () => socket.destroy());
+  socket.on('data', (chunk) => {
+    buf += chunk; const end = buf.indexOf('\n');
+    if (end < 0) { if (buf.length > 1024) socket.destroy(); return; }
+    let command; try { command = JSON.parse(buf.slice(0, end)).command; } catch {}
+    if (command === 'launch-now' && status.state === 'backoff' && !stopping) { clearTimeout(nextTimer); log('launching now, at a waiting supervisor\'s request'); launch(); }
+    socket.end(JSON.stringify(status) + '\n');
+  });
+}
+function bail(msg) { log(msg + '; stopping'); process.exit(1); }
+function acquire(then, attempt) {
+  attempt = attempt || 0;
+  if (attempt > 50) return bail('cannot take the launcher endpoint ' + endpoints.launcher);
+  try { prepareEndpointDir(); } catch (e) { return bail(e.message); }
+  const retry = (ms) => setTimeout(() => acquire(then, attempt + 1), ms);
+  const server = net.createServer(serveStatus);
+  server.once('error', (err) => {
+    if (err.code !== 'EADDRINUSE') return bail('cannot bind ' + endpoints.launcher + ': ' + err.message);
+    probe((state) => {
+      if (state === 'live') { log('launcher already running for this root; superseded, stopping'); process.exit(0); }
+      if (state === 'absent' || !endpointDir) return retry(50);
+      // A socket file whose launcher died. Replace it only inside a short critical
+      // section (an atomic mkdir), probing again there: two launchers that both
+      // unlinked and bound would each hold a socket, and both would run.
+      const guard = endpoints.launcher + '.takeover';
+      try { fs.mkdirSync(guard, {mode: 0o700}); } catch (e) {
+        if (e.code !== 'EEXIST') return bail('cannot take over ' + endpoints.launcher + ': ' + e.message);
+        try { if (Date.now() - fs.statSync(guard).mtimeMs > 10000) fs.rmdirSync(guard); } catch {}
+        return retry(100);
+      }
+      const unguard = () => { try { fs.rmdirSync(guard); } catch {} };
+      probe((again) => {
+        if (again !== 'stale') { unguard(); return retry(0); }
+        try { fs.unlinkSync(endpoints.launcher); } catch {}
+        const taken = net.createServer(serveStatus);
+        taken.once('error', () => { unguard(); retry(0); });
+        taken.listen(endpoints.launcher, () => { unguard(); log('took over a launcher endpoint left by a dead launcher'); lock = taken; then(); });
+      });
+    });
+  });
+  server.listen(endpoints.launcher, () => { lock = server; then(); });
+}
+// Ends this launcher: frees its endpoint (and the directory, once empty), then exits.
+function release(code) {
+  status.state = 'stopping'; status.nextLaunchAt = null; clearTimeout(nextTimer);
+  process.exitCode = code;
+  if (!lock) return;
+  lock.close(() => { if (endpointDir) try { fs.rmdirSync(endpointDir); } catch {} });
+  lock = undefined;
+}
 function launch() {
   if (stopping) return;
+  rotateHostLog();
   const state = read(); let timedOut = false; healthy = false; probation = undefined;
+  const startedAt = Date.now();
   child = cp.fork(state.current.entry, [role === 'host' ? '--session-host' : '--supervisor'], {env: {...process.env, SLAYZONE_NONINTERACTIVE:'1'}, stdio:['inherit','inherit','inherit','ipc']});
+  status.state = 'running'; status.childPid = child.pid; status.nextLaunchAt = null;
+  log(state.current.version + ' started pid=' + child.pid + (failures ? ' (after ' + failures + ' consecutive failures)' : ''));
   timer = setTimeout(() => {
     timedOut = true;
-    process.stderr.write('[computer-launcher] ' + role + ' ' + state.current.version + ' startup timed out; restarting\n');
+    log(state.current.version + ' startup timed out; restarting');
     // A supervisor SIGTERM means explicit shutdown, including its persistent host.
     // Crash only the supervisor; its connectors stop on IPC loss and work survives.
     if (role === 'supervisor') child.kill('SIGKILL');
     else { child.kill('SIGTERM'); killTimer = setTimeout(() => child.kill('SIGKILL'), 10000); }
   }, 90000);
-  child.on('message', m => { if (m && m.type === 'supervisor-ready') {clearTimeout(timer); if (!probation) probation = setTimeout(() => {healthy = true;}, 60000);} });
-  child.on('error', () => {});
-  child.on('exit', (code) => {
+  child.on('message', m => { if (m && m.type === 'supervisor-ready') {clearTimeout(timer); if (!probation) probation = setTimeout(() => {healthy = true; failures = 0;}, 60000);} });
+  child.on('error', (err) => { log(state.current.version + ' child error: ' + (err && err.message)); });
+  child.on('exit', (code, signal) => {
     clearTimeout(timer); clearTimeout(probation); clearTimeout(killTimer);
-    if (stopping) {process.exitCode = code || 0; return;}
-    if (code === 75 && !timedOut) {launch(); return;}
+    const ended = state.current.version + ' pid=' + child.pid + ' exited code=' + code + ' signal=' + signal + ' after ' + (Date.now() - startedAt) + 'ms';
+    status.childPid = null; status.lastExit = {version: state.current.version, code, signal, at: Date.now()};
+    if (stopping) {log(ended + '; stopping'); release(code || 0); return;}
+    // Another live host owns the endpoint: not a failure of this release (no
+    // quarantine, no rollback), and nothing to restart. This launcher is redundant.
+    if (role === 'host' && code === SUPERSEDED_EXIT && !timedOut) {log(ended + '; superseded by a live session host, stopping'); stopping = true; release(0); return;}
+    if (code === 75 && !timedOut) {log(ended + '; relaunching (requested)'); launch(); return;}
     const failed = timedOut || code !== 0;
+    let rolledBack = '';
     if (!healthy && failed && state.previous) {
       fs.writeFileSync(path.join(dir, role + '-quarantine.json'), JSON.stringify({version: state.current.version, until: Date.now() + 900000}), {mode:0o600});
       const temp = pointer + '.tmp';
       fs.writeFileSync(temp, JSON.stringify({current:state.previous}) + '\n', {mode:0o600}); fs.renameSync(temp,pointer);
+      rolledBack = '; quarantined, rolled back to ' + state.previous.version;
     }
-    if (!failed) return;
-    setTimeout(launch, 2000);
+    if (!failed) {log(ended + '; not restarting'); release(0); return;}
+    failures += 1;
+    const delay = Math.min(BACKOFF_MIN_MS * Math.pow(2, failures - 1), BACKOFF_MAX_MS);
+    log(ended + rolledBack + '; restarting in ' + delay + 'ms (failure ' + failures + ')');
+    status.state = 'backoff'; status.nextLaunchAt = Date.now() + delay;
+    nextTimer = setTimeout(launch, delay);
   });
 }
-for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => {stopping = true; child?.kill(signal);});
-launch();
+for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => {
+  stopping = true; log('received ' + signal + ', stopping');
+  // No child up (backing off, or not started yet): nothing to wait for.
+  if (child && child.exitCode === null && child.signalCode === null) child.kill(signal);
+  else release(0);
+});
+if (role === 'host') acquire(() => (stopping ? release(0) : launch()));
+else launch();
 `
 export function ensureComputerLauncher(
   root: string,

@@ -47,7 +47,14 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { eraseComputerOffline } from './offline-erasure'
 import { fork } from 'node:child_process'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
-import { atomicRuntimeJson, sessionHostLog, startSessionHost } from './session-host'
+import {
+  atomicRuntimeJson,
+  HostSupersededError,
+  sessionHostLog,
+  startSessionHost
+} from './session-host'
+import { HOST_SUPERSEDED_EXIT_CODE } from '@slayzone/platform/computer-endpoints'
+import { runMain } from './startup-failure'
 import { startConnector } from './connector'
 import {
   HOST_CONTRACT_VERSION,
@@ -56,7 +63,7 @@ import {
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { StructuralFaultError } from '@slayzone/platform/isolation'
 import { readJsonTolerant } from '@slayzone/platform/quarantine'
-import { createComputerLog } from './file-log'
+import { createComputerLog, installProcessFateLog } from './file-log'
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -203,6 +210,8 @@ async function main(): Promise<void> {
   }
   if (process.argv.includes('--session-host')) {
     const root = process.env.SLAYZONE_ROOT ?? process.cwd()
+    // Its fatal error and exit code, too: they used to reach only host.log's stderr.
+    installProcessFateLog({ stateDir: root, tag: 'host' })
     // stdout (its launcher's host.log / the service journal) and <root>/logs/computer.log.
     const hostLog = sessionHostLog(root)
     // The seed only carries launch overrides on top of the computer's config file;
@@ -223,7 +232,20 @@ async function main(): Promise<void> {
     const seed: Record<string, unknown> = read.status === 'ok' ? read.value : {}
     const config = loadBootComputerConfig(seed)
     if (!config.allowedRoots.length) config.allowedRoots = [root]
-    const host = await startSessionHost(root, config, hostLog)
+    let host: Awaited<ReturnType<typeof startSessionHost>>
+    try {
+      host = await startSessionHost(root, config, hostLog)
+    } catch (err) {
+      if (!(err instanceof HostSupersededError)) throw err
+      // Another host is live on this root: this one started nothing. Its launcher
+      // stops on this code instead of restarting it (no quarantine, no rollback).
+      hostLog('superseded by a live session host; exiting', {
+        endpoint: err.endpoint,
+        livePid: err.live.pid,
+        liveVersion: err.live.version
+      })
+      process.exit(HOST_SUPERSEDED_EXIT_CODE)
+    }
     process.send?.({ type: 'supervisor-ready' }, () => undefined)
     void host.closed.then(() => {
       if (process.connected) process.disconnect()
@@ -245,6 +267,18 @@ async function main(): Promise<void> {
   if (!supervised && !process.env.SLAYZONE_ROOT) {
     process.env.SLAYZONE_ROOT = process.cwd()
   }
+
+  // How this process ends (fatal error with stack, exit code) goes to computer.log,
+  // not only to a stderr nobody keeps. After ROOT anchoring: that is where the log is.
+  installProcessFateLog({
+    stateDir: dirname(getComputerConfigFilePath()),
+    tag:
+      workerBoot || supervised
+        ? 'computer'
+        : process.argv.includes('--supervisor')
+          ? 'supervisor'
+          : 'cli'
+  })
 
   // Interactive first-run setup (TTY only) — may seed the join token into env +
   // write computer.config.json before the resolver below reads them. No-op when
@@ -552,4 +586,12 @@ async function main(): Promise<void> {
   }
 }
 
-void main()
+// A startup failure ends the process with its reason logged (and, for a worker,
+// sent to its supervisor) — never as an unhandled rejection.
+void runMain(main, {
+  tag: process.argv.includes('--session-host') ? 'host' : isUpgradeWorker() ? 'worker' : 'computer',
+  stateDir: () =>
+    process.argv.includes('--session-host')
+      ? (process.env.SLAYZONE_ROOT ?? process.cwd())
+      : dirname(getComputerConfigFilePath())
+})

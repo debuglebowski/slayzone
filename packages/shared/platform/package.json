@@ -55,6 +55,8 @@
     "./parent-watch": "./src/parent-watch.ts",
     "./node-pty-install": "./src/node-pty-install.ts",
     "./computer-launcher": "./src/computer-launcher.ts",
+    "./computer-endpoints": "./src/computer-endpoints.ts",
+    "./rotating-log": "./src/rotating-log.ts",
     "./suspend-clock": "./src/suspend-clock.ts",
     "./resolve-command": "./src/resolve-command.ts",
     "./isolation": "./src/isolation.ts",

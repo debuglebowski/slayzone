@@ -10,7 +10,8 @@ import {
   writeFileSync,
   openSync,
   closeSync,
-  unlinkSync
+  fstatSync,
+  readSync
 } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
 import { readComputerConfigSnapshot } from '@slayzone/platform/slayzone-config'
@@ -22,9 +23,10 @@ import {
   type UpgradeWorker
 } from './auto-upgrade'
 import { npmCommand } from './npm-command'
-import { hostControl, hostEndpoint, runtimeDir, atomicRuntimeJson } from './session-host'
+import { hostControl, runtimeDir, atomicRuntimeJson } from './session-host'
 import type { LocalPeer } from '@slayzone/computer-runtime'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
+import { queryHostLauncher, type HostLauncherStatus } from '@slayzone/platform/computer-endpoints'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import type { ConnectorGrant } from './session-host'
 import { rotateLogFile } from './file-log'
@@ -204,6 +206,29 @@ export async function installComputerRelease(
 
 type Log = (message: string, meta?: Record<string, unknown>) => void
 
+/** The last `maxBytes` of a log, trimmed to whole lines, as one line. Never throws. */
+export function readLogTail(path: string, maxBytes = 1500): string {
+  try {
+    const fd = openSync(path, 'r')
+    try {
+      const size = fstatSync(fd).size
+      const length = Math.min(size, maxBytes)
+      const buffer = Buffer.alloc(length)
+      readSync(fd, buffer, 0, length, size - length)
+      const lines = buffer.toString('utf8').split('\n')
+      if (length < size) lines.shift()
+      return lines
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(' | ')
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return ''
+  }
+}
+
 /** One in-flight report plus the latest pending state; old phases cannot arrive last. */
 export function createStatusReporter(
   send: (status: Record<string, unknown>) => Promise<void>,
@@ -233,18 +258,34 @@ export function createStatusReporter(
   }
 }
 
+/** How a connector worker ended, as its supervisor saw it. */
+export interface WorkerExit {
+  pid: number | undefined
+  code: number | null
+  signal: NodeJS.Signals | null
+  uptimeMs: number
+  /** The supervisor asked it to stop (an upgrade, a shutdown): not a crash. */
+  requested: boolean
+  /** A `fatal` the worker reported over IPC before it went. */
+  fatal?: string
+}
+
 export function launchUpgradeWorker(
   entry: string,
   config: ComputerConfig,
   probation = false,
   onShutdown: () => void = () => undefined,
   env: NodeJS.ProcessEnv = process.env,
-  grant?: ConnectorGrant
+  grant?: ConnectorGrant,
+  onExit?: (exit: WorkerExit) => void
 ): UpgradeWorker {
   const child = fork(entry, [], {
     env: { ...env, [WORKER_ENV]: '1', SLAYZONE_NONINTERACTIVE: '1' },
     stdio: ['inherit', 'inherit', 'inherit', 'ipc']
   })
+  const startedAt = Date.now()
+  let stopRequested = false
+  let fatal: string | undefined
   // Attach before sending boot: errors/exits must never become unhandled events.
   let exited = false
   let connected = false
@@ -264,12 +305,29 @@ export function launchUpgradeWorker(
   child.on('exit', (code, signal) => {
     exited = true
     connectionError = new Error(`computer worker exited (${code ?? signal})`)
+    try {
+      onExit?.({
+        pid: child.pid,
+        code,
+        signal,
+        uptimeMs: Date.now() - startedAt,
+        requested: stopRequested,
+        ...(fatal !== undefined ? { fatal } : {})
+      })
+    } catch {
+      /* reporting an exit must not break handling it */
+    }
     drainReply?.(false)
     activateReject?.(connectionError)
     wake()
   })
   child.on('message', (message: unknown) => {
-    const msg = message as { type?: string; hubUrl?: string; idle?: boolean; error?: string }
+    const msg = message as {
+      type?: string
+      hubUrl?: string
+      idle?: boolean
+      error?: string
+    }
     if (msg?.type === 'connected' && msg.hubUrl) {
       connectedHubs.add(msg.hubUrl)
       connected = effectiveHubUrls(config).every((url) => connectedHubs.has(url))
@@ -281,6 +339,7 @@ export function launchUpgradeWorker(
     }
     if (msg?.type === 'shutdown') onShutdown()
     if (msg?.type === 'fatal') {
+      fatal = msg.error
       connectionError = new Error(msg.error)
       activateReject?.(connectionError)
       wake()
@@ -361,6 +420,7 @@ export function launchUpgradeWorker(
     stop: () =>
       (stopPromise ??= (async () => {
         if (exited) return
+        stopRequested = true
         const exit = once(child, 'exit').catch(() => undefined)
         const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
         child.kill('SIGTERM')
@@ -397,6 +457,16 @@ export async function ensureSessionHost(
     if ((err as Error).message.includes('active work')) throw err
     /* Start only after ruling out a live owner. */
   }
+  // The root's launcher (launch.cjs --session-host) owns its host. While it lives it
+  // is waited on, never duplicated, whatever its child is doing: a dead child inside
+  // the launcher's restart gap is exactly when the old check (host.json's pid, the
+  // CHILD's) judged the host gone and started a second launcher.
+  const owned = await awaitLauncherHost(root, notify)
+  if (owned) return owned
+  // A launcher from before the lock holds no endpoint; host.json is all it leaves.
+  // Its host alive → refuse. Dead → that launcher may be inside its fixed 2s restart
+  // gap: give it a bounded chance before starting another. A stale control.sock is
+  // the starting host's to replace (bindHostEndpoint), never unlinked from here.
   try {
     const prior = JSON.parse(readFileSync(join(runtime, 'host.json'), 'utf8')) as { pid: number }
     try {
@@ -405,13 +475,8 @@ export async function ensureSessionHost(
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
     }
-    if (process.platform !== 'win32') {
-      try {
-        unlinkSync(hostEndpoint(root))
-      } catch {
-        /* Missing stale socket. */
-      }
-    }
+    const restarted = await pollHostControl(root, notify, LEGACY_LAUNCHER_GRACE_MS)
+    if (restarted) return restarted
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
@@ -472,21 +537,116 @@ export async function ensureSessionHost(
   closeSync(out)
   child.unref()
   let exited: Error | undefined
+  let yielded = false
   child.once('error', (err) => {
     exited = err
   })
-  child.once('exit', (code) => {
-    exited = new Error(`session host exited during startup (${code})`)
+  child.once('exit', (code, signal) => {
+    // Exit 0 at startup: this launcher found another one (or a live host) owning
+    // the root and stood down. That owner is the host to use.
+    if (code === 0) {
+      yielded = true
+      return
+    }
+    // Its reason is the last thing it wrote to host.log (stderr): carried in the
+    // error, which the supervisor logs, instead of a bare exit code.
+    const tail = readLogTail(join(runtime, 'host.log'))
+    exited = new Error(
+      `session host exited during startup (code ${code}, signal ${signal})${tail ? `: ${tail}` : ''}`
+    )
   })
   for (let i = 0; i < 100; i++) {
     if (exited) throw exited
+    if (yielded) {
+      const owner =
+        (await awaitLauncherHost(root, notify)) ??
+        (await pollHostControl(root, notify, LEGACY_LAUNCHER_GRACE_MS))
+      if (owner) return owner
+      throw new Error(
+        'session host launcher stood down, but no other host came up; inspect computer-runtime/host.log'
+      )
+    }
     try {
       return await hostControl(root, notify)
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }
-  throw new Error('session host did not start; inspect computer-runtime/host.log')
+  const status = await queryHostLauncher(root, 'status').catch(() => null)
+  throw new Error(
+    `session host did not start${describeLastExit(status)}; inspect computer-runtime/host.log`
+  )
+}
+
+/** How long a launcher from before the lock may take to restart its host (it waits 2s). */
+const LEGACY_LAUNCHER_GRACE_MS = 5000
+/** How long a live launcher's host may take to come up once asked to launch now. */
+const LAUNCHER_HOST_WAIT_MS = 30_000
+
+function describeLastExit(status: HostLauncherStatus | null): string {
+  const last = status?.lastExit
+  return last
+    ? ` (its launcher is ${status!.state}; last host ${last.version} exited code=${last.code} signal=${last.signal})`
+    : ''
+}
+
+/** Connect to the root's host, retrying for up to `ms`. `null` if none came up. */
+async function pollHostControl(
+  root: string,
+  notify: ((method: string, params: unknown) => void) | undefined,
+  ms: number
+): Promise<LocalPeer | null> {
+  const deadline = Date.now() + ms
+  for (;;) {
+    try {
+      return await hostControl(root, notify)
+    } catch (err) {
+      if ((err as Error).message.includes('active work')) throw err
+    }
+    if (Date.now() >= deadline) return null
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
+
+/**
+ * The host of the root's live launcher, waited for: a launcher backing off is asked
+ * to launch now (once). `null` when no launcher holds the root. Throws when one does
+ * but its host does not come up in time — never a reason to start another.
+ */
+async function awaitLauncherHost(
+  root: string,
+  notify: ((method: string, params: unknown) => void) | undefined
+): Promise<LocalPeer | null> {
+  let status: HostLauncherStatus | null
+  try {
+    status = await queryHostLauncher(root, 'status')
+  } catch {
+    // Bound but not answering (busy): still the owner.
+    status = { state: 'starting', childPid: null, nextLaunchAt: null, lastExit: null }
+  }
+  if (!status) return null
+  let kicked = false
+  const deadline = Date.now() + LAUNCHER_HOST_WAIT_MS
+  while (Date.now() < deadline) {
+    try {
+      return await hostControl(root, notify)
+    } catch (err) {
+      if ((err as Error).message.includes('active work')) throw err
+    }
+    try {
+      const kick = status?.state === 'backoff' && !kicked
+      if (kick) kicked = true
+      status = await queryHostLauncher(root, kick ? 'launch-now' : 'status')
+      // Its launcher is gone: whoever calls next decides afresh.
+      if (!status) return null
+    } catch {
+      /* Busy: still the owner. */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(
+    `this root's session host launcher is alive but its host did not come up${describeLastExit(status)}; inspect computer-runtime/host.log`
+  )
 }
 
 /** Remember explicit stops throughout boot, including reconnect probes and host startup. */
@@ -522,7 +682,11 @@ async function initializeUpgradeSupervisor(
   original: UpgradeRelease,
   root: string,
   log: Log,
-  options: { probationMs?: number; intervalMs?: number; bootSeed?: ComputerBootSeed } = {}
+  options: {
+    probationMs?: number
+    intervalMs?: number
+    bootSeed?: ComputerBootSeed
+  } = {}
 ): Promise<{ stop(shutdownHost?: boolean): Promise<void> }> {
   const runtime = runtimeDir(root)
   mkdirSync(runtime, { recursive: true, mode: 0o700 })
@@ -622,10 +786,12 @@ async function initializeUpgradeSupervisor(
       let worker: UpgradeWorker | undefined
       let failure: Error | undefined
       let cancelled = false
+      let contractVersion: string | undefined
       // Initial launches need the same compatibility check as staged upgrades.
       // Do it before reserve: reserving revokes the still-working old connector.
       const starting = probeRuntimeContract(entry, abort.signal)
         .then(async (contract) => {
+          contractVersion = contract.version
           hostBuildChanged =
             hostInfo.buildId !== undefined &&
             contract.buildId !== undefined &&
@@ -655,7 +821,18 @@ async function initializeUpgradeSupervisor(
               void stop(true)
             },
             { ...process.env, SLAYZONE_ROOT: root },
-            grant
+            grant,
+            // Its code and signal used to be kept only in an Error nobody logged: a
+            // worker SIGKILLed by the OOM killer left no trace but the next boot.
+            (exit) =>
+              log(
+                exit.requested ? 'computer worker stopped' : 'computer worker exited unexpectedly',
+                {
+                  hubUrl,
+                  version: contractVersion,
+                  ...exit
+                }
+              )
           )
           if (cancelled) void worker.stop()
           return worker
@@ -931,7 +1108,12 @@ export async function receiveUpgradeBoot(): Promise<{
   grant?: ConnectorGrant
 }> {
   const [msg] = (await once(process, 'message')) as [
-    { type: string; config: ComputerConfig; probation: boolean; grant?: ConnectorGrant }
+    {
+      type: string
+      config: ComputerConfig
+      probation: boolean
+      grant?: ConnectorGrant
+    }
   ]
   if (msg.type !== 'boot') throw new Error('invalid computer supervisor boot message')
   return msg

@@ -130,3 +130,29 @@ it('a replacement supervisor resumes an abandoned maintenance drain', async () =
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+// A refused connector used to see only "computer-local closed: local connection
+// closed": the host destroyed the socket before its refusal reached the wire.
+it('a refused connector auth is told why, not just that the link closed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-auth-refused-'))
+  const hubUrl = 'ws://localhost:1/computers'
+  const host = await startSessionHost(root, {
+    hubUrl,
+    name: 'test',
+    allowedRoots: [root],
+    capabilities: ['proc']
+  })
+  const control = await hostControl(root)
+  try {
+    const grant = await control.rpc.request<ConnectorGrant>('reserve', { hubUrl })
+    await control.rpc.request<ConnectorGrant>('reserve', { hubUrl })
+    // A stale generation, as a connector of a replaced supervisor holds.
+    await expect(connectorHost(root, grant, hubUrl, {})).rejects.toThrow(
+      'local authentication refused'
+    )
+  } finally {
+    control.close()
+    await host.stop()
+    rmSync(root, { recursive: true, force: true })
+  }
+})

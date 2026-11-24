@@ -649,3 +649,27 @@ describe('service-unit: secrets in a unit (a hub other machines reach needs its 
     })
   }
 })
+
+describe('service-unit: a run that ends is explained (computer down 2026-11-22: OOM in a child)', () => {
+  test('a child OOM-killed by the kernel no longer stops the whole service', () => {
+    for (const spec of [SPEC, COMPUTER_SPEC]) {
+      expect(renderSystemdUnit(spec)).toContain('\nOOMPolicy=continue\n')
+    }
+  })
+
+  test("a computer's unit records each run's result in <root>/logs/computer.log", () => {
+    const unit = renderSystemdUnit(COMPUTER_SPEC)
+    const line = unit.split('\n').find((l) => l.startsWith('ExecStopPost='))
+    expect(line).toBeDefined()
+    expect(line, 'a failed record never fails the unit').toMatch(/^ExecStopPost=-\/bin\/sh /)
+    // systemd's escapes: $$ → $ (the shell reads the vars), %% → % (no specifier).
+    expect(line).toContain('"$$SERVICE_RESULT" "$$EXIT_CODE" "$$EXIT_STATUS"')
+    expect(line).toContain('>> "$1/computer.log"')
+    expect(line).toContain(`sh "${join(COMPUTER_SPEC.root, 'logs')}"`)
+    expect(line).not.toMatch(/[^%]%[^%]/)
+  })
+
+  test('a hub unit gets no computer.log stop record (its result stays in the journal)', () => {
+    expect(renderSystemdUnit(SPEC)).not.toContain('ExecStopPost=')
+  })
+})

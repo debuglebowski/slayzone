@@ -233,7 +233,10 @@ export type BackendReason =
  * because "the env var is missing" and "this machine has no supervisor" are entirely
  * different problems with entirely different fixes.
  */
-export function detectBackendWithReason(): { backend: ServiceBackend; reason: BackendReason } {
+export function detectBackendWithReason(): {
+  backend: ServiceBackend
+  reason: BackendReason
+} {
   if (process.platform === 'darwin') return { backend: 'launchd', reason: 'launchd' }
   if (process.platform === 'win32') return { backend: 'none', reason: 'windows' }
   // First attempt uses the ambient env; the second supplies a derived runtime dir.
@@ -454,6 +457,28 @@ ${envEntries}
 }
 
 /**
+ * How each run of a computer's service ended — systemd's `SERVICE_RESULT` (`oom-kill`,
+ * `exit-code`, `signal`, `timeout`, …), `EXIT_CODE` and `EXIT_STATUS` — appended to
+ * `<root>/logs/computer.log`, the log every computer process writes. A service killed
+ * outright (the OOM killer SIGKILLs its main process) logs nothing itself; before,
+ * this was only in the journal, next to nothing else the computer said.
+ *
+ * `$$` and `%%`: systemd's own escapes for a literal `$` (else it substitutes the
+ * variable itself, before they exist) and `%` (a specifier). The log dir is the
+ * script's `$1`, so the path is data, never shell syntax. A hub keeps its own logs
+ * (`sidecar.log` under its data root, not derivable here): the journal has its result.
+ */
+function systemdStopRecord(spec: ServiceUnitSpec): string {
+  if (spec.kind === 'hub') return ''
+  const script =
+    'mkdir -p "$1" && printf "%%s [systemd] service stopped result=%%s exit=%%s status=%%s\\n" ' +
+    '"$$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" "$$SERVICE_RESULT" "$$EXIT_CODE" "$$EXIT_STATUS" ' +
+    '>> "$1/computer.log"'
+  // `-`: a record that cannot be written (full disk) must not mark a clean stop failed.
+  return `ExecStopPost=-/bin/sh -c '${script}' sh "${join(spec.root, 'logs')}"\n`
+}
+
+/**
  * Render the systemd user unit.
  *
  * One unit per hub/computer rather than a `@`-template instance: the template form
@@ -469,8 +494,7 @@ export function renderSystemdUnit(spec: ServiceUnitSpec): string {
   const envLines = unitEnv(spec)
     .map(([k, v]) => `Environment=${k}=${v}`)
     .join('\n')
-  const agentIsolation =
-    spec.kind === 'hub' ? '' : '\nDelegate=memory\nDelegateSubgroup=supervisor\nOOMPolicy=continue'
+  const agentIsolation = spec.kind === 'hub' ? '' : '\nDelegate=memory\nDelegateSubgroup=supervisor'
   return `[Unit]
 Description=${kind.description} (${spec.name})
 Documentation=https://github.com/debuglebowski/slayzone
@@ -484,7 +508,10 @@ ExecStart=${exec}
 Restart=on-failure
 RestartSec=2
 OOMScoreAdjust=-750${agentIsolation}
-# stdout/stderr go to journald; read them with \`${kind.logsCommand} ${spec.name}\`.
+# A process the kernel OOM-kills (an agent's build, a headless browser) must not take
+# the whole service down with it: systemd's default (OOMPolicy=stop) did, twice a day.
+OOMPolicy=continue
+${systemdStopRecord(spec)}# stdout/stderr go to journald; read them with \`${kind.logsCommand} ${spec.name}\`.
 StandardOutput=journal
 StandardError=journal
 
@@ -619,7 +646,10 @@ export function readUnitRoot(
  * would let the reader and the writer drift onto different files, which reads as
  * "no output was captured".
  */
-export function serviceLogNames(kind: ServiceKind): { out: string; err: string } {
+export function serviceLogNames(kind: ServiceKind): {
+  out: string
+  err: string
+} {
   return { out: KINDS[kind].outLog, err: KINDS[kind].errLog }
 }
 

@@ -141,7 +141,11 @@ export type ComputerGatewayEvents = {
   /** Heartbeat watchdog fired — socket was terminated. */
   'computer-lost': { computerId: string; reason: 'heartbeat-timeout' }
   /** Usability changed without a socket reconnect (not a PTY lifecycle event). */
-  'computer-liveness': { computerId: string; usable: boolean; recovering: boolean }
+  'computer-liveness': {
+    computerId: string
+    usable: boolean
+    recovering: boolean
+  }
   'pty.data': PtyDataParams & { computerId: string }
   'pty.exit': PtyExitParams & { computerId: string }
   /** Child-process stdout/stderr chunk from a routed `proc.spawn` (arrival order,
@@ -154,7 +158,11 @@ export type ComputerGatewayEvents = {
    *  workspace-fs adapters — see `createRemoteFsAdapters`. */
   'fs.change': FsChangeParams & { computerId: string }
   /** Malformed or unexpected frame (never fatal to the gateway). */
-  'protocol-error': { computerId: string | null; detail: string; line?: string }
+  'protocol-error': {
+    computerId: string | null
+    detail: string
+    line?: string
+  }
 }
 
 export interface HubComputerGatewayOptions {
@@ -390,6 +398,11 @@ interface ComputerConnection {
   slowRequests: Map<string, number>
   /** Why the socket is closing, when the gateway knows better than "it closed". */
   closeReason: string | null
+  /** When it authenticated (wall clock), for how long a dropped connection had lasted. */
+  connectedAt: number | null
+  /** The WebSocket close frame's code and text, as the peer (or ws) gave them. */
+  closeCode: number | null
+  closeText: string | null
 }
 
 /**
@@ -455,6 +468,9 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     (() => {
       // Logging is opt-in — a host that passes no sink discards gateway diagnostics.
     })
+
+  /** Each computer's last disconnect, until it reconnects: the reconnect line's downtime. */
+  const lastDisconnect = new Map<string, { at: number; reason: string }>()
 
   const events = new TypedEventEmitter<ComputerGatewayEvents>((event, err) => {
     log('computer gateway listener threw', { event: String(event), error: String(err) })
@@ -715,11 +731,30 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
     releasePending(conn)
     if (conn.heartbeatTimer) clearTimeout(conn.heartbeatTimer)
     if (conn.authTimer) clearTimeout(conn.authTimer)
+    const pendingRequests = conn.rpc.pendingCount
     conn.rpc.dispose(reason)
     connections.delete(conn)
     const computerId = conn.descriptor?.computerId
     if (computerId && byComputerId.get(computerId) === conn) {
       byComputerId.delete(computerId)
+      // Every disconnect, with what is known about why. Before, the hub logged only
+      // the reconnect: a computer that "went down" left no record here of how
+      // (heartbeat timeout, its own stop, a network close) or how long it had been up.
+      const now = Date.now()
+      const detail = {
+        computerId,
+        name: conn.descriptor?.name,
+        version: conn.descriptor?.version,
+        reason,
+        closeCode: conn.closeCode,
+        closeText: conn.closeText,
+        connectedMs: conn.connectedAt === null ? null : now - conn.connectedAt,
+        lastHeardMsAgo: conn.descriptor ? Math.max(0, now - conn.descriptor.lastSeenAt) : null,
+        pendingRequests
+      }
+      lastDisconnect.set(computerId, { at: now, reason })
+      log('computer disconnected', detail)
+      diagnostic('computer.disconnected', detail)
       events.emit('computer-disconnected', { computerId, reason })
     }
   }
@@ -731,6 +766,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       stale.ws.terminate()
     }
     conn.descriptor = descriptor
+    conn.connectedAt = Date.now()
     conn.lastAliveAwakeMs = clock.awakeNow()
     conn.observedResumeAt = clock.lastResumeAt()
     byComputerId.set(descriptor.computerId, conn)
@@ -1014,7 +1050,15 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       protocolVersion: COMPUTER_PROTOCOL_VERSION
     })
     events.emit('computer-connected', { computer: { ...descriptor } })
-    log('computer computer reconnected', { computerId: identity.computerId })
+    // With how long it was gone and why it went: the outage, in one line.
+    const gone = lastDisconnect.get(identity.computerId)
+    lastDisconnect.delete(identity.computerId)
+    log('computer computer reconnected', {
+      computerId: identity.computerId,
+      name: descriptor.name,
+      version: descriptor.version,
+      ...(gone ? { downMs: Date.now() - gone.at, disconnectReason: gone.reason } : {})
+    })
   }
 
   const deliveredEvents = new Map<string, Set<string>>()
@@ -1200,7 +1244,10 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       liveness: 'usable',
       probe: null,
       slowRequests: new Map(),
-      closeReason: null
+      closeReason: null,
+      connectedAt: null,
+      closeCode: null,
+      closeText: null
     }
     conn.rpc = new DuplexRpc({
       label: 'computer-hub',
@@ -1257,7 +1304,15 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         if (line.trim().length > 0) conn.rpc.handleLine(line)
       }
     })
-    ws.on('close', () => teardown(conn, conn.closeReason ?? 'socket-closed'))
+    ws.on('close', (code?: number, reason?: Buffer) => {
+      // Recorded for the disconnect line only — never in the way of the teardown (a
+      // socket-like peer may close with no code or reason at all).
+      conn.closeCode = typeof code === 'number' ? code : null
+      conn.closeText = Buffer.isBuffer(reason)
+        ? reason.toString('utf8').slice(0, 200) || null
+        : null
+      teardown(conn, conn.closeReason ?? 'socket-closed')
+    })
     ws.on('error', (err) => {
       if (isWsMessageTooLargeError(err)) {
         // The computer sent a frame over the limit (it should have refused it itself).

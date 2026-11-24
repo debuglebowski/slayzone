@@ -533,7 +533,12 @@ describe('computer → hub notifications', () => {
     dialer.start()
     await dialer.events.once('connected')
 
-    const received: Array<{ computerId: string; sessionId: string; seq: number; data: string }> = []
+    const received: Array<{
+      computerId: string
+      sessionId: string
+      seq: number
+      data: string
+    }> = []
     hub.gateway.events.on('pty.data', (payload) => received.push(payload))
     for (const seq of [1, 2, 3]) {
       expect(dialer.notify('pty.data', { sessionId: 'sess-1', seq, data: `chunk-${seq}` })).toBe(
@@ -1120,5 +1125,44 @@ describe('audit (T-03)', () => {
     await hub.gateway.request('computer-1', 'pty.write', { sessionId: 's', data: 'ls\n' })
     await hub.gateway.request('computer-1', 'fs.readFile', { rootPath: '/r', filePath: 'f' })
     expect(audit).toEqual([])
+  })
+})
+
+describe('the hub log explains every computer outage (it used to log only reconnects)', () => {
+  it('a disconnect: reason, close code, how long it was up; the reconnect: how long it was gone', async () => {
+    const lines: Array<{ msg: string; meta?: Record<string, unknown> }> = []
+    const hub = await startHub({
+      log: (msg, meta) => lines.push({ msg, meta })
+    })
+    const store = createMemoryCredentialStore()
+    const first = makeDialer(hub.url, { credentialStore: store })
+    first.start()
+    await first.events.once('connected')
+    const disconnected = hub.gateway.events.once('computer-disconnected')
+    await first.stop()
+    await disconnected
+
+    const down = lines.find((l) => l.msg === 'computer disconnected')
+    expect(down?.meta).toMatchObject({
+      computerId: 'computer-1',
+      name: 'test-computer',
+      version: '0.0.0',
+      reason: 'socket-closed',
+      pendingRequests: 0
+    })
+    expect(typeof down?.meta?.closeCode).toBe('number')
+    expect(down?.meta?.connectedMs).toBeGreaterThanOrEqual(0)
+    expect(down?.meta?.lastHeardMsAgo).toBeGreaterThanOrEqual(0)
+
+    const second = makeDialer(hub.url, { credentialStore: store })
+    second.start()
+    await second.events.once('connected')
+    const up = lines.find((l) => l.msg === 'computer computer reconnected')
+    expect(up?.meta).toMatchObject({
+      computerId: 'computer-1',
+      name: 'test-computer',
+      disconnectReason: 'socket-closed'
+    })
+    expect(up?.meta?.downMs).toBeGreaterThanOrEqual(0)
   })
 })

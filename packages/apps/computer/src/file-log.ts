@@ -16,82 +16,35 @@
  *
  * @module computer/file-log
  */
-import {
-  createWriteStream,
-  existsSync,
-  mkdirSync,
-  renameSync,
-  statSync,
-  type WriteStream
-} from 'node:fs'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import {
+  createRotatingFileLog,
+  DEFAULT_LOG_MAX_BYTES,
+  rotateLogFile
+} from '@slayzone/platform/rotating-log'
+
+export { rotateLogFile }
 
 export const COMPUTER_LOG_DIR_NAME = 'logs'
 export const COMPUTER_LOG_FILE_NAME = 'computer.log'
-const MAX_BYTES = 5 * 1024 * 1024
-
-/**
- * `path` → `path.1` when it is larger than `maxBytes` (the older `.1` goes). For a
- * log a process appends to from its start (`host.log`): call before opening it.
- * Never throws.
- */
-export function rotateLogFile(path: string, maxBytes = MAX_BYTES): void {
-  try {
-    if (existsSync(path) && statSync(path).size > maxBytes) renameSync(path, `${path}.1`)
-  } catch {
-    /* a log that cannot be rotated is appended to as it is */
-  }
-}
 
 /** An appender for `<stateDir>/logs/computer.log`; a no-op when it cannot be opened. */
 export function createComputerFileLog(
   stateDir: string,
   opts: { maxBytes?: number } = {}
 ): (line: string) => void {
-  const maxBytes = opts.maxBytes ?? MAX_BYTES
-  try {
-    const dir = join(stateDir, COMPUTER_LOG_DIR_NAME)
-    mkdirSync(dir, { recursive: true, mode: 0o700 })
-    const file = join(dir, COMPUTER_LOG_FILE_NAME)
-    rotateLogFile(file, maxBytes)
-    let size = existsSync(file) ? statSync(file).size : 0
-    const open = (): WriteStream => {
-      const stream = createWriteStream(file, { flags: 'a', mode: 0o600 })
-      stream.on('error', () => undefined)
-      return stream
-    }
-    let stream = open()
-    return (line) => {
-      try {
-        const text = `${new Date().toISOString()} ${line}\n`
-        // Past its size: the open stream keeps writing what it holds into the renamed
-        // file (it writes by descriptor), the next line starts the new one. Only once
-        // the stream has its file open (`pending`: not yet — a rename then would send
-        // its queued lines to the new file's name).
-        if (size > 0 && size + Buffer.byteLength(text) > maxBytes && !stream.pending) {
-          try {
-            renameSync(file, `${file}.1`)
-          } catch {
-            /* not rotated: the new stream appends to the same file */
-          }
-          stream.end()
-          stream = open()
-          size = 0
-        }
-        stream.write(text)
-        size += Buffer.byteLength(text)
-      } catch {
-        /* never throw into a caller */
-      }
-    }
-  } catch {
-    return () => undefined
-  }
+  return createRotatingFileLog(join(stateDir, COMPUTER_LOG_DIR_NAME, COMPUTER_LOG_FILE_NAME), {
+    maxBytes: opts.maxBytes ?? DEFAULT_LOG_MAX_BYTES
+  })
 }
 
 /**
  * A computer process's log: each line `[tag] message {meta}` to stdout (its
- * launcher's log), and `message {meta}`, timestamped, to `<stateDir>/logs/computer.log`.
+ * launcher's log), and `[tag pid] message {meta}`, timestamped, to
+ * `<stateDir>/logs/computer.log`. The file is shared by every process that runs the
+ * computer (launcher, supervisor, worker, session host), so each line names its writer:
+ * without it a restart loop cannot be told apart from two processes running at once.
  */
 export function createComputerLog(opts: {
   stateDir: string
@@ -105,6 +58,69 @@ export function createComputerLog(opts: {
   return (message, meta) => {
     const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : ''
     stdout(`[${opts.tag}] ${message}${suffix}\n`)
-    fileLog(`${message}${suffix}`)
+    fileLog(`[${opts.tag} ${process.pid}] ${message}${suffix}`)
   }
+}
+
+/**
+ * One line appended to `<stateDir>/logs/computer.log` SYNCHRONOUSLY — for a process's
+ * last words (a fatal error, its exit), which an async stream would lose: the process
+ * is gone before the stream flushes. Never throws.
+ */
+export function appendComputerLogSync(stateDir: string, line: string): void {
+  try {
+    const dir = join(stateDir, COMPUTER_LOG_DIR_NAME)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    appendFileSync(join(dir, COMPUTER_LOG_FILE_NAME), `${new Date().toISOString()} ${line}\n`, {
+      mode: 0o600
+    })
+  } catch {
+    /* a log that cannot be written must not change how the process ends */
+  }
+}
+
+/** The subset of `process` {@link installProcessFateLog} listens on (a fake in tests). */
+export interface FateLoggedProcess {
+  pid: number
+  on(event: 'uncaughtExceptionMonitor', fn: (err: Error, origin: string) => void): unknown
+  on(event: 'exit', fn: (code: number) => void): unknown
+}
+
+/**
+ * Records how a computer process ends, in `computer.log`: every fatal error (an
+ * uncaught exception, or an unhandled rejection Node turns into one) with its stack,
+ * and the exit code. Before, both reached only stderr — an untimestamped `host.log`
+ * or the journal — so a crash loop showed in `computer.log` only as boot lines
+ * repeating every 2 s, with no reason (2026-11-23: ~1,560 restarts an hour for 10
+ * hours, cause `EADDRINUSE` visible only in a 32 MB `host.log`).
+ *
+ * Observes only: `uncaughtExceptionMonitor` does not change what Node does with the
+ * error (the process still prints it and exits), and `exit` cannot delay the exit.
+ * A SIGKILL (the OOM killer) leaves no line here — the process that started this one
+ * logs that exit (the launcher, the upgrade supervisor; systemd's `ExecStopPost`).
+ */
+export function installProcessFateLog(opts: {
+  stateDir: string
+  tag: string
+  proc?: FateLoggedProcess
+  now?: () => number
+}): void {
+  const proc = opts.proc ?? (process as unknown as FateLoggedProcess)
+  const now = opts.now ?? Date.now
+  const startedAt = now()
+  const write = (message: string, meta: Record<string, unknown>): void =>
+    appendComputerLogSync(
+      opts.stateDir,
+      `[${opts.tag} ${proc.pid}] ${message} ${JSON.stringify(meta)}`
+    )
+  proc.on('uncaughtExceptionMonitor', (err, origin) => {
+    write('fatal error', {
+      origin,
+      error: err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err),
+      ...(err && typeof err === 'object' && 'code' in err ? { code: String(err.code) } : {})
+    })
+  })
+  proc.on('exit', (code) => {
+    write('process exit', { code, uptimeMs: now() - startedAt })
+  })
 }
