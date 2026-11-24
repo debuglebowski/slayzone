@@ -13,6 +13,7 @@ import {
   Upload,
   FolderPlus,
   FilePlus,
+  Loader2,
   Search,
   Files,
   PanelLeftClose,
@@ -414,9 +415,17 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
 
     // --- Upload / drop ---
 
+    const [activeUploads, setActiveUploads] = useState<{ name: string }[]>([])
+    const [activeUpload] = activeUploads
     const uploadSources = useCallback(
       async (sources: readonly (string | File)[], allowDirectories = false) => {
         for (const source of sources) {
+          const name =
+            typeof source === 'string'
+              ? (source.split(/[/\\]/).filter(Boolean).pop() ?? source)
+              : source.name
+          const upload = { name }
+          setActiveUploads((active) => [...active, upload])
           try {
             if (allowDirectories && typeof source === 'string') {
               try {
@@ -428,10 +437,11 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             }
             await uploadArtifact(source)
           } catch (err) {
-            const name = typeof source === 'string' ? source.split(/[/\\]/).pop() : source.name
             toast.error('Upload failed', {
               description: `${name}: ${err instanceof Error ? err.message : String(err)}`
             })
+          } finally {
+            setActiveUploads((active) => active.filter((entry) => entry !== upload))
           }
         }
       },
@@ -786,6 +796,19 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             </div>
           </div>
         </TooltipProvider>
+
+        {activeUpload && (
+          <div
+            role="status"
+            className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+          >
+            <Loader2 aria-hidden="true" className="size-3.5 shrink-0 motion-safe:animate-spin" />
+            <span className="truncate">Uploading {activeUpload.name}…</span>
+            {activeUploads.length > 1 && (
+              <span className="shrink-0">(+{activeUploads.length - 1} more)</span>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-1 min-h-0">
           {/* Left sidebar */}

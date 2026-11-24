@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, cleanup, act } from '@testing-library/react'
+import { render, cleanup, act, screen } from '@testing-library/react'
 
 vi.mock('@slayzone/ui', () => ({
   IconButton: (props: {
@@ -73,6 +73,41 @@ afterEach(() => {
 })
 
 describe('MediaView raster image', () => {
+  it('shows preview status until the current raster loads or fails', async () => {
+    const images: MockImage[] = []
+    vi.stubGlobal(
+      'Image',
+      class extends MockImage {
+        constructor() {
+          super()
+          images.push(this)
+        }
+        set src(value: string) {
+          this._src = value
+        }
+      }
+    )
+    try {
+      const view = render(
+        <MediaView source={{ kind: 'image', src: '/image-1.png' }} showImageLoadStatus />
+      )
+      expect(screen.getByRole('status').textContent).toBe('Loading preview…')
+      act(() => images[0].onload?.())
+      expect(screen.queryByRole('status')).toBeNull()
+
+      view.rerender(
+        <MediaView source={{ kind: 'image', src: '/image-2.png' }} showImageLoadStatus />
+      )
+      expect(screen.getByRole('status').textContent).toBe('Loading preview…')
+      act(() => images[0].onload?.())
+      expect(screen.getByRole('status').textContent).toBe('Loading preview…')
+      act(() => images[1].onerror?.())
+      expect(screen.getByRole('status').textContent).toBe('Could not load image preview')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders a canvas element for image source', () => {
     const { container } = render(
       <MediaView source={{ kind: 'image', src: 'data:image/png;base64,' }} />

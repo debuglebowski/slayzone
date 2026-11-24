@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
-import { Frame, Expand } from 'lucide-react'
+import { Frame, Expand, Loader2 } from 'lucide-react'
 import { IconButton, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { usePanZoom, type PanZoomControls, type PanZoomTransform } from './usePanZoom'
 
@@ -9,6 +9,7 @@ export interface MediaViewProps {
   source: MediaSource
   className?: string
   showControls?: boolean
+  showImageLoadStatus?: boolean
 }
 
 type IntrinsicRef = React.MutableRefObject<{ w: number; h: number } | null>
@@ -141,6 +142,7 @@ export function MediaView(props: MediaViewProps) {
       src={props.source.src}
       className={props.className}
       showControls={props.showControls}
+      showImageLoadStatus={props.showImageLoadStatus}
     />
   )
 }
@@ -243,12 +245,20 @@ function SvgVectorView({
 function RasterCanvasView({
   src,
   className,
-  showControls = true
+  showControls = true,
+  showImageLoadStatus = false
 }: {
   src: string
   className?: string
   showControls?: boolean
+  showImageLoadStatus?: boolean
 }) {
+  const [image, setImage] = useState<{ src: string; status: 'loading' | 'ready' | 'error' }>({
+    src,
+    status: 'loading'
+  })
+  if (image.src !== src) setImage({ src, status: 'loading' })
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const bitmapRef = useRef<HTMLImageElement | null>(null)
   const intrinsicRef = useRef<{ w: number; h: number } | null>(null)
@@ -316,16 +326,19 @@ function RasterCanvasView({
       // Paint identity in case fit mode no-ops (host has 0 dims at this tick).
       // ResizeObserver effect will refit once host lays out.
       draw({ x: 0, y: 0, scale: 1 })
+      if (showImageLoadStatus) setImage({ src, status: 'ready' })
     }
     img.onerror = () => {
-      if (!cancelled) console.warn('[MediaView] image load failed:', src)
+      if (cancelled) return
+      if (showImageLoadStatus) setImage({ src, status: 'error' })
+      else console.warn('[MediaView] image load failed:', src)
     }
     img.src = src
 
     return () => {
       cancelled = true
     }
-  }, [src, resizeCanvas, refitIfFitMode, draw])
+  }, [src, resizeCanvas, refitIfFitMode, draw, showImageLoadStatus])
 
   useEffect(() => {
     const host = hostRef.current
@@ -345,6 +358,17 @@ function RasterCanvasView({
     <div ref={hostRef} className={hostClass}>
       <canvas ref={canvasRef} className="absolute inset-0 select-none" />
       <div ref={contentRef} className="absolute inset-0" />
+      {showImageLoadStatus && image.status !== 'ready' && (
+        <div
+          role="status"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-background/80 text-xs text-muted-foreground"
+        >
+          {image.status === 'loading' && (
+            <Loader2 aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+          )}
+          {image.status === 'error' ? 'Could not load image preview' : 'Loading preview…'}
+        </div>
+      )}
       {showControls && <FitFullControls mode={mode} fit={fit} full={full} />}
     </div>
   )

@@ -556,10 +556,8 @@ describe('ArtifactsPanel uploads to a remote hub', () => {
 
   it('sends picked bytes to the task and opens the returned artifact', async () => {
     uploads.hubId = 'remote'
-    uploads.uploadBlob.mockResolvedValue({
-      ...row('picked'),
-      title: 'picked.bin'
-    })
+    const pending = Promise.withResolvers<Row>()
+    uploads.uploadBlob.mockReturnValue(pending.promise)
     const { file, bytes } = binaryFile()
     await mountLoaded()
 
@@ -569,7 +567,12 @@ describe('ArtifactsPanel uploads to a remote hub', () => {
     expect(openPicker).toHaveBeenCalledOnce()
     fireEvent.change(picker, { target: { files: [file] } })
 
+    expect(screen.getByText('Uploading picked.bin…')).toBeTruthy()
+    expect(viewer().dataset.artifact).toBe('a1')
+    pending.resolve({ ...row('picked'), title: file.name })
+
     await waitFor(() => expect(viewer().dataset.artifact).toBe('picked'))
+    expect(screen.queryByText('Uploading picked.bin…')).toBeNull()
     expect(uploads.uploadBlob).toHaveBeenCalledWith({
       taskId: 't1',
       title: file.name,
@@ -593,6 +596,7 @@ describe('ArtifactsPanel uploads to a remote hub', () => {
       fireEvent.drop(viewer(), { dataTransfer: { files: [file, file] } })
 
       await waitFor(() => expect(viewer().dataset.artifact).toBe('picked'))
+      expect(screen.queryByText('Uploading picked.bin…')).toBeNull()
       expect(uploads.uploadBlob).toHaveBeenCalledTimes(2)
       expect(toastError).toHaveBeenCalledWith('Upload failed', {
         description: 'picked.bin: Hub unavailable'

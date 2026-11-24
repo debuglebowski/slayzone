@@ -521,6 +521,17 @@ describe('ArtifactContentEditor across a tab switch', () => {
     expect(src()).toBe(toSlzFileUrl('/data/img', 2))
   })
 
+  it('shows preview status during path lookup and reports a failed lookup', async () => {
+    const path = Promise.withResolvers<string>()
+    getFilePath.mockReturnValueOnce(path.promise)
+    render(<Tab mode="visible" art={IMAGE} />)
+    await flush()
+    expect(screen.getByRole('status').textContent).toBe('Loading preview…')
+
+    await act(async () => path.reject(new Error('Hub disconnected')))
+    expect(screen.getByRole('status').textContent).toBe('Could not load image preview')
+  })
+
   it('showing keeps the same editor mounted (caret, scroll and undo survive)', async () => {
     const view = render(<Tab mode="visible" />)
     await flush()

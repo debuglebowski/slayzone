@@ -37,7 +37,7 @@ import {
   RICH_TEXT_MAX_BYTES,
   type ArtifactTextRead
 } from '../shared/text-read'
-import { Download, FileQuestion } from 'lucide-react'
+import { Download, FileQuestion, Loader2 } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
 import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import { HtmlPreviewFrame } from './ArtifactHtmlPreview'
@@ -111,6 +111,18 @@ function NotTextView({
 
 // --- Image viewer ---
 
+function ImagePreviewStatus({ failed = false }: { failed?: boolean }) {
+  return (
+    <div
+      role="status"
+      className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground"
+    >
+      {!failed && <Loader2 aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />}
+      {failed ? 'Could not load image preview' : 'Loading preview…'}
+    </div>
+  )
+}
+
 function ImageViewer({
   artifactId,
   contentVersion,
@@ -121,24 +133,33 @@ function ImageViewer({
   getFilePath: (id: string) => Promise<string | null>
 }) {
   const hubId = useHubId()
-  const [src, setSrc] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ version: number; src: string | null }>()
 
   useEffect(() => {
-    getFilePath(artifactId).then((p) => {
-      if (p) setSrc(toArtifactFileUrl(hubId, artifactId, p, contentVersion))
-    })
+    let cancelled = false
+    getFilePath(artifactId)
+      .then((path) => {
+        if (cancelled) return
+        const src = path ? toArtifactFileUrl(hubId, artifactId, path, contentVersion) : null
+        setPreview({ version: contentVersion, src })
+      })
+      .catch(() => {
+        if (!cancelled) setPreview({ version: contentVersion, src: null })
+      })
+    return () => {
+      cancelled = true
+    }
   }, [hubId, artifactId, contentVersion, getFilePath])
 
-  if (!src)
-    return (
-      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
-        Loading...
-      </div>
-    )
+  if (!preview?.src) return <ImagePreviewStatus failed={preview?.version === contentVersion} />
 
   return (
     <div className="flex-1 relative bg-muted/20 overflow-hidden">
-      <MediaView source={{ kind: 'image', src }} className="absolute inset-0" />
+      <MediaView
+        source={{ kind: 'image', src: preview.src }}
+        className="absolute inset-0"
+        showImageLoadStatus
+      />
     </div>
   )
 }
@@ -652,6 +673,7 @@ export function ArtifactContentEditor({
     ) : null
 
   const inner = ((): React.ReactElement => {
+    if (loading && renderMode === 'image') return <ImagePreviewStatus />
     if (loading)
       return (
         <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
