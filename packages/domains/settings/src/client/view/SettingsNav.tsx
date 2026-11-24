@@ -56,7 +56,7 @@ function NavItem({
         'flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors',
         active
           ? 'bg-accent font-semibold text-foreground'
-          : 'text-foreground/80 hover:bg-accent/50 hover:text-foreground'
+          : 'text-foreground hover:bg-accent/50'
       )}
     >
       {children}
@@ -156,7 +156,8 @@ function Section({
 }) {
   return (
     <div className="pb-9">
-      <div className="mb-1 flex h-7 items-center px-2.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-foreground/70">
+      {/* pr-0: the action's w-6 box lines up with the fold chevrons' w-6 box below */}
+      <div className="mb-1 flex h-7 items-center pl-2.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {title}
         {action && <span className="ml-auto">{action}</span>}
       </div>
