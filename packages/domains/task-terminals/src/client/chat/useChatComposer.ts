@@ -97,6 +97,8 @@ export interface UseChatComposerOpts {
    * or queued (`ChatCapabilities.sideQuestions`). Absent: `/btw` is plain text.
    */
   onSideQuestion?: (question: string) => void
+  /** A picked / pasted / dropped file is still being checked or uploaded: nothing sends until it is in. */
+  attaching?: boolean
 }
 function queueFailureMessage(err: unknown): string {
   return `Could not queue the message: ${err instanceof Error ? err.message : String(err)}`
@@ -164,7 +166,8 @@ export function useChatComposer({
   attachmentsUsedBytes = 0,
   interruptTurn,
   steerAvailable = false,
-  onSideQuestion
+  onSideQuestion,
+  attaching = false
 }: UseChatComposerOpts) {
   const trpcClient = useTRPCClient()
   const capabilities = chatCapabilitiesForMode(mode)
@@ -545,6 +548,11 @@ export function useChatComposer({
       const attachments = draftSnapshot.current.attachments
       if (sessionEnded) return
       if (!text && attachments.length === 0) return
+      // The send button is disabled too; this covers Enter, queueing and `/` picks.
+      if (attaching) {
+        toast('Still attaching files — send once they are in.')
+        return
+      }
       setHistoryNav(HISTORY_IDLE)
       if (text) recordHistory(text)
 
@@ -713,7 +721,8 @@ export function useChatComposer({
       recordHistory,
       setDraft,
       setAttachments,
-      onSideQuestion
+      onSideQuestion,
+      attaching
     ]
   )
 

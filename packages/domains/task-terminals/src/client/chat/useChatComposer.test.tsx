@@ -385,6 +385,30 @@ describe('useChatComposer handleSend guards', () => {
     expect(composer.draft).toBe('hello')
   })
 
+  it('Enter sends nothing — nor queues it mid-turn — while a file is still attaching', async () => {
+    for (const inFlight of [false, true]) {
+      const { rerender } = setup({ attaching: true, inFlight })
+      type('look at this')
+      attach([IMG_A])
+      fireEvent.keyDown(textarea(), { key: 'Enter' })
+      await act(async () => {})
+      expect(sendMessage).not.toHaveBeenCalled()
+      expect(mocks.queue.push).not.toHaveBeenCalled()
+      expect(composer.draft).toBe('look at this')
+      expect(composer.attachments).toEqual([IMG_A])
+      expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/attaching/i))
+      // Once the upload is done the same Enter sends.
+      rerender({ attaching: false, inFlight })
+      fireEvent.keyDown(textarea(), { key: 'Enter' })
+      await act(async () => {})
+      expect(sendMessage.mock.calls.length + mocks.queue.push.mock.calls.length).toBe(1)
+      cleanup()
+      sendMessage.mockClear()
+      mocks.queue.push.mockClear()
+      mocks.toast.mockClear()
+    }
+  })
+
   it('does nothing for a whitespace-only draft without attachments', async () => {
     setup()
     type('   ')

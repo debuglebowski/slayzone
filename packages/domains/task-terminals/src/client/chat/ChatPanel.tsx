@@ -344,6 +344,18 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // `/btw`: side questions, answered aside — never part of the conversation.
     const sideQuestions = useSideQuestions({ tabId, taskId, mode, cwd, providerFlagsOverride })
 
+    // Before the composer: a file still uploading blocks its send. `onAdded` runs
+    // later (after an upload), so reading `composer` there is safe.
+    const attachmentsApi = useChatAttachments({
+      taskId,
+      tabId,
+      mode,
+      onAdded: (added) => {
+        composer.setAttachments((prev) => [...prev, ...added])
+        composer.textareaRef.current?.focus()
+      }
+    })
+
     const composer = useChatComposer({
       tabId,
       taskId,
@@ -372,7 +384,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       // "Send now": a turn runs and no prompt waits for an answer.
       steerAvailable:
         inFlight && !(promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)),
-      ...(chatCapabilitiesForMode(mode).sideQuestions ? { onSideQuestion: sideQuestions.ask } : {})
+      ...(chatCapabilitiesForMode(mode).sideQuestions ? { onSideQuestion: sideQuestions.ask } : {}),
+      attaching: attachmentsApi.pending.length > 0
     })
 
     const storage = useChatAvailability({
@@ -385,15 +398,6 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       })
     })
 
-    const attachmentsApi = useChatAttachments({
-      taskId,
-      tabId,
-      mode,
-      onAdded: (added) => {
-        composer.setAttachments((prev) => [...prev, ...added])
-        composer.textareaRef.current?.focus()
-      }
-    })
     const takesAnyFile = chatCapabilitiesForMode(mode).attachments === 'blocks'
 
     useImperativeHandle(ref, () => ({
