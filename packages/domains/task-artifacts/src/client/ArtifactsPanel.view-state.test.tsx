@@ -13,7 +13,11 @@ import { Activity, createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ArtifactsSidebarState, TaskArtifact } from '@slayzone/task-contracts'
+import {
+  RENDER_MODE_INFO,
+  type ArtifactsSidebarState,
+  type TaskArtifact
+} from '@slayzone/task-contracts'
 import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import type { ArtifactsPanelHandle } from './ArtifactsPanel.types'
 import { detectPlatform, toast, useShortcutStore } from '@slayzone/ui'
@@ -110,21 +114,6 @@ const appearance = {
 vi.mock('@slayzone/ui', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@slayzone/ui')>()),
   useAppearance: () => appearance
-}))
-// The Display popover, always open: its view-mode buttons are what's clicked.
-vi.mock('@slayzone/editor', () => ({
-  MarkdownSettingsPopover: ({
-    trigger,
-    children
-  }: {
-    trigger: React.ReactNode
-    children: React.ReactNode
-  }) => (
-    <div>
-      {trigger}
-      {children}
-    </div>
-  )
 }))
 // The viewer, reduced to the props under test.
 vi.mock('./ArtifactContentEditor', () => ({
@@ -233,6 +222,10 @@ async function mountLoaded(saved = 'a1') {
   return view
 }
 const select = (id: string) => act(() => handle.current?.selectArtifact(id))
+function chooseViewMode(label: 'Preview' | 'Split' | 'Raw') {
+  fireEvent.click(screen.getByRole('button', { name: /^View mode:/ }))
+  fireEvent.click(screen.getByRole('button', { name: label }))
+}
 function openFind(query: string) {
   fireEvent.keyDown(viewer(), { key: 'f', metaKey: true })
   const input = findInput()
@@ -250,6 +243,14 @@ beforeEach(() => {
   uploads.uploadPath.mockReset()
   uploads.uploadBlob.mockReset()
   uploads.showOpenDialog.mockReset()
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
   useShortcutStore.setState({ overrides: {}, isRecording: false })
   server.rows = [row('a1'), row('a2', 'raw'), row('a3')]
   server.folders = []
@@ -259,20 +260,137 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   client.clear()
+  vi.unstubAllGlobals()
+})
+
+it('pins actions per artifact and can save them as a default for its render type', async () => {
+  server.rows = [row('a1'), row('a2'), { ...row('a3'), title: 'page.html' }, row('a4')]
+  try {
+    const view = await mountLoaded()
+    const openMore = () =>
+      fireEvent.click(screen.getByRole('button', { name: 'More artifact actions' }))
+    expect(screen.queryByTestId('artifact-zoom')).toBeNull()
+    openMore()
+    const pin = screen.getByRole('button', { name: 'Pin Zoom' })
+    act(() => pin.focus())
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Pin Zoom')
+    fireEvent.click(pin)
+    expect(screen.getByTestId('artifact-zoom')).toBeTruthy()
+    act(() => screen.getByRole('button', { name: 'Zoom' }).focus())
+    act(() => screen.getByRole('button', { name: 'Unpin Zoom' }).focus())
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Unpin Zoom')
+    fireEvent.click(screen.getByRole('button', { name: 'More artifact actions' }))
+
+    select('a2')
+    expect(screen.queryByTestId('artifact-zoom')).toBeNull()
+    openMore()
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Download' }))
+
+    select('a1')
+    openMore()
+    fireEvent.click(screen.getByRole('button', { name: 'Set as default for Rich Text' }))
+    expect(screen.getByRole('button', { name: 'Saved as default for Rich Text' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unpin Zoom' })).toBeTruthy()
+
+    select('a4')
+    expect(screen.getByTestId('artifact-zoom')).toBeTruthy()
+    select('a2')
+    expect(screen.queryByTestId('artifact-zoom')).toBeNull()
+    openMore()
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    expect(screen.getByTestId('artifact-zoom')).toBeTruthy()
+
+    select('a3')
+    expect(screen.queryByTestId('artifact-zoom')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Device preview' })).toBeTruthy()
+
+    view.unmount()
+    await mountLoaded('a2')
+    expect(screen.getByTestId('artifact-zoom')).toBeTruthy()
+  } finally {
+    cleanup()
+    window.localStorage.clear()
+  }
+})
+
+it('keeps render formats, export options and Markdown display settings in More', async () => {
+  server.rows = [
+    row('a1'),
+    { ...row('a2'), title: 'page.html' },
+    { ...row('a3'), title: 'document.pdf' }
+  ]
+  await mountLoaded()
+  const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+  click('More artifact actions')
+  click('Display')
+  expect(screen.getByRole('dialog', { name: 'Artifact actions' })).toBeTruthy()
+  expect(['left', 'right']).toContain(
+    screen.getByRole('dialog', { name: 'Display' }).getAttribute('data-side')
+  )
+  for (const name of ['Outline', /Minimap/, 'Compact', 'Wide', 'Use mono font']) {
+    expect(screen.getByRole('switch', { name })).toBeTruthy()
+  }
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
+  expect(screen.getByRole('button', { name: 'Display' })).toBe(document.activeElement)
+  click('Zoom')
+  expect(['left', 'right']).toContain(
+    screen.getByRole('dialog', { name: 'Zoom' }).getAttribute('data-side')
+  )
+  expect(screen.getByRole('button', { name: 'Reset zoom' })).toBeTruthy()
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+  expect(screen.getByRole('button', { name: 'Zoom' })).toBe(document.activeElement)
+  const format = screen.getByRole('button', { name: 'Render as' })
+  act(() => format.focus())
+  fireEvent.keyDown(format, { key: 'ArrowRight' })
+  expect(screen.getByRole('dialog', { name: 'Artifact actions' })).toBeTruthy()
+  expect(screen.getByRole('dialog', { name: 'Render as' })).toBeTruthy()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Auto (Rich Text)' }))
+  for (const { label } of Object.values(RENDER_MODE_INFO)) {
+    expect(screen.getByRole('button', { name: label })).toBeTruthy()
+  }
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Rich Text' }))
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
+  expect(screen.queryByRole('dialog', { name: 'Render as' })).toBeNull()
+  expect(document.activeElement).toBe(format)
+  const download = screen.getByRole('button', { name: 'Download' })
+  fireEvent.pointerEnter(download, { pointerType: 'mouse' })
+  const downloadMenu = await screen.findByRole('dialog', { name: 'Download' })
+  expect(['left', 'right']).toContain(downloadMenu.getAttribute('data-side'))
+  fireEvent.pointerLeave(download, { pointerType: 'mouse' })
+  fireEvent.pointerEnter(downloadMenu, { pointerType: 'mouse' })
+  await settle(225)
+  expect(screen.getByRole('dialog', { name: 'Download' })).toBe(downloadMenu)
+  expect(document.activeElement).toBe(format)
+  for (const name of [
+    'Download original',
+    'Download as PDF',
+    'Download as HTML',
+    'Download all as ZIP'
+  ]) {
+    expect(screen.getByRole('button', { name })).toBeTruthy()
+  }
+
+  select('a2')
+  click('More artifact actions')
+  click('Theme')
+  for (const name of ['System theme', 'Dark (forced)', 'Light (forced)']) {
+    expect(screen.getByRole('button', { name })).toBeTruthy()
+  }
+
+  select('a3')
+  click('More artifact actions')
+  expect(screen.queryByRole('button', { name: 'Zoom' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Versions' })).toBeTruthy()
+  click('Download')
+  expect(screen.getByRole('button', { name: 'Download original' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Download as PDF' })).toBeNull()
 })
 
 describe('ArtifactsPanel device preview persistence', () => {
   const scrollIntoView = HTMLElement.prototype.scrollIntoView
 
   beforeEach(() => {
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      }
-    )
     HTMLElement.prototype.scrollIntoView ??= () => undefined
     server.rows = [
       { ...row('a1', 'split'), title: 'first.html' },
@@ -284,7 +402,6 @@ describe('ArtifactsPanel device preview persistence', () => {
     cleanup()
     localStorage.clear()
     HTMLElement.prototype.scrollIntoView = scrollIntoView
-    vi.unstubAllGlobals()
   })
 
   it('keeps the device, foldable mode, rotation and frame setting per artifact after reopening', async () => {
@@ -341,7 +458,9 @@ describe('ArtifactsPanel device preview persistence', () => {
     select('a1')
     expect(viewer().dataset.viewport).toBe('669×951')
     fireEvent.click(screen.getByRole('button', { name: 'Switch to Both' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Device preview, iPhone Duo, both screens' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Device preview, iPhone Duo, both screens' })
+    )
     fireEvent.click(screen.getByRole('switch', { name: 'Show device frame' }))
 
     view.unmount()
@@ -357,8 +476,18 @@ describe('ArtifactsPanel device preview persistence', () => {
   it('restores a rotated custom size and remembers switching back to fit to pane', async () => {
     const view = await mountLoaded()
     fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Custom size' }))
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Viewport width' }), {
+    const sizing = screen.getByRole('group', { name: 'Viewport sizing' })
+    expect(sizing.contains(screen.getByRole('button', { name: 'Fit to pane' }))).toBe(true)
+    expect(sizing.compareDocumentPosition(screen.getByRole('listbox'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    const customSize = screen.getByRole('button', { name: 'Custom size' })
+    expect(sizing.contains(customSize)).toBe(true)
+    fireEvent.click(customSize)
+    const width = screen.getByRole('spinbutton', { name: 'Viewport width' })
+    expect(document.activeElement).toBe(width)
+    expect(fireEvent.keyDown(width, { key: 'ArrowUp' })).toBe(true)
+    fireEvent.change(width, {
       target: { value: '700' }
     })
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Viewport height' }), {
@@ -371,10 +500,46 @@ describe('ArtifactsPanel device preview persistence', () => {
     const reopened = await mountLoaded()
     expect(viewer().dataset.viewport).toBe('900×700')
     fireEvent.click(screen.getByRole('button', { name: 'Device preview, Custom, 900 by 700' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'Fit to pane' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Fit to pane' }))
 
     reopened.unmount()
     await mountLoaded()
+    expect(viewer().dataset.viewport).toBeUndefined()
+  })
+
+  it('keeps foldable screens and rotation reachable after Device is unpinned', async () => {
+    await mountLoaded()
+    const openMore = () =>
+      fireEvent.click(screen.getByRole('button', { name: 'More artifact actions' }))
+    const openDevice = () => fireEvent.click(screen.getByRole('button', { name: 'Device' }))
+
+    openMore()
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin Device' }))
+    expect(screen.queryByRole('button', { name: 'Device preview' })).toBeNull()
+    openDevice()
+    const search = screen.getByRole('combobox', { name: 'Search devices' })
+    expect(document.activeElement).toBe(search)
+    expect(fireEvent.keyDown(search, { key: 'ArrowLeft' })).toBe(true)
+    expect(['left', 'right']).toContain(
+      screen.getByRole('dialog', { name: 'Device' }).getAttribute('data-side')
+    )
+    fireEvent.click(await screen.findByRole('option', { name: 'iPhone Duo' }))
+    expect(viewer().dataset.viewport).toBe('466×678')
+
+    openMore()
+    openDevice()
+    fireEvent.click(screen.getByRole('switch', { name: 'Show device frame' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to landscape' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Both' }))
+    expect(viewer().dataset.viewports).toBe('678×466, 669×951')
+    expect(viewer().dataset.deviceFrame).toBeUndefined()
+
+    openMore()
+    openDevice()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search devices' }), {
+      target: { value: 'Fit' }
+    })
+    fireEvent.click(await screen.findByRole('option', { name: 'Fit to pane' }))
     expect(viewer().dataset.viewport).toBeUndefined()
   })
 })
@@ -649,7 +814,7 @@ describe('ArtifactsPanel view state across a tab switch', () => {
     server.updateGate = new Promise<void>((r) => {
       release = r
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Split' }))
+    chooseViewMode('Split')
     expect(viewer().dataset.viewMode).toBe('split')
 
     await switchAwayAndBack(view)
@@ -689,9 +854,9 @@ describe('ArtifactsPanel view state on a selection change (pins)', () => {
     expect(viewer().dataset.viewMode).toBe('preview')
   })
 
-  it('a view mode picked in Display is saved per artifact and comes back on reselect', async () => {
+  it('a view mode picked from the toolbar is saved per artifact and comes back on reselect', async () => {
     await mountLoaded()
-    fireEvent.click(screen.getByRole('button', { name: 'Split' }))
+    chooseViewMode('Split')
     await idle()
     select('a2')
     expect(viewer().dataset.viewMode).toBe('raw')

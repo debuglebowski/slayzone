@@ -24,6 +24,17 @@ function requireSeeded<T>(row: T | null | undefined, what: string): T {
 // --- Locators ---
 
 const artifactsPanel = (page: Page) => page.locator('[data-panel-id="artifacts"]:visible')
+
+async function openArtifactActions(page: Page) {
+  await artifactsPanel(page).getByRole('button', { name: 'More artifact actions' }).click()
+  return page.getByRole('dialog', { name: 'Artifact actions' })
+}
+
+async function openArtifactZoom(page: Page) {
+  const actions = await openArtifactActions(page)
+  await actions.getByRole('button', { name: 'Zoom', exact: true }).click()
+  return page.getByRole('dialog', { name: 'Zoom', exact: true })
+}
 const sidebar = (page: Page) => artifactsPanel(page).locator('[data-testid="artifacts-sidebar"]')
 const artifactRow = (page: Page, title: string) =>
   sidebar(page)
@@ -499,7 +510,8 @@ test.describe('Artifacts panel', () => {
     await artifactRow(mainWindow, 'zoom-doc.md').click()
 
     const panel = artifactsPanel(mainWindow)
-    const zoomValue = panel.locator('[data-testid="artifact-zoom-value"]')
+    const zoom = await openArtifactZoom(mainWindow)
+    const zoomValue = zoom.locator('[data-testid="artifact-zoom-value"]')
     await expect(zoomValue).toHaveText('100%', { timeout: 5_000 })
 
     const heading = panel.locator('.ProseMirror h1').first()
@@ -508,7 +520,7 @@ test.describe('Artifacts panel', () => {
     expect(baseline).toBeTruthy()
 
     // 100 → 110 is the next rung of the Chromium-style ladder, not a fixed +10.
-    await panel.locator('[data-testid="artifact-zoom-in"]').click()
+    await zoom.locator('[data-testid="artifact-zoom-in"]').click()
     await expect(zoomValue).toHaveText('110%', { timeout: 3_000 })
     await expect
       .poll(async () => (await heading.boundingBox())!.height, { timeout: 3_000 })
@@ -528,10 +540,12 @@ test.describe('Artifacts panel', () => {
 
     // Per-artifact, not per-panel: the sibling opens at 100%.
     await artifactRow(mainWindow, 'zoom-other.md').click()
+    await openArtifactZoom(mainWindow)
     await expect(zoomValue).toHaveText('100%', { timeout: 3_000 })
 
     // Persisted: coming back restores 110%.
     await artifactRow(mainWindow, 'zoom-doc.md').click()
+    await openArtifactZoom(mainWindow)
     await expect(zoomValue).toHaveText('110%', { timeout: 3_000 })
 
     // Clicking the readout resets to 100%.
@@ -550,8 +564,9 @@ test.describe('Artifacts panel', () => {
     await artifactRow(mainWindow, 'zoom-code.ts').click()
 
     const panel = artifactsPanel(mainWindow)
-    const zoomValue = panel.locator('[data-testid="artifact-zoom-value"]')
-    const zoomIn = panel.locator('[data-testid="artifact-zoom-in"]')
+    const zoom = await openArtifactZoom(mainWindow)
+    const zoomValue = zoom.locator('[data-testid="artifact-zoom-value"]')
+    const zoomIn = zoom.locator('[data-testid="artifact-zoom-in"]')
     await expect(panel.locator('.cm-editor').first()).toBeVisible({ timeout: 5_000 })
 
     // 100 → 110 → 125 → 150
@@ -581,8 +596,9 @@ test.describe('Artifacts panel', () => {
     const frame = panel.locator('iframe[title="HTML preview"]').first()
     await expect(frame).toBeVisible({ timeout: 5_000 })
 
-    await panel.locator('[data-testid="artifact-zoom-in"]').click()
-    await expect(panel.locator('[data-testid="artifact-zoom-value"]')).toHaveText('110%', {
+    const zoom = await openArtifactZoom(mainWindow)
+    await zoom.locator('[data-testid="artifact-zoom-in"]').click()
+    await expect(zoom.locator('[data-testid="artifact-zoom-value"]')).toHaveText('110%', {
       timeout: 3_000
     })
 
@@ -613,15 +629,15 @@ test.describe('Artifacts panel', () => {
     await s.refreshData()
 
     await openArtifactsPanel(mainWindow)
-    const zoom = artifactsPanel(mainWindow).locator('[data-testid="artifact-zoom"]')
-
     // Chromium's embedded PDF viewer owns its own zoom UI.
     await artifactRow(mainWindow, 'zoom-skip.pdf').click()
-    await expect(zoom).toHaveCount(0)
+    const actions = await openArtifactActions(mainWindow)
+    await expect(actions.getByRole('button', { name: 'Zoom', exact: true })).toHaveCount(0)
 
     // MediaView's pan-zoom canvas owns zoom in the SVG preview.
     await artifactRow(mainWindow, 'zoom-skip.svg').click()
-    await expect(zoom).toHaveCount(0)
+    await openArtifactActions(mainWindow)
+    await expect(actions.getByRole('button', { name: 'Zoom', exact: true })).toHaveCount(0)
   })
 
   // The whole chain: hub content route (byte ranges) → main's slz-file handler → the
