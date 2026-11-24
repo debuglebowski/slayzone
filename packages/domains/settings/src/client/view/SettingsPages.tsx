@@ -26,6 +26,7 @@ import { SettingsTabIntro } from '../tabs/SettingsTabIntro'
 import { AgentHubSettings } from '../tabs/panels-settings/AgentHubSettings'
 import { AllProjectsPage } from './AllProjectsPage'
 import { ComputerPage } from './ComputerPage'
+import { HubOverview } from './HubOverview'
 import { SettingsSearchResults } from './SettingsSearch'
 import { ProjectAgentSettings } from './ProjectAgentSettings'
 import { useNavHubs } from './SettingsNav'
@@ -213,6 +214,7 @@ function HubPage({ route }: { route: HubRoute }) {
   const isDefault = !!hub?.isDefault
   const tabs: Array<[string, string]> = [
     ['overview', 'Overview'],
+    ['computers', 'Computers'],
     ['agents', 'Agents & providers'],
     ['worktrees', 'Worktrees'],
     ...(isDefault
@@ -230,10 +232,20 @@ function HubPage({ route }: { route: HubRoute }) {
     <div className="space-y-6" data-testid="settings-hub-page">
       <PageHeader crumb="Hubs" title={hub?.label ?? 'Hub'} />
       <PageTabs tabs={tabs} active={tab} onSelect={(t) => go({ tab: t })} testIdPrefix="hub-tab" />
-      {/* Status, sign-in, default, edit, remove and this hub's computers: the Hubs
-          page's own card (it scopes itself). */}
-      {tab === 'overview' && <HubsSettingsTab onlyHubId={hub?.id ?? 'local'} />}
+      {/* Status, sign-in, default, edit, remove, users / the computers: the Hubs
+          page's own card split over two tabs (it scopes itself). */}
+      {tab === 'overview' && <HubsSettingsTab onlyHubId={hub?.id ?? 'local'} section="hub" />}
+      {tab === 'computers' && (
+        <HubsSettingsTab onlyHubId={hub?.id ?? 'local'} section="computers" />
+      )}
       <ScopeOf hubId={hub?.id ?? null}>
+        {tab === 'overview' && (
+          <HubOverview
+            isDefault={isDefault}
+            openTab={(t) => go({ tab: t })}
+            openProjects={() => navigate({ kind: 'projects' })}
+          />
+        )}
         {tab === 'agents' && (
           <div className="space-y-8">
             <AiProvidersSettingsTab

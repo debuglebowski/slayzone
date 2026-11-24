@@ -1631,7 +1631,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         const dialog = page.getByTestId('settings-view').first()
         await expect(dialog).toBeVisible({ timeout: 10_000 })
 
-        // Hub B's own page (nav: each hub, then its computers and projects).
+        // Hub B's own page (nav: each hub, then its projects).
         const hubB = dialog.locator(
           '[data-testid="settings-nav-hub-group"][data-hub-id="remote-b"]'
         )

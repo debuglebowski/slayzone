@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, Folders, Plus } from 'lucide-react'
+import { ChevronRight, Plus } from 'lucide-react'
 import { HubScope, useFederationOrNull, useHubConnection } from '@slayzone/transport/client'
-import { computerStatus } from '@slayzone/computers/labels'
 import { cn } from '@slayzone/ui'
 import { useTRPC } from '../trpc'
 import { sameRoute, type SettingsRoute } from '../settings-route'
@@ -54,9 +53,7 @@ function NavItem({
       }}
       className={cn(
         'flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors',
-        active
-          ? 'bg-accent font-semibold text-foreground'
-          : 'text-foreground hover:bg-accent/50'
+        active ? 'bg-accent font-semibold text-foreground' : 'text-foreground hover:bg-accent/50'
       )}
     >
       {children}
@@ -208,18 +205,12 @@ export function SettingsNav() {
             <HubNavGroup key="ambient" hub={hub} />
           )
         )}
-        <NavItem route={{ kind: 'projects' }} testId="settings-nav-all-projects">
-          <LeadSlot>
-            <Folders className="size-3.5 text-muted-foreground" />
-          </LeadSlot>
-          All projects
-        </NavItem>
       </Section>
     </nav>
   )
 }
 
-/** A row's leading 18px box (dot, icon, project blob), so labels after it line up. */
+/** A hub row's leading 18px box (its dot), as wide as the project blobs below it. */
 function LeadSlot({ children }: { children?: ReactNode }) {
   return (
     <span aria-hidden className="grid size-[18px] shrink-0 place-items-center">
@@ -233,14 +224,25 @@ function HubConnectionDot({ hubId }: { hubId: string }) {
   return <StatusDot tone={toneOfConnection(useHubConnection(hubId))} />
 }
 
+/**
+ * The route is this hub's own page or one of its computers' (reached from the hub
+ * page; the nav lists no computers, so the hub row stays lit for them).
+ */
+function isHubPage(hub: NavHub, r: SettingsRoute): boolean {
+  // a legacy deep link names no hub (`hubId: null`): it means the default one
+  if (r.kind === 'hub') return r.hubId === hub.id || (r.hubId === null && hub.isDefault)
+  // outside a federation (`hub.id` null) there is one hub: every computer is its
+  if (r.kind === 'computer') return hub.id === null || r.hubId === hub.id
+  return false
+}
+
 function HubNavRow({ hub, onOpen }: { hub: NavHub; onOpen?: () => void }) {
   return (
     <NavItem
       route={{ kind: 'hub', hubId: hub.id, tab: 'overview' }}
       testId="settings-nav-hub"
       onOpen={onOpen}
-      // a legacy deep link names no hub (`hubId: null`): it means the default one
-      match={(r) => r.kind === 'hub' && (r.hubId === hub.id || (r.hubId === null && hub.isDefault))}
+      match={(r) => isHubPage(hub, r)}
     >
       <LeadSlot>{hub.id && <HubConnectionDot hubId={hub.id} />}</LeadSlot>
       <span className="truncate">{hub.label}</span>
@@ -253,18 +255,14 @@ function HubNavRow({ hub, onOpen }: { hub: NavHub; onOpen?: () => void }) {
   )
 }
 
-/** A hub, then its computers and projects. Rendered inside the hub's own scope. */
+/** A hub, then its projects (its computers are listed on its page). Rendered inside the hub's own scope. */
 function HubNavGroup({ hub }: { hub: NavHub }) {
   const trpc = useTRPC()
-  const computers = useQuery(
-    trpc.computers.list.queryOptions(undefined, { refetchInterval: 10_000 })
-  )
   const projects = useQuery(trpc.projects.list.queryOptions())
   const route = useSettingsViewStore((s) => s.route)
   // Unfolded by default only when the open page belongs to this hub.
   const inside =
-    (route.kind === 'hub' && (route.hubId === hub.id || (route.hubId === null && hub.isDefault))) ||
-    (route.kind === 'computer' && (route.hubId || null) === hub.id) ||
+    isHubPage(hub, route) ||
     (route.kind === 'project' && !!projects.data?.some((p) => p.id === route.projectId))
   const [open, setOpen] = useFold(`hub:${hub.id ?? 'ambient'}`, inside)
   return (
@@ -274,21 +272,6 @@ function HubNavGroup({ hub }: { hub: NavHub }) {
       </FoldRow>
       {open && (
         <div className="ml-3.5 border-l pl-1.5">
-          {(computers.data ?? [])
-            .filter((c) => c.revokedAt == null)
-            .map((c) => (
-              <NavItem
-                key={c.id}
-                testId="settings-nav-computer"
-                route={{ kind: 'computer', hubId: hub.id ?? '', computerId: c.id, tab: 'general' }}
-                match={(r) => r.kind === 'computer' && r.computerId === c.id}
-              >
-                <LeadSlot>
-                  <StatusDot tone={computerStatus(c).tone} />
-                </LeadSlot>
-                <span className="truncate">{c.name}</span>
-              </NavItem>
-            ))}
           {(projects.data ?? []).map((p) => (
             <NavItem
               key={p.id}

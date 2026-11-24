@@ -278,8 +278,9 @@ vi.mock('@slayzone/ui', () => {
   }
 })
 
-import { HubCard } from './HubCard'
+import { HubCard, type HubCardSection } from './HubCard'
 import { ComputerActionsProvider } from './ComputerActions'
+import { useSettingsViewStore } from '../settings-view-store'
 
 /** Stands in for `<HubScope>`: records whose subtree follows. */
 function Scope({ hubId, children }: { hubId: string; children: React.ReactNode }) {
@@ -315,7 +316,8 @@ const card = (
   hubId: string,
   hubLabel: string,
   isLocalHub: boolean,
-  ownComputerId: string | null = null
+  ownComputerId: string | null = null,
+  section: HubCardSection = 'all'
 ) => (
   <Scope hubId={hubId}>
     <HubCard
@@ -328,6 +330,7 @@ const card = (
       status={statusFor(hubLabel)}
       primary={primaryFor(hubLabel)}
       more={moreFor(hubLabel)}
+      section={section}
     />
   </Scope>
 )
@@ -540,6 +543,43 @@ describe('HubCard', () => {
     expect(screen.getByText('mac-studio')).toBeDefined()
     expect(screen.getByText('linux-box')).toBeDefined()
     expect(screen.getByText('darwin-arm64')).toBeDefined()
+  })
+
+  it("splits over a hub page's tabs: Overview has the header, Computers the rows", async () => {
+    computersByHub = { 'hub-b': [makeComputer()] }
+    await act(async () => {
+      render(
+        <ComputerActionsProvider>
+          {card('hub-b', 'Hub B', false, null, 'hub')}
+        </ComputerActionsProvider>
+      )
+    })
+    expect(screen.getByTestId('hub-row-remote')).toBeDefined()
+    expect(screen.queryByTestId('computers-table')).toBeNull()
+    cleanup()
+    await act(async () => {
+      render(
+        <ComputerActionsProvider>
+          {card('hub-b', 'Hub B', false, null, 'computers')}
+        </ComputerActionsProvider>
+      )
+    })
+    expect(screen.queryByTestId('hub-row-remote')).toBeNull()
+    await waitFor(() => expect(screen.getAllByTestId('computer-row').length).toBe(1))
+    expect(screen.getByTestId('computer-refresh')).toBeDefined()
+    expect(screen.getByTestId('computer-add-open')).toBeDefined()
+  })
+
+  it("opens a computer's own Settings page from its row", async () => {
+    computersByHub = { 'hub-b': [makeComputer({ id: 'r-2', name: 'linux-box' })] }
+    await renderRemote()
+    fireEvent.click(screen.getByTestId('computer-open'))
+    expect(useSettingsViewStore.getState().route).toEqual({
+      kind: 'computer',
+      hubId: 'hub-b',
+      computerId: 'r-2',
+      tab: 'general'
+    })
   })
 
   it('fires the delete mutation after confirming', async () => {

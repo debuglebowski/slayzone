@@ -86,10 +86,11 @@ test.describe('Computer settings tab', () => {
     await clickSettings(mainWindow)
     const view = mainWindow.getByTestId('settings-view').first()
     await expect(view).toBeVisible({ timeout: 10_000 })
-    // Hubs nav: each hub, then its computers. The local hub's one computer.
-    // A hub's computers are folded under it: clicking the hub opens and unfolds it.
+    // The nav lists hubs, not computers: a computer's page opens from its row on
+    // the hub page's Computers tab. The local hub's one computer.
     await view.getByTestId('settings-nav-hub').first().click()
-    await view.getByTestId('settings-nav-computer').first().click()
+    await view.getByTestId('hub-tab-computers').click()
+    await view.getByTestId('computer-open').first().click()
     const page = view.getByTestId('settings-computer-page')
     await expect(page).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId('computer-edit-roots')).toBeVisible()

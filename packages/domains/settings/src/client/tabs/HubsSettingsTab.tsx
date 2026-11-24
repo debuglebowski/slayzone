@@ -31,7 +31,7 @@ import {
 import { Trash2, RotateCw, Plus, X, Pencil, PlugZap, Star, MoreHorizontal } from 'lucide-react'
 import { requestSettingsReopen } from '../settings-reopen'
 import { ComputerActionsProvider } from './ComputerActions'
-import { HubCard, HubCardShell, HubStatus, ComputersHeading } from './HubCard'
+import { HubCard, HubCardShell, HubStatus, ComputersHeading, type HubCardSection } from './HubCard'
 
 /**
  * Hubs tab (multi-hub federation) — manage the set of full-data hubs this client
@@ -122,13 +122,16 @@ type DeviceSignInState =
   | { kind: 'fail'; error: string }
 
 export function HubsSettingsTab({
-  onlyHubId
+  onlyHubId,
+  section = 'all'
 }: {
   /**
-   * Show just this hub's card (the Settings view's hub Overview tab). Same state and
+   * Show just this hub's card (the Settings view's hub page). Same state and
    * Save & relaunch as the full list; no add-hub slot.
    */
   onlyHubId?: string
+  /** Which part of each card (see `HubCardSection`): the hub page splits it over tabs. */
+  section?: HubCardSection
 } = {}) {
   // OrNull: the Chromium fork renders this surface outside a FederationProvider.
   const fed = useFederationOrNull()
@@ -585,15 +588,20 @@ export function HubsSettingsTab({
     headerTestId: string,
     slots: { identity: ReactNode; status: ReactNode; primary?: ReactNode; more: ReactNode }
   ): ReactNode => {
-    const shell = (text: string): ReactNode => (
-      <HubCardShell
-        key={hubId}
-        hubId={hubId}
-        headerTestId={headerTestId}
-        {...slots}
-        body={placeholder(text)}
-      />
-    )
+    const shell = (text: string): ReactNode =>
+      section === 'computers' ? (
+        <div key={hubId} className="border-border bg-card rounded-lg border px-3 py-2">
+          {placeholder(text)}
+        </div>
+      ) : (
+        <HubCardShell
+          key={hubId}
+          hubId={hubId}
+          headerTestId={headerTestId}
+          {...slots}
+          body={section === 'hub' ? undefined : placeholder(text)}
+        />
+      )
     const card = (
       <HubCard
         key={hubId}
@@ -601,6 +609,7 @@ export function HubsSettingsTab({
         hubLabel={hubLabel}
         isLocalHub={isLocalHub}
         headerTestId={headerTestId}
+        section={section}
         {...slots}
       />
     )

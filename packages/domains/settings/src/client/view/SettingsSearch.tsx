@@ -39,9 +39,10 @@ const HUB_TABS: Array<[string, string, string, boolean]> = [
   [
     'overview',
     'Overview',
-    'status sign in login default hub address remove disconnect users computers enroll',
+    'status sign in login default hub address remove disconnect users summary',
     false
   ],
+  ['computers', 'Computers', 'computers enroll add machine restart disable replace', false],
   [
     'agents',
     'Agents & providers',

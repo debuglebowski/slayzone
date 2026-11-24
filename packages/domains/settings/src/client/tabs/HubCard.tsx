@@ -14,7 +14,8 @@ import {
   outdatedComputerNote
 } from '@slayzone/computers/labels'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
-import { Loader2, Plus, RefreshCw, RotateCw, X } from 'lucide-react'
+import { ChevronRight, Loader2, Plus, RefreshCw, RotateCw, X } from 'lucide-react'
+import { useSettingsViewStore } from '../settings-view-store'
 import { useComputerActions } from './ComputerActions'
 import { MachineLabel } from './MachineLabel'
 import { ComputerName } from './ComputerName'
@@ -91,8 +92,8 @@ export interface HubCardShellProps {
   more: ReactNode
   /** An icon action for the card as a whole, just left of `⋯` (refresh the list). */
   headerAction?: ReactNode
-  /** The card body — the computers area. */
-  body: ReactNode
+  /** The card body — the computers area. Absent: the header alone. */
+  body?: ReactNode
 }
 
 export function HubCardShell({
@@ -130,7 +131,7 @@ export function HubCardShell({
           {more}
         </div>
       </div>
-      <div className="border-border/60 border-t px-3 py-2">{body}</div>
+      {body != null && <div className="border-border/60 border-t px-3 py-2">{body}</div>}
     </div>
   )
 }
@@ -272,7 +273,15 @@ export interface HubCardProps {
   primary?: ReactNode
   more: ReactNode
   headerTestId: string
+  /**
+   * Which part to render. `all` (the Hubs page): the card with its computers.
+   * A hub's own page splits it over two tabs: `hub` (Overview) is the header plus
+   * the hub's own faults and users; `computers` is the computer list on its own.
+   */
+  section?: HubCardSection
 }
+
+export type HubCardSection = 'all' | 'hub' | 'computers'
 
 /**
  * The connector rail, DRAWN rather than typed.
@@ -323,11 +332,13 @@ export function HubCard({
   status,
   primary,
   more,
-  headerTestId
+  headerTestId,
+  section = 'all'
 }: HubCardProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const { showMintedToken, requestStart, computerRevision, restarting } = useComputerActions()
+  const navigate = useSettingsViewStore((s) => s.navigate)
 
   const [adding, setAdding] = useState(false)
   const [label, setLabel] = useState('')
@@ -463,300 +474,359 @@ export function HubCard({
     </IconButton>
   )
 
+  /** The computer list: heading or note, takeovers, rows, the add leaf. */
+  const computersList = (heading: ReactNode) => (
+    <>
+      {heading}
+      <ComputerTakeovers
+        takeovers={takeovers}
+        computers={computers}
+        onReplace={(t) => askReplace(t.former, t.successor.id)}
+      />
+      {/* `table-fixed`: with no column headers the values are the only thing
+          setting width, so auto layout would re-flow the whole rail whenever a
+          computer name changed length. */}
+      <table className="w-full table-fixed text-sm" data-testid="computers-table">
+        <tbody>
+          {firstLoad && (
+            <>
+              <SkeletonRow rail={!singleComputer} />
+              <SkeletonRow rail={!singleComputer} last={lastLeaf === 'skeleton'} />
+            </>
+          )}
+          {computers.map((computer, i) => (
+            <tr key={computer.id} data-testid="computer-row">
+              {singleComputer ? (
+                <Marker />
+              ) : (
+                <Rail last={lastLeaf === 'computer' && i === computers.length - 1} />
+              )}
+              {/* Name then muted meta on one line — the same shape as the
+                  hub's own `Local  this machine` directly above. Three equal
+                  columns spread the same facts across the width and made the
+                  two rows read as unrelated tables. */}
+              <td className="py-2 pr-3 pl-2">
+                <div
+                  className={cn(
+                    'flex min-w-0 items-center gap-2',
+                    computer.disabledAt != null && 'opacity-60'
+                  )}
+                >
+                  <ComputerName
+                    computer={computer}
+                    renamable={!(isLocalHub && isOwnComputer(computer))}
+                  />
+                  {/* On a remote hub, which row is this app's own computer — the
+                      one it joined there and will not delete. */}
+                  {!isLocalHub && isOwnComputer(computer) && (
+                    <span
+                      className="text-muted-foreground shrink-0 text-xs"
+                      data-testid="computer-own"
+                    >
+                      this computer
+                    </span>
+                  )}
+                  <span className="text-muted-foreground truncate font-mono text-xs">
+                    {computer.platform}
+                  </span>
+                  {/* Which physical box. Repeats across rows that share one,
+                      which is what makes the grouping visible without adding a
+                      header to the common one-computer-per-machine case. */}
+                  <MachineLabel machine={computer.machine ?? null} />
+                  {/* Only a DIFFERENCE from the standard set: every default
+                      computer reports the same four, so listing them said nothing. */}
+                  {capabilityNote(computer.capabilities) && (
+                    <span
+                      className="text-muted-foreground truncate text-xs"
+                      title={computer.capabilities.join(', ') || 'No capabilities'}
+                      data-testid="computer-capabilities"
+                    >
+                      {capabilityNote(computer.capabilities)}
+                    </span>
+                  )}
+                </div>
+                <OutdatedNote computer={computer} />
+                {computer.health && (
+                  <ComputerResources health={computer.health} online={computer.usable} />
+                )}
+                <ComputerFaults computerId={computer.id} />
+                <ComputerUnattachedSessions computerId={computer.id} />
+              </td>
+              {/* The same component the hub header uses, so the dot, the
+                  truncation and the tone are identical rather than merely
+                  similar. */}
+              <td className="w-32 py-2 pr-3">
+                {/* Connection and upgrade as ONE field: an upgrade is a state
+                    of the computer, and steady state (up to date) says nothing. */}
+                <HubStatus
+                  tone={computerRowStatus(computer).tone}
+                  label={computerRowStatus(computer).label}
+                  detail={computerRowStatus(computer).detail}
+                  title={
+                    computer.upgradeStatus
+                      ? `${computerRowStatus(computer).label} · ${computerUpgradeTitle(computer.upgradeStatus)}`
+                      : computerRowStatus(computer).label
+                  }
+                />
+              </td>
+              <td className={ROW_ACTIONS}>
+                <div className="flex items-center justify-end">
+                  <ComputerActionButtons computer={computer} hub={hubComputers} />
+                  {/* The computer's own Settings page (the nav lists hubs and
+                      projects only; computers are reached from here). */}
+                  <IconButton
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Open ${computer.name} settings`}
+                    title="Open settings"
+                    onClick={() =>
+                      navigate({
+                        kind: 'computer',
+                        hubId,
+                        computerId: computer.id,
+                        tab: 'general'
+                      })
+                    }
+                    data-testid="computer-open"
+                  >
+                    <ChevronRight className="size-3.5" />
+                  </IconButton>
+                </div>
+              </td>
+            </tr>
+          ))}
+
+          {/* This app's own computer could not join this remote hub (not signed in
+              there, the hub refused a token, it has no public address). Said
+              here, where its row would be, with the hub's reason. */}
+          {ownOnThisHub?.state === 'failed' &&
+            !computers.some((c) => c.id === ownOnThisHub.computerId) && (
+              <tr data-testid="computer-own-join-failed">
+                <Rail />
+                <td className="py-2 pr-3 pl-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="text-muted-foreground shrink-0 text-sm font-medium">
+                      This computer
+                    </span>
+                    <span className="text-muted-foreground truncate text-xs">not on this hub</span>
+                  </div>
+                  {ownOnThisHub.error && (
+                    <div className="text-destructive mt-1 text-xs break-words select-text">
+                      {ownOnThisHub.error}
+                    </div>
+                  )}
+                </td>
+                <td className="w-32 py-2 pr-3">
+                  <HubStatus tone="bad" label="Could not join" />
+                </td>
+                <td className={ROW_ACTIONS} />
+              </tr>
+            )}
+
+          {/* No local computer on the local hub = nothing on this machine can
+              execute: agents, terminals and git work all run on computers.
+              Reachable when the boot-time join-token mint fails (diagnostic
+              `local_computer.unspawned`), which used to be recoverable only by
+              relaunching the app. */}
+          {localComputerMissing && (
+            <tr data-testid="computer-local-missing">
+              {singleComputer ? (
+                <td className="text-destructive/70 w-8 py-2 text-center" aria-hidden="true">
+                  ⨯
+                </td>
+              ) : (
+                <Rail last={lastLeaf === 'missing'} />
+              )}
+              <td className="py-2 pr-3 pl-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="text-muted-foreground shrink-0 text-sm font-medium">
+                    Local computer
+                  </span>
+                  <span className="text-muted-foreground truncate text-xs">
+                    agents, terminals and git work all run on computers
+                  </span>
+                </div>
+                {localFailure && (
+                  // Wraps rather than truncates: the cause is usually one long
+                  // line (a dlopen error naming the missing GLIBC version), and
+                  // its tail is the part that says what to do. Selectable so it
+                  // can be pasted into an issue.
+                  <div
+                    className="text-destructive mt-1 font-mono text-xs break-all select-text"
+                    data-testid="computer-local-failure"
+                  >
+                    {localFailure}
+                  </div>
+                )}
+              </td>
+              <td className="w-32 py-2 pr-3">
+                <HubStatus
+                  tone="bad"
+                  label={localStatus?.stalled ? 'Failed' : 'Not running'}
+                  title={
+                    localStatus?.stalled === 'needs-re-enrollment'
+                      ? 'The hub no longer recognizes this computer — Start enrolls it again'
+                      : localStatus?.stalled === 'backoff-exhausted'
+                        ? 'It kept exiting at startup, so restarts stopped — Start tries again'
+                        : undefined
+                  }
+                />
+              </td>
+              <td className={cn(ROW_ACTIONS, 'text-right')}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={restarting}
+                  title="Start the local computer"
+                  onClick={requestStart}
+                  data-testid="computer-local-start"
+                >
+                  {restarting ? <RotateCw className="mr-1 size-3.5 animate-spin" /> : null}
+                  Start
+                </Button>
+              </td>
+            </tr>
+          )}
+
+          {/* Last leaf: enrolling is an operation INSIDE this hub, and sits
+              where the computer it creates will appear. Absent on the local hub
+              — see `canEnroll`. */}
+          {canEnroll && (
+            <tr data-testid="computer-add-row">
+              <Rail last />
+              <td colSpan={3} className="py-1">
+                {adding ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={label}
+                        onChange={(e) => setLabel(e.target.value)}
+                        placeholder="Computer label (e.g. office-mac)"
+                        disabled={mintMutation.isPending}
+                        className="max-w-xs"
+                        data-testid="computer-enroll-label"
+                      />
+                      <Input
+                        value={forUser}
+                        onChange={(e) => setForUser(e.target.value)}
+                        placeholder="For user (email) — blank: you"
+                        disabled={mintMutation.isPending}
+                        className="max-w-xs"
+                        data-testid="computer-enroll-for"
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={mintMutation.isPending}
+                        onClick={() => {
+                          void mint()
+                        }}
+                        data-testid="computer-add"
+                      >
+                        {mintMutation.isPending ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : null}
+                        Add a computer
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={mintMutation.isPending}
+                        onClick={() => {
+                          setAdding(false)
+                          setLabel('')
+                          setForUser('')
+                        }}
+                        data-testid="computer-add-cancel"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                    <p className="text-muted-foreground mt-2 text-xs">
+                      Mint a one-time enrollment token for{' '}
+                      <span className="text-foreground">{hubLabel || 'this hub'}</span> and paste it
+                      into the computer machine&apos;s config. The token embeds that hub&apos;s
+                      address, and expires after 15 minutes. On a hub with sign-in, name the user
+                      the computer is for: it becomes theirs.
+                    </p>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setAdding(true)}
+                    className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
+                    data-testid="computer-add-open"
+                  >
+                    <Plus className="size-4" />
+                    Add computer
+                  </button>
+                )}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </>
+  )
+  /** The hub's own (backups, erasure, project sync): admin only, else nothing. */
+  const hubExtras = (
+    <>
+      <ComputerFaults computerId={null} title="This hub needs attention" />
+      <HubUsersSection />
+    </>
+  )
+  const header = {
+    hubId,
+    headerTestId,
+    identity,
+    status,
+    primary,
+    more
+  }
+
+  if (section === 'hub') {
+    return (
+      <div className="space-y-3">
+        <HubCardShell {...header} />
+        {hubExtras}
+      </div>
+    )
+  }
+  if (section === 'computers') {
+    return (
+      <div
+        className="border-border bg-card rounded-lg border px-3 py-2"
+        data-testid={`hub-computers-${hubId}`}
+      >
+        {computersList(
+          <ComputersHeading note={note()} noteTestId="hub-computers-summary" action={refresh} />
+        )}
+      </div>
+    )
+  }
   return (
     <HubCardShell
-      hubId={hubId}
-      headerTestId={headerTestId}
-      identity={identity}
-      status={status}
-      primary={primary}
-      more={more}
+      {...header}
       headerAction={singleComputer ? undefined : refresh}
       body={
         <>
-          {singleComputer ? (
-            // No heading and no list-refresh on a one-computer hub, but the states
-            // that are NOT a row still have to be said out loud — an unreachable
-            // hub must not simply render nothing.
-            note() ? (
-              <p className="text-muted-foreground pb-1 text-xs" data-testid="hub-computers-summary">
-                {note()}
-              </p>
-            ) : null
-          ) : (
-            <ComputersHeading note={note()} noteTestId="hub-computers-summary" />
+          {computersList(
+            singleComputer ? (
+              // No heading and no list-refresh on a one-computer hub, but the states
+              // that are NOT a row still have to be said out loud — an unreachable
+              // hub must not simply render nothing.
+              note() ? (
+                <p
+                  className="text-muted-foreground pb-1 text-xs"
+                  data-testid="hub-computers-summary"
+                >
+                  {note()}
+                </p>
+              ) : null
+            ) : (
+              <ComputersHeading note={note()} noteTestId="hub-computers-summary" />
+            )
           )}
-          <ComputerTakeovers
-            takeovers={takeovers}
-            computers={computers}
-            onReplace={(t) => askReplace(t.former, t.successor.id)}
-          />
-          {/* `table-fixed`: with no column headers the values are the only thing
-              setting width, so auto layout would re-flow the whole rail whenever a
-              computer name changed length. */}
-          <table className="w-full table-fixed text-sm" data-testid="computers-table">
-            <tbody>
-              {firstLoad && (
-                <>
-                  <SkeletonRow rail={!singleComputer} />
-                  <SkeletonRow rail={!singleComputer} last={lastLeaf === 'skeleton'} />
-                </>
-              )}
-              {computers.map((computer, i) => (
-                <tr key={computer.id} data-testid="computer-row">
-                  {singleComputer ? (
-                    <Marker />
-                  ) : (
-                    <Rail last={lastLeaf === 'computer' && i === computers.length - 1} />
-                  )}
-                  {/* Name then muted meta on one line — the same shape as the
-                      hub's own `Local  this machine` directly above. Three equal
-                      columns spread the same facts across the width and made the
-                      two rows read as unrelated tables. */}
-                  <td className="py-2 pr-3 pl-2">
-                    <div
-                      className={cn(
-                        'flex min-w-0 items-center gap-2',
-                        computer.disabledAt != null && 'opacity-60'
-                      )}
-                    >
-                      <ComputerName
-                        computer={computer}
-                        renamable={!(isLocalHub && isOwnComputer(computer))}
-                      />
-                      {/* On a remote hub, which row is this app's own computer — the
-                          one it joined there and will not delete. */}
-                      {!isLocalHub && isOwnComputer(computer) && (
-                        <span
-                          className="text-muted-foreground shrink-0 text-xs"
-                          data-testid="computer-own"
-                        >
-                          this computer
-                        </span>
-                      )}
-                      <span className="text-muted-foreground truncate font-mono text-xs">
-                        {computer.platform}
-                      </span>
-                      {/* Which physical box. Repeats across rows that share one,
-                          which is what makes the grouping visible without adding a
-                          header to the common one-computer-per-machine case. */}
-                      <MachineLabel machine={computer.machine ?? null} />
-                      {/* Only a DIFFERENCE from the standard set: every default
-                          computer reports the same four, so listing them said nothing. */}
-                      {capabilityNote(computer.capabilities) && (
-                        <span
-                          className="text-muted-foreground truncate text-xs"
-                          title={computer.capabilities.join(', ') || 'No capabilities'}
-                          data-testid="computer-capabilities"
-                        >
-                          {capabilityNote(computer.capabilities)}
-                        </span>
-                      )}
-                    </div>
-                    <OutdatedNote computer={computer} />
-                    {computer.health && (
-                      <ComputerResources health={computer.health} online={computer.usable} />
-                    )}
-                    <ComputerFaults computerId={computer.id} />
-                    <ComputerUnattachedSessions computerId={computer.id} />
-                  </td>
-                  {/* The same component the hub header uses, so the dot, the
-                      truncation and the tone are identical rather than merely
-                      similar. */}
-                  <td className="w-32 py-2 pr-3">
-                    {/* Connection and upgrade as ONE field: an upgrade is a state
-                        of the computer, and steady state (up to date) says nothing. */}
-                    <HubStatus
-                      tone={computerRowStatus(computer).tone}
-                      label={computerRowStatus(computer).label}
-                      detail={computerRowStatus(computer).detail}
-                      title={
-                        computer.upgradeStatus
-                          ? `${computerRowStatus(computer).label} · ${computerUpgradeTitle(computer.upgradeStatus)}`
-                          : computerRowStatus(computer).label
-                      }
-                    />
-                  </td>
-                  <td className={ROW_ACTIONS}>
-                    <ComputerActionButtons computer={computer} hub={hubComputers} />
-                  </td>
-                </tr>
-              ))}
-
-              {/* This app's own computer could not join this remote hub (not signed in
-                  there, the hub refused a token, it has no public address). Said
-                  here, where its row would be, with the hub's reason. */}
-              {ownOnThisHub?.state === 'failed' &&
-                !computers.some((c) => c.id === ownOnThisHub.computerId) && (
-                  <tr data-testid="computer-own-join-failed">
-                    <Rail />
-                    <td className="py-2 pr-3 pl-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="text-muted-foreground shrink-0 text-sm font-medium">
-                          This computer
-                        </span>
-                        <span className="text-muted-foreground truncate text-xs">
-                          not on this hub
-                        </span>
-                      </div>
-                      {ownOnThisHub.error && (
-                        <div className="text-destructive mt-1 text-xs break-words select-text">
-                          {ownOnThisHub.error}
-                        </div>
-                      )}
-                    </td>
-                    <td className="w-32 py-2 pr-3">
-                      <HubStatus tone="bad" label="Could not join" />
-                    </td>
-                    <td className={ROW_ACTIONS} />
-                  </tr>
-                )}
-
-              {/* No local computer on the local hub = nothing on this machine can
-                  execute: agents, terminals and git work all run on computers.
-                  Reachable when the boot-time join-token mint fails (diagnostic
-                  `local_computer.unspawned`), which used to be recoverable only by
-                  relaunching the app. */}
-              {localComputerMissing && (
-                <tr data-testid="computer-local-missing">
-                  {singleComputer ? (
-                    <td className="text-destructive/70 w-8 py-2 text-center" aria-hidden="true">
-                      ⨯
-                    </td>
-                  ) : (
-                    <Rail last={lastLeaf === 'missing'} />
-                  )}
-                  <td className="py-2 pr-3 pl-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-muted-foreground shrink-0 text-sm font-medium">
-                        Local computer
-                      </span>
-                      <span className="text-muted-foreground truncate text-xs">
-                        agents, terminals and git work all run on computers
-                      </span>
-                    </div>
-                    {localFailure && (
-                      // Wraps rather than truncates: the cause is usually one long
-                      // line (a dlopen error naming the missing GLIBC version), and
-                      // its tail is the part that says what to do. Selectable so it
-                      // can be pasted into an issue.
-                      <div
-                        className="text-destructive mt-1 font-mono text-xs break-all select-text"
-                        data-testid="computer-local-failure"
-                      >
-                        {localFailure}
-                      </div>
-                    )}
-                  </td>
-                  <td className="w-32 py-2 pr-3">
-                    <HubStatus
-                      tone="bad"
-                      label={localStatus?.stalled ? 'Failed' : 'Not running'}
-                      title={
-                        localStatus?.stalled === 'needs-re-enrollment'
-                          ? 'The hub no longer recognizes this computer — Start enrolls it again'
-                          : localStatus?.stalled === 'backoff-exhausted'
-                            ? 'It kept exiting at startup, so restarts stopped — Start tries again'
-                            : undefined
-                      }
-                    />
-                  </td>
-                  <td className={cn(ROW_ACTIONS, 'text-right')}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={restarting}
-                      title="Start the local computer"
-                      onClick={requestStart}
-                      data-testid="computer-local-start"
-                    >
-                      {restarting ? <RotateCw className="mr-1 size-3.5 animate-spin" /> : null}
-                      Start
-                    </Button>
-                  </td>
-                </tr>
-              )}
-
-              {/* Last leaf: enrolling is an operation INSIDE this hub, and sits
-                  where the computer it creates will appear. Absent on the local hub
-                  — see `canEnroll`. */}
-              {canEnroll && (
-                <tr data-testid="computer-add-row">
-                  <Rail last />
-                  <td colSpan={3} className="py-1">
-                    {adding ? (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            value={label}
-                            onChange={(e) => setLabel(e.target.value)}
-                            placeholder="Computer label (e.g. office-mac)"
-                            disabled={mintMutation.isPending}
-                            className="max-w-xs"
-                            data-testid="computer-enroll-label"
-                          />
-                          <Input
-                            value={forUser}
-                            onChange={(e) => setForUser(e.target.value)}
-                            placeholder="For user (email) — blank: you"
-                            disabled={mintMutation.isPending}
-                            className="max-w-xs"
-                            data-testid="computer-enroll-for"
-                          />
-                          <Button
-                            variant="outline"
-                            disabled={mintMutation.isPending}
-                            onClick={() => {
-                              void mint()
-                            }}
-                            data-testid="computer-add"
-                          >
-                            {mintMutation.isPending ? (
-                              <Loader2 className="mr-2 size-4 animate-spin" />
-                            ) : null}
-                            Add a computer
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={mintMutation.isPending}
-                            onClick={() => {
-                              setAdding(false)
-                              setLabel('')
-                              setForUser('')
-                            }}
-                            data-testid="computer-add-cancel"
-                          >
-                            <X className="size-4" />
-                          </Button>
-                        </div>
-                        <p className="text-muted-foreground mt-2 text-xs">
-                          Mint a one-time enrollment token for{' '}
-                          <span className="text-foreground">{hubLabel || 'this hub'}</span> and
-                          paste it into the computer machine&apos;s config. The token embeds that
-                          hub&apos;s address, and expires after 15 minutes. On a hub with sign-in,
-                          name the user the computer is for: it becomes theirs.
-                        </p>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setAdding(true)}
-                        className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
-                        data-testid="computer-add-open"
-                      >
-                        <Plus className="size-4" />
-                        Add computer
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          {/* The hub's own (backups, erasure, project sync): admin only, else nothing. */}
-          <ComputerFaults computerId={null} title="This hub needs attention" />
-          <HubUsersSection />
+          {hubExtras}
         </>
       }
     />
