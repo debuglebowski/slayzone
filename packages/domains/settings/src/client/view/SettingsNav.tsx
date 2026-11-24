@@ -142,7 +142,7 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <div className="pb-9">
+    <div className="pb-4">
       {/* pr-0: the action's w-6 box lines up with the fold chevrons' w-6 box below */}
       <div className="flex h-6 items-center pl-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
         {title}
