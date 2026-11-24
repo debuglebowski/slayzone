@@ -223,6 +223,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inFlight,
       hydrating,
       reconnecting,
+      hubReconnecting,
       loadError,
       hydrateError,
       reload,
@@ -903,6 +904,9 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // The chat did not open: nothing can be sent, so the failure takes the
     // composer's place (the composer stays mounted, hidden, so a draft survives).
     const openError = loadError ?? hydrateError ?? storage.error
+    // A failure on its way out waits instead: the hub socket is down (it reopens by
+    // itself once back), or that reopen / a Retry runs.
+    const openWaiting = !openError ? null : hubReconnecting ? 'hub' : hydrating ? 'reopen' : null
 
     // What streams right now reaches only the rows that stream (plan 3.2): the
     // store's identity never changes, so providing it re-renders nothing, and a
@@ -1009,6 +1013,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                               status={storage.status}
                               error={openError}
                               placement="center"
+                              reconnecting={openWaiting}
                               onRetry={storage.retry}
                             />
                           )
@@ -1135,6 +1140,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                             status={storage.status}
                             error={openError}
                             placement="bottom"
+                            reconnecting={openWaiting}
                             onRetry={storage.retry}
                           />
                         )}

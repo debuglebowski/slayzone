@@ -84,6 +84,9 @@ const subs: Record<string, ((data: unknown) => void) | null> = { event: null, ex
 const started: Record<string, (() => void) | undefined> = {}
 /** What `useSubscription` reports (`connecting`: tRPC is reconnecting the socket). */
 let streamStatus: 'connecting' | 'pending' = 'pending'
+/** The hub socket (nearest HubScope): its state, and `useHubReopen`'s callback. */
+let hubSocket: 'open' | 'connecting' = 'open'
+let hubReopen: ((dropped: boolean) => void) | null = null
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
@@ -106,6 +109,10 @@ vi.mock('@slayzone/transport/client', () => ({
     subs[o.name] = o.enabled ? o.onData : null
     started[o.name] = o.enabled ? o.onStarted : undefined
     return { status: o.enabled ? streamStatus : 'idle' }
+  },
+  useScopedHubConnection: () => ({ status: hubSocket, error: null }),
+  useHubReopen: (onReopen: (dropped: boolean) => void) => {
+    hubReopen = onReopen
   },
   // No direct link unless a test sets `directLease`: everything goes through the hub.
   useDirectLease: () => ({ lease: directLease, lost: () => undefined })
@@ -300,6 +307,8 @@ const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
 
 afterEach(() => {
   streamStatus = 'pending'
+  hubSocket = 'open'
+  hubReopen = null
   vi.restoreAllMocks()
   cleanup()
   queryClient.clear()
@@ -583,6 +592,44 @@ describe('useChatSession — hydrate failure', () => {
     rerender({ cwd: '/wt' })
     await finishLoad(1, HISTORY)
     expect(result.current.hydrateError).toBeNull()
+  })
+})
+
+describe('useChatSession — hub connection lost while opening', () => {
+  async function failHydrate(message: string) {
+    await act(async () => {
+      bufferLoad = 0
+      loads[0].hydrate.reject(new Error(message))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      loads[0].buffer.resolve(HISTORY)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+  }
+
+  it('reopens by itself when the hub socket comes back', async () => {
+    const { result } = setup()
+    await failHydrate('Lost connection to hub ws://127.0.0.1:1/trpc (socket close, code 1006)')
+    expect(result.current.hydrateError).toMatch(/lost connection/i)
+    act(() => hubReopen?.(true))
+    expect(loads).toHaveLength(2)
+    await finishLoad(1, HISTORY)
+    expect(result.current.hydrateError).toBeNull()
+    expect(texts(result)).toEqual(['one', 'two'])
+  })
+
+  it('a reopen with nothing failed does not reload (the stream catches up)', async () => {
+    setup()
+    await finishLoad(0, HISTORY)
+    act(() => hubReopen?.(true))
+    expect(loads).toHaveLength(1)
+  })
+
+  it('reports the hub socket reconnecting', () => {
+    hubSocket = 'connecting'
+    const { result } = setup()
+    expect(result.current.hubReconnecting).toBe(true)
   })
 })
 

@@ -47,3 +47,32 @@ test('a deleted chat offers no Retry', () => {
   )
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
 })
+test('while the hub reconnects: a waiting state, no failure, no Retry', () => {
+  render(
+    <ChatOpenFailure
+      status={null}
+      error="Lost connection to hub ws://127.0.0.1:1/trpc (socket close, code 1006)"
+      placement="bottom"
+      reconnecting="hub"
+      onRetry={() => undefined}
+    />
+  )
+  expect(screen.getByTestId('chat-open-reconnecting')).toBeTruthy()
+  expect(screen.getByText('Reconnecting…')).toBeTruthy()
+  expect(screen.getByText(/reopens by itself/)).toBeTruthy()
+  expect(screen.queryByText('Couldn’t open this chat')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+})
+test('while the reopen runs: says so instead of the old failure', () => {
+  render(
+    <ChatOpenFailure
+      status={null}
+      error="boom"
+      placement="center"
+      reconnecting="reopen"
+      onRetry={() => undefined}
+    />
+  )
+  expect(screen.getByText('Reopening chat…')).toBeTruthy()
+  expect(screen.queryByText('Couldn’t open this chat')).toBeNull()
+})

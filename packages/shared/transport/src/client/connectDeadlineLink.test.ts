@@ -25,6 +25,7 @@ import {
 import { initTRPC } from '@trpc/server'
 import { observable, behaviorSubject } from '@trpc/server/observable'
 import superjson from 'superjson'
+import { WebSocketServer } from 'ws'
 import { connectDeadlineLink, type ConnectionStateSource } from './connectDeadlineLink'
 import { createTrpcWsClient } from './runtime'
 
@@ -111,6 +112,28 @@ describe('a hub whose socket never opens', () => {
     const client = runtimeClient as unknown as TRPCClient<TestRouter>
 
     await expect(client.hub.describe.query()).rejects.toThrow(/unreachable/i)
+  })
+})
+
+describe('a hub whose socket drops while a request waits', () => {
+  it('names the lost connection, not tRPC\'s "Unknown error"', async () => {
+    // @trpc/client errors an in-flight request with the socket's close EVENT, which
+    // has no message: callers showed "Unknown error" (a chat's open failure).
+    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    closers.push(() => server.close())
+    server.on('connection', (socket) => socket.on('message', () => socket.terminate()))
+    await new Promise((r) => server.once('listening', r))
+    const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/trpc`
+    const { client: runtimeClient, wsClient } = createTrpcWsClient({ url })
+    closers.push(() => void wsClient.close())
+    const client = runtimeClient as unknown as TRPCClient<TestRouter>
+
+    const error = await client.hub.describe.query().then(
+      () => null,
+      (err: Error) => err
+    )
+    expect(error?.message).not.toMatch(/unknown error/i)
+    expect(error?.message).toMatch(new RegExp(`lost connection to hub ${url}`, 'i'))
   })
 })
 

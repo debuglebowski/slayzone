@@ -11,6 +11,8 @@ import {
 import {
   hubSupportsToolPreviews,
   useDirectLease,
+  useHubReopen,
+  useScopedHubConnection,
   useSubscription
 } from '@slayzone/transport/client'
 import {
@@ -91,6 +93,11 @@ export interface UseChatSessionResult {
   hydrating: boolean
   /** Loaded, but reconnecting or catching up: the turn state shown is the last known one. */
   reconnecting: boolean
+  /**
+   * This tab's hub socket is down and tRPC is reconnecting it (sleep/wake, a hub
+   * freeze, a restart). A load it failed reopens by itself once it is back.
+   */
+  hubReconnecting: boolean
   loadError: string | null
   /**
    * The tab's chat session could not be opened (`chat.hydrate` rejected). History
@@ -436,6 +443,16 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }, [state])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [hydrateError, setHydrateError] = useState<string | null>(null)
+  // The same, synchronously: a socket reopen can come before the failure renders.
+  const loadFailedRef = useRef({ load: false, hydrate: false })
+  const noteLoadError = useStableCallback((message: string | null) => {
+    loadFailedRef.current.load = message !== null
+    setLoadError(message)
+  })
+  const noteHydrateError = useStableCallback((message: string | null) => {
+    loadFailedRef.current.hydrate = message !== null
+    setHydrateError(message)
+  })
   // Where this panel stands in the tab's stream: newest saved event, live counter,
   // server instance (`ChatStreamPosition`, the rule mobile shares).
   const positionRef = useRef(new ChatStreamPosition())
@@ -841,6 +858,15 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     setLoadedInputs(null)
     setReopenToken((n) => n + 1)
   }, [])
+  // The hub socket reopened: a load that failed — in flight when the socket closed
+  // (sleep/wake, a hub freeze), or queued past the connect deadline — can succeed
+  // now. Without this the chat stayed "Couldn't open" until Retry. Nothing failed:
+  // the hub stream's restart catches up instead (`hubStreamStarted`).
+  useHubReopen(() => {
+    const failed = loadFailedRef.current
+    if (failed.load || failed.hydrate) reload()
+  })
+  const hubReconnecting = useScopedHubConnection()?.status === 'connecting'
   // Read what this panel missed — the saved events after its newest and what
   // streams now, the server's current turn status with it — without a reload:
   // on every (re)start of the hub stream (a reconnect) and when a live event
@@ -973,8 +999,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       openFull,
       dispatch,
       restoreLocal,
-      onError: setLoadError,
-      onHydrateError: setHydrateError,
+      onError: noteLoadError,
+      onHydrateError: noteHydrateError,
       onHydrated: () => setLoadedInputs(inputs),
       timer,
       viaDirect: readsViaDirect,
@@ -1199,6 +1225,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
      * the last known one, not the server's.
      */
     reconnecting: !hydrating && (streamDown || resyncing),
+    hubReconnecting,
     loadError,
     hydrateError,
     reload,

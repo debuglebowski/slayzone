@@ -14,7 +14,8 @@ import type { AnyTRPCRouter } from '@trpc/server'
  * card's computer list showed: skeleton rows with no end, on a hub the header had
  * already reported unreachable. (Requests that were already IN FLIGHT when a
  * socket dies do get errored by @trpc/client — this link closes the gap for the
- * ones queued while it is down, so both cases now end the same way.)
+ * ones queued while it is down, so both cases now end the same way, and names the
+ * loss for the in-flight ones: see `namedConnectionLoss`.)
  *
  * WHY A DEADLINE ON CONNECTING, NOT A REQUEST TIMEOUT. The clock runs only
  * while the hub is not connected, and is thrown away the moment it is. A slow
@@ -63,6 +64,31 @@ export interface ConnectDeadlineLinkOpts {
   hubUrl?: string
 }
 
+/**
+ * An operation in flight when its socket closed. @trpc/client errors it with the
+ * socket's close/error EVENT as the cause, which carries no message, so the caller
+ * read "Unknown error" (Chromium) or "" (Node) — e.g. a chat's "Couldn't open this
+ * chat" after a sleep/wake or a hub freeze. Name what happened instead.
+ */
+function namedConnectionLoss<E extends TRPCClientError<AnyTRPCRouter>>(
+  err: E,
+  hubUrl: string | undefined
+): E {
+  if (err.shape) return err
+  const cause: unknown = err.cause
+  if (cause instanceof Error || typeof cause !== 'object' || cause === null) return err
+  const type = (cause as { type?: unknown }).type
+  if (type !== 'close' && type !== 'error') return err
+  const code = (cause as { code?: unknown }).code
+  return TRPCClientError.from(
+    new Error(
+      `Lost connection to hub${hubUrl ? ` ${hubUrl}` : ''} (socket ${type}` +
+        `${typeof code === 'number' ? `, code ${code}` : ''})`,
+      { cause }
+    )
+  ) as E
+}
+
 // Router-agnostic: it reads only the operation type, never a path's types.
 export function connectDeadlineLink<TRouter extends AnyTRPCRouter>(
   opts: ConnectDeadlineLinkOpts
@@ -87,7 +113,7 @@ export function connectDeadlineLink<TRouter extends AnyTRPCRouter>(
           error: (err) => {
             done = true
             disarm()
-            observer.error(err)
+            observer.error(namedConnectionLoss(err, opts.hubUrl))
           },
           complete: () => {
             done = true

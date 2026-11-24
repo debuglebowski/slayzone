@@ -103,9 +103,7 @@ export function useHubConnection(hubId: string): HubConnection | null {
  * federation or a hub scope.
  */
 export function useHubReopen(onReopen: (dropped: boolean) => void): void {
-  const hubId = useHubId()
-  const federation = useFederationOrNull()
-  const source = hubId ? federation?.resolve(hubId)?.ws.wsClient.connectionState : undefined
+  const source = useScopedConnectionSource()
   const latest = useRef(onReopen)
   useEffect(() => {
     latest.current = onReopen
@@ -114,4 +112,22 @@ export function useHubReopen(onReopen: (dropped: boolean) => void): void {
     if (!source) return
     return watchReopen(source, (dropped) => latest.current(dropped))
   }, [source])
+}
+
+/** The socket state stream of the nearest `HubScope`'s hub; undefined outside one. */
+function useScopedConnectionSource(): ConnectionStateSource | undefined {
+  const hubId = useHubId()
+  const federation = useFederationOrNull()
+  return hubId ? federation?.resolve(hubId)?.ws.wsClient.connectionState : undefined
+}
+
+/**
+ * The connection of the nearest `HubScope`'s hub (its socket's own state); null
+ * outside a federation or a hub scope. Unlike {@link useHubConnection} it needs no
+ * hub id and never throws without a federation.
+ */
+export function useScopedHubConnection(): HubConnection | null {
+  const source = useScopedConnectionSource()
+  const connection = useConnectionState(source ?? NO_SOCKET)
+  return source ? connection : null
 }

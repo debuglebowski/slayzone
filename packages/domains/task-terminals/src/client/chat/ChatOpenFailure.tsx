@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CircleAlert, RotateCw } from 'lucide-react'
+import { CircleAlert, LoaderCircle, RotateCw } from 'lucide-react'
 import { chatAvailabilityMessage, type ChatAvailability } from '@slayzone/terminal-contracts'
 import { Button, cn } from '@slayzone/ui'
 
@@ -8,32 +8,62 @@ import { Button, cn } from '@slayzone/ui'
  * sent): centered over an empty timeline, or below history that did load.
  * A storage state (offline, migrating, …) titles it when there is one; the raw
  * cause stays behind "Details".
+ *
+ * `reconnecting`: the failure is on its way out, so it waits instead of failing —
+ * `hub`: the hub socket is down (sleep/wake, a hub freeze) and the chat reopens by
+ * itself once it is back; `reopen`: that reopen (or a Retry) is running.
  */
 export function ChatOpenFailure({
   status,
   error,
   placement,
+  reconnecting,
   onRetry
 }: {
   status: ChatAvailability | null
   error: string
   /** `center`: no history on screen. `bottom`: history stays readable above. */
   placement: 'center' | 'bottom'
+  reconnecting?: 'hub' | 'reopen' | null
   onRetry: () => void | Promise<void>
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const className = cn(
+    'flex flex-col items-center gap-2.5 px-6 text-center',
+    placement === 'center'
+      ? 'absolute inset-0 z-20 justify-center bg-background'
+      : 'shrink-0 border-t py-5'
+  )
+  if (reconnecting) {
+    return (
+      <div
+        role="status"
+        data-testid="chat-open-reconnecting"
+        data-placement={placement}
+        className={className}
+      >
+        <LoaderCircle
+          aria-hidden
+          className="size-5 animate-spin text-muted-foreground motion-reduce:animate-none"
+        />
+        <p className="text-sm font-medium text-foreground">
+          {reconnecting === 'hub' ? 'Reconnecting…' : 'Reopening chat…'}
+        </p>
+        {reconnecting === 'hub' && (
+          <p className="max-w-sm text-xs text-muted-foreground">
+            Lost connection to the hub. The chat reopens by itself when it’s back.
+          </p>
+        )}
+      </div>
+    )
+  }
   const message = status ? chatAvailabilityMessage(status) : null
   return (
     <div
       role="status"
       data-testid="chat-open-failure"
       data-placement={placement}
-      className={cn(
-        'flex flex-col items-center gap-2.5 px-6 text-center',
-        placement === 'center'
-          ? 'absolute inset-0 z-20 justify-center bg-background'
-          : 'shrink-0 border-t py-5'
-      )}
+      className={className}
     >
       <CircleAlert aria-hidden className="size-5 text-destructive" />
       <p className="text-sm font-medium text-foreground">
