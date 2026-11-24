@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 import { ChevronRight, Plus } from 'lucide-react'
 import { HubScope, useFederationOrNull, useHubConnection } from '@slayzone/transport/client'
 import { cn } from '@slayzone/ui'
@@ -7,6 +8,7 @@ import { useTRPC } from '../trpc'
 import { sameRoute, type SettingsRoute } from '../settings-route'
 import { useSettingsViewStore } from '../settings-view-store'
 import { StatusDot, toneOfConnection } from './StatusDot'
+import { hubPageTabs } from './hub-tabs'
 
 /** The hubs the nav lists: the federation's, or this client's one hub outside it. */
 export interface NavHub {
@@ -14,14 +16,31 @@ export interface NavHub {
   id: string | null
   label: string
   isDefault: boolean
+  /** This machine's own hub. The ambient hub outside a federation (the Chromium fork) is. */
+  isLocal: boolean
 }
 
 export function useNavHubs(): NavHub[] {
   const federation = useFederationOrNull()
-  if (!federation) return [{ id: null, label: 'This hub', isDefault: true }]
+  if (!federation) return [{ id: null, label: 'This hub', isDefault: true, isLocal: true }]
   return federation.hubs
     .filter((h) => !!h.url)
-    .map((h) => ({ id: h.id, label: h.label, isDefault: h.id === federation.defaultHubId }))
+    .map((h) => ({
+      id: h.id,
+      label: h.label,
+      isDefault: h.id === federation.defaultHubId,
+      isLocal: h.kind === 'local'
+    }))
+}
+
+/**
+ * The local hub, when it is the only hub. Then the Settings view drops hubs and
+ * computers as concepts: its hub-wide pages are plain Workspace pages, its one
+ * computer is "This machine", and adding a hub is the way back to them.
+ */
+export function useSoloLocalHub(): NavHub | null {
+  const hubs = useNavHubs()
+  return hubs.length === 1 && hubs[0]!.isLocal ? hubs[0]! : null
 }
 
 function NavItem({
@@ -155,6 +174,7 @@ const app = (page: string): SettingsRoute => ({ kind: 'app', page })
 
 export function SettingsNav() {
   const hubs = useNavHubs()
+  const solo = useSoloLocalHub()
   const navigate = useSettingsViewStore((s) => s.navigate)
   return (
     <nav className="min-h-0 flex-1 overflow-y-auto px-3 pt-6 pb-6" aria-label="Settings sections">
@@ -181,36 +201,51 @@ export function SettingsNav() {
           Labs
         </NavItem>
       </Section>
-      <Section
-        title="Hubs"
-        action={
-          <button
-            type="button"
-            title="Add or manage hubs"
-            aria-label="Add or manage hubs"
-            data-testid="settings-nav-hubs"
-            onClick={() => navigate({ kind: 'hubs' })}
-            className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        }
-      >
-        {hubs.map((hub) =>
-          hub.id ? (
-            <HubScope key={hub.id} hubId={hub.id} fallback={<HubNavRow hub={hub} />}>
-              <HubNavGroup hub={hub} />
-            </HubScope>
-          ) : (
-            <HubNavGroup key="ambient" hub={hub} />
-          )
-        )}
-      </Section>
+      {solo ? (
+        <>
+          <ScopeOf hubId={solo.id}>
+            <WorkspaceNav hub={solo} />
+          </ScopeOf>
+          {/* A local hub takes no other computers: adding a hub is the next step. */}
+          <NavItem route={{ kind: 'hubs' }} testId="settings-nav-hubs">
+            <LeadSlot>
+              <Plus className="size-3.5 text-muted-foreground" />
+            </LeadSlot>
+            Add hub
+          </NavItem>
+        </>
+      ) : (
+        <Section
+          title="Hubs"
+          action={
+            <button
+              type="button"
+              title="Add or manage hubs"
+              aria-label="Add or manage hubs"
+              data-testid="settings-nav-hubs"
+              onClick={() => navigate({ kind: 'hubs' })}
+              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          }
+        >
+          {hubs.map((hub) =>
+            hub.id ? (
+              <HubScope key={hub.id} hubId={hub.id} fallback={<HubNavRow hub={hub} />}>
+                <HubNavGroup hub={hub} />
+              </HubScope>
+            ) : (
+              <HubNavGroup key="ambient" hub={hub} />
+            )
+          )}
+        </Section>
+      )}
     </nav>
   )
 }
 
-/** A hub row's leading 18px box (its dot), as wide as the project blobs below it. */
+/** A row's leading 18px box (a hub's dot, the Add hub icon), as wide as the project blobs. */
 function LeadSlot({ children }: { children?: ReactNode }) {
   return (
     <span aria-hidden className="grid size-[18px] shrink-0 place-items-center">
@@ -255,6 +290,85 @@ function HubNavRow({ hub, onOpen }: { hub: NavHub; onOpen?: () => void }) {
   )
 }
 
+/** Inside the hub's scope (outside a federation there is none to enter). */
+function ScopeOf({ hubId, children }: { hubId: string | null; children: ReactNode }) {
+  if (!hubId) return <>{children}</>
+  return (
+    <HubScope hubId={hubId} fallback={null}>
+      {children}
+    </HubScope>
+  )
+}
+
+/** The only hub, as plain pages: its hub-wide settings, this machine, its projects. */
+function WorkspaceNav({ hub }: { hub: NavHub }) {
+  const trpc = useTRPC()
+  const projects = useQuery(trpc.projects.list.queryOptions())
+  const computers = useQuery(trpc.computers.list.queryOptions())
+  // The app's own computer on its own hub (found by its enroll name, as on its page).
+  // Missing (it never enrolled): the Computers tab, which says why and offers Start.
+  const local = computers.data?.find(
+    (c) => c.revokedAt == null && c.name === DEFAULT_LOCAL_COMPUTER_NAME
+  )
+  return (
+    <>
+      <Section title="Workspace">
+        {hubPageTabs({ isDefault: true, solo: true }).map(([tab, label]) => (
+          <NavItem
+            key={tab}
+            route={{ kind: 'hub', hubId: hub.id, tab }}
+            testId={`settings-nav-workspace-${tab}`}
+            match={(r) => r.kind === 'hub' && r.tab === tab}
+          >
+            {label}
+          </NavItem>
+        ))}
+        <NavItem
+          route={
+            local
+              ? { kind: 'computer', hubId: hub.id ?? 'local', computerId: local.id, tab: 'general' }
+              : { kind: 'hub', hubId: hub.id, tab: 'computers' }
+          }
+          testId="settings-nav-this-machine"
+          match={(r) => r.kind === 'computer' || (r.kind === 'hub' && r.tab === 'computers')}
+        >
+          This machine
+        </NavItem>
+      </Section>
+      {(projects.data ?? []).length > 0 && (
+        <Section title="Projects">
+          {(projects.data ?? []).map((p) => (
+            <ProjectNavItem key={p.id} project={p} />
+          ))}
+        </Section>
+      )}
+    </>
+  )
+}
+
+function ProjectNavItem({
+  project: p
+}: {
+  project: { id: string; name: string; color: string; icon_letters?: string | null }
+}) {
+  return (
+    <NavItem
+      testId="settings-nav-project"
+      route={{ kind: 'project', projectId: p.id, tab: 'general' }}
+      match={(r) => r.kind === 'project' && r.projectId === p.id}
+    >
+      <span
+        aria-hidden
+        className="grid size-[18px] shrink-0 place-items-center rounded-[5px] text-[8px] font-bold text-background"
+        style={{ backgroundColor: p.color }}
+      >
+        {(p.icon_letters || p.name).slice(0, 2).toUpperCase()}
+      </span>
+      <span className="truncate">{p.name}</span>
+    </NavItem>
+  )
+}
+
 /** A hub, then its projects (its computers are listed on its page). Rendered inside the hub's own scope. */
 function HubNavGroup({ hub }: { hub: NavHub }) {
   const trpc = useTRPC()
@@ -273,21 +387,7 @@ function HubNavGroup({ hub }: { hub: NavHub }) {
       {open && (
         <div className="ml-3.5 border-l pl-1.5">
           {(projects.data ?? []).map((p) => (
-            <NavItem
-              key={p.id}
-              testId="settings-nav-project"
-              route={{ kind: 'project', projectId: p.id, tab: 'general' }}
-              match={(r) => r.kind === 'project' && r.projectId === p.id}
-            >
-              <span
-                aria-hidden
-                className="grid size-[18px] shrink-0 place-items-center rounded-[5px] text-[8px] font-bold text-background"
-                style={{ backgroundColor: p.color }}
-              >
-                {(p.icon_letters || p.name).slice(0, 2).toUpperCase()}
-              </span>
-              <span className="truncate">{p.name}</span>
-            </NavItem>
+            <ProjectNavItem key={p.id} project={p} />
           ))}
         </div>
       )}

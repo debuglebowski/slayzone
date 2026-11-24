@@ -29,7 +29,8 @@ import { ComputerPage } from './ComputerPage'
 import { HubOverview } from './HubOverview'
 import { SettingsSearchResults } from './SettingsSearch'
 import { ProjectAgentSettings } from './ProjectAgentSettings'
-import { useNavHubs } from './SettingsNav'
+import { useNavHubs, useSoloLocalHub } from './SettingsNav'
+import { hubPageTabs } from './hub-tabs'
 
 export interface SettingsPagesProps {
   /** Projects for the app icon badge card; absent = this host has no app icon. */
@@ -212,26 +213,35 @@ function HubPage({ route }: { route: HubRoute }) {
   const hubs = useNavHubs()
   const hub = hubs.find((h) => h.id === route.hubId) ?? hubs.find((h) => h.isDefault) ?? hubs[0]
   const isDefault = !!hub?.isDefault
-  const tabs: Array<[string, string]> = [
-    ['overview', 'Overview'],
-    ['computers', 'Computers'],
-    ['agents', 'Agents & providers'],
-    ['worktrees', 'Worktrees'],
-    ...(isDefault
-      ? ([
-          ['mcp', 'MCP'],
-          ['backups', 'Backups'],
-          ['data', 'Import & export']
-        ] as Array<[string, string]>)
-      : [])
-  ]
-  const tab = tabs.some(([k]) => k === route.tab) ? route.tab : 'overview'
+  // The only hub, and local: no hub page as such. Each tab is a Workspace page of
+  // its own (the nav lists them); Computers stays reachable as the "This machine"
+  // fallback, for a local computer that never enrolled.
+  const solo = !!useSoloLocalHub()
+  const tabs = hubPageTabs({ isDefault, solo })
+  const valid = solo
+    ? route.tab === 'computers' || tabs.some(([k]) => k === route.tab)
+    : tabs.some(([k]) => k === route.tab)
+  const tab = valid ? route.tab : tabs[0]![0]
   const go = (next: Partial<HubRoute>) =>
     navigate({ ...route, hubId: hub?.id ?? null, sub: undefined, ...next })
   return (
     <div className="space-y-6" data-testid="settings-hub-page">
-      <PageHeader crumb="Hubs" title={hub?.label ?? 'Hub'} />
-      <PageTabs tabs={tabs} active={tab} onSelect={(t) => go({ tab: t })} testIdPrefix="hub-tab" />
+      {solo ? (
+        <PageHeader
+          crumb="Workspace"
+          title={tab === 'computers' ? 'This machine' : (tabs.find(([k]) => k === tab)?.[1] ?? '')}
+        />
+      ) : (
+        <>
+          <PageHeader crumb="Hubs" title={hub?.label ?? 'Hub'} />
+          <PageTabs
+            tabs={tabs}
+            active={tab}
+            onSelect={(t) => go({ tab: t })}
+            testIdPrefix="hub-tab"
+          />
+        </>
+      )}
       {/* Status, sign-in, default, edit, remove, users / the computers: the Hubs
           page's own card split over two tabs (it scopes itself). */}
       {tab === 'overview' && <HubsSettingsTab onlyHubId={hub?.id ?? 'local'} section="hub" />}

@@ -25,9 +25,9 @@ test.describe('Settings', () => {
       await expect(dialog).not.toBeVisible({ timeout: 5_000 })
     }
     await openSettingsDialog(mainWindow)
-    // The default agent is a hub setting: the hub's Agents & providers page.
-    await dialog.getByTestId('settings-nav-hub').first().click()
-    await dialog.getByTestId('hub-tab-agents').click()
+    // The default agent is a hub setting. The only hub is local, so the nav lists
+    // its pages as plain Workspace pages.
+    await dialog.getByTestId('settings-nav-workspace-agents').click()
     await expect(dialog.getByText('Default agent provider')).toBeVisible({ timeout: 5_000 })
   }
 

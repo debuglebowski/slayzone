@@ -13,6 +13,7 @@ import { MachineLabel } from '../tabs/MachineLabel'
 import { ComputerActionButtons, useHubComputers } from '../tabs/hub-computers'
 import { PageTabs } from './SettingsPages'
 import { StatusDot } from './StatusDot'
+import { useSoloLocalHub } from './SettingsNav'
 
 type ComputerRoute = Extract<SettingsRoute, { kind: 'computer' }>
 
@@ -31,6 +32,8 @@ export function ComputerPage({ route }: { route: ComputerRoute }) {
 
 function ComputerPageBody({ route }: { route: ComputerRoute }) {
   const navigate = useSettingsViewStore((s) => s.navigate)
+  // The only hub is local: its one computer is just "This machine" (see `useSoloLocalHub`).
+  const solo = !!useSoloLocalHub()
   const federation = useFederationOrNull()
   // Outside a federation the one hub is this app's own.
   const isLocalHub = federation
@@ -57,8 +60,10 @@ function ComputerPageBody({ route }: { route: ComputerRoute }) {
   return (
     <div className="space-y-6" data-testid="settings-computer-page">
       <div className="space-y-1">
-        <div className="text-xs text-muted-foreground">Computer</div>
-        <h1 className="text-2xl font-semibold tracking-tight">{computer.name}</h1>
+        <div className="text-xs text-muted-foreground">{solo ? 'Workspace' : 'Computer'}</div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {solo ? 'This machine' : computer.name}
+        </h1>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <StatusDot tone={status.tone} />
           {status.label}

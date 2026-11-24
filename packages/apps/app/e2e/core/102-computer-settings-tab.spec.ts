@@ -86,11 +86,8 @@ test.describe('Computer settings tab', () => {
     await clickSettings(mainWindow)
     const view = mainWindow.getByTestId('settings-view').first()
     await expect(view).toBeVisible({ timeout: 10_000 })
-    // The nav lists hubs, not computers: a computer's page opens from its row on
-    // the hub page's Computers tab. The local hub's one computer.
-    await view.getByTestId('settings-nav-hub').first().click()
-    await view.getByTestId('hub-tab-computers').click()
-    await view.getByTestId('computer-open').first().click()
+    // The only hub is local, so its one computer is the nav's "This machine".
+    await view.getByTestId('settings-nav-this-machine').click()
     const page = view.getByTestId('settings-computer-page')
     await expect(page).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId('computer-edit-roots')).toBeVisible()

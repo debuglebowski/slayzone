@@ -4,7 +4,7 @@ import type { SettingsRoute } from '../settings-route'
 import { useSettingsViewStore } from '../settings-view-store'
 import { useTRPC } from '../trpc'
 import { ScopeOf } from './SettingsPages'
-import { useNavHubs, type NavHub } from './SettingsNav'
+import { useNavHubs, useSoloLocalHub, type NavHub } from './SettingsNav'
 
 interface Entry {
   label: string
@@ -108,21 +108,24 @@ function HubResults({ hub, query }: { hub: NavHub; query: string }) {
   const trpc = useTRPC()
   const computers = useQuery(trpc.computers.list.queryOptions())
   const projects = useQuery(trpc.projects.list.queryOptions())
-  const path = `Hub · ${hub.label}`
+  // The only hub, and local: no hubs or computers as such (see `useSoloLocalHub`).
+  const solo = !!useSoloLocalHub()
+  const path = solo ? 'Workspace' : `Hub · ${hub.label}`
   const entries: Entry[] = [
-    ...HUB_TABS.filter(([, , , defaultOnly]) => !defaultOnly || hub.isDefault).map(
-      ([tab, label, keywords]) => ({
-        label,
-        path,
-        keywords,
-        route: { kind: 'hub', hubId: hub.id, tab } as SettingsRoute
-      })
-    ),
+    ...HUB_TABS.filter(
+      ([tab, , , defaultOnly]) =>
+        (!defaultOnly || hub.isDefault) && !(solo && (tab === 'overview' || tab === 'computers'))
+    ).map(([tab, label, keywords]) => ({
+      label,
+      path,
+      keywords,
+      route: { kind: 'hub', hubId: hub.id, tab } as SettingsRoute
+    })),
     ...(computers.data ?? [])
       .filter((c) => c.revokedAt == null)
       .map((c) => ({
-        label: c.name,
-        path: `${path} · computer`,
+        label: solo ? 'This machine' : c.name,
+        path: solo ? path : `${path} · computer`,
         keywords: 'computer folders roots restart disable chat backups',
         route: {
           kind: 'computer',
