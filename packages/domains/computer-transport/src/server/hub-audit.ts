@@ -225,6 +225,18 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
     event: 'computer.fs.rename',
     detail: (p) => ({ projectId: p.projectId, from: p.sourcePath, path: p.path, mode: p.mode })
   },
+  'project.origin': null,
+  // A clone writes a whole checkout onto the computer, fetched from `url`.
+  'project.clone': {
+    event: 'computer.git',
+    detail: (p) => ({
+      projectId: p.projectId,
+      path: p.path,
+      op: 'clone',
+      // Never a token embedded in the address.
+      url: typeof p.url === 'string' ? p.url.replace(/\/\/[^/@]*@/, '//') : undefined
+    })
+  },
   'project.forgetPath': null,
   'project.list': null,
   ping: null,

@@ -72,6 +72,15 @@ export interface ComputerFolderOps {
   forgetProjectPath(computerId: string, projectId: string): Promise<void>
   /** The computer's own report: every folder it has recorded for this hub. */
   listProjectPaths(computerId: string): Promise<ReadonlyArray<{ projectId: string; path: string }>>
+  /** The `origin` remote of the project's folder on that computer; null = none. */
+  projectOrigin(computerId: string, projectId: string): Promise<string | null>
+  /** Clone `url` into `path` there and record it as the project's folder. */
+  cloneProject(
+    computerId: string,
+    projectId: string,
+    path: string,
+    url: string
+  ): Promise<{ path: string }>
   /**
    * The worktrees and base dirs of the given tasks, as that computer holds them (the
    * hub keeps no task path, §9 7e). Throws when it cannot answer.
@@ -134,6 +143,12 @@ export interface ComputerProjectSync {
    * clients) and the computer is told on its next connect.
    */
   forgetFolder(computerId: string, projectId: string): Promise<void>
+  /**
+   * Clone the project's repository into `path` on this computer and record it as
+   * the project's folder there. The source is the `origin` of the project's folder
+   * on another computer that holds it (ready, reachable). Throws when none has one.
+   */
+  cloneFolder(computerId: string, projectId: string, path: string): Promise<SetFolderResult>
 }
 
 /** The computer said no by its own policy (T-27) — an answer, not a failure. */
@@ -530,6 +545,30 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
           // computer is reconciled on its next connect.
           await ops.forgetProjectPath(computerId, projectId).catch(() => undefined)
         }
+        await setPlacement(db, { computerId, projectId, ...recorded })
+        deps.onChanged()
+        return recorded
+      })
+    },
+
+    async cloneFolder(computerId, projectId, path) {
+      const holders = (await listPlacements(db)).filter(
+        (r) => r.project_id === projectId && r.computer_id !== computerId && r.status === 'ready'
+      )
+      let url: string | null = null
+      for (const holder of holders) {
+        url = await ops.projectOrigin(holder.computer_id, projectId).catch(() => null)
+        if (url) break
+      }
+      if (!url)
+        throw new Error(
+          'No computer holding this project has a git remote to clone from. Check the repository out yourself, then choose its folder.'
+        )
+      const source = url
+      return withLock(computerId, async () => {
+        await widenRoots(computerId, [path]).catch(() => undefined)
+        const cloned = await ops.cloneProject(computerId, projectId, path, source)
+        const recorded = { path: cloned.path, status: 'ready' as const }
         await setPlacement(db, { computerId, projectId, ...recorded })
         deps.onChanged()
         return recorded

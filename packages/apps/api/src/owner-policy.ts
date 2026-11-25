@@ -1222,6 +1222,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     path('path'),
     path('sourcePath')
   ),
+  'projects.cloneFolder': needing(
+    'manage',
+    checked(project('id'), computer('computerId'), path('path'))
+  ),
   'projects.delete': checked(projOwner('id')),
   'projects.uploadIcon': needing('manage', checked(project('projectId'), owned('sourcePath'))),
   'projects.reorder': checked(project('projectIds[]')),

@@ -35,6 +35,13 @@ export interface ProjectFolderHost {
     projectId: string,
     path: string
   ): Promise<{ path: string; status: PlacementStatus }>
+  /** Clone the project's repository into `path` on that computer, from the folder
+   *  another computer holds, and record it there. */
+  cloneFolder?(
+    computerId: string,
+    projectId: string,
+    path: string
+  ): Promise<{ path: string; status: PlacementStatus }>
   /** Forget the folder on that computer (the folder itself is left alone). */
   forgetFolder(computerId: string, projectId: string): Promise<void>
 }

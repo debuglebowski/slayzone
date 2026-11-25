@@ -913,6 +913,10 @@ export const HubToComputerMethods = {
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
   projectRelocate: 'project.relocate',
+  /** The `origin` remote of the project's folder on the computer, to clone elsewhere. */
+  projectOrigin: 'project.origin',
+  /** Clone a repository into a folder on the computer and record it as the project's. */
+  projectClone: 'project.clone',
   projectForgetPath: 'project.forgetPath',
   projectList: 'project.list',
   ping: 'ping',
@@ -1662,6 +1666,20 @@ export const projectRelocateParamsSchema = projectSetPathParamsSchema.extend({
   mode: z.enum(['move', 'update']).default('move')
 })
 export type ProjectRelocateParams = z.infer<typeof projectRelocateParamsSchema>
+
+export const projectOriginParamsSchema = z.object({ projectId: z.string().min(1) })
+export const projectOriginResultSchema = z.object({ url: z.string().nullable() })
+export type ProjectOriginResult = z.infer<typeof projectOriginResultSchema>
+
+export const projectCloneParamsSchema = projectSetPathParamsSchema.extend({
+  /** Clone source: a URL or path git accepts, never an option or `ext::` command. */
+  url: z
+    .string()
+    .min(1)
+    .max(4000)
+    .refine((u) => !u.startsWith('-') && !u.includes('\0') && !/^ext::/i.test(u))
+})
+export type ProjectCloneParams = z.infer<typeof projectCloneParamsSchema>
 
 export const projectSetPathResultSchema = z.object({
   /** The realpath-resolved path actually recorded. */

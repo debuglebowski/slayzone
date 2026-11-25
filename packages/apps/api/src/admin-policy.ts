@@ -596,6 +596,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'projects.reorder': 'user',
   'projects.update': 'user',
   'projects.relocate': 'user',
+  'projects.cloneFolder': 'user',
   'projects.uploadIcon': 'user',
   'pty.ackEnsureAlive': 'user',
   'pty.agentsCreate': 'user',

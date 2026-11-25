@@ -25,6 +25,9 @@ import {
   projectResolvePathParamsSchema,
   projectSetPathParamsSchema,
   projectRelocateParamsSchema,
+  projectOriginParamsSchema,
+  projectCloneParamsSchema,
+  type ProjectOriginResult,
   type ProjectListResult,
   type ProjectResolvePathResult,
   type ProjectSetPathResult
@@ -33,6 +36,7 @@ import { judgePath } from '../path-jail'
 import type { ProjectPathStore } from '../project-paths'
 import type { HandlerContext, HubMethodTable } from './types'
 import { createProjectRelocation } from '../project-relocation'
+import { cloneInto, originOf } from '../git-clone'
 
 /**
  * `getStore` rather than a store, because the map is read from disk and the
@@ -122,6 +126,21 @@ export function createProjectHandlers(
       await mover.recover()
       const { projectId, sourcePath, path, mode } = projectRelocateParamsSchema.parse(raw)
       return mover.move(projectId, sourcePath, path, mode)
+    },
+    [HubToComputerMethods.projectOrigin]: async (raw: unknown): Promise<ProjectOriginResult> => {
+      const { projectId } = projectOriginParamsSchema.parse(raw)
+      const entry = store().get(projectId)
+      return { url: entry ? await originOf(entry.path) : null }
+    },
+    // Clone, then record the clone as this project's folder here.
+    [HubToComputerMethods.projectClone]: async (raw: unknown): Promise<ProjectSetPathResult> => {
+      await mover.recover()
+      mover.assertAvailable()
+      const { projectId, path, url } = projectCloneParamsSchema.parse(raw)
+      const cloned = await cloneInto(url, path, ctx.config.allowedRoots)
+      const entry = await store().set(projectId, cloned)
+      ctx.log('project cloned', { projectId, path: entry.path })
+      return { path: entry.path }
     },
     [HubToComputerMethods.projectForgetPath]: forgetPath,
     [HubToComputerMethods.projectList]: list

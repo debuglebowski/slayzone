@@ -20,7 +20,9 @@ import { expect, test } from 'vitest'
 const PROJECT_ROOT_PATHS = {
   'projects.create': ['path'],
   'projects.update': ['path'],
-  'projects.relocate': ['path', 'sourcePath']
+  'projects.relocate': ['path', 'sourcePath'],
+  // A clone creates the project's folder on a computer: a new root, like create.
+  'projects.cloneFolder': ['path']
 }
 
 const source = (file: string) => readFileSync(join(__dirname, file), 'utf8')

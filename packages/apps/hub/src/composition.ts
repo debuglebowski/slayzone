@@ -358,7 +358,9 @@ import {
   GIT_WATCH_EVENT,
   HubToComputerMethods,
   mayWaitForAgentAdmission,
-  projectListResultSchema
+  projectListResultSchema,
+  projectOriginResultSchema,
+  projectSetPathResultSchema
 } from '@slayzone/computer-transport/shared'
 import {
   createHubComputerGateway,
@@ -3083,6 +3085,21 @@ export function composeServer(opts: {
           )
           return projectListResultSchema.shape.projects.element.pick({ path: true }).parse(result)
         },
+        projectOrigin: async (computerId, projectId) =>
+          projectOriginResultSchema.parse(
+            await computerGateway.request(computerId, HubToComputerMethods.projectOrigin, {
+              projectId
+            })
+          ).url,
+        cloneProject: async (computerId, projectId, path, url) =>
+          projectSetPathResultSchema.parse(
+            await computerGateway.request(
+              computerId,
+              HubToComputerMethods.projectClone,
+              { projectId, path, url },
+              30 * 60 * 1000
+            )
+          ),
         listRoots: (computerId) => workspaceFs.listRoots(computerId),
         setAllowedRoots: (computerId, roots) => workspaceFs.setAllowedRoots(computerId, roots),
         pathExists: (computerId, path) => workspaceFs.pathExists(computerId, path),
@@ -3172,7 +3189,9 @@ export function composeServer(opts: {
         (await placement.forProject(projectId)) ?? (await registeredLocalComputer()),
       setFolder: (computerId, projectId, path) =>
         projectSync.setFolder(computerId, projectId, path),
-      forgetFolder: (computerId, projectId) => projectSync.forgetFolder(computerId, projectId)
+      forgetFolder: (computerId, projectId) => projectSync.forgetFolder(computerId, projectId),
+      cloneFolder: (computerId, projectId, path) =>
+        projectSync.cloneFolder(computerId, projectId, path)
     })
     localBootGate = supervised
       ? createLocalComputerBootGate({

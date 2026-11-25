@@ -58,6 +58,25 @@ export const projectsRouter = router({
       await host.relocateFolder(computerId, input.id, input.sourcePath, input.path, input.mode)
       return updateProject(ctx.db, { id: input.id }, iconsDir(ctx.dataRoot))
     }),
+  /** Clone the project's repository into a folder on a computer that lacks it. */
+  cloneFolder: publicProcedure
+    .input(
+      z.object({
+        id: z.string().min(1),
+        computerId: z.string().min(1),
+        path: z.string().trim().min(1)
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const exists = await ctx.db.get(
+        `SELECT id FROM projects p WHERE id=? AND NOT ${projectMovingSql('p.id')}`,
+        [input.id]
+      )
+      if (!exists) throw new Error('Project is missing or being transferred.')
+      const host = getProjectFolderHost()
+      if (!host?.cloneFolder) throw new Error('Cloning needs a connected computer.')
+      return host.cloneFolder(input.computerId, input.id, input.path)
+    }),
   list: publicProcedure.query(({ ctx }) => listAllProjects(ctx.db)),
 
   /**

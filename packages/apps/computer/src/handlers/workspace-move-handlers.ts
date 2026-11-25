@@ -8,9 +8,9 @@ import {
   workspaceMoveRequestSchema,
   type WorkspaceMoveInspection
 } from '@slayzone/computer-transport/shared'
-import { execCapture } from './exec'
+import { cloneInto, originOf } from '../git-clone'
 import { createWorkspaceMove } from './workspace-move'
-import { judgePath, judgePathIn } from '../path-jail'
+import { judgePathIn } from '../path-jail'
 import type { HandlerContext } from './types'
 
 export function createWorkspaceMoveHandlers(opts: {
@@ -57,10 +57,6 @@ export function createWorkspaceMoveHandlers(opts: {
     project && repoName
       ? judgePathIn(project.path, repoName, opts.ctx.config.allowedRoots).path
       : project?.path
-  const originOf = async (repo: string): Promise<string | null> => {
-    const result = await execCapture('git', ['-C', repo, 'remote', 'get-url', 'origin'])
-    return result.status === 0 ? result.stdout.trim() || null : null
-  }
   const request = async (raw: unknown): Promise<unknown> => {
     const input = workspaceMoveRequestSchema.parse(raw)
     switch (input.op) {
@@ -116,28 +112,7 @@ export function createWorkspaceMoveHandlers(opts: {
           throw new Error('Choose this project’s folder on the destination computer first.')
         const place = repoPathOf(project, input.repoName)
         if (!place) throw new Error('The repository has no place in this project’s folder.')
-        const target = judgePath(place, opts.ctx.config.allowedRoots)
-        if (existsSync(target) && (await readdir(target)).length > 0)
-          throw new Error(
-            `${target} is not empty. Choose an empty folder, or check the repository out there yourself.`
-          )
-        const parent = dirname(target)
-        mkdirSync(parent, { recursive: true })
-        const result = await execCapture(
-          'git',
-          ['-c', 'protocol.ext.allow=never', 'clone', '--', input.url, target],
-          {
-            cwd: parent,
-            timeoutMs: 30 * 60 * 1000,
-            // Never wait on a credential prompt nobody can answer.
-            env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' }
-          }
-        )
-        if (result.status !== 0)
-          throw new Error(
-            `Could not clone ${input.url}: ${result.stderr.trim() || 'git clone failed'}`
-          )
-        return { path: target }
+        return { path: await cloneInto(input.url, place, opts.ctx.config.allowedRoots) }
       }
       case 'snapshot':
         return mover.snapshot({ ...input, ...(await opts.paths(input.taskId)) })

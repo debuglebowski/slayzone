@@ -10,6 +10,7 @@ const setProjectDefaultComputerSpy = vi.fn()
 const genericMutateAsync = vi.fn()
 
 vi.mock('./trpc', () => ({
+  useTRPCClient: () => ({}),
   useTRPC: () => ({
     app: { dialog: { showOpenDialog: { mutationOptions: () => ({ __key: 'showOpenDialog' }) } } },
     projects: {

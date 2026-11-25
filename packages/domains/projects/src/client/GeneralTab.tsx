@@ -15,6 +15,7 @@ import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/dialogs'
 import { SettingsTabIntro } from './project-settings-shared'
 import { RelocateProjectDialog } from './RelocateProjectDialog'
+import { ProjectComputerFolders } from './ProjectComputerFolders'
 
 /** Select sentinel for the project's Local (in-process) default computer (null). */
 const LOCAL_COMPUTER_VALUE = '__local__'
@@ -244,6 +245,12 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
               Where tasks in this project run by default. Tasks can override this individually.
             </p>
           </div>
+          {computers.length > 0 && (
+            <div className="space-y-1">
+              <Label>Folders on computers</Label>
+              <ProjectComputerFolders project={project} computers={computers} />
+            </div>
+          )}
           <div className="space-y-1">
             <Label>Color</Label>
             <ColorPicker value={color} onChange={setColor} />

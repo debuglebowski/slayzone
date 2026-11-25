@@ -692,6 +692,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'projects.reorder': 'tasks',
   'projects.update': 'tasks',
   'projects.relocate': 'never',
+  'projects.cloneFolder': 'never',
   'projects.uploadIcon': 'tasks',
   'pty.ackEnsureAlive': 'agent',
   'pty.agentsCreate': 'never',

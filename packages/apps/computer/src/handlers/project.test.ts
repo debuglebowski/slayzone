@@ -354,6 +354,73 @@ describe('project path mapping', () => {
   })
 })
 
+describe('project clone', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const originRepo = () => {
+    const origin = join(dir, 'origin.git')
+    mkdirSync(origin)
+    git(origin, 'init', '--bare', '-q')
+    const seed = join(dir, 'seed')
+    mkdirSync(seed)
+    git(seed, 'init', '-q')
+    git(seed, 'config', 'user.email', 't@example.com')
+    git(seed, 'config', 'user.name', 'T')
+    git(seed, 'config', 'commit.gpgsign', 'false')
+    writeFileSync(join(seed, 'code'), 'original')
+    git(seed, 'add', '.')
+    git(seed, 'commit', '-qm', 'initial')
+    git(seed, 'remote', 'add', 'origin', origin)
+    git(seed, 'push', '-q', 'origin', 'HEAD')
+    return { origin, seed }
+  }
+
+  it("reports the project folder's origin, null without a folder or remote", async () => {
+    const { origin, seed } = originRepo()
+    const { handlers, store } = await handlersFor([dir])
+    expect(await handlers[M.projectOrigin]({ projectId: 'p1' })).toEqual({ url: null })
+    await store.set('p1', seed)
+    expect(await handlers[M.projectOrigin]({ projectId: 'p1' })).toEqual({ url: origin })
+    git(seed, 'remote', 'remove', 'origin')
+    expect(await handlers[M.projectOrigin]({ projectId: 'p1' })).toEqual({ url: null })
+  })
+
+  it('clones into the folder and records it as the project folder', async () => {
+    const { origin } = originRepo()
+    const { handlers, store } = await handlersFor([dir])
+    const target = join(dir, 'clones', 'project')
+    expect(await handlers[M.projectClone]({ projectId: 'p1', path: target, url: origin })).toEqual({
+      path: target
+    })
+    expect(readFileSync(join(target, 'code'), 'utf8')).toBe('original')
+    expect(store.get('p1')?.path).toBe(target)
+  })
+
+  it('never clones into a folder that holds anything, nor outside the jail', async () => {
+    const { origin } = originRepo()
+    const { handlers, store } = await handlersFor([join(dir, 'allowed')])
+    mkdirSync(join(dir, 'allowed', 'busy'), { recursive: true })
+    writeFileSync(join(dir, 'allowed', 'busy', 'keep'), 'keep')
+    await expect(
+      handlers[M.projectClone]({ projectId: 'p1', path: join(dir, 'allowed', 'busy'), url: origin })
+    ).rejects.toThrow(/not empty/)
+    await expect(
+      handlers[M.projectClone]({ projectId: 'p1', path: join(dir, 'outside'), url: origin })
+    ).rejects.toThrow()
+    expect(existsSync(join(dir, 'outside'))).toBe(false)
+    expect(store.get('p1')).toBeNull()
+  })
+
+  it('refuses option-like and ext:: urls', async () => {
+    const { handlers } = await handlersFor([dir])
+    for (const url of ['--upload-pack=touch /tmp/x', 'ext::sh -c touch% /tmp/x'])
+      await expect(
+        handlers[M.projectClone]({ projectId: 'p1', path: join(dir, 'x'), url })
+      ).rejects.toThrow()
+    expect(existsSync(join(dir, 'x'))).toBe(false)
+  })
+})
+
 describe('project path store — persistence', () => {
   it('survives a restart', async () => {
     const target = join(dir, 'app')

@@ -78,6 +78,10 @@ class FakeComputer {
   taskFolders = new Map<string, string>()
   /** Make every call fail like a dropped connection. */
   offline = false
+  /** Each project's checkout `origin` remote here. */
+  origins = new Map<string, string>()
+  /** What was cloned here: path → url. */
+  clones = new Map<string, string>()
   /** How long `listProjectPaths` takes to answer, to expose interleaving. */
   reportDelayMs = 0
   constructor(opts: { roots: string[]; disk?: string[] }) {
@@ -124,6 +128,19 @@ const ops: ComputerFolderOps = {
     const snapshot = [...c.map].map(([projectId, path]) => ({ projectId, path }))
     if (c.reportDelayMs) await new Promise((r) => setTimeout(r, c.reportDelayMs))
     return snapshot
+  },
+  async projectOrigin(id, projectId) {
+    const c = computers.get(id)!
+    if (c.offline) throw new Error('computer is not connected')
+    return c.origins.get(projectId) ?? null
+  },
+  async cloneProject(id, projectId, path, url) {
+    const c = computers.get(id)!
+    c.check(path)
+    c.clones.set(path, url)
+    c.disk.add(path)
+    c.map.set(projectId, path)
+    return { path }
   },
   async listTaskFolders(id, taskIds) {
     const c = computers.get(id)!
@@ -679,4 +696,50 @@ test('one project whose folder cannot be recorded does not stop delivery to the 
   expect(raw.prepare("SELECT pass,item_key FROM item_faults WHERE origin='hub'").all()).toEqual([
     { pass: 'hub-project-sync', item_key: 'p-bad' }
   ])
+})
+
+test('cloneFolder: clones from the computer that holds the project, and records the clone', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/me'], disk: ['/Users/me/app'] }))
+  computers.set(remote, new FakeComputer({ roots: ['/home/u'] }))
+  computers.get(LOCAL)!.origins.set('p1', 'git@example.test:org/app.git')
+  project('p1')
+  await setPlacement(db, {
+    computerId: LOCAL,
+    projectId: 'p1',
+    path: '/Users/me/app',
+    status: 'ready'
+  })
+  const { sync, changes } = makeSync()
+
+  expect(await sync.cloneFolder(remote, 'p1', '/home/u/app')).toEqual({
+    path: '/home/u/app',
+    status: 'ready'
+  })
+  expect(computers.get(remote)!.clones.get('/home/u/app')).toBe('git@example.test:org/app.git')
+  expect(await row('p1', remote)).toMatchObject({ path: '/home/u/app', status: 'ready' })
+  expect(changes()).toBeGreaterThan(0)
+})
+
+test('cloneFolder: skips a holder that is offline or has no remote; none left → refused', async () => {
+  const third = (await registerComputer(db, { name: 'desk', platform: 'linux', version: '1' })).id
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/me'], disk: ['/Users/me/app'] }))
+  computers.set(third, new FakeComputer({ roots: ['/srv'], disk: ['/srv/app'] }))
+  computers.set(remote, new FakeComputer({ roots: ['/home/u'] }))
+  project('p1')
+  await setPlacement(db, {
+    computerId: LOCAL,
+    projectId: 'p1',
+    path: '/Users/me/app',
+    status: 'ready'
+  })
+  await setPlacement(db, { computerId: third, projectId: 'p1', path: '/srv/app', status: 'ready' })
+  computers.get(LOCAL)!.offline = true
+  const { sync } = makeSync()
+
+  await expect(sync.cloneFolder(remote, 'p1', '/home/u/app')).rejects.toThrow(/remote/)
+  expect(await row('p1', remote)).toBeNull()
+
+  computers.get(third)!.origins.set('p1', '/srv/origin.git')
+  expect(await sync.cloneFolder(remote, 'p1', '/home/u/app')).toMatchObject({ status: 'ready' })
+  expect(computers.get(remote)!.clones.get('/home/u/app')).toBe('/srv/origin.git')
 })
