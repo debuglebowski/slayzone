@@ -60,13 +60,14 @@ export function AddPersonButton({
     <>
       <Button
         variant="outline"
-        size="sm"
-        className="w-full"
+        size="icon"
+        className="shrink-0"
+        aria-label="Add person"
+        title="Add person"
         data-testid="task-add-person"
         onClick={() => setOpen(true)}
       >
         <UserPlus className="size-4" />
-        Add person
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md" data-testid="task-add-person-dialog">

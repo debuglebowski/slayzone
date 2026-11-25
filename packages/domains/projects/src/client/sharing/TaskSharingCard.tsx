@@ -44,34 +44,47 @@ function TaskSharing({ taskId }: { taskId: string }): React.JSX.Element {
   return (
     <div data-testid="task-sharing-card">
       <label className="mb-1 block text-sm text-muted-foreground">Sharing</label>
-      {isRoot ? (
-        <Select
-          value={s.visibility}
-          disabled={!canManage}
-          onValueChange={(v) =>
-            setVisibility.mutate({ taskId, visibility: v as 'project' | 'private' })
-          }
-        >
-          <SelectTrigger className="w-full" data-testid="task-visibility">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="project">
-              <Users className="mr-1.5 inline size-3.5" />
-              Everyone in the project
-            </SelectItem>
-            <SelectItem value="private">
-              <Lock className="mr-1.5 inline size-3.5" />
-              Private — {nameOf(s.createdByUserId)} and invited people
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          {s.visibility === 'private' ? 'Private' : 'Everyone in the project'} — follows its
-          top-level task.
-        </p>
-      )}
+      <div className="flex items-center gap-1.5">
+        {isRoot ? (
+          <Select
+            value={s.visibility}
+            disabled={!canManage}
+            onValueChange={(v) =>
+              setVisibility.mutate({ taskId, visibility: v as 'project' | 'private' })
+            }
+          >
+            <SelectTrigger className="min-w-0 flex-1" data-testid="task-visibility">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="project">
+                <Users className="mr-1.5 inline size-3.5" />
+                Everyone in the project
+              </SelectItem>
+              <SelectItem value="private">
+                <Lock className="mr-1.5 inline size-3.5" />
+                Private — {nameOf(s.createdByUserId)} and invited people
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {s.visibility === 'private' ? 'Private' : 'Everyone in the project'} — follows its
+            top-level task.
+          </p>
+        )}
+        {canManage && (
+          <AddPersonButton
+            people={users}
+            exclude={invited}
+            roles={ROLES}
+            projectId={s.projectId}
+            visibility={s.visibility}
+            creatorName={nameOf(s.createdByUserId)}
+            onAdd={(userId, role) => setGrant.mutateAsync({ taskId, userId, role })}
+          />
+        )}
+      </div>
       {(s.grants.length > 0 || s.inherited.length > 0) && (
         <ul className="mt-2 space-y-1">
           {s.grants.map((g) => (
@@ -111,19 +124,6 @@ function TaskSharing({ taskId }: { taskId: string }): React.JSX.Element {
             </li>
           ))}
         </ul>
-      )}
-      {canManage && (
-        <div className="mt-2">
-          <AddPersonButton
-            people={users}
-            exclude={invited}
-            roles={ROLES}
-            projectId={s.projectId}
-            visibility={s.visibility}
-            creatorName={nameOf(s.createdByUserId)}
-            onAdd={(userId, role) => setGrant.mutateAsync({ taskId, userId, role })}
-          />
-        </div>
       )}
     </div>
   )
