@@ -105,3 +105,41 @@ export function selectTestRunPids(
   }
   return pids
 }
+
+/**
+ * The session host processes (launcher + host) serving one computer root. The
+ * computer spawns them DETACHED so agent sessions outlive it: they are not its
+ * children, keep running after it exits, and keep appending to the root's
+ * `logs/computer.log` as they wind down. A test that stops a computer and then
+ * deletes its root must wait for these too, or the delete races their last write
+ * (`ENOTEMPTY`) and the root is left behind.
+ *
+ * Matched by the root they were launched for (`SLAYZONE_ROOT` in their
+ * environment), so only this computer's hosts are touched. Fails closed like
+ * `selectTestRunPids`: an unreadable environment is not this root's.
+ */
+export function sessionHostPidsForRoot(root: string): number[] {
+  let out: string
+  try {
+    out = execFileSync('pgrep', ['-af', '--', '--session-host'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+  } catch {
+    return [] // pgrep exits 1 on no match
+  }
+  const rootVar = new RegExp(
+    `(?:^|\\s)SLAYZONE_ROOT=${root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`
+  )
+  const pids: number[] = []
+  for (const { pid } of parsePgrepOutput(out)) {
+    if (pid === process.pid) continue
+    try {
+      if (rootVar.test(readProcessEnviron(pid))) pids.push(pid)
+    } catch {
+      /* gone, or not ours */
+    }
+  }
+  return pids
+}

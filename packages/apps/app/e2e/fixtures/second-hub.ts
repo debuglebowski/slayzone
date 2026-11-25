@@ -15,7 +15,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 import type { AnyTRPCRouter } from '@trpc/server'
-import { E2E_OWNER_ENV } from './stale-processes'
+import { E2E_OWNER_ENV, isPidAlive, sessionHostPidsForRoot } from './stale-processes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -184,6 +184,36 @@ export async function authorizeHubInApp(page: Page, hubId: string, token: string
 
 const COMPUTER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
 
+/**
+ * Stop the detached session host (launcher + host) of a computer root: SIGTERM, then
+ * SIGKILL whatever is still alive after 3s, then wait until every one is gone.
+ */
+async function stopSessionHosts(root: string): Promise<void> {
+  const pids = sessionHostPidsForRoot(root)
+  if (pids.length === 0) return
+  const signal = (sig: NodeJS.Signals) => {
+    for (const pid of pids) {
+      try {
+        process.kill(pid, sig)
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+  signal('SIGTERM')
+  const deadline = Date.now() + 6_000
+  let killed = false
+  while (pids.some(isPidAlive)) {
+    if (!killed && Date.now() > deadline - 3_000) {
+      signal('SIGKILL')
+      killed = true
+    }
+    if (Date.now() > deadline)
+      throw new Error(`session host for ${root} still alive: ${pids.filter(isPidAlive).join(', ')}`)
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
 /** A real computer enrolled with a hub (not the app's own), and how to stop it. */
 export interface HubComputer {
   proc: ChildProcess
@@ -245,7 +275,7 @@ export async function attachComputerToHub(
   })
   proc.stdout?.on('data', () => undefined)
   proc.stderr?.on('data', () => undefined)
-  const stop = () =>
+  const stopComputer = () =>
     new Promise<void>((resolve) => {
       if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
       const t = setTimeout(() => proc.kill('SIGKILL'), 3_000)
@@ -255,6 +285,12 @@ export async function attachComputerToHub(
       })
       proc.kill('SIGTERM')
     })
+  // Stopped = the computer AND its detached session host are gone, so the caller can
+  // delete the store without racing the host's last log writes.
+  const stop = async () => {
+    await stopComputer()
+    await stopSessionHosts(rootDir)
+  }
   // Usable = authenticated and heard from inside the heartbeat window.
   const deadline = Date.now() + 60_000
   for (;;) {
