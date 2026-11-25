@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Lock, Users, X } from 'lucide-react'
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { useTRPC } from '../trpc'
-import { PeoplePicker, RoleSelect } from './PeoplePicker'
+import { AddPersonButton } from './AddPersonDialog'
+import { RoleSelect } from './PeoplePicker'
 import { ROLE_LABEL, toastError, useDirectory, useMyRole, useSharingStatus } from './useSharing'
 import type { AccessRole } from './useSharing'
 
@@ -113,14 +114,14 @@ function TaskSharing({ taskId }: { taskId: string }): React.JSX.Element {
       )}
       {canManage && (
         <div className="mt-2">
-          <PeoplePicker
+          <AddPersonButton
             people={users}
             exclude={invited}
             roles={ROLES}
-            testId="task-grant-picker"
-            onAdd={(userId, role) =>
-              setGrant.mutateAsync({ taskId, userId, role }).catch(() => undefined)
-            }
+            projectId={s.projectId}
+            visibility={s.visibility}
+            creatorName={nameOf(s.createdByUserId)}
+            onAdd={(userId, role) => setGrant.mutateAsync({ taskId, userId, role })}
           />
         </div>
       )}

@@ -70,17 +70,19 @@ export function RoleSelect({
   roles,
   onChange,
   disabled,
-  testId
+  testId,
+  className = 'w-[9.5rem] shrink-0'
 }: {
   value: AccessRole
   roles: readonly AccessRole[]
   onChange: (role: AccessRole) => void
   disabled?: boolean
   testId?: string
+  className?: string
 }): React.JSX.Element {
   return (
     <Select value={value} onValueChange={(v) => onChange(v as AccessRole)} disabled={disabled}>
-      <SelectTrigger className="w-[9.5rem] shrink-0" data-testid={testId}>
+      <SelectTrigger className={className} data-testid={testId}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

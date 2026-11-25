@@ -196,6 +196,7 @@ export const sharingRouter = router({
       )
       return {
         rootTaskId: root.id,
+        projectId: root.project_id,
         visibility: root.visibility,
         createdByUserId: root.created_by_user_id,
         grants: grants
