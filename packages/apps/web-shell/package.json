@@ -22,7 +22,7 @@
     "@slayzone/types": "workspace:*",
     "@trpc/client": "^11.24.0",
     "@trpc/server": "^11.24.0",
-    "fflate": "^0.8.2",
+    "fflate": "^0.8.3",
     "mermaid": "^12.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

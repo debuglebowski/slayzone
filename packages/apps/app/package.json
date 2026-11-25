@@ -119,7 +119,7 @@
     "electron": "45.2.2",
     "electron-builder": "~26.18.0",
     "electron-vite": "^6.0.0",
-    "fflate": "^0.8.2",
+    "fflate": "^0.8.3",
     "fzf": "^0.5.2",
     "jsdom": "^30.1.3",
     "lucide-react": "^1.68.0",

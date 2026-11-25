@@ -660,7 +660,7 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0(supports-color@7.2.0)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       fflate:
-        specifier: ^0.8.2
+        specifier: ^0.8.3
         version: 0.8.3
       fzf:
         specifier: ^0.5.2
@@ -1148,7 +1148,7 @@ importers:
         specifier: ~58.0.7
         version: 58.0.7(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))
       fflate:
-        specifier: ^0.8.2
+        specifier: ^0.8.3
         version: 0.8.3
       html2canvas-pro:
         specifier: 2.6.2
@@ -1381,7 +1381,7 @@ importers:
         specifier: ^11.24.0
         version: 11.24.0(patch_hash=692768755fd726c4b994698b0b889c88cf5efd4e20c4b3a27d80fc0b8736465f)(@types/express@5.0.6)(@types/ws@8.18.2)(typescript@7.1.0-dev.20261111.1)
       fflate:
-        specifier: ^0.8.2
+        specifier: ^0.8.3
         version: 0.8.3
       mermaid:
         specifier: ^12.3.0
@@ -2929,7 +2929,7 @@ importers:
         specifier: ^6.2.1
         version: 6.2.1(@rolldown/plugin-babel@0.3.0(@babel/core@7.29.7(supports-color@7.2.0))(@babel/plugin-transform-runtime@7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0))(@babel/runtime@8.0.7)(rolldown@1.2.15)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(babel-plugin-react-compiler@1.0.0)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       fflate:
-        specifier: ^0.8.2
+        specifier: ^0.8.3
         version: 0.8.3
       vitest:
         specifier: ^5.1.0
