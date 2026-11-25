@@ -188,7 +188,7 @@ const COMPUTER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
  * Stop the detached session host (launcher + host) of a computer root: SIGTERM, then
  * SIGKILL whatever is still alive after 3s, then wait until every one is gone.
  */
-async function stopSessionHosts(root: string): Promise<void> {
+export async function stopSessionHosts(root: string): Promise<void> {
   const pids = sessionHostPidsForRoot(root)
   if (pids.length === 0) return
   const signal = (sig: NodeJS.Signals) => {

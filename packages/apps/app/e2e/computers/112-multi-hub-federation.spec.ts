@@ -13,6 +13,7 @@ import {
   bootConfigPath,
   waitForUsableComputer
 } from '../fixtures/electron'
+import { stopSessionHosts } from '../fixtures/second-hub'
 
 /**
  * Phase 3a — multi-hub federation, 2-hub loopback end-to-end.
@@ -340,31 +341,37 @@ async function attachComputerToHub(opts: {
     )
     .toBe(true)
 
+  const stopComputer = () =>
+    new Promise<void>((resolve) => {
+      if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
+      const t = setTimeout(() => {
+        try {
+          proc.kill('SIGKILL')
+        } catch {
+          /* gone */
+        }
+        resolve()
+      }, 3_000)
+      proc.once('exit', () => {
+        clearTimeout(t)
+        resolve()
+      })
+      try {
+        proc.kill('SIGTERM')
+      } catch {
+        clearTimeout(t)
+        resolve()
+      }
+    })
   return {
     proc,
     computerId: computerId!,
-    stop: () =>
-      new Promise<void>((resolve) => {
-        if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
-        const t = setTimeout(() => {
-          try {
-            proc.kill('SIGKILL')
-          } catch {
-            /* gone */
-          }
-          resolve()
-        }, 3_000)
-        proc.once('exit', () => {
-          clearTimeout(t)
-          resolve()
-        })
-        try {
-          proc.kill('SIGTERM')
-        } catch {
-          clearTimeout(t)
-          resolve()
-        }
-      })
+    // The detached session host outlives the computer and keeps writing the root's
+    // logs; wait for it too, or deleting the store races its last write.
+    stop: async () => {
+      await stopComputer()
+      await stopSessionHosts(opts.rootDir)
+    }
   }
 }
 
