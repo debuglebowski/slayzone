@@ -46,7 +46,8 @@ function usePrototypeActionTarget(ready: boolean, send: SendPrototypeAction) {
   const register = useContext(PrototypeTargetContext)
   const sendAction = useStableCallback(send)
   useEffect(() => {
-    if (ready && register) return register(sendAction)
+    if (!ready || !register) return
+    return register(sendAction)
   }, [ready, register, sendAction])
 }
 
