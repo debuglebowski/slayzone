@@ -41,7 +41,8 @@ import { Download, FileQuestion, Loader2 } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
 import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import { HtmlPreviewFrame } from './ArtifactHtmlPreview'
-import { parseHtmlPrototype, type HtmlPrototype } from './html-prototype'
+import type { ArtifactControlsPosition } from '@slayzone/platform/artifact-controls'
+import { parseArtifactControls } from './artifact-controls'
 import { MediaPlayerViewer } from './MediaPlayerViewer'
 import { ArchiveViewer } from './ArchiveViewer'
 import { FontViewer } from './FontViewer'
@@ -360,7 +361,7 @@ export function ArtifactContentEditor({
   //   iframes (HTML/PDF/image) so they refetch from disk.
   const [editorReloadVersion, setEditorReloadVersion] = useState(0)
   const [previewVersion, setPreviewVersion] = useState(0)
-  const [prototype, setPrototype] = useState<HtmlPrototype | null>(null)
+  const [controls, setControls] = useState<readonly ArtifactControlsPosition[]>([])
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const baselineMtimeRef = useRef<number | null>(null)
   // Saves in flight, and whether a change event arrived during one. The watcher
@@ -394,7 +395,7 @@ export function ArtifactContentEditor({
   const refreshTextPreview = useCallback(
     (savedContent: string) => {
       if (renderMode === 'html-preview') {
-        setPrototype(parseHtmlPrototype(savedContent))
+        setControls(parseArtifactControls(savedContent))
       }
       setPreviewVersion((v) => v + 1)
     },
@@ -821,7 +822,7 @@ export function ArtifactContentEditor({
           <ArtifactPreview
             renderMode={renderMode}
             content={content ?? ''}
-            prototype={prototype}
+            controls={controls}
             artifactId={artifact.id}
             contentVersion={previewVersion}
             getFilePath={getFilePath}
@@ -859,7 +860,7 @@ export function ArtifactContentEditor({
             <ArtifactPreview
               renderMode={renderMode}
               content={content ?? ''}
-              prototype={prototype}
+              controls={controls}
               artifactId={artifact.id}
               contentVersion={previewVersion}
               getFilePath={getFilePath}
@@ -936,7 +937,7 @@ export function ArtifactContentEditor({
 function ArtifactPreview({
   renderMode,
   content,
-  prototype,
+  controls,
   artifactId,
   contentVersion,
   getFilePath,
@@ -948,7 +949,7 @@ function ArtifactPreview({
 }: {
   renderMode: RenderMode
   content: string
-  prototype: HtmlPrototype | null
+  controls: readonly ArtifactControlsPosition[]
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
@@ -969,7 +970,7 @@ function ArtifactPreview({
         key={`${artifactId}:${contentVersion}:${htmlTheme}`}
         artifactId={artifactId}
         contentVersion={contentVersion}
-        prototype={prototype}
+        controls={controls}
         getFilePath={getFilePath}
         zoom={zoom}
         htmlTheme={htmlTheme}

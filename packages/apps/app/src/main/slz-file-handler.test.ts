@@ -5,6 +5,7 @@ import {
   toSlzSourceUrl,
   type SlzFileSource
 } from '@slayzone/platform/slz-file-url'
+import { withArtifactPreviewMode } from '@slayzone/platform/artifact-controls'
 import { createSlzFileHandler } from './slz-file-handler'
 
 const HOME = '/Users/me'
@@ -197,5 +198,47 @@ describe('source URLs', () => {
     })
     const res = await down.handler(req(toSlzSourceUrl(workspace, 'a.png')))
     expect(await res.text()).toContain('Hub unavailable')
+  })
+})
+
+describe('artifact controls runtime', () => {
+  const PAGE =
+    '<html><head></head><body><p>s</p><slay-artifact-controls></slay-artifact-controls></body></html>'
+  const RUNTIME = 'id="slz-artifact-controls-runtime"'
+
+  it('injects the screen and controls runtimes into a local page, by URL mode', async () => {
+    const { handler } = setup({ readFile: vi.fn(async () => Buffer.from(PAGE)) })
+    const url = toSlzFileUrl(`${HOME}/a.html`, 1, 'dark')
+    const plain = await (await handler(req(url))).text()
+    expect(plain).not.toContain(RUNTIME)
+    const screen = await (
+      await handler(req(withArtifactPreviewMode(url, { kind: 'screen' })))
+    ).text()
+    expect(screen).toContain(RUNTIME)
+    expect(screen).toContain('color-scheme:dark')
+    const controls = await (
+      await handler(req(withArtifactPreviewMode(url, { kind: 'controls', position: 'right' })))
+    ).text()
+    expect(controls).toContain(RUNTIME)
+    expect(controls).toContain('"right"')
+  })
+
+  it('injects into an artifact served by its hub and drops the stale length', async () => {
+    const fetch = vi.fn(
+      async () => new Response(PAGE, { headers: { 'content-length': String(PAGE.length) } })
+    )
+    const { handler } = setup({ fetch: fetch as unknown as typeof globalThis.fetch })
+    const url = await toHtmlArtifactPreviewUrl('remote-1', 'a1', '/hub/report.html', 2)
+    const res = await handler(
+      req(withArtifactPreviewMode(url, { kind: 'controls', position: 'top' }))
+    )
+    expect(await res.text()).toContain(RUNTIME)
+    expect(res.headers.get('content-length')).toBeNull()
+  })
+
+  it('leaves files other than HTML alone', async () => {
+    const { handler } = setup()
+    const url = withArtifactPreviewMode(toSlzFileUrl(`${HOME}/a.png`), { kind: 'screen' })
+    expect(await (await handler(req(url))).text()).toBe('local-bytes')
   })
 })

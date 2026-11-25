@@ -3,6 +3,10 @@ import { normalize, posix, sep } from 'node:path'
 import { contentTypeForPath } from '@slayzone/platform/mime-types'
 import { injectForcedHtmlTheme } from '@slayzone/platform/forced-html-theme'
 import {
+  injectArtifactControlsRuntime,
+  readArtifactPreviewMode
+} from '@slayzone/platform/artifact-controls'
+import {
   parseHtmlArtifactPreviewUrl,
   parseSlzFileUrl,
   SLZ_ARTIFACT_SCHEME,
@@ -59,9 +63,28 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 }
 
 /** Per-artifact forced theme (task-artifacts HTML preview), gated on `?theme=`. */
-function forcedTheme(url: URL, contentType: string): 'light' | 'dark' | null {
+function forcedTheme(url: URL): 'light' | 'dark' | null {
   const theme = url.searchParams.get('theme')
-  return contentType === 'text/html' && (theme === 'dark' || theme === 'light') ? theme : null
+  return theme === 'dark' || theme === 'light' ? theme : null
+}
+
+/**
+ * What the task-artifacts HTML preview adds to a page it serves, from the URL:
+ * the forced theme (`?theme=`) and the `<slay-artifact-controls>` runtime
+ * (`?slayzone-preview=`). Injected as text at parse time: the sandboxed preview
+ * iframe has no webContents to insertCSS into, and the page is never painted
+ * wrong first. Null when there is nothing to add, so every other consumer gets
+ * the untouched bytes.
+ */
+function htmlDoctor(url: URL, contentType: string): ((html: string) => string) | null {
+  if (contentType !== 'text/html') return null
+  const theme = forcedTheme(url)
+  const mode = readArtifactPreviewMode(url)
+  if (!theme && !mode) return null
+  return (html) => {
+    const themed = theme ? injectForcedHtmlTheme(html, theme) : html
+    return mode ? injectArtifactControlsRuntime(themed, mode) : themed
+  }
 }
 
 /** The hub URL that serves a source's bytes. */
@@ -100,11 +123,8 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
       return messagePage('File not found', filePath)
     }
     const contentType = mediaType(filePath)
-    // Injected as text at parse time: the sandboxed preview iframe has no
-    // webContents to insertCSS into, and the page is never painted in the wrong
-    // scheme first. Every other consumer gets the untouched buffer.
-    const theme = forcedTheme(url, contentType)
-    const body = theme ? injectForcedHtmlTheme(data.toString('utf-8'), theme) : data
+    const doctor = htmlDoctor(url, contentType)
+    const body = doctor ? doctor(data.toString('utf-8')) : data
     return new Response(body, {
       headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
     })
@@ -164,9 +184,9 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
       // Apply the sandbox to the document as well as to the preview iframe.
       out.set('content-security-policy', 'sandbox allow-scripts allow-same-origin')
     }
-    const theme = forcedTheme(url, contentType)
-    if (theme && res.status === 200) {
-      const doctored = injectForcedHtmlTheme(await res.text(), theme)
+    const doctor = htmlDoctor(url, contentType)
+    if (doctor && res.status === 200) {
+      const doctored = doctor(await res.text())
       out.delete('content-length')
       out.delete('etag')
       return new Response(doctored, { status: 200, headers: out })

@@ -14,7 +14,7 @@ import {
   type LinkOpenTarget
 } from '@slayzone/editor'
 import { electronBootstrap, useHubId } from '@slayzone/transport/client'
-import { Button, useStableCallback } from '@slayzone/ui'
+import { useStableCallback } from '@slayzone/ui'
 import {
   SLZ_ARTIFACT_SCHEME,
   toArtifactFileUrl,
@@ -25,25 +25,31 @@ import {
   parseHtmlPreviewLinkMessage
 } from '@slayzone/platform/html-preview-links'
 import { ARTIFACT_DEVICE_PARTITION, type DeviceViewport } from '@slayzone/platform/preview-devices'
-import {
-  HTML_PROTOTYPE_ACTION,
-  type HtmlPrototypeActionMessage,
-  type HtmlPrototypeActionValue
+import type {
+  HtmlPrototypeActionMessage,
+  HtmlPrototypeActionValue
 } from '@slayzone/platform/html-prototype-actions'
+import {
+  withArtifactPreviewMode,
+  type ArtifactControlsPosition
+} from '@slayzone/platform/artifact-controls'
+import { ArtifactControlsDock, type ArtifactControlsSize } from './ArtifactControlsDock'
 import { deviceChassisLayout, DeviceCameraCutout, DeviceChassisBody } from './ArtifactDeviceFrame'
 import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
-import { ArtifactPrototypeControls } from './ArtifactPrototypeControls'
 import type { HtmlArtifactTheme } from './ArtifactsPanel.constants'
-import type { HtmlPrototype } from './html-prototype'
 
-type SendPrototypeAction = (message: HtmlPrototypeActionMessage) => void
-type RegisterPrototypeTarget = (send: SendPrototypeAction) => () => void
-const PrototypeTargetContext = createContext<RegisterPrototypeTarget | null>(null)
-const PROTOTYPE_CONTROLS_HEIGHT = 34
-const PROTOTYPE_CONTROLS_GAP = 10
+type SendAction = (message: HtmlPrototypeActionMessage) => void
+type RegisterActionTarget = (send: SendAction) => () => void
+/** Each screen registers once loaded; the docks' actions go to every screen. */
+const ActionTargetContext = createContext<RegisterActionTarget | null>(null)
+type Docks = Partial<Record<ArtifactControlsPosition, ReactNode>>
+const DOCK_GAP = 10
+// Until a dock reports what its controls need.
+const DEFAULT_DOCK_HEIGHT = 40
+const DEFAULT_DOCK_WIDTH = 160
 
-function usePrototypeActionTarget(ready: boolean, send: SendPrototypeAction) {
-  const register = useContext(PrototypeTargetContext)
+function useActionTarget(ready: boolean, send: SendAction) {
+  const register = useContext(ActionTargetContext)
   const sendAction = useStableCallback(send)
   useEffect(() => {
     if (!ready || !register) return
@@ -58,6 +64,10 @@ function usePrototypeActionTarget(ready: boolean, send: SendPrototypeAction) {
 // The parent is cross-origin, so the main-process protocol handler injects
 // the theme CSS before the document loads, using the URL's `?theme=` param.
 //
+// `<slay-artifact-controls>` (see `@slayzone/platform/artifact-controls`): each
+// position used gets a dock, the same document loaded in controls mode, around
+// the screen(s); the screens load in screen mode, which hides the controls.
+//
 // Zoom cannot go through CSS `zoom` here the way it does for the DOM panes: the
 // frame is a separate document on its own origin behind `sandbox`, so the parent
 // can neither restyle it nor rely on a layout-scale crossing the frame boundary.
@@ -70,7 +80,7 @@ export function HtmlPreviewFrame({
   getFilePath,
   zoom,
   htmlTheme,
-  prototype,
+  controls,
   devicePreviews = [],
   showDeviceFrame = true,
   onOpenLink
@@ -80,18 +90,31 @@ export function HtmlPreviewFrame({
   getFilePath: (id: string) => Promise<string | null>
   zoom: number
   htmlTheme: HtmlArtifactTheme
-  prototype: HtmlPrototype | null
+  controls: readonly ArtifactControlsPosition[]
   devicePreviews?: readonly ArtifactDevicePreview[]
   showDeviceFrame?: boolean
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   const hubId = useHubId()
   const [src, setSrc] = useState<string | null>(null)
-  const [prototypeTargets, setPrototypeTargets] = useState<SendPrototypeAction[]>([])
-  const registerPrototypeTarget = useCallback<RegisterPrototypeTarget>((send) => {
-    setPrototypeTargets((targets) => [...targets, send])
-    return () => setPrototypeTargets((targets) => targets.filter((target) => target !== send))
+  const [actionTargets, setActionTargets] = useState<SendAction[]>([])
+  const registerActionTarget = useCallback<RegisterActionTarget>((send) => {
+    setActionTargets((targets) => [...targets, send])
+    return () => setActionTargets((targets) => targets.filter((target) => target !== send))
   }, [])
+  const [dockSizes, setDockSizes] = useState<
+    Partial<Record<ArtifactControlsPosition, ArtifactControlsSize>>
+  >({})
+  const resizeDock = useCallback(
+    (position: ArtifactControlsPosition, size: ArtifactControlsSize) =>
+      setDockSizes((sizes) => {
+        const old = sizes[position]
+        return old?.width === size.width && old.height === size.height
+          ? sizes
+          : { ...sizes, [position]: size }
+      }),
+    []
+  )
   // `null` while in flight or resolved; a string once the path could not be
   // resolved. Previously there was no error branch at all: `getFilePath` had no
   // `.catch` and no null handling, so a rejection OR a null path left `src` null
@@ -156,81 +179,80 @@ export function HtmlPreviewFrame({
     )
   const isArtifactOrigin = src.startsWith(`${SLZ_ARTIFACT_SCHEME}://`)
   const sandbox = isArtifactOrigin ? 'allow-scripts allow-same-origin' : 'allow-scripts'
-  const actionsReady = prototypeTargets.length === Math.max(devicePreviews.length, 1)
-  const customControls = prototype?.kind === 'document'
-  const dockHeight = customControls ? prototype.height : PROTOTYPE_CONTROLS_HEIGHT
+  const actionsReady = actionTargets.length === Math.max(devicePreviews.length, 1)
   const dispatchAction = (message: HtmlPrototypeActionMessage) => {
     if (!actionsReady) return
-    for (const send of prototypeTargets) send(message)
+    for (const send of actionTargets) send(message)
   }
-  const prototypeControls =
-    prototype?.kind === 'document' ? (
-      <ArtifactPrototypeControls src={src} ready={actionsReady} onAction={dispatchAction} />
-    ) : prototype?.kind === 'buttons' ? (
-      <div
-        role="group"
-        aria-label="Prototype controls"
-        className="flex h-full w-fit max-w-full items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-full border border-border bg-popover px-1 text-popover-foreground shadow-md [scrollbar-width:none]"
-      >
-        {prototype.actions.map(({ id, label }) => (
-          <Button
-            key={id}
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 max-w-44 shrink-0 rounded-full px-2.5 text-xs"
-            title={label}
-            disabled={!actionsReady}
-            onClick={() => dispatchAction({ type: HTML_PROTOTYPE_ACTION, action: id })}
-          >
-            <span className="truncate">{label}</span>
-          </Button>
-        ))}
+  const docks: Docks = {}
+  for (const position of controls) {
+    docks[position] = (
+      <ArtifactControlsDock
+        src={src}
+        position={position}
+        ready={actionsReady}
+        onAction={dispatchAction}
+        onResize={resizeDock}
+      />
+    )
+  }
+  const dockExtent = (position: ArtifactControlsPosition) =>
+    position === 'top' || position === 'bottom'
+      ? (dockSizes[position]?.height ?? DEFAULT_DOCK_HEIGHT)
+      : (dockSizes[position]?.width ?? DEFAULT_DOCK_WIDTH)
+  const screenSrc = controls.length > 0 ? withArtifactPreviewMode(src, { kind: 'screen' }) : src
+  const edgeDock = (position: 'top' | 'bottom') =>
+    docks[position] && (
+      <div className="max-h-[50%] shrink-0" style={{ height: dockExtent(position) }}>
+        {docks[position]}
       </div>
-    ) : null
+    )
+  const sideDock = (position: 'left' | 'right') =>
+    docks[position] && (
+      <div className="max-w-[40%] shrink-0" style={{ width: dockExtent(position) }}>
+        {docks[position]}
+      </div>
+    )
 
   return (
-    <PrototypeTargetContext.Provider value={prototypeControls ? registerPrototypeTarget : null}>
+    <ActionTargetContext.Provider value={controls.length > 0 ? registerActionTarget : null}>
       {devicePreviews.length > 0 ? (
         <DevicePreviewCanvas
           previews={devicePreviews}
-          prototypeControls={prototypeControls}
-          dockHeight={dockHeight}
-          customControls={customControls}
+          docks={docks}
+          dockExtent={dockExtent}
           showDeviceFrame={showDeviceFrame}
           zoom={zoom}
-          src={src}
+          src={screenSrc}
           sandbox={sandbox}
           configure={isArtifactOrigin ? electronBootstrap.artifactDevicePreview() : null}
           onOpenLink={onOpenLink}
         />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-0">
-          {prototypeControls && (
-            <div
-              className="mx-3 my-2 flex max-h-[50%] shrink-0 justify-center"
-              style={{ height: dockHeight }}
-            >
-              {prototypeControls}
+          {edgeDock('top')}
+          <div className="flex min-h-0 min-w-0 flex-1">
+            {sideDock('left')}
+            <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-background">
+              <ArtifactPreviewIframe
+                src={screenSrc}
+                sandbox={sandbox}
+                className="absolute top-0 left-0 border-0"
+                style={{
+                  width: `${100 / zoom}%`,
+                  height: `${100 / zoom}%`,
+                  transform: `scale(${zoom})`,
+                  transformOrigin: '0 0'
+                }}
+                onOpenLink={onOpenLink}
+              />
             </div>
-          )}
-          <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-background">
-            <ArtifactPreviewIframe
-              src={src}
-              sandbox={sandbox}
-              className="absolute top-0 left-0 border-0"
-              style={{
-                width: `${100 / zoom}%`,
-                height: `${100 / zoom}%`,
-                transform: `scale(${zoom})`,
-                transformOrigin: '0 0'
-              }}
-              onOpenLink={onOpenLink}
-            />
+            {sideDock('right')}
           </div>
+          {edgeDock('bottom')}
         </div>
       )}
-    </PrototypeTargetContext.Provider>
+    </ActionTargetContext.Provider>
   )
 }
 
@@ -253,7 +275,7 @@ function ArtifactPreviewIframe({
   const [loaded, setLoaded] = useState(false)
   useHtmlPreviewLinks(iframeRef, onOpenLink)
   // IDs are authored by the artifact. The local-preview sandbox has an opaque origin.
-  usePrototypeActionTarget(loaded, (message) => {
+  useActionTarget(loaded, (message) => {
     iframeRef.current?.contentWindow?.postMessage(message, '*')
   })
   return (
@@ -275,9 +297,8 @@ const CAPTION_HEIGHT = 24
 
 function DevicePreviewCanvas({
   previews,
-  prototypeControls,
-  dockHeight,
-  customControls,
+  docks,
+  dockExtent,
   showDeviceFrame,
   zoom,
   src,
@@ -286,9 +307,8 @@ function DevicePreviewCanvas({
   onOpenLink
 }: {
   previews: readonly ArtifactDevicePreview[]
-  prototypeControls: ReactNode
-  dockHeight: number
-  customControls: boolean
+  docks: Docks
+  dockExtent: (position: ArtifactControlsPosition) => number
   showDeviceFrame: boolean
   zoom: number
   src: string
@@ -322,20 +342,47 @@ function DevicePreviewCanvas({
   const comparing = screens.length > 1
   const gap = comparing ? COMPARISON_GAP : 0
   const captions = comparing ? CAPTION_HEIGHT : 0
-  const controlsWidth = available ? Math.max(0, available.width - CANVAS_PADDING * 2) : undefined
-  const controlsHeight =
-    customControls && available ? Math.min(dockHeight, available.height / 2) : dockHeight
-  const controlsSpace = prototypeControls ? controlsHeight + PROTOTYPE_CONTROLS_GAP : 0
+  const edgeWidth = available ? Math.max(0, available.width - CANVAS_PADDING * 2) : undefined
+  // A dock never takes more than half the height or 40% of the width.
+  const extent = (position: ArtifactControlsPosition) => {
+    if (!docks[position]) return 0
+    const wanted = dockExtent(position)
+    if (!available) return wanted
+    return position === 'top' || position === 'bottom'
+      ? Math.min(wanted, available.height / 2)
+      : Math.min(wanted, available.width * 0.4)
+  }
+  const space = (position: ArtifactControlsPosition) =>
+    docks[position] ? extent(position) + DOCK_GAP : 0
   const totalWidth = screens.reduce((sum, screen) => sum + screen.width, 0)
   const tallest = Math.max(...screens.map(({ height }) => height))
   // Use one scale so the on-screen sizes are comparable even in a narrow pane.
   const fit = available
     ? Math.min(
         1,
-        Math.max(1, available.width - CANVAS_PADDING * 2 - gap) / totalWidth,
-        Math.max(1, available.height - CANVAS_PADDING * 2 - captions - controlsSpace) / tallest
+        Math.max(1, available.width - CANVAS_PADDING * 2 - gap - space('left') - space('right')) /
+          totalWidth,
+        Math.max(
+          1,
+          available.height - CANVAS_PADDING * 2 - captions - space('top') - space('bottom')
+        ) / tallest
       )
     : 1
+  const edgeDock = (position: 'top' | 'bottom') =>
+    docks[position] && (
+      <div
+        className="sticky shrink-0"
+        style={{ insetInline: CANVAS_PADDING, height: extent(position), width: edgeWidth }}
+      >
+        {docks[position]}
+      </div>
+    )
+  const sideDock = (position: 'left' | 'right') =>
+    docks[position] && (
+      <div className="shrink-0" style={{ width: extent(position) }}>
+        {docks[position]}
+      </div>
+    )
   const scale = fit * zoom
 
   return (
@@ -346,77 +393,70 @@ function DevicePreviewCanvas({
     >
       <div
         className="flex min-h-full min-w-full w-max flex-col items-center justify-center"
-        style={{ padding: CANVAS_PADDING, gap: PROTOTYPE_CONTROLS_GAP }}
+        style={{ padding: CANVAS_PADDING, gap: DOCK_GAP }}
       >
-        {prototypeControls && (
-          <div
-            className="sticky shrink-0"
-            style={{
-              insetInline: CANVAS_PADDING,
-              height: controlsHeight,
-              width: customControls ? controlsWidth : undefined,
-              maxWidth: controlsWidth
-            }}
-          >
-            {prototypeControls}
-          </div>
-        )}
-        <div className="flex shrink-0 items-start" style={{ gap }}>
-          {screens.map(({ slot, viewport, frame, label, chassis, width, height }) => {
-            const caption = label
-              ? label + ' · ' + viewport.width + ' × ' + viewport.height
-              : undefined
-            return (
-              <figure key={slot} className="m-0 shrink-0" style={{ width: width * scale }}>
-                {caption && (
-                  <figcaption
-                    className="truncate text-center text-xs text-muted-foreground tabular-nums"
-                    style={{ height: CAPTION_HEIGHT }}
-                    title={caption}
-                  >
-                    {caption}
-                  </figcaption>
-                )}
-                <div className="relative overflow-hidden" style={{ height: height * scale }}>
-                  <div
-                    className="absolute left-0 top-0 origin-top-left"
-                    style={{ width, height, transform: 'scale(' + scale + ')' }}
-                  >
-                    {frame && chassis && (
-                      <DeviceChassisBody model={frame.device.id} layout={chassis} />
-                    )}
-                    <div
-                      key="live-screen"
-                      className={
-                        chassis
-                          ? 'absolute overflow-hidden bg-background'
-                          : 'absolute overflow-hidden rounded-sm outline-1 -outline-offset-1 outline-border bg-background'
-                      }
-                      style={{
-                        left: chassis?.screenLeft ?? 0,
-                        top: chassis?.screenTop ?? 0,
-                        width: viewport.width,
-                        height: viewport.height,
-                        borderRadius: chassis?.screenRadius
-                      }}
+        {edgeDock('top')}
+        <div className="flex shrink-0 items-stretch" style={{ gap: DOCK_GAP }}>
+          {sideDock('left')}
+          <div className="flex shrink-0 items-start" style={{ gap }}>
+            {screens.map(({ slot, viewport, frame, label, chassis, width, height }) => {
+              const caption = label
+                ? label + ' · ' + viewport.width + ' × ' + viewport.height
+                : undefined
+              return (
+                <figure key={slot} className="m-0 shrink-0" style={{ width: width * scale }}>
+                  {caption && (
+                    <figcaption
+                      className="truncate text-center text-xs text-muted-foreground tabular-nums"
+                      style={{ height: CAPTION_HEIGHT }}
+                      title={caption}
                     >
-                      <LiveDevicePreview
-                        src={src}
-                        sandbox={sandbox}
-                        configure={configure}
-                        viewport={viewport}
-                        label={label}
-                        onOpenLink={onOpenLink}
-                      />
-                      <DeviceHinge feature={viewport.displayFeature} framed={!!chassis} />
+                      {caption}
+                    </figcaption>
+                  )}
+                  <div className="relative overflow-hidden" style={{ height: height * scale }}>
+                    <div
+                      className="absolute left-0 top-0 origin-top-left"
+                      style={{ width, height, transform: 'scale(' + scale + ')' }}
+                    >
+                      {frame && chassis && (
+                        <DeviceChassisBody model={frame.device.id} layout={chassis} />
+                      )}
+                      <div
+                        key="live-screen"
+                        className={
+                          chassis
+                            ? 'absolute overflow-hidden bg-background'
+                            : 'absolute overflow-hidden rounded-sm outline-1 -outline-offset-1 outline-border bg-background'
+                        }
+                        style={{
+                          left: chassis?.screenLeft ?? 0,
+                          top: chassis?.screenTop ?? 0,
+                          width: viewport.width,
+                          height: viewport.height,
+                          borderRadius: chassis?.screenRadius
+                        }}
+                      >
+                        <LiveDevicePreview
+                          src={src}
+                          sandbox={sandbox}
+                          configure={configure}
+                          viewport={viewport}
+                          label={label}
+                          onOpenLink={onOpenLink}
+                        />
+                        <DeviceHinge feature={viewport.displayFeature} framed={!!chassis} />
+                      </div>
+                      {chassis && <DeviceCameraCutout layout={chassis} />}
                     </div>
-                    {chassis && <DeviceCameraCutout layout={chassis} />}
                   </div>
-                </div>
-              </figure>
-            )
-          })}
+                </figure>
+              )
+            })}
+          </div>
+          {sideDock('right')}
         </div>
+        {edgeDock('bottom')}
       </div>
     </div>
   )
@@ -527,7 +567,7 @@ function ArtifactDeviceGuest({
   const [loaded, setLoaded] = useState(false)
   const guestRef = useRef<GuestElement | null>(null)
   const fallback = useStableCallback(onFallback)
-  usePrototypeActionTarget(loaded, ({ type, action, value }) => {
+  useActionTarget(loaded, ({ type, action, value }) => {
     void guestRef.current?.send(type, action, value).catch(fallback)
   })
 

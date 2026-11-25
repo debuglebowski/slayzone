@@ -335,37 +335,55 @@ it('shows both Duo displays and keeps the original preview mounted', async () =>
   expect(getFilePath).toHaveBeenCalledTimes(1)
 })
 
-const PROTOTYPE_HTML = `<!doctype html>
-<html><head><script type="application/json" id="slayzone-prototype">
-  {"actions":[{"id":"show-error","label":"Show error"}]}
-</script></head><body><p>Prototype</p></body></html>`
+const CONTROLS_HTML = `<!doctype html>
+<html><head></head><body><p>Prototype</p>
+<slay-artifact-controls><button data-action="show-error">Show error</button></slay-artifact-controls>
+</body></html>`
 const SHOW_ERROR = { type: 'slayzone:prototype-action', action: 'show-error' }
+const dock = (position: string) => screen.queryByTitle(`Artifact controls — ${position}`)
+/** A message from a frame, as the window sees it. */
+const fromFrame = (frame: HTMLIFrameElement, data: unknown) =>
+  fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data }))
 
 it.each(['preview', 'split'] as const)(
-  'sends repeatable prototype actions to the Fit to pane preview in %s mode',
+  'relays actions from the controls dock to the screen in %s mode',
   async (viewMode) => {
     vi.useRealTimers()
-    disk.content.page = PROTOTYPE_HTML
+    disk.content.page = CONTROLS_HTML
     render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode={viewMode} />)
 
-    const frame = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
-    const postMessage = vi.spyOn(frame.contentWindow!, 'postMessage')
-    const action = screen.getByRole('button', { name: 'Show error' }) as HTMLButtonElement
-    expect(action.disabled).toBe(true)
-    fireEvent.load(frame)
-    expect(action.disabled).toBe(false)
-    fireEvent.click(action)
-    fireEvent.click(action)
-    expect(postMessage.mock.calls).toEqual([
+    const preview = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
+    const controls = (await screen.findByTitle('Artifact controls — bottom')) as HTMLIFrameElement
+    expect(controls.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(new URL(preview.src).searchParams.get('slayzone-preview')).toBe('screen')
+    expect(new URL(controls.src).searchParams.get('slayzone-preview')).toBe('controls')
+    expect(new URL(controls.src).searchParams.get('slayzone-controls')).toBe('bottom')
+    const toScreen = vi.spyOn(preview.contentWindow!, 'postMessage')
+    const toControls = vi.spyOn(controls.contentWindow!, 'postMessage')
+
+    // Dropped until the screen has loaded.
+    fromFrame(controls, SHOW_ERROR)
+    expect(toScreen).not.toHaveBeenCalled()
+    fireEvent.load(preview)
+    expect(toControls).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'slayzone:prototype-ready', ready: true }),
+      '*'
+    )
+    fromFrame(preview, SHOW_ERROR)
+    fromFrame(controls, { ...SHOW_ERROR, value: {} })
+    expect(toScreen).not.toHaveBeenCalled()
+    fromFrame(controls, SHOW_ERROR)
+    fromFrame(controls, SHOW_ERROR)
+    expect(toScreen.mock.calls).toEqual([
       [SHOW_ERROR, '*'],
       [SHOW_ERROR, '*']
     ])
   }
 )
 
-it('sends one prototype action to both device previews once both are loaded', async () => {
+it('sends one action to both device previews once both are loaded', async () => {
   vi.useRealTimers()
-  disk.content.page = PROTOTYPE_HTML
+  disk.content.page = CONTROLS_HTML
   const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
   render(
     <Tab
@@ -380,83 +398,83 @@ it('sends one prototype action to both device previews once both are loaded', as
   )
   const cover = (await screen.findByTitle('HTML preview — Cover')) as HTMLIFrameElement
   const unfolded = screen.getByTitle('HTML preview — Unfolded') as HTMLIFrameElement
+  const controls = (await screen.findByTitle('Artifact controls — bottom')) as HTMLIFrameElement
   const sends = [cover, unfolded].map((frame) => vi.spyOn(frame.contentWindow!, 'postMessage'))
-  const action = screen.getByRole('button', { name: 'Show error' }) as HTMLButtonElement
-  const controls = screen.getByRole('group', { name: 'Prototype controls' })
   const canvas = screen.getByTestId('artifact-device-canvas')
   expect(canvas.contains(controls)).toBe(true)
-  expect(canvas.contains(cover)).toBe(true)
-  expect(controls.compareDocumentPosition(cover)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  expect(cover.compareDocumentPosition(controls)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   fireEvent.load(cover)
-  expect(action.disabled).toBe(true)
+  fromFrame(controls, SHOW_ERROR)
+  for (const send of sends) expect(send).not.toHaveBeenCalled()
   fireEvent.load(unfolded)
-  fireEvent.click(action)
+  fromFrame(controls, SHOW_ERROR)
   for (const send of sends) expect(send).toHaveBeenCalledExactlyOnceWith(SHOW_ERROR, '*')
 })
 
-it('keeps the prototype toolbar aligned with the saved HTML in Split mode', async () => {
+it('opens one dock per position used, sized by what each dock reports', async () => {
   vi.useRealTimers()
-  disk.content.page = PROTOTYPE_HTML
-  render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode="split" />)
-
-  await screen.findByRole('button', { name: 'Show error' })
-  vi.useFakeTimers()
-  fireEvent.change(code()!, { target: { value: PROTOTYPE_HTML.replace('Show error', 'Retry') } })
-  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Show error' })).toBeTruthy()
-  await act(() => vi.advanceTimersByTimeAsync(500))
-  expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-})
-
-it('shows the prototype controls only in a preview with a valid manifest', async () => {
-  vi.useRealTimers()
-  const html = artifact('page', 'page.html')
-  disk.content.page = PROTOTYPE_HTML
-  const view = render(<Tab mode="visible" art={html} viewMode="raw" />)
-  await screen.findByTestId('code')
-  expect(screen.queryByRole('group', { name: 'Prototype controls' })).toBeNull()
-
-  const broken = artifact('broken', 'broken.html')
-  disk.content.broken = PROTOTYPE_HTML.replace('"actions":', '"actions"')
-  view.rerender(<Tab mode="visible" art={broken} viewMode="preview" />)
-  await screen.findByTitle('HTML preview')
-  expect(screen.queryByRole('group', { name: 'Prototype controls' })).toBeNull()
-})
-
-it('relays values from the artifact-owned controls and ignores messages from the preview', async () => {
-  vi.useRealTimers()
-  disk.content.page = PROTOTYPE_HTML.replace(
-    '<head>',
-    '<head><meta name="slayzone-prototype-controls" content="96">'
+  disk.content.page = CONTROLS_HTML.replace(
+    '<p>Prototype</p>',
+    '<main><slay-artifact-controls position="top">a</slay-artifact-controls></main>' +
+      '<slay-artifact-controls position="RIGHT">b</slay-artifact-controls>' +
+      '<slay-artifact-controls position="top">c</slay-artifact-controls>'
   )
   render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode="preview" />)
+  const top = (await screen.findByTitle('Artifact controls — top')) as HTMLIFrameElement
+  const right = dock('right') as HTMLIFrameElement
+  expect(dock('bottom')).not.toBeNull()
+  expect(dock('left')).toBeNull()
+  const preview = screen.getByTitle('HTML preview')
+  expect(top.compareDocumentPosition(preview)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  expect(preview.compareDocumentPosition(right)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
 
-  const controls = (await screen.findByTitle('Prototype controls')) as HTMLIFrameElement
-  const preview = screen.getByTitle('HTML preview') as HTMLIFrameElement
-  expect(controls.getAttribute('sandbox')).toBe('allow-scripts')
-  expect(new URL(controls.src).searchParams.get('slayzone-preview')).toBe('controls')
-  expect(new URL(preview.src).searchParams.has('slayzone-preview')).toBe(false)
+  const size = { type: 'slayzone:artifact-controls-size' }
+  fromFrame(top, { ...size, width: 500, height: 80 })
+  fromFrame(right, { ...size, width: 140, height: 900 })
+  // A dock only listens to its own frame.
+  fromFrame(preview as HTMLIFrameElement, { ...size, width: 1, height: 1 })
+  expect(top.parentElement!.style.height).toBe('80px')
+  expect(right.parentElement!.style.width).toBe('140px')
+})
+
+it('keeps the docks aligned with the saved HTML in Split mode', async () => {
+  vi.useRealTimers()
+  disk.content.page = CONTROLS_HTML
+  render(<Tab mode="visible" art={artifact('page', 'page.html')} viewMode="split" />)
+
+  await screen.findByTitle('Artifact controls — bottom')
+  vi.useFakeTimers()
+  fireEvent.change(code()!, {
+    target: {
+      value: CONTROLS_HTML.replace(
+        '<slay-artifact-controls>',
+        '<slay-artifact-controls position="top">'
+      )
+    }
+  })
+  expect(dock('top')).toBeNull()
+  expect(dock('bottom')).not.toBeNull()
+  await act(() => vi.advanceTimersByTimeAsync(500))
+  expect(dock('top')).not.toBeNull()
+  expect(dock('bottom')).toBeNull()
+})
+
+it('shows no dock in raw mode, without controls, or for the retired JSON manifest', async () => {
+  vi.useRealTimers()
+  const html = artifact('page', 'page.html')
+  disk.content.page = CONTROLS_HTML
+  const view = render(<Tab mode="visible" art={html} viewMode="raw" />)
+  await screen.findByTestId('code')
+  expect(dock('bottom')).toBeNull()
+
+  const manifest = artifact('manifest', 'manifest.html')
+  disk.content.manifest = `<html><head><script type="application/json" id="slayzone-prototype">
+    {"actions":[{"id":"show-error","label":"Show error"}]}
+  </script></head><body><p>Old</p></body></html>`
+  view.rerender(<Tab mode="visible" art={manifest} viewMode="preview" />)
+  await screen.findByTitle('HTML preview')
+  expect(dock('bottom')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Show error' })).toBeNull()
-  const sendToScreen = vi.spyOn(preview.contentWindow!, 'postMessage')
-  const sendToControls = vi.spyOn(controls.contentWindow!, 'postMessage')
-
-  fireEvent.load(preview)
-  expect(sendToControls).toHaveBeenCalledWith(
-    { type: 'slayzone:prototype-ready', ready: true },
-    '*'
-  )
-  const action = { type: 'slayzone:prototype-action', action: 'set-quantity', value: 4 }
-  fireEvent(window, new MessageEvent('message', { source: preview.contentWindow, data: action }))
-  fireEvent(
-    window,
-    new MessageEvent('message', {
-      source: controls.contentWindow,
-      data: { ...action, value: {} }
-    })
-  )
-  expect(sendToScreen).not.toHaveBeenCalled()
-  fireEvent(window, new MessageEvent('message', { source: controls.contentWindow, data: action }))
-  expect(sendToScreen).toHaveBeenCalledExactlyOnceWith(action, '*')
 })
 
 describe('ArtifactContentEditor across a tab switch', () => {
