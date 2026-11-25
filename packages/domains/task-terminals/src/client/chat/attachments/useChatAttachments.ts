@@ -24,6 +24,10 @@ export interface UseChatAttachmentsOpts {
   mode: string
   /** Files ready to send (uploaded task artifacts), in the order they were given. */
   onAdded: (attachments: ChatAttachment[]) => void
+  /** A file was refused or its upload failed (the reason was toasted). */
+  onFailed?: () => void
+  /** Nothing is pending anymore: the last file was added (after `onAdded`) or refused. */
+  onSettled?: () => void
   /** Image decode/encode; the browser's by default (tests inject one). */
   codec?: ImageCodec
 }
@@ -60,6 +64,8 @@ export function useChatAttachments({
   tabId,
   mode,
   onAdded,
+  onFailed,
+  onSettled,
   codec = browserImageCodec
 }: UseChatAttachmentsOpts): UseChatAttachmentsResult {
   const capabilities = chatCapabilitiesForMode(mode)
@@ -69,6 +75,8 @@ export function useChatAttachments({
     ...(policy === 'blocks' && tabId ? { chatTabId: tabId } : {})
   })
   const [pending, setPending] = useState<PendingAttachment[]>([])
+  // Files in flight, counted in handlers: `onSettled` fires the moment it hits 0.
+  const inFlight = useRef(0)
   const [isDragging, setIsDragging] = useState(false)
   // Nested dragenter/leave pairs (children of the panel): written in handlers only.
   const dragDepth = useRef(0)
@@ -115,6 +123,7 @@ export function useChatAttachments({
       name: file.name || 'pasted image',
       file
     }))
+    inFlight.current += batch.length
     setPending((prev) => [...prev, ...batch.map(({ key, name }) => ({ key, name }))])
     const results = await Promise.all(
       batch.map(({ key, name, file }) =>
@@ -129,13 +138,26 @@ export function useChatAttachments({
             return null
           })
           .then((attachment) => {
-            setPending((prev) => prev.filter((p) => p.key !== key))
+            // A refused file leaves at once; an uploaded one stays pending until
+            // it is added below.
+            if (!attachment) {
+              setPending((prev) => prev.filter((p) => p.key !== key))
+              onFailed?.()
+            }
             return attachment
           })
       )
     )
+    inFlight.current -= batch.length
     const added = results.filter((a): a is ChatAttachment => a !== null)
-    if (added.length > 0) onAdded(added)
+    if (added.length > 0) {
+      // Added and no longer pending in ONE commit: nothing ever reads "nothing
+      // pending" without the files in the composer.
+      const done = new Set(batch.map((b) => b.key))
+      setPending((prev) => prev.filter((p) => !done.has(p.key)))
+      onAdded(added)
+    }
+    if (inFlight.current === 0) onSettled?.()
   })
 
   const extract = (dt: DataTransfer | null | undefined): File[] =>

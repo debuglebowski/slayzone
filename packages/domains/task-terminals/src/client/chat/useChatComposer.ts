@@ -97,7 +97,10 @@ export interface UseChatComposerOpts {
    * or queued (`ChatCapabilities.sideQuestions`). Absent: `/btw` is plain text.
    */
   onSideQuestion?: (question: string) => void
-  /** A picked / pasted / dropped file is still being checked or uploaded: nothing sends until it is in. */
+  /**
+   * A picked / pasted / dropped file is still being checked or uploaded. A send
+   * pressed meanwhile waits (`sendWaiting`) and goes out once every file is in.
+   */
   attaching?: boolean
 }
 function queueFailureMessage(err: unknown): string {
@@ -198,6 +201,9 @@ export function useChatComposer({
     enabled: capabilities.promptHistory
   })
   const [historyNav, setHistoryNav] = useState<HistoryNav>(HISTORY_IDLE)
+  // A send pressed while a file was still attaching: it goes out once `attaching`
+  // clears (the effect below), with the same `/` pick and "now" it was pressed with.
+  const [waitingSend, setWaitingSend] = useState<{ text?: string; now: boolean } | null>(null)
   // The files the composer held when ↑ started browsing: back once ↑/↓ leaves
   // an entry that brought its own (a cleared draft's). Handlers only.
   const historyStashFiles = useRef<ChatAttachment[]>([])
@@ -542,17 +548,25 @@ export function useChatComposer({
   // `textOverride`: a command the `/` menu resolved on Enter (sent instead of the draft).
   // `now` (Cmd+Shift+Enter): mid-turn, straight into the running turn — queued,
   // then taken by the agent after its current step — not after the queue.
+  // `settled`: the files just finished attaching (`attachmentsSettled`) — this
+  // render's `attaching` is still the old `true`.
   const handleSend = useCallback(
-    async (textOverride?: string, { now = false }: { now?: boolean } = {}) => {
+    async (
+      textOverride?: string,
+      { now = false, settled = false }: { now?: boolean; settled?: boolean } = {}
+    ) => {
       const text = (textOverride ?? draftSnapshot.current.text).trim()
       const attachments = draftSnapshot.current.attachments
+      // Every press settles a waiting send: it goes now, or waits again just below.
+      setWaitingSend(null)
       if (sessionEnded) return
-      if (!text && attachments.length === 0) return
-      // The send button is disabled too; this covers Enter, queueing and `/` picks.
-      if (attaching) {
-        toast('Still attaching files — send once they are in.')
+      // Covers the button, Enter, queueing and `/` picks: the send waits for the
+      // files (checked before "empty": a file alone is a message once it is in).
+      if (attaching && !settled) {
+        setWaitingSend({ ...(textOverride !== undefined ? { text: textOverride } : {}), now })
         return
       }
+      if (!text && attachments.length === 0) return
       setHistoryNav(HISTORY_IDLE)
       if (text) recordHistory(text)
 
@@ -739,6 +753,23 @@ export function useChatComposer({
     submitRef.current = (text) => {
       void handleSend(text)
     }
+  })
+
+  // The last file is in (`useChatAttachments` → `onSettled`, right after
+  // `onAdded`): a waiting send goes out. `setAttachments` already wrote the
+  // files to `draftSnapshot`, which `handleSend` reads.
+  const attachmentsSettled = useStableCallback(() => {
+    if (!waitingSend) return
+    void handleSend(waitingSend.text, { now: waitingSend.now, settled: true })
+  })
+
+  const cancelWaitingSend = useStableCallback(() => setWaitingSend(null))
+  // A file failed while a send waited: hold the message — it would go out
+  // without a file the user meant to send.
+  const attachFailed = useStableCallback(() => {
+    if (!waitingSend) return
+    setWaitingSend(null)
+    toast('Not sent: a file could not be attached. Send again to go without it.')
   })
 
   // Stop button + Esc shared path. Clears the queue (intentional: queued msgs
@@ -968,6 +999,11 @@ export function useChatComposer({
     queueApi,
     autocomplete,
     handleSend,
+    /** A send was pressed while a file was attaching; it goes out once they are in. */
+    sendWaiting: waitingSend !== null,
+    cancelWaitingSend,
+    attachFailed,
+    attachmentsSettled,
     handleStop,
     stopping,
     sendCommand,

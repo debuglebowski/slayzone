@@ -78,6 +78,10 @@ export interface ChatComposerProps {
   setCursorPos: Dispatch<SetStateAction<number>>
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   handleSend: () => void | Promise<void>
+  /** A send was pressed while a file was attaching: it goes out once they are in. */
+  sendWaiting?: boolean
+  /** Take back the waiting send (the message stays in the composer). */
+  cancelWaitingSend?: () => void
   handleStop: () => void | Promise<void>
   /** Stop was pressed and the turn has not closed yet: the button reads "Stopping…". */
   stopping?: boolean
@@ -151,6 +155,8 @@ export function ChatComposer({
   setCursorPos,
   onKeyDown,
   handleSend,
+  sendWaiting = false,
+  cancelWaitingSend,
   handleStop,
   stopping = false,
   historySearch,
@@ -208,6 +214,21 @@ export function ChatComposer({
                 Attaching {p.name}…
               </span>
             ))}
+            {sendWaiting && (
+              <span
+                data-testid="chat-send-waiting-note"
+                className="inline-flex items-center gap-1 px-1 py-0.5 text-2xs text-muted-foreground"
+              >
+                Sends once attached ·
+                <button
+                  type="button"
+                  onClick={() => cancelWaitingSend?.()}
+                  className="underline hover:text-foreground"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
           </div>
         )}
         <div
@@ -302,6 +323,8 @@ export function ChatComposer({
                   : `Ask ${chatProviderForMode(mode).agent} anything…`
               }
               disabled={displaySessionEnded}
+              // A waiting send takes the message as it is when the files land.
+              readOnly={sendWaiting}
               rows={1}
               className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 max-h-[240px] py-0.5 leading-normal"
             />
@@ -323,21 +346,30 @@ export function ChatComposer({
                 <Square className="size-3.5 fill-current" />
               )}
             </button>
+          ) : sendWaiting ? (
+            <button
+              onClick={() => cancelWaitingSend?.()}
+              className="shrink-0 size-8 rounded-full flex items-center justify-center bg-primary/60 text-primary-foreground hover:bg-primary/50 transition-colors"
+              title="Sends once the files are attached — click to cancel"
+              aria-label="Cancel waiting send"
+              aria-busy
+              data-testid="chat-send-waiting"
+            >
+              <Loader2 className="size-4 animate-spin" />
+            </button>
           ) : (
             <button
               onClick={() => {
                 void handleSend()
               }}
-              disabled={
-                (!draft.trim() && attachments.length === 0) || displaySessionEnded || attaching
-              }
+              disabled={(!draft.trim() && attachments.length === 0 && !attaching) || displaySessionEnded}
               className={cn(
                 'shrink-0 size-8 rounded-full flex items-center justify-center transition-colors',
-                (draft.trim() || attachments.length > 0) && !displaySessionEnded && !attaching
+                (draft.trim() || attachments.length > 0 || attaching) && !displaySessionEnded
                   ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                   : 'bg-muted text-muted-foreground cursor-not-allowed'
               )}
-              title="Send (Enter)"
+              title={attaching ? 'Send once the files are attached (Enter)' : 'Send (Enter)'}
               aria-label="Send"
             >
               <ArrowUp className="size-4" />

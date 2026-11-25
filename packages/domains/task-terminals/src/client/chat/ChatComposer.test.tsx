@@ -313,12 +313,29 @@ describe('ChatComposer send / stop', () => {
     expect(button('Send').disabled).toBe(false)
   })
 
-  it('Send is disabled while a file is being attached', () => {
+  it('Send stays pressable while a file is being attached (the send waits for it)', () => {
     setup({
       draft: 'hi',
       attachmentsApi: { ...makeProps().attachmentsApi, pending: [{ key: 'k', name: 'p.png' }] }
     })
-    expect(button('Send').disabled).toBe(true)
+    const send = button('Send')
+    expect(send.disabled).toBe(false)
+    fireEvent.click(send)
+    expect(props.handleSend).toHaveBeenCalled()
+  })
+
+  it('a waiting send shows a spinner that cancels it, and locks the text', () => {
+    const cancelWaitingSend = vi.fn()
+    setup({
+      draft: 'hi',
+      sendWaiting: true,
+      cancelWaitingSend,
+      attachmentsApi: { ...makeProps().attachmentsApi, pending: [{ key: 'k', name: 'p.png' }] }
+    })
+    expect(screen.getByTestId('chat-send-waiting-note')).toBeTruthy()
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).readOnly).toBe(true)
+    fireEvent.click(screen.getByTestId('chat-send-waiting'))
+    expect(cancelWaitingSend).toHaveBeenCalledTimes(1)
   })
 
   it('while a turn runs, Stop replaces Send and stops on click', () => {

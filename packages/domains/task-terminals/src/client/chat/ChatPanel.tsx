@@ -344,8 +344,9 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // `/btw`: side questions, answered aside — never part of the conversation.
     const sideQuestions = useSideQuestions({ tabId, taskId, mode, cwd, providerFlagsOverride })
 
-    // Before the composer: a file still uploading blocks its send. `onAdded` runs
-    // later (after an upload), so reading `composer` there is safe.
+    // Before the composer: a send pressed while a file uploads waits for it.
+    // `onAdded` / `onFailed` / `onSettled` run later (after an upload), so reading `composer`
+    // there is safe.
     const attachmentsApi = useChatAttachments({
       taskId,
       tabId,
@@ -353,7 +354,9 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       onAdded: (added) => {
         composer.setAttachments((prev) => [...prev, ...added])
         composer.textareaRef.current?.focus()
-      }
+      },
+      onFailed: () => composer.attachFailed(),
+      onSettled: () => composer.attachmentsSettled()
     })
 
     const composer = useChatComposer({
@@ -1229,6 +1232,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                             setCursorPos={composer.setCursorPos}
                             onKeyDown={composer.onKeyDown}
                             handleSend={composer.handleSend}
+                            sendWaiting={composer.sendWaiting}
+                            cancelWaitingSend={composer.cancelWaitingSend}
                             handleStop={composer.handleStop}
                             stopping={composer.stopping}
                             historySearch={composer.historySearch}

@@ -81,6 +81,68 @@ describe('useChatAttachments (Claude: images, PDFs, text)', () => {
     expect(added.flat()).toEqual([])
   })
 
+  it('a file stays pending until it is added: no render sees neither', async () => {
+    let release: () => void = () => {}
+    mocks.uploadFiles
+      .mockImplementationOnce(async (files) => files.map((f) => ({ id: 'fast', title: f.name })))
+      .mockImplementationOnce(async (files) => {
+        await new Promise<void>((r) => (release = r))
+        return files.map((f) => ({ id: 'slow', title: f.name }))
+      })
+    const seen: Array<{ pending: number; added: number }> = []
+    const added: ChatAttachment[][] = []
+    // `onSettled` comes once, after the files were handed over.
+    const settledWith: number[] = []
+    const hook = renderHook(() => {
+      const r = useChatAttachments({
+        taskId: 'task-1',
+        mode: 'claude-chat',
+        onAdded: (a) => added.push(a),
+        onSettled: () => settledWith.push(added.flat().length),
+        codec
+      })
+      seen.push({ pending: r.pending.length, added: added.flat().length })
+      return r
+    })
+    let done: Promise<void> = Promise.resolve()
+    await act(async () => {
+      done = hook.result.current.addFiles([png('a.png'), png('b.png')])
+    })
+    // The first upload is done, the second is not: both still pending.
+    expect(hook.result.current.pending).toHaveLength(2)
+    expect(added).toEqual([])
+    expect(settledWith).toEqual([])
+    await act(async () => {
+      release()
+      await done
+    })
+    expect(added.flat()).toHaveLength(2)
+    expect(settledWith).toEqual([2])
+    expect(hook.result.current.pending).toEqual([])
+    // Never "nothing pending" before the files were handed over.
+    expect(seen.some((s) => s.pending === 0 && s.added === 0 && seen.indexOf(s) > 0)).toBe(false)
+  })
+
+  it('a failed file reports onFailed and leaves pending at once', async () => {
+    mocks.uploadFiles.mockRejectedValue(new Error('disk full'))
+    const onFailed = vi.fn()
+    const onSettled = vi.fn()
+    const hook = renderHook(() =>
+      useChatAttachments({
+        taskId: 'task-1',
+        mode: 'claude-chat',
+        onAdded: () => {},
+        onFailed,
+        onSettled,
+        codec
+      })
+    )
+    await act(() => hook.result.current.addFiles([png()]))
+    expect(onFailed).toHaveBeenCalledTimes(1)
+    expect(onSettled).toHaveBeenCalledTimes(1)
+    expect(hook.result.current.pending).toEqual([])
+  })
+
   it('paste: files are attached; an Office copy (text + html + picture) pastes as text', async () => {
     const { hook, added } = setup('claude-chat')
     const clip = (types: Record<string, string>, files: File[]) => {

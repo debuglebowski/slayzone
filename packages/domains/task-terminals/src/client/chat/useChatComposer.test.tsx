@@ -385,7 +385,7 @@ describe('useChatComposer handleSend guards', () => {
     expect(composer.draft).toBe('hello')
   })
 
-  it('Enter sends nothing — nor queues it mid-turn — while a file is still attaching', async () => {
+  it('Enter while a file is still attaching waits, then sends — or queues mid-turn — once it is in', async () => {
     for (const inFlight of [false, true]) {
       const { rerender } = setup({ attaching: true, inFlight })
       type('look at this')
@@ -396,17 +396,60 @@ describe('useChatComposer handleSend guards', () => {
       expect(mocks.queue.push).not.toHaveBeenCalled()
       expect(composer.draft).toBe('look at this')
       expect(composer.attachments).toEqual([IMG_A])
-      expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/attaching/i))
-      // Once the upload is done the same Enter sends.
+      expect(composer.sendWaiting).toBe(true)
+      // The upload finishes (`onSettled`, before `attaching` re-renders false):
+      // the waiting send goes out by itself, once.
+      await act(async () => composer.attachmentsSettled())
       rerender({ attaching: false, inFlight })
-      fireEvent.keyDown(textarea(), { key: 'Enter' })
       await act(async () => {})
       expect(sendMessage.mock.calls.length + mocks.queue.push.mock.calls.length).toBe(1)
+      expect(composer.sendWaiting).toBe(false)
+      expect(mocks.toast).not.toHaveBeenCalled()
       cleanup()
       sendMessage.mockClear()
       mocks.queue.push.mockClear()
       mocks.toast.mockClear()
     }
+  })
+
+  it('a file alone, still attaching, waits and sends once it is in', async () => {
+    const { rerender } = setup({ attaching: true })
+    fireEvent.keyDown(textarea(), { key: 'Enter' })
+    await act(async () => {})
+    expect(composer.sendWaiting).toBe(true)
+    attach([IMG_A])
+    await act(async () => composer.attachmentsSettled())
+    rerender({ attaching: false })
+    await act(async () => {})
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage.mock.calls[0][0]).toEqual([{ type: 'attachment', attachment: IMG_A }])
+  })
+
+  it('a cancelled waiting send stays in the composer', async () => {
+    const { rerender } = setup({ attaching: true })
+    type('later')
+    fireEvent.keyDown(textarea(), { key: 'Enter' })
+    await act(async () => {})
+    act(() => composer.cancelWaitingSend())
+    await act(async () => composer.attachmentsSettled())
+    rerender({ attaching: false })
+    await act(async () => {})
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(composer.draft).toBe('later')
+  })
+
+  it('a file that fails to attach holds the waiting send', async () => {
+    const { rerender } = setup({ attaching: true })
+    type('with file')
+    fireEvent.keyDown(textarea(), { key: 'Enter' })
+    await act(async () => {})
+    act(() => composer.attachFailed())
+    await act(async () => composer.attachmentsSettled())
+    rerender({ attaching: false })
+    await act(async () => {})
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(composer.draft).toBe('with file')
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/not sent/i))
   })
 
   it('does nothing for a whitespace-only draft without attachments', async () => {
