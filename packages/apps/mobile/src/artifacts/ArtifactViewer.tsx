@@ -3,7 +3,9 @@
  * render mode picks (`viewerKindOf`) — markdown, code, HTML report, SVG, mermaid (each a
  * page in `DocumentWebView`), image (`ZoomableImage`), PDF — with desktop's controls
  * that fit a phone: Preview / Source for SVG and mermaid, the HTML colour scheme
- * (System → Dark → Light, saved on the artifact as on desktop), History (its versions;
+ * (System → Dark → Light, saved on the artifact as on desktop), Zoom (desktop's steps,
+ * saved on the artifact; on the surfaces desktop zooms: not images, PDFs or drawings,
+ * which pinch-zoom), History (its versions;
  * picking one shows that version), Share (the iOS share sheet: save to Files, open
  * in another app, AirDrop…), and Export: the text on screen as PDF / PNG / HTML, the
  * formats desktop offers for its render mode, made on the phone (`export/`) and handed
@@ -15,7 +17,14 @@
 import { nextHtmlTheme } from '@slayzone/platform/forced-html-theme'
 import type { ArtifactVersion } from '@slayzone/task-artifacts/shared'
 import { dbTimestampToIso, formatRelativeDate } from '@slayzone/task-artifacts/shared'
-import { getEffectiveRenderMode, type TaskArtifact } from '@slayzone/task-contracts/types'
+import {
+  DEFAULT_ZOOM_PCT,
+  getEffectiveRenderMode,
+  hasZoomableSurface,
+  stepZoom,
+  type TaskArtifact,
+  ZOOM_STEPS
+} from '@slayzone/task-contracts/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -48,6 +57,7 @@ import { htmlReportPage } from './pages/html-report-page'
 import { markdownNeedsMermaid, markdownPage } from './pages/markdown-page'
 import { mermaidPage } from './pages/mermaid-page'
 import type { PageTheme } from './pages/page-style'
+import { pageAtZoom } from './pages/page-zoom'
 import { svgPage } from './pages/svg-page'
 import { HeaderButton, ScreenHeader } from './ScreenHeader'
 import {
@@ -160,6 +170,9 @@ function LoadedArtifact({
   })
   // Why saving the colour scheme failed (its own line: not Share's).
   const [themeError, setThemeError] = useState<string | null>(null)
+  // The zoom being saved, shown until the row has it; null = the row's.
+  const [zoomDraft, setZoomDraft] = useState<number | null>(null)
+  const [zoomError, setZoomError] = useState<string | null>(null)
   const [exportState, setExportState] = useState<{
     busy: boolean
     error: string | null
@@ -218,6 +231,18 @@ function LoadedArtifact({
     [ready, kind, content, view, scheme, pageTheme, mermaid.data]
   )
 
+  // Desktop's rule for what its zoom applies to, by what is on screen: a diff shows as
+  // its source here.
+  const zoomable = hasZoomableSurface(
+    renderMode,
+    view === 'source' || renderMode === 'diff' ? 'raw' : 'preview'
+  )
+  const zoomPct = zoomDraft ?? artifact.zoom_pct ?? DEFAULT_ZOOM_PCT
+  const shownPage = useMemo(
+    () => (page && zoomable ? pageAtZoom(page, zoomPct) : page),
+    [page, zoomable, zoomPct]
+  )
+
   let body: Body
   if (version !== null && !versionReady) {
     body = versions.error
@@ -258,7 +283,7 @@ function LoadedArtifact({
     body = { kind: 'too-large', size: text.data.size }
   } else {
     // Diagrams wait for the mermaid build; if it can't be read they show as code.
-    body = page ? { kind: 'page', page } : { kind: 'loading' }
+    body = shownPage ? { kind: 'page', page: shownPage } : { kind: 'loading' }
   }
 
   const share = () => {
@@ -366,6 +391,23 @@ function LoadedArtifact({
       .catch((err: unknown) => setThemeError(err instanceof Error ? err.message : String(err)))
   }
 
+  // Saved as desktop saves it: 100% as none.
+  const saveZoom = (next: number) => {
+    setZoomError(null)
+    setZoomDraft(next)
+    hubClient.artifacts.update
+      .mutate({ id: artifact.id, zoomPct: next === DEFAULT_ZOOM_PCT ? null : next })
+      .then(() =>
+        queryClient.invalidateQueries(trpc.artifacts.get.queryFilter({ id: artifact.id }))
+      )
+      // A later step still saving stays shown.
+      .then(() => setZoomDraft((draft) => (draft === next ? null : draft)))
+      .catch((err: unknown) => {
+        setZoomDraft(null)
+        setZoomError(err instanceof Error ? err.message : String(err))
+      })
+  }
+
   const badge = extensionBadge(artifact.title)
   const actions = (
     <>
@@ -389,6 +431,27 @@ function LoadedArtifact({
           accessibilityLabel={`Colour scheme: ${HTML_THEME_LABEL[htmlTheme]}`}
           onPress={cycleHtmlTheme}
         />
+      ) : null}
+      {zoomable ? (
+        <View style={styles.zoom}>
+          <HeaderButton
+            label="−"
+            accessibilityLabel="Zoom out"
+            disabled={zoomPct <= ZOOM_STEPS[0]}
+            onPress={() => saveZoom(stepZoom(zoomPct, -1))}
+          />
+          <HeaderButton
+            label={`${zoomPct}%`}
+            accessibilityLabel={`Reset zoom (${zoomPct}%)`}
+            onPress={() => saveZoom(DEFAULT_ZOOM_PCT)}
+          />
+          <HeaderButton
+            label="+"
+            accessibilityLabel="Zoom in"
+            disabled={zoomPct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+            onPress={() => saveZoom(stepZoom(zoomPct, 1))}
+          />
+        </View>
       ) : null}
       <HeaderButton label="History" active={showHistory} onPress={() => setShowHistory(true)} />
       <HeaderButton
@@ -434,6 +497,7 @@ function LoadedArtifact({
       ) : null}
       {shareState.error ? <Text style={styles.error}>{shareState.error}</Text> : null}
       {themeError ? <Text style={styles.error}>{themeError}</Text> : null}
+      {zoomError ? <Text style={styles.error}>{zoomError}</Text> : null}
       {exportState.error ? <Text style={styles.error}>{exportState.error}</Text> : null}
       {exportState.notice ? <Text style={styles.notice}>{exportState.notice}</Text> : null}
       <View style={styles.body}>
@@ -700,6 +764,7 @@ const makeStyles = (t: ChromeColors) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: t.border
     },
+    zoom: { flexDirection: 'row', gap: 4 },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
     note: { color: t.mutedForeground, textAlign: 'center', padding: 24 },
     error: { color: t.destructive, paddingHorizontal: 16, paddingVertical: 6, fontSize: 13 },

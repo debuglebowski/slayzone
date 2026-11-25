@@ -105,11 +105,14 @@ export function fakeArtifactsHub(
     'artifacts.versionsRead': ({ artifactId, versionRef }) =>
       `${state.content[artifactId] ?? ''} (v${versionRef})`,
     'artifacts.update': (input) => {
-      state.artifacts = state.artifacts.map((a) =>
-        a.id === input.id && 'htmlThemeOverride' in input
-          ? { ...a, html_theme_override: input.htmlThemeOverride }
-          : a
-      )
+      state.artifacts = state.artifacts.map((a) => {
+        if (a.id !== input.id) return a
+        let next = a
+        if ('htmlThemeOverride' in input)
+          next = { ...next, html_theme_override: input.htmlThemeOverride }
+        if ('zoomPct' in input) next = { ...next, zoom_pct: input.zoomPct }
+        return next
+      })
       return state.artifacts.find((a) => a.id === input.id) ?? null
     }
   }

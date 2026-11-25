@@ -30,12 +30,15 @@ import {
   canExportAsHtml,
   canExportAsPdf,
   canExportAsPng,
+  DEFAULT_ZOOM_PCT,
   getEffectiveRenderMode,
   hasZoomableSurface,
   RENDER_MODE_INFO,
   type RenderMode,
+  stepZoom,
   type TaskArtifact,
-  type UpdateArtifactInput
+  type UpdateArtifactInput,
+  ZOOM_STEPS
 } from '@slayzone/task-contracts'
 import {
   ArtifactDevicePicker,
@@ -44,13 +47,10 @@ import {
 } from './ArtifactDevicePicker'
 import { ArtifactToolbarMenu, type ArtifactToolbarAction } from './ArtifactToolbarMenu'
 import {
-  DEFAULT_ZOOM_PCT,
   HTML_THEME_CYCLE,
   HTML_THEME_ICONS,
   HTML_THEME_LABELS,
-  nextHtmlTheme,
-  stepZoom,
-  ZOOM_STEPS
+  nextHtmlTheme
 } from './ArtifactsPanel.constants'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
 import { useTRPC } from './trpc'

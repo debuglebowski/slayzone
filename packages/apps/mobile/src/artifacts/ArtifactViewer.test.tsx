@@ -524,6 +524,93 @@ describe('ArtifactViewer, live and interactive', () => {
   })
 })
 
+describe('ArtifactViewer, Zoom', () => {
+  it("markdown: steps through desktop's ladder, saved on the artifact's hub; the % resets", async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-markdown')
+    expect(pageOf('artifact-page-markdown').source.html).not.toContain('zoom:')
+    const user = userEvent.setup()
+    await user.press(screen.getByRole('button', { name: 'Zoom in' }))
+    await waitFor(() =>
+      expect(hub.callsTo('artifacts.update')).toEqual([{ id: 'a1', zoomPct: 110 }])
+    )
+    await screen.findByRole('button', { name: 'Reset zoom (110%)' })
+    expect(pageOf('artifact-page-markdown').source.html).toContain('html{zoom:1.1}')
+    await user.press(screen.getByRole('button', { name: 'Reset zoom (110%)' }))
+    // 100% is the default: saved as none, as desktop does.
+    await waitFor(() => expect(hub.callsTo('artifacts.update')).toContainEqual({ id: 'a1', zoomPct: null }))
+    await screen.findByRole('button', { name: 'Reset zoom (100%)' })
+    expect(pageOf('artifact-page-markdown').source.html).not.toContain('zoom:')
+  })
+
+  it("opens at the artifact's saved zoom; the ladder's ends disable their button", async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'main.ts', { zoom_pct: 300 })],
+      content: { a1: 'const a = 1' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-code')
+    expect(pageOf('artifact-page-code').source.html).toContain('html{zoom:3}')
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeEnabled()
+  })
+
+  it('HTML: the report frame zooms', async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'report.html', { zoom_pct: 50 })],
+      content: { a1: '<p>x</p>' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-html')
+    expect(pageOf('artifact-page-html').source.html).toContain('transform:scale(0.5)')
+  })
+
+  it("SVG: no zoom control on the drawing (pinch zooms it), one on its source, as desktop", async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'logo.svg', { zoom_pct: 150 })],
+      content: { a1: '<svg viewBox="0 0 1 1"><rect/></svg>' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-svg')
+    expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull()
+    expect(pageOf('artifact-page-svg').source.html).not.toContain('zoom:')
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Source' }))
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeOnTheScreen()
+    expect(pageOf('artifact-page-svg').source.html).toContain('html{zoom:1.5}')
+  })
+
+  it.each([
+    ['shot.png', 'artifact-image'],
+    ['doc.pdf', 'artifact-page-pdf']
+  ])('%s: no zoom control (pinch zooms it)', async (title, testID) => {
+    download.mockResolvedValue(`file:///cache/a1/${title}`)
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', title)] })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId(testID)
+    expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull()
+  })
+
+  it("a zoom that couldn't be saved says so and shows the saved zoom again", async () => {
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' }
+    })
+    hub.on('artifacts.update', () => {
+      throw new Error('Read-only hub')
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-markdown')
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Zoom in' }))
+    await screen.findByText('Read-only hub')
+    await screen.findByRole('button', { name: 'Reset zoom (100%)' })
+    expect(pageOf('artifact-page-markdown').source.html).not.toContain('zoom:')
+  })
+})
+
 describe('ArtifactViewer, Export', () => {
   /** Opens Export and picks `choice` (by label); the sheet's options. */
   async function pickExport(choice: string | null): Promise<string[]> {
