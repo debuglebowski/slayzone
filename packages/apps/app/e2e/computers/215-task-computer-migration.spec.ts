@@ -223,11 +223,16 @@ async function fixture(startAgent = false) {
 }
 
 type Fixture = Awaited<ReturnType<typeof fixture>>
-async function chooseDestination(f: Fixture) {
-  await f.page.getByRole('combobox', { name: 'Computer', exact: true }).click()
-  await f.page.getByRole('option', { name: 'migration-target', exact: true }).click()
-  const dialog = f.page.getByRole('dialog', { name: 'Move to computer', exact: true })
+async function openChangeComputer(f: Fixture) {
+  await f.page.getByRole('button', { name: 'Change computer…', exact: true }).click()
+  const dialog = f.page.getByRole('dialog', { name: 'Change computer', exact: true })
   await expect(dialog).toBeVisible()
+  return dialog
+}
+async function chooseDestination(f: Fixture) {
+  const dialog = await openChangeComputer(f)
+  await dialog.getByRole('combobox', { name: 'Computer', exact: true }).click()
+  await f.page.getByRole('option', { name: 'migration-target', exact: true }).click()
   return dialog
 }
 async function begin(f: Fixture) {
@@ -343,7 +348,9 @@ test.describe('Computer field: full task migration', () => {
       await expect.poll(async () => (await f.read())?.status, { timeout: 30_000 }).toBe('failed')
       await f.page.getByRole('button', { name: 'Cancel move', exact: true }).click()
       await expect.poll(async () => (await f.read())?.status).toBe('canceled')
-      await expect(f.page.getByRole('combobox', { name: 'Computer', exact: true })).toBeEnabled()
+      await expect(
+        f.page.getByRole('button', { name: 'Change computer…', exact: true })
+      ).toBeEnabled()
       await sourceIntact(f)
       await withHubClient(f.hub, (c) =>
         c.task.update.mutate({ id: f.ids.taskId, title: 'Source task remains editable' })
@@ -366,7 +373,9 @@ test.describe('Computer field: full task migration', () => {
       await expect(f.page.getByText('Copying files', { exact: false })).toBeVisible({
         timeout: 15_000
       })
-      await expect(f.page.getByRole('combobox', { name: 'Computer', exact: true })).toBeDisabled()
+      await expect(
+        f.page.getByRole('button', { name: 'Change computer…', exact: true })
+      ).toBeDisabled()
       f.link.release()
       await completed(f)
     } finally {
@@ -390,10 +399,10 @@ test.describe('Computer field: full task migration', () => {
           { timeout: 30_000 }
         )
         .toBe(false)
-      await f.page.getByRole('combobox', { name: 'Computer', exact: true }).click()
+      const dialog = await openChangeComputer(f)
+      await dialog.getByRole('combobox', { name: 'Computer', exact: true }).click()
       await f.page.getByRole('option', { name: /migration-target/ }).click()
-      const dialog = f.page.getByRole('dialog', { name: 'Move to computer', exact: true })
-      await expect(dialog.getByRole('alert')).toContainText('must be online')
+      await expect(dialog.getByText(/must be online/)).toBeVisible()
       await expect(
         dialog.getByRole('button', { name: 'Move to migration-target', exact: true })
       ).toBeDisabled()

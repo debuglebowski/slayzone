@@ -1,13 +1,16 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { delimiter } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { resolveCommand } from '@slayzone/platform'
 import { forEachIsolated } from '@slayzone/platform/isolation'
-import { workspaceMoveRequestSchema } from '@slayzone/computer-transport/shared'
+import {
+  workspaceMoveRequestSchema,
+  type WorkspaceMoveInspection
+} from '@slayzone/computer-transport/shared'
+import { execCapture } from './exec'
 import { createWorkspaceMove } from './workspace-move'
-import { judgePathIn } from '../path-jail'
+import { judgePath, judgePathIn } from '../path-jail'
 import type { HandlerContext } from './types'
 
 export function createWorkspaceMoveHandlers(opts: {
@@ -48,6 +51,16 @@ export function createWorkspaceMoveHandlers(opts: {
         'Task is moving to another computer. Retry or cancel the move before starting work.'
       )
   }
+  /** Where the task's repository lives on this computer: the project folder, or
+   *  `repoName` inside it (judged against the allowed roots). */
+  const repoPathOf = (project: { path: string } | undefined, repoName?: string | null) =>
+    project && repoName
+      ? judgePathIn(project.path, repoName, opts.ctx.config.allowedRoots).path
+      : project?.path
+  const originOf = async (repo: string): Promise<string | null> => {
+    const result = await execCapture('git', ['-C', repo, 'remote', 'get-url', 'origin'])
+    return result.status === 0 ? result.stdout.trim() || null : null
+  }
   const request = async (raw: unknown): Promise<unknown> => {
     const input = workspaceMoveRequestSchema.parse(raw)
     switch (input.op) {
@@ -66,10 +79,7 @@ export function createWorkspaceMoveHandlers(opts: {
         return { ok: true }
       case 'inspect': {
         const project = opts.project(input.projectId)
-        const repo =
-          project && input.repoName
-            ? judgePathIn(project.path, input.repoName, opts.ctx.config.allowedRoots).path
-            : project?.path
+        const repo = repoPathOf(project, input.repoName)
         const ownPaths = await opts.paths(input.taskId)
         const env = {
           ...process.env,
@@ -77,9 +87,10 @@ export function createWorkspaceMoveHandlers(opts: {
             ? `${opts.ctx.config.binOverrideDir}${delimiter}${process.env.PATH ?? ''}`
             : process.env.PATH
         } as Record<string, string>
-        return {
+        const repoReady = !!repo && existsSync(join(repo, '.git'))
+        const inspection: WorkspaceMoveInspection = {
           projectReady: !!project && existsSync(project.path),
-          repoReady: !!repo && existsSync(join(repo, '.git')),
+          repoReady,
           worktreeGit: !!ownPaths.worktreePath && existsSync(join(ownPaths.worktreePath, '.git')),
           hasWork: opts.hasWork(input.taskId),
           sessionModes: await opts.history(input.taskId),
@@ -92,8 +103,41 @@ export function createWorkspaceMoveHandlers(opts: {
           agents: {
             claude: !!resolveCommand('claude', env, undefined),
             codex: !!resolveCommand('codex', env, undefined)
-          }
+          },
+          folder: project?.path ?? null,
+          repoPath: repo ?? null,
+          remoteUrl: repoReady && repo ? await originOf(repo) : null
         }
+        return inspection
+      }
+      case 'clone': {
+        const project = opts.project(input.projectId)
+        if (!project)
+          throw new Error('Choose this project’s folder on the destination computer first.')
+        const place = repoPathOf(project, input.repoName)
+        if (!place) throw new Error('The repository has no place in this project’s folder.')
+        const target = judgePath(place, opts.ctx.config.allowedRoots)
+        if (existsSync(target) && (await readdir(target)).length > 0)
+          throw new Error(
+            `${target} is not empty. Choose an empty folder, or check the repository out there yourself.`
+          )
+        const parent = dirname(target)
+        mkdirSync(parent, { recursive: true })
+        const result = await execCapture(
+          'git',
+          ['-c', 'protocol.ext.allow=never', 'clone', '--', input.url, target],
+          {
+            cwd: parent,
+            timeoutMs: 30 * 60 * 1000,
+            // Never wait on a credential prompt nobody can answer.
+            env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' }
+          }
+        )
+        if (result.status !== 0)
+          throw new Error(
+            `Could not clone ${input.url}: ${result.stderr.trim() || 'git clone failed'}`
+          )
+        return { path: target }
       }
       case 'snapshot':
         return mover.snapshot({ ...input, ...(await opts.paths(input.taskId)) })
@@ -115,9 +159,7 @@ export function createWorkspaceMoveHandlers(opts: {
         const project = opts.project(input.projectId)
         if (!project)
           throw new Error('Configure this project’s folder on the destination computer first.')
-        const repo = input.repoName
-          ? judgePathIn(project.path, input.repoName, opts.ctx.config.allowedRoots).path
-          : project.path
+        const repo = repoPathOf(project, input.repoName) ?? project.path
         const paths = await mover.activate(input.id, repo)
         await opts.setPaths(input.taskId, input.projectId, paths)
         return { hasWorktree: !!paths.worktreePath, hasBaseDir: !!paths.baseDir }

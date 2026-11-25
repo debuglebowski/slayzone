@@ -707,6 +707,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'task.beginComputerMove': 'user',
   'task.runComputerMove': 'user',
   'task.cancelComputerMove': 'user',
+  'task.cloneForComputerMove': 'user',
   'task.moveToProject': 'user',
   'task.duplicate': 'user',
   'task.paths': 'user',

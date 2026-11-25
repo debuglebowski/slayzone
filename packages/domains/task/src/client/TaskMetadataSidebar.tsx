@@ -75,6 +75,7 @@ export function TaskMetadataSidebar({
       <ProjectStatusCard task={task} onUpdate={onUpdate} columnsConfig={columnsConfig} />
       <ComputerCard
         taskId={task.id}
+        projectId={task.project_id}
         taskComputerId={taskComputerId}
         projectDefaultComputerId={projectDefaultComputerId}
       />

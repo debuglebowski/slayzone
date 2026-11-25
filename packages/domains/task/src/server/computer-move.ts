@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ComputerMove, ComputerMoveAgent, ComputerMovePreview } from '@slayzone/task-contracts'
+import type {
+  ComputerMove,
+  ComputerMoveAgent,
+  ComputerMoveDestination,
+  ComputerMovePreview
+} from '@slayzone/task-contracts'
 import type {} from './task-txns'
 
 /** Computer I/O stays on the host; the task domain owns ordering and commit. */
@@ -18,7 +23,11 @@ export interface ComputerMoveHost {
     hasRunningWork?: boolean
     hasStoredSessions?: boolean
     participants?: string[]
+    destination?: ComputerMoveDestination | null
   }>
+  /** Clone the task's repository into the project's folder on `target`, from the
+   *  source computer's `origin`. */
+  cloneRepository(taskId: string, source: string, target: string): Promise<void>
   stop(move: ComputerMove): Promise<void>
   copyWorkspace(
     move: ComputerMove,
@@ -83,6 +92,14 @@ export function createComputerMoves(db: SlayzoneDb, host: ComputerMoveHost) {
   const api = {
     get,
     preview,
+    /** Put the task's repository on the computer the task would move to. */
+    async cloneRepository(taskId: string, binding: string | null): Promise<ComputerMovePreview> {
+      const before = await preview(taskId, binding)
+      const url = before.destination?.cloneUrl
+      if (!url) throw new Error('The source repository has no remote to clone from.')
+      await host.cloneRepository(taskId, before.sourceComputerId, before.destinationComputerId)
+      return preview(taskId, binding)
+    },
     async begin(input: {
       taskId: string
       computerId: string | null

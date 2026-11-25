@@ -136,6 +136,10 @@ export const taskRouter = router({
         .catch((error: unknown) => console.error('[computer-move] runner:', error))
       return { ok: true }
     }),
+  /** Clone the task's repository into the project folder on the computer it would move to. */
+  cloneForComputerMove: publicProcedure
+    .input(z.object({ taskId: z.string().min(1), computerId: z.string().nullable() }))
+    .mutation(({ input }) => computerMoves().cloneRepository(input.taskId, input.computerId)),
   cancelComputerMove: publicProcedure
     .input(z.object({ taskId: z.string().min(1) }))
     .mutation(({ input }) => computerMoves().cancel(input.taskId)),

@@ -1452,6 +1452,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.beginComputerMove': checked(task('taskId'), computer('computerId')),
   'task.runComputerMove': checked(task('taskId')),
   'task.cancelComputerMove': checked(task('taskId')),
+  'task.cloneForComputerMove': checked(task('taskId'), computer('computerId')),
   'task.delete': checked(task('id')),
   'task.deleteMany': checked(task('ids[]')),
   'task.restore': checked(task('id')),

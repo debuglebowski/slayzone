@@ -72,12 +72,38 @@ const setTaskComputerSpy = vi.fn()
 const refetchSpy = vi.fn()
 const previewSpy = vi.fn()
 const beginMoveSpy = vi.fn()
+const setProjectPathSpy = vi.fn()
+const cloneSpy = vi.fn()
 let moveData: unknown = null
+
+// The folder picker browses a computer; here it hands back one fixed path.
+vi.mock('@slayzone/file-editor/client/WorkspaceDirPicker', () => ({
+  WorkspaceDirPicker: ({
+    open,
+    onSelect,
+    target
+  }: {
+    open: boolean
+    onSelect: (path: string) => void
+    target: { computerId?: string | null; projectId?: string }
+  }) =>
+    open ? (
+      <button onClick={() => onSelect('/dest/project')}>
+        pick on {target.computerId} for {target.projectId}
+      </button>
+    ) : null
+}))
 
 // The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
 vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
-  useTRPCClient: () => ({ task: { computerMovePreview: { query: previewSpy } } }),
+  useTRPCClient: () => ({
+    task: {
+      computerMovePreview: { query: previewSpy },
+      cloneForComputerMove: { mutate: cloneSpy }
+    },
+    workspace: { setProjectPath: { mutate: setProjectPathSpy } }
+  }),
   useTRPC: () => ({
     task: {
       computerMove: { queryOptions: () => ({ queryKey: ['task.computerMove'] }) },
@@ -126,42 +152,89 @@ beforeEach(() => {
   computersData = []
   resolvedComputerId = null
   moveData = null
-  previewSpy.mockResolvedValue({
+  // The hub resolves inherit to the project default; here computer-a.
+  previewSpy.mockImplementation(async ({ computerId }: { computerId: string | null }) => ({
     sourceComputerId: 'computer-a',
-    destinationComputerId: 'computer-b',
+    destinationComputerId: computerId ?? 'computer-a',
     requiresMigration: false,
     hasFiles: false,
     ready: true,
     blockers: [],
     agents: []
-  })
+  }))
   beginMoveSpy.mockResolvedValue({ id: 'move-1' })
+  setProjectPathSpy.mockResolvedValue({ computerId: 'computer-b', path: '/dest/project' })
   setTaskComputerSpy.mockResolvedValue({ ok: true })
 })
 
 describe('ComputerCard', () => {
+  const card = (props: Partial<React.ComponentProps<typeof ComputerCard>> = {}) =>
+    render(
+      <ComputerCard
+        projectId="project-1"
+        taskId="task-1"
+        taskComputerId={null}
+        projectDefaultComputerId={null}
+        {...props}
+      />
+    )
+  const openDialog = () => fireEvent.click(screen.getByText('Change computer…'))
+  const choose = (value: string) =>
+    fireEvent.change(screen.getByTestId('computer-select'), { target: { value } })
+  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
+  const migration = {
+    sourceComputerId: 'computer-a',
+    destinationComputerId: 'computer-b',
+    requiresMigration: true,
+    hasFiles: true,
+    ready: true,
+    blockers: [],
+    agents: []
+  }
+
+  it('shows where the task runs and a button, no picker until asked', () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
+    resolvedComputerId = 'computer-a'
+    card({ projectDefaultComputerId: 'computer-a' })
+    expect(screen.getByText('Runs on mac-studio')).toBeDefined()
+    expect(screen.queryByTestId('computer-select')).toBeNull()
+    openDialog()
+    expect(screen.getByRole('dialog')).toBeDefined()
+    expect(screen.getByTestId('computer-select')).toBeDefined()
+  })
+
+  it('shows a minimal "runs locally" state when no computers are enrolled', () => {
+    computersData = []
+    card()
+    expect(screen.getByText('No computers — runs locally')).toBeDefined()
+    expect(screen.queryByText('Change computer…')).toBeNull()
+  })
+
+  it('offers inherit (labeled with the project default) and each computer', () => {
+    computersData = [
+      { id: 'computer-a', name: 'mac-studio' },
+      { id: 'computer-b', name: 'linux-box' }
+    ]
+    card({ projectDefaultComputerId: 'computer-a' })
+    openDialog()
+    const options = Array.from(
+      screen.getByTestId('computer-select').querySelectorAll('option')
+    ).map((o) => o.textContent)
+    expect(options).toEqual(['Inherit project default (mac-studio)', 'mac-studio', 'linux-box'])
+  })
+
   it('previews a real migration without saving the binding, then confirms explicitly', async () => {
     computersData = [
       { id: 'computer-a', name: 'source' },
       { id: 'computer-b', name: 'destination' }
     ]
-    previewSpy.mockResolvedValueOnce({
-      sourceComputerId: 'computer-a',
-      destinationComputerId: 'computer-b',
-      requiresMigration: true,
-      hasFiles: true,
-      ready: true,
-      blockers: [],
-      agents: []
-    })
-    render(
-      <ComputerCard taskId="task-1" taskComputerId="computer-a" projectDefaultComputerId={null} />
-    )
-    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-b' } })
-    expect(await screen.findByRole('dialog')).toBeDefined()
+    previewSpy.mockResolvedValueOnce(migration)
+    card({ taskComputerId: 'computer-a' })
+    openDialog()
+    choose('computer-b')
+    await waitFor(() => expect(button('Move to destination').disabled).toBe(false))
     expect(setTaskComputerSpy).not.toHaveBeenCalled()
-    expect(beginMoveSpy).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Move to destination' }))
+    fireEvent.click(button('Move to destination'))
     await waitFor(() =>
       expect(beginMoveSpy).toHaveBeenCalledWith({
         taskId: 'task-1',
@@ -169,152 +242,171 @@ describe('ComputerCard', () => {
         allowFreshSessions: false
       })
     )
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
+
   it('shows destination blockers and never starts an unavailable move', async () => {
     computersData = [{ id: 'computer-b', name: 'destination' }]
     previewSpy.mockResolvedValueOnce({
-      sourceComputerId: 'computer-a',
-      destinationComputerId: 'computer-b',
-      requiresMigration: true,
-      hasFiles: true,
+      ...migration,
       ready: false,
-      blockers: ['Destination must be online.'],
-      agents: []
+      blockers: ['Destination must be online.']
     })
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
-    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-b' } })
+    card()
+    openDialog()
+    choose('computer-b')
     expect(await screen.findByText('Destination must be online.')).toBeDefined()
-    expect(
-      (screen.getByRole('button', { name: 'Move to destination' }) as HTMLButtonElement).disabled
-    ).toBe(true)
+    expect(button('Move to destination').disabled).toBe(true)
     expect(beginMoveSpy).not.toHaveBeenCalled()
   })
-  it('reports failed saves inline without an unhandled rejection', async () => {
-    computersData = [{ id: 'computer-a', name: 'source' }]
-    setTaskComputerSpy.mockRejectedValueOnce(new Error('Connection lost'))
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
-    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-a' } })
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Connection lost')
-  })
-  it('shows a minimal "runs locally" state when no computers are enrolled', () => {
-    computersData = []
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
-    expect(screen.getByText('No computers — runs locally')).toBeDefined()
-    // No select rendered in the empty state.
-    expect(screen.queryByTestId('computer-select')).toBeNull()
-  })
 
-  it('renders inherit + each enrolled computer as options, labeling inherit with the project default', () => {
-    computersData = [
-      { id: 'computer-a', name: 'mac-studio' },
-      { id: 'computer-b', name: 'linux-box' }
-    ]
-    resolvedComputerId = null
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
-
-    const options = Array.from(
-      screen.getByTestId('computer-select').querySelectorAll('option')
-    ).map((o) => o.textContent)
-    expect(options).toContain('Inherit project default (Local)')
-    expect(options).toContain('mac-studio')
-    expect(options).toContain('linux-box')
-  })
-
-  it('labels the inherit option with the project default computer name when set', () => {
+  it('switches without a move when nothing has to travel', async () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
-    render(
-      <ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId="computer-a" />
-    )
-    const options = Array.from(
-      screen.getByTestId('computer-select').querySelectorAll('option')
-    ).map((o) => o.textContent)
-    expect(options).toContain('Inherit project default (mac-studio)')
-  })
-
-  it('selecting a computer fires setTaskComputer with that computerId', async () => {
-    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
-
-    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: 'computer-a' } })
-
-    await waitFor(() => {
+    card()
+    openDialog()
+    choose('computer-a')
+    await waitFor(() => expect(button('Switch to mac-studio').disabled).toBe(false))
+    expect(setTaskComputerSpy).not.toHaveBeenCalled()
+    fireEvent.click(button('Switch to mac-studio'))
+    await waitFor(() =>
       expect(setTaskComputerSpy).toHaveBeenCalledWith({
         taskId: 'task-1',
         computerId: 'computer-a'
       })
-    })
-  })
-
-  it('selecting inherit fires setTaskComputer with null', async () => {
-    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
-    // Start pinned so switching to inherit is a real change.
-    render(
-      <ComputerCard taskId="task-1" taskComputerId="computer-a" projectDefaultComputerId={null} />
     )
-
-    fireEvent.change(screen.getByTestId('computer-select'), { target: { value: '__inherit__' } })
-
-    await waitFor(() => {
-      expect(setTaskComputerSpy).toHaveBeenCalledWith({ taskId: 'task-1', computerId: null })
-    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
-  it('re-syncs the local binding only when the task or its persisted binding changes', async () => {
+  it('switching back to inherit saves null', async () => {
     computersData = [
       { id: 'computer-a', name: 'mac-studio' },
       { id: 'computer-b', name: 'linux-box' }
     ]
-    const select = (): HTMLSelectElement =>
-      screen.getByTestId('computer-select') as HTMLSelectElement
-    const { rerender } = render(
-      <ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />
+    card({ taskComputerId: 'computer-b', projectDefaultComputerId: 'computer-a' })
+    openDialog()
+    choose('__inherit__')
+    await waitFor(() => expect(button('Switch to mac-studio').disabled).toBe(false))
+    fireEvent.click(button('Switch to mac-studio'))
+    await waitFor(() =>
+      expect(setTaskComputerSpy).toHaveBeenCalledWith({ taskId: 'task-1', computerId: null })
     )
-    expect(select().value).toBe('__inherit__')
-
-    // Local choice sticks across re-renders with unchanged props.
-    fireEvent.change(select(), { target: { value: 'computer-a' } })
-    await waitFor(() => expect(setTaskComputerSpy).toHaveBeenCalled())
-    rerender(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
-    expect(select().value).toBe('computer-a')
-
-    // Persisted binding changes → mirror it.
-    rerender(
-      <ComputerCard taskId="task-1" taskComputerId="computer-b" projectDefaultComputerId={null} />
-    )
-    expect(select().value).toBe('computer-b')
-
-    // Another task with the same binding value still re-syncs (taskId is a trigger).
-    fireEvent.change(select(), { target: { value: 'computer-a' } })
-    rerender(
-      <ComputerCard taskId="task-2" taskComputerId="computer-b" projectDefaultComputerId={null} />
-    )
-    expect(select().value).toBe('computer-b')
   })
 
-  it('a rejected save rolls the select back to the persisted binding', async () => {
+  it('the current computer is not a change', () => {
     computersData = [{ id: 'computer-a', name: 'mac-studio' }]
-    setTaskComputerSpy.mockRejectedValueOnce(new Error('computer offline'))
-    const select = (): HTMLSelectElement =>
-      screen.getByTestId('computer-select') as HTMLSelectElement
-    render(<ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId={null} />)
+    card({ taskComputerId: 'computer-a' })
+    openDialog()
+    expect((screen.getByTestId('computer-select') as HTMLSelectElement).value).toBe('computer-a')
+    expect(previewSpy).not.toHaveBeenCalled()
+    expect(button('Switch to mac-studio').disabled).toBe(true)
+  })
 
-    // The handler rethrows (as before); swallow it here so the test sees the UI.
-    const onUnhandled = (e: PromiseRejectionEvent | Error) => {
-      if ('preventDefault' in e) e.preventDefault()
+  it('a failed switch is shown in the dialog, which stays open', async () => {
+    computersData = [{ id: 'computer-a', name: 'source' }]
+    setTaskComputerSpy.mockRejectedValueOnce(new Error('Connection lost'))
+    card()
+    openDialog()
+    choose('computer-a')
+    await waitFor(() => expect(button('Switch to source').disabled).toBe(false))
+    fireEvent.click(button('Switch to source'))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Connection lost')
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('a failed check is shown in the dialog', async () => {
+    computersData = [{ id: 'computer-a', name: 'source' }]
+    previewSpy.mockRejectedValueOnce(new Error('Computers are still connecting'))
+    card()
+    openDialog()
+    choose('computer-a')
+    expect(await screen.findByRole('alert')).toHaveProperty(
+      'textContent',
+      'Computers are still connecting'
+    )
+  })
+
+  it('cannot be changed while a move is running', () => {
+    computersData = [{ id: 'computer-a', name: 'source' }]
+    moveData = {
+      status: 'running',
+      step: 'files',
+      destinationComputerId: 'computer-a',
+      bytesDone: 0,
+      bytesTotal: 0,
+      error: null
     }
-    process.on('unhandledRejection', onUnhandled)
-    fireEvent.change(select(), { target: { value: 'computer-a' } })
-    await waitFor(() => expect(setTaskComputerSpy).toHaveBeenCalled())
-    await waitFor(() => expect(select().value).toBe('__inherit__'))
-    process.off('unhandledRejection', onUnhandled)
+    card()
+    expect(button('Change computer…').disabled).toBe(true)
   })
 
-  it('shows the effective resolved computer', () => {
-    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
-    resolvedComputerId = 'computer-a'
-    render(
-      <ComputerCard taskId="task-1" taskComputerId={null} projectDefaultComputerId="computer-a" />
-    )
-    expect(screen.getByText('Runs on mac-studio')).toBeDefined()
+  describe('a destination that is not set up', () => {
+    const blocked = (destination: object) => ({
+      ...migration,
+      ready: false,
+      blockers: ['Choose this project’s folder on the destination computer first.'],
+      destination: {
+        folder: null,
+        folderExists: false,
+        repoPath: null,
+        repoRequired: true,
+        repoReady: false,
+        cloneUrl: 'git@example.test:org/repo.git',
+        ...destination
+      }
+    })
+    beforeEach(() => {
+      computersData = [
+        { id: 'computer-a', name: 'source' },
+        { id: 'computer-b', name: 'destination' }
+      ]
+    })
+
+    it('picks the folder on the destination computer, then checks again', async () => {
+      previewSpy.mockResolvedValueOnce(blocked({})).mockResolvedValueOnce(migration)
+      card({ taskComputerId: 'computer-a' })
+      openDialog()
+      choose('computer-b')
+      fireEvent.click(await screen.findByText('Choose folder…'))
+      fireEvent.click(screen.getByText('pick on computer-b for project-1'))
+      await waitFor(() =>
+        expect(setProjectPathSpy).toHaveBeenCalledWith({
+          computerId: 'computer-b',
+          projectId: 'project-1',
+          path: '/dest/project'
+        })
+      )
+      await waitFor(() => expect(previewSpy).toHaveBeenCalledTimes(2))
+      expect(previewSpy).toHaveBeenLastCalledWith({ taskId: 'task-1', computerId: 'computer-b' })
+      await waitFor(() => expect(button('Move to destination').disabled).toBe(false))
+    })
+
+    it('clones the repository into the chosen folder', async () => {
+      previewSpy.mockResolvedValueOnce(
+        blocked({ folder: '/dest/project', repoPath: '/dest/project' })
+      )
+      cloneSpy.mockResolvedValueOnce(migration)
+      card({ taskComputerId: 'computer-a' })
+      openDialog()
+      choose('computer-b')
+      expect(await screen.findByText(/git@example.test:org\/repo.git/)).toBeDefined()
+      fireEvent.click(screen.getByText('Clone repository'))
+      await waitFor(() =>
+        expect(cloneSpy).toHaveBeenCalledWith({ taskId: 'task-1', computerId: 'computer-b' })
+      )
+      await waitFor(() => expect(button('Move to destination').disabled).toBe(false))
+    })
+
+    it('shows why a clone failed and keeps the dialog open', async () => {
+      previewSpy.mockResolvedValueOnce(
+        blocked({ folder: '/dest/project', repoPath: '/dest/project' })
+      )
+      cloneSpy.mockRejectedValueOnce(new Error('/dest/project is not empty.'))
+      card({ taskComputerId: 'computer-a' })
+      openDialog()
+      choose('computer-b')
+      fireEvent.click(await screen.findByText('Clone repository'))
+      expect(await screen.findByText('/dest/project is not empty.')).toBeDefined()
+      expect(screen.getByRole('dialog')).toBeDefined()
+    })
   })
 })

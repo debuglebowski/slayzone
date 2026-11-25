@@ -4,6 +4,19 @@ export interface ComputerMoveAgent {
   canResume: boolean
   reason?: string
 }
+/** The destination computer's copy of the task's project, as the move needs it. */
+export interface ComputerMoveDestination {
+  /** The project's folder recorded there; null = none chosen yet. */
+  folder: string | null
+  folderExists: boolean
+  /** Where the task's repository must be there (the folder, or its repo inside it). */
+  repoPath: string | null
+  /** The task works in a git worktree, so the repository must be there. */
+  repoRequired: boolean
+  repoReady: boolean
+  /** The source repository's `origin`, to clone from; null = none known. */
+  cloneUrl: string | null
+}
 export interface ComputerMovePreview {
   sourceComputerId: string
   destinationComputerId: string
@@ -13,6 +26,8 @@ export interface ComputerMovePreview {
   hasFiles: boolean
   requiresMigration: boolean
   participants?: string[]
+  /** Null when the destination could not be asked (offline, unavailable). */
+  destination?: ComputerMoveDestination | null
 }
 export interface ComputerMove {
   id: string

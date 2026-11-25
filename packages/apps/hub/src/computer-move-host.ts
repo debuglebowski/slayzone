@@ -3,7 +3,11 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { forEachIsolated } from '@slayzone/platform/isolation'
 import { runInPathScope } from '@slayzone/platform/path-scope'
 import { getComputer } from '@slayzone/computers/server'
-import { HubToComputerMethods, workspaceManifestSchema } from '@slayzone/computer-transport/shared'
+import {
+  HubToComputerMethods,
+  workspaceManifestSchema,
+  type WorkspaceMoveInspection
+} from '@slayzone/computer-transport/shared'
 import type { HubComputerGateway } from '@slayzone/computer-transport/server'
 import {
   createComputerMoves,
@@ -13,7 +17,7 @@ import {
   taskMoveSessionsOrNull,
   type ComputerMoveHost
 } from '@slayzone/task/server'
-import type { ComputerMove } from '@slayzone/task-contracts'
+import type { ComputerMove, ComputerMoveDestination } from '@slayzone/task-contracts'
 import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import type { ComputerPlacement } from './computer-placement'
 
@@ -52,7 +56,8 @@ export function installComputerMoves(opts: {
           'verifySource',
           'verifyDestination',
           'activate',
-          'discard'
+          'discard',
+          'clone'
         ].includes((input as { op?: string }).op ?? '')
           ? 30 * 60 * 1000
           : undefined
@@ -162,30 +167,49 @@ export function installComputerMoves(opts: {
       let installed: Record<string, boolean> = {}
       let sessionModes: string[] | null = null
       let hasRunningWork = false
+      let destination: ComputerMoveDestination | null = null
       if (!blockers.length) {
         try {
-          const inspected = await call<{
-            projectReady: boolean
-            repoReady: boolean
-            agents: Record<string, boolean>
-            commands: Record<string, boolean>
-          }>(target, taskId, row.project_id, { op: 'inspect', repoName: row.repo_name, commands })
+          const inspected = await call<WorkspaceMoveInspection>(target, taskId, row.project_id, {
+            op: 'inspect',
+            repoName: row.repo_name,
+            commands
+          })
           if (!inspected.projectReady)
-            blockers.push('Configure this project’s folder on the destination computer first.')
+            blockers.push(
+              inspected.folder
+                ? `This project’s folder ${inspected.folder} does not exist on the destination computer.`
+                : 'Choose this project’s folder on the destination computer first.'
+            )
           installed = { ...inspected.agents, ...inspected.commands }
           sessionModes = []
+          let repoRequired = false
+          let cloneUrl: string | null = null
           for (const computerId of participants) {
-            const sourceState = await call<{
-              sessionModes: string[]
-              hasWork: boolean
-              worktreeGit: boolean
-            }>(computerId, taskId, row.project_id, { op: 'inspect' })
+            const sourceState = await call<WorkspaceMoveInspection>(
+              computerId,
+              taskId,
+              row.project_id,
+              { op: 'inspect', repoName: row.repo_name }
+            )
             sessionModes.push(...sourceState.sessionModes)
             hasRunningWork ||= sourceState.hasWork
-            if (computerId === source && sourceState.worktreeGit && !inspected.repoReady)
-              blockers.push(
-                'The task’s repository must be checked out in this project’s destination folder first.'
-              )
+            if (computerId === source) {
+              repoRequired = sourceState.worktreeGit
+              cloneUrl = sourceState.remoteUrl
+              if (sourceState.worktreeGit && !inspected.repoReady && inspected.projectReady)
+                blockers.push(
+                  'The task’s repository must be checked out in this project’s destination folder first.'
+                )
+            }
+          }
+          destination = {
+            folder: inspected.folder,
+            folderExists: inspected.projectReady,
+            repoPath: inspected.repoPath,
+            repoRequired,
+            repoReady: inspected.repoReady,
+            cloneUrl
           }
         } catch (error) {
           blockers.push(
@@ -215,8 +239,26 @@ export function installComputerMoves(opts: {
         agents,
         hasRunningWork,
         hasStoredSessions: (sessionModes?.length ?? 0) > 0,
-        participants
+        participants,
+        destination
       }
+    },
+    async cloneRepository(taskId, source, target) {
+      const row = await opts.db.get<{ project_id: string; repo_name: string | null }>(
+        'SELECT project_id,repo_name FROM tasks WHERE id=?',
+        [taskId]
+      )
+      if (!row) throw new Error('Task no longer exists')
+      const origin = await call<WorkspaceMoveInspection>(source, taskId, row.project_id, {
+        op: 'inspect',
+        repoName: row.repo_name
+      })
+      if (!origin.remoteUrl) throw new Error('The source repository has no remote to clone from.')
+      await call(target, taskId, row.project_id, {
+        op: 'clone',
+        repoName: row.repo_name,
+        url: origin.remoteUrl
+      })
     },
     async stop(m) {
       await opts.revoke(m.taskId)

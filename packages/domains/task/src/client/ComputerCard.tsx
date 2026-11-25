@@ -1,9 +1,9 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+import { Button } from '@slayzone/ui'
 import type { ComputerMove, ComputerMovePreview } from '@slayzone/task-contracts'
-import { ComputerMoveDialog } from './ComputerMoveDialog'
+import { ChangeComputerDialog } from './ChangeComputerDialog'
 // The words every client shows for a computer choice (the mobile app too).
 import {
   computerName,
@@ -46,6 +46,8 @@ const MOVE_STEP_LABELS: Record<ComputerMove['step'], string> = {
 
 interface ComputerCardProps {
   taskId: string
+  /** The task's project: its folder on a destination computer can be set from the move. */
+  projectId: string
   /** The task's own binding — null = inherit the project default. */
   taskComputerId: string | null
   /** The project's default computer — null = local. Labels the inherit option. */
@@ -67,6 +69,7 @@ export function ComputerCard({ ...props }: ComputerCardProps): React.JSX.Element
 
 function ComputerCardControls({
   taskId,
+  projectId,
   taskComputerId,
   projectDefaultComputerId,
   computers
@@ -75,7 +78,6 @@ function ComputerCardControls({
 }): React.JSX.Element {
   const trpc = useTRPC()
   const client = useTRPCClient()
-  const selectId = useId()
   const currentTask = useRef<string | null>(taskId)
   useLayoutEffect(() => {
     currentTask.current = taskId
@@ -98,135 +100,159 @@ function ComputerCardControls({
   const beginMove = useMutation(trpc.task.beginComputerMove.mutationOptions())
   const retryMove = useMutation(trpc.task.runComputerMove.mutationOptions())
   const cancelMove = useMutation(trpc.task.cancelComputerMove.mutationOptions())
-  const [candidate, setCandidate] = useState<{
-    computerId: string | null
-    preview: ComputerMovePreview
-  } | null>(null)
+
+  // The change dialog: the binding chosen in it (null = inherit), and what the hub
+  // says that choice takes. Nothing is saved until the user confirms.
+  const [open, setOpen] = useState(false)
+  const [choice, setChoice] = useState<string | null>(taskComputerId)
+  const [preview, setPreview] = useState<ComputerMovePreview | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [moveError, setMoveError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [allowFresh, setAllowFresh] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [saving, setSaving] = useState(false)
   const moving = moveQuery.data?.status === 'running' || moveQuery.data?.status === 'failed'
 
-  // Local mirror of the task's binding so the select reflects the choice
-  // immediately; re-sync when the task (or its persisted binding) changes.
-  // Re-synced while rendering (not in an effect) so no commit shows a stale binding.
-  const [binding, setBinding] = useState<string | null>(taskComputerId)
-  const [syncedFrom, setSyncedFrom] = useState({ taskId, taskComputerId })
-  if (syncedFrom.taskId !== taskId || syncedFrom.taskComputerId !== taskComputerId) {
-    setSyncedFrom({ taskId, taskComputerId })
-    setBinding(taskComputerId)
-    if (syncedFrom.taskId !== taskId) {
-      setCandidate(null)
-      setError(null)
-      setChecking(false)
-      setAllowFresh(false)
-    }
+  const nameFor = (id: string | null): string => computerName(computers, id)
+  const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+  const isCurrent = choice === taskComputerId
+
+  const openDialog = (): void => {
+    setChoice(taskComputerId)
+    setPreview(null)
+    setError(null)
+    setAllowFresh(false)
+    setOpen(true)
+  }
+  const closeDialog = (): void => {
+    if (saving) return
+    setOpen(false)
+    setPreview(null)
+    setError(null)
   }
 
-  const nameFor = (id: string | null): string => computerName(computers, id)
-
-  const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
-
-  const handleChange = async (value: string): Promise<void> => {
-    const computerId = value === INHERIT_VALUE ? null : value
-    setError(null)
+  /** Ask the hub what moving to `computerId` takes; stale answers are dropped. */
+  const check = async (computerId: string | null): Promise<void> => {
     setChecking(true)
-    const switchComputer = async (): Promise<void> => {
-      const preview = await client.task.computerMovePreview.query({ taskId, computerId })
-      if (currentTask.current !== taskId) return
-      if (preview.requiresMigration || !preview.ready) {
-        setAllowFresh(false)
-        setCandidate({ computerId, preview })
-        return
-      }
-      setBinding(computerId)
-      await setTaskComputer.mutateAsync({ taskId, computerId })
-      await resolvedQuery.refetch()
-    }
-    await switchComputer()
+    await client.task.computerMovePreview
+      .query({ taskId, computerId })
+      .then((next) => {
+        if (currentTask.current === taskId) setPreview(next)
+      })
       .catch((err: unknown) => {
-        if (currentTask.current !== taskId) return
-        setBinding(taskComputerId)
-        setError(messageOf(err))
+        if (currentTask.current === taskId) setError(messageOf(err))
       })
       .then(() => {
         if (currentTask.current === taskId) setChecking(false)
       })
   }
-  const confirm = async () => {
-    if (!candidate) return
+  const choose = (value: string): void => {
+    const computerId = value === INHERIT_VALUE ? null : value
+    setChoice(computerId)
+    setPreview(null)
     setError(null)
-    const start = async (): Promise<void> => {
-      await beginMove.mutateAsync({
-        taskId,
-        computerId: candidate.computerId,
-        allowFreshSessions: allowFresh
-      })
-      if (currentTask.current !== taskId) return
-      setCandidate(null)
-      await moveQuery.refetch()
-    }
-    await start().catch((err: unknown) => {
-      if (currentTask.current === taskId) setError(messageOf(err))
-    })
+    setAllowFresh(false)
+    if (computerId !== taskComputerId) void check(computerId)
   }
-  const control = async (action: 'retry' | 'cancel') => {
+
+  const confirm = async (): Promise<void> => {
+    if (!preview || isCurrent) return
     setError(null)
+    setSaving(true)
+    const run = async (): Promise<void> => {
+      if (preview.requiresMigration) {
+        await beginMove.mutateAsync({ taskId, computerId: choice, allowFreshSessions: allowFresh })
+        await moveQuery.refetch()
+      } else {
+        await setTaskComputer.mutateAsync({ taskId, computerId: choice })
+        await resolvedQuery.refetch()
+      }
+      if (currentTask.current === taskId) {
+        setOpen(false)
+        setPreview(null)
+      }
+    }
+    await run()
+      .catch((err: unknown) => {
+        if (currentTask.current === taskId) setError(messageOf(err))
+      })
+      .then(() => {
+        if (currentTask.current === taskId) setSaving(false)
+      })
+  }
+
+  /** Set up the destination (a step), then show what it says now. */
+  const prepare = async (step: () => Promise<unknown>): Promise<void> => {
+    setError(null)
+    setPreparing(true)
+    const run = async (): Promise<void> => {
+      const result = await step()
+      const next =
+        result && typeof result === 'object' && 'destinationComputerId' in result
+          ? (result as ComputerMovePreview)
+          : await client.task.computerMovePreview.query({ taskId, computerId: choice })
+      if (currentTask.current === taskId) setPreview(next)
+    }
+    await run()
+      .catch((err: unknown) => {
+        if (currentTask.current === taskId) setError(messageOf(err))
+      })
+      .then(() => {
+        if (currentTask.current === taskId) setPreparing(false)
+      })
+  }
+  const chooseFolder = (path: string): void => {
+    if (!preview) return
+    const computerId = preview.destinationComputerId
+    void prepare(() => client.workspace.setProjectPath.mutate({ computerId, projectId, path }))
+  }
+  const cloneRepository = (): void => {
+    void prepare(() => client.task.cloneForComputerMove.mutate({ taskId, computerId: choice }))
+  }
+
+  const control = async (action: 'retry' | 'cancel') => {
+    setMoveError(null)
     const mutation = action === 'retry' ? retryMove : cancelMove
     const run = async (): Promise<void> => {
       await mutation.mutateAsync({ taskId })
       await moveQuery.refetch()
       await resolvedQuery.refetch()
     }
-    await run().catch((err: unknown) => setError(messageOf(err)))
+    await run().catch((err: unknown) => setMoveError(messageOf(err)))
   }
 
   const effectiveId = resolvedQuery.data?.computerId ?? null
+  const options = [
+    { value: INHERIT_VALUE, label: inheritComputerLabel(nameFor(projectDefaultComputerId)) },
+    ...computers.map((computer) => ({
+      value: computer.id,
+      label: computer.name,
+      // A DISABLED computer (Settings → Connections) takes no new work, so nothing
+      // new may be bound to it; the hub refuses. Offline is WARNED, never disabled:
+      // work aimed at an offline computer queues until it returns.
+      disabled: computer.disabledAt != null,
+      mark:
+        computer.disabledAt != null
+          ? DISABLED_MARK
+          : computer.usable === false
+            ? OFFLINE_MARK
+            : undefined
+    }))
+  ]
 
   return (
     <div>
-      <label htmlFor={selectId} className="mb-1 block text-sm text-muted-foreground">
-        Computer
-      </label>
-      <Select
-        value={binding ?? INHERIT_VALUE}
-        onValueChange={handleChange}
-        disabled={checking || moving}
-      >
-        <SelectTrigger id={selectId} className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={INHERIT_VALUE}>
-            {inheritComputerLabel(nameFor(projectDefaultComputerId))}
-          </SelectItem>
-          {computers.map((computer) => (
-            <SelectItem
-              key={computer.id}
-              value={computer.id}
-              // A DISABLED computer (Settings → Connections) takes no new work, so
-              // nothing new may be bound to it; the hub refuses.
-              disabled={computer.disabledAt != null}
-            >
-              {/* Offline is WARNED, never disabled: work aimed at an offline
-                  computer queues until it returns, and binding a project to a
-                  sleeping laptop is the normal case — disabling the option would
-                  contradict the semantics. */}
-              {computer.name}
-              {computer.disabledAt != null ? (
-                <span className="text-muted-foreground ml-1.5 text-xs">{DISABLED_MARK}</span>
-              ) : computer.usable === false ? (
-                <span className="text-muted-foreground ml-1.5 text-xs">{OFFLINE_MARK}</span>
-              ) : null}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p className="mt-1 text-xs text-muted-foreground">{runsOnLabel(nameFor(effectiveId))}</p>
-      {checking && <p className="mt-1 text-xs text-muted-foreground">Checking destination…</p>}
-      {error && !candidate && (
+      <p className="mb-1 block text-sm text-muted-foreground">Computer</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm">{runsOnLabel(nameFor(effectiveId))}</p>
+        <Button variant="outline" size="sm" onClick={openDialog} disabled={moving}>
+          Change computer…
+        </Button>
+      </div>
+      {moveError && (
         <p role="alert" className="mt-1 text-xs text-destructive">
-          {error}
+          {moveError}
         </p>
       )}
       {moving && moveQuery.data && (
@@ -272,19 +298,30 @@ function ComputerCardControls({
           )}
         </div>
       )}
-      <ComputerMoveDialog
-        preview={candidate?.preview ?? null}
-        source={nameFor(candidate?.preview.sourceComputerId ?? null)}
-        destination={nameFor(candidate?.preview.destinationComputerId ?? null)}
+      <ChangeComputerDialog
+        open={open}
+        options={options}
+        choice={choice ?? INHERIT_VALUE}
+        onChoose={choose}
+        choiceName={
+          preview
+            ? nameFor(preview.destinationComputerId)
+            : nameFor(choice ?? projectDefaultComputerId)
+        }
+        sourceName={nameFor(preview?.sourceComputerId ?? effectiveId)}
+        isCurrent={isCurrent}
+        checking={checking}
+        preview={preview}
         allowFresh={allowFresh}
         onAllowFresh={setAllowFresh}
-        pending={beginMove.isPending}
+        pending={saving}
         error={error}
-        onClose={() => {
-          setCandidate(null)
-          setError(null)
-        }}
+        onClose={closeDialog}
         onConfirm={() => void confirm()}
+        projectId={projectId}
+        preparing={preparing}
+        onChooseFolder={chooseFolder}
+        onClone={cloneRepository}
       />
     </div>
   )

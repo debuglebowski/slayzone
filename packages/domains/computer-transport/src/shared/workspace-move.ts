@@ -83,5 +83,35 @@ export const workspaceMoveRequestSchema = z.discriminatedUnion('op', [
     projectId: id,
     repoName: z.string().max(500).nullable().optional()
   }),
-  z.object({ op: z.literal('discard'), id })
+  z.object({ op: z.literal('discard'), id }),
+  /** Clone the task's repository where this computer keeps it (the project folder, or
+   *  `repoName` inside it). Refused when that folder already holds anything. */
+  z.object({
+    op: z.literal('clone'),
+    taskId: id,
+    projectId: id,
+    repoName: z.string().max(500).nullable().optional(),
+    url: z
+      .string()
+      .min(1)
+      .max(4000)
+      .refine((u) => !u.startsWith('-') && !u.includes('\0') && !/^ext::/i.test(u))
+  })
 ])
+
+/** What `inspect` reports about this computer's copy of the task's project. */
+export interface WorkspaceMoveInspection {
+  projectReady: boolean
+  repoReady: boolean
+  worktreeGit: boolean
+  hasWork: boolean
+  sessionModes: string[]
+  commands: Record<string, boolean>
+  agents: Record<string, boolean>
+  /** The project's folder recorded on this computer, whether or not it exists. */
+  folder: string | null
+  /** Where the task's repository lives here (the folder, or `repoName` inside it). */
+  repoPath: string | null
+  /** The repository's `origin` remote here, if any. */
+  remoteUrl: string | null
+}

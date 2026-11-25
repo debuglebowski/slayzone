@@ -9,6 +9,9 @@ const host: ComputerMoveHost = {
   resolve: async () => 'source',
   destination: async () => 'target',
   inspect: async () => ({ ready: true, blockers: [], agents: [] }),
+  cloneRepository: async () => {
+    calls.push('clone')
+  },
   stop: async () => {
     calls.push('stop')
   },

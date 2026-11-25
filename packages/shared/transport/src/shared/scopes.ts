@@ -835,6 +835,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.beginComputerMove': 'tasks',
   'task.runComputerMove': 'tasks',
   'task.cancelComputerMove': 'tasks',
+  'task.cloneForComputerMove': 'tasks',
   'taskMoves.abort': 'tasks',
   'taskMoves.addRemoteBlockers': 'tasks',
   'taskMoves.advance': 'tasks',
