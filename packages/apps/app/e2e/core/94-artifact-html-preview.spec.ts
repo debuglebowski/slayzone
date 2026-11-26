@@ -266,6 +266,7 @@ test.describe('HTML artifact preview executes scripts', () => {
       title: 'controls-devices.html',
       content: CONTROLS_HTML
     })
+    if (!artifact) throw new Error('seed returned no artifact controls-devices.html')
     // Both screens of the Duo: two Chromium device guests (<webview>), not iframes.
     await mainWindow.evaluate((id) => {
       localStorage.setItem(
