@@ -10,7 +10,6 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@slayzone/settings-core": "workspace:*",
     "@slayzone/agent-panels": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/api": "workspace:*",
@@ -27,6 +26,8 @@
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/search": "workspace:*",
     "@slayzone/settings": "workspace:*",
+    "@slayzone/settings-core": "workspace:*",
+    "@slayzone/shortcuts": "workspace:*",
     "@slayzone/sidebar": "workspace:*",
     "@slayzone/tabs": "workspace:*",
     "@slayzone/tabs-state": "workspace:*",

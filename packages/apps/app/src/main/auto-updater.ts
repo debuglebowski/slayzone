@@ -4,7 +4,7 @@ import { app, BrowserWindow, powerMonitor, autoUpdater as nativeAutoUpdater } fr
 // A default import gives us the raw CJS exports object where the getter works.
 import electronUpdater from 'electron-updater'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { menuEvents } from './menu-events'
+import { clientEvents } from './client-events'
 
 let isRestarting = false
 
@@ -36,7 +36,7 @@ function getAutoUpdater() {
       downloadedVersion = info.version
       const win = BrowserWindow.getAllWindows()[0]
       win?.setProgressBar(-1)
-      menuEvents.emit('update-status', { type: 'downloaded', version: info.version })
+      clientEvents.emit('update-status', { type: 'downloaded', version: info.version })
     })
 
     // On macOS, MacUpdater uses native Squirrel to stage the update after electron-updater
@@ -139,7 +139,7 @@ export async function restartForUpdate(): Promise<void> {
 }
 
 function sendUpdateStatus(status: import('@slayzone/types').UpdateStatus): void {
-  menuEvents.emit('update-status', status)
+  clientEvents.emit('update-status', status)
 }
 
 export async function checkForUpdates(): Promise<void> {

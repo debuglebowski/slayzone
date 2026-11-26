@@ -1,12 +1,10 @@
 import { nativeTheme } from 'electron'
-import { settingsEvents, type ThemePreference } from '@slayzone/settings-core/server'
+import type { ThemePreference } from '@slayzone/settings-core/server'
 import { updateClientSettings } from '@slayzone/platform/client-settings'
 
 /**
- * Pure theme API — `nativeTheme` only, no IPC/BrowserWindow. This is the narrow
- * surface the tRPC `settings.*Theme` procedures dynamically import (via the
- * `@slayzone/settings/theme` subpath) so transport never reaches the IPC
- * handler-registration barrel. The IPC broadcast side lives in ./theme.
+ * The theme mode on Electron's `nativeTheme` — main's side of the client host's
+ * `theme.set` / settings snapshot (app/src/main/client-host-ipc.ts). No IPC here.
  */
 
 /** Effective theme Electron is actually rendering (resolves 'system'). */
@@ -28,28 +26,11 @@ export function getThemeSource(): 'system' | 'light' | 'dark' {
  * also fixes remote mode, where this wrote to the remote hub while main read the
  * local database on the next boot, and the toggle simply did not stick.
  *
- * Shared by the `theme:set` IPC handler + the `settings.setTheme` tRPC mutation
- * (the latter reaches here through AppDeps.themeSet, i.e. on the desktop).
+ * Called by the client host's `theme.set`; the `nativeTheme 'updated'` it causes is
+ * what tells every window (main's `settings-changed`).
  */
 export async function setTheme(theme: ThemePreference): Promise<'dark' | 'light'> {
   nativeTheme.themeSource = theme
   await updateClientSettings({ theme })
   return getEffectiveTheme()
-}
-
-let bridgeInstalled = false
-
-/**
- * The single OS→app theme listener: wires nativeTheme.on('updated') into
- * settingsEvents. Everything downstream — the tRPC `settings.onThemeChanged`
- * subscription AND the IPC `theme:changed` broadcast (registerThemeHandlers) —
- * subscribes to that bus, so there is exactly one nativeTheme listener.
- * Idempotent. Permanent (survives the slice-5 IPC removal).
- */
-export function wireNativeThemeBridge(): void {
-  if (bridgeInstalled) return
-  bridgeInstalled = true
-  nativeTheme.on('updated', () => {
-    settingsEvents.emit('theme:changed', getEffectiveTheme())
-  })
 }

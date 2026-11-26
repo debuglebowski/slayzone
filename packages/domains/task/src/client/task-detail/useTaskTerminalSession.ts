@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { useClientHostEvent, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task } from '@slayzone/task-contracts'
 import { getProviderFlags } from '@slayzone/task-contracts/types'
@@ -168,12 +168,7 @@ export function useTaskTerminalSession({
   })
 
   // Cmd+Shift+U: sync detected session ID to DB (only when this task is active and banner is showing)
-  useSubscription(
-    trpc.menu.onSyncSessionId.subscriptionOptions(undefined, {
-      enabled: !!shortcutActive,
-      onData: handleSyncSessionId
-    })
-  )
+  useClientHostEvent('sync-session-id', handleSyncSessionId, { enabled: !!shortcutActive })
 
   // Persist detected conversation IDs immediately for modes that need session
   // discovery. Deduped by a ref so the write fires EXACTLY ONCE per detected id.

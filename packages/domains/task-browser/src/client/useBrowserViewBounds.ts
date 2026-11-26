@@ -1,7 +1,6 @@
 import { useCallback, useRef, useEffect, useInsertionEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC } from './trpc'
+import { getClientHost, useClientHostEvent } from '@slayzone/transport/client'
 import { callBrowserHost } from './browser-host'
 import { useStableCallback } from '@slayzone/ui'
 
@@ -24,7 +23,6 @@ export function useBrowserViewBounds(
   viewId: string | null,
   opts: UseBrowserViewBoundsOpts
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
-  const trpc = useTRPC()
   const { visible, hidden, isResizing, offScreen } = opts
   const shouldPaint = visible && !hidden && !isResizing
   const effectivelyVisible = shouldPaint && !offScreen
@@ -46,8 +44,11 @@ export function useBrowserViewBounds(
     appZoomFactorRef.current = appZoomFactor
   })
 
-  // Initial app zoom factor — app.meta.getZoomFactor mirrors app:get-zoom-factor.
-  const zoomQuery = useQuery(trpc.app.meta.getZoomFactor.queryOptions())
+  // Initial app zoom factor — this device's own (client host), never a hub's.
+  const zoomQuery = useQuery({
+    queryKey: ['client-host', 'zoom.get'],
+    queryFn: () => getClientHost().call('zoom.get')
+  })
   // Adopt each new query result. Adjusted during render — same trigger as a
   // `[zoomQuery.data]` effect; `undefined` start = an already-cached value at
   // mount is adopted too, exactly like that effect's first run.
@@ -57,7 +58,7 @@ export function useBrowserViewBounds(
     if (typeof zoomQuery.data === 'number') setAppZoomFactor(zoomQuery.data)
   }
 
-  // Live zoom changes — menu.onZoomFactorChanged mirrors app:zoom-factor-changed.
+  // Live zoom changes — the client host's `zoom-factor-changed`.
   const handleZoomFactorChanged = useStableCallback((factor: number) => {
     setAppZoomFactor((current) => {
       if (Math.abs(current - factor) < 0.0001) return current
@@ -65,11 +66,7 @@ export function useBrowserViewBounds(
       return factor
     })
   })
-  useSubscription(
-    trpc.menu.onZoomFactorChanged.subscriptionOptions(undefined, {
-      onData: handleZoomFactorChanged
-    })
-  )
+  useClientHostEvent('zoom-factor-changed', handleZoomFactorChanged)
 
   // Sync visibility changes — drives WCV painting independent of bounds. When
   // shouldPaint is true but offScreen is true, the view keeps painting (video

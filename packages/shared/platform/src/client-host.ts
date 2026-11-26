@@ -5,7 +5,7 @@
  * (ARCHITECTURE.md, "client-local host work").
  *
  * The renderer reaches it directly — Electron main over preload IPC
- * (`window.api.clientHost`, app/src/main/client-host-ipc.ts), the web shell over
+ * (the preload's `clientHost`, app/src/main/client-host-ipc.ts), the web shell over
  * `localStorage`, the chromium shell over its Mojo key-value store
  * (`createStorageClientHost` below) — and never through a hub. A hub cannot answer
  * for a device it does not run on (a remote hub, a second machine), and a hub's
@@ -122,7 +122,7 @@ export type ClientEventMap = {
 }
 
 /**
- * The raw, untyped surface each shell exposes as `window.api.clientHost`.
+ * The raw, untyped surface each shell installs as the `clientHost` of its `api` global.
  * `@slayzone/transport/client`'s `getClientHost()` is the typed reader.
  */
 export interface ElectronClientHost {

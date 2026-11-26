@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
-import { useTRPC, useTRPCClient } from '../trpc'
+import { getClientHost, useClientHostEvent } from '@slayzone/transport/client'
+import { useTRPC } from '../trpc'
 import { scopeTracker, useStableCallback } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
 import {
@@ -49,7 +49,6 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   } = deps
 
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
   const closeWindow = useMutation(trpc.app.window.close.mutationOptions())
 
   // Stable handlers for the close subscriptions: they read the active tab from the
@@ -65,83 +64,53 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
     if (tabs[activeTabIndex]?.type === 'home') void closeWindow.mutate()
   })
 
-  useSubscription(
-    trpc.menu.onCloseActiveTask.subscriptionOptions(undefined, { onData: closeActiveTask })
-  )
-  useSubscription(
-    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, { onData: closeCurrentHome })
-  )
-  // Task open/close requests come from every hub, not just this one: `HubTaskEvents`.
-  useSubscription(
-    trpc.menu.onGoHome.subscriptionOptions(undefined, {
-      onData: () => {
-        const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')
-        if (homeIndex >= 0) setActiveTabIndex(homeIndex)
-      }
-    })
-  )
-  useSubscription(
-    trpc.menu.onToggleGlobalAgentPanel.subscriptionOptions(undefined, {
-      onData: () => {
-        if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
-      }
-    })
-  )
-  useSubscription(
-    trpc.menu.onToggleAgentStatusPanel.subscriptionOptions(undefined, {
-      onData: () => {
-        setAgentStatusState({ isLocked: !agentStatusState.isLocked })
-      }
-    })
-  )
-  useSubscription(
-    trpc.menu.onOpenSettings.subscriptionOptions(undefined, {
-      onData: () => openSettings()
-    })
-  )
-  useSubscription(
-    trpc.menu.onOpenProjectSettings.subscriptionOptions(undefined, {
-      onData: () => {
-        if (!selectedProjectId) return
-        const project = projects.find((p) => p.id === selectedProjectId)
-        if (!project) return
-        openProjectSettings(project)
-      }
-    })
-  )
+  // Native menu / accelerator events come from THIS device's client host, never a
+  // hub (a hub must not drive this window's menu actions). Task open/close requests
+  // come from every hub: `HubTaskEvents`.
+  useClientHostEvent('close-active-task', closeActiveTask)
+  useClientHostEvent('close-current-focus', closeCurrentHome)
+  useClientHostEvent('go-home', () => {
+    const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')
+    if (homeIndex >= 0) setActiveTabIndex(homeIndex)
+  })
+  useClientHostEvent('toggle-global-agent-panel', () => {
+    if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
+  })
+  useClientHostEvent('toggle-agent-status-panel', () => {
+    setAgentStatusState({ isLocked: !agentStatusState.isLocked })
+  })
+  useClientHostEvent('open-settings', () => openSettings())
+  useClientHostEvent('open-project-settings', () => {
+    if (!selectedProjectId) return
+    const project = projects.find((p) => p.id === selectedProjectId)
+    if (!project) return
+    openProjectSettings(project)
+  })
 
   // Cmd+R: reload the active browser view (WebContentsView or webview fallback)
-  useSubscription(
-    trpc.menu.onReloadBrowser.subscriptionOptions(undefined, {
-      onData: () => {
-        // Find visible WebContentsView placeholder and reload it on this device's host
-        const placeholder = document.querySelector(
-          '[data-browser-panel][data-view-id]'
-        ) as HTMLElement | null
-        const viewId = placeholder?.dataset.viewId
-        if (viewId) {
-          // The hub's event: the host counts it as the user's only if it saw the key.
-          callBrowserHost('view.reload', viewId, undefined, 'shortcut')
-          return
-        }
-        // Fallback: webview (multi-device grid). <webview> is an Electron custom
-        // element, so the DOM lib types it as a bare HTMLElement — narrow to just
-        // the one method we call rather than pulling in the Electron typings.
-        type ReloadableWebview = HTMLElement & { reload?: () => void }
-        const webview = document.querySelector<ReloadableWebview>('[data-browser-panel] webview')
-        if (webview?.reload) webview.reload()
-      }
-    })
-  )
+  useClientHostEvent('reload-browser', () => {
+    // Find visible WebContentsView placeholder and reload it on this device's host
+    const placeholder = document.querySelector(
+      '[data-browser-panel][data-view-id]'
+    ) as HTMLElement | null
+    const viewId = placeholder?.dataset.viewId
+    if (viewId) {
+      // A menu event: the browser host counts it as the user's only if main saw the key.
+      callBrowserHost('view.reload', viewId, undefined, 'shortcut')
+      return
+    }
+    // Fallback: webview (multi-device grid). <webview> is an Electron custom
+    // element, so the DOM lib types it as a bare HTMLElement — narrow to just
+    // the one method we call rather than pulling in the Electron typings.
+    type ReloadableWebview = HTMLElement & { reload?: () => void }
+    const webview = document.querySelector<ReloadableWebview>('[data-browser-panel] webview')
+    if (webview?.reload) webview.reload()
+  })
 
   // Cmd+Shift+R: reload the app
-  useSubscription(
-    trpc.menu.onReloadApp.subscriptionOptions(undefined, {
-      onData: () => {
-        window.location.reload()
-      }
-    })
-  )
+  useClientHostEvent('reload-app', () => {
+    window.location.reload()
+  })
 
   // Keep app zoom on an explicit path instead of relying on Electron's default zoom roles.
   useEffect(() => {
@@ -150,25 +119,25 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
 
       if (e.key === '=' || e.key === '+') {
         e.preventDefault()
-        void trpcClient.app.meta.adjustZoom.mutate({ command: 'in' })
+        void getClientHost().call('zoom.adjust', 'in')
         return
       }
 
       if (e.key === '-') {
         e.preventDefault()
-        void trpcClient.app.meta.adjustZoom.mutate({ command: 'out' })
+        void getClientHost().call('zoom.adjust', 'out')
         return
       }
 
       if (e.key === '0') {
         e.preventDefault()
-        void trpcClient.app.meta.adjustZoom.mutate({ command: 'reset' })
+        void getClientHost().call('zoom.adjust', 'reset')
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [trpcClient])
+  }, [])
 
   // Forward keyboard shortcuts from WebContentsView back into the DOM.
   // Forward WebContentsView keyboard shortcuts back into the renderer DOM (the

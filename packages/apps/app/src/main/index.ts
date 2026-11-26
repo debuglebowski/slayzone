@@ -20,7 +20,6 @@ import {
   Menu,
   protocol,
   screen,
-  powerMonitor,
   crashReporter,
   nativeImage
 } from 'electron'
@@ -71,7 +70,8 @@ import {
   browserGetUrl,
   browserCapturePng
 } from './browser-registry'
-import { registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
+import { isAppRenderer, registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
+import { registerClientHostIpc } from './client-host-ipc'
 import { linkBridgeAllowed, UserGestureTracker, type LinkBridgeKind } from './panel-link-bridge'
 import {
   PanelNetworkPolicy,
@@ -139,11 +139,14 @@ import {
   toElectronAccelerator,
   matchesElectronInput,
   resolveShortcutKeys,
+  normalizeShortcutOverrides,
   MENU_SHORTCUT_DEFAULTS,
   type ElectronInput
 } from '@slayzone/shortcuts'
+import type { ClientSettingsSnapshot } from '@slayzone/platform/client-host'
 
-// Mutable shortcut overrides — updated from DB when shortcuts change.
+// Mutable shortcut overrides — from client.config.json, refreshed by the client
+// host's `shortcuts.set`.
 // Module-scope so both createMainWindow (before-input-event) and app.whenReady (menu) can access.
 let currentOverrides: Record<string, string | null> = {}
 
@@ -495,7 +498,6 @@ import {
   taskOps,
   setTaskDeps
 } from '@slayzone/task/server'
-import { wireNativeThemeBridge } from '@slayzone/settings/electron'
 import {
   getEffectiveTheme as nativeGetEffectiveTheme,
   getThemeSource as nativeGetThemeSource,
@@ -567,6 +569,7 @@ import {
 import { setTaskAgentsStopper, setAgentLifecycleEvents } from '@slayzone/terminal/server'
 import {
   attachFloatingGlobalAgentPanel,
+  isFloatingGlobalAgentPanelWebContents,
   setupFloatingGlobalAgentPanel,
   floatingGlobalAgentPanelOps,
   floatingGlobalAgentPanelEvents
@@ -644,11 +647,10 @@ import {
 import { createStatsPoller } from '@slayzone/processes/pid-stats'
 import { notifyEvents } from './notify-renderer'
 import { presentWindow } from './present-window'
-import { menuEvents } from './menu-events'
+import { clientEvents } from './client-events'
 import { automationsEvents } from './automations-events'
 import { telemetryEvents } from './telemetry-events'
 import { agentLifecycleEvents } from './agent-lifecycle-events'
-import { powerResumeEvents } from './power-resume-events'
 import { startDesktopBridgeServer } from './desktop-bridge-server'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
@@ -1509,8 +1511,7 @@ function applyAppZoom(command: AppZoomCommand): number {
 
   wc.zoomLevel = nextLevel
   const zoomFactor = wc.zoomFactor
-  menuEvents.emit('zoom-factor-changed', zoomFactor)
-  wc.send('app:zoom-factor-changed', zoomFactor) // slice 5: drop legacy send
+  clientEvents.emit('zoom-factor-changed', zoomFactor)
   return zoomFactor
 }
 
@@ -1632,7 +1633,7 @@ function handleOAuthDeepLink(url: string): void {
   // slayzone://task/<id> — open task in app
   if (parsed.hostname === 'task' && normalizedPath.length > 1) {
     const taskId = normalizedPath.slice(1)
-    menuEvents.emit('open-task', { taskId })
+    clientEvents.emit('open-task', { taskId })
     presentWindow(mainWindow)
     return
   }
@@ -1686,15 +1687,15 @@ app.on('open-url', (event, url) => {
 })
 
 function emitOpenSettings(): void {
-  menuEvents.emit('open-settings')
+  clientEvents.emit('open-settings')
 }
 
 function emitOpenProjectSettings(): void {
-  menuEvents.emit('open-project-settings')
+  clientEvents.emit('open-project-settings')
 }
 
 function emitNewTemporaryTask(): void {
-  menuEvents.emit('new-temporary-task')
+  clientEvents.emit('new-temporary-task')
 }
 
 function getCliSrc(): string {
@@ -1873,7 +1874,7 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'go-home'))) {
       event.preventDefault()
-      menuEvents.emit('go-home')
+      clientEvents.emit('go-home')
       return
     }
 
@@ -1892,28 +1893,28 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'terminal-screenshot'))) {
       event.preventDefault()
-      menuEvents.emit('screenshot-trigger')
+      clientEvents.emit('screenshot-trigger')
     }
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'reload-browser'))) {
       event.preventDefault()
       userLocalAccess.reloadShortcutPressed()
-      menuEvents.emit('reload-browser')
+      clientEvents.emit('reload-browser')
     }
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'reload-app'))) {
       event.preventDefault()
-      menuEvents.emit('reload-app')
+      clientEvents.emit('reload-app')
     }
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'global-agent-panel'))) {
       event.preventDefault()
-      menuEvents.emit('toggle-global-agent-panel')
+      clientEvents.emit('toggle-global-agent-panel')
     }
 
     if (matchesElectronInput(ei, resolveShortcutKeys(currentOverrides, 'agent-status-panel'))) {
       event.preventDefault()
-      menuEvents.emit('toggle-agent-status-panel')
+      clientEvents.emit('toggle-agent-status-panel')
     }
   })
 
@@ -2210,7 +2211,7 @@ app
               label: 'Sync Detected Session ID',
               accelerator: getMenuAccelerator('sync-session-id', overrides),
               click: () => {
-                menuEvents.emit('sync-session-id')
+                clientEvents.emit('sync-session-id')
               }
             }
           ]
@@ -2238,7 +2239,7 @@ app
               registerAccelerator: false,
               click: () => {
                 userLocalAccess.reloadShortcutPressed()
-                menuEvents.emit('reload-browser')
+                clientEvents.emit('reload-browser')
               }
             },
             {
@@ -2246,7 +2247,7 @@ app
               accelerator: 'CmdOrCtrl+Shift+R',
               registerAccelerator: false,
               click: () => {
-                menuEvents.emit('reload-app')
+                clientEvents.emit('reload-app')
               }
             },
             { role: 'toggleDevTools' },
@@ -2288,14 +2289,14 @@ app
                   focused.close()
                   return
                 }
-                menuEvents.emit('close-current-focus')
+                clientEvents.emit('close-current-focus')
               }
             },
             {
               label: 'Close Task',
               accelerator: getMenuAccelerator('close-task', overrides),
               click: () => {
-                menuEvents.emit('close-active-task')
+                clientEvents.emit('close-active-task')
               }
             },
             { type: 'separator' },
@@ -2313,15 +2314,84 @@ app
       app.dock?.setIcon(icon)
     }
 
-    currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
+    // The overrides the menu accelerators AND the before-input-event matcher use come
+    // from THIS file, normalized like the renderer store does (renames, retired
+    // defaults). The client host's `shortcuts.set` writes it and refreshes both.
+    const readShortcutOverrides = (): Record<string, string | null> =>
+      normalizeShortcutOverrides(clientSettings.customShortcuts).overrides
+    currentOverrides = readShortcutOverrides()
     buildAppMenu(currentOverrides)
     logBoot('app menu built')
 
-    // Rebuild menu + update overrides cache whenever shortcuts change
-    ipcMain.on('shortcuts:changed', async () => {
-      currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
-      buildAppMenu(currentOverrides)
+    // The client host: this device's renderers (app windows + the floating panel)
+    // reach main directly for theme, labs, shortcuts, zoom and updates, and hear the
+    // client events above — no hub in between (client-host-ipc.ts). Registered before
+    // any window exists so a renderer's first subscribe is never lost.
+    const clientSettingsSnapshot = (): ClientSettingsSnapshot => ({
+      theme: nativeGetThemeSource(),
+      effectiveTheme: nativeGetEffectiveTheme(),
+      labs: {
+        testsPanel: isLabEnabled('labs_tests_panel'),
+        loopMode: isLabEnabled('labs_loop_mode')
+      },
+      shortcuts: currentOverrides,
+      shortcutsAdoptedFromHub: clientSettings.shortcutsAdoptedFromHub === true
     })
+    const clientSettingsChanged = (): void => {
+      clientEvents.emit('settings-changed', clientSettingsSnapshot())
+    }
+    // OS dark/light toggle while the mode is 'system' (and any explicit change).
+    nativeTheme.on('updated', clientSettingsChanged)
+    registerClientHostIpc({
+      ipc: ipcMain as never,
+      events: clientEvents,
+      isAllowedSender: (wc) =>
+        isAppRenderer(wc as unknown as Electron.WebContents) ||
+        isFloatingGlobalAgentPanelWebContents(wc),
+      isPlaywright,
+      impl: {
+        'settings.snapshot': () => clientSettingsSnapshot(),
+        'theme.set': async (pref) => {
+          const effective = await nativeSetTheme(pref)
+          clientSettings = readClientSettings(clientRoot)
+          clientSettingsChanged()
+          return effective
+        },
+        'labs.set': async (flag, on) => {
+          // The other flag keeps its stored value — unset stays unset (its default).
+          await updateClientSettings(
+            {
+              labs: {
+                testsPanel: clientSettings.labs?.testsPanel,
+                loopMode: clientSettings.labs?.loopMode,
+                [flag]: on
+              }
+            },
+            clientRoot
+          )
+          clientSettings = readClientSettings(clientRoot)
+          clientSettingsChanged()
+        },
+        'shortcuts.set': async (overrides, opts) => {
+          // One write: the map and (on adoption) the marker together.
+          clientSettings = await updateClientSettings(
+            {
+              customShortcuts: normalizeShortcutOverrides(overrides).overrides,
+              ...(opts?.adoptedFromHub ? { shortcutsAdoptedFromHub: true } : {})
+            },
+            clientRoot
+          )
+          currentOverrides = readShortcutOverrides()
+          buildAppMenu(currentOverrides)
+          clientSettingsChanged()
+        },
+        'zoom.get': () => mainWindow?.webContents.zoomFactor ?? 1,
+        'zoom.adjust': (command) => applyAppZoom(command),
+        'update.restart': () => restartForUpdate(),
+        'update.check': () => checkForUpdates()
+      }
+    })
+    logBoot('client host registered')
 
     // Bind diagnostics first so tRPC diagnostics works and IPC below is instrumented.
     // Flushes any events buffered before this point (boot.start, crash detect, lock outcome).
@@ -2372,9 +2442,6 @@ app
     // against the same shared DB and were never consulted.
     logBoot('core domain ops built')
 
-    // Single OS→app theme listener. Both the tRPC `settings.onThemeChanged`
-    // subscription and native OS theme changes derive from this one bus.
-    wireNativeThemeBridge()
     const usageOps = buildUsageOps()
     logBoot('terminal runtime wired')
 
@@ -2469,8 +2536,7 @@ app
     // both run there, and taskEvents is process-local). The remote-mode branch
     // that used to start one here ran against the LOCAL database, which in remote
     // mode has no tasks and therefore no triggers to fire; the remote hub runs its
-    // own. `powerMonitor` is host-only, so wake still forwards over the bridge.
-    powerMonitor.on('resume', () => powerResumeEvents.emit('resume'))
+    // own, and notices its own wake from sleep (hub wake-watchdog.ts).
     // Reclaim Blink/Oilpan garbage on busy renderers that never go idle (see
     // proactive-gc.ts). No-op under Playwright.
     startProactiveGc()
@@ -2480,7 +2546,7 @@ app
     // host serves a bridge the side-car forwards Electron-only calls
     // to. The data-dep registry sets below are now harmless no-ops on the host
     // (no in-process appRouter server reads them) — left in place to minimise
-    // churn; only setAppDeps/setMenuEvents/setPowerResumeEvents back the bridge.
+    // churn; only setAppDeps backs the bridge.
     // Remote mode: skipped (renderer connects to the remote server).
     if (!isRemoteMode)
       setImmediate(() => {
@@ -2507,15 +2573,10 @@ app
             // `telemetry.onIpcEvent` subs and IPC coexist (bridge drops later).
             mod.setAutomationsEvents(automationsEvents)
             setTelemetryEvents(telemetryEvents)
-            // Menu / app-shortcut bus — native menus, the before-input-event
-            // accelerator handler, the auto-updater, and protocol deep-links emit
-            // here. Post-cutover the host capability bridge streams these to the
-            // side-car, whose `menu.*` subscriptions deliver them to the renderer.
-            mod.setMenuEvents(menuEvents)
+            // Native menu / accelerator / updater events no longer cross the bridge:
+            // the client host hands them to this device's renderers directly
+            // (client-host-ipc.ts). Wake from sleep: the side-car detects its own.
             setAgentLifecycleEvents(agentLifecycleEvents)
-            // Power-resume bus — host `powerMonitor 'resume'` (see above) forwarded
-            // over the capability bridge so the side-car engine runs cron catchup.
-            mod.setPowerResumeEvents(powerResumeEvents)
             // App-level ops — the SAME single instances the IPC handlers built and
             // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
             // implementation, both transports coexist (renderer cutover is slice 5).
@@ -2551,30 +2612,10 @@ app
               appGetVersion: () => app.getVersion(),
               appGetDownloadsDir: async () => app.getPath('downloads'),
               appGetTrpcPort: () => awaitTrpcPort(),
-              appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
-              appSetLabFlag: async (key, on) => {
-                const next =
-                  key === 'labs_tests_panel'
-                    ? { testsPanel: on, loopMode: clientSettings.labs?.loopMode }
-                    : { testsPanel: clientSettings.labs?.testsPanel, loopMode: on }
-                await updateClientSettings({ labs: next }, clientRoot)
-                clientSettings = readClientSettings(clientRoot)
-              },
-              appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
-              appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
               appGetProtocolClientStatus: () => protocolClientStatus,
               appGetRendererZoomFactor: () => mainWindow?.webContents.zoomFactor ?? null,
               appCheckCliInstalled: () => checkCliInstalled({ expectedVersion: app.getVersion() }),
               appInstallCli: () => installCli(getCliSrc()),
-              appAdjustZoom: (command) => applyAppZoom(command),
-              appRestartForUpdate: () => restartForUpdate(),
-              appCheckForUpdates: () => checkForUpdates(),
-              appRebuildMenuForShortcuts: () => {
-                void (async () => {
-                  currentOverrides = readClientSettings(clientRoot).customShortcuts ?? {}
-                  buildAppMenu(currentOverrides)
-                })()
-              },
               appGetSidecarStatus: getSidecarStatusSnapshot,
               appRevealSidecarLog: revealSidecarLogInFinder,
               appWindowGetContentBounds: () => mainWindow?.getContentBounds() ?? null,
@@ -2621,12 +2662,6 @@ app
               appRaiseMainWindow: () => {
                 presentWindow(mainWindow ?? BrowserWindow.getAllWindows()[0])
               },
-              // Theme — Electron nativeTheme. The side-car's `settings.*Theme`
-              // procedures forward here over the bridge; `theme:changed` streams
-              // back (wireNativeThemeBridge → settingsEvents → bridge `theme` chan).
-              themeGetEffective: () => nativeGetEffectiveTheme(),
-              themeGetSource: () => nativeGetThemeSource(),
-              themeSet: (pref) => nativeSetTheme(pref),
               // Credential cipher — Electron safeStorage. The side-car runs as
               // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
               // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
@@ -2671,9 +2706,9 @@ app
               events: processEvents
             })
             // Cutover: no in-process appRouter server. The desktop app serves ONE
-            // bridge listener (setAppDeps/setMenuEvents/setPowerResumeEvents back it):
+            // bridge listener (setAppDeps backs it):
             //  • WS `/cap` — the side-car forwards its Electron-only AppDeps calls
-            //    here and streams desktop menu/power events back (startTrpcServer retired).
+            //    here and streams task-window / panel events back (startTrpcServer retired).
             // That is now the ONLY thing it serves. The `/api/*` reverse-proxy is
             // gone: those routes run in the side-car against its own db and reach
             // back through `/cap` for the Electron step alone — so this listener no
@@ -4488,7 +4523,7 @@ app
         browserViewManager.reset()
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.zoomLevel = 0
-          menuEvents.emit('zoom-factor-changed', mainWindow.webContents.zoomFactor)
+          clientEvents.emit('zoom-factor-changed', mainWindow.webContents.zoomFactor)
         }
 
         // 6. Clear oauth state
@@ -4515,8 +4550,13 @@ app
           await devReset()
         }
         // Client store is unaffected by the schema rebuild, but re-read anyway so
-        // any test that rewrote it takes effect.
-        clientSettings = readClientSettings(clientRoot)
+        // any test that rewrote it takes effect. Shortcut overrides live here now, not
+        // in the hub DB the reset wipes: clear them too, so one spec's rebinds never
+        // leak into the next (the adoption marker stays — no re-copy from the hub).
+        clientSettings = await updateClientSettings({ customShortcuts: {} }, clientRoot)
+        currentOverrides = readShortcutOverrides()
+        buildAppMenu(currentOverrides)
+        clientSettingsChanged()
 
         // 8. The computer connection normally survives (the reset keeps the gateway
         // and the `computers` rows), so this resolves at once. It still guards the

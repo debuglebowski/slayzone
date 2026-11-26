@@ -35,10 +35,10 @@ async function sendIPC(electronApp: ElectronApplication, channel: string): Promi
   )
 }
 
-// Invoke the real menu item from the main process. The renderer consumes
-// close-active-task via the tRPC `menu.onCloseActiveTask` subscription (fed by
-// menuEvents); the legacy `app:close-active-task` webContents broadcast has no
-// renderer consumer post slice-5, so `sendIPC` of it is a no-op.
+// Invoke the real menu item from the main process. The renderer hears
+// close-active-task from its client host (main's `clientEvents` → client-host IPC);
+// the legacy `app:close-active-task` webContents broadcast has no renderer consumer,
+// so `sendIPC` of it is a no-op.
 async function clickMenuItem(electronApp: ElectronApplication, labels: string[]): Promise<void> {
   await electronApp.evaluate(
     ({ Menu }: { Menu: typeof Electron.CrossProcessExports.Menu }, path: string[]) => {

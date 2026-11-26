@@ -9,8 +9,11 @@ import React, {
 } from 'react'
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  getClientHost,
+  useClientHostEvent,
+  useClientSettings,
   useSubscription,
   useFederationOrNull,
   getHubIdForProject,
@@ -328,7 +331,6 @@ function App(): React.JSX.Element {
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const { updateVersion, updateDownloadPercent, updateToastDismissed, setUpdateToastDismissed } =
     useAppUpdates()
-  const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
 
   // Warm keystroke-triggered lazy chunks (Cmd+K palette) on idle → no blank gap on first open.
   useIdlePreload()
@@ -762,7 +764,8 @@ function App(): React.JSX.Element {
   // A live query, not a read on Settings close: the Labs switch saves the flag
   // in the background and refreshes this query when the save lands, so closing
   // Settings right after flipping it can't read the old value.
-  const testsPanelEnabled = useQuery(trpc.app.meta.isTestsPanelEnabled.queryOptions()).data ?? false
+  // A labs flag: this device's own (client.config.json), live across windows.
+  const testsPanelEnabled = useClientSettings()?.labs.testsPanel ?? false
 
   // Close context manager when hidden
   useEffect(() => {
@@ -1070,11 +1073,7 @@ function App(): React.JSX.Element {
     },
     { enableOnFormTags: true, enabled: !isRecordingShortcut && newTempTaskKeys !== '' }
   )
-  useSubscription(
-    trpc.menu.onNewTemporaryTask.subscriptionOptions(undefined, {
-      onData: () => triggerNewTempTask('menu')
-    })
-  )
+  useClientHostEvent('new-temporary-task', () => triggerNewTempTask('menu'))
 
   // Task handlers
   const handleTaskCreated = (task: Task): void => {
@@ -1489,7 +1488,7 @@ function App(): React.JSX.Element {
                   ? {
                       phase: 'ready',
                       version: updateVersion,
-                      onRestart: () => restartForUpdate.mutate()
+                      onRestart: () => void getClientHost().call('update.restart')
                     }
                   : null
             }

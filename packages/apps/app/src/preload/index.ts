@@ -17,6 +17,8 @@ let lastPastePaths: string[] = []
 const isPlaywright = process.env.PLAYWRIGHT === '1'
 const browserHostListeners = new Set<(event: string, payload: unknown) => void>()
 let browserHostSubscribed = false
+const clientHostListeners = new Set<(event: string, payload: unknown) => void>()
+let clientHostSubscribed = false
 
 window.addEventListener('dragover', (event) => event.preventDefault(), true)
 window.addEventListener(
@@ -149,6 +151,25 @@ const api: ElectronAPI = {
       }
       return () => {
         browserHostListeners.delete(listener)
+      }
+    }
+  },
+  // Client-local host capability, not a domain API: what THIS device owns (theme
+  // mode, labs, shortcut overrides, zoom, updates) and its native-menu events (see
+  // client-host-ipc.ts). Never routed through the hub.
+  clientHost: {
+    invoke: (method, args) => ipcRenderer.invoke('client-host:invoke', method, args),
+    on: (listener) => {
+      clientHostListeners.add(listener)
+      if (!clientHostSubscribed) {
+        clientHostSubscribed = true
+        ipcRenderer.on('client-host:event', (_e, event: string, payload: unknown) => {
+          for (const l of clientHostListeners) l(event, payload)
+        })
+        ipcRenderer.send('client-host:subscribe')
+      }
+      return () => {
+        clientHostListeners.delete(listener)
       }
     }
   },

@@ -1,7 +1,7 @@
 /**
  * api's wiring of the settings router's host deps: a `settings.set` reaches the
- * notify bus (`notify.onSettingsChanged`, the cross-window sync), and the theme
- * procedures resolve the host's `AppDeps`.
+ * notify bus (`notify.onSettingsChanged`, the cross-window sync). The theme
+ * procedures resolve nothing on the host any more: the mode is client-local.
  *
  * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
@@ -24,18 +24,18 @@ test('settings.set tells every window which key changed, over the notify bus', a
   expect(seen).toEqual([{ keys: ['panel_config'] }])
 })
 
-test('theme procedures resolve the AppDeps the host set', async () => {
-  const set: string[] = []
-  setAppDeps({
-    themeGetEffective: () => 'light',
-    themeGetSource: () => 'system',
-    themeSet: async (pref: 'light' | 'dark' | 'system') => {
-      set.push(pref)
-      return 'dark'
-    }
-  } as unknown as AppDeps)
-  expect(await caller.getEffectiveTheme()).toBe('light')
+test('theme procedures never reach the host AppDeps (the mode is client-local)', async () => {
+  const touched: string[] = []
+  setAppDeps(
+    new Proxy({} as AppDeps, {
+      get: (_t, prop) => {
+        touched.push(String(prop))
+        return () => 'light'
+      }
+    })
+  )
+  expect(await caller.getEffectiveTheme()).toBe('dark')
   expect(await caller.getThemeSource()).toBe('system')
   expect(await caller.setTheme('dark')).toBe('dark')
-  expect(set).toEqual(['dark'])
+  expect(touched).toEqual([])
 })

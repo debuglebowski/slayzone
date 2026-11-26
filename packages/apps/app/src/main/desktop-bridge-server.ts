@@ -12,9 +12,11 @@ import { capabilityBridgeRouter } from '@slayzone/api'
  * loopback listener, advertised as `SLAYZONE_DESKTOP_BRIDGE_ADDRESS`:
  *
  *  • WS `/cap` — the side-car forwards Electron-only capability *method calls*
- *    (browser-WCV, clipboard, dialogs, backup, task-windows, floating-agent,
- *    native menus, …) over `capabilityBridgeRouter`, and desktop-originated
- *    events (native menus, power-resume, theme) stream back through it.
+ *    (clipboard, dialogs, backup, task-windows, floating-agent, …) over
+ *    `capabilityBridgeRouter`, and the task-window / floating-panel events stream
+ *    back through it. Native menu events, the theme mode, labs, shortcuts, zoom and
+ *    updates do NOT cross it: the client host hands them to this app's renderers
+ *    directly (client-host-ipc.ts), and the side-car detects its own wake.
  *
  * That is now the ONLY thing it serves. It used to also host `/api/*` as a
  * reverse-proxy target for REST routes the side-car couldn't run itself — which
@@ -22,9 +24,8 @@ import { capabilityBridgeRouter } from '@slayzone/api'
  * tables the side-car owns. Inverting them (handler stays with the data, only the
  * Electron step crosses) removed both the proxy and the database handle.
  *
- * The bridge procedures resolve `getAppDeps()`/`getMenuEvents()`/
- * `getPowerResumeEvents()` from the transport registries — the desktop's REAL
- * impls, wired via `setAppDeps()` before this server starts.
+ * The bridge procedures resolve `getAppDeps()` from the api registry — the
+ * desktop's REAL impls, wired via `setAppDeps()` before this server starts.
  *
  * AUTH: loopback is NOT a trust boundary for this listener — the whole threat
  * this gate closes is "another process on the SAME box, also loopback,

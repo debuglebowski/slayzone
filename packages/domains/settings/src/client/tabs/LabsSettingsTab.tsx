@@ -1,60 +1,41 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '../trpc'
+import { getClientHost, useClientSettings } from '@slayzone/transport/client'
+import type { LabFlag } from '@slayzone/platform/client-host'
 import { Label, Switch } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
-const LABS_FEATURES = [
+const LABS_FEATURES: ReadonlyArray<{
+  key: LabFlag
+  /** Element id (kept from the hub-key era; e2e selects by it). */
+  id: string
+  label: string
+  description: string
+}> = [
   {
-    key: 'labs_tests_panel',
+    key: 'testsPanel',
+    id: 'labs_tests_panel',
     label: 'Tests Panel',
     description: 'Show test computer panel in the home tab'
   },
   {
-    key: 'labs_loop_mode',
+    key: 'loopMode',
+    id: 'labs_loop_mode',
     label: 'Loop Command',
     description: 'Repeat a prompt until acceptance criteria are met'
   }
-] as const
+]
 
 export function LabsSettingsTab() {
-  const trpc = useTRPC()
-  const [state, setState] = useState<Record<string, boolean>>({})
-
-  const testsPanelQuery = useQuery(trpc.app.meta.isTestsPanelEnabled.queryOptions())
-  const loopModeQuery = useQuery(trpc.app.meta.isLoopModeEnabled.queryOptions())
-  // Labs flags are client-scoped (they gate native menu items built before any hub
-  // exists), so they go through the app router to the desktop's client store — NOT
-  // `settings.set`, which would write a hub row nothing reads.
-  // Once saved, refresh every reader of the flags (the home Tests panel reads
-  // `isTestsPanelEnabled` live), whenever Settings closes.
-  const queryClient = useQueryClient()
-  const setLabFlagMutation = useMutation(
-    trpc.app.meta.setLabFlag.mutationOptions({
-      onSuccess: () =>
-        Promise.all([
-          queryClient.invalidateQueries({ queryKey: trpc.app.meta.isTestsPanelEnabled.queryKey() }),
-          queryClient.invalidateQueries({ queryKey: trpc.app.meta.isLoopModeEnabled.queryKey() })
-        ])
-    })
-  )
-
-  // Each new flag result re-seeds its switch (which a local toggle overrides in
-  // between) — adjusted while rendering.
-  const [seenTestsPanel, setSeenTestsPanel] = useState<typeof testsPanelQuery.data>()
-  if (testsPanelQuery.data !== seenTestsPanel) {
-    setSeenTestsPanel(testsPanelQuery.data)
-    if (testsPanelQuery.data !== undefined) {
-      setState((prev) => ({ ...prev, labs_tests_panel: !!testsPanelQuery.data }))
-    }
-  }
-
-  const [seenLoopMode, setSeenLoopMode] = useState<typeof loopModeQuery.data>()
-  if (loopModeQuery.data !== seenLoopMode) {
-    setSeenLoopMode(loopModeQuery.data)
-    if (loopModeQuery.data !== undefined) {
-      setState((prev) => ({ ...prev, labs_loop_mode: !!loopModeQuery.data }))
-    }
+  // Labs flags are this device's own (they gate native menu items built before any
+  // hub exists): the client host keeps them in client.config.json, and every window
+  // hears the change (`settings-changed`) — never a hub row.
+  const labs = useClientSettings()?.labs
+  // A local toggle shows at once; the host's next snapshot re-seeds it.
+  const [pending, setPending] = useState<Partial<Record<LabFlag, boolean>>>({})
+  const [seenLabs, setSeenLabs] = useState(labs)
+  if (labs !== seenLabs) {
+    setSeenLabs(labs)
+    setPending({})
   }
 
   return (
@@ -67,15 +48,15 @@ export function LabsSettingsTab() {
         {LABS_FEATURES.map((f) => (
           <div key={f.key} className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label htmlFor={f.key}>{f.label}</Label>
+              <Label htmlFor={f.id}>{f.label}</Label>
               <p className="text-xs text-muted-foreground">{f.description}</p>
             </div>
             <Switch
-              id={f.key}
-              checked={state[f.key] ?? false}
+              id={f.id}
+              checked={pending[f.key] ?? labs?.[f.key] ?? false}
               onCheckedChange={async (checked) => {
-                setState((prev) => ({ ...prev, [f.key]: checked }))
-                await setLabFlagMutation.mutateAsync({ key: f.key, on: checked })
+                setPending((prev) => ({ ...prev, [f.key]: checked }))
+                await getClientHost().call('labs.set', f.key, checked)
               }}
             />
           </div>

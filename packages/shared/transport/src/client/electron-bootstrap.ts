@@ -7,6 +7,7 @@ import type {
   SaveTargetOpenResult,
   SaveTargetRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
+import type { ElectronClientHost } from '@slayzone/platform/client-host'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type {
   LocalComputerHubs,
@@ -150,5 +151,10 @@ export const electronBootstrap = {
   // none — `window.api` itself is absent in the web shell. `@slayzone/task-browser`'s
   // typed client is the only intended reader.
   browserHost: (): ElectronBrowserHost | null =>
-    (typeof window !== 'undefined' ? window.api?.browserHost : undefined) ?? null
+    (typeof window !== 'undefined' ? window.api?.browserHost : undefined) ?? null,
+  // This device's client host (theme, labs, shortcuts, zoom, updates, native-menu
+  // events), or null where the shell installed none. `./client-host.ts`'s
+  // `getClientHost()` is the only intended reader.
+  clientHost: (): ElectronClientHost | null =>
+    (typeof window !== 'undefined' ? window.api?.clientHost : undefined) ?? null
 }

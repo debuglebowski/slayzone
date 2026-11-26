@@ -60,25 +60,31 @@ export type AppShellRouter = typeof appShellRouter
 /** Where `@slayzone/api` mounts it: `app.shell`. */
 export type AppShellMounts = { app: { shell: AppShellRouter } }
 
-// App metadata
+// App metadata.
+//
+// The labs flags, app zoom and the updater are RETIRED here (task 557ebb72): they are
+// this device's own and the renderer asks its client host (`@slayzone/platform/
+// client-host`). The paths stay for older desktops with what a hub without a desktop
+// answers — flags off, zoom 1, setters no-ops — and are never forwarded to a desktop.
+// Delete them once those versions have aged out.
 export const appMetaRouter = router({
   getVersion: publicProcedure.query(() => getHost().appGetVersion()),
   getTrpcPort: publicProcedure.query(() => getHost().appGetTrpcPort()),
-  isTestsPanelEnabled: publicProcedure.query(() => getHost().appIsTestsPanelEnabled()),
+  isTestsPanelEnabled: publicProcedure.query(() => false),
   setLabFlag: publicProcedure
     .input(z.object({ key: z.enum(['labs_tests_panel', 'labs_loop_mode']), on: z.boolean() }))
-    .mutation(({ input }) => getHost().appSetLabFlag(input.key, input.on)),
-  isLoopModeEnabled: publicProcedure.query(() => getHost().appIsLoopModeEnabled()),
-  getZoomFactor: publicProcedure.query(() => getHost().appGetZoomFactor()),
+    .mutation(() => undefined),
+  isLoopModeEnabled: publicProcedure.query(() => false),
+  getZoomFactor: publicProcedure.query(() => 1),
   getProtocolClientStatus: publicProcedure.query(() => getHost().appGetProtocolClientStatus()),
   getRendererZoomFactor: publicProcedure.query(() => getHost().appGetRendererZoomFactor()),
   checkCliInstalled: publicProcedure.query(() => getHost().appCheckCliInstalled()),
   installCli: publicProcedure.mutation(() => getHost().appInstallCli()),
   adjustZoom: publicProcedure
     .input(z.object({ command: z.enum(['in', 'out', 'reset']) }))
-    .mutation(({ input }) => getHost().appAdjustZoom(input.command)),
-  restartForUpdate: publicProcedure.mutation(() => getHost().appRestartForUpdate()),
-  checkForUpdates: publicProcedure.mutation(() => getHost().appCheckForUpdates()),
+    .mutation(() => 1),
+  restartForUpdate: publicProcedure.mutation(() => undefined),
+  checkForUpdates: publicProcedure.mutation(() => undefined),
   // Dark-launch side-car supervisor status (Diagnostics settings tab).
   getSidecarStatus: publicProcedure.query(() => getHost().appGetSidecarStatus()),
   revealSidecarLog: publicProcedure.mutation(() => getHost().appRevealSidecarLog())
@@ -123,10 +129,10 @@ export type AppWindowRouter = typeof appWindowRouter
 /** Where `@slayzone/api` mounts it: `app.window`. */
 export type AppWindowMounts = { app: { window: AppWindowRouter } }
 
-// Shortcuts — rebuild the native menu after the renderer persists custom
-// shortcut overrides. Was the `shortcuts:changed` IPC (preload bootstrap-only).
+// Shortcuts — RETIRED (task 557ebb72): the renderer writes overrides to its client
+// host, which rebuilds the native menu itself. Kept, a no-op, for older desktops.
 export const appShortcutsRouter = router({
-  changed: publicProcedure.mutation(() => getHost().appRebuildMenuForShortcuts())
+  changed: publicProcedure.mutation(() => undefined)
 })
 
 export type AppShortcutsRouter = typeof appShortcutsRouter

@@ -29,13 +29,15 @@ import {
   MoveVertical,
   Expand
 } from 'lucide-react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import {
   electronBootstrap,
   hubAllows,
   useHubId,
   useHubRegistryStore,
-  useSubscription
+  useSubscription,
+  useClientHostEvent,
+  useClientSettings
 } from '@slayzone/transport/client'
 import { terminalOnThisDevice } from './terminal-on-this-device'
 import { useTRPC, useTRPCClient } from './trpc'
@@ -899,9 +901,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   } | null>(null)
 
   // Loop command (labs feature)
-  // Live, so turning the lab flag on reaches already-open tasks (the Labs switch
-  // refreshes this query when its save lands).
-  const loopModeAvailable = useQuery(trpc.app.meta.isLoopModeEnabled.queryOptions()).data ?? false
+  // Live: a labs flag is this device's own (client host), and its change reaches every
+  // window, so turning it on reaches already-open tasks.
+  const loopModeAvailable = useClientSettings()?.labs.loopMode ?? false
   const [loopDialogOpen, setLoopDialogOpen] = useState(false)
   const loopConfigured =
     task?.loop_config != null &&
@@ -1185,12 +1187,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const viewId = browserPanelRef.current?.getActiveViewId()
     if (viewId) void handleScreenshot(viewId)
   })
-  useSubscription(
-    trpc.menu.onScreenshotTrigger.subscriptionOptions(undefined, {
-      enabled: !!shortcutActive,
-      onData: handleScreenshotTrigger
-    })
-  )
+  // From THIS device's client host only: a hub must never trigger a capture of the
+  // active browser view.
+  useClientHostEvent('screenshot-trigger', handleScreenshotTrigger, { enabled: !!shortcutActive })
 
   // Keep a ref so the onCloseCurrent handler always sees current browserTabs without re-subscribing
   const browserTabsRef = useRef(browserTabs)
@@ -1391,12 +1390,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     // Nothing was closed — close the task tab
     onCloseTab?.(taskId)
   })
-  useSubscription(
-    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, {
-      enabled: !!shortcutActive,
-      onData: handleCloseCurrentFocus
-    })
-  )
+  useClientHostEvent('close-current-focus', handleCloseCurrentFocus, { enabled: !!shortcutActive })
 
   const handleOpenArtifact = useStableCallback(
     ({ taskId: targetTaskId, artifactId }: { taskId: string; artifactId: string }) => {

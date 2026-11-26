@@ -1,18 +1,21 @@
 import { observable } from '@trpc/server/observable'
 import { z } from 'zod'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { getMenuEvents, type MenuEventMap, type UpdateStatus } from './menu-events'
+import type { UpdateStatus } from '@slayzone/platform/client-host'
+import { getMenuEvents, type HubMenuEventMap } from './menu-events'
 
 /**
- * Menu / app-shortcut signals. Mirrors (and in slice 5 replaces) the one-way
- * `app:*` / `browser:*` `webContents.send` broadcasts driven by native menus,
- * the `before-input-event` accelerator handler, the auto-updater, and the
- * REST/MCP task-open routes. The host dual-emits onto `menuEvents` (menu-events.ts)
- * alongside the legacy broadcasts; each `.emit(...)` fans out to every WS
- * subscriber. The legacy IPC broadcasts stay live in parallel until the renderer
- * drops IPC (slice 5). `getMenuEvents()` is read lazily inside each factory so the
- * standalone `@slayzone/hub` host (which never calls `setMenuEvents()`) doesn't
- * throw at import.
+ * Task and browser requests a HUB raises for the clients signed in to it (`slay
+ * tasks open`, `done --close`, an artifact to show, `slay browser` opening a panel or
+ * tab). `getMenuEvents()` is read lazily inside each factory so a host that never
+ * called `setMenuEvents()` doesn't throw at import.
+ *
+ * The native-menu / accelerator / updater / zoom subscriptions below are RETIRED
+ * (task 557ebb72): those events are this device's own and reach its renderers from
+ * its client host (`@slayzone/platform/client-host`), never a hub — a hub must not be
+ * able to trigger a screenshot of the active browser view or reload the app. The
+ * paths stay, inert, for older desktops that still subscribe; delete them once those
+ * versions have aged out.
  */
 /** An event for `principal` (undefined = not a user's request: everyone) reaches this
  *  subscriber. Same key as the browser relay's hosts: the user id, null when login-off. */
@@ -23,64 +26,34 @@ function forCaller(
   return principal === undefined || principal === (ctx.principal?.userId ?? null)
 }
 
+/** A retired client-local subscription: accepted, never fires. */
+const retired = <T>() => publicProcedure.subscription(() => observable<T>(() => () => undefined))
+
 export const menuRouter = router({
+  // Retired with the client-local events (e2e drives them through the desktop's
+  // `client-host:test-emit` now). Kept, inert, for the path's older callers.
   testEmit: publicProcedure
     .input(z.object({ event: z.enum(['close-current-focus', 'close-active-task']) }))
-    .mutation(({ input }) => {
+    .mutation(() => {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
-      getMenuEvents().emit(input.event)
     }),
-  onGoHome: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('go-home', h)
-      return () => ev.off('go-home', h)
-    })
-  ),
-  onToggleGlobalAgentPanel: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('toggle-global-agent-panel', h)
-      return () => ev.off('toggle-global-agent-panel', h)
-    })
-  ),
-  onToggleAgentStatusPanel: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('toggle-agent-status-panel', h)
-      return () => ev.off('toggle-agent-status-panel', h)
-    })
-  ),
-  onOpenSettings: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('open-settings', h)
-      return () => ev.off('open-settings', h)
-    })
-  ),
-  onOpenProjectSettings: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('open-project-settings', h)
-      return () => ev.off('open-project-settings', h)
-    })
-  ),
-  onNewTemporaryTask: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('new-temporary-task', h)
-      return () => ev.off('new-temporary-task', h)
-    })
-  ),
+  onGoHome: retired<void>(),
+  onToggleGlobalAgentPanel: retired<void>(),
+  onToggleAgentStatusPanel: retired<void>(),
+  onOpenSettings: retired<void>(),
+  onOpenProjectSettings: retired<void>(),
+  onNewTemporaryTask: retired<void>(),
+  onScreenshotTrigger: retired<void>(),
+  onCloseCurrentFocus: retired<void>(),
+  onCloseActiveTask: retired<void>(),
+  onSyncSessionId: retired<void>(),
+  onReloadBrowser: retired<void>(),
+  onReloadApp: retired<void>(),
+  onZoomFactorChanged: retired<number>(),
+  onUpdateStatus: retired<UpdateStatus>(),
   onOpenTask: publicProcedure.subscription(() =>
-    observable<MenuEventMap['open-task'][0]>((emit) => {
-      const h = (payload: MenuEventMap['open-task'][0]): void => emit.next(payload)
+    observable<HubMenuEventMap['open-task'][0]>((emit) => {
+      const h = (payload: HubMenuEventMap['open-task'][0]): void => emit.next(payload)
       const ev = getMenuEvents()
       ev.on('open-task', h)
       return () => ev.off('open-task', h)
@@ -102,75 +75,11 @@ export const menuRouter = router({
       return () => ev.off('open-artifact', h)
     })
   ),
-  onScreenshotTrigger: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('screenshot-trigger', h)
-      return () => ev.off('screenshot-trigger', h)
-    })
-  ),
-  onCloseCurrentFocus: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('close-current-focus', h)
-      return () => ev.off('close-current-focus', h)
-    })
-  ),
-  onCloseActiveTask: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('close-active-task', h)
-      return () => ev.off('close-active-task', h)
-    })
-  ),
-  onSyncSessionId: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('sync-session-id', h)
-      return () => ev.off('sync-session-id', h)
-    })
-  ),
-  onReloadBrowser: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('reload-browser', h)
-      return () => ev.off('reload-browser', h)
-    })
-  ),
-  onReloadApp: publicProcedure.subscription(() =>
-    observable<void>((emit) => {
-      const h = (): void => emit.next()
-      const ev = getMenuEvents()
-      ev.on('reload-app', h)
-      return () => ev.off('reload-app', h)
-    })
-  ),
-  onZoomFactorChanged: publicProcedure.subscription(() =>
-    observable<number>((emit) => {
-      const h = (factor: number): void => emit.next(factor)
-      const ev = getMenuEvents()
-      ev.on('zoom-factor-changed', h)
-      return () => ev.off('zoom-factor-changed', h)
-    })
-  ),
-  onUpdateStatus: publicProcedure.subscription(() =>
-    observable<UpdateStatus>((emit) => {
-      const h = (status: UpdateStatus): void => emit.next(status)
-      const ev = getMenuEvents()
-      ev.on('update-status', h)
-      return () => ev.off('update-status', h)
-    })
-  ),
   // A user's `slay browser` request opens tabs only in THAT user's own panel: on a
   // hub where tasks are shared, another user's agent never reaches yours.
   onBrowserEnsurePanelOpen: publicProcedure.subscription(({ ctx }) =>
-    observable<MenuEventMap['browser-ensure-panel-open'][0]>((emit) => {
-      const h = (payload: MenuEventMap['browser-ensure-panel-open'][0]): void => {
+    observable<HubMenuEventMap['browser-ensure-panel-open'][0]>((emit) => {
+      const h = (payload: HubMenuEventMap['browser-ensure-panel-open'][0]): void => {
         if (forCaller(payload.principal, ctx)) emit.next(payload)
       }
       const ev = getMenuEvents()
@@ -179,8 +88,8 @@ export const menuRouter = router({
     })
   ),
   onBrowserCreateTab: publicProcedure.subscription(({ ctx }) =>
-    observable<MenuEventMap['browser-create-tab'][0]>((emit) => {
-      const h = (payload: MenuEventMap['browser-create-tab'][0]): void => {
+    observable<HubMenuEventMap['browser-create-tab'][0]>((emit) => {
+      const h = (payload: HubMenuEventMap['browser-create-tab'][0]): void => {
         if (forCaller(payload.principal, ctx)) emit.next(payload)
       }
       const ev = getMenuEvents()

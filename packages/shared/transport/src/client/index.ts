@@ -106,6 +106,15 @@ export {
   type HubIssueEntry
 } from './hubIssues'
 export { electronBootstrap } from './electron-bootstrap'
+export {
+  clientHostShortcutBackend,
+  getClientHost,
+  loadClientSettings,
+  useClientHostEvent,
+  useClientSettings,
+  type ClientHost,
+  type ClientHostShortcutBackend
+} from './client-host'
 export { hubAllows, hubPermitsTelemetry, hubSupportsToolPreviews } from './hubCapabilities'
 export { useHubRegistryStore, seedHubRegistry } from './hubRegistryStore'
 export {

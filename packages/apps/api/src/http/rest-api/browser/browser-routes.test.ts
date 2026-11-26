@@ -13,7 +13,7 @@ import express from 'express'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
 import type { BrowserAccess, RestApiDeps } from '../types.js'
-import type { MenuEventMap } from '../../../app-deps.js'
+import type { HubMenuEventMap } from '../../../app-deps.js'
 import { registerBrowserNavigateRoute } from './navigate.js'
 import { registerBrowserNewTabRoute } from './new-tab.js'
 import { registerBrowserEvalRoute } from './eval.js'
@@ -44,7 +44,7 @@ const browser: BrowserAccess = {
   getUrl: async () => 'https://a.test/',
   capturePng: async () => null
 }
-const menu = new TypedEmitter<MenuEventMap>()
+const menu = new TypedEmitter<HubMenuEventMap>()
 const opened: unknown[] = []
 const created: unknown[] = []
 menu.on('browser-ensure-panel-open', (p) => opened.push(p))

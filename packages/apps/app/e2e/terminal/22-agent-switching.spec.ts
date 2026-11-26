@@ -4,9 +4,9 @@ import { openTaskTerminal, switchAgent, currentSession, seedSession } from '../f
 import type { ElectronApplication, Page } from '@playwright/test'
 
 // Simulate a native menu accelerator by invoking the real menu item from the
-// main process. The renderer consumes these signals via the tRPC `menu.*`
-// subscriptions (fed by `menuEvents`); the legacy `webContents.send('app:*')`
-// broadcasts are orphaned post-cutover, so driving them is a no-op.
+// main process. The renderer hears these signals from its client host (main's
+// `clientEvents` → client-host IPC); the legacy `webContents.send('app:*')`
+// broadcasts are orphaned, so driving them is a no-op.
 async function clickMenuItem(electronApp: ElectronApplication, labels: string[]): Promise<void> {
   await electronApp.evaluate(
     ({ Menu }: { Menu: typeof Electron.CrossProcessExports.Menu }, path: string[]) => {

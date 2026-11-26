@@ -5,8 +5,7 @@ import { observable } from '@trpc/server/observable'
 import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
 import { settingsWriteProcedure } from './settings-admin'
 import { SettingsService } from './service'
-import { settingsEvents } from './events'
-import { getSettingsHostDeps, notifySettingsWritten } from './settings-host-deps'
+import { notifySettingsWritten } from './settings-host-deps'
 import {
   clearProjectOverride,
   isLockedForProjects,
@@ -30,17 +29,7 @@ const settingsFor = (ctx: TrpcContext) =>
   SettingsService.forDatabase(ctx.db).forUser(ctx.principal?.userId ?? null)
 
 /**
- * Theme is Electron `nativeTheme`-backed (host-only), so the theme procedures
- * resolve the injected host deps (`settings-host-deps.ts`) — on the Electron host these run the real
- * nativeTheme API; when the renderer talks to the side-car they are forwarded
- * over the capability bridge to the host. The `theme:changed` event streams back
- * on the bridge's `theme` channel into this process's `settingsEvents`, which
- * `onThemeChanged` wraps. settings get/set/getAll stay electron-free (ctx.db).
- */
-
-/**
- * Mirrors the 3 `db:settings:*` + 3 `theme:*` IPC handlers (settings/main) plus
- * the `theme:changed` broadcast. get/set/getAll route through the warmed
+ * get/set/getAll route through the warmed
  * SettingsService singleton — `forDatabase` is keyed by `ctx.db`, the same handle
  * the app warmed and registered the IPC handlers against, so write-through cache
  * coherence holds across both paths. IPC + tRPC share one impl; renderer cutover
@@ -123,29 +112,25 @@ export const settingsRouter = router({
       notifySettingsWritten({ keys: [input.key] })
     }),
 
-  // --- Theme (Electron nativeTheme — host-only, via injected host deps) ---
+  // --- Theme mode: RETIRED (task 557ebb72) ---
+  //
+  // The mode (light / dark / system) is each device's own: the desktop keeps it in
+  // client.config.json (Electron main applies it before the first window paints), the
+  // shells in their own store — through the client host, never a hub. These paths
+  // stay for older desktops and mobile with a hub's own answer: 'system' (each device
+  // follows its OS, D2), an echo for a setter that stores nothing, and a change
+  // stream that never fires. The palette keys (`app_theme_*`) are ordinary settings.
 
-  getEffectiveTheme: publicProcedure.query(() => getSettingsHostDeps().themeGetEffective()),
+  getEffectiveTheme: publicProcedure.query((): 'dark' | 'light' => 'dark'),
 
-  getThemeSource: publicProcedure.query(() => getSettingsHostDeps().themeGetSource()),
+  getThemeSource: publicProcedure.query((): 'system' | 'light' | 'dark' => 'system'),
 
   setTheme: publicProcedure
     .input(themeInput)
-    .mutation(({ input }) => getSettingsHostDeps().themeSet(input)),
+    .mutation(({ input }): 'dark' | 'light' => (input === 'light' ? 'light' : 'dark')),
 
-  /**
-   * Replaces the `theme:changed` broadcast. Fires when nativeTheme.on('updated')
-   * triggers — an OS dark/light toggle while themeSource === 'system', or an
-   * explicit setTheme. Renderer subscribes here once it drops IPC (slice 5).
-   */
   onThemeChanged: publicProcedure.subscription(() =>
-    observable<'dark' | 'light'>((emit) => {
-      const handler = (effective: 'dark' | 'light'): void => emit.next(effective)
-      settingsEvents.on('theme:changed', handler)
-      return () => {
-        settingsEvents.off('theme:changed', handler)
-      }
-    })
+    observable<'dark' | 'light'>(() => () => undefined)
   )
 })
 

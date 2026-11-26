@@ -1,3 +1,4 @@
+import type { ElectronClientHost } from './client-host'
 import type { DeviceViewport } from './preview-devices'
 /**
  * The bootstrap-only `window.api` preload contract: the few calls the renderer
@@ -229,4 +230,9 @@ export interface ElectronBootstrapAPI {
   files: ElectronBootstrapFiles
   /** Absent where this device hosts no web views (web shell, a partial host). */
   browserHost?: ElectronBrowserHost
+  /**
+   * This device's client host (`@slayzone/platform/client-host`): Electron main over
+   * IPC, `localStorage` in the web shell, the Mojo KV in the chromium shell.
+   */
+  clientHost?: ElectronClientHost
 }

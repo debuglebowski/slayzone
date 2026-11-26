@@ -951,10 +951,10 @@ base.describe('Multi-hub federation (2 hubs)', () => {
         .toBe(true)
 
       // (5) NATIVE MENU → REMOTE TASK TAB — Cmd+W ("Close Tab") is raised by the
-      // Electron host and reaches only the LOCAL hub (the capability bridge). The
-      // remote task's page sits in the remote hub's HubScope, so it must still
-      // hear the host event. Emit it the way the menu does (on the local hub, via
-      // the window's default client) and require the remote task's tab to close.
+      // Electron host and reaches this window from its client host, not from any
+      // hub. The remote task's page sits in the remote hub's HubScope, so it must
+      // still hear it. Emit it the way the menu does (main's client events) and
+      // require the remote task's tab to close.
       const remoteTabOpen = () =>
         page.evaluate(
           (tid) =>
@@ -970,9 +970,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           remoteTaskId
         )
       expect(await remoteTabOpen()).toBe(true)
-      await page.evaluate(() =>
-        window.getTrpcVanillaClient().menu.testEmit.mutate({ event: 'close-current-focus' })
-      )
+      await page.evaluate(() => window.__testInvoke('client-host:test-emit', 'close-current-focus'))
       await expect.poll(remoteTabOpen, { timeout: 10_000, intervals: [250, 500] }).toBe(false)
 
       // (6) DESKTOP-ONLY CALLS FROM THE REMOTE HUB'S CLIENT — what a remote task pane

@@ -10,10 +10,13 @@ import { readJsonObject, writeJsonAtomic } from './slayzone-config'
  * This is the generalization of the rule already stated at the top of
  * `boot-config.ts`: if a process that cannot assume a hub exists needs a value,
  * that value must not live on a hub. `theme` is applied before the first window is
- * created (to avoid a flash), the native menu is built from `custom_shortcuts` and
- * the `labs_*` flags, and the floating panel's geometry is a property of this
- * display. None of them can wait for a round trip to a server that may not be
- * running, or may be in another country.
+ * created (to avoid a flash), the native menu and its key matcher are built from
+ * `customShortcuts` and the `labs` flags, and the floating panel's geometry is a
+ * property of this display. None of them can wait for a round trip to a server that
+ * may not be running, or may be in another country.
+ *
+ * The renderer reads and writes theme, labs and shortcuts through the client host
+ * (`./client-host.ts`, main's `client-host-ipc.ts`) — never through a hub.
  *
  * It also fixes a live split-brain: `initDatabases()` was never gated on mode, so
  * in REMOTE mode main read these keys from a local database while the renderer

@@ -1,4 +1,12 @@
-import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
+import {
+  test,
+  expect,
+  seed,
+  goHome,
+  clickProject,
+  resetApp,
+  emitClientEvent
+} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
 import type { Page } from '@playwright/test'
@@ -46,9 +54,8 @@ async function emitMenu(page: Page, event: 'close-current-focus' | 'close-active
         `later spec in this worker. Re-open the task tab before emitting.`
     )
   }
-  await page.evaluate((eventName) => {
-    return window.getTrpcVanillaClient().menu.testEmit.mutate({ event: eventName })
-  }, event)
+  // The menu item's event, fired the way main's menu fires it: the client host.
+  await emitClientEvent(page, event)
 }
 
 test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {

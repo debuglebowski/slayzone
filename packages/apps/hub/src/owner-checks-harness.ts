@@ -37,7 +37,6 @@ import {
 } from '@slayzone/terminal/server'
 import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
-import { settingsEvents } from '@slayzone/settings-core/server'
 // Not a dependency of the hub app; reached by path so it is the SAME module instance
 // the transport routers subscribe to (workspace symlinks resolve to this file).
 import {
@@ -510,33 +509,10 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'chat.onQueueChanged': (o) => getChatDeps().queueEvents.emit('queue-changed', o.tab),
   'chat.onQueueDrained': (o) => getChatDeps().queueEvents.emit('queue-drained', o.tab, o.mark),
   'chat.onReplayRequired': (o) => getChatDeps().events.emit('replay-required', o.tab, o.mark),
-  'menu.onGoHome': (o) => asUser(o.userId, () => getMenuEvents().emit('go-home')),
-  'menu.onToggleGlobalAgentPanel': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('toggle-global-agent-panel')),
-  'menu.onToggleAgentStatusPanel': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('toggle-agent-status-panel')),
-  'menu.onOpenSettings': (o) => asUser(o.userId, () => getMenuEvents().emit('open-settings')),
-  'menu.onOpenProjectSettings': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('open-project-settings')),
-  'menu.onNewTemporaryTask': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('new-temporary-task')),
   'menu.onOpenTask': (o) => getMenuEvents().emit('open-task', { taskId: o.task }),
   'menu.onCloseTask': (o) => getMenuEvents().emit('close-task', o.task),
   'menu.onOpenArtifact': (o) =>
     getMenuEvents().emit('open-artifact', { taskId: o.task, artifactId: o.artifact }),
-  'menu.onScreenshotTrigger': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('screenshot-trigger')),
-  'menu.onCloseCurrentFocus': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('close-current-focus')),
-  'menu.onCloseActiveTask': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('close-active-task')),
-  'menu.onSyncSessionId': (o) => asUser(o.userId, () => getMenuEvents().emit('sync-session-id')),
-  'menu.onReloadBrowser': (o) => asUser(o.userId, () => getMenuEvents().emit('reload-browser')),
-  'menu.onReloadApp': (o) => asUser(o.userId, () => getMenuEvents().emit('reload-app')),
-  'menu.onZoomFactorChanged': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('zoom-factor-changed', 1.1)),
-  'menu.onUpdateStatus': (o) =>
-    asUser(o.userId, () => getMenuEvents().emit('update-status', { type: 'checking' } as never)),
   'menu.onBrowserEnsurePanelOpen': (o) =>
     getMenuEvents().emit('browser-ensure-panel-open', { taskId: o.task }),
   'menu.onBrowserCreateTab': (o) =>
@@ -546,11 +522,9 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   // notify.onTasksChanged and task.onChanged are produced by a REAL `task.update` from
   // the owner's own client (see the test), not by an emit here. A task write no longer
   // signals settings-changed (it changes no setting), so that ping — a void signal
-  // attributed to who caused it — is emitted as the owner, like the menu events.
+  // attributed to who caused it — is emitted as the owner.
   'notify.onSettingsChanged': (o) =>
     asUser(o.userId, () => getNotifyEvents().emit('settings-changed')),
-  'settings.onThemeChanged': (o) =>
-    asUser(o.userId, () => settingsEvents.emit('theme:changed', 'dark')),
   'processes.onLog': (o) => getProcessesDeps().events.emit('log', o.process, o.mark),
   'processes.onStatus': (o) => getProcessesDeps().events.emit('status', o.process, 'running'),
   'processes.onTitle': (o) => getProcessesDeps().events.emit('title', o.process, o.mark),

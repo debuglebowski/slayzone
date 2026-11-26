@@ -38,7 +38,7 @@ vi.mock('electron-updater', () => ({
   }
 }))
 vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => {} }))
-vi.mock('./menu-events', () => ({ menuEvents: { emit: () => {} } }))
+vi.mock('./client-events', () => ({ clientEvents: { emit: () => {} } }))
 
 import { initAutoUpdater } from './auto-updater'
 

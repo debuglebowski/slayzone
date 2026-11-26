@@ -1,4 +1,9 @@
-import { HubScope, useFederationOrNull, useSubscription } from '@slayzone/transport/client'
+import {
+  HubScope,
+  useClientHostEvent,
+  useFederationOrNull,
+  useSubscription
+} from '@slayzone/transport/client'
 import { useStableCallback } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useTRPC, useTRPCClient } from '../trpc'
@@ -19,6 +24,11 @@ export interface HubTaskEventsProps {
  */
 export function HubTaskEvents(props: HubTaskEventsProps): React.JSX.Element {
   const fed = useFederationOrNull()
+  // A `slayzone://task/<id>` link opened on THIS device: its client host, not a hub.
+  useClientHostEvent('open-task', ({ taskId, background }) => {
+    if (background) props.guardTaskOpen(taskId, props.openTaskInBackground)
+    else props.openTask(taskId)
+  })
   // No federation (single-client boot): the ambient client is the only hub.
   if (!fed) return <HubTaskEventsListener {...props} />
   return (

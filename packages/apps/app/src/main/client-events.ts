@@ -1,13 +1,11 @@
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { MenuEventMap } from '@slayzone/api'
+import type { ClientEventMap } from '@slayzone/platform/client-host'
 
 /**
- * Host-owned bus for the one-way main→renderer menu / app-shortcut signals
- * (native menus, the `before-input-event` accelerator handler, the auto-updater,
- * the REST/MCP task-open routes). Source for the tRPC `menu.*` subscriptions
- * (slice-5 renderer consumes). Dual-emitted alongside the legacy `app:*` /
- * `browser:*` `webContents.send` broadcasts — both stay live until the renderer
- * drops IPC in slice 5. Injected into the transport package via `setMenuEvents()`
- * at boot so the `menuRouter` and the legacy broadcasts share one instance.
+ * Main's bus for THIS device's client events (`ClientHostEvents`): the native
+ * menus, the `before-input-event` accelerator handler, browser-view key forwarding,
+ * the auto-updater, app zoom and `slayzone://task/…` deep links emit here, and the
+ * client host (client-host-ipc.ts) pushes each to this device's renderers directly —
+ * never through a hub.
  */
-export const menuEvents = new TypedEmitter<MenuEventMap>()
+export const clientEvents = new TypedEmitter<ClientEventMap>()

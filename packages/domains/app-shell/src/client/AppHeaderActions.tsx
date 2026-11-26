@@ -1,7 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { FolderClosed, Focus, LayoutGrid, TerminalSquare } from 'lucide-react'
-import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
+import { getClientHost } from '@slayzone/transport/client'
 import {
   Tooltip,
   TooltipTrigger,
@@ -69,8 +68,6 @@ export function AppHeaderActions({
   updateVersion,
   updateDownloadPercent
 }: AppHeaderActionsProps): React.JSX.Element {
-  const trpc = useTRPC()
-  const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
   const btnSize = compact ? 'h-7 w-7' : 'size-10 rounded-lg'
   const iconSize = compact ? 'size-3.5' : 'size-5'
   return (
@@ -187,7 +184,7 @@ export function AppHeaderActions({
       <UpdateButton
         version={updateVersion}
         downloadPercent={updateDownloadPercent}
-        onRestart={() => restartForUpdate.mutate()}
+        onRestart={() => void getClientHost().call('update.restart')}
         size={compact ? 'sm' : 'lg'}
       />
     </>

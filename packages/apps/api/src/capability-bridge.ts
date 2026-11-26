@@ -3,14 +3,7 @@ import { initTRPC } from '@trpc/server'
 import superjson from 'superjson'
 import { observable } from '@trpc/server/observable'
 import { EventEmitter } from 'node:events'
-import { settingsEvents } from '@slayzone/settings-core/server'
-import {
-  getAppDeps,
-  getMenuEvents,
-  getPowerResumeEvents,
-  type AppDeps,
-  type MenuEventMap
-} from './app-deps'
+import { getAppDeps, type AppDeps } from './app-deps'
 
 /**
  * Capability bridge — the host↔side-car seam for the slice-9 local cutover.
@@ -21,6 +14,10 @@ import {
  * in the Electron host. So the side-car's `AppDeps` become thin proxies that
  * forward each call to the host over THIS router, and host-originated events
  * stream back over the single `events` subscription.
+ *
+ * Native menu / accelerator / updater / zoom events, the theme mode and the wake
+ * from sleep no longer cross it (task 557ebb72): the desktop's client host hands the
+ * first three to its own renderers directly, and the hub detects its own wake.
  *
  * Why a generic `invoke({path,args})` instead of mirroring every `app.*`
  * procedure: `AppDeps` already encodes window scoping as plain method ARGS
@@ -58,7 +55,7 @@ function resolveAppDepsMethod(path: string): (...args: unknown[]) => unknown {
 }
 
 /** Channels of host-originated events the side-car re-emits onto local buses. */
-export type CapabilityEventChannel = 'floatingAgent' | 'taskWindows' | 'menu' | 'power' | 'theme'
+export type CapabilityEventChannel = 'floatingAgent' | 'taskWindows'
 
 /** One host event, relayed verbatim. `args` are the emitter's listener args. */
 export type CapabilityEventFrame = {
@@ -68,7 +65,7 @@ export type CapabilityEventFrame = {
 }
 
 // Event names per channel — kept here next to the bridge (TypedEmitter has no
-// wildcard). Must match the events the `app.ts` / `menu.ts` subscriptions wrap.
+// wildcard). Must match the events the `app.*` subscriptions wrap.
 const FLOATING_EVENTS = ['state', 'session-changed', 'collapse-changed'] as const
 const TASK_WINDOWS_EVENTS = [
   'list-changed',
@@ -77,41 +74,13 @@ const TASK_WINDOWS_EVENTS = [
   'panels-released-on-close',
   'panels-close-request'
 ] as const
-const MENU_EVENTS: Array<keyof MenuEventMap> = [
-  'go-home',
-  'toggle-global-agent-panel',
-  'toggle-agent-status-panel',
-  'open-settings',
-  'open-project-settings',
-  'new-temporary-task',
-  'open-task',
-  'close-task',
-  'open-artifact',
-  'screenshot-trigger',
-  'close-current-focus',
-  'close-active-task',
-  'sync-session-id',
-  'reload-browser',
-  'reload-app',
-  'zoom-factor-changed',
-  'update-status',
-  'browser-ensure-panel-open',
-  'browser-create-tab',
-  'browser-agent-touched'
-]
-const POWER_EVENTS = ['resume'] as const
-// nativeTheme 'updated' (OS dark/light toggle) + explicit setTheme both emit
-// 'theme:changed' on the host's settingsEvents; relayed so the side-car's
-// `settings.onThemeChanged` subscription fires for the renderer.
-const THEME_EVENTS = ['theme:changed'] as const
-
 type AnyEmitter = AppDeps['floatingAgent']['events']
 
 /**
  * This router has its OWN tRPC instance with an EMPTY context, deliberately.
  *
- * Every procedure here resolves its implementation from the AppDeps/menu/power
- * registries and ignores the context entirely — but it used to be built on the
+ * Every procedure here resolves its implementation from the AppDeps registry and
+ * ignores the context entirely — but it used to be built on the
  * shared `TrpcContext`, whose `db: SlayzoneDb` is required. That meant the
  * desktop had to hand a live database handle to `createContext` purely to
  * satisfy a type nothing read, and so the Electron host kept a connection to the
@@ -135,7 +104,7 @@ export const capabilityBridgeRouter = router({
       return await fn(...input.args)
     }),
 
-  // One merged stream of every host-originated capability + menu + power event.
+  // One merged stream of every host-originated capability event.
   // The side-car routes each frame to the matching local emitter by `channel`.
   events: publicProcedure.subscription(() =>
     observable<CapabilityEventFrame>((emit) => {
@@ -157,9 +126,6 @@ export const capabilityBridgeRouter = router({
 
       wire('floatingAgent', deps.floatingAgent.events, FLOATING_EVENTS)
       wire('taskWindows', deps.taskWindows.events, TASK_WINDOWS_EVENTS)
-      wire('menu', getMenuEvents(), MENU_EVENTS as readonly string[])
-      wire('power', getPowerResumeEvents(), POWER_EVENTS)
-      wire('theme', settingsEvents, THEME_EVENTS)
 
       return () => {
         for (const off of offs) off()

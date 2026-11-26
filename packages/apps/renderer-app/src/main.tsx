@@ -1,5 +1,11 @@
 import { createRoot } from 'react-dom/client'
-import { deviceSettingsLink } from '@slayzone/transport/client'
+import {
+  clientHostShortcutBackend,
+  deviceSettingsLink,
+  getClientHost,
+  loadClientSettings
+} from '@slayzone/transport/client'
+import { adoptShortcutsFromHub } from '@slayzone/shortcuts'
 import { isDeviceSetting } from '@slayzone/settings-core/device-keys'
 import { TrpcProvider, electronBootstrap } from '@slayzone/transport/client'
 import { initTrpcClient } from './trpc'
@@ -7,7 +13,7 @@ import { ThemeProvider, AppearanceProvider } from '@slayzone/settings'
 import { PtyProvider, registerHibernatedSessionIdsSource } from '@slayzone/terminal'
 import { hibernatedSessionIdsSource } from '@slayzone/task-terminals/hibernated-sessions'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
-import { TooltipProvider, UndoProvider } from '@slayzone/ui'
+import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { ConvexAuthBootstrap } from '@slayzone/leaderboard'
 import { HomeView } from './HomeView'
 import { TaskDetailsView } from './TaskDetailsView'
@@ -103,9 +109,25 @@ export async function mountApp({ onboarding = true }: MountAppOptions = {}): Pro
   // `window.api.browserHost` (window-api-shim) — nothing about it rides tRPC.
   // FIRST initTrpcClient call wins; TrpcProvider reuses the singleton.
   // Device-only preferences stay on this device (plans/settings-by-scope.md, phase 4).
-  initTrpcClient(trpcUrl, {
+  const { client: hubClient } = initTrpcClient(trpcUrl, {
     links: [deviceSettingsLink({ isDeviceKey: isDeviceSetting, storage: window.localStorage })]
   })
+  // Shortcut overrides are this browser's own (the shell's client host store, D3),
+  // mirrored to the hub as best effort, after a one-time copy of the hub's map (D1) —
+  // same as the desktop.
+  setShortcutBackend(
+    clientHostShortcutBackend({
+      ready: loadClientSettings().then((client) =>
+        adoptShortcutsFromHub({
+          alreadyAdopted: client.shortcutsAdoptedFromHub,
+          readHub: () => hubClient.settings.get.query({ key: 'custom_shortcuts' }),
+          write: (overrides) =>
+            getClientHost().call('shortcuts.set', overrides, { adoptedFromHub: true })
+        })
+      ),
+      mirror: (json) => hubClient.settings.set.mutate({ key: 'custom_shortcuts', value: json })
+    })
+  )
 
   // Provider stack mirrors the Electron renderer (packages/apps/app/src/renderer/
   // src/main.tsx): TrpcProvider OUTERMOST (Pty/Appearance/Telemetry providers call

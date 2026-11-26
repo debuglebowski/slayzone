@@ -2,16 +2,8 @@ import { EventEmitter } from 'node:events'
 import { WebSocket } from 'ws'
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
-import { TypedEmitter } from '@slayzone/platform/events'
-import { settingsEvents } from '@slayzone/settings-core/server'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import type {
-  AppDeps,
-  CapabilityBridgeRouter,
-  CapabilityEventFrame,
-  MenuEventMap,
-  PowerResumeEventMap
-} from '@slayzone/api'
+import type { AppDeps, CapabilityBridgeRouter, CapabilityEventFrame } from '@slayzone/api'
 
 /**
  * Side-car → Electron-host capability bridge (slice 9 local cutover).
@@ -30,10 +22,6 @@ import type {
 
 export type HostBridge = {
   appDeps: AppDeps
-  /** Host-forwarded native menu/accelerator events + side-car-local emits land here. */
-  menuEvents: TypedEmitter<MenuEventMap>
-  /** Host `powerMonitor 'resume'`, forwarded so the side-car engine runs catchup. */
-  powerResume: TypedEmitter<PowerResumeEventMap>
   connect: () => void
   dispose: () => void
 }
@@ -72,17 +60,9 @@ export function createHostBridge(
   // and the host's events stream feeds them (plus side-car-local menu emits).
   const floatingEmitter = new EventEmitter()
   const taskWindowsEmitter = new EventEmitter()
-  const menuEvents = new TypedEmitter<MenuEventMap>()
-  const powerResume = new TypedEmitter<PowerResumeEventMap>()
-
   const emitterByChannel: Record<CapabilityEventFrame['channel'], EventEmitter> = {
     floatingAgent: floatingEmitter,
-    taskWindows: taskWindowsEmitter,
-    menu: menuEvents,
-    power: powerResume,
-    // Re-emit host theme:changed onto THIS process's settingsEvents singleton —
-    // the side-car's `settings.onThemeChanged` subscription wraps that instance.
-    theme: settingsEvents
+    taskWindows: taskWindowsEmitter
   }
 
   const makeNested = (prefix: string, emitter: EventEmitter): unknown =>
@@ -171,5 +151,5 @@ export function createHostBridge(
     }
   }
 
-  return { appDeps, menuEvents, powerResume, connect, dispose }
+  return { appDeps, connect, dispose }
 }

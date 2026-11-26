@@ -9,6 +9,7 @@ import { dialogShim } from './dialog'
 import { browserShim } from './browser'
 import { webviewShim } from './webview'
 import { browserHostShim } from './browser-host'
+import { clientHostShim } from './client-host'
 import { agentsShim } from './agents'
 import { tabsShim } from './tabs'
 import { makeStubNamespace } from './stub-factory'
@@ -81,6 +82,8 @@ export function buildApi(): ElectronAPI {
   api.webview = webviewShim
   // The canonical browser panel's client-local host (see ./browser-host.ts).
   api.browserHost = browserHostShim
+  // This device's client host: theme mode, labs, shortcuts over the Mojo KV.
+  api.clientHost = clientHostShim
   api.agents = agentsShim
   api.tabs = tabsShim
   return api as unknown as ElectronAPI

@@ -12,6 +12,7 @@
 // buy nothing. This file implements ONLY the real typed contract, and nothing
 // beyond it is silently stubbed — see the Proxy at the bottom.
 import type { ElectronAPI, HubEntry } from '@slayzone/types'
+import { createStorageClientHost } from '@slayzone/platform/client-host'
 import { resolveServerUrl, resolveWindowId } from './server-url'
 import { exportArtifactInBrowser } from './artifact-export'
 import { createBrowserSaveTargets } from './client-save'
@@ -146,6 +147,36 @@ function wrapNamespace<T extends object>(ns: T, prefix: string): T {
   })
 }
 
+/**
+ * This browser's client host (D3, task 557ebb72): theme mode, labs flags and shortcut
+ * overrides persist in `localStorage` — the device's own, like the desktop's
+ * client.config.json. No native menu, app zoom or updater here: those are inert.
+ */
+function createWebClientHost(): NonNullable<ElectronAPI['clientHost']> {
+  return createStorageClientHost({
+    kv: {
+      get: (key) => {
+        try {
+          return window.localStorage.getItem(key)
+        } catch {
+          return null
+        }
+      },
+      set: (key, value) => {
+        try {
+          window.localStorage.setItem(key, value)
+        } catch {
+          /* storage full or unavailable: the value lasts for this page */
+        }
+      }
+    },
+    systemTheme: () =>
+      typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark'
+  })
+}
+
 export function setupWindowApi(): ElectronAPI {
   // Deliberately a PLAIN object at the top level, not itself Proxy-wrapped:
   // `browser-mojo-link.ts` / `embedded-tab-host.ts` (shared renderer-app code
@@ -158,6 +189,7 @@ export function setupWindowApi(): ElectronAPI {
   // ordinary JS property-access rules.
   return {
     app: wrapNamespace(webApiTarget.app, '.app'),
-    files: wrapNamespace(webApiTarget.files, '.files')
+    files: wrapNamespace(webApiTarget.files, '.files'),
+    clientHost: createWebClientHost()
   }
 }

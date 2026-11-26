@@ -1,6 +1,5 @@
 import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { useTRPC, useTRPCClient } from '../trpc'
+import { useTRPCClient } from '../trpc'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +15,7 @@ import {
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
 import {
+  getClientHost,
   HubScope,
   useFederationOrNull,
   useHubIdForProject,
@@ -187,9 +187,7 @@ export function AppDialogs({
     deleteTask: useOwnerHubId({ taskId: deletingTask?.id }),
     deleteProject: useOwnerHubId({ projectId: deletingProject?.id })
   }
-  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
   return (
     <>
       {/* Dialogs — lazy-mounted on first trigger, stay mounted for close/reopen animations */}
@@ -396,7 +394,7 @@ export function AppDialogs({
       </AlertDialog>
       <UpdateToast
         version={updateToastDismissed ? null : updateVersion}
-        onRestart={() => restartForUpdate.mutate()}
+        onRestart={() => void getClientHost().call('update.restart')}
         onDismiss={() => setUpdateToastDismissed(true)}
       />
       <Suspense fallback={null}>

@@ -572,6 +572,12 @@ function currentStatePayload(): {
 
 // --- Public API ---
 
+/** `wc` is the floating global agent panel's own renderer (a client-host sender). */
+export function isFloatingGlobalAgentPanelWebContents(wc: { id: number }): boolean {
+  const win = floatingGlobalAgentPanelWindow
+  return !!win && !win.isDestroyed() && win.webContents.id === wc.id
+}
+
 export function attachFloatingGlobalAgentPanel(win: BrowserWindow): void {
   mainWindow = win
 

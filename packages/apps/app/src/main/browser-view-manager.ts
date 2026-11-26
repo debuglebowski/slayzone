@@ -24,11 +24,11 @@ const usesExtensions = (entry: { partition: string }): boolean =>
   entry.partition === LOCAL_BROWSER_PARTITION
 import { EventEmitter } from 'node:events'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { menuEvents } from './menu-events'
+import { clientEvents } from './client-events'
 
 // View event stream — forwarded to this app's renderers by the client-local browser
-// host (`browser-host-ipc.ts`). The `app:*` shortcut broadcasts below are also
-// emitted onto `menuEvents` for the `menu.*` subs.
+// host (`browser-host-ipc.ts`). App-menu keys pressed in a view (reload the app, go
+// home, …) go onto `clientEvents`, which the client host pushes to the renderers.
 export const browserViewEvents = new EventEmitter() as EventEmitter & {
   on(event: 'event', listener: (e: unknown) => void): EventEmitter
   on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
@@ -1528,7 +1528,7 @@ export class BrowserViewManager {
         return
       }
       if (action.kind === 'menu') {
-        menuEvents.emit(action.event)
+        clientEvents.emit(action.event)
         return
       }
 

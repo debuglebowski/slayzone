@@ -6,7 +6,8 @@ import {
   clickProject,
   clickSettings,
   resetApp,
-  settingsView
+  settingsView,
+  clientHostInvoke
 } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
@@ -21,12 +22,9 @@ const homePanelBtn = (page: import('@playwright/test').Page, label: string) =>
     .filter({ has: page.locator(`button:has-text("Kanban")`) })
     .locator(`button:has-text("${label}")`)
 
+// A labs flag is this device's own: set through the client host.
 const setTestsPanelLab = (page: import('@playwright/test').Page, on: boolean) =>
-  page.evaluate(
-    (v) =>
-      window.getTrpcVanillaClient().app.meta.setLabFlag.mutate({ key: 'labs_tests_panel', on: v }),
-    on
-  )
+  clientHostInvoke(page, 'labs.set', ['testsPanel', on])
 
 test.describe('Home panel shortcut follows the Tests panel lab flag', () => {
   test.beforeAll(async ({ mainWindow }) => {

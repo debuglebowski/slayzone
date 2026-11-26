@@ -264,6 +264,33 @@ function closeSessionLogCapture(): void {
  * IMPORTANT: Every .spec.ts file MUST call resetApp(mainWindow) inside
  * test.beforeAll to ensure parallel worker isolation.
  */
+/**
+ * Call this app's client host (`window.api.clientHost`): theme mode, labs flags,
+ * shortcut overrides, zoom, updates — this device's own, never a hub's.
+ */
+export function clientHostInvoke(page: Page, method: string, args: unknown[] = []) {
+  return page.evaluate(
+    ({ m, a }) =>
+      (
+        window as unknown as {
+          api: { clientHost: { invoke: (m: string, a: unknown[]) => Promise<unknown> } }
+        }
+      ).api.clientHost.invoke(m, a),
+    { m: method, a: args }
+  )
+}
+
+/**
+ * Fire a native-menu / accelerator event the way main's menu does, through the
+ * client host (`client-host:test-emit`, Playwright only). A hub cannot send these.
+ */
+export function emitClientEvent(page: Page, event: string, payload?: unknown) {
+  return page.evaluate(({ e, p }) => window.__testInvoke('client-host:test-emit', e, p), {
+    e: event,
+    p: payload
+  })
+}
+
 export async function resetApp(page: Page): Promise<void> {
   // Quiesce the renderer's debounced `viewState` write first. Otherwise a tab change
   // the previous spec made <500ms before this call is written AFTER the wipe below,
@@ -1004,7 +1031,7 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
    * The routes into that state are real and reachable: the renderer's Cmd+W /
    * Cmd+Shift+W handlers (useAppIpcListeners.ts) fall through to
    * `app.window.close()` when the active tab isn't the type they target, so a
-   * `menu.testEmit` fired while the HOME tab is active closes the main window —
+   * close event (`emitClientEvent`) fired while the HOME tab is active closes the main window —
    * measured, windows 1 → 0 with the process still running.
    *
    * The guard cannot REPAIR the run: worker-scoped fixtures hand each test the
@@ -1059,7 +1086,7 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
           (processAlive
             ? `The app CLOSED its own main window; it did not crash (process still running, ` +
               `${lostAtWindows} live window(s)). Usual cause: a close menu event (Cmd+W / ` +
-              `Cmd+Shift+W, incl. menu.testEmit) reaching the renderer while the active tab is ` +
+              `Cmd+Shift+W, incl. emitClientEvent) reaching the renderer while the active tab is ` +
               `not the type the handler targets — those handlers fall through to ` +
               `app.window.close().`
             : `The Electron process EXITED (code=${sharedProcExit?.code}, ` +
@@ -1322,8 +1349,8 @@ export function seed(page: Page) {
     getSetting: (key: string) =>
       page.evaluate((k) => window.getTrpcVanillaClient().settings.get.query({ key: k }), key),
 
-    setTheme: (theme: 'light' | 'dark' | 'system') =>
-      page.evaluate((t) => window.getTrpcVanillaClient().settings.setTheme.mutate(t), theme),
+    // The theme mode is this device's own: the client host, never a hub.
+    setTheme: (theme: 'light' | 'dark' | 'system') => clientHostInvoke(page, 'theme.set', [theme]),
 
     // --- Artifacts ---
 

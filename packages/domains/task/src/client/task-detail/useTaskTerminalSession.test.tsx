@@ -61,7 +61,9 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => trpcClient,
   useSubscription: (opts: { respawn?: typeof respawnSuggested }) => {
     if (opts.respawn) respawnSuggested = opts.respawn
-  }
+  },
+  // This device's client host (the sync-session-id menu event): inert here.
+  useClientHostEvent: () => undefined
 }))
 vi.mock('@slayzone/terminal', () => ({ markSkipCache: vi.fn() }))
 vi.mock('@slayzone/task-terminals', () => ({ markForceStart: vi.fn(), requestAgentStart: vi.fn() }))

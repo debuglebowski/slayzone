@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { TasksChange } from '@slayzone/task-contracts'
-import type { MenuEventMap } from '../../../app-deps'
+import type { HubMenuEventMap } from '../../../app-deps'
 
 interface StoredTab {
   id: string
@@ -34,7 +34,7 @@ export async function markTabAgentTouched(
   taskId: string,
   tabId: string | null,
   legacyBroadcast?: (channel: string, ...args: unknown[]) => void,
-  menu?: TypedEmitter<MenuEventMap>
+  menu?: TypedEmitter<HubMenuEventMap>
 ): Promise<void> {
   if (!tabId) return
   // Always announce: even if the DB row already has the flag, the renderer

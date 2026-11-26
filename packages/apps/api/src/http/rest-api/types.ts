@@ -10,7 +10,7 @@ import type {
 } from '@slayzone/terminal-contracts'
 import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap, UnattachedSession } from '@slayzone/terminal/server'
-import type { MenuEventMap } from '../../app-deps'
+import type { HubMenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { FindJoinTokenAccount, TakeoverCandidate } from '@slayzone/computers/server'
 import type { Scope } from '@slayzone/transport/scopes'
@@ -321,7 +321,7 @@ export interface RestApiDeps {
   /** Menu / app-shortcut bus — the SAME host-owned emitter injected via
    *  `setMenuEvents` (threaded here directly so route handlers never race the
    *  registry's async init). */
-  menu?: TypedEmitter<MenuEventMap>
+  menu?: TypedEmitter<HubMenuEventMap>
   taskBus?: TaskOpsBus
   pty?: PtyAccess
   chat?: ChatAccess

@@ -1,35 +1,39 @@
 import { create } from 'zustand'
 import {
   shortcutDefinitions,
+  normalizeShortcutOverrides,
   resolveShortcutKeys,
-  SHORTCUT_DEFAULT_MIGRATIONS,
-  SHORTCUT_ID_RENAMES,
   type ShortcutDefinition,
+  type ShortcutOverrides,
   type ShortcutScope
 } from '@slayzone/shortcuts'
 
-// Persistence + notify seam, injected at boot by the host (renderer wires it to
-// tRPC; see shortcut-backend in the app). @slayzone/ui is the base design-system
-// layer and deliberately has NO transport dependency, so the backend is passed
-// in rather than imported — the successor to the old `window.api` preload global.
+// Persistence seam, injected at boot by the host. @slayzone/ui is the base
+// design-system layer and deliberately has NO transport dependency, so the backend
+// is passed in rather than imported. The renderer wires it to THIS device's client
+// host (client.config.json on the desktop), which also rebuilds the native menu.
 export interface ShortcutBackend {
-  /** Read a persisted setting value (null when unset). */
-  get: (key: string) => Promise<string | null>
-  /** Persist a setting value. */
-  set: (key: string, value: string) => Promise<void>
-  /** Tell the host the shortcut map changed (rebuilds native menu accelerators). */
-  notifyChanged: () => void
+  /** The stored override map (null when none is stored). */
+  load: () => Promise<ShortcutOverrides | null>
+  /** Persist the whole map. */
+  save: (overrides: ShortcutOverrides) => Promise<void>
+  /** Another window (or the one-time hub adoption) changed the stored map. */
+  onChanged?: (listener: (overrides: ShortcutOverrides) => void) => () => void
 }
 
 let backend: ShortcutBackend | null = null
+let offChanged: (() => void) | null = null
 
 /** Wire the shortcut persistence backend. Call once at renderer boot, before
  *  the store's `load()` runs. */
 export function setShortcutBackend(b: ShortcutBackend): void {
   backend = b
+  offChanged?.()
+  offChanged =
+    b.onChanged?.((next) => {
+      useShortcutStore.setState({ overrides: normalizeShortcutOverrides(next).overrides })
+    }) ?? null
 }
-
-const SETTINGS_KEY = 'custom_shortcuts'
 
 interface ShortcutState {
   /** User overrides. `null` value means explicitly cleared (unbound). */
@@ -47,51 +51,22 @@ interface ShortcutState {
   setRecording: (recording: boolean) => void
 }
 
+const persist = async (overrides: ShortcutOverrides): Promise<void> => {
+  await backend?.save(overrides)
+}
+
 export const useShortcutStore = create<ShortcutState>((set, get) => ({
   overrides: {},
   isRecording: false,
   loaded: false,
 
   load: async () => {
-    const raw = (await backend?.get(SETTINGS_KEY)) ?? null
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw)
-        // Clear any user overrides that still match a retired default, so the
-        // new default takes effect. Registry lives next to shortcutDefinitions.
-        let changed = false
-        // Rename legacy shortcut ids first so subsequent migrations apply on the new id.
-        for (const { from, to } of SHORTCUT_ID_RENAMES) {
-          if (from in parsed) {
-            if (!(to in parsed)) parsed[to] = parsed[from]
-            delete parsed[from]
-            changed = true
-          }
-        }
-        for (const { id, oldDefault } of SHORTCUT_DEFAULT_MIGRATIONS) {
-          if (parsed[id] === oldDefault) {
-            delete parsed[id]
-            changed = true
-          }
-        }
-        // Clears used to be stored as '' — unbound is null.
-        for (const id of Object.keys(parsed)) {
-          if (parsed[id] === '') {
-            parsed[id] = null
-            changed = true
-          }
-        }
-        if (changed) {
-          await backend?.set(SETTINGS_KEY, JSON.stringify(parsed))
-          backend?.notifyChanged()
-        }
-        set({ overrides: parsed, loaded: true })
-      } catch {
-        set({ loaded: true })
-      }
-    } else {
-      set({ loaded: true })
-    }
+    const stored = await (backend?.load() ?? Promise.resolve(null)).catch(() => null)
+    // Renames, retired defaults and legacy '' clears (@slayzone/shortcuts) — the same
+    // rules main applies when it builds the native menu from the file.
+    const { overrides, changed } = normalizeShortcutOverrides(stored)
+    if (changed) await persist(overrides).catch(() => undefined)
+    set({ overrides, loaded: true })
   },
 
   getKeys: (id: string) => resolveShortcutKeys(get().overrides, id),
@@ -124,21 +99,18 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
   setOverride: async (id: string, keys: string | null) => {
     const newOverrides = { ...get().overrides, [id]: keys }
     set({ overrides: newOverrides })
-    await backend?.set(SETTINGS_KEY, JSON.stringify(newOverrides))
-    backend?.notifyChanged()
+    await persist(newOverrides)
   },
 
   batchSetOverrides: async (entries: Record<string, string | null>) => {
     const newOverrides = { ...get().overrides, ...entries }
     set({ overrides: newOverrides })
-    await backend?.set(SETTINGS_KEY, JSON.stringify(newOverrides))
-    backend?.notifyChanged()
+    await persist(newOverrides)
   },
 
   resetAll: async () => {
     set({ overrides: {} })
-    await backend?.set(SETTINGS_KEY, '{}')
-    backend?.notifyChanged()
+    await persist({})
   },
 
   setRecording: (recording: boolean) => set({ isRecording: recording })

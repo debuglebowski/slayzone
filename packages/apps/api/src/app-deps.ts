@@ -4,7 +4,6 @@
 // owns its router keeps that router's registry itself, e.g. terminal's
 // `setPtyDeps`/`setChatDeps`.)
 
-import type { TypedEmitter } from '@slayzone/platform/events'
 import type { HubSwitches } from '@slayzone/platform'
 import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
 import type { HostCapabilities } from '@slayzone/host-capabilities/server'
@@ -27,11 +26,11 @@ export {
   type SettingsChange
 } from '@slayzone/notify/server'
 
-// Menu / app-shortcut bus (`menu.*`) — lives with the `menu` router.
+// The hub's task/browser request bus (`menu.*`) — lives with the `menu` router.
 export {
   setMenuEvents,
   getMenuEvents,
-  type MenuEventMap
+  type HubMenuEventMap
 } from '@slayzone/host-capabilities/server'
 
 // Auth-callback bus (`app.auth.onCallback`) — lives with the `app.auth` router.
@@ -40,28 +39,6 @@ export {
   getAuthEvents,
   type AuthEventMap
 } from '@slayzone/host-capabilities/server'
-
-// Power-resume bus — Electron `powerMonitor.on('resume')` is host-only, but the
-// AutomationEngine (which runs catchup on wake) lives in the side-car after the
-// slice-9 cutover. The host fires `resume` on this emitter; the capability
-// bridge forwards it to the side-car, which calls `automationEngine.runCatchup()`.
-export type PowerResumeEventMap = {
-  resume: []
-}
-
-let powerResumeEvents: TypedEmitter<PowerResumeEventMap> | null = null
-
-export function setPowerResumeEvents(ev: TypedEmitter<PowerResumeEventMap>): void {
-  powerResumeEvents = ev
-}
-
-export function getPowerResumeEvents(): TypedEmitter<PowerResumeEventMap> {
-  if (!powerResumeEvents)
-    throw new Error(
-      'powerResumeEvents not initialized — call setPowerResumeEvents() in main host first'
-    )
-  return powerResumeEvents
-}
 
 // App-level ops — the grab-bag of main-process capabilities (backup, clipboard,
 // screenshot, leaderboard, export/import, usage, …) that the `app` router wraps.
@@ -108,15 +85,6 @@ export type AppDeps = HostCapabilities &
      * and then hand callers a Promise at runtime.
      */
     appGetDownloadsDir: () => Promise<string>
-    // Theme — Electron `nativeTheme`-backed (resolves 'system' against the OS), so
-    // host-only. The `settings.*Theme` tRPC procedures resolve these (through
-    // `settings-host-wiring.ts`; forwarded
-    // over the capability bridge); the `theme:changed` event streams back on the
-    // bridge's `theme` channel → the side-car's settingsEvents → onThemeChanged.
-    themeGetEffective: () => 'dark' | 'light'
-    themeGetSource: () => 'system' | 'light' | 'dark'
-    themeSet: (pref: 'light' | 'dark' | 'system') => Promise<'dark' | 'light'>
-
     // Credential cipher — Electron `safeStorage`-backed, so host-only. The side-car
     // runs as ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
     // forwards encrypt/decrypt here over the bridge. Base64 strings on the wire

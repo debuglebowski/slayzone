@@ -132,6 +132,8 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 run_harness packages/apps/api/src/path-ids.test.ts
 # worktree computer state for the Trash purge (R5-1)
 run_harness packages/apps/hub/src/worktree-computer-state.test.ts
+# Hub notices its own wake from sleep (automation catch-up, no desktop needed).
+run_harness packages/apps/hub/src/wake-watchdog.test.ts
 # Trash purge waits for the worktree computer (R5-1)
 # Trash purge removes a worktree on the computer it was made on (R6 follow-up)
 run_harness packages/apps/hub/src/trash-purge-worktree-owner.test.ts
@@ -537,6 +539,8 @@ run_harness packages/apps/app/src/main/browser-panel-policy.test.ts
 # The panel page link bridge acts only on a real user act; system browser only from own tabs
 run_harness packages/apps/app/src/main/panel-link-bridge.test.ts
 run_harness packages/apps/app/src/main/browser-host-routing.test.ts
+# Client host over IPC: sender check, allowlist, inputs, fan-out, update-status replay.
+run_harness packages/apps/app/src/main/client-host-ipc.test.ts
 # Criterion 4: the same migration against a COPY of a real store. Opt-in — no-ops
 # unless SLAYZONE_REAL_STORE_FIXTURE points at a real slayzone.sqlite. Asserts the
 # ORIGINAL is byte-untouched, because a test that reads your live database is one
@@ -819,6 +823,8 @@ run_harness packages/apps/api/src/http/rest-api/browser/screenshot.test.ts
 run_harness packages/apps/api/src/http/rest-api/browser/browser-routes.test.ts
 # slay browser open-panel / new-tab events reach only the requesting user's clients
 run_harness packages/shared/host-capabilities/src/server/menu-router.test.ts
+# No renderer listens to a hub for a client-local menu event (source scan).
+run_harness packages/shared/host-capabilities/src/server/client-events-not-from-hub.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
 run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
@@ -1513,6 +1519,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
+  packages/shared/transport/src/client/client-host.test.ts \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
   packages/shared/transport/src/client/runtime.test.ts \

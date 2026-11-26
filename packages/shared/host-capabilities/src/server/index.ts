@@ -47,7 +47,6 @@ export {
   type ShellHost,
   type MetaHost,
   type WindowHost,
-  type ShortcutsHost,
   type DialogHost,
   type AuthHost,
   type TaskWindowsHost
@@ -58,6 +57,6 @@ export { menuRouter, type MenuRouter, type MenuMounts } from './menu-router'
 export {
   setMenuEvents,
   getMenuEvents,
-  type MenuEventMap,
+  type HubMenuEventMap,
   type UpdateStatus
 } from './menu-events'

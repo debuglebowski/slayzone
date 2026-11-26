@@ -18,8 +18,12 @@ import {
   setDirectLinkProbe,
   setDirectRtcPeerFactory,
   seedHubRegistry,
-  deviceSettingsLink
+  deviceSettingsLink,
+  clientHostShortcutBackend,
+  getClientHost,
+  loadClientSettings
 } from '@slayzone/transport/client'
+import { adoptShortcutsFromHub } from '@slayzone/shortcuts'
 import { getHubClient, getTrpcClient, initTrpcClient } from './trpc'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
@@ -218,19 +222,26 @@ if (isFloatingGlobalAgentPanel) {
     // module-scope callers — incl. taskDetailCache.prefetch below and getTrpcClient()
     // in stores — work. TrpcProvider reuses this same client (one WS connection).
     initTrpcClient(trpcUrl, { links: deviceLinks() })
-    // Wire the shortcut store's persistence to tRPC (was the preload
-    // global). @slayzone/ui has no transport dependency, so the host injects the
-    // backend. Closures are lazy — they call getTrpcClient() only when invoked,
-    // which is always after the init above.
-    setShortcutBackend({
-      get: (key) => getTrpcClient().settings.get.query({ key }),
-      set: async (key, value) => {
-        await getTrpcClient().settings.set.mutate({ key, value })
-      },
-      notifyChanged: () => {
-        void getTrpcClient().app.shortcuts.changed.mutate()
-      }
-    })
+    // Shortcut overrides are this device's own (client.config.json, which main also
+    // builds the native menu and key matcher from): the store reads and writes them
+    // through the client host, and mirrors each save to the default hub as best
+    // effort (older app versions, a new device's adoption). The first boot after the
+    // move copies the hub's map over the file once (D1) — before the store loads.
+    const shortcutsAdopted = loadClientSettings().then((client) =>
+      adoptShortcutsFromHub({
+        alreadyAdopted: client.shortcutsAdoptedFromHub,
+        readHub: () => getTrpcClient().settings.get.query({ key: 'custom_shortcuts' }),
+        write: (overrides) =>
+          getClientHost().call('shortcuts.set', overrides, { adoptedFromHub: true })
+      })
+    )
+    setShortcutBackend(
+      clientHostShortcutBackend({
+        ready: shortcutsAdopted,
+        mirror: (json) =>
+          getTrpcClient().settings.set.mutate({ key: 'custom_shortcuts', value: json })
+      })
+    )
     await loadTabStoreState()
     electronBootstrap.bootMark('tabStoreReady resolved')
 

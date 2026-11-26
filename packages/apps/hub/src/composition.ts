@@ -161,13 +161,14 @@ import {
   resetAgentHookStateForTest,
   type AppDeps,
   type NotifyEventMap,
-  type MenuEventMap,
+  type HubMenuEventMap,
   type AuthEventMap,
   type RestApiDeps,
   type FloatingAgentState
 } from '@slayzone/api'
 import { createChatAttachmentReader } from './chat-attachment-reader'
 import { createHostBridge, type HostBridge } from './host-bridge.js'
+import { startWakeWatchdog } from './wake-watchdog.js'
 import { getDesktopBridgeCapUrl, getDesktopBridgeToken } from './desktop-bridge-address.js'
 import { getServerBuildInfo } from './build-info.js'
 import {
@@ -654,9 +655,8 @@ export function composeServer(opts: {
   // When supervised by the Electron desktop app, Electron-only capabilities
   // (browser-WCV, clipboard, dialogs, backup, task-windows, floating-agent,
   // native menus, …) can't run in this plain-node process — they forward to the
-  // desktop over the bridge, and desktop-originated events (native menus,
-  // power-resume) stream back. Truly standalone (no desktop): bridge stays null
-  // and the fail-loud stubs apply.
+  // desktop over the bridge, and the desktop's window/panel events stream back.
+  // Truly standalone (no desktop): bridge stays null and the fail-loud stubs apply.
   const desktopCapUrl = getDesktopBridgeCapUrl()
   const bridge: HostBridge | null =
     supervised && desktopCapUrl
@@ -670,10 +670,10 @@ export function composeServer(opts: {
   const notifyEvents = new TypedEmitter<NotifyEventMap>()
   const automationsEvents = new TypedEmitter<AutomationsEventMap>()
   const telemetryEvents = new TypedEmitter<TelemetryEventMap>()
-  // Native menu/app-shortcut events originate in the Electron host; when bridged
-  // they arrive on `bridge.menuEvents`, which ALSO carries this process's own
-  // emits (the MCP REST task-open route). Standalone: a local inert emitter.
-  const menuEvents = bridge ? bridge.menuEvents : new TypedEmitter<MenuEventMap>()
+  // Task/browser requests THIS hub raises for its clients (REST/MCP `tasks open`,
+  // `done --close`, `slay browser`). A desktop's native menu events never come here:
+  // its client host hands them to its own renderers.
+  const menuEvents = new TypedEmitter<HubMenuEventMap>()
   // Agent-lifecycle (hook-driven turn/state) — the agent-hook REST route lands
   // on THIS process now (pty runs here), so the side-car owns this bus.
   const agentLifecycleEvents = new TypedEmitter<AgentLifecycleEventMap>()
@@ -1661,13 +1661,15 @@ export function composeServer(opts: {
   // mutation — the renderer's tRPC mutations AND the CLI/MCP REST data routes
   // both run here, and `taskEvents` is process-local. So start the engine here
   // (cron + task-event + tag triggers). The Electron host's engine is NOT started
-  // in local mode — two engines on the shared DB would double-fire. Electron-only
-  // `powerMonitor 'resume'` is forwarded over the bridge → runCatchup().
+  // in local mode — two engines on the shared DB would double-fire. After the machine
+  // sleeps, the missed cron slots run once: the hub notices its own wake (no desktop
+  // needed — a standalone hub on a laptop catches up too). Overlaps with the boot
+  // catch-up are deduped by the engine (`catchupsRunning`).
   automationEngine.start(taskBus)
+  startWakeWatchdog({ onWake: () => void automationEngine.runCatchup() })
   // Expose the engine's bus so the tRPC `tags.setForTask` path can fire the
   // tag-change trigger (`db:taskTags:setForTask:done`) — closes the slice-7 gap.
   setTaskTriggerBus(taskBus)
-  bridge?.powerResume.on('resume', () => void automationEngine.runCatchup())
 
   // --- App-level deps: forwarded to the host when bridged (supervised), else
   // fail-loud stubs (truly standalone — no Electron host to forward to).
@@ -1708,13 +1710,6 @@ export function composeServer(opts: {
       // dialog itself is the stub that fails loud.
       appGetDownloadsDir: async () => join(homedir(), 'Downloads'),
       appGetTrpcPort: async () => boundPort,
-      // Graceful read-path defaults (flag getters / cosmetics) — a throwing stub
-      // here would break harmless renderer reads post-flip for no gain.
-      appIsTestsPanelEnabled: () => false,
-      // No desktop client to hold the flag when standalone.
-      appSetLabFlag: stub('appSetLabFlag'),
-      appIsLoopModeEnabled: () => false,
-      appGetZoomFactor: () => 1,
       appGetProtocolClientStatus: () => ({
         scheme: 'slayzone',
         attempted: false,
@@ -1732,9 +1727,6 @@ export function composeServer(opts: {
       appCheckCliInstalled: async () =>
         hubProcessesEnabled() ? checkCliInstalled() : checkCliInstalledAtTarget(),
       appInstallCli: stub('appInstallCli'),
-      appAdjustZoom: stub('appAdjustZoom'),
-      appRestartForUpdate: stub('appRestartForUpdate'),
-      appCheckForUpdates: stub('appCheckForUpdates'),
       // Read-path: a renderer served BY this server is asking about the server
       // itself — report self status instead of a supervisor snapshot. It IS the
       // running build, so runningBuildId is its own; there's no supervisor here to
@@ -1761,13 +1753,6 @@ export function composeServer(opts: {
       appFocusRenderer: noop,
       // No window to raise on a headless host.
       appRaiseMainWindow: noop,
-      // No OS nativeTheme off-Electron. Default the preference to "system" so the
-      // renderer resolves dark/light from `prefers-color-scheme` (ThemeContext);
-      // an explicit light/dark still applies for the session. (Cross-restart
-      // persistence of an explicit choice in the fork is a follow-up.)
-      themeGetEffective: () => 'dark',
-      themeGetSource: () => 'system',
-      themeSet: async (pref) => (pref === 'light' ? 'light' : 'dark'),
       // No Electron safeStorage on a headless host — report unavailable so the
       // credential store uses its plaintext fallback (gated on availability). The encrypt/
       // decrypt stubs are never reached because the cipher stays unset standalone.
@@ -1776,8 +1761,6 @@ export function composeServer(opts: {
         encryptStringToB64: stub('credentialCipher.encryptStringToB64'),
         decryptStringFromB64: stub('credentialCipher.decryptStringFromB64')
       },
-      // No native menu on a headless host.
-      appRebuildMenuForShortcuts: noop,
 
       // Chromium-fork GitHub OAuth start. Unlike the Electron host (which blocks
       // waiting for the deep-link and returns the code inline), the fork CANNOT

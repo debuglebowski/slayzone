@@ -6,19 +6,17 @@ import {
   clickSettings,
   openTaskById,
   TEST_PROJECT_PATH,
-  settingsView
+  settingsView,
+  clientHostInvoke
 } from '../fixtures/electron'
 
 // An already-open task picks up the Loop command lab flag as soon as it's turned
 // on. The task view used to read the flag once when it mounted, so the Loop
 // button only appeared after the task was closed and reopened.
 
+// A labs flag is this device's own: set through the client host.
 const setLoopModeLab = (page: import('@playwright/test').Page, on: boolean) =>
-  page.evaluate(
-    (v) =>
-      window.getTrpcVanillaClient().app.meta.setLabFlag.mutate({ key: 'labs_loop_mode', on: v }),
-    on
-  )
+  clientHostInvoke(page, 'labs.set', ['loopMode', on])
 
 test.describe('Loop command lab flag reaches an open task', () => {
   let taskId = ''

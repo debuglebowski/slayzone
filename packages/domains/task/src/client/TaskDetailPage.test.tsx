@@ -313,6 +313,9 @@ vi.mock('@slayzone/transport/client', () => {
     useHubRegistryStore: (sel: (s: { hubs: unknown[]; defaultHubId: string }) => unknown) =>
       sel({ hubs: [], defaultHubId: 'local' }),
     useSubscription: () => undefined,
+    // This device's client host (menu events, labs): inert here.
+    useClientHostEvent: () => undefined,
+    useClientSettings: () => null,
     hubAllows: async () => false
   }
 })

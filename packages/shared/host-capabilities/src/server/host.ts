@@ -38,16 +38,6 @@ export type ShellHost = {
 export type MetaHost = {
   appGetVersion: () => string
   appGetTrpcPort: () => Promise<number>
-  appIsTestsPanelEnabled: () => boolean
-  /**
-   * Labs flags are CLIENT-scoped — they gate native menu items the host builds
-   * before any hub exists, so they live in the client store. The read already came
-   * through AppDeps; this is the matching write, without which the Labs tab would
-   * update a hub row nothing reads.
-   */
-  appSetLabFlag: (key: 'labs_tests_panel' | 'labs_loop_mode', on: boolean) => Promise<void>
-  appIsLoopModeEnabled: () => boolean
-  appGetZoomFactor: () => number
   appGetProtocolClientStatus: () => {
     scheme: string
     attempted: boolean
@@ -57,9 +47,6 @@ export type MetaHost = {
   appGetRendererZoomFactor: () => number | null
   appCheckCliInstalled: () => Promise<CliStatus>
   appInstallCli: () => Promise<CliInstallResult>
-  appAdjustZoom: (command: 'in' | 'out' | 'reset') => number
-  appRestartForUpdate: () => Promise<void>
-  appCheckForUpdates: () => Promise<void>
 
   // side-car supervisor (dark-launch) — read-only status + log reveal for the
   // Diagnostics settings tab. Shape mirrors the host's `SidecarStatus`
@@ -108,13 +95,6 @@ export type WindowHost = {
   // window.close — closes the window owning the connection (ctx.windowId).
   // Same effect as the `window:close` IPC (which uses event.sender).
   windowClose: (windowId: number) => void
-}
-
-export type ShortcutsHost = {
-  // shortcuts — rebuild the native app menu from the persisted custom-shortcut
-  // overrides after the renderer writes them (was the `shortcuts:changed` IPC).
-  // No-op on a headless host (no native menu).
-  appRebuildMenuForShortcuts: () => void
 }
 
 export type DialogHost = {
@@ -174,7 +154,6 @@ export type HostCapabilities = ClipboardHost &
   ShellHost &
   MetaHost &
   WindowHost &
-  ShortcutsHost &
   DialogHost &
   AuthHost & { taskWindows: TaskWindowsHost }
 

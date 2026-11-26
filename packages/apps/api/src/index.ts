@@ -34,7 +34,7 @@ export { setNotifyEvents, getNotifyEvents, type NotifyEventMap } from './app-dep
 // The automations domain's bus setter, re-exported for the Electron host, which
 // reaches it through its lazy `import('@slayzone/api')` (one registry, the domain's).
 export { setAutomationsEvents } from '@slayzone/automations/server'
-export { setMenuEvents, getMenuEvents, type MenuEventMap } from './app-deps'
+export { setMenuEvents, getMenuEvents, type HubMenuEventMap } from './app-deps'
 export { setAuthEvents, getAuthEvents, type AuthEventMap } from './app-deps'
 export {
   requestGithubSignInStart,
@@ -64,11 +64,6 @@ export {
   type HubDescribeDeps
 } from './app-deps'
 export { setHubAdminDeps, getHubAdminDeps, type HubAdminDeps } from './hub-admin-deps'
-export {
-  setPowerResumeEvents,
-  getPowerResumeEvents,
-  type PowerResumeEventMap
-} from './app-deps'
 // The tags router's trigger bus lives with it; re-exported so the hub wires it here.
 export { setTaskTriggerBus, getTaskTriggerBus, type TaskTriggerBus } from '@slayzone/tags/server'
 // The browser panel's hub side: which client owns a task's live tabs (`slay browser`

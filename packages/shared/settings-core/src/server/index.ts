@@ -7,7 +7,6 @@
  * @module settings-core/server
  */
 export { SettingsService, type SettingsView, type ThemePreference } from './service'
-export { settingsEvents, type SettingsEventMap } from './events'
 export {
   isMachineLocalSetting,
   LOCAL_COMPUTER_WORK_ROOTS_KEY,

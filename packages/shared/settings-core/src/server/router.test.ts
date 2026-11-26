@@ -3,8 +3,7 @@
  * tRPC `createCaller` against the in-memory harness DB. Ports the coverage from
  * the legacy settings IPC-handler test
  * (domains/settings/src/electron/handlers.test.ts), including the warmed-cache
- * coherency regression. Theme procs are Electron nativeTheme-backed (host deps)
- * and were not covered by the handler test — out of scope here.
+ * coherency regression. The retired theme procs answer constants (last test).
  * Run with: electron + experimental-loader (see test-utils/run-all.sh).
  */
 import { test, expect } from 'vitest'
@@ -49,15 +48,7 @@ test('settings router: set tells every window which key changed (cross-window sy
   // A second window (secondary task window) learns of this window's settings writes
   // only through notify.onSettingsChanged — set must signal it, scoped to the key.
   const seen: SettingsChange[] = []
-  const unwired = () => {
-    throw new Error('theme not wired in this test')
-  }
-  setSettingsHostDeps({
-    themeGetEffective: unwired,
-    themeGetSource: unwired,
-    themeSet: unwired,
-    onSettingsWritten: (change) => seen.push(change)
-  })
+  setSettingsHostDeps({ onSettingsWritten: (change) => seen.push(change) })
   await caller.set({ key: 'panel_config', value: '{"webPanels":[]}' })
   expect(seen).toEqual([{ keys: ['panel_config'] }])
 })
@@ -256,4 +247,17 @@ test('settings router: a hub lock ignores project values and refuses new ones', 
     value: 'codex',
     source: 'project'
   })
+})
+
+// Theme mode is client-local (task 557ebb72, D2/D5): each device keeps its own in
+// client.config.json, read by Electron main. The hub keeps these paths for older
+// desktops and mobile with constant answers — it never forwards to a desktop.
+test('settings router: theme procedures answer constants, with no host behind them', async () => {
+  setSettingsHostDeps({ onSettingsWritten: () => undefined })
+  expect(await caller.getThemeSource()).toBe('system')
+  expect(await caller.getEffectiveTheme()).toBe('dark')
+  expect(await caller.setTheme('light')).toBe('light')
+  expect(await caller.setTheme('system')).toBe('dark')
+  // Still 'system': the hub stores nothing.
+  expect(await caller.getThemeSource()).toBe('system')
 })

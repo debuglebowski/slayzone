@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { getClientHost, loadClientSettings, useClientHostEvent } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { useTrack } from '@slayzone/telemetry/client'
@@ -17,21 +17,22 @@ import {
 import { applyTheme } from './apply-theme'
 import { readThemeCache, resolveThemeCache, systemTheme, writeThemeCache } from './theme-cache'
 
-// "system" is resolved in the renderer (`systemTheme`, theme-cache.ts): the
-// chromium-fork sidecar has no Electron `nativeTheme`, so its server-side
-// effective-theme is a constant. matchMedia reflects nativeTheme in Electron too.
+// The theme MODE (light / dark / system) is this device's own: the client host keeps
+// it (client.config.json, applied by Electron main before the first window paints;
+// the shells' own store elsewhere), never a hub. The palette keys (`app_theme_*`)
+// stay hub settings. "system" is resolved in the renderer (`systemTheme`,
+// theme-cache.ts); matchMedia reflects nativeTheme in Electron too.
 
 // Effective dark/light from the user's preference: explicit wins, "system" maps
-// to the OS, and a non-preference value falls back to the server's answer.
-function resolveEffective(source: ThemePreference, serverEffective: Theme): Theme {
-  return resolveThemeVariant(source, systemTheme, serverEffective)
+// to the OS, and a non-preference value falls back to the host's answer.
+function resolveEffective(source: ThemePreference, hostEffective: Theme): Theme {
+  return resolveThemeVariant(source, systemTheme, hostEffective)
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { track } = useTrack()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const setThemeMutation = useMutation(trpc.settings.setTheme.mutationOptions())
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
   // First paint uses the last-applied settings (theme-cache.ts, also applied by
@@ -77,8 +78,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const initialize = async () => {
       const [
-        effective,
-        source,
+        client,
         savedThemeId,
         savedSplit,
         savedDark,
@@ -86,8 +86,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         savedTermOvrId,
         savedEditorOvrId
       ] = await Promise.all([
-        queryClient.fetchQuery(trpc.settings.getEffectiveTheme.queryOptions()),
-        queryClient.fetchQuery(trpc.settings.getThemeSource.queryOptions()),
+        loadClientSettings(),
         getSetting(APP_THEME_SETTING_KEYS.themeId),
         getSetting(APP_THEME_SETTING_KEYS.split),
         getSetting(APP_THEME_SETTING_KEYS.themeIdDark),
@@ -116,7 +115,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         })
       }
 
-      const resolved = resolveEffective(source, effective)
+      const source = client.theme
+      const resolved = resolveEffective(source, client.effectiveTheme)
       setTheme(resolved)
       setPreferenceState(source)
       setSingleThemeId(selection.singleThemeId)
@@ -145,18 +145,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Replaces the old preload theme listener: fires on OS dark/light toggle (when
-  // source === 'system') or an explicit setTheme.
-  useSubscription(
-    trpc.settings.onThemeChanged.subscriptionOptions(undefined, {
-      onData: (effective) => setTheme(effective)
-    })
-  )
+  // The mode changed in another window (or the OS toggled while it is 'system'):
+  // this device's client host tells every window.
+  useClientHostEvent('settings-changed', (client) => {
+    setPreferenceState(client.theme)
+    setTheme(resolveEffective(client.theme, client.effectiveTheme))
+  })
 
-  // Follow OS dark/light while the preference is "system". The fork sidecar can't
-  // push OS changes (no nativeTheme), so this renderer-side listener is what makes
-  // system mode track the OS there; on Electron it harmlessly mirrors the
-  // onThemeChanged push.
+  // Follow OS dark/light while the preference is "system". The shells' storage hosts
+  // can't push OS changes (no nativeTheme), so this renderer-side listener is what
+  // makes system mode track the OS there; on Electron it harmlessly mirrors the
+  // host's settings-changed push.
   useEffect(() => {
     if (preference !== 'system') return
     if (typeof window === 'undefined' || !window.matchMedia) return
@@ -195,9 +194,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   ])
 
   const setPreference = useStableCallback(async (nextPreference: ThemePreference) => {
-    const serverEffective = await setThemeMutation.mutateAsync(nextPreference)
+    const hostEffective = await getClientHost().call('theme.set', nextPreference)
     setPreferenceState(nextPreference)
-    setTheme(resolveEffective(nextPreference, serverEffective))
+    setTheme(resolveEffective(nextPreference, hostEffective))
     track('theme_changed', { mode: nextPreference as 'light' | 'dark' | 'system' })
   })
 

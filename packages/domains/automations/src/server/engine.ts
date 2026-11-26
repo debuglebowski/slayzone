@@ -188,7 +188,7 @@ export class AutomationEngine {
    * matched between last_run_at and now, fire once (coalesced — never replay
    * every missed slot).
    *
-   * Public so external triggers (e.g. powerMonitor.resume) can re-run it.
+   * Public so external triggers (the hub's wake-from-sleep watchdog) can re-run it.
    */
   async runCatchup(): Promise<void> {
     const rows = (await this.db.all<AutomationRow>(

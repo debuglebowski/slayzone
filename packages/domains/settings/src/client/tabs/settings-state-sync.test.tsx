@@ -50,11 +50,33 @@ const trpc = trpcProxy()
 
 // The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
 vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
+// This device's client host (labs flags): a snapshot the test swaps, and the calls.
+type Labs = { testsPanel: boolean; loopMode: boolean }
+let clientLabs: { labs: Labs } | null = null
+const clientLabsListeners = new Set<() => void>()
+const setClientLabs = (next: Labs): void => {
+  clientLabs = { labs: next }
+  for (const l of clientLabsListeners) l()
+}
+let clientHostCalls: unknown[][] = []
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => trpc,
   useTRPCClient: () => ({}),
   useSubscription: () => undefined,
-  hubAllows: async () => true
+  hubAllows: async () => true,
+  useClientSettings: () =>
+    React.useSyncExternalStore(
+      (cb) => {
+        clientLabsListeners.add(cb)
+        return () => clientLabsListeners.delete(cb)
+      },
+      () => clientLabs
+    ),
+  getClientHost: () => ({
+    call: async (...args: unknown[]) => {
+      clientHostCalls.push(args)
+    }
+  })
 }))
 
 type Kids = { children?: React.ReactNode }
@@ -208,36 +230,31 @@ afterEach(() => {
 
 describe('LabsSettingsTab', () => {
   it('mirrors the flags, keeps local toggles, re-seeds on new data', async () => {
-    results['app.meta.isTestsPanelEnabled'] = true
-    results['app.meta.isLoopModeEnabled'] = false
+    clientLabs = null
+    clientHostCalls = []
     renderTab(<LabsSettingsTab />)
     expect(switchState('labs_tests_panel')).toBe('false')
-    await flush()
+    act(() => setClientLabs({ testsPanel: true, loopMode: false }))
     expect(switchState('labs_tests_panel')).toBe('true')
     expect(switchState('labs_loop_mode')).toBe('false')
 
     fireEvent.click(document.getElementById('labs_loop_mode') as HTMLElement)
     await flush()
     expect(switchState('labs_loop_mode')).toBe('true')
-    expect(mutations).toEqual([
-      { path: 'app.meta.setLabFlag', input: { key: 'labs_loop_mode', on: true } }
-    ])
+    // Through this device's client host — never a hub mutation.
+    expect(clientHostCalls).toEqual([['labs.set', 'loopMode', true]])
+    expect(mutations).toEqual([])
 
-    results['app.meta.isTestsPanelEnabled'] = false
-    await refetchAll()
+    act(() => setClientLabs({ testsPanel: false, loopMode: true }))
     expect(switchState('labs_tests_panel')).toBe('false')
-    // loop-mode data unchanged (false → false, same value) → local toggle kept.
     expect(switchState('labs_loop_mode')).toBe('true')
   })
 
-  it('seeds straight from cached data on remount', async () => {
-    results['app.meta.isTestsPanelEnabled'] = true
-    results['app.meta.isLoopModeEnabled'] = true
+  it('seeds straight from the current snapshot on remount', async () => {
+    setClientLabs({ testsPanel: true, loopMode: true })
     renderTab(<LabsSettingsTab />)
-    await flush()
     cleanup()
     renderTab(<LabsSettingsTab />)
-    await flush()
     expect(switchState('labs_tests_panel')).toBe('true')
     expect(switchState('labs_loop_mode')).toBe('true')
   })

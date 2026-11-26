@@ -1,12 +1,8 @@
 /**
- * Host deps of the settings router — what it needs that this domain cannot own.
- *
- * - Theme: Electron `nativeTheme`-backed, so host-only. On the desktop these run the
- *   real nativeTheme API; in the side-car they forward over the capability bridge.
- *   They stay members of api's bridged `AppDeps` (the bridge forwards `AppDeps` by
- *   member name), so api registers lazy delegates to them here.
- * - `onSettingsWritten`: tell every window which keys a write changed — api's
- *   notify bus (`notify.onSettingsChanged`).
+ * Host deps of the settings router — what it needs that this domain cannot own:
+ * `onSettingsWritten`, telling every window which keys a write changed (api's notify
+ * bus, `notify.onSettingsChanged`). The theme mode is not a hub setting at all (each
+ * device's client host keeps it; the router's theme paths answer constants).
  *
  * api calls `setSettingsHostDeps()` once at load (`app-deps.ts`), so every host
  * that composes the app router has it wired.
@@ -20,9 +16,6 @@ export interface SettingsChange {
 }
 
 export type SettingsHostDeps = {
-  themeGetEffective: () => 'dark' | 'light'
-  themeGetSource: () => 'system' | 'light' | 'dark'
-  themeSet: (pref: 'light' | 'dark' | 'system') => Promise<'dark' | 'light'>
   onSettingsWritten: (change: SettingsChange) => void
 }
 
