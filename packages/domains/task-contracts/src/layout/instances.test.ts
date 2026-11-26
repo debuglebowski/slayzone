@@ -135,7 +135,10 @@ describe('panel_instance_state', () => {
     const a = patchInstanceState(null, 'editor:1', { editorOpenFiles: { files: ['a'] } })
     const b = patchInstanceState(a, 'git:2', { gitTab: 'changes' })
     const c = patchInstanceState(b, 'git:2', { gitTab: undefined, repoName: 'r' })
-    expect(c).toEqual({ 'editor:1': { editorOpenFiles: { files: ['a'] } }, 'git:2': { repoName: 'r' } })
+    expect(c).toEqual({
+      'editor:1': { editorOpenFiles: { files: ['a'] } },
+      'git:2': { repoName: 'r' }
+    })
     expect(withoutInstanceState(c, 'git:2')).toEqual({
       'editor:1': { editorOpenFiles: { files: ['a'] } }
     })

@@ -99,7 +99,6 @@ async function ensureGitPanelVisible(page: import('@playwright/test').Page) {
     // mounted `invisible` (visibility: hidden) has its own Git toggle, which `:visible`
     // still matches but the accessibility tree leaves out.
     const gitToggle = page.getByRole('button', { name: /^Git(?:\s|$)/ }).first()
-    await gitToggle.click({ trial: true, timeout: 4000 }).then(() => console.log('DBG trial ok'), (e: Error) => console.log('DBG trial', e.message.slice(0, 3000)))
     if (await gitToggle.isVisible().catch(() => false)) {
       await gitToggle.click().catch(() => {})
     } else {
