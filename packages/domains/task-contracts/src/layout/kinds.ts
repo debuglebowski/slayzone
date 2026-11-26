@@ -11,7 +11,15 @@
  *   own: one each per task, like Settings.
  */
 import { instancesOfKind } from './instances'
-import type { LayoutTree, PanelInstance, PanelInstanceSettings, PanelKind } from './types'
+import { isInstanceVisible, isPrimaryInstance } from './ops'
+import {
+  CLASSIC_LAYOUT_ID,
+  PRIMARY_INSTANCE_IDS,
+  type LayoutTree,
+  type PanelInstance,
+  type PanelInstanceSettings,
+  type PanelKind
+} from './types'
 
 /** Kinds a task holds at most one instance of: adding another shows the one it has. */
 export const ONE_PER_TASK_KINDS: readonly PanelKind[] = [
@@ -91,12 +99,37 @@ export function artifactIdOf(inst: PanelInstance | undefined): string | null {
 // ── Adding ───────────────────────────────────────────────────────────────────
 
 /**
+ * The primary instance of `kind` a request with `settings` stands for: the legacy id
+ * (`terminal`, `browser`…), for `web` the `settings.panelId` preset. Only when every
+ * setting asked for is one the primary already has (an agent asked with a
+ * `provider` is a new panel). Null: no such primary.
+ */
+function primaryInstanceFor(
+  tree: LayoutTree,
+  kind: PanelKind,
+  settings: PanelInstanceSettings
+): string | null {
+  const id =
+    kind === 'web'
+      ? typeof settings.panelId === 'string'
+        ? settings.panelId
+        : undefined
+      : PRIMARY_INSTANCE_IDS[kind]
+  if (!id) return null
+  const inst = tree.instances[id]
+  if (inst?.kind !== kind || !isPrimaryInstance(inst)) return null
+  return Object.entries(settings).every(([k, v]) => inst.settings[k] === v) ? id : null
+}
+
+/**
  * The instance to show instead of adding a new one of `kind` with `settings`: the
  * task's instance of a one-per-task kind, or the Artifact panel already showing
- * that artifact. Null: add a new instance.
+ * that artifact. On Classic, the kind's primary panel while it is hidden or parked
+ * (Classic is "today's panels": opening one shows it); a visible primary means the
+ * user wants another one. Null: add a new instance.
  */
 export function existingInstanceFor(
-  tree: LayoutTree,
+  tree: LayoutTree & { layoutId?: string },
   kind: PanelKind,
   settings: PanelInstanceSettings = {}
 ): string | null {
@@ -105,6 +138,10 @@ export function existingInstanceFor(
     const want = settings.artifactId
     if (typeof want !== 'string' || want === '') return null
     return instancesOfKind(tree, 'artifact').find((i) => artifactIdOf(i) === want)?.id ?? null
+  }
+  if (tree.layoutId === CLASSIC_LAYOUT_ID) {
+    const primary = primaryInstanceFor(tree, kind, settings)
+    if (primary && !isInstanceVisible(tree, primary)) return primary
   }
   return null
 }

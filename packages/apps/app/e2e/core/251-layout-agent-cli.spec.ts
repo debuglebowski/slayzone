@@ -62,21 +62,50 @@ test.describe('Agent layout changes', () => {
       encoding: 'utf8'
     })
 
-  test('an agent opens a panel: it shows in the open task view, and Undo takes it back', async ({
+  test('an agent opens a hidden Classic panel: it shows, and Undo hides it again', async ({
     mainWindow: page
   }) => {
     const taskId = await open(page)
 
     // Classic holds a hidden Processes panel (it follows Settings → Panels), so
-    // opening one adds a second instance: `processes:<id>`.
+    // opening one shows it rather than adding a second.
+    const r = slayAsAgent(taskId, 'panels', 'layout', 'open', 'processes', '--json')
+    expect(r.stderr).toBe('')
+    expect(r.status).toBe(0)
+    expect(JSON.parse(r.stdout)).toMatchObject({ instanceId: 'processes', existing: true })
+
+    await expect(panel(page, 'processes')).toBeVisible({ timeout: 15_000 })
+    await expect(panel(page, 'terminal')).toBeVisible()
+    await expect(toast(page)).toBeVisible({ timeout: 15_000 })
+
+    await toast(page).getByRole('button', { name: 'Undo' }).click()
+    await expect(panel(page, 'processes')).toBeHidden({ timeout: 15_000 })
+    const ids = Object.keys((await storedLayout(page, taskId))?.instances ?? {})
+    expect(ids.filter((i) => i.startsWith('processes:'))).toEqual([])
+  })
+
+  test('an agent opens a panel whose primary is visible: a new instance, and Undo takes it back', async ({
+    mainWindow: page
+  }) => {
+    const taskId = await openTaskWithLayout(
+      page,
+      projectId,
+      `Agent layout ${++n}`,
+      layoutOf([
+        { id: 'terminal', slots: [{ id: 'terminal', tabs: ['terminal'] }] },
+        { id: 'processes', slots: [{ id: 'processes', tabs: ['processes'] }] }
+      ]),
+      ['terminal', 'processes']
+    )
+
     const r = slayAsAgent(taskId, 'panels', 'layout', 'open', 'processes', '--json')
     expect(r.stderr).toBe('')
     expect(r.status).toBe(0)
     const id = (JSON.parse(r.stdout) as { instanceId: string }).instanceId
-    expect(id).toMatch(/^processes/)
+    expect(id).toMatch(/^processes:/)
 
     await expect(panel(page, id)).toBeVisible({ timeout: 15_000 })
-    await expect(panel(page, 'terminal')).toBeVisible()
+    await expect(panel(page, 'processes')).toBeVisible()
     await expect(toast(page)).toBeVisible({ timeout: 15_000 })
 
     await toast(page).getByRole('button', { name: 'Undo' }).click()

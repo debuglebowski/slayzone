@@ -90,12 +90,26 @@ describe('GET /api/tasks/:id/layout', () => {
 })
 
 describe('POST /api/tasks/:id/panels', () => {
-  test('opens a panel as a new column, bumps the rev and dual-writes', async () => {
+  test('Classic: a hidden primary is shown, not added', async () => {
+    const res = await rest.request<Ok<ChangeData>>('POST', `/api/tasks/${taskId}/panels`, {
+      kind: 'browser'
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ instanceId: 'browser', existing: true })
+    expect(isInstanceVisible(res.body.data.layout, 'browser')).toBe(true)
+    expect(
+      Object.keys(res.body.data.layout.instances).filter((id) => id.startsWith('browser'))
+    ).toEqual(['browser'])
+  })
+
+  test('with the primary visible: opens a panel as a new column, bumps the rev and dual-writes', async () => {
+    await rest.request('POST', `/api/tasks/${taskId}/panels`, { kind: 'browser' })
     const before = notified
     const res = await rest.request<Ok<ChangeData>>('POST', `/api/tasks/${taskId}/panels`, {
       kind: 'browser'
     })
     expect(res.status).toBe(200)
+    expect(res.body.data.existing).toBeUndefined()
     const id = res.body.data.instanceId as string
     expect(id).toMatch(/^browser:/)
     expect(isInstanceVisible(res.body.data.layout, id)).toBe(true)
@@ -196,6 +210,8 @@ describe('PATCH / DELETE /api/tasks/:id/panels/:instanceId', () => {
   })
 
   test('DELETE removes a secondary panel and only hides a primary one', async () => {
+    // The first shows Classic's hidden primary Git panel; the second is a new one.
+    await rest.request('POST', `/api/tasks/${taskId}/panels`, { kind: 'git' })
     const opened = await rest.request<Ok<ChangeData>>('POST', `/api/tasks/${taskId}/panels`, {
       kind: 'git'
     })

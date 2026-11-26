@@ -14,7 +14,7 @@ import {
   webPageSettings,
   webPageUrlOf
 } from './kinds.js'
-import { addInstance } from './ops.js'
+import { addInstance, hideTab, setSlotHidden } from './ops.js'
 import { parseInstanceSettings, parseTaskLayout } from './settings.js'
 import type { LayoutDefinition, PanelInstance, TaskLayout } from './types.js'
 
@@ -180,9 +180,35 @@ describe('adding finds an existing instance', () => {
     expect(existingInstanceFor(layout, 'artifact', {})).toBeNull()
   })
 
-  test('multi-instance kinds always add', () => {
+  test('multi-instance kinds add while their primary is visible', () => {
     expect(existingInstanceFor(base(), 'agent')).toBeNull()
     expect(existingInstanceFor(base(), 'web', webPageSettings('https://a.dev/'))).toBeNull()
+  })
+
+  test('Classic: a hidden or parked primary is shown instead of adding', () => {
+    const hidden = setSlotHidden(base(), 'terminal', true)
+    expect(existingInstanceFor(hidden, 'agent')).toBe('terminal')
+    const parked = structuredClone(base())
+    parked.columns[0].slots[0].tabs[0] = { instanceId: 'terminal', hidden: true, parked: true }
+    expect(existingInstanceFor(parked, 'agent')).toBe('terminal')
+    // Asked with settings the primary lacks (another provider): a new panel.
+    expect(existingInstanceFor(hidden, 'agent', { provider: 'codex' })).toBeNull()
+    // Other layouts always add.
+    expect(existingInstanceFor({ ...hidden, layoutId: 'focus' }, 'agent')).toBeNull()
+  })
+
+  test('Classic: a hidden web panel preset is its own primary', () => {
+    const withWeb = addInstance(
+      base(),
+      'web',
+      { type: 'column' },
+      { settings: { panelId: 'web:docs' }, newId: ids() }
+    )
+    expect(withWeb.instanceId).toBe('web:docs')
+    expect(existingInstanceFor(withWeb.layout, 'web', { panelId: 'web:docs' })).toBeNull()
+    const hidden = hideTab(withWeb.layout, 'web:docs')
+    expect(existingInstanceFor(hidden, 'web', { panelId: 'web:docs' })).toBe('web:docs')
+    expect(existingInstanceFor(hidden, 'web', { panelId: 'web:other' })).toBeNull()
   })
 })
 

@@ -274,6 +274,12 @@ export async function changeTaskLayoutOp(
     case 'open': {
       const check = checkPanelSettings(change.kind, withoutNulls(change.settings ?? {}))
       if (!check.ok) throw new TaskLayoutChangeError(400, check.error)
+      const placement = resolvePlacement(current, change.placement ?? { type: 'column' })
+      if (!placement)
+        throw new TaskLayoutChangeError(
+          400,
+          `Unknown group or panel: ${(change.placement as { slotId: string }).slotId}`
+        )
       const existing = existingInstanceFor(current, change.kind, check.settings)
       if (existing) {
         next = showInstance(current, existing)
@@ -282,12 +288,6 @@ export async function changeTaskLayoutOp(
         result.existing = true
         break
       }
-      const placement = resolvePlacement(current, change.placement ?? { type: 'column' })
-      if (!placement)
-        throw new TaskLayoutChangeError(
-          400,
-          `Unknown group or panel: ${(change.placement as { slotId: string }).slotId}`
-        )
       const added = addInstance(current, change.kind, placement, {
         settings: check.settings,
         name: change.name

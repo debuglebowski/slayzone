@@ -37,7 +37,7 @@ A task's panels are tabs in groups, groups stacked in columns. `slay panels layo
 - `slay panels layout open <kind> [--settings <json>] [--placement <where>] [--name <name>]` — open a panel. Kinds: `agent`, `terminal`, `browser`, `web`, `editor`, `artifacts`, `artifact`, `git`, `processes`, `settings`, `description`, `subtasks`, `details`.
   - `--settings`: `{"url":"https://…"}` for a web page, `{"artifactId":"…"}` for an artifact, `{"provider":"codex"}` for an agent panel
   - `--placement`: `column[:<index>]` (default: a new column at the end), `tab:<group-or-panel>[:<index>]` (a tab next to a panel), `split:<group-or-panel>:<left|right|before|after>`
-  - An agent or terminal panel starts its own terminal. A one-per-task kind (`settings`, `description`, `subtasks`, `details`) or an artifact already in a panel is shown instead of opened twice.
+  - An agent or terminal panel starts its own terminal. A one-per-task kind (`settings`, `description`, `subtasks`, `details`) or an artifact already in a panel is shown instead of opened twice. On the Classic layout, a kind whose panel is hidden (or parked) is shown rather than opened again; once it is visible, `open` adds another.
 
 - `slay panels layout hide <panel-id>` — hide a panel in place (its whole group when it is the group's last shown tab). Open it again with `open <kind>` or the task view's toggles.
 
