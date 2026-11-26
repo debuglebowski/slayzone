@@ -78,6 +78,12 @@ export interface PanelInstance {
 export interface LayoutTab {
   instanceId: string
   hidden?: boolean
+  /**
+   * Set aside by a layout switch: the instance had live state (terminal sessions,
+   * browser tabs, open files) the new layout had no place for. Always hidden; listed
+   * under "Parked" in the New panel menu instead of in the group toggles.
+   */
+  parked?: boolean
 }
 
 export interface LayoutSlot {

@@ -114,13 +114,17 @@ export async function createTaskOp(
 
   const priority = data.priority ?? template?.default_priority ?? 3
   const dangerouslySkipPerms = template?.dangerously_skip_permissions ? true : false
-  // A template's layout is the task's starting layout, with the legacy columns
-  // projected from it (dual-write, docs/plans/panel-model.md §1.4).
+  // The task's starting layout: its template's, else the creating user's default
+  // layout (resolved by their client, step 10), else none (derived: Classic). The
+  // legacy columns are projected from it (dual-write, docs/plans/panel-model.md §1.4).
   const templateLayout = parseTaskLayout(template?.panel_layout)
-  const panelLayout = templateLayout ? serializeTaskLayout({ ...templateLayout, rev: 0 }) : null
+  const startLayout = templateLayout ?? parseTaskLayout(data.defaultPanelLayout ?? null)
+  const panelLayout = startLayout ? serializeTaskLayout({ ...startLayout, rev: 0 }) : null
   const projected =
-    templateLayout &&
-    projectToLegacy(templateLayout, { panelVisibility: template?.panel_visibility ?? undefined })
+    startLayout &&
+    projectToLegacy(startLayout, {
+      panelVisibility: templateLayout ? (template?.panel_visibility ?? undefined) : undefined
+    })
   const panelVisibility = projected
     ? JSON.stringify(projected.panelVisibility)
     : template?.panel_visibility

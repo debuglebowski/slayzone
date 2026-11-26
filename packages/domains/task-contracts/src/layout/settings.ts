@@ -217,7 +217,9 @@ export function normalizeLayoutTree(rawColumns: unknown, rawInstances: unknown):
         const inst = parseInstance(id, instIn[id])
         if (!inst) continue
         instances[id] = inst
-        tabs.push(rt.hidden === true ? { instanceId: id, hidden: true } : { instanceId: id })
+        // Parked implies hidden: a parked tab is never shown in place.
+        if (rt.parked === true) tabs.push({ instanceId: id, hidden: true, parked: true })
+        else tabs.push(rt.hidden === true ? { instanceId: id, hidden: true } : { instanceId: id })
       }
       if (tabs.length === 0) continue
       const weight = finiteNumber(rs.weight)

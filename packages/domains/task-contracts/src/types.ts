@@ -906,6 +906,12 @@ export interface CreateTaskInput {
    * `CreateTaskInputSchema`, since no REST or MCP caller opens what it creates.
    */
   openAfterCreate?: boolean
+  /**
+   * The layout the creating user starts new tasks from (their `task_layouts`
+   * default, resolved by the client). A template's layout wins over it. Renderer-
+   * only, like `openAfterCreate`; an older hub ignores it.
+   */
+  defaultPanelLayout?: TaskLayout | null
 }
 
 export interface UpdateTaskInput {

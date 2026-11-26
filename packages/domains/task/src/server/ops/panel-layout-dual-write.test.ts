@@ -174,3 +174,48 @@ test('a template keeps panel_layout and a task made from it copies it', async ()
   expect(cleared?.panel_layout).toBeNull()
   expect(cleared?.panel_visibility?.editor).toBe(false)
 })
+
+test("a new task starts from the creator's default layout; a template's wins over it", async () => {
+  const focus: TaskLayout = {
+    v: 1,
+    rev: 7,
+    layoutId: 'focus',
+    columns: [
+      {
+        id: 'terminal',
+        size: { unit: 'fr', value: 1 },
+        slots: [
+          {
+            id: 'terminal',
+            weight: 1,
+            activeInstanceId: 'terminal',
+            tabs: [{ instanceId: 'terminal' }]
+          }
+        ]
+      }
+    ],
+    instances: { terminal: { id: 'terminal', kind: 'agent', settings: {} } }
+  }
+  const task = await createTaskOp(
+    h.slayDb,
+    { projectId, title: 'Default layout', defaultPanelLayout: focus },
+    {}
+  )
+  expect(task?.panel_layout?.layoutId).toBe('focus')
+  expect(task?.panel_layout?.rev).toBe(0)
+  expect(task?.panel_visibility?.terminal).toBe(true)
+  expect(task?.panel_visibility?.browser).toBeFalsy()
+
+  const tpl = await createTemplate(h.slayDb, {
+    projectId,
+    name: 'Tpl layout',
+    panelLayout: setSlotHidden(classic(), 'editor', false)
+  })
+  const fromTpl = await createTaskOp(
+    h.slayDb,
+    { projectId, title: 'Tpl wins', templateId: tpl!.id, defaultPanelLayout: focus },
+    {}
+  )
+  expect(fromTpl?.panel_layout?.layoutId).toBe('classic')
+  expect(isInstanceVisible(fromTpl!.panel_layout!, 'editor')).toBe(true)
+})

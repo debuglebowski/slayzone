@@ -478,6 +478,7 @@ export function setActiveTab<T extends LayoutTree>(tree: T, instanceId: string):
     if (!loc) return
     const slot = d.columns[loc.columnIndex].slots[loc.slotIndex]
     delete slot.tabs[loc.tabIndex].hidden
+    delete slot.tabs[loc.tabIndex].parked
     slot.activeInstanceId = instanceId
   })
 }
@@ -516,6 +517,7 @@ export function setTabHidden<T extends LayoutTree>(
       if (slot.activeInstanceId === instanceId) activateNeighbour(slot, loc.tabIndex)
     } else {
       delete tab.hidden
+      delete tab.parked
       slot.activeInstanceId = instanceId
     }
   })
@@ -693,6 +695,39 @@ function placeTab(
   )
     return
   insertColumn(d, tab, size, ctx, placement.type === 'column' ? placement.index : undefined, max)
+}
+
+/** The instances a layout switch parked, in layout order. */
+export function parkedInstances(tree: LayoutTree): PanelInstance[] {
+  const out: PanelInstance[] = []
+  for (const column of tree.columns)
+    for (const slot of column.slots)
+      for (const tab of slot.tabs) {
+        const inst = tree.instances[tab.instanceId]
+        if (tab.parked && inst) out.push(inst)
+      }
+  return out
+}
+
+/**
+ * Bring a parked instance back: its tab leaves the parked group for `placement`
+ * (default: a new column at the end) and shows there. Anything not parked is a
+ * no-op apart from the rev bump.
+ */
+export function unparkInstance<T extends LayoutTree>(
+  tree: T,
+  instanceId: string,
+  placement: InstancePlacement = { type: 'column' },
+  ctx: OpContext = {}
+): T {
+  return edit(tree, (d) => {
+    const loc = findTab(d, instanceId)
+    const inst = d.instances[instanceId]
+    if (!loc || !inst || !d.columns[loc.columnIndex].slots[loc.slotIndex].tabs[loc.tabIndex].parked)
+      return
+    takeTab(d, instanceId)
+    placeTab(d, { instanceId }, instanceDefaultLayout(inst.kind, inst.settings), placement, ctx)
+  })
 }
 
 /**
