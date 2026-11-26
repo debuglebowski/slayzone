@@ -8,16 +8,20 @@ import { MAX_LAYOUT_COLUMNS } from './types.js'
 import {
   addInstance,
   closeInstance,
+  closeTab,
+  hideTab,
   columnEffectiveLayout,
   findTab,
   isColumnVisible,
   isPrimaryInstance,
   legacyIdOf,
   mergeInto,
+  moveSlot,
   moveTab,
   newInstanceId,
   normalizeLayout,
   pruneLayout,
+  renameInstance,
   renameSlot,
   reorderTab,
   resizeColumns,
@@ -446,5 +450,90 @@ describe('prune / normalize', () => {
     const l = layout([[['terminal']], [['browser'], ['editor', 'diff']]])
     expect(findTab(l, 'diff')).toEqual({ columnIndex: 1, slotIndex: 1, tabIndex: 1 })
     expect(findTab(l, 'nope')).toBeNull()
+  })
+})
+
+describe('moveSlot', () => {
+  test('merge appends the whole group at an index and shows its active tab', () => {
+    const l = layout([[['terminal']], [['browser', 'editor']], [['diff']]])
+    l.columns[1].slots[0].activeInstanceId = 'editor'
+    l.columns[1].slots[0].tabs[0].hidden = true
+    const snap = frozen(l)
+    const after = moveSlot(l, 's-browser', { type: 'merge', slotId: 's-terminal', index: 0 })
+    expect(l).toEqual(snap)
+    expect(shape(after)).toEqual([[['browser', 'editor', 'terminal']], [['diff']]])
+    expect(after.columns[0].slots[0].activeInstanceId).toBe('editor')
+    // Hidden tabs travel with their group, still hidden.
+    expect(after.columns[0].slots[0].tabs[0]).toEqual({ instanceId: 'browser', hidden: true })
+    expect(after.rev).toBe(1)
+  })
+
+  test('split moves the group as a column or a stacked slot, keeping its id and name', () => {
+    const l = layout([[['terminal'], ['browser', 'editor']], [['diff']]])
+    l.columns[0].slots[1].name = 'Web'
+    const right = moveSlot(l, 's-browser', { type: 'split', slotId: 's-diff', zone: 'right' }, ctx)
+    expect(shape(right)).toEqual([[['terminal']], [['diff']], [['browser', 'editor']]])
+    expect(right.columns[2].slots[0]).toMatchObject({ id: 's-browser', name: 'Web', weight: 1 })
+    const below = moveSlot(l, 's-browser', { type: 'split', slotId: 's-diff', zone: 'after' }, ctx)
+    expect(shape(below)).toEqual([[['terminal']], [['diff'], ['browser', 'editor']]])
+    expect(below.columns[1].slots.map((s) => s.weight)).toEqual([0.5, 0.5])
+  })
+
+  test('a group that empties its column lends the column size to the new one', () => {
+    const l = layout([[['terminal']], [['settings']]])
+    l.columns[1].size = { unit: 'px', value: 440 }
+    const after = moveSlot(l, 's-settings', { type: 'split', slotId: 's-terminal', zone: 'left' })
+    expect(shape(after)).toEqual([[['settings']], [['terminal']]])
+    expect(after.columns[0].size).toMatchObject({ unit: 'px', value: 440 })
+  })
+
+  test('targets in the group itself and unknown ids change nothing', () => {
+    const l = layout([[['terminal', 'browser']], [['diff']]])
+    expect(shape(moveSlot(l, 's-terminal', { type: 'merge', slotId: 's-terminal' }))).toEqual(
+      shape(l)
+    )
+    expect(
+      shape(moveSlot(l, 's-terminal', { type: 'split', slotId: 's-terminal', zone: 'left' }))
+    ).toEqual(shape(l))
+    expect(shape(moveSlot(l, 'nope', { type: 'merge', slotId: 's-diff' }))).toEqual(shape(l))
+  })
+
+  test(`side splits beyond ${MAX_LAYOUT_COLUMNS} columns stack instead`, () => {
+    const ids = ['browser', 'editor', 'artifacts', 'diff', 'settings', 'processes', 'web:a']
+    const l = layout([[['terminal'], ['web:x']], ...ids.map((id) => [[id]])])
+    const after = moveSlot(l, 's-web:x', { type: 'split', slotId: 's-diff', zone: 'right' })
+    expect(after.columns).toHaveLength(8)
+    expect(shape(after)[4]).toEqual([['diff'], ['web:x']])
+  })
+})
+
+describe('hideTab / closeTab / renameInstance', () => {
+  test('hideTab hides a tab among shown ones, else its whole group', () => {
+    const l = layout([[['terminal', 'browser']], [['diff']]])
+    const one = hideTab(l, 'browser')
+    expect(one.columns[0].slots[0].tabs[1].hidden).toBe(true)
+    expect(one.columns[0].slots[0].hidden).toBeUndefined()
+    const last = hideTab(one, 'terminal')
+    expect(last.columns[0].slots[0].hidden).toBe(true)
+    // The group keeps its tabs as they were: showing it again shows `terminal`.
+    expect(last.columns[0].slots[0].tabs[0].hidden).toBeUndefined()
+    expect(isColumnVisible(last.columns[0])).toBe(false)
+  })
+
+  test('closeTab hides a primary instance and removes any other', () => {
+    const l = layout([[['terminal', 'agent:abcd1234']], [['diff']]])
+    const hidden = closeTab(l, 'terminal')
+    expect(hidden.instances.terminal).toBeDefined()
+    expect(hidden.columns[0].slots[0].tabs[0].hidden).toBe(true)
+    const closed = closeTab(l, 'agent:abcd1234')
+    expect(closed.instances['agent:abcd1234']).toBeUndefined()
+    expect(shape(closed)).toEqual([[['terminal']], [['diff']]])
+  })
+
+  test('renameInstance sets and clears the tab name', () => {
+    const l = layout([[['terminal']]])
+    const named = renameInstance(l, 'terminal', '  Claude  ')
+    expect(named.instances.terminal.name).toBe('Claude')
+    expect(renameInstance(named, 'terminal', ' ').instances.terminal.name).toBeUndefined()
   })
 })

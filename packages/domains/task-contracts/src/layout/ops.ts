@@ -371,6 +371,82 @@ export function moveTab<T extends LayoutTree>(
     : splitAt(tree, instanceId, target.slotId, target.zone, ctx)
 }
 
+/**
+ * Move a whole group (with its hidden tabs, name and active tab): `merge` appends
+ * its tabs to another group at `index` (default end) and shows its active tab
+ * there; `split` places it beside another group like `splitAt`. A target in the
+ * group itself is a no-op (apart from the rev bump).
+ */
+export function moveSlot<T extends LayoutTree>(
+  tree: T,
+  slotId: string,
+  target: TabDropTarget,
+  ctx: OpContext = {}
+): T {
+  return edit(tree, (d) => {
+    const from = findSlot(d, slotId)
+    if (!from || target.slotId === slotId || !findSlot(d, target.slotId)) return
+    const column = d.columns[from.columnIndex]
+    const slot = column.slots[from.slotIndex]
+    if (target.type === 'merge') {
+      const to = findSlot(d, target.slotId)
+      if (!to) return
+      const dest = d.columns[to.columnIndex].slots[to.slotIndex]
+      const at =
+        target.index === undefined
+          ? dest.tabs.length
+          : Math.max(0, Math.min(target.index, dest.tabs.length))
+      dest.tabs.splice(at, 0, ...slot.tabs)
+      const shown = slot.tabs.find((t) => t.instanceId === slot.activeInstanceId && !t.hidden)
+      if (shown && !slot.hidden) dest.activeInstanceId = shown.instanceId
+      slot.tabs = []
+      return
+    }
+    // The group leaves its column; a column it empties lends its size to the new one.
+    const size =
+      column.slots.length === 1
+        ? column.size
+        : (() => {
+            const inst = slot.activeInstanceId ? d.instances[slot.activeInstanceId] : undefined
+            return inst ? instanceDefaultLayout(inst.kind, inst.settings) : column.size
+          })()
+    column.slots.splice(from.slotIndex, 1)
+    insertSlotSplit(d, { ...slot, weight: 1 }, target.slotId, target.zone, size, ctx)
+  })
+}
+
+/** Place an existing group beside `slotId` (a sibling column or a stacked slot). */
+function insertSlotSplit(
+  draft: LayoutTree,
+  slot: LayoutSlot,
+  slotId: string,
+  zone: SplitZone,
+  size: PanelLayout,
+  ctx: OpContext
+): void {
+  const loc = findSlot(draft, slotId)
+  if (!loc) return
+  let z = zone
+  if (
+    (z === 'left' || z === 'right') &&
+    draft.columns.filter(columnHasTabs).length >= MAX_LAYOUT_COLUMNS
+  )
+    z = z === 'left' ? 'before' : 'after'
+  if (z === 'left' || z === 'right') {
+    draft.columns.splice(loc.columnIndex + (z === 'right' ? 1 : 0), 0, {
+      id: `column:${(ctx.newId ?? randomId8)()}`,
+      size: { ...size },
+      slots: [slot]
+    })
+    return
+  }
+  const column = draft.columns[loc.columnIndex]
+  const targetSlot = column.slots[loc.slotIndex]
+  const half = targetSlot.weight / 2
+  targetSlot.weight = half
+  column.slots.splice(loc.slotIndex + (z === 'after' ? 1 : 0), 0, { ...slot, weight: half })
+}
+
 /** Move a tab to `toIndex` within its own slot (clamped). */
 export function reorderTab<T extends LayoutTree>(tree: T, instanceId: string, toIndex: number): T {
   return edit(tree, (d) => {
@@ -437,6 +513,45 @@ export function closeInstance<T extends LayoutTree>(tree: T, instanceId: string)
   return edit(tree, (d) => {
     takeTab(d, instanceId)
     delete d.instances[instanceId]
+  })
+}
+
+/**
+ * Hide a tab, keeping its place: the last shown tab of a group hides the whole
+ * group instead (what `panel_visibility` maps to), so showing the panel again
+ * brings its group back as it was.
+ */
+export function hideTab<T extends LayoutTree>(tree: T, instanceId: string): T {
+  const loc = findTab(tree, instanceId)
+  if (!loc) return normalizeLayout(tree)
+  const slot = tree.columns[loc.columnIndex].slots[loc.slotIndex]
+  const othersShown = slot.tabs.some((t) => t.instanceId !== instanceId && !t.hidden)
+  return othersShown ? setTabHidden(tree, instanceId, true) : setSlotHidden(tree, slot.id, true)
+}
+
+/**
+ * Close a tab. A primary (legacy-id) instance is only hidden (`hideTab`): legacy
+ * clients, shortcuts and ownership address it by that id and expect it to exist.
+ * Any other instance is removed (`closeInstance`).
+ */
+export function closeTab<T extends LayoutTree>(tree: T, instanceId: string): T {
+  const inst = tree.instances[instanceId]
+  if (inst && isPrimaryInstance(inst)) return hideTab(tree, instanceId)
+  return closeInstance(tree, instanceId)
+}
+
+/** Name an instance (its tab label); blank or undefined = the kind's label. */
+export function renameInstance<T extends LayoutTree>(
+  tree: T,
+  instanceId: string,
+  name: string | undefined
+): T {
+  return edit(tree, (d) => {
+    const inst = d.instances[instanceId]
+    if (!inst) return
+    const trimmed = name?.trim()
+    if (trimmed) inst.name = trimmed
+    else delete inst.name
   })
 }
 
