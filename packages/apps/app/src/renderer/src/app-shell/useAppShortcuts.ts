@@ -198,6 +198,19 @@ export function useAppShortcuts(deps: AppShortcutsDeps): void {
     { enableOnFormTags: true, enabled: !isRecording }
   )
 
+  // Tree sidebar lenses 1–9, in lens-menu order (⌃1–9 on macOS, Alt+1–9 elsewhere).
+  const lensKeyPrefix = getKeys('switch-lens-1-9').replace(/1-9$/, '')
+  useGuardedHotkeys(
+    lensKeyPrefix ? Array.from({ length: 9 }, (_, i) => `${lensKeyPrefix}${i + 1}`).join(',') : '',
+    (e) => {
+      const num = parseInt(e.code.replace('Digit', ''), 10)
+      if (!(num >= 1 && num <= 9)) return
+      e.preventDefault()
+      useTabStore.getState().applyLensAt(num - 1)
+    },
+    { enableOnFormTags: true, enabled: !isRecording && lensKeyPrefix !== '' }
+  )
+
   const navigateCycle = useCallback(
     (direction: 1 | -1) => {
       const cycle = tabCycleOrder.filter((i) => toVisibleIndex(i) >= 0)

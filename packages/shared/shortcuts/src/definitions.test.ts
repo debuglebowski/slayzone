@@ -17,6 +17,19 @@ afterEach(() => {
   vi.resetModules()
 })
 
+describe('lens switching never collides with tab switching', () => {
+  it('macOS: ⌃1–9 (⌘1–9 switches tabs)', async () => {
+    const d = await defaultsOn('mac')
+    expect(d['switch-lens-1-9']).toBe('ctrl+1-9')
+  })
+
+  it('Windows/Linux: Alt+1–9 (mod is Ctrl there)', async () => {
+    const d = await defaultsOn('other')
+    expect(d['switch-lens-1-9']).toBe('alt+1-9')
+    expect(d['switch-tab-1-9']).toBe('mod+1-9')
+  })
+})
+
 describe('task-tab shortcut defaults follow the platform convention', () => {
   it('macOS: ⌘⌥← / ⌘⌥→', async () => {
     const d = await defaultsOn('mac')

@@ -203,6 +203,16 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     scope: 'global',
     customizable: false
   },
+  // Tree sidebar lenses, in menu order. macOS: ⌃1–9 (⌘1–9 is tab switching).
+  // Windows/Linux: Alt+1–9 — there `mod` IS Ctrl, so Ctrl+1–9 is taken by tab switching.
+  {
+    id: 'switch-lens-1-9',
+    label: 'Switch Sidebar Lens 1–9',
+    group: 'General',
+    defaultKeys: perPlatform({ mac: 'ctrl+1-9', other: 'alt+1-9' }),
+    scope: 'global',
+    customizable: false
+  },
   {
     id: 'toggle-project-tabs',
     label: 'Project-Scoped Tabs',
