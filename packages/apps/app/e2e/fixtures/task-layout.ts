@@ -28,8 +28,11 @@ export interface ColumnSpec {
   slots: SlotSpec[]
 }
 
-/** A v1 TaskLayout of primary instances; every column is `1fr`. */
-export function layoutOf(columns: ColumnSpec[]) {
+/**
+ * A v1 TaskLayout; every column is `1fr`. Primary instances by their legacy id;
+ * another instance as `<kind>:<id>` (e.g. `git:aaaa1111`), its settings in `settings`.
+ */
+export function layoutOf(columns: ColumnSpec[], settings: Record<string, object> = {}) {
   const instances: Record<string, { id: string; kind: string; settings: object }> = {}
   return {
     v: 1,
@@ -39,7 +42,12 @@ export function layoutOf(columns: ColumnSpec[]) {
       id: c.id,
       size: { unit: 'fr', value: 1 },
       slots: c.slots.map((s) => {
-        for (const id of s.tabs) instances[id] = { id, kind: KIND_OF[id], settings: {} }
+        for (const id of s.tabs)
+          instances[id] = {
+            id,
+            kind: KIND_OF[id] ?? id.split(':')[0],
+            settings: settings[id] ?? {}
+          }
         return {
           id: s.id,
           weight: s.weight ?? 1,
@@ -59,11 +67,20 @@ export async function openTaskWithLayout(
   projectId: string,
   title: string,
   layout: ReturnType<typeof layoutOf>,
-  waitFor: string[]
+  waitFor: string[],
+  /** `agentId` for the new task; `update`: more fields stored with the layout (browserTabs …). */
+  opts: { agentId?: string; update?: Record<string, unknown> } = {}
 ): Promise<string> {
   const s = seed(page)
-  const t = await s.createTask({ projectId, title, status: 'todo' })
-  await s.updateTask({ id: t.id, panelLayout: layout } as Parameters<typeof s.updateTask>[0])
+  const t = await s.createTask({
+    projectId,
+    title,
+    status: 'todo',
+    ...(opts.agentId ? { agentId: opts.agentId } : {})
+  } as Parameters<typeof s.createTask>[0])
+  await s.updateTask({ id: t.id, panelLayout: layout, ...opts.update } as Parameters<
+    typeof s.updateTask
+  >[0])
   await s.refreshData()
   await expect(async () => {
     await page.evaluate((id) => {
