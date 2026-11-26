@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { Info, MoreHorizontal, Search, ShieldAlert, UserPlus } from 'lucide-react'
 import type { ErasureReport } from '@slayzone/content-erasure'
 import {
   AlertDialog,
@@ -10,252 +11,416 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Input,
-  Label
+  toast,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
 } from '@slayzone/ui'
+import { StatusDot } from '../view/StatusDot'
+import { AddHubUserDialog, type CreatedHubAccount, type HubAccountRole } from './AddHubUserDialog'
+import { describeError, EraseUserDialog, UserCleanupPanel } from './HubUserErasure'
 
 export interface ManagedHubUser {
   id: string
   name: string
   email: string
+  role: HubAccountRole
   disabledAt: string | null
+  createdAt: string
+  /** Managed by `slayzone-hub break-glass` alone: no actions here. */
+  breakGlass: boolean
 }
+
+/** What this hub lets the Users tab do (hub `describe`). */
+export interface HubUserManagement {
+  roleAuthority: 'idp' | 'entra-app-roles' | 'hub'
+  passwordEnabled: boolean
+}
+
 interface Props {
   users: ManagedHubUser[]
+  /** The signed-in admin's own account id: marked "You", and warned before self-lockout. */
+  selfUserId: string | null
+  management: HubUserManagement | null
+  /** For "Copy sign-in details" after creating an account. */
+  hubUrl?: string
   reports: ErasureReport[]
   statusUserId: string | null
-  onShowReports: (userId: string) => void
+  onShowReports: (userId: string | null) => void
   onPreview: (userId: string) => Promise<{ counts: ErasureReport['counts'] }>
+  onCreate: (input: {
+    email: string
+    name?: string
+    role?: HubAccountRole
+  }) => Promise<CreatedHubAccount>
   onDisable: (email: string) => Promise<void>
+  onEnable: (email: string) => Promise<void>
+  onSetRole: (email: string, role: HubAccountRole) => Promise<void>
   onErase: (userId: string, confirmation: string) => Promise<ErasureReport>
   onRetry: (jobId: string) => Promise<ErasureReport>
   reportsLoading?: boolean
   reportsError?: boolean
 }
-const describeError = (error: unknown) =>
-  error instanceof Error ? error.message : 'The operation failed. Please retry.'
 
-/** Only administrative metadata enters this view: no titles, chats or file paths. */
+type Filter = 'all' | 'active' | 'disabled'
+/** A role change waiting for confirmation (promotions, and demoting yourself). */
+type RoleChange = { user: ManagedHubUser; role: HubAccountRole }
+
+const ROLE_SOURCE: Record<Exclude<HubUserManagement['roleAuthority'], 'hub'>, string> = {
+  'entra-app-roles':
+    'Roles on this hub come from Entra ID: assign or remove the SlayZone.Admin app role on the enterprise application. A change applies at the account’s next sign-in.',
+  idp: 'Roles on this hub are managed by your identity provider.'
+}
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+
+function initials(user: ManagedHubUser): string {
+  const words = user.name.trim().split(/\s+/).filter(Boolean)
+  const letters =
+    words.length >= 2 ? `${words[0]![0]}${words[words.length - 1]![0]}` : user.name.slice(0, 2)
+  return (letters || user.email.slice(0, 2)).toUpperCase()
+}
+
+/**
+ * A hub's accounts: who can sign in, as what, and the admin actions on each.
+ * Only administrative metadata enters this view: no titles, chats or file paths.
+ */
 export function HubUsersView(props: Props) {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
+  const [adding, setAdding] = useState(false)
   const [disable, setDisable] = useState<ManagedHubUser | null>(null)
-  const [erase, setErase] = useState<ManagedHubUser | null>(null)
-  const [confirmation, setConfirmation] = useState('')
-  const [counts, setCounts] = useState<ErasureReport['counts'] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const previewRequest = useRef(0)
+  const [roleChange, setRoleChange] = useState<RoleChange | null>(null)
+  const [erase, setErase] = useState<{ user: ManagedHubUser; attempt: number } | null>(null)
+  const [eraseOpen, setEraseOpen] = useState(false)
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [dialogError, setDialogError] = useState<string | null>(null)
 
-  function openErase(user: ManagedHubUser) {
-    const request = ++previewRequest.current
-    setErase(user)
-    setConfirmation('')
-    setCounts(null)
-    setError(null)
-    void props
-      .onPreview(user.id)
-      .then((result) => {
-        if (previewRequest.current === request) setCounts(result.counts)
-      })
-      .catch((failure) => {
-        if (previewRequest.current === request) setError(describeError(failure))
-      })
+  const management = props.management
+  // A hub too old to describe itself has no add / enable / role procedures either.
+  const outdated = management === null
+  const rolesHere = management?.roleAuthority === 'hub'
+  const canAdd = management?.passwordEnabled === true
+  const active = props.users.filter((u) => u.disabledAt === null)
+  const disabledCount = props.users.length - active.length
+  const words = query.trim().toLowerCase()
+  const shown = props.users.filter(
+    (u) =>
+      (filter === 'all' || (filter === 'active') === (u.disabledAt === null)) &&
+      (!words || `${u.name} ${u.email}`.toLowerCase().includes(words))
+  )
+  const cleanupUser = props.users.find((u) => u.id === props.statusUserId)
+
+  /** Run one row action: the row shows it is busy, the outcome is a toast. */
+  function act(user: ManagedHubUser, run: () => Promise<void>, done: string) {
+    setPendingId(user.id)
+    void run()
+      .then(() => toast.success(done))
+      .catch((failure) => toast.error(describeError(failure)))
+      .finally(() => setPendingId(null))
   }
-  function closeErase() {
-    if (busy) return
-    previewRequest.current++
-    setErase(null)
-    setConfirmation('')
-    setCounts(null)
-    setError(null)
-  }
-  function confirmDisable() {
-    if (!disable || busy) return
-    setBusy(true)
-    setError(null)
-    void props
-      .onDisable(disable.email)
-      .then(() => setDisable(null))
-      .catch((failure) => setError(describeError(failure)))
-      .finally(() => setBusy(false))
-  }
-  function confirmErase() {
-    if (
-      !erase ||
-      busy ||
-      !counts ||
-      confirmation.trim().toLowerCase() !== erase.email.toLowerCase()
-    )
-      return
-    const userId = erase.id
-    setBusy(true)
-    setError(null)
-    void props
-      .onErase(userId, confirmation)
+  /** Run a confirmed dialog action: errors stay in the dialog, success closes it. */
+  function confirmIn(run: () => Promise<void>, close: () => void, done: string) {
+    if (pendingId) return
+    setPendingId('dialog')
+    setDialogError(null)
+    void run()
       .then(() => {
-        props.onShowReports(userId)
-        previewRequest.current++
-        setErase(null)
-        setConfirmation('')
-        setCounts(null)
+        close()
+        toast.success(done)
       })
-      .catch((failure) => setError(describeError(failure)))
-      .finally(() => setBusy(false))
+      .catch((failure) => setDialogError(describeError(failure)))
+      .finally(() => setPendingId(null))
   }
-  const reports = new Map<string, ErasureReport>()
-  for (const report of props.reports) reports.set(report.id, report)
-  const selected = props.users.find((user) => user.id === props.statusUserId)
+  function requestRole(user: ManagedHubUser, role: HubAccountRole) {
+    setDialogError(null)
+    // Granting admin, or giving up your own: say what it means first.
+    if (role === 'admin' || user.id === props.selfUserId) setRoleChange({ user, role })
+    else act(user, () => props.onSetRole(user.email, role), `${user.name} is now a user`)
+  }
+
+  const filters: Array<[Filter, string, number]> = [
+    ['all', 'All', props.users.length],
+    ['active', 'Active', active.length],
+    ['disabled', 'Disabled', disabledCount]
+  ]
+  const addButton = (
+    <Button
+      size="sm"
+      disabled={!canAdd}
+      onClick={() => setAdding(true)}
+      data-testid="hub-user-add-open"
+    >
+      <UserPlus />
+      Add user
+    </Button>
+  )
+
   return (
-    <section className="mt-3 space-y-3 border-t border-border pt-3" aria-label="Hub users">
-      <h3 className="text-sm font-medium">Users</h3>
-      <div className="space-y-2">
-        {props.users.map((user) => (
-          <div key={user.id} className="flex flex-wrap items-center gap-2 text-sm">
-            <div className="min-w-0 flex-1">
-              <span className="font-medium">{user.name}</span>
-              <span className="ml-2 break-all text-xs text-muted-foreground">{user.email}</span>
-            </div>
-            <span className="text-xs text-muted-foreground">
-              {user.disabledAt ? 'Disabled' : 'Active'}
-            </span>
-            {user.disabledAt ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  aria-label={`View cleanup for ${user.name}`}
-                  onClick={() => {
-                    setError(null)
-                    props.onShowReports(user.id)
-                  }}
-                >
-                  Cleanup status
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive"
-                  disabled={busy}
-                  aria-label={`Erase content for ${user.name}`}
-                  onClick={() => openErase(user)}
-                >
-                  Erase all content
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                aria-label={`Disable ${user.name}`}
-                onClick={() => {
-                  setError(null)
-                  setDisable(user)
-                }}
-              >
-                Disable
-              </Button>
-            )}
-          </div>
-        ))}
-        {props.users.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No users.</p>
-        ) : null}
-      </div>
-      {error && !disable && !erase ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {selected ? (
-        <div className="space-y-2 text-sm" aria-live="polite">
-          <h4 className="font-medium">Cleanup for {selected.name}</h4>
-          {props.reportsError ? (
-            <p role="alert" className="text-destructive">
-              Could not load cleanup status. Try Cleanup status again.
-            </p>
-          ) : props.reportsLoading ? (
-            <p className="text-muted-foreground">Loading cleanup status…</p>
-          ) : reports.size === 0 ? (
-            <p className="text-muted-foreground">No erasure operations recorded.</p>
-          ) : null}
-          {[...reports.values()].map((report) => (
-            <div key={report.id} className="space-y-1 border-l-2 border-border pl-3">
-              <p>
-                {report.state === 'complete'
-                  ? 'SlayZone content erased.'
-                  : 'Some data has not been deleted yet.'}
-              </p>
-              {report.computers
-                .filter((computer) => !computer.deleted)
-                .map((computer) => (
-                  <p key={computer.id}>
-                    Data on <strong>{computer.name}</strong> has not been deleted yet.
-                  </p>
-                ))}
-              {report.computers
-                .filter((c) => c.verifiedBy === 'operator')
-                .map((c) => (
-                  <p key={`operator-${c.id}`} className="text-xs text-muted-foreground">
-                    Cleanup on {c.name} was confirmed by an operator.
-                  </p>
-                ))}
-              {report.failures.length > 0 ? (
-                <p className="text-destructive">
-                  {report.failures.some(
-                    (code) =>
-                      code === 'LEGACY_FILES_NEED_OWNERSHIP_REVIEW' ||
-                      code === 'LEGACY_DIAGNOSTICS_NEED_OWNERSHIP_REVIEW'
-                  )
-                    ? 'Old files have no recorded owner. An operator must check them locally before erasure can be confirmed.'
-                    : report.failures.includes('BLOB_CLEANUP_WAITING_FOR_BACKUP')
-                      ? 'File cleanup will continue when the running backup finishes.'
-                      : report.failures.includes('WORKTREE_COMPUTER_GONE')
-                        ? 'A worktree is on a computer that was removed or revoked. It will not be retried; an operator must confirm its removal locally.'
-                        : 'Some data could not be deleted. Cleanup will retry.'}
-                </p>
-              ) : null}
-              {report.retainedSharedBlobs > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Files needed by other content were kept.
-                </p>
-              ) : null}
-              {report.retainedBackupBlobs > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Existing backups remain until their normal expiry.
-                </p>
-              ) : null}
-              {report.state === 'incomplete' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    setBusy(true)
-                    setError(null)
-                    void props
-                      .onRetry(report.id)
-                      .then(() => {
-                        props.onShowReports(selected.id)
-                      })
-                      .catch((failure) => setError(describeError(failure)))
-                      .finally(() => setBusy(false))
-                  }}
-                >
-                  Retry cleanup
-                </Button>
-              ) : null}
-            </div>
+    <section className="space-y-4" aria-label="Hub users" data-testid="hub-users">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-64 max-w-full">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search name or email"
+            aria-label="Search users"
+            className="h-8 pl-8"
+          />
+        </div>
+        <div role="tablist" aria-label="Filter users" className="flex rounded-md border p-0.5">
+          {filters.map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={filter === key}
+              onClick={() => setFilter(key)}
+              className={cn(
+                'rounded-sm px-2.5 py-1 text-xs transition-colors',
+                filter === key
+                  ? 'bg-accent font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {label} <span className="text-muted-foreground tabular-nums">{count}</span>
+            </button>
           ))}
         </div>
+        <div className="ml-auto">
+          {canAdd ? (
+            addButton
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0}>{addButton}</span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-64">
+                {outdated
+                  ? 'Update this hub to add users from here, or run `slay hub users add` on it.'
+                  : 'Password sign-in is off on this hub, so accounts are made at their first SSO sign-in.'}
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      {management && management.roleAuthority !== 'hub' ? (
+        <p
+          className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground"
+          data-testid="hub-users-role-source"
+        >
+          <Info className="mt-px size-3.5 shrink-0" />
+          {ROLE_SOURCE[management.roleAuthority]}
+        </p>
       ) : null}
+
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs text-muted-foreground">
+              <th className="py-2 pr-3 pl-4 font-medium">User</th>
+              <th className="w-24 py-2 pr-3 font-medium">Role</th>
+              <th className="w-40 py-2 pr-3 font-medium">Status</th>
+              <th className="w-32 py-2 pr-3 font-medium">Added</th>
+              <th className="w-12 py-2 pr-2">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {shown.map((user) => {
+              const self = user.id === props.selfUserId
+              const disabled = user.disabledAt !== null
+              const busy = pendingId === user.id
+              return (
+                <tr key={user.id} data-testid={`hub-user-row-${user.email}`}>
+                  <td className="py-2.5 pr-3 pl-4">
+                    <div
+                      className={cn('flex min-w-0 items-center gap-3', disabled && 'opacity-60')}
+                    >
+                      <span
+                        aria-hidden
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground"
+                      >
+                        {initials(user)}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate font-medium">{user.name}</span>
+                          {self ? <Pill>You</Pill> : null}
+                          {user.breakGlass ? (
+                            <Pill tone="warn" title="Emergency account">
+                              <ShieldAlert className="size-3" />
+                              Emergency
+                            </Pill>
+                          ) : null}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    {user.breakGlass ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : (
+                      <Pill tone={user.role === 'admin' ? 'primary' : 'muted'}>
+                        {user.role === 'admin' ? 'Admin' : 'User'}
+                      </Pill>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    <span className="flex items-center gap-2 text-xs">
+                      <StatusDot tone={disabled ? 'idle' : 'ok'} />
+                      {disabled ? (
+                        <span className="text-muted-foreground">
+                          Disabled {formatDate(user.disabledAt!)}
+                        </span>
+                      ) : (
+                        'Active'
+                      )}
+                    </span>
+                  </td>
+                  <td className="py-2.5 pr-3 text-xs text-muted-foreground">
+                    {formatDate(user.createdAt)}
+                  </td>
+                  <td className="py-2.5 pr-2 text-right">
+                    {user.breakGlass ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex size-8 items-center justify-center text-muted-foreground">
+                            <Info className="size-4" aria-label="Managed on the hub machine" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-64">
+                          Only <code>slayzone-hub break-glass</code> on the hub machine opens or
+                          ends this account.
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      // Not modal: an item opens a dialog, and a modal menu closing
+                      // under it leaves the page unclickable.
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            disabled={busy || pendingId === 'dialog'}
+                            aria-label={`Actions for ${user.name}`}
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-44">
+                          {disabled ? (
+                            <>
+                              {outdated ? null : (
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    act(
+                                      user,
+                                      () => props.onEnable(user.email),
+                                      `${user.name} can sign in again`
+                                    )
+                                  }
+                                >
+                                  Enable
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem onSelect={() => props.onShowReports(user.id)}>
+                                Cleanup status
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => {
+                                  setErase((last) => ({ user, attempt: (last?.attempt ?? 0) + 1 }))
+                                  setEraseOpen(true)
+                                }}
+                              >
+                                Erase all content…
+                              </DropdownMenuItem>
+                            </>
+                          ) : (
+                            <>
+                              {rolesHere ? (
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    requestRole(user, user.role === 'admin' ? 'user' : 'admin')
+                                  }
+                                >
+                                  {user.role === 'admin' ? 'Remove admin' : 'Make admin'}
+                                </DropdownMenuItem>
+                              ) : null}
+                              {rolesHere ? <DropdownMenuSeparator /> : null}
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => {
+                                  setDialogError(null)
+                                  setDisable(user)
+                                }}
+                              >
+                                Disable…
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+            {shown.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  {props.users.length === 0
+                    ? 'No users.'
+                    : words
+                      ? `No users match “${query.trim()}”.`
+                      : filter === 'disabled'
+                        ? 'No disabled users.'
+                        : 'No active users.'}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      {cleanupUser ? (
+        <UserCleanupPanel
+          user={cleanupUser}
+          reports={props.reports}
+          loading={props.reportsLoading}
+          failed={props.reportsError}
+          onRetry={props.onRetry}
+          onRefresh={() => props.onShowReports(cleanupUser.id)}
+          onClose={() => props.onShowReports(null)}
+        />
+      ) : null}
+
+      <AddHubUserDialog
+        open={adding}
+        onOpenChange={setAdding}
+        canChooseRole={rolesHere}
+        hubUrl={props.hubUrl}
+        onCreate={props.onCreate}
+      />
+
       <AlertDialog
         open={disable !== null}
         onOpenChange={(open) => {
-          if (!open && !busy) {
-            setDisable(null)
-            setError(null)
-          }
+          if (!open && pendingId !== 'dialog') setDisable(null)
         }}
       >
         <AlertDialogContent>
@@ -263,86 +428,116 @@ export function HubUsersView(props: Props) {
             <AlertDialogTitle>Disable {disable?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
               This revokes access to this hub and disconnects their computers. Their content is
-              kept.
+              kept, and you can enable the account again.
+              {disable?.id === props.selfUserId ? ' You will be signed out of this hub.' : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {error ? (
+          {dialogError ? (
             <p role="alert" className="text-sm text-destructive">
-              {error}
+              {dialogError}
             </p>
           ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={pendingId === 'dialog'}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={busy}
+              disabled={pendingId === 'dialog'}
               onClick={(event) => {
                 event.preventDefault()
-                confirmDisable()
+                const target = disable
+                if (!target) return
+                confirmIn(
+                  () => props.onDisable(target.email),
+                  () => setDisable(null),
+                  `${target.name} is disabled`
+                )
               }}
             >
-              {busy ? 'Disabling…' : 'Disable user'}
+              {pendingId === 'dialog' ? 'Disabling…' : 'Disable user'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
       <AlertDialog
-        open={erase !== null}
+        open={roleChange !== null}
         onOpenChange={(open) => {
-          if (!open) closeErase()
+          if (!open && pendingId !== 'dialog') setRoleChange(null)
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Erase all content for {erase?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {roleChange?.role === 'admin'
+                ? `Make ${roleChange.user.name} an admin?`
+                : 'Remove your own admin access?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Includes archived projects and tasks, chats, files and every saved version. This
-              cannot be undone. Their account stays disabled.
+              {roleChange?.role === 'admin'
+                ? 'Admins can add, disable and erase accounts, and change this hub’s settings.'
+                : 'You will no longer be able to manage accounts on this hub. Another admin can give it back.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {counts ? (
-            <p className="text-sm">
-              {counts.projects} {counts.projects === 1 ? 'project' : 'projects'} · {counts.tasks}{' '}
-              tasks · {counts.artifacts} files · {counts.versions} saved versions
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {error ? 'Could not check content counts.' : 'Checking content counts…'}
-            </p>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="erase-user-email">Confirm user email</Label>
-            <Input
-              id="erase-user-email"
-              type="email"
-              value={confirmation}
-              placeholder={erase?.email}
-              autoComplete="off"
-              disabled={busy}
-              onChange={(event) => setConfirmation(event.target.value)}
-            />
-          </div>
-          {error ? (
+          {dialogError ? (
             <p role="alert" className="text-sm text-destructive">
-              {error}
+              {dialogError}
             </p>
           ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={pendingId === 'dialog'}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground"
-              disabled={
-                busy || !counts || confirmation.trim().toLowerCase() !== erase?.email.toLowerCase()
-              }
+              disabled={pendingId === 'dialog'}
               onClick={(event) => {
                 event.preventDefault()
-                confirmErase()
+                const change = roleChange
+                if (!change) return
+                confirmIn(
+                  () => props.onSetRole(change.user.email, change.role),
+                  () => setRoleChange(null),
+                  `${change.user.name} is now ${change.role === 'admin' ? 'an admin' : 'a user'}`
+                )
               }}
             >
-              {busy ? 'Erasing…' : 'Erase all content'}
+              {roleChange?.role === 'admin' ? 'Make admin' : 'Remove admin'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EraseUserDialog
+        target={erase}
+        open={eraseOpen}
+        onClose={() => setEraseOpen(false)}
+        onPreview={props.onPreview}
+        onErase={props.onErase}
+        onErased={(userId) => {
+          setEraseOpen(false)
+          props.onShowReports(userId)
+        }}
+      />
     </section>
+  )
+}
+
+function Pill({
+  tone = 'muted',
+  title,
+  children
+}: {
+  tone?: 'muted' | 'primary' | 'warn'
+  title?: string
+  children: ReactNode
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none',
+        tone === 'primary' && 'bg-primary/10 text-primary',
+        tone === 'muted' && 'bg-muted text-muted-foreground',
+        tone === 'warn' && 'bg-destructive/10 text-destructive'
+      )}
+    >
+      {children}
+    </span>
   )
 }

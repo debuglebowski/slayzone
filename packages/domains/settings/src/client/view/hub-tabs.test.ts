@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { hubPageTabs } from './hub-tabs'
 
-const keys = (opts: { isDefault: boolean; solo: boolean }) => hubPageTabs(opts).map(([k]) => k)
+const keys = (opts: { isDefault: boolean; solo: boolean; isLocal?: boolean }) =>
+  hubPageTabs({ isLocal: false, ...opts }).map(([k]) => k)
 
 describe('hubPageTabs', () => {
   it('a hub among others: overview and computers first, host pages on the default only', () => {
@@ -9,6 +10,7 @@ describe('hubPageTabs', () => {
       'overview',
       'computers',
       'projects',
+      'users',
       'agents',
       'worktrees',
       'mcp',
@@ -19,13 +21,18 @@ describe('hubPageTabs', () => {
       'overview',
       'computers',
       'projects',
+      'users',
       'agents',
       'worktrees'
     ])
   })
 
+  it('the local hub has no sign-in accounts, so no Users tab', () => {
+    expect(keys({ isDefault: true, solo: false, isLocal: true })).not.toContain('users')
+  })
+
   it('the only hub, local: no hub or computer pages as such (its projects stay)', () => {
-    expect(keys({ isDefault: true, solo: true })).toEqual([
+    expect(keys({ isDefault: true, solo: true, isLocal: true })).toEqual([
       'projects',
       'agents',
       'worktrees',

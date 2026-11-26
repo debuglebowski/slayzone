@@ -16,6 +16,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@normain/idp-role-contract": "file:../../../vendor/normain-idp-role-contract-0.1.0.tgz",
     "@slayzone/db-migrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",

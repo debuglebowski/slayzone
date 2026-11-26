@@ -1659,7 +1659,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'hub.setLabel': none(HUB_CONFIG),
   'hub.users.list': none('account management metadata only; no user content'),
   'hub.users.access': none('the current caller role only; no other account or content'),
+  'hub.users.create': none('account creation; returns the new account and its password only'),
   'hub.users.disable': none('account access revocation, without content access'),
+  'hub.users.enable': none('account access restoration, without content access'),
+  'hub.users.setRole': none('account role change, without content access'),
   'hub.users.previewErasure': none('disabled-user erasure counts only; checked in handler'),
   'hub.users.eraseContent': none(
     'erase only a disabled user, checked in handler; never returns content'

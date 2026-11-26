@@ -1804,6 +1804,9 @@ importers:
 
   packages/domains/content-erasure:
     dependencies:
+      '@normain/idp-role-contract':
+        specifier: file:../../../vendor/normain-idp-role-contract-0.1.0.tgz
+        version: file:vendor/normain-idp-role-contract-0.1.0.tgz
       '@slayzone/db-migrations':
         specifier: workspace:*
         version: link:../../shared/db-migrations

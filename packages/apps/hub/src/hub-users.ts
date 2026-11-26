@@ -15,12 +15,14 @@
  */
 import {
   createHubUser,
+  describeHubUserManagement,
   disableHubUser,
   enableHubUser,
   findHubUser,
   listHubUsers,
   setHubUserRole,
-  type HubAuth
+  type HubAuth,
+  type HubUserManagement
 } from '@slayzone/hub-auth/server'
 import type { ComputersDeps, RestApiDeps } from '@slayzone/api'
 import type { UserAccessRevoker } from './user-access.js'
@@ -31,9 +33,14 @@ export function createHubUsersCapability(
   getAuth: () => HubAuth | null,
   revoker: Pick<UserAccessRevoker, 'revokeUser'>,
   options: { db?: SlayzoneDb } = {}
-): NonNullable<RestApiDeps['hubUsers']> {
+): NonNullable<RestApiDeps['hubUsers']> & { describe: () => HubUserManagement | null } {
   return {
     ready: () => getAuth() !== null,
+    /** For the Settings Users tab: offer only what this hub will accept. Null while not ready. */
+    describe: () => {
+      const auth = getAuth()
+      return auth ? describeHubUserManagement(auth) : null
+    },
     create: async (input) => {
       // Unreachable in practice — the route checks `ready()` first — but this must
       // not silently no-op if that order ever changes.

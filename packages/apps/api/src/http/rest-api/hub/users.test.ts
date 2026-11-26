@@ -263,7 +263,8 @@ describe('GET /api/hub/users', () => {
         name: 'Alice',
         role: 'admin' as const,
         disabledAt: null,
-        createdAt: '2026-01-01T00:00:00.000Z'
+        createdAt: '2026-01-01T00:00:00.000Z',
+        breakGlass: false
       }
     ]
     const res = await call<{ ok: boolean; data: typeof rows }>(

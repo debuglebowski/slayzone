@@ -313,7 +313,7 @@ function WorkspaceNav({ hub }: { hub: NavHub }) {
   return (
     <>
       <Section title="Workspace">
-        {hubPageTabs({ isDefault: true, solo: true }).map(([tab, label]) => (
+        {hubPageTabs({ isDefault: true, solo: true, isLocal: true }).map(([tab, label]) => (
           <NavItem
             key={tab}
             route={{ kind: 'hub', hubId: hub.id, tab }}
