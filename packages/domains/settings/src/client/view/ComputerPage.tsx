@@ -7,6 +7,7 @@ import { useSettingsViewStore } from '../settings-view-store'
 import { ComputerActionsProvider } from '../tabs/ComputerActions'
 import { ComputerBackupList } from '../tabs/ComputerChatBackups'
 import { ComputerFaults } from '../tabs/ComputerFaults'
+import { ComputerFolders } from '../tabs/ComputerFolders'
 import { ComputerName } from '../tabs/ComputerName'
 import { ComputerUnattachedSessions } from '../tabs/ComputerUnattachedSessions'
 import { MachineLabel } from '../tabs/MachineLabel'
@@ -49,6 +50,7 @@ function ComputerPageBody({ route }: { route: ComputerRoute }) {
   const status = computerRowStatus(computer)
   const tabs: Array<[string, string]> = [
     ['general', 'General'],
+    ['folders', 'Folders'],
     ['backups', 'Chat backups']
   ]
   const tab = tabs.some(([k]) => k === route.tab) ? route.tab : 'general'
@@ -99,6 +101,7 @@ function ComputerPageBody({ route }: { route: ComputerRoute }) {
           <ComputerActionButtons computer={computer} hub={hub} labels />
         </div>
       )}
+      {tab === 'folders' && <ComputerFolders computer={computer} />}
       {tab === 'backups' && (
         <ComputerBackupList computerId={computer.id} usable={computer.usable} />
       )}

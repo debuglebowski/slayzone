@@ -13,6 +13,7 @@ import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-serve
 import { getProjectsRouterDeps } from './projects-router-deps'
 import { getProjectFolderHost } from './project-folders'
 import { projectMovingSql } from './project-move-sql'
+import { getPlacement } from '@slayzone/computers/server'
 
 const createProjectInput = z.object({
   name: z.string().min(1),
@@ -52,9 +53,16 @@ export const projectsRouter = router({
       const host = getProjectFolderHost()
       if (!host?.relocateFolder)
         throw new Error('Project relocation requires a connected computer.')
-      const computerId = await host.computerForProject(input.id)
-      if (computerId !== input.computerId)
-        throw new Error('Project computer changed. Reopen Relocate and try again.')
+      // The computer the hub runs the project on, or any other computer that holds
+      // a folder for it (Settings → project → Computers lists every one).
+      const computerId = input.computerId
+      if (computerId !== (await host.computerForProject(input.id))) {
+        const held = await getPlacement(ctx.db, input.id, computerId)
+        if (!held || held.status === 'forgotten')
+          throw new Error('Project computer changed. Reopen Relocate and try again.')
+        if (held.path !== input.sourcePath)
+          throw new Error('Project folder changed. Reopen Relocate and try again.')
+      }
       await host.relocateFolder(computerId, input.id, input.sourcePath, input.path, input.mode)
       return updateProject(ctx.db, { id: input.id }, iconsDir(ctx.dataRoot))
     }),

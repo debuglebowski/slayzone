@@ -7,7 +7,12 @@ export {
   type ProjectSettingsPanelProps,
   type ProjectSettingsTab
 } from './ProjectSettingsPanel'
-export { ScopedRelocateProjectDialog } from './RelocateProjectDialog'
+export { RelocateProjectDialog, ScopedRelocateProjectDialog } from './RelocateProjectDialog'
+export {
+  ProjectFolderRow,
+  useProjectFolderEditor,
+  type ProjectFolderRowProps
+} from './ProjectFolderRow'
 export { DeleteProjectDialog } from './DeleteProjectDialog'
 export { GroupSettingsDialog } from './GroupSettingsDialog'
 export { ProjectSelect } from './ProjectSelect'

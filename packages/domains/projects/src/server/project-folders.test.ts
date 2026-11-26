@@ -77,6 +77,31 @@ test('relocate refuses a changed computer before touching disk', async () => {
   expect(calls).toEqual([])
 })
 
+const placeFolder = (computerId: string, projectId: string, path: string) =>
+  h.slayDb.run(
+    `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+     VALUES (?, ?, ?, 'ready', ?)`,
+    [computerId, projectId, path, Date.now()]
+  )
+
+// Settings → project → Computers: every computer holding a folder offers Relocate,
+// not only the one the hub runs the project on.
+test('relocate on a computer that is not the project’s, but holds its folder', async () => {
+  const p = await caller.create({ name: 'Two homes', color: '#000000', computerId: 'c-3' })
+  await placeFolder('c-4', p.id, '/old-4')
+  await caller.relocate({ id: p.id, computerId: 'c-4', sourcePath: '/old-4', path: '/new-4' })
+  expect(calls).toEqual([['relocate', 'c-4', p.id, '/old-4', '/new-4']])
+})
+
+test('relocate on another computer refuses a folder that changed meanwhile', async () => {
+  const p = await caller.create({ name: 'Stale', color: '#000000', computerId: 'c-3' })
+  await placeFolder('c-4', p.id, '/moved-elsewhere')
+  await expect(
+    caller.relocate({ id: p.id, computerId: 'c-4', sourcePath: '/old-4', path: '/new-4' })
+  ).rejects.toThrow(/folder changed/i)
+  expect(calls).toEqual([])
+})
+
 test('create with no computer named: the caller’s default becomes the project’s default', async () => {
   const p = await caller.create({ name: 'A', color: '#000000' })
   expect(p.default_computer_id).toBe('c-default')

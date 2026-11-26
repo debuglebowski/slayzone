@@ -47,20 +47,18 @@ export type RootsTarget = {
   }>
 }
 
-export function ComputerRootsDialog({
-  target,
-  onClose
-}: {
-  target: RootsTarget | null
-  onClose: () => void
-}) {
+/**
+ * Load, edit and save one computer's allowed folders. Shared by the dialog (the Hubs
+ * page rows) and the computer page's Folders tab, so both read and write the same way.
+ */
+export function useAllowedFoldersEditor(target: RootsTarget | null) {
   const [edited, setEdited] = useState<string[] | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
 
   /**
    * Re-read on every open rather than caching: another client (or the hub's own
-   * widening when a computer connects) may have changed the jail since this dialog
+   * widening when a computer connects) may have changed the jail since this editor
    * last ran, and editing a stale list would silently revert their change.
    *
    * `gcTime: 0` is what makes "every open" true — the query is keyed by computer,
@@ -90,31 +88,126 @@ export function ComputerRootsDialog({
     setDraft('')
   }
 
-  const save = async (): Promise<void> => {
-    if (!target) return
+  /** True when saved (some entries may have been refused — named in a warning). */
+  const save = (): Promise<boolean> => {
+    if (!target) return Promise.resolve(false)
     setSaving(true)
-    try {
-      const res = await target.save(roots)
-      setEdited(res.roots)
-      if (res.rejected.length > 0) {
-        // Not a failure — the rest was applied. But naming the entries that did
-        // not take is the whole reason the computer reports them.
-        toast.warning(
-          `Saved without ${res.rejected.length}: ${res.rejected
-            .map((r) => `${r.path} (${r.reason})`)
-            .join(', ')}`
-        )
-      } else {
-        toast.success(`Updated ${target.name}`)
-      }
-      onClose()
-    } catch (err) {
-      toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setSaving(false)
-    }
+    return target
+      .save(roots)
+      .then((res) => {
+        setEdited(res.roots)
+        if (res.rejected.length > 0) {
+          // Not a failure — the rest was applied. But naming the entries that did
+          // not take is the whole reason the computer reports them.
+          toast.warning(
+            `Saved without ${res.rejected.length}: ${res.rejected
+              .map((r) => `${r.path} (${r.reason})`)
+              .join(', ')}`
+          )
+        } else {
+          toast.success(`Updated ${target.name}`)
+        }
+        return true
+      })
+      .catch((err: unknown) => {
+        toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
+        return false
+      })
+      .finally(() => setSaving(false))
   }
 
+  return {
+    roots,
+    loading,
+    error,
+    saving,
+    /** Edited since the last load or save. */
+    dirty: edited !== null && edited.join('\0') !== (query.data?.roots ?? []).join('\0'),
+    draft,
+    setDraft,
+    addDraft,
+    remove: (root: string) => setEdited(roots.filter((r) => r !== root)),
+    save
+  }
+}
+
+type AllowedFoldersEditor = ReturnType<typeof useAllowedFoldersEditor>
+
+/** The list and the add field. */
+function AllowedFoldersBody({ editor }: { editor: AllowedFoldersEditor }) {
+  const { roots, loading, error, draft, setDraft, addDraft, remove } = editor
+  if (error)
+    return (
+      <p className="text-destructive text-xs" data-testid="computer-roots-error">
+        Could not read this computer&apos;s folders: {error}
+      </p>
+    )
+  return (
+    <div className="space-y-2">
+      {loading ? (
+        <p className="text-muted-foreground text-xs">Reading…</p>
+      ) : roots.length === 0 ? (
+        // Not cosmetic: a computer with no roots refuses every filesystem
+        // call, so this is the explanation for an otherwise silent failure.
+        <p className="text-muted-foreground text-xs" data-testid="computer-roots-empty">
+          No folders configured — this computer refuses all filesystem access.
+        </p>
+      ) : (
+        <ul className="space-y-1" data-testid="computer-roots-list">
+          {roots.map((root) => (
+            <li
+              key={root}
+              className="border-border bg-muted/30 flex items-center gap-2 rounded border px-2 py-1.5"
+            >
+              <FolderOpen className="text-muted-foreground size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
+                {root}
+              </span>
+              <IconButton
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Remove ${root}`}
+                onClick={() => remove(root)}
+              >
+                <X className="size-3.5" />
+              </IconButton>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Typed, not browsed: the picker can only show what is already
+          inside the jail, so it cannot be the way to widen it. */}
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          placeholder="/absolute/path/on/the/computer"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addDraft()
+            }
+          }}
+          data-testid="computer-roots-input"
+        />
+        <Button variant="outline" onClick={addDraft} disabled={!draft.trim()}>
+          <Plus className="mr-1 size-3.5" />
+          Add
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function ComputerRootsDialog({
+  target,
+  onClose
+}: {
+  target: RootsTarget | null
+  onClose: () => void
+}) {
+  const editor = useAllowedFoldersEditor(target)
   return (
     <Dialog open={!!target} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-lg" data-testid="computer-roots-dialog">
@@ -126,74 +219,15 @@ export function ComputerRootsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {error ? (
-          <p className="text-destructive text-xs" data-testid="computer-roots-error">
-            Could not read this computer&apos;s folders: {error}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {loading ? (
-              <p className="text-muted-foreground text-xs">Reading…</p>
-            ) : roots.length === 0 ? (
-              // Not cosmetic: a computer with no roots refuses every filesystem
-              // call, so this is the explanation for an otherwise silent failure.
-              <p className="text-muted-foreground text-xs" data-testid="computer-roots-empty">
-                No folders configured — this computer refuses all filesystem access.
-              </p>
-            ) : (
-              <ul className="space-y-1" data-testid="computer-roots-list">
-                {roots.map((root) => (
-                  <li
-                    key={root}
-                    className="border-border bg-muted/30 flex items-center gap-2 rounded border px-2 py-1.5"
-                  >
-                    <FolderOpen className="text-muted-foreground size-3.5 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
-                      {root}
-                    </span>
-                    <IconButton
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Remove ${root}`}
-                      onClick={() => setEdited(roots.filter((r) => r !== root))}
-                    >
-                      <X className="size-3.5" />
-                    </IconButton>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {/* Typed, not browsed: the picker can only show what is already
-                inside the jail, so it cannot be the way to widen it. */}
-            <div className="flex gap-2">
-              <Input
-                value={draft}
-                placeholder="/absolute/path/on/the/computer"
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    addDraft()
-                  }
-                }}
-                data-testid="computer-roots-input"
-              />
-              <Button variant="outline" onClick={addDraft} disabled={!draft.trim()}>
-                <Plus className="mr-1 size-3.5" />
-                Add
-              </Button>
-            </div>
-          </div>
-        )}
+        <AllowedFoldersBody editor={editor} />
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button
-            onClick={() => void save()}
-            disabled={saving || loading || !!error}
+            onClick={() => void editor.save().then((saved) => saved && onClose())}
+            disabled={editor.saving || editor.loading || !!editor.error}
             data-testid="computer-roots-save"
           >
             Save
@@ -201,5 +235,25 @@ export function ComputerRootsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** The same editor in place, on the computer page (stays open after saving). */
+export function ComputerAllowedFolders({ target }: { target: RootsTarget }) {
+  const editor = useAllowedFoldersEditor(target)
+  return (
+    <div className="space-y-3" data-testid="computer-allowed-folders">
+      <AllowedFoldersBody editor={editor} />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={() => void editor.save()}
+          disabled={!editor.dirty || editor.saving || editor.loading || !!editor.error}
+          data-testid="computer-roots-save"
+        >
+          Save
+        </Button>
+      </div>
+    </div>
   )
 }

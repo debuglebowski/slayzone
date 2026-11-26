@@ -8,6 +8,7 @@ import {
   inheritComputerLabel,
   NO_COMPUTERS_NOTE,
   OFFLINE_MARK,
+  placementStatus,
   outdatedComputerNote,
   runsOnLabel,
   STANDARD_COMPUTER_CAPABILITIES
@@ -210,5 +211,23 @@ describe('capabilityNote', () => {
     expect(capabilityNote(['pty', 'git', 'fs', 'proc', 'gpu'])).toBe('+gpu')
     expect(capabilityNote(['git', 'gpu'])).toBe('no pty, fs, proc · +gpu')
     expect(capabilityNote([])).toBe('no capabilities')
+  })
+})
+
+describe('placementStatus', () => {
+  it('names every folder state, and no folder at all', () => {
+    expect(placementStatus('ready')).toEqual({ label: 'Ready', tone: 'ok' })
+    expect(placementStatus('pending').label).toBe('Waiting for computer')
+    expect(placementStatus('pending').tone).toBe('idle')
+    expect(placementStatus('missing')).toMatchObject({ label: 'Folder not found', tone: 'bad' })
+    expect(placementStatus('refused')).toMatchObject({ label: 'Not allowed', tone: 'bad' })
+    expect(placementStatus(null)).toMatchObject({ label: 'Not set', tone: 'idle' })
+    // Cleared by the user, the computer not told yet: no folder, for every client.
+    expect(placementStatus('forgotten')).toEqual(placementStatus(null))
+  })
+
+  it('explains every state that is not plainly fine', () => {
+    for (const s of ['pending', 'missing', 'refused', null] as const)
+      expect(placementStatus(s).detail).toBeTruthy()
   })
 })

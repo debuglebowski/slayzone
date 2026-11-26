@@ -1583,6 +1583,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerFaults.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerFolders.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerUnattachedSessions.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerChatStorage.test.tsx \
   packages/domains/settings/src/client/HubIssueBanners.test.tsx \
@@ -1754,6 +1755,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/client/useSettingsReopenTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
+  packages/domains/projects/src/client/ComputersTab.test.tsx \
   packages/shared/settings-core/src/server/service.test.ts \
   packages/shared/settings-core/src/server/scope.test.ts \
   packages/shared/settings-core/src/shared/registry.test.ts \

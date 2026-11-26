@@ -6,6 +6,7 @@ import { defaultProjectRoot } from '@slayzone/projects-contracts'
 import { useTrack } from '@slayzone/telemetry/client'
 import { TestsTab } from '@slayzone/test-panel/client'
 import { GeneralTab } from './GeneralTab'
+import { ComputersTab, useHubHasManyComputers } from './ComputersTab'
 import { EnvironmentTab } from './EnvironmentTab'
 import { ColumnsTab } from './ColumnsTab'
 import { WorktreesTab } from './WorktreesTab'
@@ -23,6 +24,7 @@ import {
 
 export type ProjectSettingsTab =
   | 'general'
+  | 'computers'
   | 'environment'
   | 'tasks'
   | 'tasks/general'
@@ -90,6 +92,8 @@ export function ProjectSettingsPanel({
   const lookupStatusSyncLock = useStatusSyncLockLookup()
   const sharing = useSharingStatus()
   const detectedRepos = useProjectDetectedRepos(defaultProjectRoot(project), project.id)
+  // One computer: its folder is the General tab's, and the tab would say nothing more.
+  const manyComputers = useHubHasManyComputers()
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
   const checkIntegrationLock = () => {
@@ -107,6 +111,7 @@ export function ProjectSettingsPanel({
 
   const tabs: Array<[string, string]> = [
     ['general', 'General'],
+    ...(manyComputers ? [['computers', 'Computers'] as [ProjectSettingsTab, string]] : []),
     ...extraTabs.map((t): [string, string] => [t.key, t.label]),
     ['environment', 'Environment'],
     ['tasks/general', 'Tasks'],
@@ -159,6 +164,9 @@ export function ProjectSettingsPanel({
           onChanged={onChanged ?? onUpdated}
           onClose={onClose}
         />
+      )}
+      {tab === 'computers' && manyComputers && (
+        <ComputersTab project={project} onChanged={onChanged ?? onUpdated} />
       )}
       {tab === 'environment' && (
         <EnvironmentTab project={project} onUpdated={onUpdated} onClose={onClose} />
