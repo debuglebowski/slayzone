@@ -63,6 +63,43 @@ async function assertKnownUser(id: string): Promise<void> {
   }
 }
 
+/**
+ * Sharing never reaches past a project's people: a task or an artifact can be shared
+ * with its project's owner or one of its members, nobody else on the hub. (`access.ts`
+ * ignores any other grant all the same; this tells the caller.)
+ */
+async function assertInProject(ctx: TrpcContext, projectId: string, userId: string): Promise<void> {
+  const row = await ctx.db.get<{ ok: number }>(
+    `SELECT 1 AS ok FROM projects p WHERE p.id = ? AND (p.owner_user_id = ?
+       OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?))`,
+    [projectId, userId, userId]
+  )
+  if (!row) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Only people in the project can be invited. Add them to the project first.'
+    })
+  }
+}
+
+async function projectOfTask(ctx: TrpcContext, taskId: string): Promise<string> {
+  const row = await ctx.db.get<{ project_id: string }>(
+    'SELECT project_id FROM tasks WHERE id = ?',
+    [taskId]
+  )
+  if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found' })
+  return row.project_id
+}
+
+async function projectOfArtifact(ctx: TrpcContext, artifactId: string): Promise<string> {
+  const row = await ctx.db.get<{ project_id: string }>(
+    'SELECT t.project_id FROM task_artifacts a JOIN tasks t ON t.id = a.task_id WHERE a.id = ?',
+    [artifactId]
+  )
+  if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found' })
+  return row.project_id
+}
+
 /** The task's ancestors, nearest first (the task itself first). */
 async function chainOf(ctx: TrpcContext, taskId: string) {
   return ctx.db.all<{
@@ -166,12 +203,36 @@ export const sharingRouter = router({
       getSharingRouterDeps().onProjectShared(input.projectId)
       return { ok: true as const }
     }),
+  /**
+   * Take someone out of the project — and with it every task and artifact of the
+   * project they were invited to: sharing never reaches past the project's people,
+   * and adding them back later must not bring old invitations back with it.
+   */
   removeProjectMember: publicProcedure
     .input(z.object({ projectId: z.string().min(1), userId }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.db.run('DELETE FROM project_members WHERE project_id = ? AND user_id = ?', [
-        input.projectId,
-        input.userId
+      // One transaction: no moment where they are out of the project yet still invited.
+      // The owner stays in the project whatever its member rows say: theirs are kept.
+      const notOwner = `NOT EXISTS (SELECT 1 FROM projects WHERE id = ? AND owner_user_id = ?)`
+      await ctx.db.batchTxn([
+        {
+          type: 'run',
+          sql: 'DELETE FROM project_members WHERE project_id = ? AND user_id = ?',
+          params: [input.projectId, input.userId]
+        },
+        {
+          type: 'run',
+          sql: `DELETE FROM task_grants WHERE user_id = ? AND ${notOwner}
+                  AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`,
+          params: [input.userId, input.projectId, input.userId, input.projectId]
+        },
+        {
+          type: 'run',
+          sql: `DELETE FROM artifact_grants WHERE user_id = ? AND ${notOwner}
+                  AND artifact_id IN (SELECT a.id FROM task_artifacts a
+                    JOIN tasks t ON t.id = a.task_id WHERE t.project_id = ?)`,
+          params: [input.userId, input.projectId, input.userId, input.projectId]
+        }
       ])
       changed(ctx, [input.userId])
       return { ok: true as const }
@@ -270,10 +331,12 @@ export const sharingRouter = router({
         getSharingRouterDeps().onTaskShared(task.id)
       return { ok: true as const }
     }),
+  /** Invite one of the project's people to a task (a private one, or above their role). */
   setTaskGrant: publicProcedure
     .input(z.object({ taskId: z.string().min(1), userId, role }))
     .mutation(async ({ ctx, input }) => {
       await assertKnownUser(input.userId)
+      await assertInProject(ctx, await projectOfTask(ctx, input.taskId), input.userId)
       await ctx.db.run(
         `INSERT INTO task_grants (task_id, user_id, role, added_by) VALUES (?, ?, ?, ?)
          ON CONFLICT (task_id, user_id) DO UPDATE SET role = excluded.role`,
@@ -306,14 +369,17 @@ export const sharingRouter = router({
       return rows.map((r) => ({ userId: r.user_id, role: r.role }))
     }),
   /**
-   * Invite one user to one artifact. A shared artifact lives on the hub: one held
-   * by a computer is moved there first (every version), so the grantee can reach it
-   * while that computer is away. The move gives it a new id, which this answers.
+   * Invite one of the project's people to one artifact — on its own, too: someone not
+   * invited to its private task opens this artifact only. A shared artifact lives on
+   * the hub: one held by a computer is moved there first (every version), so the
+   * grantee can reach it while that computer is away. The move gives it a new id,
+   * which this answers.
    */
   setArtifactGrant: publicProcedure
     .input(z.object({ artifactId: z.string().min(1), userId, role: artifactRole }))
     .mutation(async ({ ctx, input }) => {
       await assertKnownUser(input.userId)
+      await assertInProject(ctx, await projectOfArtifact(ctx, input.artifactId), input.userId)
       let artifactId: string
       try {
         artifactId = await getSharingRouterDeps().promoteArtifact(input.artifactId)
@@ -345,52 +411,69 @@ export const sharingRouter = router({
     }),
 
   /**
-   * What other users invited the caller to on its own — a task or an artifact
-   * outside every project it is a member of. The owner gate cuts each row to what
-   * the caller may see.
+   * The artifacts shared with the caller ON THEIR OWN: invited to the artifact, while
+   * its task stays out of reach (a private task they are not invited to). Nothing of
+   * the task travels with them. Newest first; `isNew` until the caller opens it
+   * ({@link markArtifactOpened}). The owner gate cuts each row to what the caller may
+   * open — the project's people only.
    */
-  sharedWithMe: publicProcedure.query(async ({ ctx }) => {
+  artifactsSharedWithMe: publicProcedure.query(async ({ ctx }) => {
     const me = ctx.principal?.userId
-    if (!me) return { tasks: [], artifacts: [] }
-    const tasks = await ctx.db.all<{
-      id: string
-      title: string
-      project_id: string
-      role: AccessRole
-    }>(
-      `SELECT t.id, t.title, t.project_id, g.role FROM task_grants g JOIN tasks t ON t.id = g.task_id
-        WHERE g.user_id = ? AND t.deleted_at IS NULL
-          AND t.project_id NOT IN (SELECT project_id FROM project_members WHERE user_id = ?)
-          AND t.project_id NOT IN (SELECT id FROM projects WHERE owner_user_id = ?)
-        ORDER BY g.created_at DESC`,
-      [me, me, me]
-    )
-    const artifacts = await ctx.db.all<{
+    if (!me) return []
+    const rows = await ctx.db.all<{
       id: string
       title: string
       task_id: string
+      project_id: string
       role: 'view' | 'edit'
+      added_by: string | null
+      opened_at: string | null
     }>(
-      `SELECT a.id, a.title, a.task_id, g.role FROM artifact_grants g
+      `SELECT a.id, a.title, a.task_id, t.project_id, g.role, g.added_by, g.opened_at
+         FROM artifact_grants g
          JOIN task_artifacts a ON a.id = g.artifact_id
-        WHERE g.user_id = ? ORDER BY g.created_at DESC`,
+         JOIN tasks t ON t.id = a.task_id
+        WHERE g.user_id = ? AND t.deleted_at IS NULL
+        ORDER BY g.created_at DESC, a.id`,
       [me]
     )
-    return {
-      tasks: tasks.map((t) => ({
-        id: t.id,
-        title: t.title,
-        projectId: t.project_id,
-        role: t.role
-      })),
-      artifacts: artifacts.map((a) => ({
-        id: a.id,
-        title: a.title,
-        taskId: a.task_id,
-        role: a.role
-      }))
+    const out: {
+      id: string
+      title: string
+      projectId: string
+      sharedByUserId: string | null
+      role: 'view' | 'edit'
+      isNew: boolean
+    }[] = []
+    for (const r of rows) {
+      // Its task is open to the caller: the artifact is found there, not here.
+      if ((await getSharingRouterDeps().roleOf(ctx, { kind: 'task', id: r.task_id })) !== null)
+        continue
+      out.push({
+        id: r.id,
+        title: r.title,
+        projectId: r.project_id,
+        sharedByUserId: r.added_by,
+        role: r.role,
+        isNew: r.opened_at === null
+      })
     }
+    return out
   }),
+  /** The caller opened an artifact shared with them: it is no longer new. */
+  markArtifactOpened: publicProcedure
+    .input(z.object({ artifactId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const me = ctx.principal?.userId
+      if (!me) return { ok: true as const }
+      const r = await ctx.db.run(
+        `UPDATE artifact_grants SET opened_at = datetime('now')
+          WHERE artifact_id = ? AND user_id = ? AND opened_at IS NULL`,
+        [input.artifactId, me]
+      )
+      if (r.changes > 0) changed(ctx, [])
+      return { ok: true as const }
+    }),
 
   /** Something about sharing changed for one of `userIds`: refetch what you can see. */
   onChanged: publicProcedure.subscription(() =>

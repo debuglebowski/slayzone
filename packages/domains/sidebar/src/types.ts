@@ -53,3 +53,12 @@ export interface StartupProgress {
   terminalsQueued: number
   chatsLoading: number
 }
+
+/** Where an app-supplied footer toolbar entry renders: it matches its neighbours. */
+export interface SidebarFooterPlacement {
+  layout: 'vertical' | 'horizontal'
+  tooltipSide: 'top' | 'right'
+}
+
+/** An app-supplied footer toolbar entry, rendered with the toolbar's placement. */
+export type SidebarFooterSlot = (placement: SidebarFooterPlacement) => ReactNode

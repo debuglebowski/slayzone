@@ -32,7 +32,7 @@ export { ProjectLockScreen } from './ProjectLockScreen'
 export { MembersTab } from './sharing/MembersTab'
 export { TaskSharingCard } from './sharing/TaskSharingCard'
 export { ArtifactShareDialog } from './sharing/ArtifactShareDialog'
-export { SharedWithMe } from './sharing/SharedWithMe'
+export { SharedArtifactsButton } from './sharing/SharedArtifactsButton'
 export {
   ROLE_LABEL,
   useBoardRoles,

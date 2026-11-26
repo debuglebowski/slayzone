@@ -509,18 +509,22 @@ describe('scopes: many decisions for one request or one stream', () => {
 })
 
 describe('sharing (T-100): members, private tasks, grants', () => {
-  // pS: A owns it; B is an edit member, C a view member. D is invited to one task.
+  // pS: A owns it; B is an edit member, C and F view members. Only the project's
+  // people can be shared with: D and E are outside it, so the grant rows naming them
+  // (refused by the sharing router, dropped by migration v227) open nothing.
   const C = 'user-c'
   const D = 'user-d'
   const E = 'user-e'
+  const F = 'user-f'
   // In beforeAll: the describes above run first and count A's projects.
   beforeAll(seedSharing)
   function seedSharing(): void {
     sql(`INSERT INTO projects (id, name, color, owner_user_id) VALUES ('pS', 'S', '#444', ?)`, A)
     sql(
-      `INSERT INTO project_members (project_id, user_id, role) VALUES ('pS', ?, 'edit'), ('pS', ?, 'view')`,
+      `INSERT INTO project_members (project_id, user_id, role) VALUES ('pS', ?, 'edit'), ('pS', ?, 'view'), ('pS', ?, 'view')`,
       B,
-      C
+      C,
+      F
     )
     sql(
       `INSERT INTO tasks (id, project_id, title, created_by_user_id, visibility, parent_id) VALUES
@@ -537,10 +541,13 @@ describe('sharing (T-100): members, private tasks, grants', () => {
     )
     sql(`INSERT INTO task_grants (task_id, user_id, role) VALUES ('tGrant', ?, 'view')`, D)
     sql(`INSERT INTO task_grants (task_id, user_id, role) VALUES ('tPriv', ?, 'edit')`, D)
+    sql(`INSERT INTO task_grants (task_id, user_id, role) VALUES ('tPriv', ?, 'edit')`, F)
     sql(
-      `INSERT INTO task_artifacts (id, task_id, title) VALUES ('arS', 'tS', 's'), ('arOne', 'tA', 'one')`
+      `INSERT INTO task_artifacts (id, task_id, title) VALUES ('arS', 'tS', 's'), ('arOne', 'tA', 'one'),
+        ('arPriv', 'tPriv', 'priv')`
     )
     sql(`INSERT INTO artifact_grants (artifact_id, user_id, role) VALUES ('arOne', ?, 'view')`, E)
+    sql(`INSERT INTO artifact_grants (artifact_id, user_id, role) VALUES ('arPriv', ?, 'view')`, C)
     sql(`INSERT INTO artifact_folders (id, task_id, name) VALUES ('fS', 'tS', 'f')`)
     sql(`INSERT INTO tags (id, project_id, name) VALUES ('tagS', 'pS', 's')`)
     sql(
@@ -581,27 +588,32 @@ describe('sharing (T-100): members, private tasks, grants', () => {
     expect(await role(B, 'task', 'tS')).toBe('edit')
   })
 
-  test('a private task: creator + grantees only — the project owner gets nothing', async () => {
+  test('a private task: creator + invited members only — the project owner gets nothing', async () => {
     expect(await role(B, 'task', 'tPriv')).toBe('manage')
-    expect(await role(D, 'task', 'tPriv')).toBe('edit')
+    expect(await role(F, 'task', 'tPriv')).toBe('edit')
     expect(await role(A, 'task', 'tPriv')).toBeNull()
     expect(await role(C, 'task', 'tPriv')).toBeNull()
     // Its subtask follows the root's visibility and grants.
     expect(await role(A, 'task', 'tPrivSub')).toBeNull()
-    expect(await role(D, 'task', 'tPrivSub')).toBe('edit')
+    expect(await role(F, 'task', 'tPrivSub')).toBe('edit')
     expect(await role(B, 'task', 'tPrivSub')).toBe('manage')
   })
 
-  test('a task grant opens one task to a non-member, nothing else of the project', async () => {
-    expect(await role(D, 'task', 'tGrant')).toBe('view')
+  test('a task grant to someone outside the project opens nothing', async () => {
+    expect(await role(D, 'task', 'tGrant')).toBeNull()
+    expect(await role(D, 'task', 'tPriv')).toBeNull()
+    expect(await role(D, 'task', 'tPrivSub')).toBeNull()
     expect(await role(D, 'task', 'tS')).toBeNull()
-    expect(await role(D, 'tag', 'tagS')).toBeNull()
   })
 
-  test('artifacts follow their task; an artifact grant opens that one artifact', async () => {
+  test("artifacts follow their task; a member's artifact grant opens that one artifact", async () => {
     expect(await role(C, 'artifact', 'arS')).toBe('view')
     expect(await role(C, 'artifactFolder', 'fS')).toBe('view')
-    expect(await role(E, 'artifact', 'arOne')).toBe('view')
+    // Shared on its own: C opens the file, never its private task.
+    expect(await role(C, 'artifact', 'arPriv')).toBe('view')
+    expect(await role(C, 'task', 'tPriv')).toBeNull()
+    // E is outside pA: the grant opens nothing.
+    expect(await role(E, 'artifact', 'arOne')).toBeNull()
     expect(await role(E, 'task', 'tA')).toBeNull()
     expect(await role(E, 'artifact', 'arA')).toBeNull()
   })

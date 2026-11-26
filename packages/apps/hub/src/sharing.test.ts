@@ -2,10 +2,11 @@
  * T-100, sharing on a REAL hub with login (`startServer()` in this process, its real
  * auth, `/trpc` socket, routers and owner gate; see owner-checks-harness.ts):
  *
- *   A owns a project. B is an edit member, C a view member, D nobody in it — until A
- *   invites D to one task. What each may read and change follows their role; what
- *   lives on a computer (terminals) stays A's; a private task is its creator's and
- *   its grantees' only — the project owner included.
+ *   A owns a project. B is an edit member, C a view member, D nobody in it. Only
+ *   people in the project can be invited to a private task or a file: D never can.
+ *   What each may read and change follows their role; what lives on a computer
+ *   (terminals) stays A's; a private task is its creator's and its grantees' only —
+ *   the project owner included. A file shared on its own opens that file only.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
@@ -168,18 +169,79 @@ describe('T-100 sharing: members, roles, private tasks and grants on a real hub'
     expect(JSON.stringify(board)).not.toContain('B_PRIVATE')
   })
 
-  test('a grant opens one task to an outsider, and nothing else of the project', async () => {
-    await m(cb, 'sharing.setTaskGrant', { taskId: 't_b_private', userId: ids.d, role: 'view' })
-    expect(await codeOf(q(cd, 'task.get', { id: 't_b_private' }))).toBe('OK')
-    expect(await codeOf(q(cd, 'task.get', { id: A.task }))).toBe('NOT_FOUND')
-    expect(await codeOf(m(cd, 'task.update', { id: 't_b_private', title: 'by D' }))).toBe(
+  test('only people in the project can be invited — to a task or to a file', async () => {
+    // D is on the hub but not in the project: refused, whoever asks.
+    expect(
+      await codeOf(
+        m(cb, 'sharing.setTaskGrant', { taskId: 't_b_private', userId: ids.d, role: 'view' })
+      )
+    ).toBe('BAD_REQUEST')
+    expect(
+      await codeOf(
+        m(ca, 'sharing.setArtifactGrant', { artifactId: A.artifact, userId: ids.d, role: 'view' })
+      )
+    ).toBe('BAD_REQUEST')
+    expect(
+      raw.prepare('SELECT COUNT(*) AS n FROM task_grants WHERE user_id = ?').get(ids.d)
+    ).toEqual({ n: 0 })
+    // A grant row to an outsider that got in some other way opens nothing.
+    raw
+      .prepare(`INSERT INTO task_grants (task_id, user_id, role) VALUES ('t_b_private', ?, 'view')`)
+      .run(ids.d)
+    try {
+      expect(await codeOf(q(cd, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
+    } finally {
+      raw.prepare(`DELETE FROM task_grants WHERE user_id = ?`).run(ids.d)
+    }
+    // A member is invited to the private task: C sees it, and only as invited.
+    await m(cb, 'sharing.setTaskGrant', { taskId: 't_b_private', userId: ids.c, role: 'view' })
+    expect(await codeOf(q(cc, 'task.get', { id: 't_b_private' }))).toBe('OK')
+    expect(await codeOf(m(cc, 'task.update', { id: 't_b_private', title: 'by C' }))).toBe(
       'FORBIDDEN'
     )
-    const mine = (await q(cd, 'sharing.sharedWithMe')) as { tasks: { id: string }[] }
-    expect(mine.tasks.map((t) => t.id)).toEqual(['t_b_private'])
-    // Revoked: gone again.
-    await m(cb, 'sharing.removeTaskGrant', { taskId: 't_b_private', userId: ids.d })
-    expect(await codeOf(q(cd, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
+    await m(cb, 'sharing.removeTaskGrant', { taskId: 't_b_private', userId: ids.c })
+    expect(await codeOf(q(cc, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
+  })
+
+  test('a file shared on its own opens that file, not its task, and is listed as shared', async () => {
+    raw
+      .prepare(
+        `INSERT INTO task_artifacts (id, task_id, title) VALUES ('art_b_private', 't_b_private', 'B_FILE')`
+      )
+      .run()
+    await m(cb, 'sharing.setArtifactGrant', {
+      artifactId: 'art_b_private',
+      userId: ids.c,
+      role: 'view'
+    })
+    expect(await codeOf(q(cc, 'artifacts.get', { id: 'art_b_private' }))).toBe('OK')
+    expect(await codeOf(q(cc, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
+    // A file of a task C already sees is not "shared on its own": not listed.
+    await m(ca, 'sharing.setArtifactGrant', { artifactId: A.artifact, userId: ids.c, role: 'edit' })
+    const listed = (await q(cc, 'sharing.artifactsSharedWithMe')) as unknown[]
+    expect(listed).toEqual([
+      {
+        id: 'art_b_private',
+        title: 'B_FILE',
+        projectId: A.project,
+        sharedByUserId: ids.b,
+        role: 'view',
+        isNew: true
+      }
+    ])
+    // Nothing of the task travels with it.
+    expect(JSON.stringify(listed)).not.toContain('"t_b_private"')
+    expect(JSON.stringify(listed)).not.toContain('B_PRIVATE')
+    // Opened: no longer new.
+    await m(cc, 'sharing.markArtifactOpened', { artifactId: 'art_b_private' })
+    expect(
+      ((await q(cc, 'sharing.artifactsSharedWithMe')) as { isNew: boolean }[]).map((a) => a.isNew)
+    ).toEqual([false])
+    // Someone it was not shared with may not mark it, and lists nothing.
+    expect(await codeOf(m(cd, 'sharing.markArtifactOpened', { artifactId: 'art_b_private' }))).toBe(
+      'NOT_FOUND'
+    )
+    expect(await q(cd, 'sharing.artifactsSharedWithMe')).toEqual([])
   })
 
   test('an editor assigns the task to a hub user; the external assignee stays', async () => {
@@ -262,8 +324,20 @@ describe('T-100 sharing: members, roles, private tasks and grants on a real hub'
     }
   })
 
-  test('removing a member closes the project to them', async () => {
+  test('removing a member closes the project to them, and takes their task and file grants', async () => {
+    await m(cb, 'sharing.setTaskGrant', { taskId: 't_b_private', userId: ids.c, role: 'view' })
     await m(ca, 'sharing.removeProjectMember', { projectId: A.project, userId: ids.c })
     expect(await codeOf(q(cc, 'task.get', { id: A.task }))).toBe('NOT_FOUND')
+    expect(await codeOf(q(cc, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
+    expect(await codeOf(q(cc, 'artifacts.get', { id: 'art_b_private' }))).toBe('NOT_FOUND')
+    expect(await q(cc, 'sharing.artifactsSharedWithMe')).toEqual([])
+    const left = (table: string) =>
+      raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = ?`).get(ids.c)
+    expect(left('task_grants')).toEqual({ n: 0 })
+    expect(left('artifact_grants')).toEqual({ n: 0 })
+    // Added back, they get the project again, but not what they were invited to before.
+    await m(ca, 'sharing.setProjectMember', { projectId: A.project, userId: ids.c, role: 'view' })
+    expect(await codeOf(q(cc, 'task.get', { id: A.task }))).toBe('OK')
+    expect(await codeOf(q(cc, 'task.get', { id: 't_b_private' }))).toBe('NOT_FOUND')
   })
 })

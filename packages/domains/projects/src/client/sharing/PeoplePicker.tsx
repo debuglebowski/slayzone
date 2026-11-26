@@ -10,27 +10,33 @@ interface Person {
 
 /**
  * Pick a person and a role, then Add. `exclude`: people already in (and the owner),
- * who are not offered again.
+ * who are not offered again. `emptyText`: shown when nobody is left to offer.
  */
 export function PeoplePicker({
   people,
   exclude,
   roles,
   onAdd,
-  testId
+  testId,
+  emptyText = 'Everyone on this hub is already in.'
 }: {
   people: readonly Person[]
   exclude: ReadonlySet<string>
   roles: readonly AccessRole[]
   onAdd: (userId: string, role: AccessRole) => Promise<unknown>
   testId: string
+  emptyText?: string
 }): React.JSX.Element {
   const candidates = people.filter((p) => !exclude.has(p.id))
   const [userId, setUserId] = useState<string>('')
   const [role, setRole] = useState<AccessRole>(roles[0] ?? 'view')
   const [busy, setBusy] = useState(false)
   if (candidates.length === 0) {
-    return <p className="text-xs text-muted-foreground">Everyone on this hub is already in.</p>
+    return (
+      <p className="text-xs text-muted-foreground" data-testid={`${testId}-none`}>
+        {emptyText}
+      </p>
+    )
   }
   return (
     <div className="flex items-center gap-2" data-testid={testId}>

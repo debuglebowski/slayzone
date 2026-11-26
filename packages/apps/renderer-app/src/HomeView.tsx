@@ -83,7 +83,7 @@ import {
   useIdleTasks
 } from '@slayzone/agent-panels'
 import { AppSidebar } from '@slayzone/sidebar'
-import { SharedWithMe } from '@slayzone/projects/client'
+import { SharedArtifactsButton } from '@slayzone/projects/client'
 import { SharedArtifactDialog } from '@slayzone/task-artifacts/client'
 import { FeedbackDialog } from '@slayzone/feedback/client'
 import { ConvexScope, useLeaderboardAuth } from '@slayzone/leaderboard'
@@ -735,6 +735,11 @@ export function HomeView({
   return (
     <FaultedTasksProvider>
       <SidebarProvider defaultOpen className="relative h-svh min-h-0 bg-background text-foreground">
+        {/* A file shared with the user on its own (T-100): opened from Shared. */}
+        <SharedArtifactDialog
+          artifactId={sharedArtifactId}
+          onClose={() => setSharedArtifactId(null)}
+        />
         <AppSidebar
           projects={projects}
           projectGroups={data.projectGroups}
@@ -764,18 +769,9 @@ export function HomeView({
               <FeedbackDialog />
             </ConvexScope>
           }
-          sharedSlot={
-            <>
-              <SharedWithMe
-                onOpenTask={openTask}
-                onOpenArtifact={(_taskId, artifactId) => setSharedArtifactId(artifactId)}
-              />
-              <SharedArtifactDialog
-                artifactId={sharedArtifactId}
-                onClose={() => setSharedArtifactId(null)}
-              />
-            </>
-          }
+          sharedSlot={(placement) => (
+            <SharedArtifactsButton {...placement} onOpenArtifact={setSharedArtifactId} />
+          )}
           keyRecorder={KeyRecorder}
           sessionTaskIds={EMPTY_SESSION_IDS}
           onReorderProjects={data.reorderProjects}

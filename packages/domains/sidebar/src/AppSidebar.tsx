@@ -18,7 +18,7 @@ import type {
   ColumnConfig,
   TopLevelEntryRef
 } from '@slayzone/projects-contracts'
-import type { OnboardingChecklistState, KeyRecorderComponent } from './types'
+import type { OnboardingChecklistState, KeyRecorderComponent, SidebarFooterSlot } from './types'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'
 import { SidebarResizeHandle } from './SidebarResizeHandle'
@@ -52,8 +52,12 @@ interface AppSidebarProps {
   convexConfigured?: boolean
   /** App-supplied feedback entry, rendered in the footer when convex is configured. */
   feedbackSlot?: ReactNode
-  /** App-supplied list of tasks and files shared with the user (T-100), above the footer. */
-  sharedSlot?: ReactNode
+  /**
+   * App-supplied "Shared" entry of the footer toolbar (T-100): files shared with the
+   * user on their own. Rendered with the toolbar's layout; renders nothing itself
+   * while nothing is shared.
+   */
+  sharedSlot?: SidebarFooterSlot
   /** App-supplied renderless KeyRecorder, threaded to the shortcuts dialog. */
   keyRecorder: KeyRecorderComponent
   /** Task ids with an active agent session — always pass the tree filter. */
@@ -329,12 +333,15 @@ export function AppSidebar({
             })}
           </SidebarGroupContent>
         </SidebarGroup>
-        {sharedSlot && <SidebarGroup className="shrink-0 pt-0">{sharedSlot}</SidebarGroup>}
       </SidebarContent>
       <SidebarFooter className={cn('py-4 gap-3', !compactFooter && 'border-t border-border/60')}>
         {statusSlot}
         {compactFooter ? (
-          compactFooter
+          <>
+            {/* The compact footer has no toolbar: Shared stands on its own above it. */}
+            {sharedSlot?.({ layout: 'horizontal', tooltipSide: 'top' })}
+            {compactFooter}
+          </>
         ) : (
           <>
             <SidebarFooterIcons
@@ -347,6 +354,7 @@ export function AppSidebar({
               onboardingChecklist={onboardingChecklist}
               convexConfigured={convexConfigured}
               feedbackSlot={feedbackSlot}
+              sharedSlot={sharedSlot}
               keyRecorder={keyRecorder}
               trailing={
                 view.footerLayout === 'horizontal' ? (

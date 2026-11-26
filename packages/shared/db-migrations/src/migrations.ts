@@ -6027,6 +6027,36 @@ export const migrations: Migration[] = [
       // open_task_tabs carries a task_id: fenced like every such table.
       installContentErasureFences(db)
     }
+  },
+  {
+    // Sharing is for project members only (T-100 reversed, docs/sharing.md): a task
+    // or artifact can be shared with someone in its project, never with anyone else
+    // on the hub. A grant held by someone who is neither the project's owner nor one
+    // of its members is DROPPED, not turned into membership — membership opens every
+    // task of the project the whole project sees, which a person invited to one task
+    // was never given; the project's managers add them as a member if they should be.
+    //
+    // artifact_grants.opened_at: when the grantee first opened the artifact (the
+    // "new" dot on a file shared on its own is lit while it is NULL).
+    version: 227,
+    up: (db) => {
+      db.exec(`
+        DELETE FROM task_grants WHERE NOT EXISTS (
+          SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
+           WHERE t.id = task_grants.task_id AND (
+             p.owner_user_id = task_grants.user_id
+             OR EXISTS (SELECT 1 FROM project_members m
+                         WHERE m.project_id = p.id AND m.user_id = task_grants.user_id)));
+        DELETE FROM artifact_grants WHERE NOT EXISTS (
+          SELECT 1 FROM task_artifacts a JOIN tasks t ON t.id = a.task_id
+            JOIN projects p ON p.id = t.project_id
+           WHERE a.id = artifact_grants.artifact_id AND (
+             p.owner_user_id = artifact_grants.user_id
+             OR EXISTS (SELECT 1 FROM project_members m
+                         WHERE m.project_id = p.id AND m.user_id = artifact_grants.user_id)));
+        ALTER TABLE artifact_grants ADD COLUMN opened_at TEXT;
+      `)
+    }
   }
 ]
 

@@ -2727,9 +2727,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           Saved in Temporary tasks until you delete it
                         </TooltipContent>
                       </Tooltip>
-                      <span className="text-2xl italic text-muted-foreground">
-                        {task.title}
-                      </span>
+                      <span className="text-2xl italic text-muted-foreground">{task.title}</span>
                       <Button
                         variant="outline"
                         size="sm"
@@ -3833,6 +3831,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     {sharingArtifact && (
                       <ArtifactShareDialog
                         artifactId={sharingArtifact.id}
+                        projectId={task.project_id}
                         title={sharingArtifact.title}
                         open
                         onOpenChange={(open) => !open && setSharingArtifact(null)}

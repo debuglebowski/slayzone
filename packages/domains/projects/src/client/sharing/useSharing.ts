@@ -39,7 +39,43 @@ export function useDirectory(enabled: boolean) {
     const u = byId.get(id)
     return u ? u.name || u.email : 'Former user'
   }
-  return { users, byId, nameOf }
+  return { users, byId, nameOf, loaded: q.data !== undefined }
+}
+
+/** One of a project's people: its owner, or a member with their project role. */
+export interface ProjectPerson {
+  id: string
+  name: string
+  email: string
+  projectRole: AccessRole | 'owner'
+}
+
+/**
+ * The project's people — its owner and members, the only ones a task or an artifact
+ * can be shared with (the hub refuses anyone else). `loading` until both the members
+ * and the directory are known. A member no longer on the hub (disabled) is left out.
+ */
+export function useProjectPeople(
+  projectId: string | null | undefined,
+  enabled = true
+): { people: ProjectPerson[]; loading: boolean } {
+  const trpc = useTRPC()
+  const on = enabled && !!projectId
+  const { byId, loaded } = useDirectory(on)
+  const members = useQuery({
+    ...trpc.sharing.projectMembers.queryOptions({ projectId: projectId ?? '' }),
+    enabled: on,
+    retry: false
+  })
+  if (!members.data || !loaded) return { people: [], loading: on && !members.isError }
+  const people: ProjectPerson[] = []
+  const add = (id: string, projectRole: ProjectPerson['projectRole']) => {
+    const u = byId.get(id)
+    if (u) people.push({ ...u, projectRole })
+  }
+  if (members.data.ownerUserId) add(members.data.ownerUserId, 'owner')
+  for (const m of members.data.members) add(m.userId, m.role)
+  return { people, loading: false }
 }
 
 /** The caller's own role on one resource; null while loading or without access. */

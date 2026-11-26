@@ -5,7 +5,7 @@ import { IconButton, Tooltip, TooltipTrigger, TooltipContent, cn } from '@slayzo
 import { useDialogStore } from '@slayzone/dialogs'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task-contracts'
-import type { OnboardingChecklistState, KeyRecorderComponent } from './types'
+import type { OnboardingChecklistState, KeyRecorderComponent, SidebarFooterSlot } from './types'
 import { GettingStartedPopover } from './GettingStartedPopover'
 import { ShortcutsDialog } from './ShortcutsDialog'
 
@@ -22,6 +22,8 @@ interface SidebarFooterIconsProps {
   convexConfigured?: boolean
   /** App-supplied feedback entry (rendered when convex is configured). */
   feedbackSlot?: ReactNode
+  /** App-supplied "Shared" toolbar entry (T-100), given the toolbar's layout. */
+  sharedSlot?: SidebarFooterSlot
   /** App-supplied renderless KeyRecorder (threaded to the shortcuts dialog). */
   keyRecorder: KeyRecorderComponent
   trailing?: React.ReactNode
@@ -38,6 +40,7 @@ export function SidebarFooterIcons({
   onboardingChecklist,
   convexConfigured = false,
   feedbackSlot = null,
+  sharedSlot,
   keyRecorder,
   trailing,
   actions
@@ -56,6 +59,7 @@ export function SidebarFooterIcons({
     <div className={containerClass}>
       {actions}
       <TerminalStatusPopover tasks={tasks} onTaskClick={onTaskClick} side={tooltipSide} />
+      {sharedSlot?.({ layout, tooltipSide })}
 
       {onboardingChecklist && (
         <GettingStartedPopover

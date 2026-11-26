@@ -3,23 +3,28 @@ import { X } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { useTRPC } from '../trpc'
 import { PeoplePicker, RoleSelect } from './PeoplePicker'
-import { toastError, useDirectory, type AccessRole } from './useSharing'
+import { toastError, useDirectory, useProjectPeople, type AccessRole } from './useSharing'
 
 const ROLES: readonly AccessRole[] = ['view', 'edit']
 
 /**
- * Share one file with people (T-100): view or edit, nothing else of its task. A file
- * held by a computer moves to the hub first (it must be connected), so the people it
- * is shared with reach it whether or not that computer is on.
+ * Share one file with people in its project (T-100): view or edit. Someone not invited
+ * to its private task gets this file only — never the task; they find it under Shared
+ * in the sidebar. Nobody outside the project can be added (the hub refuses them). A
+ * file held by a computer moves to the hub first (it must be connected), so the people
+ * it is shared with reach it whether or not that computer is on.
  */
 export function ArtifactShareDialog({
   artifactId,
+  projectId,
   title,
   open,
   onOpenChange,
   onMoved
 }: {
   artifactId: string
+  /** The project of the file's task: whose people it can be shared with. */
+  projectId: string
   title: string
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -28,7 +33,8 @@ export function ArtifactShareDialog({
 }): React.JSX.Element {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const { users, nameOf } = useDirectory(open)
+  const { nameOf } = useDirectory(open)
+  const { people, loading } = useProjectPeople(projectId, open)
   const grantsQuery = useQuery({
     ...trpc.sharing.artifactGrants.queryOptions({ artifactId }),
     enabled: open
@@ -54,7 +60,8 @@ export function ArtifactShareDialog({
           <DialogTitle>Share “{title}”</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground">
-          People you add see this file only — not the rest of its task.
+          Only people in the project can be added. Someone who can’t see the task gets this file
+          only.
         </p>
         <ul className="space-y-1">
           {grants.map((g) => (
@@ -80,17 +87,22 @@ export function ArtifactShareDialog({
             </li>
           ))}
         </ul>
-        <PeoplePicker
-          people={users}
-          exclude={new Set(grants.map((g) => g.userId))}
-          roles={ROLES}
-          testId="artifact-grant-picker"
-          onAdd={(userId, role) =>
-            setGrant
-              .mutateAsync({ artifactId, userId, role: role as 'view' | 'edit' })
-              .catch(() => undefined)
-          }
-        />
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : (
+          <PeoplePicker
+            people={people}
+            exclude={new Set(grants.map((g) => g.userId))}
+            roles={ROLES}
+            testId="artifact-grant-picker"
+            emptyText="Everyone in the project is already in. Add more people to the project in Project Settings → Members."
+            onAdd={(userId, role) =>
+              setGrant
+                .mutateAsync({ artifactId, userId, role: role as 'view' | 'edit' })
+                .catch(() => undefined)
+            }
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

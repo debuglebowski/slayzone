@@ -11,7 +11,7 @@ const ROLES: readonly AccessRole[] = ['view', 'edit', 'manage']
 
 /**
  * Task details → Sharing (T-100): whether the whole project sees the task or only its
- * creator and the people invited, and who is invited. Renders nothing on a hub
+ * creator and the people invited, and who is invited — always people in the project. Renders nothing on a hub
  * without login (one operator, nobody to share with).
  */
 export function TaskSharingCard({ taskId }: { taskId: string }): React.JSX.Element | null {
@@ -25,7 +25,7 @@ function TaskSharing({ taskId }: { taskId: string }): React.JSX.Element {
   const queryClient = useQueryClient()
   const myRole = useMyRole('task', taskId)
   const canManage = myRole === 'manage'
-  const { users, nameOf } = useDirectory(true)
+  const { nameOf } = useDirectory(true)
   const sharingQuery = useQuery(trpc.sharing.taskSharing.queryOptions({ taskId }))
   const refresh = () => queryClient.invalidateQueries({ queryKey: trpc.sharing.pathKey() })
   const opts = { onSuccess: refresh, onError: toastError }
@@ -75,7 +75,6 @@ function TaskSharing({ taskId }: { taskId: string }): React.JSX.Element {
         )}
         {canManage && (
           <AddPersonButton
-            people={users}
             exclude={invited}
             roles={ROLES}
             projectId={s.projectId}

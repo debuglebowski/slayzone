@@ -296,16 +296,6 @@ const oneOrNull =
     return r && (await scope.allows(r)) ? data : null
   }
 
-/** `sharing.sharedWithMe`: each invited task and artifact, cut to what the caller sees. */
-const sharedWithMe: OutputFilter = async (data, scope) => {
-  if (!isRecord(data)) return data
-  return {
-    ...data,
-    tasks: await rows('id', 'task')(data.tasks, scope),
-    artifacts: await rows('id', 'artifact')(data.artifacts, scope)
-  }
-}
-
 /** `task.loadBoardData` / `task.loadBoardRows`: the board (or a few of its rows),
  *  cut to the caller's projects. */
 const board: OutputFilter = async (data, scope) => {
@@ -1360,7 +1350,11 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'sharing.artifactGrants': checked(artifact('artifactId')),
   'sharing.setArtifactGrant': needing('manage', checked(artifact('artifactId'))),
   'sharing.removeArtifactGrant': needing('manage', checked(artifact('artifactId'))),
-  'sharing.sharedWithMe': listed(sharedWithMe),
+  // Artifacts shared with the caller on their own: each one the caller may open (the
+  // project's people only — a grant to anyone else opens nothing, see access.ts).
+  'sharing.artifactsSharedWithMe': listed(rows('id', 'artifact')),
+  // Only the caller's own grant row is touched; one they cannot see does not exist.
+  'sharing.markArtifactOpened': needing('view', checked(artifact('artifactId'))),
   // Each event names the users it concerns: only theirs (who may now see more or less).
   'sharing.onChanged': streamed((event, { userId }) =>
     isRecord(event) && Array.isArray(event.userIds) && event.userIds.includes(userId) ? event : DROP

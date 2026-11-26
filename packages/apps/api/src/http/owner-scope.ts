@@ -139,9 +139,9 @@ export async function ownedProjectIdsOrAll(): Promise<string[] | null> {
 /**
  * The ids of every task the current request may see, for a scan across tasks (artifact
  * search's `--all-tasks`); null = unrestricted. A shared project still holds private
- * tasks of others (T-100), so the caller's projects alone are no bound: each candidate
- * — every task of those projects, and every task granted to the caller — is decided
- * through the access function.
+ * tasks of others (T-100), so the caller's projects alone are no bound: each task of
+ * those projects is decided through the access function. (Sharing never reaches past a
+ * project's people, so no task outside the caller's projects can be visible to them.)
  */
 export async function visibleTaskIdsOrAll(db: SlayzoneDb): Promise<string[] | null> {
   const scope = currentOwnerScope()
@@ -153,15 +153,8 @@ export async function visibleTaskIdsOrAll(db: SlayzoneDb): Promise<string[] | nu
 export async function visibleTaskIds(db: SlayzoneDb, scope: AccessScope): Promise<string[]> {
   const projectIds = (await scopedProjectIds(scope)) ?? []
   const candidates = await db.all<{ id: string }>(
-    `SELECT id FROM tasks WHERE project_id IN (SELECT value FROM json_each(?))
-     UNION
-     SELECT t.id FROM tasks t WHERE t.id IN (
-       WITH RECURSIVE granted(id, depth) AS (
-         SELECT g.task_id, 0 FROM task_grants g WHERE g.user_id = ?
-         UNION ALL
-         SELECT c.id, d.depth + 1 FROM tasks c JOIN granted d ON c.parent_id = d.id WHERE d.depth < 64
-       ) SELECT id FROM granted)`,
-    [JSON.stringify(projectIds), scope.userId ?? '']
+    'SELECT id FROM tasks WHERE project_id IN (SELECT value FROM json_each(?))',
+    [JSON.stringify(projectIds)]
   )
   return scope.filter(
     candidates.map((c) => c.id),

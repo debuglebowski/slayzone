@@ -5,5 +5,7 @@ export type {
   OnboardingChecklistStep,
   KeyRecorderProps,
   KeyRecorderComponent,
+  SidebarFooterPlacement,
+  SidebarFooterSlot,
   StartupProgress
 } from './types'

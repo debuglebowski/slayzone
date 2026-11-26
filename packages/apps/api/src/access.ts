@@ -302,6 +302,27 @@ async function projectFacts(db: SlayzoneDb, projectId: string): Promise<SharedOw
   return { owner_user_id: project.owner_user_id, grants }
 }
 
+/**
+ * Whether `userId` is one of the project's people — its owner or a member. Sharing
+ * never reaches past them: a task or artifact grant held by anyone else counts for
+ * nothing (the sharing router refuses such a grant, removing a member deletes theirs,
+ * and migration v227 dropped the old ones; this keeps a stray row from opening
+ * anything all the same).
+ */
+function inProject(project: SharedOwnership, userId: string): boolean {
+  return (
+    project.owner_user_id === userId || (project.grants ?? []).some((m) => m.user_id === userId)
+  )
+}
+
+/** The grants among `grants` held by the project's people. */
+function projectPeopleOnly(
+  project: SharedOwnership,
+  grants: readonly AccessGrant[]
+): AccessGrant[] {
+  return grants.filter((g) => inProject(project, g.user_id))
+}
+
 /** What a task's sharing comes down to. */
 interface TaskFacts {
   /** Who may reach the task's hub-resident content, with which role. */
@@ -310,6 +331,8 @@ interface TaskFacts {
    *  when a row names none (a legacy tab, a task process): its creator, else (a row
    *  from before creators were recorded) its project's owner. */
   readonly ownerUser: string | null
+  /** Its project's owner and members ({@link projectFacts}). */
+  readonly project: SharedOwnership
 }
 
 /** The task and its ancestors (nearest first), each with its own grants (JSON). */
@@ -334,7 +357,8 @@ const TASK_CHAIN_SQL = `
  *                         not its owner, not its managers (they manage members, never
  *                         task access).
  *
- * Either way a `task_grants` row on the task or an ancestor adds its user.
+ * Either way a `task_grants` row on the task or an ancestor adds its user — when that
+ * user is one of the project's people (owner or member); anyone else's grant is void.
  */
 async function taskFacts(db: SlayzoneDb, taskId: string): Promise<TaskFacts | null> {
   const chain = await db.all<{
@@ -348,21 +372,24 @@ async function taskFacts(db: SlayzoneDb, taskId: string): Promise<TaskFacts | nu
   const project = await projectFacts(db, chain[0].project_id)
   if (!project) return null
   const root = chain[chain.length - 1]
-  const taskGrants: AccessGrant[] = chain.flatMap((t) => JSON.parse(t.grants) as AccessGrant[])
+  const taskGrants = projectPeopleOnly(
+    project,
+    chain.flatMap((t) => JSON.parse(t.grants) as AccessGrant[])
+  )
   // The task's MAIN runtime (its main agent, conversation, workspace on the task row) is
   // its creator's; before creators were recorded, its project owner's.
   const creator = chain[0].created_by_user_id ?? project.owner_user_id
   if (root.visibility === 'private') {
     return {
       shared: { owner_user_id: root.created_by_user_id, grants: taskGrants },
-      ownerUser: creator
+      ownerUser: creator,
+      project
     }
   }
   const members = project.grants ?? []
-  const isMember = (userId: string) => members.some((m) => m.user_id === userId)
   const creators: AccessGrant[] = []
   for (const t of chain) {
-    if (t.created_by_user_id !== null && isMember(t.created_by_user_id))
+    if (t.created_by_user_id !== null && members.some((m) => m.user_id === t.created_by_user_id))
       creators.push({ user_id: t.created_by_user_id, role: 'manage' })
   }
   return {
@@ -370,7 +397,8 @@ async function taskFacts(db: SlayzoneDb, taskId: string): Promise<TaskFacts | nu
       owner_user_id: project.owner_user_id,
       grants: [...members, ...creators, ...taskGrants]
     },
-    ownerUser: creator
+    ownerUser: creator,
+    project
   }
 }
 
@@ -425,7 +453,10 @@ const viaTaskColumn =
     return row ? viaTask(db, row.task_id) : NONE
   }
 
-/** An artifact: its task's sharing, plus the users invited to this one artifact. */
+/**
+ * An artifact: its task's sharing, plus the project's people invited to this one
+ * artifact — who may open it even without its (private) task.
+ */
 async function resolveArtifact(db: SlayzoneDb, id: string): Promise<Ownership> {
   const row = await db.get<{ task_id: string }>('SELECT task_id FROM task_artifacts WHERE id = ?', [
     id
@@ -437,7 +468,10 @@ async function resolveArtifact(db: SlayzoneDb, id: string): Promise<Ownership> {
     'SELECT user_id, role FROM artifact_grants WHERE artifact_id = ?',
     [id]
   )
-  return sharedOf({ ...facts.shared, grants: [...(facts.shared.grants ?? []), ...own] })
+  return sharedOf({
+    ...facts.shared,
+    grants: [...(facts.shared.grants ?? []), ...projectPeopleOnly(facts.project, own)]
+  })
 }
 
 /**
