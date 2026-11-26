@@ -27,6 +27,8 @@ import { trpcTransformer } from './trpc-transformer'
 import { ADMIN_ONLY, roleAllows } from './access-class'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
 import { registeredAppCodes } from './app-codes'
+import { assertClientApiServed, isClientTooOldError } from './client-api-gate'
+import { CLIENT_TOO_OLD } from './api-version'
 import { procedurePolicy, registeredProcedurePolicy } from './procedure-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
@@ -42,6 +44,8 @@ const t = initTRPC.context<TrpcContext>().create({
       ...(isHubSwitchedOffError(error.cause) ? { appCode: error.cause.code } : {}),
       // A role refusal (T-15) carries `ADMIN_ONLY` the same way.
       ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
+      // A client older than this hub serves (client-api-gate.ts): `CLIENT_TOO_OLD`.
+      ...(isClientTooOldError(error.cause) ? { appCode: CLIENT_TOO_OLD } : {}),
       // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
       ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {}),
       // A computer's refusal by its own policy (its path jail, T-27): `COMPUTER_REFUSED`.
@@ -204,6 +208,16 @@ function withLiveness(live: () => boolean, data: unknown): unknown {
  * UNAUTHORIZED at once; nothing waits on a network refresh while the cached principal
  * keeps working. No `principalLive` (every other host, login off): a pass-through.
  */
+/**
+ * Client API gate (client-api-gate.ts): a client older than this hub serves is refused
+ * before anything else runs, so what it hears is "update SlayZone", not whatever the
+ * newer procedure would make of its older request. Inert while `MIN_CLIENT_API` is 0.
+ */
+const clientApiGate = t.middleware(({ ctx, next }) => {
+  assertClientApiServed(ctx.req)
+  return next()
+})
+
 const livenessGate = t.middleware(async ({ ctx, next, path, type }) => {
   const live = ctx.principalLive
   if (!ctx.principal || !live) return next()
@@ -426,6 +440,7 @@ const computerFrameTooLarge = t.middleware(async ({ next }) => {
  */
 export const publicProcedure = t.procedure
   .use(securityContext)
+  .use(clientApiGate)
   .use(livenessGate)
   .use(authGate)
   .use(adminGate)

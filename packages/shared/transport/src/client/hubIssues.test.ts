@@ -6,6 +6,7 @@
 import { behaviorSubject } from '@trpc/server/observable'
 import { TRPCClientError } from '@trpc/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { HUB_API_VERSION } from '@slayzone/trpc-server/api-version'
 import type { ConnectionStateSource } from './connectDeadlineLink'
 import {
   isSignedOutDescribe,
@@ -25,8 +26,10 @@ const failing = (message: string): State => ({
   error: TRPCClientError.from(new Error(message))
 })
 
-const SIGNED_IN = { authRequired: true, scopes: ['full'] }
-const SIGNED_OUT = { authRequired: true, scopes: null }
+/** A hub of this release: compatible with this client (`api-version.ts`). */
+const CURRENT = { api: { version: HUB_API_VERSION, minClient: 0 } }
+const SIGNED_IN = { ...CURRENT, authRequired: true, scopes: ['full'] }
+const SIGNED_OUT = { ...CURRENT, authRequired: true, scopes: null }
 
 function harness(initial: State, describe: () => Promise<unknown>) {
   const source = behaviorSubject<State>(initial) as unknown as ConnectionStateSource & {
@@ -155,14 +158,16 @@ describe('watchHubHealth', () => {
   it('a hub that answers with this app signed in is ok, signed in', async () => {
     const h = healthHarness(OPEN, () => Promise.resolve(SIGNED_IN))
     await vi.advanceTimersByTimeAsync(0)
-    expect(h.last()).toEqual({ kind: 'ok', authRequired: true })
+    expect(h.last()).toEqual({ kind: 'ok', authRequired: true, release: null })
     h.stop()
   })
 
   it('a hub without login is ok, with nothing to sign in to', async () => {
-    const h = healthHarness(OPEN, () => Promise.resolve({ authRequired: false, scopes: null }))
+    const h = healthHarness(OPEN, () =>
+      Promise.resolve({ ...CURRENT, authRequired: false, scopes: null })
+    )
     await vi.advanceTimersByTimeAsync(0)
-    expect(h.last()).toEqual({ kind: 'ok', authRequired: false })
+    expect(h.last()).toEqual({ kind: 'ok', authRequired: false, release: null })
     h.stop()
   })
 

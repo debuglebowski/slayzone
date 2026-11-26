@@ -83,6 +83,36 @@ jobs:
           POSTHOG_HOST: https://app.posthog.com
           VITE_CONVEX_URL: https://example.invalid
 
+  # Client ↔ hub API compatibility (scripts/check-api-compat.mjs): this commit's tRPC
+  # API against the latest release's, both directions (that release's app on this hub;
+  # this app on that release's hub). A break the contract in api-version.ts does not
+  # cover — and packages/apps/api/api-compat.json does not accept — fails. Its own job:
+  # it installs the release's dependencies (types only) next to this commit's.
+  api-compat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: pnpm/action-setup@v6.1.0
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      # The shallow checkout has no tags; the check picks the newest stable `v*` one.
+      - name: Fetch release tags
+        run: git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+
+      - name: Check API compatibility with the latest release
+        run: pnpm check:api-compat --explain
+
   # Every unit suite: the one list in packages/shared/test-utils/run-all.sh (it absorbed
   # the former hosted-tests subset: hub switches, hub auth, per-user ownership). Strict:
   # exits non-zero if any suite fails or any test file is registered nowhere. Node 24

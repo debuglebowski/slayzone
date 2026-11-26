@@ -10,6 +10,7 @@
  *
  * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
+import { HUB_API_VERSION, HUB_FEATURES, MIN_CLIENT_API } from '@slayzone/trpc-server/api-version'
 import { test, expect } from 'vitest'
 import { CHAT_HISTORY_DISPLAY_VERSION } from '@slayzone/terminal-contracts'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
@@ -48,6 +49,10 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
     toolPreviews: true,
     chatDisplay: CHAT_HISTORY_DISPLAY_VERSION
   })
+  // The client ↔ hub API contract (`@slayzone/trpc-server/api-version`): what a client
+  // compares itself with before it sends this hub anything else.
+  expect(d.api).toEqual({ version: HUB_API_VERSION, minClient: MIN_CLIENT_API })
+  expect(d.features).toEqual([...HUB_FEATURES])
 })
 
 test('hub.setLabel persists a label that describe then reports', async () => {
@@ -175,4 +180,20 @@ test('auth gate ON + a non-admin account: setLabel is FORBIDDEN, describe still 
   } finally {
     setAuthGate(() => false)
   }
+})
+
+test('hub.describe is the API contract anchor: no field it ever had may go', async () => {
+  // Every client of every release reads these to find out whether it can talk to this
+  // hub at all (`@slayzone/trpc-server/api-version`). Adding is fine; removing or
+  // retyping one strands the clients that read it.
+  const d = await caller.describe()
+  expect(typeof d.version).toBe('string')
+  expect(typeof d.authRequired).toBe('boolean')
+  expect(typeof d.switches).toBe('object')
+  expect('scopes' in d).toBe(true)
+  expect('label' in d).toBe(true)
+  expect(Number.isInteger(d.api.version)).toBe(true)
+  expect(Number.isInteger(d.api.minClient)).toBe(true)
+  expect(Array.isArray(d.features)).toBe(true)
+  expect(typeof d.wire).toBe('object')
 })

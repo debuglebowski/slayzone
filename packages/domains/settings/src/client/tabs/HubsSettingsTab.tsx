@@ -680,6 +680,12 @@ export function HubsSettingsTab({
     return sessions[hubId]
   }
 
+  /** The SlayZone release a hub runs, as its live connection last said; null when unknown. */
+  const hubRelease = (hubId: string): string | null => {
+    const live = liveHealth.get(hubId)
+    return live?.kind === 'ok' || live?.kind === 'incompatible' ? live.release : null
+  }
+
   /**
    * A bearer is stored for this hub — unless main, asked to check it, says it holds
    * none (`none`: cleared since the list loaded). Main is the store's owner, so its
@@ -701,6 +707,16 @@ export function HubsSettingsTab({
     if (verify?.kind === 'probing') return <HubStatus tone="idle" label="Checking…" />
     if (verify?.kind === 'fail')
       return <HubStatus tone="bad" label="Unreachable" title={verify.reason} />
+    // Before sign-in: a hub that cannot work with this app version makes it moot.
+    const live = liveHealth.get(h.id)
+    if (live?.kind === 'incompatible')
+      return (
+        <HubStatus
+          tone="bad"
+          label={live.side === 'hub' ? 'Hub needs update' : 'App too old for hub'}
+          title={live.detail}
+        />
+      )
     if (hasStoredSignIn(h.id)) {
       const session = sessionOf(h.id)
       if (session?.state === 'expired')
@@ -846,6 +862,15 @@ export function HubsSettingsTab({
                     >
                       {h.url}
                     </span>
+                    {hubRelease(h.id) && (
+                      <span
+                        className="text-muted-foreground shrink-0 text-xs"
+                        title="The SlayZone version this hub runs"
+                        data-testid="hub-release"
+                      >
+                        v{hubRelease(h.id)}
+                      </span>
+                    )}
                     {hasStoredSignIn(h.id) && (
                       <span className="sr-only" data-testid="hub-signed-in">
                         signed in

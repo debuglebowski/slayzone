@@ -688,6 +688,9 @@ run_harness scripts/check-task-computer-resolver.test.mjs
 # and typechecked sources' relative imports resolve inside the package or a workspace
 # package it depends on (transitively).
 run_harness scripts/check-tsconfig-hermetic.test.mjs
+# `pnpm check:api-compat` (client ↔ hub API contract): base-release pick, contract
+# parsing, the generated type comparison's verdict, and the policy over it.
+run_harness scripts/api-compat/lib.test.mjs
 # CI's Turborepo typecheck cache keeps only the current run's entries before it is saved.
 run_harness scripts/ci/turbo-cache-prune.test.mjs
 # Machine-wide CI lock around heavy local runs (`pnpm test:e2e`, `test:unit`), shared with
@@ -1515,6 +1518,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
+  packages/shared/transport/src/client/hubCompat.test.ts \
   packages/shared/transport/src/client/runtime.test.ts \
   packages/shared/transport/src/client/compactBytes.test.ts \
   packages/shared/transport/src/client/deviceSettingsLink.test.ts \
@@ -1781,6 +1785,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/trpc-server/src/subscription-security-context.test.ts \
   packages/shared/trpc-server/src/computer-refusal.test.ts \
   packages/shared/trpc-server/src/unknown-scope.test.ts \
+  packages/shared/trpc-server/src/api-version.test.ts \
+  packages/shared/trpc-server/src/client-api-gate.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

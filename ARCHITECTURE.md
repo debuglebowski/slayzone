@@ -179,6 +179,32 @@ Computer backups snapshot SQLite and referenced blobs together. Restores publish
 separate read-only archives; provider session resumability is not guaranteed.
 See [backup and restore](docs/backup-and-restore.md) for retention and operator details.
 
+### Client ↔ hub versions
+
+A remote hub and its apps (desktop, web shell, mobile) update independently, so
+each side checks the other before relying on it. One file holds the contract,
+`packages/shared/trpc-server/src/api-version.ts`. `HUB_API_VERSION` is the API's
+version. `MIN_CLIENT_API` is the oldest app a hub serves, and `MIN_HUB_API` is the
+oldest hub an app works with. `HUB_FEATURES` lists the optional features an app
+checks with `hubHasFeature` before using them.
+
+- Every app socket names its version in the url (`?clientApi=N`). A hub refuses an
+  app below its minimum on every call with `CLIENT_TOO_OLD`.
+- `hub.describe` stays open to every version and reports `api` and `features`. It
+  is the contract's anchor: its fields are never removed.
+- An app finds a hub below its minimum, or one that no longer serves it, in that
+  answer. That hub gets one banner ("needs update" or "update SlayZone") and a
+  status in Settings → Hubs, and `hubCompatLink` sends it nothing else. A call to a
+  procedure an older hub lacks fails as "update the hub", not as a bare NOT_FOUND.
+- `pnpm check:api-compat` (CI, and `release:tag`) compares HEAD's tRPC API with the
+  latest release's in both directions, inputs and outputs, at the type level. It
+  fails on a break the minimums do not exclude, unless
+  `packages/apps/api/api-compat.json` accepts it with a reason. So a change stays
+  additive, is gated by a feature, is accepted, or narrows the window.
+
+Not covered yet: the CLI's REST routes. Hub ↔ computer has its own strict
+`COMPUTER_PROTOCOL_VERSION` plus auto-upgrade.
+
 ## Dependency Rules
 
 1. **Apps** compose domains. No business logic.

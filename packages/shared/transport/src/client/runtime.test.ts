@@ -73,3 +73,12 @@ describe('initTrpcClient token threading', () => {
     expect(await openedToken(second.wsClient)).toBeUndefined()
   })
 })
+
+describe('client API version on the socket url', () => {
+  it('every hub socket names this client’s API version (`clientApi`), keeping the rest of the url', async () => {
+    const { HUB_API_VERSION } = await import('@slayzone/trpc-server/api-version')
+    const { wsClient } = initTrpcClient(`${URL_A}?windowId=2`)
+    const url = (wsClient as unknown as { url: () => Promise<string> }).url
+    expect(await url()).toBe(`${URL_A}?windowId=2&clientApi=${HUB_API_VERSION}`)
+  })
+})

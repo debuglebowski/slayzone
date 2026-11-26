@@ -1,58 +1,31 @@
 # Client ↔ hub version compatibility
 
+Status: implemented (phases 1–4, 6). Overview: ARCHITECTURE.md, "Client ↔ hub versions".
+
 ## Problem
-A remote hub and the clients that connect to it (desktop, web-shell, mobile, CLI) update independently, so they can be on different releases. Nothing checks for this. A client on a different release than its hub hits `NOT_FOUND` errors, silently dropped input fields, or renderer `TypeError`s. Hub ↔ computer is already solved (`COMPUTER_PROTOCOL_VERSION` + auto-upgrade), so it is not in scope.
+A remote hub and its apps (desktop, web shell, mobile) update independently. Before this, nothing checked versions. A client on a different release than its hub hit `NOT_FOUND`, silently dropped input fields, or renderer `TypeError`s. Hub ↔ computer was already solved (`COMPUTER_PROTOCOL_VERSION` + auto-upgrade).
 
 ## Model
-- `HUB_API_VERSION`: an integer, bumped only when the API changes in a breaking way. It is separate from the release semver.
-- The hub declares `minClientApi`. Each client declares `minHubApi`. A connection works when both sides are within the other's minimum. That range is the **support window**.
-- Within the window: everything works, and a new feature hides itself on a hub that lacks it.
-- Outside the window: a clear message for that hub only, and no calls are made to it.
+`packages/shared/trpc-server/src/api-version.ts`:
+- `HUB_API_VERSION`: an integer, raised only when a minimum must exclude an older release.
+- `MIN_CLIENT_API`: the oldest app a hub serves. `MIN_HUB_API`: the oldest hub an app works with. A side older than the contract counts as API 0.
+- `HUB_FEATURES`: optional features. An app checks `hubHasFeature` before using one.
 
-## Phases
+The first contract release sets `MIN_HUB_API = 1`. This app calls procedures a v0.43 hub lacks: open-tabs sync, batched git panel reads, clone-for-move. It also reads `sharing.taskSharing.projectId`, which a v0.43 hub never sends. So it says "update the hub" instead of breaking piecemeal. `MIN_CLIENT_API = 0`: v0.43 apps on this hub have 0 breaks.
 
-### 1. Handshake
-- `hub.describe` gains `api: { version, minClient }` and `features: string[]`. It already has `version`.
-- Freeze `hub.describe` as the forever-stable contract, and add a test that fails if its shape changes.
-- Clients send `apiVersion` in `connectionParams` (desktop and web: `transport/src/client/runtime.ts`), and the REST API (CLI) sends it in a header.
-- The hub rejects a client below `minClientApi` with a typed `CLIENT_TOO_OLD` error.
-- The client reads `describe` before anything else. Below `minHubApi`, it marks that hub `incompatible`.
+## What was built
+1. **Handshake.** `?clientApi=N` on every app socket (`createTrpcWsClient`). `hub.describe` gains `api: { version, minClient }` and `features`; a test guards its fields. The hub's `clientApiGate` (first in `publicProcedure`) refuses an older app with PRECONDITION_FAILED / `CLIENT_TOO_OLD`. In-process callers are exempt.
+2. **UI.** A new `HubIssue` kind, `incompatible`, with `side: 'hub' | 'app'`, takes precedence over sign-in. It shows in the app-wide banner and in the Hubs card status ("Hub needs update" / "App too old for hub"). The card also shows the hub's release (`v0.44.0`). `hubCompatLink` sends an incompatible hub nothing but `hub.describe`, and rewrites a missing-procedure NOT_FOUND to "update the hub". Each socket reopen feeds a fresh `describe` into the shared cache, so an upgraded hub is seen without restarting the app.
+3. **Features.** `hubHasFeature` reads `features`, falling back to the legacy `wire` flags. `compact-bytes` and `tool-previews` moved onto it.
+4. **CI check.** `pnpm check:api-compat` (`scripts/check-api-compat.mjs`) compares HEAD with the newest stable `v*` tag:
+   - The base is unpacked with `git archive` and installed (types only) under `node_modules/.cache/api-compat/<sha>`.
+   - A generated file compares the two `AppRouter`s, procedure by procedure, through tsgo. Types are normalized to their wire shape first, so type-only brands don't count. tsgo has no compiler API, so the results are read from `noErrorTruncation` diagnostics.
+   - Break categories: removed, added, input/output in each direction, and input fields silently dropped by an older hub's zod object (single object inputs only).
+   - A break fails unless a minimum excludes that pairing or `packages/apps/api/api-compat.json` accepts it with a reason. `--explain` shows tsgo's reason; `--prune` drops stale acceptances.
+   - Runs as its own CI job and in `release:tag`.
+5. **Process.** Expand/contract: rename = add the new one → migrate clients → remove the old one once it is out of the window. Documented in ARCHITECTURE.md.
 
-### 2. UI
-- Each hub shows its state in the hub card and the sidebar:
-  - "Hub v0.40 — needs update to work with this app"
-  - "This app is too old for hub X — update"
-- Calls to an incompatible hub are blocked at the link layer (as `connectDeadlineLink` does now), so no crashes.
-- The hub card shows the hub's version, plus "update available" for admins.
-
-### 3. Feature gating
-- The `wire` flags (`compactBytes`, `toolPreviews`, `chatDisplay`) fold into `features`; keep the old fields until they leave the window.
-- Add a helper `hubHas(client, 'feature')` (generalizing `hubCapabilities.ts`). UI for a new feature checks it.
-- Rule: a new input field whose silent loss matters must be feature-gated, because zod strips unknown keys on an old hub.
-
-### 4. CI contract check
-- A script uses the TS compiler API to walk `AppRouter` and emit `api-snapshot.d.ts`: `{ '<path>': { input; output } }` for every procedure. Outputs come from inferred TS types, not zod: only 27 of 1353 procedures declare `.output()`.
-- Commit the snapshot each release under `api-snapshots/<HUB_API_VERSION>.d.ts`.
-- A compat test checks assignability in both directions against every snapshot still in the window:
-  - Old client → new hub: old input assignable to new input; new output assignable to old output.
-  - New client → old hub: the reverse, unless the procedure is behind a feature in the old snapshot.
-- On failure: either make the change additive, or bump `HUB_API_VERSION` and accept the narrower window.
-- Runs in `pnpm lint`.
-
-### 5. Cross-release smoke (later)
-- In CI, build the hub from the previous release tag and run a small client smoke test against it: connect, list projects and tasks, open a task, chat start/stop.
-
-### 6. Process
-- Expand/contract: rename = add new → migrate clients → remove old only once it has left the window.
-- Document this in `ARCHITECTURE.md` and the release skill, and have the release skill print the current window.
-
-## Out of scope
-- Hub auto-upgrade (separate decision).
-- Hub ↔ computer (already solved).
-
-## Unresolved questions
-1. Window length: N-2 releases? 30 days?
-2. Mobile: longer window?
-3. Hub inputs: `.strict()` (reject unknown keys loudly) or keep stripping + feature-gate?
-4. CLI REST in scope now or later?
-5. Phase 5 now or later?
+## Not done
+- The CLI's REST routes (a separate Express surface, not tRPC).
+- A cross-release runtime smoke test (an old hub build against the current client).
+- Hub auto-upgrade.
