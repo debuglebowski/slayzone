@@ -126,12 +126,12 @@ test.describe('Layout title row', () => {
     await expect(menu.getByRole('menuitem', { name: 'Focus' })).toBeVisible()
     await page.keyboard.press('Escape')
 
-    // A layout the user has changed is Custom.
+    // A layout the user has changed keeps its definition's name, with unsaved changes.
     await open(page)
     await page.locator('[data-testid="layout-menu"]:visible').click()
-    await expect(
-      page.getByTestId('layout-menu-content').getByTestId('layout-menu-current')
-    ).toHaveText('Custom')
+    const changed = page.getByTestId('layout-menu-content')
+    await expect(changed.getByTestId('layout-menu-current')).toHaveText('Classic')
+    await expect(changed.getByTestId('layout-unsaved')).toBeVisible()
     await page.keyboard.press('Escape')
   })
 })
