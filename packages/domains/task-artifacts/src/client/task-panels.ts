@@ -4,7 +4,7 @@ import { useArtifacts } from './useArtifacts'
 
 /**
  * This feature's half of the task page's injected panels (see task's
- * TaskPanels.ts). The app spreads it into what it passes to registerTaskPanels.
+ * panels/registry.ts). The app spreads it into what it passes to registerTaskPanels.
  * The panel stays a lazy chunk; `.preload()` warms it (useIdlePreload).
  */
 export const ArtifactsPanel = lazyWithPreload(() =>

@@ -15,7 +15,7 @@
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",
     "./client/TaskDetailDataLoader": "./src/client/TaskDetailDataLoader.tsx",
     "./client/lazyPanels": "./src/client/task-detail/lazyPanels.tsx",
-    "./client/TaskPanels": "./src/client/task-detail/TaskPanels.ts",
+    "./client/TaskPanels": "./src/client/panels/registry.ts",
     "./client/taskSessionsSource": "./src/client/agent-sessions-source.ts",
     "./client/taskDetailCache": "./src/client/taskDetailCache.ts",
     "./client/deleteTaskResult": "./src/client/deleteTaskResult.ts",

@@ -351,7 +351,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 
 // --- Import component after mocks ---
 import { TaskDetailPage } from './TaskDetailPage'
-import { registerTaskPanels } from './task-detail/TaskPanels'
+import { registerTaskPanels } from './panels/registry'
 import { registerArtifactUploader } from '@slayzone/editor/hooks'
 import { detectPlatform } from '@slayzone/ui'
 

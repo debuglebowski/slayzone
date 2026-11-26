@@ -25,4 +25,4 @@ export {
   type ArtifactsPanelProps,
   type UnifiedGitPanelHandle,
   type UnifiedGitPanelProps
-} from './TaskPanels'
+} from '../panels/registry'

@@ -1,4 +1,14 @@
 import type { ComponentType, RefAttributes } from 'react'
+import {
+  Cpu,
+  FileCode,
+  GitBranch,
+  Globe,
+  Paperclip,
+  Settings2,
+  Terminal as TerminalIcon,
+  type LucideIcon
+} from 'lucide-react'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import type {
   ArtifactsSidebarState,
@@ -7,6 +17,140 @@ import type {
   TaskArtifact,
   UpdateTaskInput
 } from '@slayzone/task-contracts'
+
+/**
+ * The task page's panel kinds: what each kind of panel is (label, icon, shortcut,
+ * keep-alive policy), plus the panels other features inject into the page.
+ *
+ * The kinds' components live in ./kinds (PANEL_KIND_COMPONENTS), keyed by the same
+ * PanelKind, so this module stays light: the composing app imports it at boot to
+ * call registerTaskPanels(), before any panel code is needed.
+ */
+
+// --- Kinds -----------------------------------------------------------------------
+
+export type PanelKind =
+  | 'agent'
+  | 'browser'
+  | 'web'
+  | 'editor'
+  | 'artifacts'
+  | 'git'
+  | 'settings'
+  | 'processes'
+
+/**
+ * What a panel does while its task tab is not the one in view.
+ * - `activity`: wrapped in React <Activity>, hidden (effects unmounted, state kept).
+ * - `mounted`: stays mounted and rendered; the kind parks itself. Browser and web
+ *   keep their WebContentsView painting off-screen (Activity's cleanup would destroy
+ *   the view and reset playback); the agent's terminal takes `isActive` itself.
+ */
+export type PanelKeepAlive = 'activity' | 'mounted'
+
+export interface PanelKindDef {
+  kind: PanelKind
+  /**
+   * The panel id of the kind's first instance — what `panel_visibility`,
+   * `panel_sizes`, ownership, `data-panel-id`, `focusedPanel` and the shortcuts use.
+   * Null for `web`: each configured web panel has its own id (`web:*`).
+   */
+  primaryPanelId: string | null
+  label: string
+  icon: LucideIcon
+  /** Shortcut that toggles the panel. Web panels carry theirs in panel_config. */
+  shortcutId: string | null
+  keepAlive: PanelKeepAlive
+  /** Wrapped in Suspense with the panel skeleton (its content is code-split). */
+  suspense: boolean
+  /** May show in a secondary "Open in new window" frame. The agent never does. */
+  secondaryWindow: boolean
+}
+
+export const PANEL_KINDS = {
+  agent: {
+    kind: 'agent',
+    primaryPanelId: 'terminal',
+    label: 'Agent',
+    icon: TerminalIcon,
+    shortcutId: 'panel-terminal',
+    keepAlive: 'mounted',
+    suspense: false,
+    secondaryWindow: false
+  },
+  browser: {
+    kind: 'browser',
+    primaryPanelId: 'browser',
+    label: 'Browser',
+    icon: Globe,
+    shortcutId: 'panel-browser',
+    keepAlive: 'mounted',
+    suspense: true,
+    secondaryWindow: true
+  },
+  editor: {
+    kind: 'editor',
+    primaryPanelId: 'editor',
+    label: 'Editor',
+    icon: FileCode,
+    shortcutId: 'panel-editor',
+    keepAlive: 'activity',
+    suspense: true,
+    secondaryWindow: true
+  },
+  artifacts: {
+    kind: 'artifacts',
+    primaryPanelId: 'artifacts',
+    label: 'Artifacts',
+    icon: Paperclip,
+    shortcutId: 'panel-artifacts',
+    keepAlive: 'activity',
+    suspense: true,
+    secondaryWindow: true
+  },
+  web: {
+    kind: 'web',
+    primaryPanelId: null,
+    label: 'Web',
+    icon: Globe,
+    shortcutId: null,
+    keepAlive: 'mounted',
+    suspense: false,
+    secondaryWindow: true
+  },
+  git: {
+    kind: 'git',
+    primaryPanelId: 'diff',
+    label: 'Git',
+    icon: GitBranch,
+    shortcutId: 'panel-git',
+    keepAlive: 'activity',
+    suspense: true,
+    secondaryWindow: true
+  },
+  settings: {
+    kind: 'settings',
+    primaryPanelId: 'settings',
+    label: 'Settings',
+    icon: Settings2,
+    shortcutId: 'panel-settings',
+    keepAlive: 'activity',
+    suspense: false,
+    secondaryWindow: true
+  },
+  processes: {
+    kind: 'processes',
+    primaryPanelId: 'processes',
+    label: 'Processes',
+    icon: Cpu,
+    shortcutId: 'panel-processes',
+    keepAlive: 'activity',
+    suspense: false,
+    secondaryWindow: true
+  }
+} as const satisfies { [K in PanelKind]: PanelKindDef & { kind: K } }
+
+// --- Injected panels ---------------------------------------------------------------
 
 /**
  * Panels and data hooks the task page embeds from features built ON TOP of task
