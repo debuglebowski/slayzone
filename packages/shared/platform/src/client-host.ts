@@ -43,8 +43,12 @@ export interface ClientSettingsSnapshot {
   labs: Record<LabFlag, boolean>
   /** Shortcut overrides; `null` = explicitly unbound. */
   shortcuts: ShortcutOverrideMap
-  /** The one-time copy of the hub's overrides into this device happened (D1). */
-  shortcutsAdoptedFromHub: boolean
+  /**
+   * This device's map is authoritative: the one-time copy of the hub's overrides
+   * happened, or the person edited shortcuts here (D1). Either way the hub's map
+   * must never overwrite it again.
+   */
+  shortcutsOwnedByDevice: boolean
 }
 
 export interface ClientHostMethods {
@@ -52,9 +56,16 @@ export interface ClientHostMethods {
   /** Apply + persist the mode; returns what it resolves to. */
   'theme.set': (preference: ThemePreference) => EffectiveTheme
   'labs.set': (flag: LabFlag, on: boolean) => void
-  /** Replace the whole override map. `adoptedFromHub` also sets the one-time
-   *  adoption marker, in the same write. */
-  'shortcuts.set': (overrides: ShortcutOverrideMap, opts?: { adoptedFromHub?: boolean }) => void
+  /**
+   * Replace the whole override map. `adoptedFromHub` (the one-time copy) or
+   * `localEdit` (the person changed a shortcut here) also sets
+   * `shortcutsOwnedByDevice`, in the same write. A plain write (load-time
+   * normalization) leaves it as it is.
+   */
+  'shortcuts.set': (
+    overrides: ShortcutOverrideMap,
+    opts?: { adoptedFromHub?: boolean; localEdit?: boolean }
+  ) => void
   'zoom.get': () => number
   'zoom.adjust': (command: ZoomCommand) => number
   'update.restart': () => void
@@ -145,7 +156,7 @@ const KEY = {
   theme: 'slayzone:client:theme',
   labs: 'slayzone:client:labs',
   shortcuts: 'slayzone:client:shortcuts',
-  adopted: 'slayzone:client:shortcuts-adopted-from-hub'
+  adopted: 'slayzone:client:shortcuts-owned-by-device'
 } as const
 
 const parseJson = (raw: string | null): unknown => {
@@ -204,7 +215,7 @@ export function createStorageClientHost(opts: {
         loopMode: isRecord(l) && l.loopMode === true
       },
       shortcuts: map,
-      shortcutsAdoptedFromHub: adopted === '1'
+      shortcutsOwnedByDevice: adopted === '1'
     }
   }
 
@@ -225,10 +236,10 @@ export function createStorageClientHost(opts: {
     },
     'shortcuts.set': async (
       overrides: ShortcutOverrideMap,
-      o?: { adoptedFromHub?: boolean }
+      o?: { adoptedFromHub?: boolean; localEdit?: boolean }
     ): Promise<void> => {
       await kv.set(KEY.shortcuts, JSON.stringify(isRecord(overrides) ? overrides : {}))
-      if (o?.adoptedFromHub) await kv.set(KEY.adopted, '1')
+      if (o?.adoptedFromHub || o?.localEdit) await kv.set(KEY.adopted, '1')
       await changed()
     },
     'zoom.get': () => 1,

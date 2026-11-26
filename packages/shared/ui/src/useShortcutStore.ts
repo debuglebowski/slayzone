@@ -15,8 +15,9 @@ import {
 export interface ShortcutBackend {
   /** The stored override map (null when none is stored). */
   load: () => Promise<ShortcutOverrides | null>
-  /** Persist the whole map. */
-  save: (overrides: ShortcutOverrides) => Promise<void>
+  /** Persist the whole map. `userEdit`: the person changed it (not load-time
+   *  normalization) — the host then never lets the hub's older map replace it. */
+  save: (overrides: ShortcutOverrides, opts?: { userEdit?: boolean }) => Promise<void>
   /** Another window (or the one-time hub adoption) changed the stored map. */
   onChanged?: (listener: (overrides: ShortcutOverrides) => void) => () => void
 }
@@ -51,8 +52,8 @@ interface ShortcutState {
   setRecording: (recording: boolean) => void
 }
 
-const persist = async (overrides: ShortcutOverrides): Promise<void> => {
-  await backend?.save(overrides)
+const persist = async (overrides: ShortcutOverrides, userEdit: boolean): Promise<void> => {
+  await backend?.save(overrides, { userEdit })
 }
 
 export const useShortcutStore = create<ShortcutState>((set, get) => ({
@@ -65,7 +66,7 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
     // Renames, retired defaults and legacy '' clears (@slayzone/shortcuts) — the same
     // rules main applies when it builds the native menu from the file.
     const { overrides, changed } = normalizeShortcutOverrides(stored)
-    if (changed) await persist(overrides).catch(() => undefined)
+    if (changed) await persist(overrides, false).catch(() => undefined)
     set({ overrides, loaded: true })
   },
 
@@ -99,18 +100,18 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
   setOverride: async (id: string, keys: string | null) => {
     const newOverrides = { ...get().overrides, [id]: keys }
     set({ overrides: newOverrides })
-    await persist(newOverrides)
+    await persist(newOverrides, true)
   },
 
   batchSetOverrides: async (entries: Record<string, string | null>) => {
     const newOverrides = { ...get().overrides, ...entries }
     set({ overrides: newOverrides })
-    await persist(newOverrides)
+    await persist(newOverrides, true)
   },
 
   resetAll: async () => {
     set({ overrides: {} })
-    await persist({})
+    await persist({}, true)
   },
 
   setRecording: (recording: boolean) => set({ isRecording: recording })

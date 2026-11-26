@@ -34,11 +34,13 @@ export type ClientSettings = {
    *  built pre-hub, and every window's shortcut store. Per-machine. */
   customShortcuts?: Record<string, string | null>
   /**
-   * The one-time copy of the default hub's `custom_shortcuts` into this file
-   * happened (`adoptShortcutsFromHub`). Written in the SAME patch as the copied map,
-   * and only after the hub was read — a failed read leaves it unset and retries.
+   * `customShortcuts` here is authoritative: the one-time copy of the default hub's
+   * `custom_shortcuts` happened (`adoptShortcutsFromHub`), or the person edited
+   * shortcuts on this device. Written in the SAME patch as the map. A failed hub read
+   * leaves it unset (the copy retries next boot) unless a local edit set it — a local
+   * edit is never overwritten by the hub's older map.
    */
-  shortcutsAdoptedFromHub?: boolean
+  shortcutsOwnedByDevice?: boolean
   /** AUTHORITATIVE — gate native menu items. */
   labs?: { testsPanel?: boolean; loopMode?: boolean }
   /** AUTHORITATIVE — geometry of a native window on this display. */
@@ -140,7 +142,7 @@ function coerce(raw: Record<string, unknown>): ClientSettings {
     }
     out.customShortcuts = map
   }
-  if (raw.shortcutsAdoptedFromHub === true) out.shortcutsAdoptedFromHub = true
+  if (raw.shortcutsOwnedByDevice === true) out.shortcutsOwnedByDevice = true
   if (raw.labs && typeof raw.labs === 'object') {
     const l = raw.labs as Record<string, unknown>
     out.labs = { testsPanel: asBool(l.testsPanel), loopMode: asBool(l.loopMode) }

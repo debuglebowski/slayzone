@@ -119,7 +119,7 @@ export async function mountApp({ onboarding = true }: MountAppOptions = {}): Pro
     clientHostShortcutBackend({
       ready: loadClientSettings().then((client) =>
         adoptShortcutsFromHub({
-          alreadyAdopted: client.shortcutsAdoptedFromHub,
+          alreadyAdopted: client.shortcutsOwnedByDevice,
           readHub: () => hubClient.settings.get.query({ key: 'custom_shortcuts' }),
           write: (overrides) =>
             getClientHost().call('shortcuts.set', overrides, { adoptedFromHub: true })

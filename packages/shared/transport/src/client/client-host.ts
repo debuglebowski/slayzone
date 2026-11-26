@@ -172,7 +172,9 @@ export function useClientSettings(): ClientSettingsSnapshot | null {
 
 export interface ClientHostShortcutBackend {
   load: () => Promise<ShortcutOverrideMap | null>
-  save: (overrides: ShortcutOverrideMap) => Promise<void>
+  /** `userEdit`: the person changed a shortcut — the device's map now wins over the
+   *  hub's for good (a later adoption skips). Load-time normalization is not one. */
+  save: (overrides: ShortcutOverrideMap, opts?: { userEdit?: boolean }) => Promise<void>
   onChanged: (listener: (overrides: ShortcutOverrideMap) => void) => () => void
 }
 
@@ -194,8 +196,12 @@ export function clientHostShortcutBackend(opts: {
       await opts.ready?.catch(() => undefined)
       return (await host().call('settings.snapshot')).shortcuts
     },
-    save: async (overrides) => {
-      await host().call('shortcuts.set', overrides)
+    save: async (overrides, saveOpts) => {
+      await host().call(
+        'shortcuts.set',
+        overrides,
+        saveOpts?.userEdit ? { localEdit: true } : undefined
+      )
       if (opts.mirror) {
         opts.mirror(JSON.stringify(overrides)).catch((err: unknown) => {
           console.warn('[shortcuts] mirror to the hub failed:', err)

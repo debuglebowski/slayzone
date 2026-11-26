@@ -26,7 +26,7 @@ describe('createStorageClientHost (web shell / chromium shell, D3)', () => {
       effectiveTheme: 'light',
       labs: { testsPanel: false, loopMode: false },
       shortcuts: {},
-      shortcutsAdoptedFromHub: false
+      shortcutsOwnedByDevice: false
     })
   })
 
@@ -42,8 +42,16 @@ describe('createStorageClientHost (web shell / chromium shell, D3)', () => {
       effectiveTheme: 'light',
       labs: { testsPanel: false, loopMode: true },
       shortcuts: { 'go-home': 'mod+k' },
-      shortcutsAdoptedFromHub: true
+      shortcutsOwnedByDevice: true
     })
+  })
+
+  it('a local edit claims the map for the device; a plain write does not', async () => {
+    const host = createStorageClientHost({ kv: memoryKv(), systemTheme: () => 'dark' })
+    await call(host, 'shortcuts.set', { search: 'mod+p' })
+    expect(await call(host, 'settings.snapshot')).toMatchObject({ shortcutsOwnedByDevice: false })
+    await call(host, 'shortcuts.set', { search: 'mod+o' }, { localEdit: true })
+    expect(await call(host, 'settings.snapshot')).toMatchObject({ shortcutsOwnedByDevice: true })
   })
 
   it('a later plain shortcuts.set keeps the adoption marker', async () => {
@@ -52,7 +60,7 @@ describe('createStorageClientHost (web shell / chromium shell, D3)', () => {
     await call(host, 'shortcuts.set', { search: null })
     expect(await call(host, 'settings.snapshot')).toMatchObject({
       shortcuts: { search: null },
-      shortcutsAdoptedFromHub: true
+      shortcutsOwnedByDevice: true
     })
   })
 

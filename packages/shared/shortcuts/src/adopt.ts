@@ -1,7 +1,8 @@
 import { normalizeShortcutOverrides, type ShortcutOverrides } from './normalize'
 
 export interface AdoptShortcutsDeps {
-  /** The client file's `shortcutsAdoptedFromHub` marker. */
+  /** The client file's `shortcutsOwnedByDevice` marker (adopted before, or edited
+   *  locally — either way the device's map wins). */
   alreadyAdopted: boolean
   /** The default hub's `custom_shortcuts` (JSON, or null when it has none). Throws
    *  when the hub cannot be read. */

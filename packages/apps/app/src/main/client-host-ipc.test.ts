@@ -52,7 +52,7 @@ beforeEach(() => {
       effectiveTheme: 'dark' as const,
       labs: { testsPanel: false, loopMode: false },
       shortcuts: {},
-      shortcutsAdoptedFromHub: false
+      shortcutsOwnedByDevice: false
     })),
     'theme.set': vi.fn(() => 'light' as const),
     'labs.set': vi.fn(),
@@ -107,6 +107,12 @@ test('shortcuts.set passes the map and the adoption flag', async () => {
     { 'go-home': 'mod+k', search: null },
     { adoptedFromHub: true }
   )
+})
+
+test('shortcuts.set accepts the local-edit flag', async () => {
+  await invoke(app1, 'shortcuts.set', [{ search: 'mod+p' }, { localEdit: true }])
+  expect(impl['shortcuts.set']).toHaveBeenCalledWith({ search: 'mod+p' }, { localEdit: true })
+  await expect(invoke(app1, 'shortcuts.set', [{}, { localEdit: 'yes' }])).rejects.toThrow()
 })
 
 test('events reach every subscribed app renderer, never a web view', () => {

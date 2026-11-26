@@ -229,7 +229,7 @@ if (isFloatingGlobalAgentPanel) {
     // move copies the hub's map over the file once (D1) — before the store loads.
     const shortcutsAdopted = loadClientSettings().then((client) =>
       adoptShortcutsFromHub({
-        alreadyAdopted: client.shortcutsAdoptedFromHub,
+        alreadyAdopted: client.shortcutsOwnedByDevice,
         readHub: () => getTrpcClient().settings.get.query({ key: 'custom_shortcuts' }),
         write: (overrides) =>
           getClientHost().call('shortcuts.set', overrides, { adoptedFromHub: true })

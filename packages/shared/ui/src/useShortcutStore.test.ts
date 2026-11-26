@@ -6,13 +6,13 @@ import { setShortcutBackend, useShortcutStore } from './useShortcutStore'
 type Overrides = Record<string, string | null>
 const backend = {
   load: vi.fn<() => Promise<Overrides | null>>(),
-  save: vi.fn<(o: Overrides) => Promise<void>>()
+  save: vi.fn<(o: Overrides, opts?: { userEdit?: boolean }) => Promise<void>>()
 }
 let changedListener: ((o: Overrides) => void) | null = null
 
 setShortcutBackend({
   load: () => backend.load(),
-  save: (o) => backend.save(o),
+  save: (o, opts) => backend.save(o, opts),
   onChanged: (l) => {
     changedListener = l
     return () => {
@@ -62,7 +62,7 @@ describe('load', () => {
       expect(useShortcutStore.getState().overrides).toEqual({ search: 'mod+shift+p' })
       // Single persist write for the whole migration pass
       expect(backend.save).toHaveBeenCalledOnce()
-      expect(backend.save).toHaveBeenCalledWith({ search: 'mod+shift+p' })
+      expect(backend.save).toHaveBeenCalledWith({ search: 'mod+shift+p' }, { userEdit: false })
     })
 
     it('preserves overrides that differ from the retired default', async () => {
@@ -86,7 +86,10 @@ describe('load', () => {
       await useShortcutStore.getState().load()
       expect(useShortcutStore.getState().overrides).toEqual({ 'global-agent-panel': 'mod+shift+a' })
       expect(backend.save).toHaveBeenCalledOnce()
-      expect(backend.save).toHaveBeenCalledWith({ 'global-agent-panel': 'mod+shift+a' })
+      expect(backend.save).toHaveBeenCalledWith(
+        { 'global-agent-panel': 'mod+shift+a' },
+        { userEdit: false }
+      )
     })
 
     it('keeps existing new-id override when both legacy and new ids present', async () => {
@@ -107,7 +110,10 @@ describe('load', () => {
       search: 'mod+shift+p'
     })
     expect(backend.save).toHaveBeenCalledOnce()
-    expect(backend.save).toHaveBeenCalledWith({ 'new-task': null, search: 'mod+shift+p' })
+    expect(backend.save).toHaveBeenCalledWith(
+      { 'new-task': null, search: 'mod+shift+p' },
+      { userEdit: false }
+    )
   })
 })
 
@@ -200,10 +206,11 @@ describe('findShadow', () => {
 })
 
 describe('setOverride', () => {
-  it('persists through the backend', async () => {
+  it('persists through the backend as a user edit (the device then owns the map)', async () => {
     await useShortcutStore.getState().setOverride('search', 'mod+shift+p')
     expect(useShortcutStore.getState().overrides.search).toBe('mod+shift+p')
     expect(backend.save).toHaveBeenCalledOnce()
+    expect(backend.save).toHaveBeenCalledWith({ search: 'mod+shift+p' }, { userEdit: true })
   })
 
   it('preserves existing overrides', async () => {
@@ -225,6 +232,7 @@ describe('batchSetOverrides', () => {
     expect(useShortcutStore.getState().overrides.search).toBe('mod+shift+p')
     expect(useShortcutStore.getState().overrides['zen-mode']).toBe('mod+shift+j')
     expect(backend.save).toHaveBeenCalledOnce()
+    expect(backend.save.mock.calls[0]?.[1]).toEqual({ userEdit: true })
   })
 })
 
@@ -233,7 +241,7 @@ describe('resetAll', () => {
     useShortcutStore.setState({ overrides: { search: 'mod+shift+p', 'zen-mode': 'mod+j' } })
     await useShortcutStore.getState().resetAll()
     expect(useShortcutStore.getState().overrides).toEqual({})
-    expect(backend.save).toHaveBeenCalledWith({})
+    expect(backend.save).toHaveBeenCalledWith({}, { userEdit: true })
   })
 })
 

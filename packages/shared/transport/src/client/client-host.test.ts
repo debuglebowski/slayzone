@@ -141,3 +141,36 @@ describe('clientHostShortcutBackend', () => {
     expect(seen).toHaveBeenCalledWith({ a: 'mod+a' })
   })
 })
+
+describe('a local shortcut edit is never overwritten by the hub (orders-2 Q1)', () => {
+  it('edit while the hub is unreachable, then adoption succeeds: the local edit stays', async () => {
+    const { adoptShortcutsFromHub } = await import('@slayzone/shortcuts')
+    install(undefined)
+    const host = getClientHost()
+    const backend = clientHostShortcutBackend({ host })
+    const adopt = async (readHub: () => Promise<string | null>) =>
+      adoptShortcutsFromHub({
+        alreadyAdopted: (await host.call('settings.snapshot')).shortcutsOwnedByDevice,
+        readHub,
+        write: (o) => host.call('shortcuts.set', o, { adoptedFromHub: true })
+      })
+    // Boot 1: the hub is down — no adoption.
+    expect(
+      await adopt(async () => {
+        throw new Error('hub down')
+      })
+    ).toBe('failed')
+    // The user rebinds locally.
+    await backend.save({ 'go-home': 'mod+l' }, { userEdit: true })
+    // Boot 2: the hub answers with its older map — it must not win.
+    expect(await adopt(async () => JSON.stringify({ 'go-home': 'mod+k' }))).toBe('skipped')
+    expect(await backend.load()).toEqual({ 'go-home': 'mod+l' })
+  })
+
+  it('a non-user save (load-time normalization) does not claim the map for the device', async () => {
+    install(undefined)
+    const host = getClientHost()
+    await clientHostShortcutBackend({ host }).save({}, { userEdit: false })
+    expect((await host.call('settings.snapshot')).shortcutsOwnedByDevice).toBe(false)
+  })
+})

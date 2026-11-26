@@ -71,7 +71,12 @@ const ARGS: { [K in ClientHostMethod]: z.ZodType<Parameters<ClientHostMethods[K]
   'labs.set': z.tuple([z.enum(['testsPanel', 'loopMode']), z.boolean()]),
   'shortcuts.set': z.union([
     z.tuple([overrides]),
-    z.tuple([overrides, z.object({ adoptedFromHub: z.boolean().optional() }).optional()])
+    z.tuple([
+      overrides,
+      z
+        .object({ adoptedFromHub: z.boolean().optional(), localEdit: z.boolean().optional() })
+        .optional()
+    ])
   ]) as z.ZodType<Parameters<ClientHostMethods['shortcuts.set']>>,
   'zoom.get': z.tuple([]),
   'zoom.adjust': z.tuple([z.enum(['in', 'out', 'reset'])]),

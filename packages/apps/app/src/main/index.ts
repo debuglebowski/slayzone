@@ -2335,7 +2335,7 @@ app
         loopMode: isLabEnabled('labs_loop_mode')
       },
       shortcuts: currentOverrides,
-      shortcutsAdoptedFromHub: clientSettings.shortcutsAdoptedFromHub === true
+      shortcutsOwnedByDevice: clientSettings.shortcutsOwnedByDevice === true
     })
     const clientSettingsChanged = (): void => {
       clientEvents.emit('settings-changed', clientSettingsSnapshot())
@@ -2373,11 +2373,12 @@ app
           clientSettingsChanged()
         },
         'shortcuts.set': async (overrides, opts) => {
-          // One write: the map and (on adoption) the marker together.
+          // One write: the map and (on adoption or a local edit) the marker together —
+          // from then on the hub's older map never overwrites this device's.
           clientSettings = await updateClientSettings(
             {
               customShortcuts: normalizeShortcutOverrides(overrides).overrides,
-              ...(opts?.adoptedFromHub ? { shortcutsAdoptedFromHub: true } : {})
+              ...(opts?.adoptedFromHub || opts?.localEdit ? { shortcutsOwnedByDevice: true } : {})
             },
             clientRoot
           )
