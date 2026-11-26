@@ -8,6 +8,25 @@ export function isRenderableKind(kind: string): kind is RenderableKind {
 }
 
 /**
+ * The `panel_config` id that enables a kind in the task view (`isBuiltinEnabled`);
+ * web panels are enabled one by one, so they have none.
+ */
+const ENABLE_IDS: Partial<Record<RenderableKind, string>> = {
+  agent: 'terminal',
+  terminal: 'terminal',
+  browser: 'browser',
+  editor: 'editor',
+  git: 'diff',
+  artifacts: 'artifacts',
+  processes: 'processes',
+  settings: 'settings'
+}
+
+export function panelEnableId(kind: string): string | null {
+  return isRenderableKind(kind) ? (ENABLE_IDS[kind] ?? null) : null
+}
+
+/**
  * A panel tab's label and icon: the instance's own name, else a web panel's
  * configured name, else its kind's label.
  */

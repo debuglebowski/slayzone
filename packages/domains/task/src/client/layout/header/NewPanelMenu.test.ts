@@ -1,7 +1,7 @@
-// Pins the "New <kind> panel" choices (docs/plans/panel-model.md step 7): every
-// enabled multi-instance kind plus each web panel; Settings stays single.
+// Pins the title row's ⋯ "New panel" choices (docs/plans/panel-model.md step 9):
+// every enabled multi-instance kind plus each web panel, in sections; Settings stays single.
 import { describe, expect, it } from 'vitest'
-import { newPanelChoiceForToggle, newPanelChoiceLike, newPanelChoices } from './NewPanelMenu'
+import { newPanelChoiceLike, newPanelChoices, newPanelSections } from './NewPanelMenu'
 
 const web = [{ id: 'web:docs', name: 'Docs' }]
 
@@ -27,15 +27,22 @@ describe('new panel choices', () => {
     expect(noBrowser.map((c) => c.key)).not.toContain('browser')
   })
 
-  it('maps a tab or a panel toggle to another panel of the same kind', () => {
+  it('groups the choices into Run / Code / Content, dropping empty sections', () => {
+    const sections = newPanelSections(newPanelChoices(web, () => true))
+    expect(sections.map((s) => [s.label, s.choices.map((c) => c.key)])).toEqual([
+      ['Run', ['agent', 'terminal', 'processes']],
+      ['Code', ['editor', 'git']],
+      ['Content', ['browser', 'artifacts', 'web:docs']]
+    ])
+    const onlyGit = newPanelSections(newPanelChoices([], (id) => id === 'diff'))
+    expect(onlyGit.map((s) => s.label)).toEqual(['Code'])
+  })
+
+  it('maps a tab to another panel of the same kind', () => {
     expect(newPanelChoiceLike({ id: 'git:1', kind: 'git', settings: {} }, web)?.kind).toBe('git')
     expect(newPanelChoiceLike({ id: 'settings', kind: 'settings', settings: {} }, web)).toBeNull()
     expect(
       newPanelChoiceLike({ id: 'web:9', kind: 'web', settings: { panelId: 'web:docs' } }, web)
     ).toMatchObject({ label: 'Docs', settings: { panelId: 'web:docs' } })
-    expect(newPanelChoiceForToggle('terminal', web)?.kind).toBe('agent')
-    expect(newPanelChoiceForToggle('diff', web)?.kind).toBe('git')
-    expect(newPanelChoiceForToggle('web:docs', web)?.settings).toEqual({ panelId: 'web:docs' })
-    expect(newPanelChoiceForToggle('tests', web)).toBeNull()
   })
 })

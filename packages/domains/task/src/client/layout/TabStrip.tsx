@@ -12,7 +12,7 @@ import {
 } from '@slayzone/ui'
 import { useTaskPageContext } from '../panels/TaskPageContext'
 import { LayoutActionsContext, LayoutDragItemContext } from './LayoutContext'
-import { newPanelChoiceLike } from './NewPanelMenu'
+import { newPanelChoiceLike } from './header/NewPanelMenu'
 import { panelTabMeta } from './panelTabMeta'
 import type { DragItem } from './layoutDnd'
 
@@ -84,7 +84,7 @@ function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): Reac
   const actions = use(LayoutActionsContext)
   const { web, panels } = useTaskPageContext()
   const { label, icon: Icon } = panelTabMeta(instance, web.enabledWebPanels)
-  // Another panel like this one, as a tab of this group (step 9 moves it to ⋯).
+  // Another panel like this one, as a tab of this group (the title row ⋯ adds a column).
   const another = panels.canAddPanels ? newPanelChoiceLike(instance, web.enabledWebPanels) : null
   const [renaming, setRenaming] = useState(false)
   // Set by the menu's Rename; the menu's close must then leave focus to the name field.

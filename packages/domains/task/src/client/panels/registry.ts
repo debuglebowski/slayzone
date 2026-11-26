@@ -76,6 +76,11 @@ export interface PanelKindDef {
   primaryPanelId: string | null
   label: string
   icon: LucideIcon
+  /**
+   * Theme-token text colour of the kind's icon where kinds are told apart at a
+   * glance (the title row's group toggles, the New panel menu).
+   */
+  iconClassName: string
   /** Shortcut that toggles the panel. Web panels carry theirs in panel_config. */
   shortcutId: string | null
   keepAlive: PanelKeepAlive
@@ -123,6 +128,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'terminal',
     label: 'Agent',
     icon: TerminalIcon,
+    iconClassName: 'text-agent',
     shortcutId: 'panel-terminal',
     keepAlive: 'mounted',
     suspense: false,
@@ -135,6 +141,7 @@ export const PANEL_KINDS = {
     primaryPanelId: null,
     label: 'Terminal',
     icon: SquareTerminal,
+    iconClassName: 'text-success',
     shortcutId: null,
     keepAlive: 'mounted',
     suspense: false,
@@ -147,6 +154,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'browser',
     label: 'Browser',
     icon: Globe,
+    iconClassName: 'text-info',
     shortcutId: 'panel-browser',
     keepAlive: 'mounted',
     suspense: true,
@@ -158,6 +166,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'editor',
     label: 'Editor',
     icon: FileCode,
+    iconClassName: 'text-chart-4',
     shortcutId: 'panel-editor',
     keepAlive: 'activity',
     suspense: true,
@@ -169,6 +178,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'artifacts',
     label: 'Artifacts',
     icon: Paperclip,
+    iconClassName: 'text-chart-5',
     shortcutId: 'panel-artifacts',
     keepAlive: 'activity',
     suspense: true,
@@ -180,6 +190,7 @@ export const PANEL_KINDS = {
     primaryPanelId: null,
     label: 'Web',
     icon: Globe,
+    iconClassName: 'text-info',
     shortcutId: null,
     keepAlive: 'mounted',
     suspense: false,
@@ -191,6 +202,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'diff',
     label: 'Git',
     icon: GitBranch,
+    iconClassName: 'text-warning',
     shortcutId: 'panel-git',
     keepAlive: 'activity',
     suspense: true,
@@ -202,6 +214,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'settings',
     label: 'Settings',
     icon: Settings2,
+    iconClassName: 'text-muted-foreground',
     shortcutId: 'panel-settings',
     keepAlive: 'activity',
     suspense: false,
@@ -213,6 +226,7 @@ export const PANEL_KINDS = {
     primaryPanelId: 'processes',
     label: 'Processes',
     icon: Cpu,
+    iconClassName: 'text-chart-3',
     shortcutId: 'panel-processes',
     keepAlive: 'activity',
     suspense: false,

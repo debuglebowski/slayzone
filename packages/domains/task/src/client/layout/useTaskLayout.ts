@@ -31,12 +31,15 @@ import {
   applyLegacyWrite,
   closeTab as closeTabOp,
   deriveLayoutFromLegacy,
+  findSlot,
   findTab,
   hideTab as hideTabOp,
   legacyKindOf,
+  moveColumn as moveColumnOp,
   projectToLegacy,
   reconcileClassicLayout,
   renameInstance,
+  renameSlot,
   resizeColumns,
   resizeSlots as resizeSlotsOp,
   setActiveTab,
@@ -100,6 +103,10 @@ export interface TaskLayoutApi {
   closeTab: (instanceId: string) => void
   /** Name a tab (blank = the kind's label). Persists. */
   renameTab: (instanceId: string, name: string) => void
+  /** Name a group (blank = named from its contents). Persists. */
+  renameGroup: (slotId: string, name: string) => void
+  /** Move a column to `toIndex` among the columns. Persists. */
+  moveColumn: (columnId: string, toIndex: number) => void
   /**
    * Add a new instance of `kind` at `placement` and show it; returns its id (the
    * kind's legacy id while no instance holds it, else `<kind>:<uuid8>`). Persists.
@@ -362,6 +369,17 @@ export function useTaskLayout({
     )
   })
 
+  const renameGroup = useStableCallback((slotId: string, name: string) => {
+    edit((current) => (findSlot(current, slotId) ? renameSlot(current, slotId, name) : null), true)
+  })
+
+  const moveColumn = useStableCallback((columnId: string, toIndex: number) => {
+    edit((current) => {
+      const from = current.columns.findIndex((c) => c.id === columnId)
+      return from < 0 || from === toIndex ? null : moveColumnOp(current, columnId, toIndex)
+    }, true)
+  })
+
   const addInstance = useStableCallback(
     (kind: PanelKind, placement: InstancePlacement, settings?: Record<string, unknown>): string => {
       // The id is decided here, against the layout this render shows, so the caller
@@ -407,6 +425,8 @@ export function useTaskLayout({
     hideTab,
     closeTab,
     renameTab,
+    renameGroup,
+    moveColumn,
     addInstance,
     supportsInstances: hubHasLayout && !isSecondaryWindow,
     updateInstanceSettings

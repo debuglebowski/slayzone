@@ -11,7 +11,7 @@ import {
 
 const panelBtn = (page: import('@playwright/test').Page, label: string) =>
   page
-    .locator('.bg-surface-2.rounded-lg:visible')
+    .locator('[data-testid="panel-toggles"]:visible')
     .filter({ has: page.locator('button:has-text("Agent")') })
     .locator(`button:has-text("${label}")`)
 

@@ -1,20 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import {
   Loader2,
-  Terminal as TerminalIcon,
-  Globe,
-  Settings2,
-  GitBranch,
-  FileCode,
   Info,
   CheckCircle2,
   XCircle,
   Stethoscope,
-  Cpu,
   Circle,
-  LayoutTemplate,
-  Paperclip,
-  PanelsTopLeft
+  LayoutTemplate
 } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -50,6 +42,7 @@ import {
   getProviderFlags,
   instancesOfKind,
   isInstanceVisible,
+  isClassicShaped,
   isPrimaryInstance,
   legacyKindOf,
   priorityOptions,
@@ -74,20 +67,13 @@ import {
   workComputerId
 } from '@slayzone/projects-contracts'
 import type { AgentId } from '@slayzone/terminal-contracts'
-import {
-  Button,
-  PanelToggle,
-  DevServerToast,
-  formatKeysForDisplay,
-  webPanelShortcutKeys
-} from '@slayzone/ui'
+import { Button, DevServerToast, webPanelShortcutKeys } from '@slayzone/ui'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@slayzone/ui'
-import { ContextMenuItem, ContextMenuLabel } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
 import { DeleteTaskDialog } from './DeleteTaskDialog'
 import { MoveTaskDialog } from './MoveTaskDialog'
@@ -142,7 +128,6 @@ import {
   useAppearance,
   matchesShortcut,
   useShortcutStore,
-  useShortcutDisplay,
   useStableCallback,
   withModalGuard,
   getThemeEditorColors,
@@ -161,9 +146,14 @@ import { resolveLayoutStrip } from './layout/strip'
 import { TaskLayoutView } from './layout/TaskLayoutView'
 import { usePanelCloseRequest } from './layout/usePanelCloseRequest'
 import { usePanelInstanceState } from './layout/usePanelInstanceState'
-import { NewPanelMenu, newPanelChoiceForToggle, newPanelChoices } from './layout/NewPanelMenu'
+import { NewPanelMenu, newPanelChoices } from './layout/header/NewPanelMenu'
+import { GroupToggles } from './layout/header/GroupToggles'
+import { LayoutMenu } from './layout/header/LayoutMenu'
+import { columnMoveOf, layoutGroups, type LayoutGroup } from './layout/header/groups'
+import { usePanelShortcuts } from './layout/header/usePanelShortcuts'
+import { isRenderableKind, panelEnableId } from './layout/panelTabMeta'
 import { InstanceHandles } from './panels/instanceHandles'
-import type { PanelKind } from './panels/registry'
+import { PANEL_KINDS, type PanelKind } from './panels/registry'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
@@ -509,15 +499,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // PTY context for buffer management
   const { resetTaskState, subscribeSessionDetected, subscribeDevServer } = usePty()
 
-  // Shortcut display strings (reactive to user customization)
-  const panelTerminalShortcut = useShortcutDisplay('panel-terminal')
-  const panelBrowserShortcut = useShortcutDisplay('panel-browser')
-  const panelEditorShortcut = useShortcutDisplay('panel-editor')
-  const panelGitShortcut = useShortcutDisplay('panel-git')
-  const panelProcessesShortcut = useShortcutDisplay('panel-processes')
-  const panelSettingsShortcut = useShortcutDisplay('panel-settings')
-  const panelArtifactsShortcut = useShortcutDisplay('panel-artifacts')
-
   // Title editing state
   const {
     editingTitle,
@@ -630,10 +611,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     config: panelConfig,
     updateConfig: updatePanelConfig,
     enabledWebPanels,
-    isBuiltinEnabled,
-    getOrderedTaskIds
+    isBuiltinEnabled
   } = usePanelConfig()
-  const orderedTaskIds = useMemo(() => getOrderedTaskIds(), [getOrderedTaskIds])
+  const panelShortcuts = usePanelShortcuts(enabledWebPanels)
   // Web panels in config order: their stable DOM order in the strip.
   const webPanelIds = useMemo(() => enabledWebPanels.map((wp) => wp.id), [enabledWebPanels])
 
@@ -2130,6 +2110,101 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const mainTerminal = mainTerminalProps(task, project, modes)
 
+  // ── Title row (docs/plans/panel-model.md step 9): group toggles, ⋯ New panel, Layout ──
+  const canAddPanels = taskLayout.supportsInstances && canEdit
+  const headerAlign = taskHeaderPanelAlign === 'left' ? 'start' : 'end'
+  const headerGroups = layoutGroups(taskLayout.layout, {
+    webPanels: enabledWebPanels,
+    isTabListed: (inst) => {
+      if (inst.kind === 'web') {
+        const webId = typeof inst.settings.panelId === 'string' ? inst.settings.panelId : inst.id
+        return enabledWebPanels.some((wp) => wp.id === webId)
+      }
+      const enableId = panelEnableId(inst.kind)
+      if (!enableId || !isBuiltinEnabled(enableId, 'task')) return false
+      return !(task.is_temporary && inst.kind === 'settings')
+    },
+    // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
+    excludesGroup: (inst) =>
+      isSecondaryWindow && (!isRenderableKind(inst.kind) || !PANEL_KINDS[inst.kind].secondaryWindow)
+  })
+  /** A group's shortcut: the `panel-*` (or web panel) one of a kind's primary panel in it. */
+  const groupShortcut = (group: LayoutGroup): string | null => {
+    for (const id of group.instanceIds) {
+      const inst = taskLayout.layout.instances[id]
+      if (!inst || !isPrimaryInstance(inst)) continue
+      const shortcut = panelShortcuts.ofInstance(inst)
+      if (shortcut) return shortcut
+    }
+    return null
+  }
+  const titleRowPanels = (
+    <div className="flex items-center gap-1 min-w-0">
+      <GroupToggles
+        groups={headerGroups}
+        webPanels={enabledWebPanels}
+        mode={taskHeaderPanelMode === 'menu' ? 'menu' : 'toggles'}
+        align={headerAlign}
+        onToggle={(group, active) => handlePanelToggle(group.iconInstance.id, active)}
+        shortcutOf={groupShortcut}
+        onReorder={(orderedSlotIds, move) => {
+          // Classic follows panel_config: its group ids are the legacy panel ids, and
+          // the order is the global one Settings → Panels edits too.
+          if (isClassicShaped(taskLayout.layout)) {
+            handlePanelReorder(orderedSlotIds)
+            return
+          }
+          const m = columnMoveOf(taskLayout.layout, headerGroups, move.id, move.overId)
+          if (m) taskLayout.moveColumn(m.columnId, m.toIndex)
+        }}
+        onRename={canEdit ? taskLayout.renameGroup : undefined}
+        onClose={
+          canEdit
+            ? (group) => {
+                for (const id of group.instanceIds) requestClosePanelTab(id)
+              }
+            : undefined
+        }
+        // Gather a group into another shown one as tabs (the way into tab groups from
+        // Classic, whose panels have no strip).
+        onAddAsTab={
+          isSecondaryWindow
+            ? undefined
+            : (group, target) =>
+                dropPanel(
+                  { type: 'group', slotId: group.slotId },
+                  { type: 'zone', slotId: target.slotId, zone: 'merge' }
+                )
+        }
+      />
+      {headerGroups.length > 0 && (canAddPanels || taskLayout.supportsInstances) && (
+        <span aria-hidden className="size-1 shrink-0 rounded-full bg-muted-foreground/50 mx-1" />
+      )}
+      {canAddPanels && (
+        <NewPanelMenu
+          choices={newPanelChoices(enabledWebPanels, (id) => isBuiltinEnabled(id, 'task'))}
+          onAdd={(c) => addPanel(c.kind, undefined, c.settings)}
+          shortcutOf={(c) =>
+            c.kind === 'web'
+              ? panelShortcuts.ofInstance({ id: c.key, kind: 'web', settings: c.settings ?? {} })
+              : panelShortcuts.ofKind(c.kind)
+          }
+          align={headerAlign}
+        />
+      )}
+      {taskLayout.supportsInstances && (
+        <LayoutMenu
+          layout={taskLayout.layout}
+          capabilities={{
+            kinds: Object.keys(PANEL_KINDS) as LayoutPanelKind[],
+            multiInstance: taskLayout.supportsInstances
+          }}
+          align={headerAlign}
+        />
+      )}
+    </div>
+  )
+
   // What the panels read from this page (see panels/TaskPageContext). Each section
   // is its own object, so the compiler keeps a section stable while its inputs are:
   // a tab switch changes `isActive`, not what the settings panel shows.
@@ -2160,7 +2235,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       isInstanceShown,
       instanceState,
       updateInstanceSettings,
-      canAddPanels: taskLayout.supportsInstances && canEdit,
+      canAddPanels,
       addPanel
     },
     agent: {
@@ -2631,204 +2706,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       {isSecondaryWindow ? 'Reattach' : 'Detach'}
                     </button>
                   ))}
-                {(() => {
-                  const entries: Record<
-                    string,
-                    { id: string; icon: typeof Globe; label: string; shortcut?: string | null }
-                  > = {
-                    terminal: {
-                      id: 'terminal',
-                      icon: TerminalIcon,
-                      label: 'Agent',
-                      shortcut: panelTerminalShortcut
-                    },
-                    browser: {
-                      id: 'browser',
-                      icon: Globe,
-                      label: 'Browser',
-                      shortcut: panelBrowserShortcut
-                    },
-                    editor: {
-                      id: 'editor',
-                      icon: FileCode,
-                      label: 'Editor',
-                      shortcut: panelEditorShortcut
-                    },
-                    artifacts: {
-                      id: 'artifacts',
-                      icon: Paperclip,
-                      label: 'Artifacts',
-                      shortcut: panelArtifactsShortcut
-                    },
-                    diff: { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
-                    processes: {
-                      id: 'processes',
-                      icon: Cpu,
-                      label: 'Processes',
-                      shortcut: panelProcessesShortcut
-                    },
-                    settings: {
-                      id: 'settings',
-                      icon: Settings2,
-                      label: 'Settings',
-                      shortcut: panelSettingsShortcut
-                    }
-                  }
-                  for (const wp of enabledWebPanels) {
-                    entries[wp.id] = {
-                      id: wp.id,
-                      icon: Globe,
-                      label: wp.name,
-                      shortcut: formatKeysForDisplay(webPanelShortcutKeys(wp.shortcut)) ?? undefined
-                    }
-                  }
-                  const ordered = orderedTaskIds
-                    .map((id) => entries[id])
-                    .filter((e): e is NonNullable<typeof e> => !!e)
-                    .filter((p) => {
-                      // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
-                      if (isSecondaryWindow && p.id === 'terminal') return false
-                      const isBuiltin = [
-                        'terminal',
-                        'browser',
-                        'editor',
-                        'artifacts',
-                        'diff',
-                        'processes',
-                        'settings'
-                      ].includes(p.id)
-                      if (isBuiltin)
-                        return (
-                          isBuiltinEnabled(p.id, 'task') &&
-                          !(task.is_temporary && p.id === 'settings')
-                        )
-                      return true // web panels already filtered by enabledWebPanels
-                    })
-                    .map((p) => ({ ...p, active: !!panelVisibility[p.id] }))
-                  // "New <kind> panel" (step 9 replaces these with the ⋯ menu).
-                  const canAddPanels = taskLayout.supportsInstances && canEdit
-                  const newPanelMenu = canAddPanels ? (
-                    <NewPanelMenu
-                      choices={newPanelChoices(enabledWebPanels, (id) =>
-                        isBuiltinEnabled(id, 'task')
-                      )}
-                      onAdd={(c) => addPanel(c.kind, undefined, c.settings)}
-                      align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'}
-                    />
-                  ) : null
-
-                  if (taskHeaderPanelMode === 'menu') {
-                    const activeCount = ordered.filter((p) => p.active).length
-                    return (
-                      <>
-                        <DropdownMenu>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <DropdownMenuTrigger asChild>
-                                <button
-                                  type="button"
-                                  aria-label="Panels"
-                                  className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 hover:bg-surface-3 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                                >
-                                  <PanelsTopLeft className="size-4" />
-                                  {activeCount > 0 && (
-                                    <span className="tabular-nums text-[10px] text-muted-foreground/80">
-                                      {activeCount}
-                                    </span>
-                                  )}
-                                </button>
-                              </DropdownMenuTrigger>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">Panels</TooltipContent>
-                          </Tooltip>
-                          <DropdownMenuContent
-                            align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'}
-                            className="min-w-[180px]"
-                          >
-                            {ordered.map((p) => {
-                              const Icon = p.icon
-                              return (
-                                <DropdownMenuItem
-                                  key={p.id}
-                                  onSelect={(e) => {
-                                    e.preventDefault()
-                                    handlePanelToggle(p.id, !p.active)
-                                  }}
-                                  className={cn('cursor-pointer gap-2', p.active && 'bg-accent/50')}
-                                >
-                                  <Icon className="size-4" />
-                                  <span className="flex-1">{p.label}</span>
-                                  {p.shortcut && (
-                                    <span className="text-[10px] text-muted-foreground tabular-nums">
-                                      {p.shortcut}
-                                    </span>
-                                  )}
-                                </DropdownMenuItem>
-                              )
-                            })}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        {newPanelMenu}
-                      </>
-                    )
-                  }
-
-                  return (
-                    <>
-                      <PanelToggle
-                        panels={ordered}
-                        onChange={handlePanelToggle}
-                        onReorder={handlePanelReorder}
-                        renderContextMenu={(id) => {
-                          // Another panel of this kind, in a new column.
-                          const another = canAddPanels
-                            ? newPanelChoiceForToggle(id, enabledWebPanels)
-                            : null
-                          const newItem = another && (
-                            <ContextMenuItem
-                              onSelect={() => addPanel(another.kind, undefined, another.settings)}
-                            >
-                              <another.icon className="size-3.5" />
-                              New {another.label} panel
-                            </ContextMenuItem>
-                          )
-                          // Gather a panel into another shown group as a tab (the way
-                          // into tab groups from Classic, whose panels have no strip).
-                          const from = taskLayout.slotOf(id)
-                          if (!from || isSecondaryWindow) return newItem || null
-                          const targets = ordered.filter((p) => {
-                            const to = p.active ? taskLayout.slotOf(p.id) : null
-                            return p.id !== id && to !== null && to !== from
-                          })
-                          if (targets.length === 0) return newItem || null
-                          return (
-                            <>
-                              {newItem}
-                              <ContextMenuLabel>Add as a tab to</ContextMenuLabel>
-                              {targets.map((p) => (
-                                <ContextMenuItem
-                                  key={p.id}
-                                  onSelect={() => {
-                                    const to = taskLayout.slotOf(p.id)
-                                    if (to)
-                                      dropPanel(
-                                        { type: 'tab', instanceId: id },
-                                        { type: 'zone', slotId: to, zone: 'merge' }
-                                      )
-                                  }}
-                                >
-                                  <p.icon className="size-3.5" />
-                                  {p.label}
-                                </ContextMenuItem>
-                              ))}
-                            </>
-                          )
-                        }}
-                      />
-                      {newPanelMenu}
-                    </>
-                  )
-                })()}
+                {titleRowPanels}
               </div>
             </div>
             {parentTask && (

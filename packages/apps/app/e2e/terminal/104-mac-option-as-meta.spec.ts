@@ -20,7 +20,7 @@ const META_ECHO = '^[2'
 
 const panelBtn = (page: Page, label: string) =>
   page
-    .locator('.bg-surface-2.rounded-lg:visible')
+    .locator('[data-testid="panel-toggles"]:visible')
     .filter({ has: page.locator('button:has-text("Agent")') })
     .locator(`button:has-text("${label}")`)
 
