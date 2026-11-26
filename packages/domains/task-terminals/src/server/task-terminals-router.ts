@@ -49,9 +49,13 @@ export const taskTerminalsRouter = router({
     .input(z.object({ tabId: z.string(), targetGroupId: z.string().nullable() }))
     .mutation(({ ctx, input }) => moveTabToGroup(ctx.db, input.tabId, input.targetGroupId)),
 
-  update: publicProcedure
-    .input(updateInput)
-    .mutation(({ ctx, input }) => updateTabRow(ctx.db, input)),
+  update: publicProcedure.input(updateInput).mutation(async ({ ctx, input }) => {
+    const tab = await updateTabRow(ctx.db, input)
+    // A mode change restarts the tab's agent in every window showing it (an agent
+    // panel's provider): they re-read the tabs, and the pane remounts in the new mode.
+    if (tab && input.mode !== undefined) tabsEvents.emit('tabs:changed', { taskId: tab.taskId })
+    return tab
+  }),
 
   delete: publicProcedure
     .input(z.object({ tabId: z.string() }))

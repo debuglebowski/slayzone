@@ -1,7 +1,10 @@
 import { useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSubscription } from '@slayzone/transport/client'
 import type { AgentId } from '@slayzone/terminal-contracts'
 import type { TerminalTab } from '../shared/types'
-import { useTRPCClient } from './trpc'
+import { beginModeSwitch } from './mode-switch'
+import { useTRPC, useTRPCClient } from './trpc'
 
 /**
  * A task's terminal groups as whole units, for panels that each show some of them
@@ -17,6 +20,20 @@ export interface TerminalGroupsApi {
   anyLive: (taskId: string, groupIds: readonly string[]) => Promise<boolean>
   /** Close every tab of these groups: rows deleted, sessions (pty, chat) ended. */
   closeGroups: (taskId: string, groupIds: readonly string[]) => Promise<void>
+  /**
+   * Restart a group's agent — its first terminal — in `mode` (an agent panel's
+   * provider): its session ends, the row takes the new mode, and every window
+   * showing it remounts the pane, which starts the new mode fresh. Resolves to the
+   * mode it had (null: no such group, or already in `mode`).
+   */
+  setGroupMode: (taskId: string, groupId: string, mode: AgentId) => Promise<AgentId | null>
+}
+
+/** A group's agent: its first terminal by position. */
+function agentTabOf(tabs: readonly TerminalTab[], groupId: string): TerminalTab | null {
+  return (
+    tabs.filter((t) => t.groupId === groupId).sort((a, b) => a.position - b.position)[0] ?? null
+  )
 }
 
 export function useTerminalGroupsApi(): TerminalGroupsApi {
@@ -44,7 +61,43 @@ export function useTerminalGroupsApi(): TerminalGroupsApi {
           // A chat tab's session too (a no-op when there is none).
           await client.chat.remove.mutate({ tabId: tab.id }).catch(() => undefined)
         }
+      },
+      setGroupMode: async (taskId, groupId, mode) => {
+        const tab = agentTabOf(await client.taskTerminals.list.query({ taskId }), groupId)
+        if (!tab || tab.mode === mode) return null
+        const sessionId = `${taskId}:${tab.id}`
+        if (await client.pty.exists.query({ sessionId })) {
+          beginModeSwitch(sessionId)
+          await client.pty.kill.mutate({ sessionId })
+        }
+        await client.chat.remove.mutate({ tabId: tab.id }).catch(() => undefined)
+        await client.taskTerminals.update.mutate({ id: tab.id, mode })
+        return tab.mode
       }
     }
   }, [client])
+}
+
+/**
+ * The mode of a group's agent (its first terminal), or null while unknown or when
+ * the group has no terminal. Follows mode changes made anywhere (`tabs:changed`).
+ */
+export function useTerminalGroupMode(taskId: string, groupId: string | null): AgentId | null {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const options = trpc.taskTerminals.list.queryOptions(
+    { taskId },
+    { enabled: groupId !== null, staleTime: 5_000 }
+  )
+  const { data } = useQuery(options)
+  useSubscription(
+    trpc.taskTerminals.onChanged.subscriptionOptions(undefined, {
+      enabled: groupId !== null,
+      onData: ({ taskId: changed }) => {
+        if (changed === taskId) void queryClient.invalidateQueries({ queryKey: options.queryKey })
+      }
+    })
+  )
+  if (!data || groupId === null) return null
+  return agentTabOf(data, groupId)?.mode ?? null
 }

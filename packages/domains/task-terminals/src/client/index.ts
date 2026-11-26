@@ -8,5 +8,9 @@ export { markForceStart, requestAgentStart } from './TerminalStarter'
 export { chatsLoadingCount, subscribeChatsLoading } from './chat/chat-loading'
 export { resolveIdRef } from './chat/chat-link'
 export { useTaskTerminals } from './useTaskTerminals'
-export { useTerminalGroupsApi, type TerminalGroupsApi } from './useTerminalGroupsApi'
+export {
+  useTerminalGroupMode,
+  useTerminalGroupsApi,
+  type TerminalGroupsApi
+} from './useTerminalGroupsApi'
 export { CHAT_SUPPORTED_MODES, isChatSupported } from '../shared/chat-modes'

@@ -12,6 +12,7 @@ export {
   subscribeChatsLoading,
   resolveIdRef,
   useTerminalGroupsApi,
+  useTerminalGroupMode,
   filterTerminalGroups
 } from './client'
 export type { TerminalContainerHandle } from './client'

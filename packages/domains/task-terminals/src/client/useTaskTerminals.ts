@@ -5,6 +5,7 @@ import { useTRPC, useTRPCClient } from './trpc'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { AgentId } from '@slayzone/terminal-contracts'
 import { usePty } from '@slayzone/terminal'
+import { isModeSwitchExit } from './mode-switch'
 
 /**
  * A task's tabs, opened read-only — including while the task is migrating: the main
@@ -247,6 +248,8 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
       if (tab.isMain) continue
       const sessionId = `${taskId}:${tab.id}`
       const unsub = subscribeExit(sessionId, () => {
+        // Killed to restart in another mode (an agent panel's provider): keep the tab.
+        if (isModeSwitchExit(sessionId)) return
         void closeTabInternal(tab.id, true)
       })
       unsubs.push(unsub)
