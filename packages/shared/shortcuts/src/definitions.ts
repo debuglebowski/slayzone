@@ -256,6 +256,13 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     scope: 'task'
   },
   {
+    id: 'task-computer',
+    label: 'Switch computer',
+    group: 'Task Panels',
+    defaultKeys: 'mod+shift+m',
+    scope: 'task'
+  },
+  {
     id: 'panel-processes',
     label: 'Processes',
     group: 'Task Panels',

@@ -125,6 +125,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { safeRandomUUID, safeClipboardWriteText } from '@slayzone/ui'
 import { TaskMetadataSidebar } from './TaskMetadataSidebar'
+import { TaskComputerChip } from './TaskComputerChip'
 import { TaskStatusMenu } from './TaskStatusMenu'
 import {
   normalizeDescription,
@@ -308,6 +309,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Prefer live global state; fall back to suspense-cached data for subtask race window
   const task = taskProp ?? initialData?.task ?? null
   const project = projectProp ?? initialData?.project ?? null
+  // The title-row computer chip's menu; ⌘⇧M toggles it.
+  const [computerMenuOpen, setComputerMenuOpen] = useState(false)
 
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
   const shortcutActive = hasShortcutFocus ?? isActive
@@ -1573,6 +1576,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       ) {
         e.preventDefault()
         handlePanelToggle('settings', !panelVisibility.settings)
+      } else if (matchesShortcut(e, keys('task-computer'))) {
+        e.preventDefault()
+        setComputerMenuOpen((open) => !open)
       } else {
         // Web panel shortcuts (not in registry — dynamic per-project config):
         // primary modifier + the panel's letter, exactly as its tab label shows it.
@@ -2814,6 +2820,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       </TooltipTrigger>
                       <TooltipContent>You can see this task but not change it.</TooltipContent>
                     </Tooltip>
+                  )}
+                  {canEdit && (
+                    <TaskComputerChip
+                      taskId={task.id}
+                      projectId={task.project_id}
+                      taskComputerId={(task as { computer_id?: string | null }).computer_id ?? null}
+                      projectDefaultComputerId={
+                        (project as { default_computer_id?: string | null } | null)
+                          ?.default_computer_id ?? null
+                      }
+                      open={computerMenuOpen}
+                      onOpenChange={setComputerMenuOpen}
+                    />
                   )}
                 </div>
               )}

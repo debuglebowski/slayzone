@@ -67,15 +67,26 @@ export function ComputerCard({ ...props }: ComputerCardProps): React.JSX.Element
   return <ComputerCardControls key={props.taskId} {...props} computers={computers} />
 }
 
-function ComputerCardControls({
+export type ComputerListItem = {
+  id: string
+  name: string
+  disabledAt?: number | null
+  usable?: boolean
+}
+
+/**
+ * Everything behind "which computer does this task run on": the effective computer,
+ * the running move, and the change dialog (preview → confirm, folder / clone steps).
+ * Shared by the settings card and the title-row chip, so both change it the same way.
+ * `openDialog(choice)` opens the dialog with `choice` (null = inherit) already picked.
+ */
+export function useTaskComputerControls({
   taskId,
   projectId,
   taskComputerId,
   projectDefaultComputerId,
   computers
-}: ComputerCardProps & {
-  computers: Array<{ id: string; name: string; disabledAt?: number | null; usable?: boolean }>
-}): React.JSX.Element {
+}: ComputerCardProps & { computers: ComputerListItem[] }) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const currentTask = useRef<string | null>(taskId)
@@ -118,12 +129,14 @@ function ComputerCardControls({
   const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
   const isCurrent = choice === taskComputerId
 
-  const openDialog = (): void => {
-    setChoice(taskComputerId)
+  const openDialog = (preset?: string | null): void => {
+    const initial = preset === undefined ? taskComputerId : preset
+    setChoice(initial)
     setPreview(null)
     setError(null)
     setAllowFresh(false)
     setOpen(true)
+    if (initial !== taskComputerId) void check(initial)
   }
   const closeDialog = (): void => {
     if (saving) return
@@ -241,12 +254,74 @@ function ComputerCardControls({
     }))
   ]
 
+  const dialog = (
+    <ChangeComputerDialog
+      open={open}
+      options={options}
+      choice={choice ?? INHERIT_VALUE}
+      onChoose={choose}
+      choiceName={
+        preview
+          ? nameFor(preview.destinationComputerId)
+          : nameFor(choice ?? projectDefaultComputerId)
+      }
+      sourceName={nameFor(preview?.sourceComputerId ?? effectiveId)}
+      isCurrent={isCurrent}
+      checking={checking}
+      preview={preview}
+      allowFresh={allowFresh}
+      onAllowFresh={setAllowFresh}
+      pending={saving}
+      error={error}
+      onClose={closeDialog}
+      onConfirm={() => void confirm()}
+      projectId={projectId}
+      preparing={preparing}
+      onChooseFolder={chooseFolder}
+      onClone={cloneRepository}
+    />
+  )
+
+  return {
+    effectiveId,
+    nameFor,
+    options,
+    inheritValue: INHERIT_VALUE,
+    moving,
+    move: moveQuery.data,
+    moveError,
+    control,
+    retryPending: retryMove.isPending,
+    cancelPending: cancelMove.isPending,
+    openDialog,
+    dialog
+  }
+}
+
+export const MOVE_STEP_TEXT = MOVE_STEP_LABELS
+
+function ComputerCardControls(
+  props: ComputerCardProps & { computers: ComputerListItem[] }
+): React.JSX.Element {
+  const {
+    effectiveId,
+    nameFor,
+    moving,
+    move,
+    moveError,
+    control,
+    retryPending,
+    cancelPending,
+    openDialog,
+    dialog
+  } = useTaskComputerControls(props)
+
   return (
     <div>
       <p className="mb-1 block text-sm text-muted-foreground">Computer</p>
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm">{runsOnLabel(nameFor(effectiveId))}</p>
-        <Button variant="outline" size="sm" onClick={openDialog} disabled={moving}>
+        <Button variant="outline" size="sm" onClick={() => openDialog()} disabled={moving}>
           Change computer…
         </Button>
       </div>
@@ -255,41 +330,40 @@ function ComputerCardControls({
           {moveError}
         </p>
       )}
-      {moving && moveQuery.data && (
+      {moving && move && (
         <div className="mt-2 space-y-2 text-sm" aria-live="polite">
           <p>
-            Moving to {nameFor(moveQuery.data.destinationComputerId)} ·{' '}
-            {MOVE_STEP_LABELS[moveQuery.data.step]}
+            Moving to {nameFor(move.destinationComputerId)} · {MOVE_STEP_LABELS[move.step]}
           </p>
-          {moveQuery.data.bytesTotal > 0 && (
+          {move.bytesTotal > 0 && (
             <progress
               className="w-full"
               aria-label="Workspace transfer"
-              value={moveQuery.data.bytesDone}
-              max={moveQuery.data.bytesTotal}
+              value={move.bytesDone}
+              max={move.bytesTotal}
             />
           )}
-          {moveQuery.data.error && (
+          {move.error && (
             <p role="alert" className="text-destructive">
-              {moveQuery.data.error}
+              {move.error}
             </p>
           )}
-          {moveQuery.data.status === 'failed' && (
+          {move.status === 'failed' && (
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => void control('retry')}
-                disabled={retryMove.isPending}
+                disabled={retryPending}
               >
                 Retry move
               </Button>
-              {moveQuery.data.step !== 'finish' && (
+              {move.step !== 'finish' && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => void control('cancel')}
-                  disabled={cancelMove.isPending}
+                  disabled={cancelPending}
                 >
                   Cancel move
                 </Button>
@@ -298,31 +372,7 @@ function ComputerCardControls({
           )}
         </div>
       )}
-      <ChangeComputerDialog
-        open={open}
-        options={options}
-        choice={choice ?? INHERIT_VALUE}
-        onChoose={choose}
-        choiceName={
-          preview
-            ? nameFor(preview.destinationComputerId)
-            : nameFor(choice ?? projectDefaultComputerId)
-        }
-        sourceName={nameFor(preview?.sourceComputerId ?? effectiveId)}
-        isCurrent={isCurrent}
-        checking={checking}
-        preview={preview}
-        allowFresh={allowFresh}
-        onAllowFresh={setAllowFresh}
-        pending={saving}
-        error={error}
-        onClose={closeDialog}
-        onConfirm={() => void confirm()}
-        projectId={projectId}
-        preparing={preparing}
-        onChooseFolder={chooseFolder}
-        onClone={cloneRepository}
-      />
+      {dialog}
     </div>
   )
 }
