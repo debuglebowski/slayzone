@@ -1,6 +1,7 @@
 import { readBootstrapOwner } from '@slayzone/platform/hub-owner-file'
 import { probeLocalHub } from './local-hub'
 import { isTaskTerminal, resolveTaskCommandTarget } from './hub-config'
+import { AGENT_CALLER, CALLER_HEADER } from '@slayzone/task-contracts/caller'
 
 interface ApiTarget {
   baseUrl: string
@@ -68,10 +69,17 @@ async function resolveTarget(): Promise<ApiTarget> {
   return { baseUrl: `http://127.0.0.1:${probe.port}`, token: ownerToken ?? null, hub: false }
 }
 
+/**
+ * The bearer, and from a task terminal the caller marker (`x-slayzone-caller:
+ * agent`): the request comes from an agent session. Routes that honour the user's
+ * agent preferences read it (`agent_may_change_layout`). A marker, not a credential.
+ */
 function withAuth(init: RequestInit | undefined, token: string | null): RequestInit | undefined {
-  if (!token) return init
+  const agent = isTaskTerminal()
+  if (!token && !agent) return init
   const headers = new Headers(init?.headers)
-  if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  if (agent) headers.set(CALLER_HEADER, AGENT_CALLER)
   return { ...init, headers }
 }
 
@@ -117,6 +125,14 @@ export function apiPost<T>(path: string, body: Record<string, unknown>): Promise
 export function apiPatch<T>(path: string, body: Record<string, unknown>): Promise<T> {
   return request<T>(path, {
     method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+}
+
+export function apiPut<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  return request<T>(path, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   })

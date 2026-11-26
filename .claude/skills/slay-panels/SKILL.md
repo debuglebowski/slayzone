@@ -1,6 +1,6 @@
 ---
 name: slay-panels
-description: "Manage web panels via the slay CLI"
+description: "Manage web panels and a task's panel layout via the slay CLI"
 trigger: auto
 ---
 
@@ -24,3 +24,21 @@ SlayZone ships with predefined panels for Figma, Notion, GitHub, Excalidraw, and
 
 - `slay panels disable <id-or-name>` — hide the panel from task view without deleting it.
   - The panel config is preserved
+
+## Task layout
+
+A task's panels are tabs in groups, groups stacked in columns. `slay panels layout` shows and changes the layout of a task (default: the current task, `$SLAYZONE_TASK_ID`; `-t <id>` for another). Changes show up in the open task view at once; a change you make from a task terminal offers the user **Undo**. If the user turned off "Agent may change the layout" (Manage layouts), every change fails with `layout_locked` — don't retry, tell the user.
+
+- `slay panels layout show [--json]` — columns, groups and panels with their **panel ids** (`terminal` = the main agent, `browser`, `editor`, `diff`, `settings`, `browser:1a2b3c4d` …), which are hidden or parked, and the layouts `apply` takes.
+
+- `slay panels layout apply <layout>` — switch to a layout by id or name (`classic`, `focus`, `pair`, `review`, the user's own …). Panels with live state (agent sessions, open pages, open files) that the layout has no place for are parked, never lost.
+  - `apply <file.json>` / `apply -` (stdin) applies a whole layout; edited `show --json` output works.
+
+- `slay panels layout open <kind> [--settings <json>] [--placement <where>] [--name <name>]` — open a panel. Kinds: `agent`, `terminal`, `browser`, `web`, `editor`, `artifacts`, `artifact`, `git`, `processes`, `settings`, `description`, `subtasks`, `details`.
+  - `--settings`: `{"url":"https://…"}` for a web page, `{"artifactId":"…"}` for an artifact, `{"provider":"codex"}` for an agent panel
+  - `--placement`: `column[:<index>]` (default: a new column at the end), `tab:<group-or-panel>[:<index>]` (a tab next to a panel), `split:<group-or-panel>:<left|right|before|after>`
+  - An agent or terminal panel starts its own terminal. A one-per-task kind (`settings`, `description`, `subtasks`, `details`) or an artifact already in a panel is shown instead of opened twice.
+
+- `slay panels layout hide <panel-id>` — hide a panel in place (its whole group when it is the group's last shown tab). Open it again with `open <kind>` or the task view's toggles.
+
+- `slay panels layout close <panel-id>` — close a panel. The first panel of a kind (`terminal`, `browser`, `editor`, `diff`, …) is only hidden.
