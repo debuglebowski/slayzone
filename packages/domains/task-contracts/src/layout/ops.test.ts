@@ -16,6 +16,7 @@ import {
   isPrimaryInstance,
   legacyIdOf,
   mergeInto,
+  moveColumn,
   moveSlot,
   moveTab,
   newInstanceId,
@@ -504,6 +505,33 @@ describe('moveSlot', () => {
     const after = moveSlot(l, 's-web:x', { type: 'split', slotId: 's-diff', zone: 'right' })
     expect(after.columns).toHaveLength(8)
     expect(shape(after)[4]).toEqual([['diff'], ['web:x']])
+  })
+})
+
+describe('moveColumn', () => {
+  test('moves a whole column (stacked groups, hidden state, size) to an index', () => {
+    const l = layout([[['terminal'], ['web:x']], [['browser']], [['diff']]])
+    l.columns[0].slots[1].hidden = true
+    l.columns[0].sizeOverride = { unit: 'px', value: 500 }
+    const snap = frozen(l)
+    const after = moveColumn(l, 'c-terminal', 2)
+    expect(l).toEqual(snap)
+    expect(shape(after)).toEqual([[['browser']], [['diff']], [['terminal'], ['web:x']]])
+    expect(after.columns[2].slots[1].hidden).toBe(true)
+    expect(after.columns[2].sizeOverride).toEqual({ unit: 'px', value: 500 })
+    expect(after.rev).toBe(1)
+    expect(shape(moveColumn(l, 'c-diff', 0))).toEqual([
+      [['diff']],
+      [['terminal'], ['web:x']],
+      [['browser']]
+    ])
+  })
+
+  test('clamps the index; unknown columns change nothing', () => {
+    const l = layout([[['terminal']], [['browser']]])
+    expect(shape(moveColumn(l, 'c-terminal', 99))).toEqual([[['browser']], [['terminal']]])
+    expect(shape(moveColumn(l, 'c-browser', -3))).toEqual([[['browser']], [['terminal']]])
+    expect(shape(moveColumn(l, 'nope', 0))).toEqual(shape(l))
   })
 })
 

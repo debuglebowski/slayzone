@@ -415,6 +415,19 @@ export function moveSlot<T extends LayoutTree>(
   })
 }
 
+/**
+ * Move a whole column (its groups, sizes and hidden state) to `toIndex` among the
+ * columns (clamped): the title row's group toggles reorder columns by drag.
+ */
+export function moveColumn<T extends LayoutTree>(tree: T, columnId: string, toIndex: number): T {
+  return edit(tree, (d) => {
+    const from = d.columns.findIndex((c) => c.id === columnId)
+    if (from < 0) return
+    const [column] = d.columns.splice(from, 1)
+    d.columns.splice(Math.max(0, Math.min(toIndex, d.columns.length)), 0, column)
+  })
+}
+
 /** Place an existing group beside `slotId` (a sibling column or a stacked slot). */
 function insertSlotSplit(
   draft: LayoutTree,
