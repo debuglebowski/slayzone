@@ -4,6 +4,8 @@ The design is the prototype artifact `slayzone-layout.html` in the task "🧭 De
 
 ## Phase 1: Sidebar chrome (tree view)
 
+Status: done.
+
 - Tree is the default view.
 - Header: traffic lights, the centered "Slay Zone" wordmark, a mini usage meter (Claude/Codex bars, opens `UsagePopover`), and ☰ to hide the sidebar.
 - Footer: one evenly spaced toolbar, with labels when the sidebar is at least 420px wide:
@@ -26,6 +28,8 @@ The design is the prototype artifact `slayzone-layout.html` in the task "🧭 De
 
 ## Phase 2: Lenses
 
+Status: done.
+
 - A lens is a saved sidebar preset: grouping (project / agent status / task status / recent), row look (cards / flat / accordion / dense), which projects, the "Needs you" strip, and the tree display settings.
 - The built-in lenses are Today, Agent status, Task status, Recent and Accordion.
 - Lens menu: lens rows with ✎ on hover, ⌃1–9 shortcuts, and Manage lenses….
@@ -37,12 +41,16 @@ The design is the prototype artifact `slayzone-layout.html` in the task "🧭 De
 
 ## Phase 3: Computer chip
 
+Status: done.
+
 - A "This Mac ▾" chip in the task title row, shown only when the project has a folder on more than one computer.
 - It picks the computer where new agents and terminals start. Running sessions stay where they are.
 - ⌘⇧M flips between the computers.
 - The menu links to "Folders on each computer…", which opens the project settings.
 
 ## Phase 4: Panel model (task view)
+
+Status: done.
 
 - Columns of tab groups:
   - Drag-and-drop a tab: dropping on the middle of a group merges into it, dropping on an edge splits.
@@ -54,9 +62,11 @@ The design is the prototype artifact `slayzone-layout.html` in the task "🧭 De
 - Title row: group toggles, a ⋯ menu for new panels, and the layout button (icon only).
 - Saved layouts: built-in "Classic" (today's defaults), plus user layouts with Manage layouts (bulk actions, enable switches) and ⌥1–9 shortcuts.
 - Migration: per-task `panel_visibility` and `panel_sizes`, and the global `panel_config`, map onto the Classic layout.
-- This phase needs its own design doc before code: `TaskDetailPage.tsx` is 4k lines with hand-written panel blocks.
+- Built from its own design doc, docs/plans/panel-model.md (steps 1–14).
 
 ## Phase 5: Sharing
+
+Status: waiting on task 812f5341.
 
 - Task 812f5341 makes invites member-only and removes "Shared with me".
 - An artifact shared on its own appears behind the **Shared** footer button: a popover grouped by project, view only, with a new-item dot.
