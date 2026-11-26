@@ -11,6 +11,7 @@ import {
   GenericPanelSettings
 } from './panels-settings'
 import type { PanelsSettingsTabProps } from './panels-settings'
+import { TaskLayoutsLink } from './panels-settings/TaskLayoutsLink'
 
 export function PanelsSettingsTab({ activeTab, navigateTo }: PanelsSettingsTabProps) {
   const s = usePanelSettings(activeTab, navigateTo)
@@ -26,6 +27,8 @@ export function PanelsSettingsTab({ activeTab, navigateTo }: PanelsSettingsTabPr
       ) : panelDetailId ? (
         <PanelDetailHeader state={s} />
       ) : null}
+
+      {activeTab === 'panels' && <TaskLayoutsLink />}
 
       {activeTab === 'panels' && <PanelList state={s} />}
 

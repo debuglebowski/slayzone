@@ -1,10 +1,10 @@
 // Pins the title row's group toggles (docs/plans/panel-model.md step 9): one per tab
 // group in layout order, named from contents unless renamed, hidden groups kept in
-// place, and the layout's name.
+// place, parked tabs left out, and the layout's name.
 import { describe, expect, it } from 'vitest'
 import type { LayoutColumn, PanelInstance, PanelKind, TaskLayout } from '@slayzone/task-contracts'
 import { columnMoveOf, groupNameOf, layoutGroups } from './groups'
-import { availableBuiltinLayouts, currentLayoutName } from './LayoutMenu'
+import { currentLayoutName } from './LayoutMenu'
 
 const KIND_OF: Record<string, PanelKind> = {
   terminal: 'agent',
@@ -119,21 +119,28 @@ describe('group toggles', () => {
 })
 
 describe('layout name', () => {
-  it('Classic while Classic-shaped, else Custom', () => {
-    const l = layout([[['terminal']], [['diff']]])
-    expect(currentLayoutName(l)).toBe('Classic')
-    l.columns[0].slots[0].name = 'Main'
-    expect(currentLayoutName(l)).toBe('Custom')
-    expect(currentLayoutName(layout([[['terminal', 'diff']]]))).toBe('Custom')
+  it('the applied definition’s name, else Custom', () => {
+    const def = {
+      ...layout([[['terminal']]]),
+      id: 'focus',
+      name: 'Focus',
+      builtin: true,
+      enabled: true,
+      edited: false
+    }
+    expect(currentLayoutName(def)).toBe('Focus')
+    expect(currentLayoutName(null)).toBe('Custom')
   })
+})
 
-  it('lists the built-ins the app can show', () => {
-    const ids = (multiInstance: boolean) =>
-      availableBuiltinLayouts({
-        kinds: ['agent', 'browser', 'editor', 'git', 'terminal', 'processes'],
-        multiInstance
-      }).map((s) => s.id)
-    expect(ids(false)).toEqual(['classic', 'focus', 'pair', 'review', 'debug'])
-    expect(ids(true)).toContain('two-git')
+describe('parked tabs', () => {
+  it('get no toggle; a group holding only parked tabs has none', () => {
+    const l = layout([[['terminal'], ['terminal:p1']], [['browser', 'editor']]])
+    l.columns[0].slots[1].hidden = true
+    l.columns[0].slots[1].tabs[0] = { instanceId: 'terminal:p1', hidden: true, parked: true }
+    l.columns[1].slots[0].tabs[1] = { instanceId: 'editor', hidden: true, parked: true }
+    const groups = layoutGroups(l, all)
+    expect(groups.map((g) => g.slotId)).toEqual(['terminal', 'browser'])
+    expect(groups[1].instanceIds).toEqual(['browser'])
   })
 })

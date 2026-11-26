@@ -31,6 +31,7 @@ import { Calendar } from '@slayzone/ui'
 import { Checkbox } from '@slayzone/ui'
 import { ProjectSelect } from '@slayzone/projects'
 import { buildStatusOptions, cn, formatKeysForDisplay, isPrimaryModifier } from '@slayzone/ui'
+import { withDefaultPanelLayout } from './layouts/newTaskLayout'
 
 interface CreateTaskDialogProps {
   open: boolean
@@ -98,7 +99,9 @@ export function CreateTaskDialog({
   const client = useClientForProject(selectedProjectId)
 
   const createMutation = useMutation({
-    mutationFn: (input: CreateTaskInput) => client.task.create.mutate(input)
+    // The user's default layout (step 10) rides along; a template's layout wins hub-side.
+    mutationFn: async (input: CreateTaskInput) =>
+      client.task.create.mutate(await withDefaultPanelLayout(input))
   })
   const setTagsMutation = useMutation({
     mutationFn: (input: { taskId: string; tagIds: string[] }) =>

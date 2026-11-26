@@ -56,7 +56,7 @@ import { scratchTaskInput } from '@slayzone/tasks/board'
 import { insertCreatedRow, type useTasksData } from '@slayzone/tasks/client'
 import { markSessionUnspawned, traceSessionOpen } from '@slayzone/terminal/client'
 import type { Project } from '@slayzone/projects-contracts'
-import type { Task } from '@slayzone/task-contracts'
+import { OPEN_MANAGE_LAYOUTS_EVENT, type Task } from '@slayzone/task-contracts'
 
 // Lazy chunks so the heavy settings/project-settings tab code (CodeMirror, MCP/
 // AI-provider editors, integration + test panels) stays out of the initial
@@ -121,6 +121,22 @@ const CliInstallDialog = lazy(() =>
 const TerminalStatusDialog = lazy(() =>
   import('@slayzone/terminal').then((m) => ({ default: m.TerminalStatusDialog }))
 )
+
+// Manage layouts + the layout editor: mounted on the first request to open them
+// (a task's Layout menu, Settings → Panels). Mirrors canonical app-shell/AppDialogs.
+const ManageLayoutsHost = lazy(() =>
+  import('@slayzone/task/client/layouts').then((m) => ({ default: m.ManageLayoutsHost }))
+)
+
+function useManageLayoutsRequests(): number {
+  const [requests, setRequests] = useState(0)
+  useEffect(() => {
+    const onOpen = (): void => setRequests((n) => n + 1)
+    window.addEventListener(OPEN_MANAGE_LAYOUTS_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_MANAGE_LAYOUTS_EVENT, onOpen)
+  }, [])
+  return requests
+}
 
 type CreateProjectProps = ComponentProps<typeof CreateProjectDialog>
 
@@ -193,6 +209,7 @@ export function AppDialogs({
   // tab store. The global-agent toggle reads the SHARED useGlobalAgentPanelState
   // store (singleton) so it flips the same state HomeView renders.
   const trpcClient = useTRPCClient()
+  const layoutsOpenRequest = useManageLayoutsRequests()
   const [agentPanel, setAgentPanel] = useGlobalAgentPanelState()
   const searchOpen = useDialogStore((s) => s.searchOpen)
   const tabs = useTabStore((s) => s.tabs)
@@ -585,6 +602,11 @@ export function AppDialogs({
       <Suspense fallback={null}>
         <TerminalStatusDialog tasks={data.tasks} onTaskClick={onOpenTask} />
       </Suspense>
+      {layoutsOpenRequest > 0 && (
+        <Suspense fallback={null}>
+          <ManageLayoutsHost openRequest={layoutsOpenRequest} />
+        </Suspense>
+      )}
 
       {/* Toast surface — imported feature code calls toast(); without a mounted
           Toaster those notifications silently no-op. */}

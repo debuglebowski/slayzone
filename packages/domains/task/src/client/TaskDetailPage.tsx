@@ -34,6 +34,12 @@ import { useHeldTaskPath, useTaskPath, useTaskPathLocation } from './useTaskPath
 import {
   BUILTIN_PANEL_IDS,
   DEFAULT_TASK_PANEL_VISIBILITY,
+  LAYOUT_SHORTCUT_COUNT,
+  addUserLayout,
+  isLayoutDirty,
+  layoutAtShortcut,
+  parkedInstances,
+  saveLayoutTree,
   PRIMARY_INSTANCE_IDS,
   SECONDARY_WINDOW_PANEL_VISIBILITY,
   browserInstanceOfTab,
@@ -53,6 +59,8 @@ import {
   terminalGroupIdsOf,
   type BrowserTab,
   type BrowserTabsState,
+  type EditorOpenFilesState,
+  type PanelInstance,
   type PanelKind as LayoutPanelKind
 } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
@@ -146,12 +154,15 @@ import { resolveLayoutStrip } from './layout/strip'
 import { TaskLayoutView } from './layout/TaskLayoutView'
 import { usePanelCloseRequest } from './layout/usePanelCloseRequest'
 import { usePanelInstanceState } from './layout/usePanelInstanceState'
-import { NewPanelMenu, newPanelChoices } from './layout/header/NewPanelMenu'
+import { NewPanelMenu, newPanelChoices, type ParkedPanel } from './layout/header/NewPanelMenu'
 import { GroupToggles } from './layout/header/GroupToggles'
 import { LayoutMenu } from './layout/header/LayoutMenu'
+import { SaveLayoutAsDialog } from './layouts/SaveLayoutAsDialog'
+import { layoutDialogs } from './layouts/manageLayoutsStore'
+import { isClassicCustomized, resolveClientLayouts, useTaskLayouts } from './layouts/useTaskLayouts'
 import { columnMoveOf, layoutGroups, type LayoutGroup } from './layout/header/groups'
 import { usePanelShortcuts } from './layout/header/usePanelShortcuts'
-import { isRenderableKind, panelEnableId } from './layout/panelTabMeta'
+import { isRenderableKind, panelEnableId, panelTabMeta } from './layout/panelTabMeta'
 import { InstanceHandles } from './panels/instanceHandles'
 import { PANEL_KINDS, type PanelKind } from './panels/registry'
 import { usePanelConfig } from './usePanelConfig'
@@ -614,6 +625,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     isBuiltinEnabled
   } = usePanelConfig()
   const panelShortcuts = usePanelShortcuts(enabledWebPanels)
+  // Layout definitions (the per-user task_layouts setting, step 10).
+  const taskLayouts = useTaskLayouts()
+  const classicCustomized = isClassicCustomized(taskLayouts.setting)
   // Web panels in config order: their stable DOM order in the strip.
   const webPanelIds = useMemo(() => enabledWebPanels.map((wp) => wp.id), [enabledWebPanels])
 
@@ -631,7 +645,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     isSecondaryWindow,
     updateTask: updateTaskAsync,
     onTaskUpdated,
-    onPanelVisibilityChange
+    onPanelVisibilityChange,
+    followPanelConfig: !classicCustomized
   })
   const {
     panelVisibility,
@@ -1364,15 +1379,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   )
 
-  /**
-   * Close a panel tab: a primary instance only hides (legacy clients, shortcuts and
-   * ownership address it by its id). Any other instance is removed with its state:
-   * its `panel_instance_state` entry, a browser's tabs, an agent/terminal panel's
-   * terminal tabs (their sessions end — the close request asked first).
-   */
-  const closePanelInstance = useStableCallback((instanceId: string) => {
-    const inst = taskLayout.layout.instances[instanceId]
-    if (inst && !isPrimaryInstance(inst) && task) {
+  /** Let go of a removed instance's state; a primary's lives in the task's columns and stays. */
+  const releaseInstance = useStableCallback((inst: PanelInstance) => {
+    const instanceId = inst.id
+    if (!isPrimaryInstance(inst) && task) {
       if (inst.kind === 'browser')
         void commitBrowserTabs(removeBrowserInstanceTabs(browserTabsRef.current, instanceId))
       if (inst.kind === 'agent' || inst.kind === 'terminal') {
@@ -1388,7 +1398,142 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       for (const handles of [browserHandles, editorHandles, gitHandles, artifactsHandles])
         handles.forget(instanceId)
     }
+  })
+
+  /**
+   * Close a panel tab: a primary instance only hides (legacy clients, shortcuts and
+   * ownership address it by its id). Any other instance is removed with its state:
+   * its `panel_instance_state` entry, a browser's tabs, an agent/terminal panel's
+   * terminal tabs (their sessions end — the close request asked first).
+   */
+  const closePanelInstance = useStableCallback((instanceId: string) => {
+    const inst = taskLayout.layout.instances[instanceId]
+    if (inst) releaseInstance(inst)
     closePanelTab(instanceId)
+  })
+
+  // ── Layout definitions (docs/plans/panel-model.md step 10) ──────────────────────
+  const layoutDefs = resolveClientLayouts(taskLayouts.setting, panelConfig)
+  const currentLayoutDef = layoutDefs.find((d) => d.id === taskLayout.layout.layoutId) ?? null
+  const layoutDirty = isLayoutDirty(taskLayout.layout, currentLayoutDef)
+  const [saveLayoutAsOpen, setSaveLayoutAsOpen] = useState(false)
+
+  /**
+   * Whether an instance holds live state a layout switch must not throw away: the
+   * primary agent (the task's main session), agent/terminal panels with terminal
+   * groups, browser panels with a page open, editors with open files.
+   */
+  const instanceHasLiveState = useStableCallback((inst: PanelInstance): boolean => {
+    const primary = isPrimaryInstance(inst)
+    switch (inst.kind) {
+      case 'agent':
+        return primary || terminalGroupIdsOf(inst).length > 0
+      case 'terminal':
+        return terminalGroupIdsOf(inst).length > 0
+      case 'browser':
+        return browserTabsForInstance(browserTabsRef.current, inst.id, primary).tabs.some(
+          (t) => t.url !== '' && t.url !== 'about:blank'
+        )
+      case 'editor': {
+        const saved = primary
+          ? task?.editor_open_files
+          : (instanceState.get(inst.id).editorOpenFiles as EditorOpenFilesState | undefined)
+        return (saved?.files.length ?? 0) > 0
+      }
+      default:
+        return false
+    }
+  })
+
+  /**
+   * Switch the task to layout `layoutId`. Nothing live is lost: instances move to
+   * their match in the definition, unmatched ones with live state are parked (⋯ →
+   * Parked), the rest are released. A new agent/terminal panel gets its first
+   * terminal, like one added from the ⋯ menu.
+   */
+  const applyLayout = useStableCallback((layoutId: string) => {
+    if (!task || !taskLayout.supportsInstances) return
+    const def = layoutDefs.find((d) => d.id === layoutId)
+    if (!def) return
+    const result = taskLayout.applyDefinition(def, instanceHasLiveState)
+    for (const inst of result.dropped) releaseInstance(inst)
+    for (const id of result.added) {
+      const inst = result.layout.instances[id]
+      if (!inst || (inst.kind !== 'agent' && inst.kind !== 'terminal')) continue
+      if (terminalGroupIdsOf(inst).length > 0) continue
+      terminalGroups
+        .createGroup(task.id, inst.kind === 'agent' ? task.agent_id : 'terminal')
+        .then((tab) => updateInstanceSettings(id, { terminalGroupIds: [tab.groupId] }))
+        .catch((error: unknown) =>
+          console.warn('[task] starting a terminal for a layout panel failed:', error)
+        )
+    }
+  })
+
+  const saveLayoutOver = useStableCallback(() => {
+    const def = currentLayoutDef
+    if (!def) return
+    void taskLayouts
+      .update((s) => saveLayoutTree(s, def.id, taskLayout.layout))
+      .then(() => toast.success(`Saved “${def.name}”`))
+      .catch(() => toast.error("Couldn't save the layout"))
+  })
+
+  const saveLayoutAs = useStableCallback((name: string) => {
+    let newId: string | null = null
+    void taskLayouts
+      .update((s) => {
+        const added = addUserLayout(s, layoutDefs, name, taskLayout.layout, {
+          afterId: currentLayoutDef?.id
+        })
+        newId = added.id
+        return added.setting
+      })
+      .then(() => {
+        if (newId) taskLayout.setLayoutId(newId)
+        toast.success(`Saved “${name.trim() || 'Untitled layout'}”`)
+      })
+      .catch(() => toast.error("Couldn't save the layout"))
+  })
+
+  /** ⌃⌥N: switch to the N-th enabled layout. */
+  const switchLayoutAt = useStableCallback((n: number): boolean => {
+    const def = layoutAtShortcut(layoutDefs, n)
+    if (!def) return false
+    applyLayout(def.id)
+    return true
+  })
+  // Capture phase, like terminal-restart: the layout keys work from a focused
+  // terminal too (xterm would otherwise take them).
+  const layoutShortcutsEnabled = shortcutActive && taskLayout.supportsInstances
+  useEffect(() => {
+    if (!layoutShortcutsEnabled) return
+    const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
+      const { isRecording, getKeys } = useShortcutStore.getState()
+      if (isRecording) return
+      for (let n = 1; n <= LAYOUT_SHORTCUT_COUNT; n++) {
+        if (!matchesShortcut(e, getKeys(`switch-layout-${n}`))) continue
+        e.preventDefault()
+        e.stopPropagation()
+        switchLayoutAt(n)
+        return
+      }
+    })
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [layoutShortcutsEnabled, switchLayoutAt])
+
+  const parkedPanels: ParkedPanel[] = parkedInstances(taskLayout.layout).flatMap((inst) => {
+    if (!isRenderableKind(inst.kind)) return []
+    const meta = panelTabMeta(inst, enabledWebPanels)
+    return [
+      {
+        instanceId: inst.id,
+        label: meta.label,
+        icon: meta.icon,
+        iconClassName: PANEL_KINDS[inst.kind].iconClassName
+      }
+    ]
   })
 
   // Closing a panel tab (×, ⌘W, the tab menu) asks its kind first: an agent or
@@ -2149,8 +2294,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         shortcutOf={groupShortcut}
         onReorder={(orderedSlotIds, move) => {
           // Classic follows panel_config: its group ids are the legacy panel ids, and
-          // the order is the global one Settings → Panels edits too.
-          if (isClassicShaped(taskLayout.layout)) {
+          // the order is the global one Settings → Panels edits too (until the user
+          // customizes the Classic layout itself).
+          if (isClassicShaped(taskLayout.layout) && !classicCustomized) {
             handlePanelReorder(orderedSlotIds)
             return
           }
@@ -2189,19 +2335,32 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               ? panelShortcuts.ofInstance({ id: c.key, kind: 'web', settings: c.settings ?? {} })
               : panelShortcuts.ofKind(c.kind)
           }
+          parked={parkedPanels}
+          onUnpark={taskLayout.unpark}
           align={headerAlign}
         />
       )}
       {taskLayout.supportsInstances && (
         <LayoutMenu
-          layout={taskLayout.layout}
-          capabilities={{
-            kinds: Object.keys(PANEL_KINDS) as LayoutPanelKind[],
-            multiInstance: taskLayout.supportsInstances
+          layouts={layoutDefs}
+          current={currentLayoutDef}
+          dirty={layoutDirty}
+          onSelectLayout={applyLayout}
+          onRevert={() => {
+            if (currentLayoutDef) applyLayout(currentLayoutDef.id)
           }}
+          onSave={saveLayoutOver}
+          onSaveAs={() => setSaveLayoutAsOpen(true)}
+          onManage={layoutDialogs.openManage}
           align={headerAlign}
         />
       )}
+      <SaveLayoutAsDialog
+        open={saveLayoutAsOpen}
+        defaultName={currentLayoutDef ? `${currentLayoutDef.name} variant` : 'My layout'}
+        onOpenChange={setSaveLayoutAsOpen}
+        onSave={saveLayoutAs}
+      />
     </div>
   )
 

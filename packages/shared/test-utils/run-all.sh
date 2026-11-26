@@ -1416,6 +1416,8 @@ run_harness packages/domains/task-contracts/src/layout/legacy.test.ts
 run_harness packages/domains/task-contracts/src/layout/settings.test.ts
 run_harness packages/domains/task-contracts/src/layout/classic.test.ts
 run_harness packages/domains/task-contracts/src/layout/instances.test.ts
+# Layout definitions: switching (match by kind, park live leftovers), dirty detection, task_layouts.
+run_harness packages/domains/task-contracts/src/layout/definitions.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
 run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts
@@ -1836,6 +1838,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/layout/header/NewPanelMenu.test.ts \
   packages/domains/task/src/client/layout/header/groups.test.ts \
   packages/domains/task/src/client/layout/header/GroupToggles.test.tsx \
+  packages/domains/task/src/client/layout/header/LayoutMenu.test.tsx \
   packages/domains/task/src/client/panels/instanceHandles.test.ts \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \

@@ -7,6 +7,7 @@ import { arrayMove } from '@dnd-kit/sortable'
 import type { CreateTaskInput, Task } from '@slayzone/task-contracts'
 import { useTrack } from '@slayzone/telemetry/client'
 import { settleDeleteTaskResult } from './deleteTaskResult'
+import { withDefaultPanelLayout } from './layouts/newTaskLayout'
 
 export interface UseSubTasksReturn {
   subTasks: Task[]
@@ -50,7 +51,8 @@ export function useSubTasks(
   const parentHubId = useHubIdForTask(parentId)
   const createClient = useClientForTask(parentId)
   const { mutateAsync: createTask } = useMutation({
-    mutationFn: (input: CreateTaskInput) => createClient.task.create.mutate(input)
+    mutationFn: async (input: CreateTaskInput) =>
+      createClient.task.create.mutate(await withDefaultPanelLayout(input))
   })
   const { mutateAsync: updateTask } = useMutation(trpc.task.update.mutationOptions())
   const { mutateAsync: deleteTask } = useMutation(trpc.task.delete.mutationOptions())

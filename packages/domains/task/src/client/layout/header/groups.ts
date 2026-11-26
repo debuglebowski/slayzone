@@ -68,7 +68,8 @@ function groupOf(
     .map((tab) => ({ tab, instance: layout.instances[tab.instanceId] }))
     .filter((t): t is { tab: typeof t.tab; instance: PanelInstance } => !!t.instance)
   if (opts.excludesGroup && tabs.some((t) => opts.excludesGroup?.(t.instance))) return null
-  const listed = tabs.filter((t) => opts.isTabListed(t.instance))
+  // A parked tab waits in the New panel menu, not behind a toggle.
+  const listed = tabs.filter((t) => !t.tab.parked && opts.isTabListed(t.instance))
   if (listed.length === 0) return null
   const shown = listed.filter((t) => !t.tab.hidden)
   const named = shown.length > 0 ? shown : listed

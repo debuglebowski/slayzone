@@ -130,12 +130,22 @@ const panelConfigStore = (() => {
       }
     },
     get: (): PanelConfig => config,
+    /** The stored config (reads it when nobody has yet). */
+    async load(): Promise<PanelConfig> {
+      if (raw === undefined) await reload()
+      return config
+    },
     /** Optimistic local write (the caller persists it). */
     set(next: PanelConfig): void {
       publish(JSON.stringify(next), next)
     }
   }
 })()
+
+/** The window's panel config, read if no one has yet (task creation resolves layouts from it). */
+export function loadPanelConfig(): Promise<PanelConfig> {
+  return panelConfigStore.load()
+}
 
 export function usePanelConfig(): {
   config: PanelConfig

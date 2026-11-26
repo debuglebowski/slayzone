@@ -5,7 +5,10 @@
  *   legacy columns the page mounted with (`deriveLayoutFromLegacy`). A secondary
  *   window always derives from its own (lifted) visibility.
  * - Classic follows `panel_config` while it is Classic-shaped
- *   (`reconcileClassicLayout`), so the rendered layout is a view of the stored one.
+ *   (`reconcileClassicLayout`), so the rendered layout is a view of the stored one —
+ *   until the user edits the Classic definition (`followPanelConfig` false).
+ * - Layout definitions (step 10) apply through `applyDefinition`: instances are
+ *   matched by kind and keep their ids; leftovers with live state are parked.
  * - Writes go through a debounced `updateTask({panelLayout})` from the primary
  *   window only; the hub dual-writes panel_visibility / panel_sizes. A hub without
  *   the column (`task.panel_layout === undefined`) gets the legacy fields instead.
@@ -18,7 +21,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStableCallback } from '@slayzone/ui'
 import type {
   InstancePlacement,
+  LayoutDefinition,
   PanelConfig,
+  PanelInstance,
   PanelKind,
   PanelSizes,
   PanelVisibility,
@@ -45,7 +50,10 @@ import {
   setActiveTab,
   setSlotHidden,
   splitAt,
-  updateInstanceSettings as updateInstanceSettingsOp
+  switchLayout,
+  unparkInstance,
+  updateInstanceSettings as updateInstanceSettingsOp,
+  type SwitchLayoutResult
 } from '@slayzone/task-contracts'
 import { applyDrop, type DragItem, type DropTarget } from './layoutDnd'
 
@@ -64,6 +72,11 @@ export interface UseTaskLayoutOptions {
   onTaskUpdated: (task: Task) => void
   /** Called with the projected visibility whenever it changes (a secondary window lifts it). */
   onPanelVisibilityChange?: (visibility: PanelVisibility) => void
+  /**
+   * A Classic-shaped layout is rebuilt from `panel_config` (default true). False once
+   * the user edited the Classic definition: it then is a layout like any other.
+   */
+  followPanelConfig?: boolean
 }
 
 export interface TaskLayoutApi {
@@ -124,6 +137,19 @@ export interface TaskLayoutApi {
   supportsInstances: boolean
   /** Merge into an instance's settings (undefined deletes a key). Persists. */
   updateInstanceSettings: (instanceId: string, patch: Record<string, unknown>) => void
+  /**
+   * Switch to layout definition `def` (`switchLayout`): matched instances keep their
+   * ids, unmatched ones with live state are parked, the rest dropped (the caller
+   * releases their state). Persists. Returns what happened.
+   */
+  applyDefinition: (
+    def: LayoutDefinition,
+    hasLiveState: (inst: PanelInstance) => boolean
+  ) => SwitchLayoutResult
+  /** Bring a parked instance back as a new column and show it. Persists. */
+  unpark: (instanceId: string) => void
+  /** Record that the layout now IS definition `layoutId` (it was just saved as it). Persists. */
+  setLayoutId: (layoutId: string) => void
 }
 
 interface LayoutState {
@@ -162,8 +188,11 @@ export function useTaskLayout({
   isSecondaryWindow,
   updateTask,
   onTaskUpdated,
-  onPanelVisibilityChange
+  onPanelVisibilityChange,
+  followPanelConfig = true
 }: UseTaskLayoutOptions): TaskLayoutApi {
+  const reconcile = (stored: TaskLayout): TaskLayout =>
+    followPanelConfig ? reconcileClassicLayout(stored, panelConfig) : stored
   const [state, setState] = useState<LayoutState>(() => ({
     stored:
       (!isSecondaryWindow ? task?.panel_layout : null) ??
@@ -176,8 +205,8 @@ export function useTaskLayout({
   }))
 
   const layout = useMemo(
-    () => reconcileClassicLayout(state.stored, panelConfig),
-    [state.stored, panelConfig]
+    () => (followPanelConfig ? reconcileClassicLayout(state.stored, panelConfig) : state.stored),
+    [state.stored, panelConfig, followPanelConfig]
   )
 
   // Keyed by content so a resize frame (new layout, same visibility) keeps the object.
@@ -245,7 +274,7 @@ export function useTaskLayout({
   const edit = useStableCallback(
     (fn: (current: TaskLayout) => TaskLayout | null, persist: boolean) => {
       setState((prev) => {
-        const current = reconcileClassicLayout(prev.stored, panelConfig)
+        const current = reconcile(prev.stored)
         const next = fn(current)
         if (!next) return prev
         return {
@@ -264,7 +293,7 @@ export function useTaskLayout({
 
   const setPanelVisible = useStableCallback((panelId: string, visible: boolean) => {
     setState((prev) => {
-      const current = reconcileClassicLayout(prev.stored, panelConfig)
+      const current = reconcile(prev.stored)
       const next = withPanelVisible(current, panelId, visible)
       return {
         stored: next ?? prev.stored,
@@ -297,7 +326,7 @@ export function useTaskLayout({
 
   const replaceVisibilityLocally = useStableCallback((visibility: Record<string, boolean>) => {
     setState((prev) => {
-      const current = reconcileClassicLayout(prev.stored, panelConfig)
+      const current = reconcile(prev.stored)
       // Every panel the layout holds that `visibility` omits is hidden, like the
       // legacy wholesale replace.
       const full: Record<string, boolean> = {}
@@ -408,6 +437,27 @@ export function useTaskLayout({
     }
   )
 
+  const applyDefinition = useStableCallback(
+    (def: LayoutDefinition, hasLiveState: (inst: PanelInstance) => boolean): SwitchLayoutResult => {
+      // Decided against the layout this render shows, so the caller can act on the
+      // result right away (release dropped instances, start terminals for new ones).
+      const result = switchLayout(layout, def, { hasLiveState })
+      edit(() => result.layout, true)
+      return result
+    }
+  )
+
+  const unpark = useStableCallback((instanceId: string) => {
+    edit(
+      (current) => (findTab(current, instanceId) ? unparkInstance(current, instanceId) : null),
+      true
+    )
+  })
+
+  const setLayoutId = useStableCallback((layoutId: string) => {
+    edit((current) => ({ ...current, layoutId, rev: current.rev + 1 }), true)
+  })
+
   return {
     layout,
     panelVisibility,
@@ -429,6 +479,9 @@ export function useTaskLayout({
     moveColumn,
     addInstance,
     supportsInstances: hubHasLayout && !isSecondaryWindow,
-    updateInstanceSettings
+    updateInstanceSettings,
+    applyDefinition,
+    unpark,
+    setLayoutId
   }
 }

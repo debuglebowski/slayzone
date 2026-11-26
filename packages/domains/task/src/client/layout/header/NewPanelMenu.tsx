@@ -99,20 +99,33 @@ export function newPanelChoiceLike(
     : null
 }
 
-/** ⋯ after the group toggles: opens the New panel menu. */
+/** A panel a layout switch parked (it kept live state the new layout had no place for). */
+export interface ParkedPanel {
+  instanceId: string
+  label: string
+  icon: LucideIcon
+  iconClassName: string
+}
+
+/** ⋯ after the group toggles: opens the New panel menu (and lists parked panels). */
 export function NewPanelMenu({
   choices,
   onAdd,
   shortcutOf,
+  parked = [],
+  onUnpark,
   align = 'end'
 }: {
   choices: readonly NewPanelChoice[]
   onAdd: (choice: NewPanelChoice) => void
   /** The shortcut shown beside a choice (the kind's or the web panel's). */
   shortcutOf: (choice: NewPanelChoice) => string | null
+  /** Panels a layout switch parked: "Parked", each brought back by a click. */
+  parked?: readonly ParkedPanel[]
+  onUnpark?: (instanceId: string) => void
   align?: 'start' | 'end'
 }): React.JSX.Element | null {
-  if (choices.length === 0) return null
+  if (choices.length === 0 && parked.length === 0) return null
   const sections = newPanelSections(choices)
   return (
     <DropdownMenu>
@@ -158,6 +171,23 @@ export function NewPanelMenu({
             })}
           </div>
         ))}
+        {parked.length > 0 && (
+          <div role="group" aria-label="Parked" data-testid="parked-panels">
+            {sections.length > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Parked</DropdownMenuLabel>
+            {parked.map((p) => (
+              <DropdownMenuItem
+                key={p.instanceId}
+                className="gap-2.5"
+                data-testid={`parked-panel-${p.instanceId}`}
+                onSelect={() => onUnpark?.(p.instanceId)}
+              >
+                <p.icon className={cn('size-4', p.iconClassName)} />
+                <span className="flex-1 truncate">{p.label}</span>
+              </DropdownMenuItem>
+            ))}
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

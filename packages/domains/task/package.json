@@ -27,6 +27,8 @@
     "./client/ResizeHandle": "./src/client/ResizeHandle.tsx",
     "./client/usePanelSizes": "./src/client/usePanelSizes.ts",
     "./client/usePanelConfig": "./src/client/usePanelConfig.ts",
+    "./client/layouts": "./src/client/layouts/index.ts",
+    "./client/newTaskLayout": "./src/client/layouts/newTaskLayout.ts",
     "./main-terminal": "./src/shared/main-terminal.ts"
   },
   "scripts": {

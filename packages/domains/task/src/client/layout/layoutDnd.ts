@@ -9,7 +9,7 @@
  * picks the zone: the outer 20% left/right opens a new column, the outer 30%
  * top/bottom a new slot above/below, the middle merges as a tab.
  */
-import type { SplitZone, TaskLayout } from '@slayzone/task-contracts'
+import type { LayoutTree, SplitZone } from '@slayzone/task-contracts'
 import { findSlot, findTab, mergeInto, moveSlot, splitAt } from '@slayzone/task-contracts'
 
 export type DragItem = { type: 'tab'; instanceId: string } | { type: 'group'; slotId: string }
@@ -65,7 +65,7 @@ export function targetKey(target: DropTarget | null): string {
 }
 
 /** The group a drag item comes from. */
-export function sourceSlotId(layout: TaskLayout, item: DragItem): string | null {
+export function sourceSlotId(layout: LayoutTree, item: DragItem): string | null {
   if (item.type === 'group') return findSlot(layout, item.slotId) ? item.slotId : null
   const loc = findTab(layout, item.instanceId)
   return loc ? layout.columns[loc.columnIndex].slots[loc.slotIndex].id : null
@@ -76,11 +76,11 @@ export function sourceSlotId(layout: TaskLayout, item: DragItem): string | null 
  * nothing (onto its own place, a lone tab onto its own group's edge, a group
  * onto itself) — the drag then ends without a write.
  */
-export function applyDrop(
-  layout: TaskLayout,
+export function applyDrop<T extends LayoutTree>(
+  layout: T,
   item: DragItem,
   target: DropTarget
-): TaskLayout | null {
+): T | null {
   const from = sourceSlotId(layout, item)
   const to = findSlot(layout, target.slotId)
   if (!from || !to) return null
@@ -122,7 +122,7 @@ export type DropPreview =
 
 /** What to highlight for a pending drop; null when the drop would change nothing. */
 export function dropPreview(
-  layout: TaskLayout,
+  layout: LayoutTree,
   item: DragItem,
   target: DropTarget | null
 ): DropPreview | null {

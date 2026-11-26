@@ -260,6 +260,14 @@ vi.mock('./usePanelConfig', () => ({
   })
 }))
 
+// The task_layouts store reads the settings client; the page only needs its value.
+vi.mock('./layouts/useTaskLayouts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./layouts/useTaskLayouts')>()
+  const { defaultTaskLayoutsSetting } = await import('@slayzone/task-contracts')
+  const value = { setting: defaultTaskLayoutsSetting(), loaded: true, update: vi.fn() }
+  return { ...real, useTaskLayouts: () => value }
+})
+
 // useDevServerDetection reads the pty buffer as a string (`buf.match(...)`). The
 // transport proxy resolves every call to [] (universal-safe for list consumers),
 // which is truthy and trips its `.match` — irrelevant to this render test, so stub

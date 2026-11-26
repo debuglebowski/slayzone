@@ -106,7 +106,7 @@ Each step passes typecheck, lint and e2e. New e2e specs are numbered from 235.
 7. **Multiple instances of every kind.** Uses ownership by instance, `panel_instance_state`, `browser_tabs.byPanel` and a terminal group filter. Handlers resolve the focused instance, falling back to the primary.
 8. **Tab strip and drag and drop.** Adds ×, ⌘W and right-click (Rename / Hide / Close). Closing an agent with a live session asks for confirmation.
 9. **Title row.** Group toggles, the ⋯ "New panel" menu and the Layout button. Both header modes stay, and `panel-*` shortcuts toggle the group that holds each kind.
-10. **Layout definitions.** Switch, save, save as and revert. Switching never destroys live state: leftover instances are parked as hidden tabs.
+10. **Layout definitions.** Switch, save, save as and revert. Switching never destroys live state: leftover instances are parked as hidden tabs (`LayoutTab.parked`, listed under ⋯ → Parked). New tasks start from the template's layout, else the user's default layout (sent by the creating client as `defaultPanelLayout`; Classic as shipped sends nothing and stays derived).
 11. **Manage layouts dialog and layout editor.** The editor works by dragging panel types onto the layout.
 12. **New kinds.** Web page, Artifact, and Description/Subtasks/Details split out of Settings. Adds an agent provider per panel.
 13. **The agent can change the layout.** Adds `/api/tasks/:id/layout` and `/panels` REST routes, the `slay panels layout …` CLI and an undo toast. Gated by `agent_may_change_layout`.
@@ -116,7 +116,7 @@ Each step passes typecheck, lint and e2e. New e2e specs are numbered from 235.
 
 1. Should existing terminal sub-tabs become panel tabs, and when? The plan keeps them inside the primary agent panel for now.
 2. Layouts are stored per task and shared by everyone on a hub. Members with view-only access should probably get a local-only layout.
-3. ⌥1–9 for layouts clashes with ⌥-digit input in xterm on macOS and with the lens shortcuts. Options are registering them only outside the terminal, or using ⌃⌥1–9.
+3. ~~⌥1–9 for layouts clashes with ⌥-digit input in xterm on macOS and with the lens shortcuts.~~ Decided (step 10): ⌃⌥1–9 on every platform, nine customizable `switch-layout-N` shortcuts, the N-th enabled layout in menu order. They work from a focused terminal (capture phase).
 4. Many mounted browser views use a lot of memory. Inactive ones could be capped or hibernated.
 5. Old apps on a new hub can't see extra instances. Release notes must say so.
-6. Once Classic is overridden, reordering in Settings → Panels no longer affects it. Show a notice when that happens.
+6. ~~Once Classic is overridden, reordering in Settings → Panels no longer affects it.~~ Done (step 11): Settings → Panels says "Classic is customized — edit it in Layouts" and links to Manage layouts; a customized Classic no longer follows `panel_config`.

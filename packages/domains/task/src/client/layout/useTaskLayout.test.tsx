@@ -376,7 +376,7 @@ describe('useTaskLayout — panel instances (step 7)', () => {
     expect(result.current.layout.instances.editor?.kind).toBe('editor')
     expect(result.current.panelVisibility.editor).toBe(true)
     await flushSave()
-    expect((updateTask.mock.calls.at(-1)?.[0].panelLayout as TaskLayout).instances[id]).toBeTruthy()
+    expect(updateTask.mock.calls.at(-1)?.[0].panelLayout?.instances[id]).toBeTruthy()
   })
 
   it('updateInstanceSettings merges, and closing a non-primary instance removes it', async () => {
@@ -401,5 +401,72 @@ describe('useTaskLayout — panel instances (step 7)', () => {
     ).toBe(false)
     cleanup()
     expect(setup({ isSecondaryWindow: true }).result.current.supportsInstances).toBe(false)
+  })
+
+  it('applyDefinition switches without losing live instances; unpark brings one back', async () => {
+    const { result } = setup()
+    let term = ''
+    act(() => {
+      term = result.current.addInstance(
+        'terminal',
+        { type: 'column' },
+        { terminalGroupIds: ['g1'] }
+      )
+    })
+    const focus = {
+      id: 'focus',
+      name: 'Focus',
+      builtin: true,
+      enabled: true,
+      columns: [
+        {
+          id: 'terminal',
+          size: { unit: 'fr' as const, value: 1 },
+          slots: [
+            {
+              id: 'terminal',
+              weight: 1,
+              activeInstanceId: 'terminal',
+              tabs: [{ instanceId: 'terminal' }]
+            }
+          ]
+        }
+      ],
+      instances: { terminal: { id: 'terminal', kind: 'agent' as const, settings: {} } }
+    }
+    let parked: string[] = []
+    act(() => {
+      parked = result.current.applyDefinition(focus, (i) => i.id === term).parked
+    })
+    expect(parked).toEqual([term])
+    expect(result.current.layout.layoutId).toBe('focus')
+    expect(visibleColumns(result.current.layout)).toEqual(['terminal'])
+    expect(result.current.layout.instances[term].settings.terminalGroupIds).toEqual(['g1'])
+    expect(result.current.layout.instances.browser).toBeUndefined()
+    await flushSave()
+    expect(updateTask.mock.calls.at(-1)?.[0].panelLayout?.layoutId).toBe('focus')
+
+    act(() => result.current.unpark(term))
+    expect(visibleColumns(result.current.layout)).toHaveLength(2)
+    act(() => result.current.setLayoutId('mine'))
+    expect(result.current.layout.layoutId).toBe('mine')
+  })
+
+  it('a customized Classic stops following panel_config', () => {
+    const custom = setSlotHidden(deriveLayoutFromLegacy({}, config()), 'browser', false)
+    // Reverse the config order: a following Classic re-sorts, a customized one keeps its own.
+    const reversed = config({ order: [...(config().order ?? [])].reverse() })
+    const following = setup({ task: makeTask({ panel_layout: custom }), panelConfig: reversed })
+    const followIds = following.result.current.layout.columns.map((c) => c.id)
+    cleanup()
+    const fixed = setup({
+      task: makeTask({ panel_layout: custom }),
+      panelConfig: reversed,
+      followPanelConfig: false
+    })
+    expect(fixed.result.current.layout.columns.map((c) => c.id)).toEqual(
+      custom.columns.map((c) => c.id)
+    )
+    expect(followIds).not.toEqual(custom.columns.map((c) => c.id))
   })
 })
