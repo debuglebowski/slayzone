@@ -56,10 +56,8 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
     effectiveRepoPath,
     handleTaskUpdate,
     updateTaskAndNotify,
-    panels,
     settings
   } = useTaskPageContext()
-  const { panelVisibility, handlePanelToggle } = panels
   const {
     tags,
     setTags,
@@ -109,7 +107,8 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
     handleCreateSubTask,
     onNavigateToTask,
     artifacts,
-    artifactsPanelRef
+    selectArtifactInPanel,
+    createArtifactInPanel
   } = settings
   const {
     fontFamily: notesFontFamily,
@@ -385,10 +384,7 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
                       title: a.title,
                       type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
                     }))}
-                    onArtifactClick={(artifactId) => {
-                      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                      artifactsPanelRef.current?.selectArtifact(artifactId)
-                    }}
+                    onArtifactClick={selectArtifactInPanel}
                     onUploadImages={handleUploadImages}
                     onOpenLink={handleDescriptionOpenLink}
                   />
@@ -519,10 +515,7 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
                       key={artifact.id}
                       type="button"
                       className="flex items-center gap-2 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 text-left"
-                      onClick={() => {
-                        if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                        artifactsPanelRef.current?.selectArtifact(artifact.id)
-                      }}
+                      onClick={() => selectArtifactInPanel(artifact.id)}
                     >
                       <Paperclip className="size-3 shrink-0" />
                       <span className="truncate">{artifact.title}</span>
@@ -533,10 +526,7 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
                   ))}
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                      artifactsPanelRef.current?.createArtifact()
-                    }}
+                    onClick={createArtifactInPanel}
                     className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
                   >
                     <Plus className="size-3" />

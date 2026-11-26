@@ -17,7 +17,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStableCallback } from '@slayzone/ui'
 import type {
+  InstancePlacement,
   PanelConfig,
+  PanelKind,
   PanelSizes,
   PanelVisibility,
   Task,
@@ -25,6 +27,7 @@ import type {
   UpdateTaskInput
 } from '@slayzone/task-contracts'
 import {
+  addInstance as addInstanceOp,
   applyLegacyWrite,
   closeTab as closeTabOp,
   deriveLayoutFromLegacy,
@@ -38,7 +41,8 @@ import {
   resizeSlots as resizeSlotsOp,
   setActiveTab,
   setSlotHidden,
-  splitAt
+  splitAt,
+  updateInstanceSettings as updateInstanceSettingsOp
 } from '@slayzone/task-contracts'
 import { applyDrop, type DragItem, type DropTarget } from './layoutDnd'
 
@@ -96,6 +100,23 @@ export interface TaskLayoutApi {
   closeTab: (instanceId: string) => void
   /** Name a tab (blank = the kind's label). Persists. */
   renameTab: (instanceId: string, name: string) => void
+  /**
+   * Add a new instance of `kind` at `placement` and show it; returns its id (the
+   * kind's legacy id while no instance holds it, else `<kind>:<uuid8>`). Persists.
+   */
+  addInstance: (
+    kind: PanelKind,
+    placement: InstancePlacement,
+    settings?: Record<string, unknown>
+  ) => string
+  /**
+   * New panel instances can be added and kept: the hub stores `panel_layout` and this
+   * is the primary window (an old hub keeps the legacy columns only, which hold no
+   * extra instances; a secondary window's layout is local).
+   */
+  supportsInstances: boolean
+  /** Merge into an instance's settings (undefined deletes a key). Persists. */
+  updateInstanceSettings: (instanceId: string, patch: Record<string, unknown>) => void
 }
 
 interface LayoutState {
@@ -341,6 +362,34 @@ export function useTaskLayout({
     )
   })
 
+  const addInstance = useStableCallback(
+    (kind: PanelKind, placement: InstancePlacement, settings?: Record<string, unknown>): string => {
+      // The id is decided here, against the layout this render shows, so the caller
+      // can use it right away; the edit below applies the same op to the latest state.
+      const { instanceId } = addInstanceOp(layout, kind, placement, { settings })
+      edit(
+        (current) =>
+          current.instances[instanceId]
+            ? null
+            : addInstanceOp(current, kind, placement, { id: instanceId, settings }).layout,
+        true
+      )
+      return instanceId
+    }
+  )
+
+  const updateInstanceSettings = useStableCallback(
+    (instanceId: string, patch: Record<string, unknown>) => {
+      edit(
+        (current) =>
+          current.instances[instanceId]
+            ? updateInstanceSettingsOp(current, instanceId, patch)
+            : null,
+        true
+      )
+    }
+  )
+
   return {
     layout,
     panelVisibility,
@@ -357,6 +406,9 @@ export function useTaskLayout({
     splitTab,
     hideTab,
     closeTab,
-    renameTab
+    renameTab,
+    addInstance,
+    supportsInstances: hubHasLayout && !isSecondaryWindow,
+    updateInstanceSettings
   }
 }

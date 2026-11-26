@@ -6,6 +6,7 @@ import {
   Globe,
   Paperclip,
   Settings2,
+  SquareTerminal,
   Terminal as TerminalIcon,
   type LucideIcon
 } from 'lucide-react'
@@ -31,6 +32,7 @@ import type {
 
 export type PanelKind =
   | 'agent'
+  | 'terminal'
   | 'browser'
   | 'web'
   | 'editor'
@@ -51,6 +53,8 @@ export type PanelKeepAlive = 'activity' | 'mounted'
 /** What closing a panel tab may need to know about the instance being closed. */
 export interface PanelCloseContext {
   panelId: string
+  /** The kind's first instance (legacy id): closing only hides it. Any other is removed. */
+  primary: boolean
   /** Whether the instance's agent session (its pty) is running right now. */
   isSessionLive: () => Promise<boolean>
 }
@@ -80,15 +84,31 @@ export interface PanelKindDef {
   /** May show in a secondary "Open in new window" frame. The agent never does. */
   secondaryWindow: boolean
   /**
+   * More than one instance may exist ("New <kind> panel"): each keeps its own state
+   * (docs/plans/panel-model.md step 7). Settings stays single: one task, one form.
+   */
+  multiInstance: boolean
+  /**
    * Asked before a tab of this kind closes (× , ⌘W, the tab menu's Close). A
    * confirmation it returns is shown first; null closes right away.
    */
   onCloseRequest?: (ctx: PanelCloseContext) => Promise<PanelCloseConfirm | null>
 }
 
-/** The agent's: confirm while its session runs (closing a tab must not feel like losing it). */
+/**
+ * Agents and terminals: confirm while a session runs (closing a tab must not feel
+ * like losing it). The primary agent's tab only hides, keeping its session; any other
+ * agent/terminal panel is removed and its sessions end with it.
+ */
 async function confirmLiveAgentClose(ctx: PanelCloseContext): Promise<PanelCloseConfirm | null> {
   if (!(await ctx.isSessionLive())) return null
+  if (!ctx.primary)
+    return {
+      title: 'Close the panel?',
+      description:
+        'Its sessions are still running. Closing the panel ends them and closes its terminal tabs.',
+      confirmLabel: 'Close and end sessions'
+    }
   return {
     title: 'Close the agent?',
     description:
@@ -107,6 +127,19 @@ export const PANEL_KINDS = {
     keepAlive: 'mounted',
     suspense: false,
     secondaryWindow: false,
+    multiInstance: true,
+    onCloseRequest: confirmLiveAgentClose
+  },
+  terminal: {
+    kind: 'terminal',
+    primaryPanelId: null,
+    label: 'Terminal',
+    icon: SquareTerminal,
+    shortcutId: null,
+    keepAlive: 'mounted',
+    suspense: false,
+    secondaryWindow: false,
+    multiInstance: true,
     onCloseRequest: confirmLiveAgentClose
   },
   browser: {
@@ -117,7 +150,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-browser',
     keepAlive: 'mounted',
     suspense: true,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: true
   },
   editor: {
     kind: 'editor',
@@ -127,7 +161,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-editor',
     keepAlive: 'activity',
     suspense: true,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: true
   },
   artifacts: {
     kind: 'artifacts',
@@ -137,7 +172,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-artifacts',
     keepAlive: 'activity',
     suspense: true,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: true
   },
   web: {
     kind: 'web',
@@ -147,7 +183,8 @@ export const PANEL_KINDS = {
     shortcutId: null,
     keepAlive: 'mounted',
     suspense: false,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: true
   },
   git: {
     kind: 'git',
@@ -157,7 +194,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-git',
     keepAlive: 'activity',
     suspense: true,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: true
   },
   settings: {
     kind: 'settings',
@@ -167,7 +205,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-settings',
     keepAlive: 'activity',
     suspense: false,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: false
   },
   processes: {
     kind: 'processes',
@@ -177,7 +216,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-processes',
     keepAlive: 'activity',
     suspense: false,
-    secondaryWindow: true
+    secondaryWindow: true,
+    multiInstance: true
   }
 } as const satisfies { [K in PanelKind]: PanelKindDef & { kind: K } } as {
   readonly [K in PanelKind]: PanelKindDef & { kind: K }

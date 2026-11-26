@@ -42,12 +42,26 @@ import { useHeldTaskPath, useTaskPath, useTaskPathLocation } from './useTaskPath
 import {
   BUILTIN_PANEL_IDS,
   DEFAULT_TASK_PANEL_VISIBILITY,
+  PRIMARY_INSTANCE_IDS,
   SECONDARY_WINDOW_PANEL_VISIBILITY,
+  browserInstanceOfTab,
+  browserTabsForInstance,
+  claimedTerminalGroupIds,
   getProviderFlags,
+  instancesOfKind,
+  isInstanceVisible,
+  isPrimaryInstance,
+  legacyKindOf,
+  priorityOptions,
+  removeBrowserInstanceTabs,
+  resolveTargetInstance,
+  setBrowserTabsForInstance,
   setProviderFlags,
-  priorityOptions
+  terminalGroupIdsOf,
+  type BrowserTab,
+  type BrowserTabsState,
+  type PanelKind as LayoutPanelKind
 } from '@slayzone/task-contracts'
-import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects-contracts'
 import {
@@ -115,7 +129,11 @@ import {
   PtyStateDot
 } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal-contracts'
-import { type TerminalContainerHandle, resolveIdRef } from '@slayzone/task-terminals'
+import {
+  type TerminalContainerHandle,
+  resolveIdRef,
+  useTerminalGroupsApi
+} from '@slayzone/task-terminals'
 import {
   buildStatusOptions,
   cn,
@@ -142,6 +160,10 @@ import { isInTabStrip } from './layout/strip'
 import { resolveLayoutStrip } from './layout/strip'
 import { TaskLayoutView } from './layout/TaskLayoutView'
 import { usePanelCloseRequest } from './layout/usePanelCloseRequest'
+import { usePanelInstanceState } from './layout/usePanelInstanceState'
+import { NewPanelMenu, newPanelChoiceForToggle, newPanelChoices } from './layout/NewPanelMenu'
+import { InstanceHandles } from './panels/instanceHandles'
+import type { PanelKind } from './panels/registry'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
@@ -466,6 +488,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     taskBound: taskBoundRepoForView,
     hasWorktree: !!task?.has_worktree
   })
+  // Another git panel's view: its own pick (panel_instance_state), the same rules.
+  const gitViewPathFor = (picked: string | null): string | null =>
+    gitViewPath({
+      picked,
+      repos: viewableRepos,
+      reposSettled: viewableReposSettled,
+      taskBound: taskBoundRepoForView,
+      hasWorktree: !!task?.has_worktree
+    })
   const handleRepoChange = useCallback(
     (repoName: string) => {
       // Ephemeral: pick by name from discovered repos. Does NOT persist to task.repo_name.
@@ -635,19 +666,56 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     splitTab,
     hideTab,
     closeTab: closePanelTab,
-    renameTab
+    renameTab,
+    addInstance,
+    updateInstanceSettings
   } = taskLayout
 
-  // Closing a panel tab (×, ⌘W, the tab menu) asks its kind first: the agent
-  // confirms while its session runs.
-  const { requestClose: requestClosePanelTab, dialog: panelCloseDialog } = usePanelCloseRequest({
-    layout: taskLayout.layout,
-    closeTab: closePanelTab,
-    isSessionLive: async (instanceId) =>
-      !!task && instanceId === 'terminal'
-        ? trpcClient.pty.exists.query({ sessionId: getMainSessionId(task.id) })
-        : false
+  // ── Panel instances (docs/plans/panel-model.md step 7) ──────────────────────────
+  // A kind may have several panels. Kind-wide actions (shortcuts, palette, CLI
+  // events) target the instance of that kind focused last while it is still in the
+  // layout, else the kind's primary (its legacy id).
+  const lastFocusedByKindRef = useRef<Partial<Record<LayoutPanelKind, string>>>({})
+  const focusedInstanceOf = useStableCallback((kind: LayoutPanelKind): string | null =>
+    resolveTargetInstance(taskLayout.layout, kind, lastFocusedByKindRef.current[kind])
+  )
+  /** The target instance of a kind with a primary id (never null). */
+  const targetOf = useStableCallback(
+    (kind: 'agent' | 'browser' | 'editor' | 'artifacts' | 'git'): string =>
+      focusedInstanceOf(kind) ?? (PRIMARY_INSTANCE_IDS[kind] as string)
+  )
+  const kindOfPanel = useStableCallback(
+    (panelId: string): LayoutPanelKind | null => taskLayout.layout.instances[panelId]?.kind ?? null
+  )
+  const isInstanceShown = useStableCallback((instanceId: string): boolean =>
+    isInstanceVisible(taskLayout.layout, instanceId)
+  )
+  // The agent/terminal panel owning terminal shortcuts (⌘T, ⌘D): only one container
+  // may answer them, or every agent panel would open a tab.
+  const [focusedTerminalPanel, setFocusedTerminalPanel] = useState('terminal')
+  const terminalShortcutOwner = taskLayout.layout.instances[focusedTerminalPanel]
+    ? focusedTerminalPanel
+    : 'terminal'
+  const notePanelFocus = useStableCallback((panelId: string) => {
+    const kind = kindOfPanel(panelId)
+    if (!kind) return
+    lastFocusedByKindRef.current[kind] = panelId
+    if (kind === 'agent' || kind === 'terminal') setFocusedTerminalPanel(panelId)
   })
+  // Terminal groups claimed by other agent/terminal panels (the primary hides them),
+  // keyed by content so the primary's filter stays stable across layout edits.
+  const claimedGroupsKey = claimedTerminalGroupIds(taskLayout.layout, 'terminal').join('\n')
+  const claimedGroups = useMemo(
+    () => (claimedGroupsKey === '' ? [] : claimedGroupsKey.split('\n')),
+    [claimedGroupsKey]
+  )
+  const instanceState = usePanelInstanceState(task, updateTaskAsync)
+  const terminalGroups = useTerminalGroupsApi()
+  const [terminalHandles] = useState(() => new InstanceHandles<TerminalContainerHandle>())
+  const [browserHandles] = useState(() => new InstanceHandles<BrowserPanelHandle>())
+  const [editorHandles] = useState(() => new InstanceHandles<FileEditorViewHandle>())
+  const [gitHandles] = useState(() => new InstanceHandles<UnifiedGitPanelHandle>())
+  const [artifactsHandles] = useState(() => new InstanceHandles<ArtifactsPanelHandle>())
 
   // Drag-reorder of the PanelToggle button row. Receives the reordered subset of
   // task-view panel ids (only the buttons actually shown) and merges it back into
@@ -664,8 +732,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Auto-claim panels for this window when visible AND no current owner.
   // First-owner priority: subsequent windows opening same panel render a
   // stub w/ Take over buttons until user explicitly takes over.
+  const claimingTaskId = task?.id
   useEffect(() => {
-    if (!task || ownership.windowId == null) return
+    if (!claimingTaskId || ownership.windowId == null) return
     const claimableIds = [
       'terminal',
       'browser',
@@ -681,7 +750,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     for (const wp of enabledWebPanels) {
       if (panelVisibility[wp.id] && ownership.ownerOf(wp.id) == null) ownership.claim(wp.id)
     }
-  }, [task?.id, ownership.windowId, panelVisibility, enabledWebPanels, ownership]) // eslint-disable-line react-hooks/exhaustive-deps
+    // Every other panel instance, by its own id.
+    for (const inst of Object.values(taskLayout.layout.instances)) {
+      if (isPrimaryInstance(inst) || !isInstanceVisible(taskLayout.layout, inst.id)) continue
+      if (ownership.ownerOf(inst.id) == null) ownership.claim(inst.id)
+    }
+  }, [claimingTaskId, panelVisibility, enabledWebPanels, ownership, taskLayout.layout])
 
   // When a secondary window closes, primary's renderer flips local visibility off for the
   // panels it owned — they must NOT auto-pop back open here. User clicks toggle to reopen.
@@ -820,7 +894,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     subscribeDevServer,
     getMainSessionId
   })
-  const gitPanelRef = useRef<UnifiedGitPanelHandle>(null)
   const [gitDefaultTab, setGitDefaultTab] = useState<GitTabId>(
     () => task?.git_active_tab ?? 'general'
   )
@@ -837,10 +910,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     gitTabSyncedRef.current = true
     if (task?.id) void updateTaskAsync({ id: task.id, gitActiveTab: tab })
   }
-  const fileEditorRef = useRef<FileEditorViewHandle>(null)
-  const terminalContainerRef = useRef<TerminalContainerHandle>(null)
-  const browserPanelRef = useRef<BrowserPanelHandle>(null)
-  const artifactsPanelRef = useRef<ArtifactsPanelHandle>(null)
   // Sharing one file with people (T-100); only on a hub with login.
   const sharing = useSharingStatus()
   const runsAgentsHere = useRunsAgentsHere(task?.id)
@@ -851,27 +920,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // A View member (T-100) sees the task as it is: nothing on the page offers an edit.
   const canEdit = useCanEdit('task', task?.id)
   const [sharingArtifact, setSharingArtifact] = useState<{ id: string; title: string } | null>(null)
-  const pendingArtifactRef = useRef<string | null>(null)
-  const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
-    artifactsPanelRef.current = handle
-    if (handle && pendingArtifactRef.current) {
-      handle.selectArtifact(pendingArtifactRef.current)
-      pendingArtifactRef.current = null
-    }
-  }, [])
-  const pendingEditorFileRef = useRef<string | null>(null)
-  const pendingSearchToggleRef = useRef(false)
-  const fileEditorRefCallback = useCallback((handle: FileEditorViewHandle | null) => {
-    fileEditorRef.current = handle
-    if (handle && pendingEditorFileRef.current) {
-      handle.openFile(pendingEditorFileRef.current)
-      pendingEditorFileRef.current = null
-    }
-    if (handle && pendingSearchToggleRef.current) {
-      handle.toggleSearch()
-      pendingSearchToggleRef.current = false
-    }
-  }, [])
   // One probe, shared by the focus listener and the project-change effect, so
   // the two can never disagree about how the question is asked.
   const probeTaskId = task?.id
@@ -1037,7 +1085,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Screenshot trigger (terminal-screenshot shortcut) from main process
   const handleScreenshotTrigger = useStableCallback(() => {
-    const viewId = browserPanelRef.current?.getActiveViewId()
+    const viewId = browserHandles.get(targetOf('browser'))?.getActiveViewId()
     if (viewId) void handleScreenshot(viewId)
   })
   useSubscription(
@@ -1052,6 +1100,58 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   useEffect(() => {
     browserTabsRef.current = browserTabs
   }, [browserTabs])
+
+  // The task's ONE flat browser tab list, plus which tabs each non-primary browser
+  // panel shows (`byPanel`): every write goes through here.
+  const commitBrowserTabs = useStableCallback(async (next: BrowserTabsState) => {
+    browserTabsRef.current = next
+    setBrowserTabs(next)
+    if (!task) return
+    // Persist to DB (debounced via the tab state itself)
+    await updateTaskAsync({ id: task.id, browserTabs: next })
+  })
+
+  // Browser instance `instanceId`'s panel changed its tabs.
+  const handleBrowserTabsChange = useStableCallback(
+    (instanceId: string, tabs: BrowserTabsState): Promise<void> =>
+      commitBrowserTabs(
+        setBrowserTabsForInstance(
+          browserTabsRef.current,
+          instanceId,
+          instanceId === PRIMARY_INSTANCE_IDS.browser,
+          tabs
+        )
+      )
+  )
+
+  // What each browser panel shows: stable per instance while the stored tabs are.
+  const browserInstanceIds = instancesOfKind(taskLayout.layout, 'browser')
+    .map((i) => i.id)
+    .join('\n')
+  const browserViews = useMemo(() => {
+    const out: Record<string, BrowserTabsState> = {}
+    for (const id of browserInstanceIds.split('\n'))
+      if (id) out[id] = browserTabsForInstance(browserTabs, id, id === PRIMARY_INSTANCE_IDS.browser)
+    return out
+  }, [browserTabs, browserInstanceIds])
+  const browserTabsFor = (instanceId: string): BrowserTabsState =>
+    browserViews[instanceId] ??
+    browserTabsForInstance(browserTabs, instanceId, instanceId === PRIMARY_INSTANCE_IDS.browser)
+
+  /** Add `tab` to browser instance `instanceId` (selected unless `background`). */
+  const addBrowserTab = useStableCallback(
+    (
+      instanceId: string,
+      tab: BrowserTab,
+      opts: { background?: boolean; replace?: boolean } = {}
+    ) => {
+      const primary = instanceId === PRIMARY_INSTANCE_IDS.browser
+      const view = browserTabsForInstance(browserTabsRef.current, instanceId, primary)
+      const tabs = opts.replace ? [tab] : [...view.tabs, tab]
+      const activeTabId = opts.background && view.tabs.length > 0 ? view.activeTabId : tab.id
+      void handleBrowserTabsChange(instanceId, { tabs, activeTabId })
+    }
+  )
 
   // Track last-focused sub-panel via focusin (macOS native menu accelerators clear activeElement by callback time).
   // Listened on this page's root, not the window: every open tab mounts a page, and a
@@ -1070,14 +1170,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // and which sub-item closer applies to it (specific selectors).
       const panelTarget =
         panelId ?? target?.closest('[data-panel-tab]')?.getAttribute('data-panel-tab')
-      if (panelTarget) lastFocusedPanelIdRef.current = panelTarget
+      if (panelTarget) {
+        lastFocusedPanelIdRef.current = panelTarget
+        notePanelFocus(panelTarget)
+      }
+      const kind = panelTarget ? kindOfPanel(panelTarget) : null
       if (target?.classList.contains('xterm-helper-textarea') || target?.closest('.xterm')) {
         lastFocusedPanelRef.current = 'terminal'
-      } else if (target?.closest('[data-panel-id="editor"]')) {
+      } else if (panelId && kind === 'editor') {
         lastFocusedPanelRef.current = 'editor'
       } else if (target?.closest('[data-browser-panel]')) {
         lastFocusedPanelRef.current = 'browser'
-      } else if (panelTarget && !['terminal', 'editor', 'browser'].includes(panelTarget)) {
+      } else if (
+        panelTarget &&
+        !(kind === 'agent' || kind === 'terminal' || kind === 'editor' || kind === 'browser')
+      ) {
         // Another panel (or its tab in a strip): a sub-item of the panel focused
         // before is no longer what Cmd+W closes.
         lastFocusedPanelRef.current = null
@@ -1094,7 +1201,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       taskRootEl.removeEventListener('focusin', handleFocusIn)
       taskRootEl.removeEventListener('focusout', handleFocusOut)
     }
-  }, [taskRootEl])
+  }, [taskRootEl, notePanelFocus, kindOfPanel])
 
   // Cmd+R browser reload is handled globally in App.tsx
 
@@ -1197,40 +1304,163 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         if (ownership.isOwnedByMe(panelId)) ownership.release(panelId)
       }
       // Auto-focus panel content so scope tracker detects the right scope
-      if (panelId === 'browser' && active) {
+      if (active && kindOfPanel(panelId) === 'browser') {
         requestAnimationFrame(() => {
+          const handle = browserHandles.get(panelId)
           // Create a fresh tab when reopening with no tabs (honors browserDefaultUrl)
-          if (browserTabsRef.current.tabs.length === 0) {
-            browserPanelRef.current?.newTab()
-          }
-          browserPanelRef.current?.focus()
+          const view = browserTabsForInstance(
+            browserTabsRef.current,
+            panelId,
+            panelId === PRIMARY_INSTANCE_IDS.browser
+          )
+          if (view.tabs.length === 0) handle?.newTab()
+          handle?.focus()
         })
       }
     },
-    [task, setPanelVisible, ownership, track]
+    [task, setPanelVisible, ownership, track, kindOfPanel, browserHandles]
   )
+
+  /** Toggle the target instance of a kind (shortcuts, palette); a legacy id with no kind (`tests`, a web panel) toggles itself. */
+  const togglePanelKind = useStableCallback((legacyId: string) => {
+    const kind = legacyKindOf(legacyId)
+    if (!kind || kind === 'web') {
+      handlePanelToggle(legacyId, !panelVisibility[legacyId])
+      return
+    }
+    const target = focusedInstanceOf(kind) ?? legacyId
+    handlePanelToggle(target, !isInstanceShown(target))
+  })
+
+  /** Show an artifact in the target artifacts panel, opening it (the panel selects it once mounted). */
+  const selectArtifactInPanel = useStableCallback((artifactId: string) => {
+    const id = targetOf('artifacts')
+    if (!isInstanceShown(id)) handlePanelToggle(id, true)
+    artifactsHandles.whenReady(id, (handle) => handle.selectArtifact(artifactId))
+  })
+  /** Start a new artifact in the target artifacts panel, opening it. */
+  const createArtifactInPanel = useStableCallback(() => {
+    const id = targetOf('artifacts')
+    if (!isInstanceShown(id)) handlePanelToggle(id, true)
+    artifactsHandles.whenReady(id, (handle) => handle.createArtifact())
+  })
+
+  // ── New and closed panel instances ──────────────────────────────────────────────
+  /**
+   * Add a new instance of `kind`: a tab in `nextTo`'s group, else a new column. An
+   * agent/terminal panel gets its first terminal group (a terminal_tabs row, the
+   * same path as the + in a terminal tab bar); a browser panel its first tab.
+   */
+  const addPanel = useStableCallback(
+    (kind: PanelKind, nextTo?: string, settings?: Record<string, unknown>) => {
+      if (!task || !taskLayout.supportsInstances) return
+      const slotId = nextTo ? taskLayout.slotOf(nextTo) : null
+      const placement = slotId ? { type: 'tab' as const, slotId } : { type: 'column' as const }
+      const show = (id: string): void => {
+        ownership.claim(id)
+        lastFocusedByKindRef.current[kind] = id
+      }
+      if (kind === 'agent' || kind === 'terminal') {
+        const mode = kind === 'agent' ? task.agent_id : 'terminal'
+        terminalGroups
+          .createGroup(task.id, mode)
+          .then((tab) => {
+            const id = addInstance(kind, placement, {
+              ...settings,
+              terminalGroupIds: [tab.groupId]
+            })
+            show(id)
+            setFocusedTerminalPanel(id)
+          })
+          .catch((error: unknown) => {
+            console.warn('[task] creating a terminal for the new panel failed:', error)
+            toast.error("Couldn't start a terminal for the new panel")
+          })
+        return
+      }
+      const id = addInstance(kind, placement, settings)
+      show(id)
+      if (kind === 'browser') browserHandles.whenReady(id, (h) => h.newTab())
+    }
+  )
+
+  /**
+   * Close a panel tab: a primary instance only hides (legacy clients, shortcuts and
+   * ownership address it by its id). Any other instance is removed with its state:
+   * its `panel_instance_state` entry, a browser's tabs, an agent/terminal panel's
+   * terminal tabs (their sessions end — the close request asked first).
+   */
+  const closePanelInstance = useStableCallback((instanceId: string) => {
+    const inst = taskLayout.layout.instances[instanceId]
+    if (inst && !isPrimaryInstance(inst) && task) {
+      if (inst.kind === 'browser')
+        void commitBrowserTabs(removeBrowserInstanceTabs(browserTabsRef.current, instanceId))
+      if (inst.kind === 'agent' || inst.kind === 'terminal') {
+        terminalGroups
+          .closeGroups(task.id, terminalGroupIdsOf(inst))
+          .catch((error: unknown) =>
+            console.warn("[task] closing a panel's terminals failed:", error)
+          )
+        terminalHandles.forget(instanceId)
+      }
+      instanceState.drop(instanceId)
+      if (ownership.isOwnedByMe(instanceId)) ownership.release(instanceId)
+      for (const handles of [browserHandles, editorHandles, gitHandles, artifactsHandles])
+        handles.forget(instanceId)
+    }
+    closePanelTab(instanceId)
+  })
+
+  // Closing a panel tab (×, ⌘W, the tab menu) asks its kind first: an agent or
+  // terminal panel confirms while a session of its runs.
+  const { requestClose: requestClosePanelTab, dialog: panelCloseDialog } = usePanelCloseRequest({
+    layout: taskLayout.layout,
+    closeTab: closePanelInstance,
+    isSessionLive: async (instanceId) => {
+      if (!task) return false
+      if (instanceId === PRIMARY_INSTANCE_IDS.agent)
+        return trpcClient.pty.exists.query({ sessionId: getMainSessionId(task.id) })
+      return terminalGroups.anyLive(
+        task.id,
+        terminalGroupIdsOf(taskLayout.layout.instances[instanceId])
+      )
+    }
+  })
 
   // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
   // or fall through to close the task tab if nothing to close
   const handleCloseCurrentFocus = useStableCallback(async () => {
     const panel = lastFocusedPanelRef.current
+    // The instance the sub-item belongs to: the panel focused last, if of that kind.
+    const focusedId = lastFocusedPanelIdRef.current
+    const focusedKind = focusedId ? kindOfPanel(focusedId) : null
+    const instanceOf = (...kinds: LayoutPanelKind[]): string | null =>
+      focusedId && focusedKind && kinds.includes(focusedKind) ? focusedId : null
     if (panel === 'terminal') {
-      const closed = (await terminalContainerRef.current?.closeActiveGroup()) ?? true
+      const id = instanceOf('agent', 'terminal') ?? 'terminal'
+      const closed = (await terminalHandles.get(id)?.closeActiveGroup()) ?? true
       if (closed) return
     } else if (panel === 'editor') {
-      const closed = fileEditorRef.current?.closeActiveFile()
+      const closed = editorHandles
+        .get(instanceOf('editor') ?? targetOf('editor'))
+        ?.closeActiveFile()
       if (closed) return
     } else if (panel === 'browser') {
-      const bt = browserTabsRef.current
+      const id = instanceOf('browser') ?? targetOf('browser')
+      const bt = browserTabsForInstance(
+        browserTabsRef.current,
+        id,
+        id === PRIMARY_INSTANCE_IDS.browser
+      )
       if (bt.tabs.length > 1) {
         const idx = bt.tabs.findIndex((t) => t.id === bt.activeTabId)
         const newTabs = bt.tabs.filter((t) => t.id !== bt.activeTabId)
         const newActiveId = newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null
-        setBrowserTabs({ tabs: newTabs, activeTabId: newActiveId })
+        void handleBrowserTabsChange(id, { tabs: newTabs, activeTabId: newActiveId })
         return
       } else if (bt.tabs.length === 1) {
-        setBrowserTabs({ tabs: [], activeTabId: null })
-        handlePanelToggle('browser', false)
+        void handleBrowserTabsChange(id, { tabs: [], activeTabId: null })
+        handlePanelToggle(id, false)
         return
       }
     }
@@ -1253,9 +1483,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleOpenArtifact = useStableCallback(
     ({ taskId: targetTaskId, artifactId }: { taskId: string; artifactId: string }) => {
       if (!task || targetTaskId !== task.id) return
-      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-      if (artifactsPanelRef.current) artifactsPanelRef.current.selectArtifact(artifactId)
-      else pendingArtifactRef.current = artifactId
+      selectArtifactInPanel(artifactId)
     }
   )
   // Chat links name an artifact by full id or a short prefix (`artifact:416b87b4`).
@@ -1274,17 +1502,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     trpc.menu.onOpenArtifact.subscriptionOptions(undefined, { onData: handleOpenArtifact })
   )
 
-  const handleQuickOpenFile = useCallback(
-    (filePath: string, options?: OpenFileOptions) => {
-      if (fileEditorRef.current) {
-        fileEditorRef.current.openFile(filePath, options)
-      } else {
-        pendingEditorFileRef.current = filePath
-        handlePanelToggle('editor', true)
-      }
-    },
-    [handlePanelToggle]
-  )
+  // Opens in the target editor (the one focused last, else the primary), showing it.
+  const handleQuickOpenFile = useStableCallback((filePath: string, options?: OpenFileOptions) => {
+    const id = targetOf('editor')
+    const handle = editorHandles.get(id)
+    if (handle && isInstanceShown(id)) {
+      handle.openFile(filePath, options)
+      return
+    }
+    editorHandles.whenReady(id, (h) => h.openFile(filePath, options))
+    handlePanelToggle(id, true)
+  })
 
   // Snapshot of the task's file-open context for the unified palette.
   // Captured into the dialog payload at the moment the shortcut fires; cleared on close.
@@ -1300,14 +1528,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Git panel shortcuts (Cmd+G general, Cmd+Shift+G changes): open on `tab`, switch
   // to it, or close when already showing it. Shared by the shortcuts and Cmd+K.
   const toggleGitTab = useStableCallback((tab: GitTabId) => {
-    if (!panelVisibility.diff) {
+    const id = targetOf('git')
+    const handle = gitHandles.get(id)
+    if (!isInstanceShown(id)) {
       // The panel mounts on `tab`, so it is also the tab to save (and reopen on).
-      handleGitTabChange(tab)
-      handlePanelToggle('diff', true)
-    } else if (gitPanelRef.current?.getActiveTab() === tab) {
-      handlePanelToggle('diff', false)
+      if (id === PRIMARY_INSTANCE_IDS.git) handleGitTabChange(tab)
+      else instanceState.patch(id, { gitTab: tab })
+      handlePanelToggle(id, true)
+      // Shown again while still mounted (a tab of a strip): switch it now.
+      if (handle && handle.getActiveTab() !== tab) handle.switchToTab(tab)
+    } else if (handle?.getActiveTab() === tab) {
+      handlePanelToggle(id, false)
     } else {
-      gitPanelRef.current?.switchToTab(tab)
+      handle?.switchToTab(tab)
     }
   })
 
@@ -1322,31 +1555,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
       if (matchesShortcut(e, keys('editor-search')) && isBuiltinEnabled('editor', 'task')) {
         e.preventDefault()
-        if (fileEditorRef.current) {
-          if (!panelVisibility.editor) handlePanelToggle('editor', true)
-          fileEditorRef.current.toggleSearch()
-        } else {
-          pendingSearchToggleRef.current = true
-          handlePanelToggle('editor', true)
-        }
+        const id = targetOf('editor')
+        if (!isInstanceShown(id)) handlePanelToggle(id, true)
+        editorHandles.whenReady(id, (h) => h.toggleSearch())
         return
       }
-      if (
-        matchesShortcut(e, keys('browser-element-picker')) &&
-        isBuiltinEnabled('browser', 'task') &&
-        panelVisibility.browser
-      ) {
+      const browserId = targetOf('browser')
+      const browserShown = isBuiltinEnabled('browser', 'task') && isInstanceShown(browserId)
+      if (matchesShortcut(e, keys('browser-element-picker')) && browserShown) {
         e.preventDefault()
-        browserPanelRef.current?.pickElement()
+        browserHandles.get(browserId)?.pickElement()
         return
       }
-      if (
-        matchesShortcut(e, keys('browser-focus-url')) &&
-        isBuiltinEnabled('browser', 'task') &&
-        panelVisibility.browser
-      ) {
+      if (matchesShortcut(e, keys('browser-focus-url')) && browserShown) {
         e.preventDefault()
-        browserPanelRef.current?.focusUrlBar()
+        browserHandles.get(browserId)?.focusUrlBar()
         return
       }
       if (matchesShortcut(e, keys('panel-git-diff')) && isBuiltinEnabled('diff', 'task')) {
@@ -1365,7 +1588,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // Cmd+E: toggle editor panel — works even inside CodeMirror
       if (matchesShortcut(e, keys('panel-editor')) && isBuiltinEnabled('editor', 'task')) {
         e.preventDefault()
-        handlePanelToggle('editor', !panelVisibility.editor)
+        togglePanelKind('editor')
         return
       }
 
@@ -1376,24 +1599,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         return
       }
       // Cmd+T: new browser tab when browser panel is open
-      if (
-        matchesShortcut(e, keys('browser-new-tab')) &&
-        panelVisibility.browser &&
-        isBuiltinEnabled('browser', 'task')
-      ) {
+      if (matchesShortcut(e, keys('browser-new-tab')) && browserShown) {
         e.preventDefault()
-        browserPanelRef.current?.newTab()
-        requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
+        const handle = browserHandles.get(browserId)
+        handle?.newTab()
+        requestAnimationFrame(() => handle?.focusUrlBar())
         return
       }
       if (matchesShortcut(e, keys('panel-terminal')) && isBuiltinEnabled('terminal', 'task')) {
         e.preventDefault()
-        handlePanelToggle('terminal', !panelVisibility.terminal)
+        togglePanelKind('terminal')
         return
       }
       if (matchesShortcut(e, keys('panel-processes')) && isBuiltinEnabled('processes', 'task')) {
         e.preventDefault()
-        handlePanelToggle('processes', !panelVisibility.processes)
+        togglePanelKind('processes')
         return
       }
       if (matchesShortcut(e, keys('panel-tests')) && isBuiltinEnabled('tests', 'task')) {
@@ -1403,7 +1623,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       if (matchesShortcut(e, keys('panel-artifacts')) && isBuiltinEnabled('artifacts', 'task')) {
         e.preventDefault()
-        handlePanelToggle('artifacts', !panelVisibility.artifacts)
+        togglePanelKind('artifacts')
         return
       }
       // Skip shortcuts inside CodeMirror / contenteditable so editor bindings (e.g. Mod+B) win
@@ -1418,7 +1638,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         isBuiltinEnabled('browser', 'task')
       ) {
         e.preventDefault()
-        handlePanelToggle('browser', !panelVisibility.browser)
+        togglePanelKind('browser')
       } else if (
         matchesShortcut(e, keys('panel-settings')) &&
         isBuiltinEnabled('settings', 'task')
@@ -1449,7 +1669,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     isBuiltinEnabled,
     enabledWebPanels,
     buildTaskFileContext,
-    toggleGitTab
+    toggleGitTab,
+    togglePanelKind,
+    targetOf,
+    isInstanceShown,
+    editorHandles,
+    browserHandles
   ])
 
   const handleDescriptionSave = async (): Promise<void> => {
@@ -1570,24 +1795,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     return updated
   }
 
-  // Handler for browser tabs changes
-  const handleBrowserTabsChange = useCallback(
-    async (tabs: BrowserTabsState) => {
-      setBrowserTabs(tabs)
-      if (!task) return
-      // Persist to DB (debounced via the tab state itself)
-      await updateTaskAsync({
-        id: task.id,
-        browserTabs: tabs
-      })
-    },
-    [task, updateTaskAsync]
-  )
-
-  // Open a dev server URL in the browser panel (used by both auto-open and toast)
-  const openDevServerInBrowser = useCallback(
+  // Open a URL in the target browser panel (used by auto-open, the toast, links)
+  const openDevServerInBrowser = useStableCallback(
     (url: string, tabId?: string, isolated?: boolean) => {
-      handlePanelToggle('browser', true)
+      const target = targetOf('browser')
+      handlePanelToggle(target, true)
       const id = tabId ?? `tab-${safeRandomUUID().slice(0, 8)}`
       const newTab = {
         id,
@@ -1595,13 +1807,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         title: url === 'about:blank' ? 'New Tab' : url,
         ...(isolated ? { isolated: true } : {})
       }
-      if (browserOpenRef.current) {
-        handleBrowserTabsChange({ tabs: [...browserTabs.tabs, newTab], activeTabId: newTab.id })
-      } else {
-        handleBrowserTabsChange({ tabs: [newTab], activeTabId: newTab.id })
-      }
-    },
-    [handlePanelToggle, handleBrowserTabsChange, browserTabs, browserOpenRef]
+      // A primary browser that was closed starts over with just this tab.
+      const replace = target === PRIMARY_INSTANCE_IDS.browser && !browserOpenRef.current
+      addBrowserTab(target, newTab, { replace })
+    }
   )
 
   useEffect(() => {
@@ -1651,18 +1860,26 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       if (!task || taskId !== task.id) return
       const load = planHubUrl(rawUrl, origin)
       if (tabId) {
-        // CLI targeted an existing tab — open panel and switch to that tab.
+        // CLI targeted an existing tab — open the panel showing it and switch to it.
         // The navigate route will load `url` into the targeted tab's webContents.
         // Anyone but the user's own local agent may only bring up an isolated tab.
-        handlePanelToggle('browser', true)
-        const tabs = browserTabsRef.current
+        const known = browserTabsRef.current.tabs.some((t) => t.id === tabId)
+        const panel = known
+          ? (browserInstanceOfTab(browserTabsRef.current, tabId) ?? PRIMARY_INSTANCE_IDS.browser!)
+          : targetOf('browser')
+        handlePanelToggle(panel, true)
+        const tabs = browserTabsForInstance(
+          browserTabsRef.current,
+          panel,
+          panel === PRIMARY_INSTANCE_IDS.browser
+        )
         const target = tabs.tabs.find((t) => t.id === tabId)
         if (
           target &&
           (target.isolated || callerIsTrustedLocal(origin)) &&
           tabs.activeTabId !== tabId
         ) {
-          handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+          void handleBrowserTabsChange(panel, { ...tabs, activeTabId: tabId })
         }
       } else if (load?.untrusted || isolated) {
         // Anyone but the user's own local agent works in a NEW isolated tab (the hub
@@ -1673,7 +1890,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       } else if (load) {
         openDevServerInBrowser(load.url)
       } else {
-        handlePanelToggle('browser', true)
+        handlePanelToggle(targetOf('browser'), true)
       }
     }
   )
@@ -1702,7 +1919,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       isolated?: boolean
     }) => {
       if (!task || taskId !== task.id) return
-      handlePanelToggle('browser', true)
+      // The new tab opens in the target browser panel (focused last, else the primary).
+      const panel = targetOf('browser')
+      handlePanelToggle(panel, true)
       const load = planHubUrl(url, origin)
       const tabUrl = load && !load.untrusted ? load.url : 'about:blank'
       // Anyone but the user's own local agent gets an isolated tab, whatever the hub says.
@@ -1712,11 +1931,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl,
         ...(isolated || !callerIsTrustedLocal(origin) ? { isolated: true } : {})
       }
-      const current = browserTabsRef.current
-      if (current.tabs.some((t) => t.id === tabId)) return
+      // Tab ids are unique per task, whichever panel shows them.
+      if (browserTabsRef.current.tabs.some((t) => t.id === tabId)) return
       if (load?.untrusted) queueUntrustedLoad(task.id, tabId, load.url)
-      const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
-      handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
+      addBrowserTab(panel, newTab, { background })
     }
   )
   useSubscription(
@@ -1842,7 +2060,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     parentTask,
     templates,
     windowAction: isSecondaryWindow ? 'reattach' : hasOpenSecondary ? null : 'detach',
-    browserOpen: !!panelVisibility.browser && isBuiltinEnabled('browser', 'task'),
+    browserOpen: isInstanceShown(targetOf('browser')) && isBuiltinEnabled('browser', 'task'),
     onConvertToTask: async () => {
       if (!task) return
       const converted = await onConvertTask?.(task)
@@ -1863,27 +2081,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onReattachTerminal: handleReattachTerminal,
     onCopyHistory: handleCopyHistory,
     onEditFlags: () => {
-      // The flags dialog lives in the terminal panel's header.
+      // The flags dialog lives in the primary agent panel's header.
       if (!panelVisibility.terminal) handlePanelToggle('terminal', true)
       setFlagsPopoverOpen(true)
     },
     onResetFlags: handleSetDefaultFlags,
     onDoctor: handleDoctor,
     onEditDescription: () => setDescriptionFullscreen(true),
-    onNewArtifact: () => {
-      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-      artifactsPanelRef.current?.createArtifact()
-    },
+    onNewArtifact: createArtifactInPanel,
     onOpenExternal: (url) => void trpcClient.app.shell.openExternal.mutate({ url }),
     onNewBrowserTab: () => {
-      browserPanelRef.current?.newTab()
-      requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
+      const handle = browserHandles.get(targetOf('browser'))
+      handle?.newTab()
+      requestAnimationFrame(() => handle?.focusUrlBar())
     },
     onBrowserScreenshot: handleScreenshotTrigger,
     onTogglePanel: (panelId) => {
       if (panelId === 'git') toggleGitTab('general')
       else if (panelId === 'git-diff') toggleGitTab('changes')
-      else handlePanelToggle(panelId, !panelVisibility[panelId])
+      else togglePanelKind(panelId)
     }
   })
 
@@ -1900,9 +2116,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     )
   }
 
-  const visiblePanelCount = [...BUILTIN_PANEL_IDS, ...enabledWebPanels.map((wp) => wp.id)].filter(
-    (panelId) => !!panelVisibility[panelId]
-  ).length
+  const visiblePanelCount =
+    [...BUILTIN_PANEL_IDS, ...enabledWebPanels.map((wp) => wp.id)].filter(
+      (panelId) => !!panelVisibility[panelId]
+    ).length +
+    // Panels beyond a kind's first (not in the legacy projection).
+    Object.values(taskLayout.layout.instances).filter(
+      (inst) => !isPrimaryInstance(inst) && isInstanceVisible(taskLayout.layout, inst.id)
+    ).length
   const hasVisiblePanels = visiblePanelCount > 0
   const multipleVisiblePanels = visiblePanelCount > 1
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
@@ -1934,7 +2155,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       multipleVisiblePanels,
       containerWidth,
       resolvedWidths,
-      panelOrderIdx
+      panelOrderIdx,
+      focusedInstanceOf,
+      isInstanceShown,
+      instanceState,
+      updateInstanceSettings,
+      canAddPanels: taskLayout.supportsInstances && canEdit,
+      addPanel
     },
     agent: {
       runsAgentsHere,
@@ -1948,7 +2175,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       taskFolderMissing,
       worktreePath,
       baseDir,
-      terminalContainerRef,
+      terminalHandles,
+      claimedTerminalGroupIds: claimedGroups,
+      terminalShortcutOwner,
       terminalKey,
       mainTerminal,
       modes,
@@ -1984,16 +2213,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setProjectFolderPickerOpen
     },
     browser: {
-      browserPanelRef,
-      browserTabs,
+      browserHandles,
+      browserTabsFor,
       handleBrowserTabsChange,
       handleInsertElementSnippet,
       handleScreenshot
     },
-    editor: { fileEditorRefCallback, handleEditorStateChange },
+    editor: { editorHandles, handleEditorStateChange },
     artifacts: {
-      artifactsPanelRef,
-      artifactsPanelRefCallback,
+      artifactsHandles,
       handleActiveArtifactIdChange,
       handleArtifactsSidebarChange,
       sharingEnabled: sharing.enabled,
@@ -2002,7 +2230,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     web: { enabledWebPanels, handleWebPanelUrlChange, handleWebPanelFaviconChange },
     git: {
-      gitPanelRef,
+      gitHandles,
+      gitViewPathFor,
       resolvedGitViewPath,
       completedStatus,
       gitDefaultTab,
@@ -2065,7 +2294,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       handleCreateSubTask,
       onNavigateToTask,
       artifacts,
-      artifactsPanelRef
+      selectArtifactInPanel,
+      createArtifactInPanel
     },
     processes: { processesCwdUnavailable }
   }
@@ -2475,98 +2705,128 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       return true // web panels already filtered by enabledWebPanels
                     })
                     .map((p) => ({ ...p, active: !!panelVisibility[p.id] }))
+                  // "New <kind> panel" (step 9 replaces these with the ⋯ menu).
+                  const canAddPanels = taskLayout.supportsInstances && canEdit
+                  const newPanelMenu = canAddPanels ? (
+                    <NewPanelMenu
+                      choices={newPanelChoices(enabledWebPanels, (id) =>
+                        isBuiltinEnabled(id, 'task')
+                      )}
+                      onAdd={(c) => addPanel(c.kind, undefined, c.settings)}
+                      align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'}
+                    />
+                  ) : null
 
                   if (taskHeaderPanelMode === 'menu') {
                     const activeCount = ordered.filter((p) => p.active).length
                     return (
-                      <DropdownMenu>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                aria-label="Panels"
-                                className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 hover:bg-surface-3 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                <PanelsTopLeft className="size-4" />
-                                {activeCount > 0 && (
-                                  <span className="tabular-nums text-[10px] text-muted-foreground/80">
-                                    {activeCount}
-                                  </span>
-                                )}
-                              </button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">Panels</TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent
-                          align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'}
-                          className="min-w-[180px]"
-                        >
-                          {ordered.map((p) => {
-                            const Icon = p.icon
-                            return (
-                              <DropdownMenuItem
-                                key={p.id}
-                                onSelect={(e) => {
-                                  e.preventDefault()
-                                  handlePanelToggle(p.id, !p.active)
-                                }}
-                                className={cn('cursor-pointer gap-2', p.active && 'bg-accent/50')}
-                              >
-                                <Icon className="size-4" />
-                                <span className="flex-1">{p.label}</span>
-                                {p.shortcut && (
-                                  <span className="text-[10px] text-muted-foreground tabular-nums">
-                                    {p.shortcut}
-                                  </span>
-                                )}
-                              </DropdownMenuItem>
-                            )
-                          })}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <>
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label="Panels"
+                                  className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 hover:bg-surface-3 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                  <PanelsTopLeft className="size-4" />
+                                  {activeCount > 0 && (
+                                    <span className="tabular-nums text-[10px] text-muted-foreground/80">
+                                      {activeCount}
+                                    </span>
+                                  )}
+                                </button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">Panels</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent
+                            align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'}
+                            className="min-w-[180px]"
+                          >
+                            {ordered.map((p) => {
+                              const Icon = p.icon
+                              return (
+                                <DropdownMenuItem
+                                  key={p.id}
+                                  onSelect={(e) => {
+                                    e.preventDefault()
+                                    handlePanelToggle(p.id, !p.active)
+                                  }}
+                                  className={cn('cursor-pointer gap-2', p.active && 'bg-accent/50')}
+                                >
+                                  <Icon className="size-4" />
+                                  <span className="flex-1">{p.label}</span>
+                                  {p.shortcut && (
+                                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                                      {p.shortcut}
+                                    </span>
+                                  )}
+                                </DropdownMenuItem>
+                              )
+                            })}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        {newPanelMenu}
+                      </>
                     )
                   }
 
                   return (
-                    <PanelToggle
-                      panels={ordered}
-                      onChange={handlePanelToggle}
-                      onReorder={handlePanelReorder}
-                      renderContextMenu={(id) => {
-                        // Gather a panel into another shown group as a tab (the way
-                        // into tab groups from Classic, whose panels have no strip).
-                        const from = taskLayout.slotOf(id)
-                        if (!from || isSecondaryWindow) return null
-                        const targets = ordered.filter((p) => {
-                          const to = p.active ? taskLayout.slotOf(p.id) : null
-                          return p.id !== id && to !== null && to !== from
-                        })
-                        if (targets.length === 0) return null
-                        return (
-                          <>
-                            <ContextMenuLabel>Add as a tab to</ContextMenuLabel>
-                            {targets.map((p) => (
-                              <ContextMenuItem
-                                key={p.id}
-                                onSelect={() => {
-                                  const to = taskLayout.slotOf(p.id)
-                                  if (to)
-                                    dropPanel(
-                                      { type: 'tab', instanceId: id },
-                                      { type: 'zone', slotId: to, zone: 'merge' }
-                                    )
-                                }}
-                              >
-                                <p.icon className="size-3.5" />
-                                {p.label}
-                              </ContextMenuItem>
-                            ))}
-                          </>
-                        )
-                      }}
-                    />
+                    <>
+                      <PanelToggle
+                        panels={ordered}
+                        onChange={handlePanelToggle}
+                        onReorder={handlePanelReorder}
+                        renderContextMenu={(id) => {
+                          // Another panel of this kind, in a new column.
+                          const another = canAddPanels
+                            ? newPanelChoiceForToggle(id, enabledWebPanels)
+                            : null
+                          const newItem = another && (
+                            <ContextMenuItem
+                              onSelect={() => addPanel(another.kind, undefined, another.settings)}
+                            >
+                              <another.icon className="size-3.5" />
+                              New {another.label} panel
+                            </ContextMenuItem>
+                          )
+                          // Gather a panel into another shown group as a tab (the way
+                          // into tab groups from Classic, whose panels have no strip).
+                          const from = taskLayout.slotOf(id)
+                          if (!from || isSecondaryWindow) return newItem || null
+                          const targets = ordered.filter((p) => {
+                            const to = p.active ? taskLayout.slotOf(p.id) : null
+                            return p.id !== id && to !== null && to !== from
+                          })
+                          if (targets.length === 0) return newItem || null
+                          return (
+                            <>
+                              {newItem}
+                              <ContextMenuLabel>Add as a tab to</ContextMenuLabel>
+                              {targets.map((p) => (
+                                <ContextMenuItem
+                                  key={p.id}
+                                  onSelect={() => {
+                                    const to = taskLayout.slotOf(p.id)
+                                    if (to)
+                                      dropPanel(
+                                        { type: 'tab', instanceId: id },
+                                        { type: 'zone', slotId: to, zone: 'merge' }
+                                      )
+                                  }}
+                                >
+                                  <p.icon className="size-3.5" />
+                                  {p.label}
+                                </ContextMenuItem>
+                              ))}
+                            </>
+                          )
+                        }}
+                      />
+                      {newPanelMenu}
+                    </>
                   )
                 })()}
               </div>
@@ -2822,10 +3082,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             title: a.title,
             type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
           }))}
-          onArtifactClick={(artifactId) => {
-            if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-            artifactsPanelRef.current?.selectArtifact(artifactId)
-          }}
+          onArtifactClick={selectArtifactInPanel}
           onUploadImages={handleUploadImages}
           onOpenLink={handleDescriptionOpenLink}
         />

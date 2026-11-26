@@ -178,6 +178,12 @@ vi.mock('@slayzone/task-terminals', () => ({
       terminalMounts.count++
     }, [])
     return <div data-testid="terminal" />
+  }),
+  useTerminalGroupsApi: () => ({
+    createGroup: vi.fn(),
+    tabsOf: vi.fn(async () => []),
+    anyLive: vi.fn(async () => false),
+    closeGroups: vi.fn(async () => undefined)
   })
 }))
 // The task's paths as its computer answers them (per test). The page's own

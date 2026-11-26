@@ -82,7 +82,9 @@ export function AgentKind({ panelId }: PanelKindProps): React.JSX.Element {
     taskFolderMissing,
     worktreePath,
     baseDir,
-    terminalContainerRef,
+    terminalHandles,
+    claimedTerminalGroupIds,
+    terminalShortcutOwner,
     terminalKey,
     mainTerminal,
     modes,
@@ -305,13 +307,17 @@ export function AgentKind({ panelId }: PanelKindProps): React.JSX.Element {
             </div>
           ) : mainAgentCwd && !projectPathMissing ? (
             <TerminalContainer
-              ref={terminalContainerRef}
+              ref={terminalHandles.ref(panelId)}
+              // Groups another agent/terminal panel claims show there, not here.
+              groupFilter={
+                claimedTerminalGroupIds.length > 0 ? { except: claimedTerminalGroupIds } : undefined
+              }
               paused={isResizing}
               key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${worktreePath || ''}-${baseDir || ''}`}
               taskId={task.id}
               isTemporary={task.is_temporary}
               isActive={isActive}
-              hasShortcutFocus={shortcutActive}
+              hasShortcutFocus={shortcutActive && terminalShortcutOwner === panelId}
               cwd={mainAgentCwd}
               // Spawn props shared with the terminal-first pane (one
               // derivation — see mainTerminalProps). No conversation

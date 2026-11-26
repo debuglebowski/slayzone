@@ -12,6 +12,7 @@ import {
 } from '@slayzone/ui'
 import { useTaskPageContext } from '../panels/TaskPageContext'
 import { LayoutActionsContext, LayoutDragItemContext } from './LayoutContext'
+import { newPanelChoiceLike } from './NewPanelMenu'
 import { panelTabMeta } from './panelTabMeta'
 import type { DragItem } from './layoutDnd'
 
@@ -27,7 +28,7 @@ interface TabStripProps {
  * A group's tab strip: one square tab per shown panel (icon, name, ×), the
  * group's name when it has one. The strip is the group's drag handle as a whole
  * (drag its empty part or name to move the group); each tab drags on its own.
- * Right-click a tab for Rename / Split down / Split right / Hide / Close.
+ * Right-click a tab for Rename / New <kind> panel / Split down / Split right / Hide / Close.
  */
 export function TabStrip({ layout, slot, tabs, activeId }: TabStripProps): React.JSX.Element {
   const dragItem = use(LayoutDragItemContext)
@@ -81,8 +82,10 @@ interface PanelTabProps {
 
 function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): React.JSX.Element {
   const actions = use(LayoutActionsContext)
-  const { web } = useTaskPageContext()
+  const { web, panels } = useTaskPageContext()
   const { label, icon: Icon } = panelTabMeta(instance, web.enabledWebPanels)
+  // Another panel like this one, as a tab of this group (step 9 moves it to ⋯).
+  const another = panels.canAddPanels ? newPanelChoiceLike(instance, web.enabledWebPanels) : null
   const [renaming, setRenaming] = useState(false)
   // Set by the menu's Rename; the menu's close must then leave focus to the name field.
   const renameRequestedRef = useRef(false)
@@ -190,6 +193,13 @@ function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): Reac
         >
           Rename
         </ContextMenuItem>
+        {another && (
+          <ContextMenuItem
+            onSelect={() => panels.addPanel(another.kind, instance.id, another.settings)}
+          >
+            New {another.label} panel
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={!canSplit}

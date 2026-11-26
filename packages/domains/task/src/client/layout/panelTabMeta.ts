@@ -16,8 +16,10 @@ export function panelTabMeta(
   webPanels: readonly { id: string; name: string }[]
 ): { label: string; icon: LucideIcon } {
   const def = isRenderableKind(instance.kind) ? PANEL_KINDS[instance.kind] : null
+  const webId =
+    typeof instance.settings.panelId === 'string' ? instance.settings.panelId : instance.id
   const webName =
-    instance.kind === 'web' ? webPanels.find((wp) => wp.id === instance.id)?.name : undefined
+    instance.kind === 'web' ? webPanels.find((wp) => wp.id === webId)?.name : undefined
   return {
     label: instance.name ?? webName ?? def?.label ?? instance.kind,
     icon: def?.icon ?? Square

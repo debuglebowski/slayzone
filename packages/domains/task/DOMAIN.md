@@ -39,7 +39,8 @@ DOM-free subpaths): the mobile chat resolves a chat tab's folder with it.
 ## Client (client/)
 
 - `TaskDetailPage` - Full task view with terminal
-- `layout/` - the task's panels as a layout (columns of tab groups, docs/plans/panel-model.md): `useTaskLayout` owns the state (stored `panel_layout`, else Classic derived from `panel_visibility`/`panel_sizes`; debounced write from the primary window, merged by `rev`), `TaskLayoutView` renders it inside `#task-panels` through the same width resolver as before, so Classic is the legacy strip. `handlePanelToggle(id, on)` hides/shows the group holding panel `id`.
+- `layout/` - the task's panels as a layout (columns of tab groups, docs/plans/panel-model.md): `useTaskLayout` owns the state (stored `panel_layout`, else Classic derived from `panel_visibility`/`panel_sizes`; debounced write from the primary window, merged by `rev`), `TaskLayoutView` renders it inside `#task-panels` through the same width resolver as before, so Classic is the legacy strip. `handlePanelToggle(id, on)` hides/shows the group holding panel `id`. Each panel renders once, keyed by instance id, into the slot that holds it (`PanelHosts`): moving a tab moves its DOM, never remounts it.
+- Several panels of a kind (`PanelInstance`; the first keeps its legacy id, others are `<kind>:<uuid8>`): their state lives in `panel_instance_state` (editor, git, artifacts), `browser_tabs.byPanel` (browser) and `settings.terminalGroupIds` (agent/terminal; the primary agent shows every unclaimed group). Kind-wide actions (shortcuts, palette, CLI events) target `focusedInstanceOf(kind)`: the one focused last, else the primary.
 - `CreateTaskDialog` / `EditTaskDialog` / `DeleteTaskDialog`
 - `TaskMetadataSidebar` - Priority, status, project, tags, blockers
 

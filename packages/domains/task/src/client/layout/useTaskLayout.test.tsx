@@ -359,3 +359,47 @@ describe('useTaskLayout', () => {
     ).toEqual([0.3, 0.7])
   })
 })
+
+describe('useTaskLayout — panel instances (step 7)', () => {
+  it('adds another instance of a kind, returns its id at once and persists it', async () => {
+    const { result } = setup({
+      initialVisibility: { ...DEFAULT_TASK_PANEL_VISIBILITY, editor: true }
+    })
+    expect(result.current.supportsInstances).toBe(true)
+    let id = ''
+    act(() => {
+      id = result.current.addInstance('editor', { type: 'column' })
+    })
+    expect(id).toMatch(/^editor:[0-9a-f]{8}$/)
+    expect(result.current.layout.instances[id]?.kind).toBe('editor')
+    // The primary keeps its legacy id; the projection is unchanged.
+    expect(result.current.layout.instances.editor?.kind).toBe('editor')
+    expect(result.current.panelVisibility.editor).toBe(true)
+    await flushSave()
+    expect((updateTask.mock.calls.at(-1)?.[0].panelLayout as TaskLayout).instances[id]).toBeTruthy()
+  })
+
+  it('updateInstanceSettings merges, and closing a non-primary instance removes it', async () => {
+    const { result } = setup()
+    let id = ''
+    act(() => {
+      id = result.current.addInstance('agent', { type: 'column' }, { terminalGroupIds: ['g1'] })
+    })
+    act(() => result.current.updateInstanceSettings(id, { terminalGroupIds: ['g1', 'g2'] }))
+    expect(result.current.layout.instances[id].settings.terminalGroupIds).toEqual(['g1', 'g2'])
+    act(() => result.current.closeTab(id))
+    expect(result.current.layout.instances[id]).toBeUndefined()
+    // The primary agent only hides.
+    act(() => result.current.closeTab('terminal'))
+    expect(result.current.layout.instances.terminal).toBeTruthy()
+    expect(result.current.panelVisibility.terminal).toBe(false)
+  })
+
+  it('no instances on a hub without panel_layout, nor in a secondary window', () => {
+    expect(
+      setup({ task: makeTask({ panel_layout: undefined }) }).result.current.supportsInstances
+    ).toBe(false)
+    cleanup()
+    expect(setup({ isSecondaryWindow: true }).result.current.supportsInstances).toBe(false)
+  })
+})

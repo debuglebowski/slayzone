@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { TaskLayout } from '@slayzone/task-contracts'
+import { isPrimaryInstance } from '@slayzone/task-contracts'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,7 +50,11 @@ export function usePanelCloseRequest({
       closeTab(instanceId)
       return
     }
-    ask({ panelId: instanceId, isSessionLive: () => isSessionLive(instanceId) }).then(
+    ask({
+      panelId: instanceId,
+      primary: isPrimaryInstance(instance),
+      isSessionLive: () => isSessionLive(instanceId)
+    }).then(
       (confirm) => {
         if (confirm) setPending({ instanceId, confirm })
         else closeTab(instanceId)
