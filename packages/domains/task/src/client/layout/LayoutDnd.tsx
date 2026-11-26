@@ -7,7 +7,6 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragMoveEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
 import type { TaskLayout } from '@slayzone/task-contracts'
@@ -170,10 +169,13 @@ export function LayoutDnd({
   const dragRef = useRef<DragState | null>(null)
   const pendingSettleRef = useRef<{ root: HTMLElement; first: Map<string, DOMRect> } | null>(null)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Removes the drag's pointer listener (see handleDragStart).
+  const stopTrackingRef = useRef<(() => void) | null>(null)
 
   useEffect(
     () => () => {
       if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+      stopTrackingRef.current?.()
     },
     []
   )
@@ -186,6 +188,18 @@ export function LayoutDnd({
     settle(pending.root, pending.first)
   }, [layout])
 
+  /** Hit-test the pointer at (x, y); a new target re-renders the indicator. */
+  const trackPointer = useStableCallback((x: number, y: number) => {
+    const current = dragRef.current
+    if (!current) return
+    const hit = hitTest(current.root, layout, x, y)
+    if (hit === 'keep' || targetKey(hit?.target ?? null) === targetKey(current.hit?.target ?? null))
+      return
+    const next = { ...current, hit }
+    dragRef.current = next
+    setDrag(next)
+  })
+
   const handleDragStart = useStableCallback((event: DragStartEvent) => {
     const item = (event.active.data.current as { item?: DragItem } | undefined)?.item
     const source = event.activatorEvent.target
@@ -196,35 +210,19 @@ export function LayoutDnd({
     dragRef.current = next
     setDrag(next)
     onDraggingChange(true)
-  })
-
-  /** Hit-test the pointer of a move/end event; updates the live drag. */
-  const track = (event: DragMoveEvent | DragEndEvent): DragState | null => {
-    const current = dragRef.current
-    if (!current) return null
-    const start = event.activatorEvent as PointerEvent
-    const hit = hitTest(
-      current.root,
-      layout,
-      start.clientX + event.delta.x,
-      start.clientY + event.delta.y
-    )
-    if (hit === 'keep' || targetKey(hit?.target ?? null) === targetKey(current.hit?.target ?? null))
-      return current
-    const next = { ...current, hit }
-    dragRef.current = next
-    return next
-  }
-
-  const handleDragMove = useStableCallback((event: DragMoveEvent) => {
-    const before = dragRef.current
-    const next = track(event)
-    if (next && next !== before) setDrag(next)
+    // The pointer itself, not dnd-kit's delta: that one comes from its rendered
+    // state, which may lag the last moves when the pointer is released quickly.
+    const onMove = (e: PointerEvent): void => trackPointer(e.clientX, e.clientY)
+    window.addEventListener('pointermove', onMove, true)
+    stopTrackingRef.current?.()
+    stopTrackingRef.current = () => window.removeEventListener('pointermove', onMove, true)
   })
 
   // The live drag is read from the ref, not state: the pointer may be released
   // before the last move's render.
   const finish = (current: DragState | null, commit: boolean): void => {
+    stopTrackingRef.current?.()
+    stopTrackingRef.current = null
     dragRef.current = null
     setDrag(null)
     if (commit && current?.hit) {
@@ -243,7 +241,7 @@ export function LayoutDnd({
       commit ? DROP_SETTLE_MS : 0
     )
   }
-  const handleDragEnd = useStableCallback((event: DragEndEvent) => finish(track(event), true))
+  const handleDragEnd = useStableCallback((_event: DragEndEvent) => finish(dragRef.current, true))
   const handleDragCancel = useStableCallback(() => finish(dragRef.current, false))
 
   const preview = drag ? dropPreview(layout, drag.item, drag.hit?.target ?? null) : null
@@ -256,7 +254,6 @@ export function LayoutDnd({
       // #task-panels, an item of the panel strip.
       accessibility={{ container: document.body }}
       onDragStart={handleDragStart}
-      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >

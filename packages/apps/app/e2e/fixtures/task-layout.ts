@@ -73,6 +73,18 @@ export async function openTaskWithLayout(
       fn(id)
     }, t.id)
     await expect.poll(() => activeTaskId(page), { timeout: 5_000 }).toBe(t.id)
+    // The tab switch commits with the new page (a transition): until its detail
+    // page has mounted, the previous task's page is still the one on screen.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            (id) => performance.getEntriesByName(`sz:taskDetail:${id}:mount`).length,
+            t.id
+          ),
+        { timeout: 5_000 }
+      )
+      .toBeGreaterThan(0)
     for (const id of waitFor) await expect(panel(page, id)).toBeVisible({ timeout: 5_000 })
   }).toPass({ timeout: 20_000 })
   return t.id

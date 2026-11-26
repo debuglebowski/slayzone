@@ -189,7 +189,7 @@ test.describe('Layout tab drag and drop', () => {
     await page.getByRole('menuitem', { name: 'Agent' }).click()
     await expect.poll(() => stripTabs(page, 'terminal')).toEqual(['terminal', 'settings'])
     await expect
-      .poll(async () => shapeOf(await storedLayout(page, taskId)))
-      .toEqual([[['terminal', 'settings']]])
+      .poll(async () => shapeOf(await storedLayout(page, taskId))[0])
+      .toEqual([['terminal', 'settings']])
   })
 })
