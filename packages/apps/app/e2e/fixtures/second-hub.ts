@@ -63,8 +63,15 @@ async function readOwner(
   throw new Error(`hub owner file not usable within ${timeoutMs}ms: ${file}`)
 }
 
-/** Spawn a standalone hub on a free loopback port, state under `<storeDir>/hub`. */
-export async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
+/**
+ * Spawn a standalone hub on a free loopback port, state under `<storeDir>/hub`.
+ * `login: false` runs it without sign-in (a loopback hub; `token` is then empty).
+ */
+export async function spawnSecondHub(
+  storeDir: string,
+  opts: { login?: boolean } = {}
+): Promise<SecondHub> {
+  const login = opts.login !== false
   if (!fs.existsSync(HUB_BIN)) throw new Error(`hub bin missing: ${HUB_BIN} (run pnpm build)`)
   const hubRoot = path.join(storeDir, 'hub')
   fs.mkdirSync(hubRoot, { recursive: true })
@@ -82,7 +89,7 @@ export async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
       ...cleanEnv,
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
-      SLAYZONE_HUB_REQUIRE_LOGIN: '1',
+      SLAYZONE_HUB_REQUIRE_LOGIN: login ? '1' : '0',
       SLAYZONE_ROOT: hubRoot,
       // The hub's test-only chat seams (seed / read a conversation) answer only under it.
       PLAYWRIGHT: '1',
@@ -92,7 +99,7 @@ export async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
   })
   proc.stdout?.on('data', () => undefined)
   proc.stderr?.on('data', () => undefined)
-  const owner = await readOwner(hubRoot)
+  const owner = login ? await readOwner(hubRoot) : { token: '', email: '' }
   return {
     proc,
     port,
