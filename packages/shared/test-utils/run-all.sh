@@ -364,6 +364,7 @@ run_harness packages/domains/task/src/client/terminal-on-this-device.test.ts
 run_harness packages/shared/workflow/src/columns.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
 run_harness packages/domains/tabs-state/src/useTabStore.test.ts
+run_harness packages/domains/tabs-state/src/lenses.test.ts
 run_harness packages/domains/tabs-state/src/open-tabs-sync.test.ts
 run_harness packages/domains/tabs-state/src/server/router.test.ts
 # Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
