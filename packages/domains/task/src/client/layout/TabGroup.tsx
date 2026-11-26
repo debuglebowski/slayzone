@@ -1,11 +1,9 @@
 import type { LayoutSlot, PanelInstance, TaskLayout } from '@slayzone/task-contracts'
-import { cn } from '@slayzone/ui'
-import { PANEL_KINDS, type PanelKind as RenderableKind } from '../panels/registry'
 import { PANEL_KIND_COMPONENTS } from '../panels/kinds'
-
-function isRenderable(kind: string): kind is RenderableKind {
-  return Object.hasOwn(PANEL_KIND_COMPONENTS, kind)
-}
+import { PanelCellContext } from '../panels/PanelFrame'
+import { TaskPageProvider, useTaskPageContext } from '../panels/TaskPageContext'
+import { isRenderableKind } from './panelTabMeta'
+import { TabStrip } from './TabStrip'
 
 /** One panel instance: its kind's component (a kind this app cannot render shows nothing). */
 export function PanelInstanceView({
@@ -13,67 +11,77 @@ export function PanelInstanceView({
 }: {
   instance: PanelInstance
 }): React.JSX.Element | null {
-  if (!isRenderable(instance.kind)) return null
+  if (!isRenderableKind(instance.kind)) return null
   const Kind = PANEL_KIND_COMPONENTS[instance.kind]
   return <Kind panelId={instance.id} />
 }
 
-function tabLabel(instance: PanelInstance): string {
-  if (instance.name) return instance.name
-  return isRenderable(instance.kind) ? PANEL_KINDS[instance.kind].label : instance.kind
+/**
+ * A tab's panel. Every shown tab of a group stays mounted; the inactive ones are
+ * out of view (display: none) and see their task page as inactive — the same
+ * keep-alive a task tab in the background gets (PANEL_KINDS[kind].keepAlive):
+ * browser, web and the agent stay mounted and park themselves (`isActive` false:
+ * native views off-screen, terminal paused); every other kind goes into
+ * <Activity hidden> in its PanelFrame. The wrapper never changes element type,
+ * so switching tabs moves no DOM.
+ */
+function TabPanel({
+  instance,
+  active
+}: {
+  instance: PanelInstance
+  active: boolean
+}): React.JSX.Element {
+  const page = useTaskPageContext()
+  const value = active ? page : { ...page, isActive: false, shortcutActive: false }
+  return (
+    <div className={active ? 'contents' : 'hidden'} data-tab-panel={instance.id}>
+      <TaskPageProvider value={value}>
+        <PanelInstanceView instance={instance} />
+      </TaskPageProvider>
+    </div>
+  )
 }
 
 interface TabGroupProps {
   layout: TaskLayout
   slot: LayoutSlot
-  onActivateTab?: (instanceId: string) => void
+  /** No strip and no drag (the explode-mode cell). */
+  compact?: boolean
 }
 
 /**
  * A group of tabs showing its active instance. An unnamed group with one shown tab
  * (every Classic group) renders the bare panel: no strip, no wrapper, so the panel
- * stays a direct item of the strip exactly as before.
+ * stays a direct item of the strip exactly as before. Otherwise the TabStrip sits
+ * on top and each tab's panel fills the cell below it.
  */
-export function TabGroup({ layout, slot, onActivateTab }: TabGroupProps): React.JSX.Element | null {
+export function TabGroup({
+  layout,
+  slot,
+  compact = false
+}: TabGroupProps): React.JSX.Element | null {
   const tabs = slot.tabs.filter((t) => !t.hidden && layout.instances[t.instanceId])
   const active =
     tabs.find((t) => t.instanceId === slot.activeInstanceId)?.instanceId ?? tabs[0]?.instanceId
   const activeInstance = active ? layout.instances[active] : undefined
-  if (!activeInstance) return null
-  if (tabs.length === 1 && !slot.name) return <PanelInstanceView instance={activeInstance} />
+  if (!active || !activeInstance) return null
+  if (compact || (tabs.length === 1 && !slot.name))
+    return <PanelInstanceView instance={activeInstance} />
 
   return (
     <div data-slot-id={slot.id} className="flex-1 min-h-0 min-w-0 flex flex-col">
-      <div role="tablist" className="shrink-0 flex items-center gap-1 pb-1 min-w-0">
-        {slot.name && (
-          <span className="px-1 text-xs font-medium text-muted-foreground truncate">
-            {slot.name}
-          </span>
-        )}
-        {tabs.map((t) => {
-          const instance = layout.instances[t.instanceId]
-          const selected = t.instanceId === active
-          return (
-            <button
+      <TabStrip layout={layout} slot={slot} tabs={tabs} activeId={active} />
+      <div className="flex-1 min-h-0 min-w-0 flex">
+        <PanelCellContext value={true}>
+          {tabs.map((t) => (
+            <TabPanel
               key={t.instanceId}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => onActivateTab?.(t.instanceId)}
-              className={cn(
-                'px-2 py-0.5 rounded text-xs truncate',
-                selected
-                  ? 'bg-tab-active text-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              )}
-            >
-              {tabLabel(instance)}
-            </button>
-          )
-        })}
-      </div>
-      <div className="flex-1 min-h-0 flex [&>[data-panel-id]]:flex-1">
-        <PanelInstanceView key={activeInstance.id} instance={activeInstance} />
+              instance={layout.instances[t.instanceId]}
+              active={t.instanceId === active}
+            />
+          ))}
+        </PanelCellContext>
       </div>
     </div>
   )

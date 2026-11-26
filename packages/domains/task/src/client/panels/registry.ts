@@ -48,6 +48,20 @@ export type PanelKind =
  */
 export type PanelKeepAlive = 'activity' | 'mounted'
 
+/** What closing a panel tab may need to know about the instance being closed. */
+export interface PanelCloseContext {
+  panelId: string
+  /** Whether the instance's agent session (its pty) is running right now. */
+  isSessionLive: () => Promise<boolean>
+}
+
+/** A confirmation to show before a panel tab closes. */
+export interface PanelCloseConfirm {
+  title: string
+  description: string
+  confirmLabel: string
+}
+
 export interface PanelKindDef {
   kind: PanelKind
   /**
@@ -65,6 +79,22 @@ export interface PanelKindDef {
   suspense: boolean
   /** May show in a secondary "Open in new window" frame. The agent never does. */
   secondaryWindow: boolean
+  /**
+   * Asked before a tab of this kind closes (× , ⌘W, the tab menu's Close). A
+   * confirmation it returns is shown first; null closes right away.
+   */
+  onCloseRequest?: (ctx: PanelCloseContext) => Promise<PanelCloseConfirm | null>
+}
+
+/** The agent's: confirm while its session runs (closing a tab must not feel like losing it). */
+async function confirmLiveAgentClose(ctx: PanelCloseContext): Promise<PanelCloseConfirm | null> {
+  if (!(await ctx.isSessionLive())) return null
+  return {
+    title: 'Close the agent?',
+    description:
+      'Its session is still running. Closing the tab keeps the session; you can show the agent again from the panel toggles.',
+    confirmLabel: 'Close'
+  }
 }
 
 export const PANEL_KINDS = {
@@ -76,7 +106,8 @@ export const PANEL_KINDS = {
     shortcutId: 'panel-terminal',
     keepAlive: 'mounted',
     suspense: false,
-    secondaryWindow: false
+    secondaryWindow: false,
+    onCloseRequest: confirmLiveAgentClose
   },
   browser: {
     kind: 'browser',
@@ -148,7 +179,9 @@ export const PANEL_KINDS = {
     suspense: false,
     secondaryWindow: true
   }
-} as const satisfies { [K in PanelKind]: PanelKindDef & { kind: K } }
+} as const satisfies { [K in PanelKind]: PanelKindDef & { kind: K } } as {
+  readonly [K in PanelKind]: PanelKindDef & { kind: K }
+}
 
 // --- Injected panels ---------------------------------------------------------------
 

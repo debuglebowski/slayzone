@@ -3,6 +3,9 @@ import type { PanelSizes, TaskLayout } from '@slayzone/task-contracts'
 import { ResizeHandle } from '../ResizeHandle'
 import { applyBoundaryResize, minWidthFor, unstretchPx } from '../usePanelSizes'
 import { LayoutColumn } from './LayoutColumn'
+import { LayoutActionsContext, type LayoutActions } from './LayoutContext'
+import { LayoutDnd } from './LayoutDnd'
+import type { DragItem, DropTarget } from './layoutDnd'
 import { PanelInstanceView } from './TabGroup'
 import { compactColumns, domOrderedColumns, type LayoutStrip } from './strip'
 
@@ -23,7 +26,12 @@ interface TaskLayoutViewProps {
   onResizeEnd: () => void
   /** Double-click on a handle: every column back to its default size. */
   onResetSizes: () => void
-  onActivateTab?: (instanceId: string) => void
+  /** Tab and group actions (strips, tab menus, slot dividers). */
+  actions: Omit<LayoutActions, 'onResizeStart' | 'onResizeEnd'>
+  /** A finished panel drag. */
+  onDrop: (item: DragItem, target: DropTarget) => void
+  /** A panel drag starts / has settled (native views hide meanwhile, like a resize). */
+  onDraggingChange: (dragging: boolean) => void
 }
 
 /**
@@ -46,10 +54,17 @@ export function TaskLayoutView({
   onResizeStart,
   onResizeEnd,
   onResetSizes,
-  onActivateTab
+  actions,
+  onDrop,
+  onDraggingChange
 }: TaskLayoutViewProps): React.JSX.Element {
   const { resolved, plan, layouts } = strip
   const compactAgent = compact ? compactColumns(layout) : null
+  const layoutActions: LayoutActions = {
+    ...actions,
+    onResizeStart,
+    onResizeEnd
+  }
 
   // The divider before `columnId`: dragging it moves the boundary with its
   // same-cluster left neighbour, each column keeping its unit (fr stays fr).
@@ -112,20 +127,27 @@ export function TaskLayoutView({
         // No agent in the layout (a disabled, hidden agent): the cell still shows it.
         <PanelInstanceView instance={{ id: 'terminal', kind: 'agent', settings: {} }} />
       )}
-      {(compact ? (compactAgent ?? []) : domOrderedColumns(layout, strip.columns, webPanelIds)).map(
-        (column) => (
-          <Fragment key={column.id}>
-            {renderHandle(column.id)}
-            <LayoutColumn
-              layout={layout}
-              column={column}
-              width={resolved.widths[column.id]}
-              order={plan.order[column.id] ?? 0}
-              onActivateTab={onActivateTab}
-            />
-          </Fragment>
-        )
-      )}
+      {/* One element path in both modes (compact only changes the columns), so
+          entering/leaving explode mode keeps the agent mounted. */}
+      <LayoutActionsContext value={layoutActions}>
+        <LayoutDnd layout={layout} onDrop={onDrop} onDraggingChange={onDraggingChange}>
+          {(compact
+            ? (compactAgent ?? [])
+            : domOrderedColumns(layout, strip.columns, webPanelIds)
+          ).map((column) => (
+            <Fragment key={column.id}>
+              {renderHandle(column.id)}
+              <LayoutColumn
+                layout={layout}
+                column={column}
+                width={resolved.widths[column.id]}
+                order={plan.order[column.id] ?? 0}
+                compact={compact}
+              />
+            </Fragment>
+          ))}
+        </LayoutDnd>
+      </LayoutActionsContext>
     </>
   )
 }

@@ -6,11 +6,14 @@ import type { PanelConfig, PanelSizes } from '@slayzone/task-contracts'
 import {
   DEFAULT_PANEL_CONFIG,
   deriveLayoutFromLegacy,
+  mergeInto,
   orderIdToTaskId,
-  setSlotHidden
+  renameSlot,
+  setSlotHidden,
+  setTabHidden
 } from '@slayzone/task-contracts'
 import { planPanelStrip, resolvePanels } from '../usePanelSizes'
-import { compactColumns, domOrderedColumns, resolveLayoutStrip } from './strip'
+import { compactColumns, domOrderedColumns, isInTabStrip, resolveLayoutStrip } from './strip'
 
 const config = (patch: Partial<PanelConfig> = {}): PanelConfig => ({
   ...structuredClone(DEFAULT_PANEL_CONFIG),
@@ -153,5 +156,24 @@ describe('compactColumns', () => {
   it('is null without a primary agent', () => {
     const layout = deriveLayoutFromLegacy({ panel_visibility: null }, config())
     expect(compactColumns({ ...layout, columns: [], instances: {} })).toBeNull()
+  })
+})
+
+describe('isInTabStrip', () => {
+  it('is true for shown tabs of a group with several shown tabs or a name', () => {
+    const classic = deriveLayoutFromLegacy(
+      { panel_visibility: { terminal: true, browser: true, settings: true } },
+      config()
+    )
+    expect(isInTabStrip(classic, 'terminal')).toBe(false)
+    const merged = mergeInto(classic, 'browser', 'terminal')
+    expect(isInTabStrip(merged, 'terminal')).toBe(true)
+    expect(isInTabStrip(merged, 'browser')).toBe(true)
+    const oneShown = setTabHidden(merged, 'browser', true)
+    expect(isInTabStrip(oneShown, 'terminal')).toBe(false)
+    expect(isInTabStrip(oneShown, 'browser')).toBe(false)
+    expect(isInTabStrip(renameSlot(oneShown, 'terminal', 'Work'), 'terminal')).toBe(true)
+    expect(isInTabStrip(setSlotHidden(merged, 'terminal', true), 'terminal')).toBe(false)
+    expect(isInTabStrip(merged, 'nope')).toBe(false)
   })
 })

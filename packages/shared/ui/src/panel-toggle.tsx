@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import type { CSSProperties, HTMLAttributes, Ref } from 'react'
+import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from 'react'
 
 import {
   DndContext,
@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities'
 
 import { cn } from './utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from './tooltip'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from './context-menu'
 import { withShortcut } from '@slayzone/shortcuts'
 
 interface PanelToggleItem {
@@ -42,6 +43,8 @@ interface PanelToggleProps {
    * reorders instead.
    */
   onReorder?: (orderedIds: string[]) => void
+  /** Right-click menu items for a panel's button; null/undefined = no menu. */
+  renderContextMenu?: (id: string) => ReactNode
   variant?: 'raised' | 'flat'
   className?: string
 }
@@ -70,6 +73,7 @@ interface PanelButtonProps {
   dragProps?: HTMLAttributes<HTMLButtonElement>
   style?: CSSProperties
   isDragging?: boolean
+  renderContextMenu?: (id: string) => ReactNode
 }
 
 function PanelButton({
@@ -80,62 +84,71 @@ function PanelButton({
   dragRef,
   dragProps,
   style,
-  isDragging
+  isDragging,
+  renderContextMenu
 }: PanelButtonProps) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          ref={dragRef}
-          style={style}
-          {...dragProps}
-          onClick={() => onChange(panel.id, !panel.active)}
-          aria-pressed={panel.active}
-          disabled={panel.disabled}
+  const menu = renderContextMenu?.(panel.id)
+  const button = (
+    <button
+      ref={dragRef}
+      style={style}
+      {...dragProps}
+      onClick={() => onChange(panel.id, !panel.active)}
+      aria-pressed={panel.active}
+      disabled={panel.disabled}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+        draggable && !panel.disabled && 'cursor-grab active:cursor-grabbing touch-none',
+        isDragging && 'opacity-60',
+        panel.disabled
+          ? panel.active
+            ? styles.activeDisabled
+            : 'text-muted-foreground/40 cursor-not-allowed'
+          : panel.active
+            ? styles.active
+            : 'text-muted-foreground hover:text-foreground'
+      )}
+    >
+      <panel.icon className="size-3.5" />
+      {panel.label}
+      {panel.shortcut && (
+        <span
           className={cn(
-            'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
-            draggable && !panel.disabled && 'cursor-grab active:cursor-grabbing touch-none',
-            isDragging && 'opacity-60',
-            panel.disabled
-              ? panel.active
-                ? styles.activeDisabled
-                : 'text-muted-foreground/40 cursor-not-allowed'
-              : panel.active
-                ? styles.active
-                : 'text-muted-foreground hover:text-foreground'
+            'ml-1 text-[10px]',
+            panel.active ? 'text-muted-foreground' : 'text-muted-foreground/60'
           )}
         >
-          <panel.icon className="size-3.5" />
-          {panel.label}
-          {panel.shortcut && (
-            <span
-              className={cn(
-                'ml-1 text-[10px]',
-                panel.active ? 'text-muted-foreground' : 'text-muted-foreground/60'
+          {panel.shortcut}
+        </span>
+      )}
+    </button>
+  )
+  return (
+    <ContextMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {menu ? <ContextMenuTrigger asChild>{button}</ContextMenuTrigger> : button}
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {panel.disabled
+            ? `Select a project to use ${panel.label}`
+            : withShortcut(
+                `${panel.active ? 'Hide' : 'Show'} ${panel.label} panel`,
+                panel.shortcut ?? null
               )}
-            >
-              {panel.shortcut}
-            </span>
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">
-        {panel.disabled
-          ? `Select a project to use ${panel.label}`
-          : withShortcut(
-              `${panel.active ? 'Hide' : 'Show'} ${panel.label} panel`,
-              panel.shortcut ?? null
-            )}
-      </TooltipContent>
-    </Tooltip>
+        </TooltipContent>
+      </Tooltip>
+      {menu && <ContextMenuContent className="min-w-48">{menu}</ContextMenuContent>}
+    </ContextMenu>
   )
 }
 
 function SortablePanelButton({
   panel,
   styles,
-  onChange
-}: Pick<PanelButtonProps, 'panel' | 'styles' | 'onChange'>) {
+  onChange,
+  renderContextMenu
+}: Pick<PanelButtonProps, 'panel' | 'styles' | 'onChange' | 'renderContextMenu'>) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: panel.id,
     disabled: panel.disabled
@@ -154,6 +167,7 @@ function SortablePanelButton({
         zIndex: isDragging ? 10 : undefined
       }}
       isDragging={isDragging}
+      renderContextMenu={renderContextMenu}
     />
   )
 }
@@ -162,6 +176,7 @@ export function PanelToggle({
   panels,
   onChange,
   onReorder,
+  renderContextMenu,
   variant = 'flat',
   className
 }: PanelToggleProps) {
@@ -187,6 +202,7 @@ export function PanelToggle({
             styles={styles}
             onChange={onChange}
             draggable={false}
+            renderContextMenu={renderContextMenu}
           />
         ))}
       </div>
@@ -214,7 +230,13 @@ export function PanelToggle({
       <SortableContext items={panels.map((p) => p.id)} strategy={horizontalListSortingStrategy}>
         <div className={containerClass}>
           {panels.map((panel) => (
-            <SortablePanelButton key={panel.id} panel={panel} styles={styles} onChange={onChange} />
+            <SortablePanelButton
+              key={panel.id}
+              panel={panel}
+              styles={styles}
+              onChange={onChange}
+              renderContextMenu={renderContextMenu}
+            />
           ))}
         </div>
       </SortableContext>

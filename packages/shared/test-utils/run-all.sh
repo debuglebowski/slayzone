@@ -1828,6 +1828,8 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/usePanelSizes.test.ts \
   packages/domains/task/src/client/layout/strip.test.ts \
   packages/domains/task/src/client/layout/useTaskLayout.test.tsx \
+  packages/domains/task/src/client/layout/layoutDnd.test.ts \
+  packages/domains/task/src/client/layout/usePanelCloseRequest.test.tsx \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.scope.test.tsx \

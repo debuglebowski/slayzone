@@ -26,15 +26,21 @@ import type {
 } from '@slayzone/task-contracts'
 import {
   applyLegacyWrite,
+  closeTab as closeTabOp,
   deriveLayoutFromLegacy,
   findTab,
+  hideTab as hideTabOp,
   legacyKindOf,
   projectToLegacy,
   reconcileClassicLayout,
+  renameInstance,
   resizeColumns,
+  resizeSlots as resizeSlotsOp,
   setActiveTab,
-  setSlotHidden
+  setSlotHidden,
+  splitAt
 } from '@slayzone/task-contracts'
+import { applyDrop, type DragItem, type DropTarget } from './layoutDnd'
 
 /** Coalesces a burst of toggles (a shortcut held down, several panels opened at once). */
 export const LAYOUT_SAVE_DEBOUNCE_MS = 150
@@ -78,6 +84,18 @@ export interface TaskLayoutApi {
   commitSizes: () => void
   /** Clear every column size override and persist. */
   resetAllSizes: () => void
+  /** Slot weights within a column: live during a drag (`persist` false), or one persisted edit. */
+  resizeSlots: (columnId: string, weights: Record<string, number>, persist: boolean) => void
+  /** A finished panel drag: move the tab or group (no-op drops change nothing). Persists. */
+  dropPanel: (item: DragItem, target: DropTarget) => void
+  /** Move a tab into a new slot below its group (`after`) or a new column right of it (`right`). */
+  splitTab: (instanceId: string, zone: 'after' | 'right') => void
+  /** Hide a tab in place (its group when it is the group's last shown tab). Persists. */
+  hideTab: (instanceId: string) => void
+  /** Close a tab: hides a primary (legacy-id) instance, removes any other. Persists. */
+  closeTab: (instanceId: string) => void
+  /** Name a tab (blank = the kind's label). Persists. */
+  renameTab: (instanceId: string, name: string) => void
 }
 
 interface LayoutState {
@@ -287,6 +305,42 @@ export function useTaskLayout({
     )
   })
 
+  const resizeSlots = useStableCallback(
+    (columnId: string, weights: Record<string, number>, persist: boolean) => {
+      edit((current) => resizeSlotsOp(current, columnId, weights), persist)
+    }
+  )
+
+  const dropPanel = useStableCallback((item: DragItem, target: DropTarget) => {
+    edit((current) => applyDrop(current, item, target), true)
+  })
+
+  const splitTab = useStableCallback((instanceId: string, zone: 'after' | 'right') => {
+    edit((current) => {
+      const loc = findTab(current, instanceId)
+      if (!loc) return null
+      const slot = current.columns[loc.columnIndex].slots[loc.slotIndex]
+      if (slot.tabs.length < 2) return null
+      return splitAt(current, instanceId, slot.id, zone)
+    }, true)
+  })
+
+  const hideTab = useStableCallback((instanceId: string) => {
+    edit((current) => (findTab(current, instanceId) ? hideTabOp(current, instanceId) : null), true)
+  })
+
+  const closeTab = useStableCallback((instanceId: string) => {
+    edit((current) => (findTab(current, instanceId) ? closeTabOp(current, instanceId) : null), true)
+  })
+
+  const renameTab = useStableCallback((instanceId: string, name: string) => {
+    edit(
+      (current) =>
+        current.instances[instanceId] ? renameInstance(current, instanceId, name) : null,
+      true
+    )
+  })
+
   return {
     layout,
     panelVisibility,
@@ -297,6 +351,12 @@ export function useTaskLayout({
     replaceVisibilityLocally,
     resizeColumns: resizeColumnsLive,
     commitSizes,
-    resetAllSizes
+    resetAllSizes,
+    resizeSlots,
+    dropPanel,
+    splitTab,
+    hideTab,
+    closeTab,
+    renameTab
   }
 }

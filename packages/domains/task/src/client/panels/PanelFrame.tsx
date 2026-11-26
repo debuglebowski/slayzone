@@ -1,10 +1,17 @@
-import { Activity, Suspense } from 'react'
+import { Activity, Suspense, createContext, use } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { cn } from '@slayzone/ui'
 import { PanelOwnerStub } from '../PanelOwnerStub'
 import { PanelLoadingSkeleton } from '../PanelLoadingSkeleton'
 import { PANEL_KINDS, type PanelKind } from './registry'
 import { useTaskPageContext } from './TaskPageContext'
+
+/**
+ * True inside a layout cell — a group stacked in a column with others, or a tab
+ * group with a strip: the frame fills its cell instead of taking the width and
+ * flex order the strip resolved for the column named like the panel.
+ */
+export const PanelCellContext = createContext(false)
 
 const FOCUS_GLOW = 'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
 
@@ -48,6 +55,7 @@ export function PanelFrame({
   const { isActive, panels } = useTaskPageContext()
   const { ownership, focusedPanel, multipleVisiblePanels, resolvedWidths, panelOrderIdx } = panels
   const def = PANEL_KINDS[kind]
+  const inCell = use(PanelCellContext)
 
   let body: ReactNode = children
   if (def.keepAlive === 'activity') {
@@ -76,10 +84,15 @@ export function PanelFrame({
       className={cn(
         'shrink-0 transition-shadow duration-200',
         chrome && 'rounded-md bg-surface-1 border border-border',
+        inCell && 'flex-1 min-w-0 min-h-0',
         className,
         chrome && multipleVisiblePanels && focusedPanel === panelId && FOCUS_GLOW
       )}
-      style={style ?? { width: resolvedWidths[panelId], order: panelOrderIdx[panelId] ?? 0 }}
+      style={
+        inCell
+          ? undefined
+          : (style ?? { width: resolvedWidths[panelId], order: panelOrderIdx[panelId] ?? 0 })
+      }
     >
       {replacement ??
         (ownership.hasOtherOwner(panelId) ? (

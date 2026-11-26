@@ -5,7 +5,13 @@
  * same `resolveLayout`/`planPanelStrip` the legacy strip used. Classic column ids
  * are the legacy panel ids, so Classic resolves exactly as before.
  */
-import type { LayoutColumn, PanelKind, PanelLayout, TaskLayout } from '@slayzone/task-contracts'
+import type {
+  LayoutColumn,
+  LayoutSlot,
+  PanelKind,
+  PanelLayout,
+  TaskLayout
+} from '@slayzone/task-contracts'
 import { columnEffectiveLayout, findTab, isColumnVisible } from '@slayzone/task-contracts'
 import {
   planPanelStrip,
@@ -105,4 +111,17 @@ export function compactColumns(layout: TaskLayout): LayoutColumn[] | null {
       ]
     }
   ]
+}
+
+/** A group shows a tab strip: it is named, or more than one of its tabs is shown. */
+export function showsTabStrip(slot: LayoutSlot): boolean {
+  return !!slot.name || slot.tabs.filter((t) => !t.hidden).length > 1
+}
+
+/** The instance is a shown tab of a shown group that has a tab strip (⌘W closes it). */
+export function isInTabStrip(layout: TaskLayout, instanceId: string): boolean {
+  const loc = findTab(layout, instanceId)
+  if (!loc) return false
+  const slot = layout.columns[loc.columnIndex].slots[loc.slotIndex]
+  return !slot.hidden && !slot.tabs[loc.tabIndex].hidden && showsTabStrip(slot)
 }

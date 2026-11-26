@@ -260,4 +260,102 @@ describe('useTaskLayout', () => {
     expect(updateTask).toHaveBeenCalledTimes(1)
     expect(updateTask.mock.calls[0][0].panelVisibility).toMatchObject({ processes: true })
   })
+
+  it('a drop moves the panel and persists; a no-op drop writes nothing', async () => {
+    const { result } = setup({
+      initialVisibility: { ...DEFAULT_TASK_PANEL_VISIBILITY, browser: true }
+    })
+    act(() =>
+      result.current.dropPanel(
+        { type: 'tab', instanceId: 'browser' },
+        { type: 'zone', slotId: 'browser', zone: 'merge' }
+      )
+    )
+    await flushSave()
+    expect(updateTask).not.toHaveBeenCalled()
+
+    act(() =>
+      result.current.dropPanel(
+        { type: 'tab', instanceId: 'browser' },
+        { type: 'zone', slotId: 'terminal', zone: 'merge' }
+      )
+    )
+    const shape = (l: TaskLayout) =>
+      l.columns
+        .filter(isColumnVisible)
+        .map((c) => c.slots.map((s) => s.tabs.map((t) => t.instanceId)))
+    expect(shape(result.current.layout)).toEqual([[['terminal', 'browser']], [['settings']]])
+    // Both stay visible in the legacy projection: one shows, one is a click away.
+    expect(result.current.panelVisibility).toMatchObject({ terminal: true, browser: true })
+    await flushSave()
+    expect(updateTask).toHaveBeenCalledTimes(1)
+    expect(shape(updateTask.mock.calls[0][0].panelLayout as TaskLayout)).toEqual([
+      [['terminal', 'browser']],
+      [['settings']]
+    ])
+  })
+
+  it('splitTab, hideTab, closeTab and renameTab edit the tab and persist', async () => {
+    const { result } = setup({
+      initialVisibility: { ...DEFAULT_TASK_PANEL_VISIBILITY, browser: true }
+    })
+    act(() =>
+      result.current.dropPanel(
+        { type: 'tab', instanceId: 'browser' },
+        { type: 'zone', slotId: 'terminal', zone: 'merge' }
+      )
+    )
+    act(() => result.current.splitTab('browser', 'after'))
+    const col = result.current.layout.columns[0]
+    expect(col.slots.map((s) => s.tabs.map((t) => t.instanceId))).toEqual([
+      ['terminal'],
+      ['browser']
+    ])
+    // A lone tab has nothing to split from.
+    const rev = result.current.layout.rev
+    act(() => result.current.splitTab('browser', 'right'))
+    expect(result.current.layout.rev).toBe(rev)
+
+    act(() => result.current.renameTab('browser', 'Docs'))
+    expect(result.current.layout.instances.browser.name).toBe('Docs')
+
+    act(() => result.current.closeTab('browser'))
+    // A primary instance is hidden, not removed.
+    expect(result.current.layout.instances.browser).toBeDefined()
+    expect(result.current.panelVisibility.browser).toBe(false)
+    act(() => result.current.setPanelVisible('browser', true))
+    expect(result.current.panelVisibility.browser).toBe(true)
+    act(() => result.current.hideTab('browser'))
+    expect(result.current.panelVisibility.browser).toBe(false)
+    await flushSave()
+    expect(updateTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('resizeSlots: live frames keep the rev, a persisted edit bumps and writes it', async () => {
+    const { result } = setup({
+      initialVisibility: { ...DEFAULT_TASK_PANEL_VISIBILITY, browser: true }
+    })
+    act(() =>
+      result.current.dropPanel(
+        { type: 'tab', instanceId: 'browser' },
+        { type: 'zone', slotId: 'terminal', zone: 'after' }
+      )
+    )
+    await flushSave()
+    updateTask.mockClear()
+    const col = result.current.layout.columns[0]
+    const [a, b] = col.slots
+    const rev = result.current.layout.rev
+    act(() => result.current.resizeSlots(col.id, { [a.id]: 0.3, [b.id]: 0.7 }, false))
+    expect(result.current.layout.rev).toBe(rev)
+    expect(result.current.layout.columns[0].slots.map((s) => s.weight)).toEqual([0.3, 0.7])
+    await flushSave()
+    expect(updateTask).not.toHaveBeenCalled()
+    act(() => result.current.commitSizes())
+    await flushSave()
+    expect(updateTask).toHaveBeenCalledTimes(1)
+    expect(
+      (updateTask.mock.calls[0][0].panelLayout as TaskLayout).columns[0].slots.map((s) => s.weight)
+    ).toEqual([0.3, 0.7])
+  })
 })

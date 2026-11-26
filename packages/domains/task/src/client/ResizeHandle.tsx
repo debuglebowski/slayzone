@@ -1,6 +1,12 @@
 import { useRef, useCallback, useEffect, type CSSProperties } from 'react'
 
 interface ResizeHandleProps {
+  /**
+   * `x` (default): a vertical divider between two columns. `y`: a horizontal
+   * divider between two stacked slots — "left"/"right" then mean top/bottom and
+   * the widths are heights.
+   */
+  axis?: 'x' | 'y'
   /** Current width of the panel immediately left of this handle */
   leftWidth: number
   /** Current width of the panel immediately right of this handle */
@@ -15,6 +21,12 @@ interface ResizeHandleProps {
   onDragStart?: () => void
   onDragEnd?: () => void
   onReset?: () => void
+  /**
+   * Take the starting sizes from the handle's neighbouring elements (their
+   * rendered width/height) instead of `leftWidth`/`rightWidth` — for neighbours
+   * sized by flex weight rather than resolved px.
+   */
+  measureSiblings?: boolean
   style?: CSSProperties
 }
 
@@ -25,6 +37,7 @@ interface ResizeHandleProps {
  * opens up — regardless of which panels sit on either side.
  */
 export function ResizeHandle({
+  axis = 'x',
   leftWidth,
   rightWidth,
   leftMinWidth,
@@ -35,6 +48,7 @@ export function ResizeHandle({
   onDragStart,
   onDragEnd,
   onReset,
+  measureSiblings = false,
   style
 }: ResizeHandleProps) {
   const isDragging = useRef(false)
@@ -53,14 +67,22 @@ export function ResizeHandle({
     (e: React.MouseEvent) => {
       e.preventDefault()
       isDragging.current = true
-      startX.current = e.clientX
+      startX.current = axis === 'y' ? e.clientY : e.clientX
       startLeft.current = leftWidth
       startRight.current = rightWidth
+      if (measureSiblings) {
+        const size = (el: Element | null): number => {
+          const r = el?.getBoundingClientRect()
+          return r ? (axis === 'y' ? r.height : r.width) : 0
+        }
+        startLeft.current = size(e.currentTarget.previousElementSibling)
+        startRight.current = size(e.currentTarget.nextElementSibling)
+      }
       onDragStart?.()
 
       const handleMouseMove = (e: MouseEvent) => {
         if (!isDragging.current) return
-        const delta = e.clientX - startX.current
+        const delta = (axis === 'y' ? e.clientY : e.clientX) - startX.current
         const total = startLeft.current + startRight.current
         // newLeft bounds: respect both panels' min AND max (right's bounds map to
         // newLeft = total - rightWidth).
@@ -87,6 +109,8 @@ export function ResizeHandle({
       }
     },
     [
+      axis,
+      measureSiblings,
       leftWidth,
       rightWidth,
       leftMinWidth,
@@ -101,13 +125,23 @@ export function ResizeHandle({
 
   return (
     <div
-      data-testid="panel-resize-handle"
-      className="w-4 shrink-0 cursor-col-resize flex items-center justify-center group z-10"
+      data-testid={axis === 'y' ? 'slot-resize-handle' : 'panel-resize-handle'}
+      className={
+        axis === 'y'
+          ? 'h-4 shrink-0 cursor-row-resize flex items-center justify-center group z-10'
+          : 'w-4 shrink-0 cursor-col-resize flex items-center justify-center group z-10'
+      }
       onMouseDown={handleMouseDown}
       onDoubleClick={onReset}
       style={style}
     >
-      <div className="w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 bg-primary/30 group-active:bg-primary/50 transition-opacity" />
+      <div
+        className={
+          axis === 'y'
+            ? 'h-1 w-8 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 bg-primary/30 group-active:bg-primary/50 transition-opacity'
+            : 'w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 bg-primary/30 group-active:bg-primary/50 transition-opacity'
+        }
+      />
     </div>
   )
 }

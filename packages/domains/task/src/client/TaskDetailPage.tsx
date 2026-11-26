@@ -73,6 +73,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@slayzone/ui'
+import { ContextMenuItem, ContextMenuLabel } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
 import { DeleteTaskDialog } from './DeleteTaskDialog'
 import { MoveTaskDialog } from './MoveTaskDialog'
@@ -137,8 +138,10 @@ import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useTrack } from '@slayzone/telemetry/client'
 import { useTaskLayout } from './layout/useTaskLayout'
+import { isInTabStrip } from './layout/strip'
 import { resolveLayoutStrip } from './layout/strip'
 import { TaskLayoutView } from './layout/TaskLayoutView'
+import { usePanelCloseRequest } from './layout/usePanelCloseRequest'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
@@ -627,8 +630,24 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     resizeColumns,
     commitSizes,
     resetAllSizes,
-    activateTab
+    activateTab,
+    dropPanel,
+    splitTab,
+    hideTab,
+    closeTab: closePanelTab,
+    renameTab
   } = taskLayout
+
+  // Closing a panel tab (×, ⌘W, the tab menu) asks its kind first: the agent
+  // confirms while its session runs.
+  const { requestClose: requestClosePanelTab, dialog: panelCloseDialog } = usePanelCloseRequest({
+    layout: taskLayout.layout,
+    closeTab: closePanelTab,
+    isSessionLive: async (instanceId) =>
+      !!task && instanceId === 'terminal'
+        ? trpcClient.pty.exists.query({ sessionId: getMainSessionId(task.id) })
+        : false
+  })
 
   // Drag-reorder of the PanelToggle button row. Receives the reordered subset of
   // task-view panel ids (only the buttons actually shown) and merges it back into
@@ -1039,21 +1058,30 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // window listener let a focus move in ANY tab re-render all of them (and record
   // another tab's panel as this one's Cmd+W target).
   const lastFocusedPanelRef = useRef<'terminal' | 'editor' | 'browser' | null>(null)
+  const lastFocusedPanelIdRef = useRef<string | null>(null)
   const [focusedPanel, setFocusedPanel] = useState<string | null>(null)
   useEffect(() => {
     if (!taskRootEl) return
     const handleFocusIn = (e: FocusEvent): void => {
       const target = e.target as HTMLElement | null
-      // Cmd+W tracking (sticky ref, specific selectors)
+      // Glow tracking (data-panel-id on all panel wrappers)
+      const panelId = target?.closest('[data-panel-id]')?.getAttribute('data-panel-id')
+      // Cmd+W tracking (sticky refs): the panel (or its tab in a strip) last focused,
+      // and which sub-item closer applies to it (specific selectors).
+      const panelTarget =
+        panelId ?? target?.closest('[data-panel-tab]')?.getAttribute('data-panel-tab')
+      if (panelTarget) lastFocusedPanelIdRef.current = panelTarget
       if (target?.classList.contains('xterm-helper-textarea') || target?.closest('.xterm')) {
         lastFocusedPanelRef.current = 'terminal'
       } else if (target?.closest('[data-panel-id="editor"]')) {
         lastFocusedPanelRef.current = 'editor'
       } else if (target?.closest('[data-browser-panel]')) {
         lastFocusedPanelRef.current = 'browser'
+      } else if (panelTarget && !['terminal', 'editor', 'browser'].includes(panelTarget)) {
+        // Another panel (or its tab in a strip): a sub-item of the panel focused
+        // before is no longer what Cmd+W closes.
+        lastFocusedPanelRef.current = null
       }
-      // Glow tracking (data-panel-id on all panel wrappers)
-      const panelId = target?.closest('[data-panel-id]')?.getAttribute('data-panel-id')
       if (panelId) setFocusedPanel(panelId)
     }
     const handleFocusOut = (e: FocusEvent): void => {
@@ -1206,7 +1234,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         return
       }
     }
-    // Nothing was closed — close the task tab
+    // No sub-item closed: close the focused panel's tab when it sits in a tab
+    // strip (a group of several tabs, or a named one) — else the task tab.
+    const panelId = lastFocusedPanelIdRef.current
+    if (panelId && isInTabStrip(taskLayout.layout, panelId)) {
+      requestClosePanelTab(panelId)
+      return
+    }
     onCloseTab?.(taskId)
   })
   useSubscription(
@@ -2500,6 +2534,38 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       panels={ordered}
                       onChange={handlePanelToggle}
                       onReorder={handlePanelReorder}
+                      renderContextMenu={(id) => {
+                        // Gather a panel into another shown group as a tab (the way
+                        // into tab groups from Classic, whose panels have no strip).
+                        const from = taskLayout.slotOf(id)
+                        if (!from || isSecondaryWindow) return null
+                        const targets = ordered.filter((p) => {
+                          const to = p.active ? taskLayout.slotOf(p.id) : null
+                          return p.id !== id && to !== null && to !== from
+                        })
+                        if (targets.length === 0) return null
+                        return (
+                          <>
+                            <ContextMenuLabel>Add as a tab to</ContextMenuLabel>
+                            {targets.map((p) => (
+                              <ContextMenuItem
+                                key={p.id}
+                                onSelect={() => {
+                                  const to = taskLayout.slotOf(p.id)
+                                  if (to)
+                                    dropPanel(
+                                      { type: 'tab', instanceId: id },
+                                      { type: 'zone', slotId: to, zone: 'merge' }
+                                    )
+                                }}
+                              >
+                                <p.icon className="size-3.5" />
+                                {p.label}
+                              </ContextMenuItem>
+                            ))}
+                          </>
+                        )
+                      }}
                     />
                   )
                 })()}
@@ -2582,11 +2648,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 commitSizes()
               }}
               onResetSizes={resetAllSizes}
-              onActivateTab={activateTab}
+              actions={{
+                activateTab,
+                requestCloseTab: requestClosePanelTab,
+                hideTab,
+                renameTab,
+                splitTab,
+                resizeSlots: taskLayout.resizeSlots
+              }}
+              onDrop={dropPanel}
+              onDraggingChange={setIsResizing}
             />
           )}
         </div>
       </TaskPageProvider>
+      {panelCloseDialog}
 
       <LoopModeDialog
         open={loopDialogOpen}
