@@ -1415,6 +1415,7 @@ run_harness packages/domains/task-contracts/src/layout/ops.test.ts
 run_harness packages/domains/task-contracts/src/layout/legacy.test.ts
 run_harness packages/domains/task-contracts/src/layout/settings.test.ts
 run_harness packages/domains/task-contracts/src/layout/classic.test.ts
+run_harness packages/domains/task-contracts/src/layout/instances.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
 run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts

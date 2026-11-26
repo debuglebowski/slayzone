@@ -555,6 +555,27 @@ export function renameInstance<T extends LayoutTree>(
   })
 }
 
+/**
+ * Merge `patch` into an instance's settings (undefined values delete keys), then
+ * re-validate them for its kind like a parsed layout would.
+ */
+export function updateInstanceSettings<T extends LayoutTree>(
+  tree: T,
+  instanceId: string,
+  patch: Record<string, unknown>
+): T {
+  return edit(tree, (d) => {
+    const inst = d.instances[instanceId]
+    if (!inst) return
+    const next: Record<string, unknown> = { ...inst.settings }
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) delete next[k]
+      else next[k] = v
+    }
+    inst.settings = parseInstanceSettings(inst.kind, next)
+  })
+}
+
 /** Name a group; blank or undefined = unnamed. */
 export function renameSlot<T extends LayoutTree>(
   tree: T,
