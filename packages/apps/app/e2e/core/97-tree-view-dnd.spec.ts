@@ -74,6 +74,19 @@ async function killAllPtys(page: Page) {
   })
 }
 
+/** Lens button → ✎ on the active lens → flip one switch in the editor → close it. */
+async function toggleLensSwitch(page: Page, tab: string, name: string) {
+  await page.getByRole('button', { name: 'Lens', exact: true }).click()
+  const active = page.locator('[data-testid="lens-menu-item"][data-active="true"]')
+  await active.hover()
+  await active.getByRole('button', { name: /^Edit / }).click()
+  const dialog = page.getByTestId('lens-edit-dialog')
+  await dialog.getByRole('tab', { name: tab }).click()
+  await dialog.getByRole('switch', { name, exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+}
+
 function taskRow(page: Page, taskId: string) {
   return page.locator(`[data-sidebar-tree-item="task"][data-task-id="${taskId}"]`)
 }
@@ -405,9 +418,7 @@ test.describe('TreeView drag and drop', () => {
     try {
       await patchStore(mainWindow, { treeShowBlocked: true })
       await seed(mainWindow).refreshData()
-      await mainWindow.getByRole('button', { name: 'Lens', exact: true }).click()
-      await mainWindow.getByRole('switch', { name: 'Group blocked tasks', exact: true }).click()
-      await mainWindow.keyboard.press('Escape')
+      await toggleLensSwitch(mainWindow, 'What to show', 'Group blocked tasks')
       const header = mainWindow.locator(
         `[data-sidebar-tree-item="header"][data-project-id="${projectId}"][data-group-key="__blocked__"]`
       )
@@ -432,9 +443,7 @@ test.describe('TreeView drag and drop', () => {
         expect(task?.status).toBe('in_progress')
         expect(task?.priority).toBe(3)
       }
-      await mainWindow.getByRole('button', { name: 'Lens', exact: true }).click()
-      await mainWindow.getByRole('switch', { name: 'Group blocked tasks', exact: true }).click()
-      await mainWindow.keyboard.press('Escape')
+      await toggleLensSwitch(mainWindow, 'What to show', 'Group blocked tasks')
       await expect(header).toHaveCount(0)
       await expect(taskRow(mainWindow, rootB)).toBeVisible()
     } finally {
