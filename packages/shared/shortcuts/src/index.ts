@@ -8,6 +8,8 @@ export {
   type ShortcutDefinition
 } from './definitions'
 export { resolveShortcutKeys } from './resolve'
+export { normalizeShortcutOverrides, type ShortcutOverrides } from './normalize'
+export { adoptShortcutsFromHub, type AdoptShortcutsDeps } from './adopt'
 export {
   toElectronAccelerator,
   matchesShortcut,

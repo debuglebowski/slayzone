@@ -147,3 +147,20 @@ test('nothing on disk: a read creates nothing', () => {
   readClientSettings(d)
   expect(fs.readdirSync(d).length).toBe(0)
 })
+
+test('keeps the one-time shortcut adoption marker, written with the map in one patch', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-adopt-'))
+  await updateClientSettings({ customShortcuts: { 'go-home': 'mod+k' } }, d)
+  expect(readClientSettings(d).shortcutsAdoptedFromHub).toBeUndefined()
+  await updateClientSettings(
+    { customShortcuts: { 'go-home': null }, shortcutsAdoptedFromHub: true },
+    d
+  )
+  expect(readClientSettings(d)).toMatchObject({
+    customShortcuts: { 'go-home': null },
+    shortcutsAdoptedFromHub: true
+  })
+  // Hand-edited garbage reads as unset, not as adopted.
+  fs.writeFileSync(clientSettingsPath(d), JSON.stringify({ shortcutsAdoptedFromHub: 'yes' }))
+  expect(readClientSettings(d).shortcutsAdoptedFromHub).toBeUndefined()
+})

@@ -27,8 +27,15 @@ import { readJsonObject, writeJsonAtomic } from './slayzone-config'
 export type ClientSettings = {
   /** AUTHORITATIVE — read before the first window exists. */
   theme?: 'light' | 'dark' | 'system'
-  /** AUTHORITATIVE — native menu accelerators, built pre-hub. Per-machine. */
+  /** AUTHORITATIVE — keyboard-shortcut overrides: the native menu accelerators,
+   *  built pre-hub, and every window's shortcut store. Per-machine. */
   customShortcuts?: Record<string, string | null>
+  /**
+   * The one-time copy of the default hub's `custom_shortcuts` into this file
+   * happened (`adoptShortcutsFromHub`). Written in the SAME patch as the copied map,
+   * and only after the hub was read — a failed read leaves it unset and retries.
+   */
+  shortcutsAdoptedFromHub?: boolean
   /** AUTHORITATIVE — gate native menu items. */
   labs?: { testsPanel?: boolean; loopMode?: boolean }
   /** AUTHORITATIVE — geometry of a native window on this display. */
@@ -130,6 +137,7 @@ function coerce(raw: Record<string, unknown>): ClientSettings {
     }
     out.customShortcuts = map
   }
+  if (raw.shortcutsAdoptedFromHub === true) out.shortcutsAdoptedFromHub = true
   if (raw.labs && typeof raw.labs === 'object') {
     const l = raw.labs as Record<string, unknown>
     out.labs = { testsPanel: asBool(l.testsPanel), loopMode: asBool(l.loopMode) }
