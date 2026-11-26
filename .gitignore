@@ -70,3 +70,4 @@ packages/apps/app/e2e-move-hub-*/
 
 # Turborepo local cache (pnpm typecheck)
 .turbo
+.vitest/
