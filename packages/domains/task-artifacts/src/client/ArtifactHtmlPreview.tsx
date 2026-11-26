@@ -24,7 +24,11 @@ import {
   HTML_PREVIEW_LINK_MESSAGE_TYPE,
   parseHtmlPreviewLinkMessage
 } from '@slayzone/platform/html-preview-links'
-import { ARTIFACT_DEVICE_PARTITION, type DeviceViewport } from '@slayzone/platform/preview-devices'
+import {
+  ARTIFACT_DEVICE_PARTITION,
+  zoomDeviceViewport,
+  type DeviceViewport
+} from '@slayzone/platform/preview-devices'
 import type {
   HtmlPrototypeActionMessage,
   HtmlPrototypeActionValue
@@ -37,6 +41,7 @@ import { ArtifactControlsDock, type ArtifactControlsSize } from './ArtifactContr
 import { deviceChassisLayout, DeviceCameraCutout, DeviceChassisBody } from './ArtifactDeviceFrame'
 import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import type { HtmlArtifactTheme } from './ArtifactsPanel.constants'
+import { ZoomStepper } from './ZoomStepper'
 
 type SendAction = (message: HtmlPrototypeActionMessage) => void
 type RegisterActionTarget = (send: SendAction) => () => void
@@ -74,6 +79,10 @@ function useActionTarget(ready: boolean, send: SendAction) {
 // Shrinking the frame's layout viewport by the zoom factor and scaling the
 // element back up by the same factor reproduces browser zoom exactly — the inner
 // document reflows to the narrower viewport, then paints enlarged.
+//
+// Device previews have two zooms: `zoom` scales the whole device (frame and
+// page alike), display zoom zooms the page inside the device's screen, as if
+// its resolution were lower or higher (see `deviceScreenStyle`).
 export function HtmlPreviewFrame({
   artifactId,
   contentVersion,
@@ -83,6 +92,8 @@ export function HtmlPreviewFrame({
   controls,
   devicePreviews = [],
   showDeviceFrame = true,
+  displayZoomPct = 100,
+  onDisplayZoomPctChange,
   onOpenLink
 }: {
   artifactId: string
@@ -93,6 +104,9 @@ export function HtmlPreviewFrame({
   controls: readonly ArtifactControlsPosition[]
   devicePreviews?: readonly ArtifactDevicePreview[]
   showDeviceFrame?: boolean
+  /** Device previews only; the canvas shows its control when it can be changed. */
+  displayZoomPct?: number
+  onDisplayZoomPctChange?: (pct: number) => void
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   const hubId = useHubId()
@@ -223,6 +237,8 @@ export function HtmlPreviewFrame({
           dockExtent={dockExtent}
           showDeviceFrame={showDeviceFrame}
           zoom={zoom}
+          displayZoomPct={displayZoomPct}
+          onDisplayZoomPctChange={onDisplayZoomPctChange}
           src={screenSrc}
           sandbox={sandbox}
           configure={isArtifactOrigin ? electronBootstrap.artifactDevicePreview() : null}
@@ -301,6 +317,8 @@ function DevicePreviewCanvas({
   dockExtent,
   showDeviceFrame,
   zoom,
+  displayZoomPct,
+  onDisplayZoomPctChange,
   src,
   sandbox,
   configure,
@@ -311,6 +329,8 @@ function DevicePreviewCanvas({
   dockExtent: (position: ArtifactControlsPosition) => number
   showDeviceFrame: boolean
   zoom: number
+  displayZoomPct: number
+  onDisplayZoomPctChange?: (pct: number) => void
   src: string
   sandbox: string
   configure: ConfigureGuest | null
@@ -384,80 +404,103 @@ function DevicePreviewCanvas({
       </div>
     )
   const scale = fit * zoom
+  // Floats over the canvas, in a corner no controls dock is docked along.
+  const displayZoomEdge = docks.bottom && !docks.top ? 'top-3' : 'bottom-3'
 
   return (
-    <div
-      ref={measure}
-      data-testid="artifact-device-canvas"
-      className="relative min-h-0 min-w-0 flex-1 overflow-auto bg-surface-0"
-    >
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div
-        className="flex min-h-full min-w-full w-max flex-col items-center justify-center"
-        style={{ padding: CANVAS_PADDING, gap: DOCK_GAP }}
+        ref={measure}
+        data-testid="artifact-device-canvas"
+        className="relative min-h-0 min-w-0 flex-1 overflow-auto bg-surface-0"
       >
-        {edgeDock('top')}
-        <div className="flex shrink-0 items-stretch" style={{ gap: DOCK_GAP }}>
-          {sideDock('left')}
-          <div className="flex shrink-0 items-start" style={{ gap }}>
-            {screens.map(({ slot, viewport, frame, label, chassis, width, height }) => {
-              const caption = label
-                ? label + ' · ' + viewport.width + ' × ' + viewport.height
-                : undefined
-              return (
-                <figure key={slot} className="m-0 shrink-0" style={{ width: width * scale }}>
-                  {caption && (
-                    <figcaption
-                      className="truncate text-center text-xs text-muted-foreground tabular-nums"
-                      style={{ height: CAPTION_HEIGHT }}
-                      title={caption}
-                    >
-                      {caption}
-                    </figcaption>
-                  )}
-                  <div className="relative overflow-hidden" style={{ height: height * scale }}>
-                    <div
-                      className="absolute left-0 top-0 origin-top-left"
-                      style={{ width, height, transform: 'scale(' + scale + ')' }}
-                    >
-                      {frame && chassis && (
-                        <DeviceChassisBody model={frame.device.id} layout={chassis} />
-                      )}
-                      <div
-                        key="live-screen"
-                        className={
-                          chassis
-                            ? 'absolute overflow-hidden bg-background'
-                            : 'absolute overflow-hidden rounded-sm outline-1 -outline-offset-1 outline-border bg-background'
-                        }
-                        style={{
-                          left: chassis?.screenLeft ?? 0,
-                          top: chassis?.screenTop ?? 0,
-                          width: viewport.width,
-                          height: viewport.height,
-                          borderRadius: chassis?.screenRadius
-                        }}
+        <div
+          className="flex min-h-full min-w-full w-max flex-col items-center justify-center"
+          style={{ padding: CANVAS_PADDING, gap: DOCK_GAP }}
+        >
+          {edgeDock('top')}
+          <div className="flex shrink-0 items-stretch" style={{ gap: DOCK_GAP }}>
+            {sideDock('left')}
+            <div className="flex shrink-0 items-start" style={{ gap }}>
+              {screens.map(({ slot, viewport, frame, label, chassis, width, height }) => {
+                const caption = label
+                  ? label + ' · ' + viewport.width + ' × ' + viewport.height
+                  : undefined
+                return (
+                  <figure key={slot} className="m-0 shrink-0" style={{ width: width * scale }}>
+                    {caption && (
+                      <figcaption
+                        className="truncate text-center text-xs text-muted-foreground tabular-nums"
+                        style={{ height: CAPTION_HEIGHT }}
+                        title={caption}
                       >
-                        <LiveDevicePreview
-                          src={src}
-                          sandbox={sandbox}
-                          configure={configure}
-                          viewport={viewport}
-                          label={label}
-                          onOpenLink={onOpenLink}
-                        />
-                        <DeviceHinge feature={viewport.displayFeature} framed={!!chassis} />
+                        {caption}
+                      </figcaption>
+                    )}
+                    <div className="relative overflow-hidden" style={{ height: height * scale }}>
+                      <div
+                        className="absolute left-0 top-0 origin-top-left"
+                        style={{ width, height, transform: 'scale(' + scale + ')' }}
+                      >
+                        {frame && chassis && (
+                          <DeviceChassisBody model={frame.device.id} layout={chassis} />
+                        )}
+                        <div
+                          key="live-screen"
+                          className={
+                            chassis
+                              ? 'absolute overflow-hidden bg-background'
+                              : 'absolute overflow-hidden rounded-sm outline-1 -outline-offset-1 outline-border bg-background'
+                          }
+                          style={{
+                            left: chassis?.screenLeft ?? 0,
+                            top: chassis?.screenTop ?? 0,
+                            width: viewport.width,
+                            height: viewport.height,
+                            borderRadius: chassis?.screenRadius
+                          }}
+                        >
+                          <LiveDevicePreview
+                            src={src}
+                            sandbox={sandbox}
+                            configure={configure}
+                            viewport={viewport}
+                            zoom={displayZoomPct / 100}
+                            label={label}
+                            onOpenLink={onOpenLink}
+                          />
+                          <DeviceHinge feature={viewport.displayFeature} framed={!!chassis} />
+                        </div>
+                        {chassis && <DeviceCameraCutout layout={chassis} />}
                       </div>
-                      {chassis && <DeviceCameraCutout layout={chassis} />}
                     </div>
-                  </div>
-                </figure>
-              )
-            })}
+                  </figure>
+                )
+              })}
+            </div>
+            {sideDock('right')}
           </div>
-          {sideDock('right')}
+          {edgeDock('bottom')}
         </div>
-        {edgeDock('bottom')}
       </div>
+      {onDisplayZoomPctChange && (
+        <div
+          className={
+            'absolute right-4 z-10 flex items-center gap-1.5 rounded-lg border border-border bg-popover py-1 pr-1 pl-2 shadow-md ' +
+            displayZoomEdge
+          }
+          title="Above 100%, the page sees a lower resolution; below, a higher one."
+        >
+          <span className="text-xs text-muted-foreground">Display zoom</span>
+          <ZoomStepper
+            zoom={displayZoomPct}
+            onZoom={onDisplayZoomPctChange}
+            label="Display zoom"
+            noun="Display zoom"
+            testId="artifact-display-zoom"
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -490,11 +533,28 @@ function DeviceHinge({
   )
 }
 
+/**
+ * The page's box inside a device screen at `zoom`: the zoomed layout viewport
+ * (what the page lays out in), scaled back up to cover the whole screen.
+ */
+function deviceScreenStyle(viewport: DeviceViewport, zoom: number): CSSProperties {
+  const { width, height } = zoomDeviceViewport(viewport, zoom)
+  if (zoom === 1) return { width, height }
+  return {
+    width,
+    height,
+    // Per axis: the zoomed size is rounded to whole CSS pixels, the screen is not.
+    transform: 'scale(' + viewport.width / width + ', ' + viewport.height / height + ')',
+    transformOrigin: '0 0'
+  }
+}
+
 function LiveDevicePreview({
   src,
   sandbox,
   configure,
   viewport,
+  zoom,
   label,
   onOpenLink
 }: {
@@ -502,6 +562,7 @@ function LiveDevicePreview({
   sandbox: string
   configure: ConfigureGuest | null
   viewport: DeviceViewport
+  zoom: number
   label?: string
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
@@ -509,11 +570,14 @@ function LiveDevicePreview({
   const fallback = useCallback(() => setFailedViewport(viewport), [viewport])
 
   const failed = failedViewport === viewport
+  const screenStyle = deviceScreenStyle(viewport, zoom)
   if (configure && !failed) {
     return (
       <ArtifactDeviceGuest
         src={src}
         viewport={viewport}
+        zoom={zoom}
+        style={screenStyle}
         configure={configure}
         onFallback={fallback}
         onOpenLink={onOpenLink}
@@ -527,7 +591,7 @@ function LiveDevicePreview({
         src={src}
         sandbox={sandbox}
         className="block border-0"
-        style={{ width: viewport.width, height: viewport.height }}
+        style={screenStyle}
         label={label}
         onOpenLink={onOpenLink}
       />
@@ -551,6 +615,8 @@ type GuestMessage = Event & { channel: string; args: unknown[] }
 function ArtifactDeviceGuest({
   src,
   viewport,
+  zoom,
+  style,
   configure,
   onFallback,
   onOpenLink,
@@ -558,6 +624,9 @@ function ArtifactDeviceGuest({
 }: {
   src: string
   viewport: DeviceViewport
+  /** Emulated inside the guest; `style` scales its smaller viewport back up. */
+  zoom: number
+  style: CSSProperties
   configure: ConfigureGuest
   onFallback: () => void
   label?: string
@@ -613,7 +682,7 @@ function ArtifactDeviceGuest({
   useEffect(() => {
     if (guestId === null) return
     let active = true
-    void configure(guestId, src, viewport).then(
+    void configure(guestId, src, viewport, zoom).then(
       (ok) => {
         if (active && !ok) onFallback()
       },
@@ -624,7 +693,7 @@ function ArtifactDeviceGuest({
     return () => {
       active = false
     }
-  }, [guestId, src, viewport, configure, onFallback])
+  }, [guestId, src, viewport, zoom, configure, onFallback])
 
   return (
     <>
@@ -636,7 +705,7 @@ function ArtifactDeviceGuest({
         partition={ARTIFACT_DEVICE_PARTITION}
         aria-label={label ? 'HTML device preview — ' + label : 'HTML device preview'}
         title="Chromium device preview"
-        style={{ width: viewport.width, height: viewport.height }}
+        style={style}
       />
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-background text-xs text-muted-foreground">

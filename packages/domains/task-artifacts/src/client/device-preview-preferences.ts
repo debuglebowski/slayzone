@@ -1,6 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import { z } from 'zod'
 import { MAX_DEVICE_VIEWPORT_SIZE, PREVIEW_DEVICES } from '@slayzone/platform/preview-devices'
+import { DEFAULT_ZOOM_PCT, ZOOM_STEPS } from '@slayzone/task-contracts'
 import type { ArtifactDeviceSelection } from './ArtifactDevicePicker'
 
 const storagePrefix = 'slayzone:artifact-device-preview:'
@@ -55,6 +56,12 @@ function restoreSelection(raw: string | null): ArtifactDeviceSelection {
   return { kind: 'preset', device, screen: device.screens[screen] ? screen : 0, rotated, showBoth }
 }
 
+/** A stored display zoom; anything off the zoom ladder reads as 100%. */
+function restoreDisplayZoom(raw: string | null): number {
+  const pct = Number(raw)
+  return raw && ZOOM_STEPS.includes(pct) ? pct : DEFAULT_ZOOM_PCT
+}
+
 function subscribe(onChange: () => void) {
   const onStorage = (event: StorageEvent) => {
     if (event.key === null || event.key === legacyFrameKey || event.key.startsWith(storagePrefix)) {
@@ -85,6 +92,7 @@ function writeStorage(key: string, raw: string | null) {
 export function useDevicePreviewPreferences(artifactId: string | undefined) {
   const key = artifactId ? storagePrefix + artifactId : null
   const frameKey = key ? key + ':frame' : null
+  const displayZoomKey = key ? key + ':display-zoom' : null
   const raw = useSyncExternalStore(
     subscribe,
     () => (key ? readStorage(key) : null),
@@ -94,6 +102,13 @@ export function useDevicePreviewPreferences(artifactId: string | undefined) {
     subscribe,
     () => ((frameKey && readStorage(frameKey)) ?? readStorage(legacyFrameKey)) !== '0',
     () => true
+  )
+  const displayZoomPct = restoreDisplayZoom(
+    useSyncExternalStore(
+      subscribe,
+      () => (displayZoomKey ? readStorage(displayZoomKey) : null),
+      () => null
+    )
   )
   const selection = useMemo(() => restoreSelection(raw), [raw])
 
@@ -114,10 +129,17 @@ export function useDevicePreviewPreferences(artifactId: string | undefined) {
     if (frameKey) writeStorage(frameKey, show ? '1' : '0')
   }
 
+  /** 100% removes the key, so untouched artifacts store nothing. */
+  function setDisplayZoomPct(pct: number) {
+    if (displayZoomKey) writeStorage(displayZoomKey, pct === DEFAULT_ZOOM_PCT ? null : String(pct))
+  }
+
   return {
     selection,
     setSelection,
     showDeviceFrame,
-    setShowDeviceFrame
+    setShowDeviceFrame,
+    displayZoomPct,
+    setDisplayZoomPct
   }
 }

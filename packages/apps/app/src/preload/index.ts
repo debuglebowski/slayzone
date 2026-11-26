@@ -102,12 +102,13 @@ const api: ElectronAPI = {
     // Client-local host capability, not a domain API: the export renders on THIS device.
     exportArtifact: (request: ArtifactExportRequest) =>
       ipcRenderer.invoke('app:export-artifact', request) as Promise<ArtifactExportResult>,
-    configureArtifactDevicePreview: (id, url, viewport) =>
+    configureArtifactDevicePreview: (id, url, viewport, zoom) =>
       ipcRenderer.invoke(
         'app:configure-artifact-device-preview',
         id,
         url,
-        viewport
+        viewport,
+        zoom
       ) as Promise<boolean>,
     saveTargetOpen: (request: SaveTargetRequest) =>
       ipcRenderer.invoke('app:save-target-open', request) as Promise<SaveTargetOpenResult>,

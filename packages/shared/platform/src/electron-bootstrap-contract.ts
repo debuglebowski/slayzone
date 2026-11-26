@@ -151,11 +151,16 @@ export interface ElectronBootstrapApp {
    * Optional: a host without it reports export as unsupported.
    */
   exportArtifact?: (request: ArtifactExportRequest) => Promise<ArtifactExportResult>
-  /** Emulate a device on a guest owned by this window, then load its HTML artifact. */
+  /**
+   * Emulate a device on a guest owned by this window, then load its HTML artifact.
+   * `zoom` is the display zoom (1 = 100%): the page's zoom inside the device, as if
+   * its resolution were lower (above 1) or higher (below).
+   */
   configureArtifactDevicePreview?: (
     webContentsId: number,
     url: string,
-    viewport: DeviceViewport
+    viewport: DeviceViewport,
+    zoom: number
   ) => Promise<boolean>
   /**
    * Save a download on THIS device in pieces: open (asks where), then write each

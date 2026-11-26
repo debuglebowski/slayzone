@@ -46,8 +46,10 @@ vi.mock('@slayzone/transport/client', () => ({
   },
   // No hub scope: previews are plain local `slz-file://` paths (`toArtifactFileUrl`).
   useHubId: () => hubId,
-  electronBootstrap: { artifactDevicePreview: () => null }
+  electronBootstrap: { artifactDevicePreview: () => configureGuest }
 }))
+/** The host's device emulation for `<webview>` guests; null = iframe fallback. */
+let configureGuest: ReturnType<typeof vi.fn> | null = null
 const appearance = {
   notesFontFamily: 'sans',
   notesCheckedHighlight: false,
@@ -134,7 +136,10 @@ function Tab({
   siblings = [],
   deviceViewport,
   deviceFrame,
-  devicePreviews
+  devicePreviews,
+  zoomPct = 100,
+  displayZoomPct,
+  onDisplayZoomPctChange
 }: {
   mode: 'visible' | 'hidden'
   art?: TaskArtifact
@@ -143,6 +148,9 @@ function Tab({
   deviceViewport?: DeviceViewport
   deviceFrame?: ArtifactDeviceFrame
   devicePreviews?: React.ComponentProps<typeof ArtifactContentEditor>['devicePreviews']
+  zoomPct?: number
+  displayZoomPct?: number
+  onDisplayZoomPctChange?: (pct: number) => void
 }) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
     artifact: art,
@@ -153,7 +161,9 @@ function Tab({
     getFilePath,
     effectiveReadability: 'normal',
     effectiveWidth: 'wide',
-    zoomPct: 100,
+    zoomPct,
+    displayZoomPct,
+    onDisplayZoomPctChange,
     htmlTheme: 'system',
     devicePreviews:
       devicePreviews ??
@@ -179,6 +189,7 @@ const flush = () => act(async () => {})
 beforeEach(() => {
   vi.useFakeTimers()
   hubId = null
+  configureGuest = null
   disk.content = { a1: 'v1' }
   disk.mtime = { a1: 1, img: 1 }
   disk.notText = {}
@@ -304,6 +315,98 @@ it('toggles a device frame around the same live HTML viewport', async () => {
   expect(screen.getByTitle('HTML preview')).toBe(frame)
   expect(frame.style.width).toBe('951px')
   expect(frame.style.height).toBe('669px')
+})
+
+it('artifact zoom scales the device; display zoom changes its resolution', async () => {
+  vi.useRealTimers()
+  const html = artifact('page', 'page.html')
+  disk.content.page = '<p>Hello</p>'
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const viewport = deviceViewport(device, 0)
+  const props = {
+    mode: 'visible' as const,
+    art: html,
+    viewMode: 'preview' as const,
+    deviceViewport: viewport,
+    deviceFrame: { device, screen: 0 }
+  }
+  const view = render(<Tab {...props} />)
+  const frame = (await screen.findByTitle('HTML preview')) as HTMLIFrameElement
+  const figureWidth = () => parseFloat((frame.closest('figure') as HTMLElement).style.width)
+  const deviceWidth = figureWidth()
+
+  // The whole device grows; the page inside keeps its resolution.
+  view.rerender(<Tab {...props} zoomPct={150} />)
+  expect(figureWidth()).toBeCloseTo(deviceWidth * 1.5)
+  expect(frame.style.width).toBe('466px')
+  expect(frame.style.transform).toBe('')
+
+  view.rerender(<Tab {...props} displayZoomPct={150} />)
+  expect(screen.getByTitle('HTML preview')).toBe(frame)
+  expect(figureWidth()).toBe(deviceWidth)
+  // 466×678 at 150%: the page lays out in 311×452 CSS pixels, painted over the whole screen.
+  expect(frame.style.width).toBe('311px')
+  expect(frame.style.height).toBe('452px')
+  expect(frame.style.transform).toBe(`scale(${466 / 311}, ${678 / 452})`)
+  expect(frame.style.transformOrigin).toBe('0 0')
+})
+
+it('puts the display zoom control on the device canvas only', async () => {
+  vi.useRealTimers()
+  disk.content.page = '<p>Hello</p>'
+  const onDisplayZoomPctChange = vi.fn()
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const props = {
+    mode: 'visible' as const,
+    art: artifact('page', 'page.html'),
+    viewMode: 'preview' as const,
+    onDisplayZoomPctChange
+  }
+  const view = render(<Tab {...props} />)
+  await screen.findByTitle('HTML preview')
+  expect(screen.queryByRole('group', { name: 'Display zoom' })).toBeNull()
+
+  view.rerender(<Tab {...props} deviceViewport={deviceViewport(device, 0)} displayZoomPct={125} />)
+  const control = screen.getByRole('group', { name: 'Display zoom' })
+  expect(screen.getByTestId('artifact-device-canvas').parentElement?.contains(control)).toBe(true)
+  expect(screen.getByTestId('artifact-display-zoom-value').textContent).toBe('125%')
+  fireEvent.click(screen.getByRole('button', { name: 'Display zoom in' }))
+  expect(onDisplayZoomPctChange).toHaveBeenLastCalledWith(150)
+  fireEvent.click(screen.getByRole('button', { name: 'Reset display zoom' }))
+  expect(onDisplayZoomPctChange).toHaveBeenLastCalledWith(100)
+})
+
+it('zooms an emulated device guest through its viewport', async () => {
+  vi.useRealTimers()
+  vi.stubGlobal('crypto', webcrypto)
+  hubId = 'hub'
+  configureGuest = vi.fn(async () => true)
+  disk.content.page = '<p>Hello</p>'
+  const device = PREVIEW_DEVICES.find(({ id }) => id === 'iphone-duo')!
+  const viewport = deviceViewport(device, 0)
+  const props = {
+    mode: 'visible' as const,
+    art: artifact('page', 'page.html'),
+    viewMode: 'preview' as const,
+    deviceViewport: viewport
+  }
+  const view = render(<Tab {...props} />)
+  const guest = (await screen.findByLabelText('HTML device preview')) as HTMLElement
+  Object.assign(guest, { getWebContentsId: () => 7, getURL: () => 'about:blank' })
+  fireEvent(guest, new Event('dom-ready'))
+  await vi.waitFor(() =>
+    expect(configureGuest).toHaveBeenCalledWith(7, expect.any(String), viewport, 1)
+  )
+  expect(guest.style.width).toBe('466px')
+
+  view.rerender(<Tab {...props} displayZoomPct={150} />)
+  await vi.waitFor(() =>
+    expect(configureGuest).toHaveBeenLastCalledWith(7, expect.any(String), viewport, 1.5)
+  )
+  expect(screen.getByLabelText('HTML device preview')).toBe(guest)
+  expect(guest.style.width).toBe('311px')
+  expect(guest.style.height).toBe('452px')
+  expect(guest.style.transform).toBe(`scale(${466 / 311}, ${678 / 452})`)
 })
 
 it('shows both Duo displays and keeps the original preview mounted', async () => {

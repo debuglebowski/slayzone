@@ -307,7 +307,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       selection: deviceSelection,
       setSelection: setDeviceSelection,
       showDeviceFrame,
-      setShowDeviceFrame
+      setShowDeviceFrame,
+      displayZoomPct,
+      setDisplayZoomPct
     } = useDevicePreviewPreferences(selectedArtifact?.id)
     const devicePreviews = useMemo(() => artifactDevicePreviews(deviceSelection), [deviceSelection])
 
@@ -998,6 +1000,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   htmlTheme={htmlTheme}
                   devicePreviews={devicePreviews}
                   showDeviceFrame={showDeviceFrame}
+                  displayZoomPct={displayZoomPct}
+                  onDisplayZoomPctChange={setDisplayZoomPct}
                   searchQuery={findOpen ? findQuery : ''}
                   searchActiveIndex={findActiveIndex}
                   searchMatchCase={findMatchCase}

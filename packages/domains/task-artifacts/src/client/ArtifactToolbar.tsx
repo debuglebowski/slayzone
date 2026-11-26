@@ -12,7 +12,6 @@ import {
   FileText,
   History,
   ImageDown,
-  Minus,
   MonitorSmartphone,
   Plus,
   SlidersHorizontal
@@ -35,10 +34,8 @@ import {
   hasZoomableSurface,
   RENDER_MODE_INFO,
   type RenderMode,
-  stepZoom,
   type TaskArtifact,
-  type UpdateArtifactInput,
-  ZOOM_STEPS
+  type UpdateArtifactInput
 } from '@slayzone/task-contracts'
 import {
   ArtifactDevicePicker,
@@ -54,6 +51,7 @@ import {
 } from './ArtifactsPanel.constants'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
 import { useTRPC } from './trpc'
+import { ZoomStepper } from './ZoomStepper'
 
 type UpdateArtifact = (patch: Omit<UpdateArtifactInput, 'id'>) => void
 
@@ -142,54 +140,14 @@ function ToolbarOption({
 }
 
 function ArtifactZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (zoom: number) => void }) {
-  const segmentClass =
-    'h-full rounded-none border-0 p-0 shadow-none active:scale-100 disabled:opacity-100 disabled:text-muted-foreground'
   return (
-    <div
-      className="inline-flex h-7 shrink-0 items-center overflow-hidden rounded-md border shadow-xs dark:border-input"
-      data-testid="artifact-zoom"
-      role="group"
-      aria-label="Artifact zoom"
-    >
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className={`${segmentClass} w-6`}
-        onClick={() => onZoom(stepZoom(zoom, -1))}
-        disabled={zoom <= ZOOM_STEPS[0]}
-        title="Zoom out"
-        aria-label="Zoom out"
-        data-testid="artifact-zoom-out"
-      >
-        <Minus className="size-3" />
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className={`${segmentClass} min-w-11 px-1 text-[11px] tabular-nums`}
-        onClick={() => onZoom(DEFAULT_ZOOM_PCT)}
-        title="Reset zoom"
-        aria-label="Reset zoom"
-        data-testid="artifact-zoom-value"
-      >
-        {zoom}%
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className={`${segmentClass} w-6`}
-        onClick={() => onZoom(stepZoom(zoom, 1))}
-        disabled={zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-        title="Zoom in"
-        aria-label="Zoom in"
-        data-testid="artifact-zoom-in"
-      >
-        <Plus className="size-3" />
-      </Button>
-    </div>
+    <ZoomStepper
+      zoom={zoom}
+      onZoom={onZoom}
+      label="Artifact zoom"
+      noun="Zoom"
+      testId="artifact-zoom"
+    />
   )
 }
 

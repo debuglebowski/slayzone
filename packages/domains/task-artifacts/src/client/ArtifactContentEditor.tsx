@@ -270,6 +270,8 @@ export function ArtifactContentEditor({
   htmlTheme,
   devicePreviews,
   showDeviceFrame,
+  displayZoomPct = 100,
+  onDisplayZoomPctChange,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -293,6 +295,10 @@ export function ArtifactContentEditor({
   htmlTheme: HtmlArtifactTheme
   devicePreviews?: readonly ArtifactDevicePreview[]
   showDeviceFrame?: boolean
+  /** Device previews only: the page's zoom inside the device; `zoomPct` scales the device. */
+  displayZoomPct?: number
+  /** Absent: the canvas shows no display zoom control. */
+  onDisplayZoomPctChange?: (pct: number) => void
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -830,6 +836,8 @@ export function ArtifactContentEditor({
             htmlTheme={htmlTheme}
             devicePreviews={devicePreviews}
             showDeviceFrame={showDeviceFrame}
+            displayZoomPct={displayZoomPct}
+            onDisplayZoomPctChange={onDisplayZoomPctChange}
             onOpenLink={handleOpenLink}
           />
         </div>
@@ -868,6 +876,8 @@ export function ArtifactContentEditor({
               htmlTheme={htmlTheme}
               devicePreviews={devicePreviews}
               showDeviceFrame={showDeviceFrame}
+              displayZoomPct={displayZoomPct}
+              onDisplayZoomPctChange={onDisplayZoomPctChange}
               onOpenLink={handleOpenLink}
             />
           </div>
@@ -945,6 +955,8 @@ function ArtifactPreview({
   htmlTheme,
   devicePreviews,
   showDeviceFrame,
+  displayZoomPct,
+  onDisplayZoomPctChange,
   onOpenLink
 }: {
   renderMode: RenderMode
@@ -957,6 +969,8 @@ function ArtifactPreview({
   htmlTheme: HtmlArtifactTheme
   devicePreviews?: readonly ArtifactDevicePreview[]
   showDeviceFrame?: boolean
+  displayZoomPct: number
+  onDisplayZoomPctChange?: (pct: number) => void
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   if (renderMode === 'html-preview')
@@ -976,6 +990,8 @@ function ArtifactPreview({
         htmlTheme={htmlTheme}
         devicePreviews={devicePreviews}
         showDeviceFrame={showDeviceFrame}
+        displayZoomPct={displayZoomPct}
+        onDisplayZoomPctChange={onDisplayZoomPctChange}
         onOpenLink={onOpenLink}
       />
     )

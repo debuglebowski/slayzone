@@ -32,6 +32,32 @@ export interface DeviceViewport extends Omit<DeviceScreen, 'name'> {
 }
 
 export const MAX_DEVICE_VIEWPORT_SIZE = 4096
+
+/**
+ * What the page sees when the preview zooms INSIDE the device: as with browser
+ * zoom, a CSS pixel grows by `zoom`, so the layout viewport shrinks by it and the
+ * pixel ratio grows by it (the raster keeps the device's own pixel count, so it
+ * stays sharp). The device and its screen keep their size: the embedder scales
+ * the smaller viewport back up to fill the screen.
+ */
+export function zoomDeviceViewport(viewport: DeviceViewport, zoom: number): DeviceViewport {
+  if (zoom === 1) return viewport
+  const css = (px: number) => Math.round(px / zoom)
+  const { displayFeature } = viewport
+  return {
+    ...viewport,
+    width: Math.max(1, css(viewport.width)),
+    height: Math.max(1, css(viewport.height)),
+    deviceScaleFactor: viewport.deviceScaleFactor * zoom,
+    ...(displayFeature && {
+      displayFeature: {
+        ...displayFeature,
+        offset: css(displayFeature.offset),
+        maskLength: css(displayFeature.maskLength)
+      }
+    })
+  }
+}
 export const ARTIFACT_DEVICE_PARTITION = 'persist:artifact-device-previews'
 
 /**
