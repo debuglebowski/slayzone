@@ -122,6 +122,11 @@ export interface AgentPanelContext {
   handleLoopConfigChange: (cfg: Task['loop_config'] | null) => void
   slayNudge: ReturnType<typeof useSlayNudge>
   handleModeChange: (mode: AgentId) => Promise<void>
+  /**
+   * Change agent panel `instanceId`'s provider: the primary switches the task's
+   * agent (`task.agent_id`); any other panel its own terminal's mode (terminal_tabs).
+   */
+  setPanelProvider: (instanceId: string, mode: AgentId) => Promise<void>
   flagsPopoverOpen: boolean
   setFlagsPopoverOpen: SetState<boolean>
   flagsInputValue: string
@@ -168,6 +173,8 @@ export interface ArtifactsPanelContext {
   sharingEnabled: boolean
   sharingArtifact: { id: string; title: string } | null
   setSharingArtifact: SetState<{ id: string; title: string } | null>
+  /** Show one artifact in an Artifact panel of its own (the one showing it, else a new one). */
+  openArtifactInOwnPanel: (artifactId: string, nextTo?: string) => void
 }
 
 export interface WebPanelsContext {
@@ -198,8 +205,6 @@ export interface SettingsPanelContext {
   taskPathLocation: string | null
   taskFolderLabel: string
   baseDir: string | null
-  baseDirPickerOpen: boolean
-  setBaseDirPickerOpen: SetState<boolean>
   isArchived: boolean
   handleUnarchive: () => Promise<void>
   setArchiveDialogOpen: SetState<boolean>
@@ -239,12 +244,8 @@ export interface SettingsPanelContext {
   handleSubTaskDragEnd: UseSubTasksReturn['handleDragEnd']
   handleUpdateSubTask: UseSubTasksReturn['updateSubTask']
   handleDeleteSubTask: UseSubTasksReturn['deleteSubTask']
-  addingSubTask: boolean
-  setAddingSubTask: SetState<boolean>
-  subTaskTitle: string
-  setSubTaskTitle: SetState<string>
-  subTaskInputRef: RefObject<HTMLInputElement | null>
-  handleCreateSubTask: () => Promise<void>
+  /** Add a sub-task titled `title` (in the project's default status). */
+  createSubTask: (title: string) => Promise<void>
   onNavigateToTask?: (taskId: string) => void
   // Artifacts card
   artifacts: TaskArtifact[]

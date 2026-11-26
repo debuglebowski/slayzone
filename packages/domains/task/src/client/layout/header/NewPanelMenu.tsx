@@ -1,5 +1,6 @@
-import { MoreHorizontal, type LucideIcon } from 'lucide-react'
+import { Link, MoreHorizontal, type LucideIcon } from 'lucide-react'
 import type { PanelInstance } from '@slayzone/task-contracts'
+import { isWebPageInstance, webPageSettings } from '@slayzone/task-contracts'
 import {
   cn,
   DropdownMenu,
@@ -7,6 +8,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -27,15 +31,18 @@ export interface NewPanelChoice {
   kind: PanelKind
   label: string
   icon: LucideIcon
-  /** Settings of the new instance (a web panel: which one). */
+  /** Settings of the new instance (a web panel: which one; an artifact: which file). */
   settings?: Record<string, unknown>
+  /** A submenu instead (Artifact ▸ the task's files); the choice itself adds nothing. */
+  children?: NewPanelChoice[]
 }
 
 /** Menu sections, in display order, and the kinds each holds. */
 const SECTIONS: readonly { label: string; kinds: readonly PanelKind[] }[] = [
   { label: 'Run', kinds: ['agent', 'terminal', 'processes'] },
   { label: 'Code', kinds: ['editor', 'git'] },
-  { label: 'Content', kinds: ['browser', 'web', 'artifacts'] }
+  { label: 'Content', kinds: ['browser', 'web', 'artifacts', 'artifact'] },
+  { label: 'Task', kinds: ['description', 'subtasks', 'details'] }
 ]
 
 /** Kinds the menu offers (besides web panels), in order. */
@@ -49,18 +56,39 @@ const KINDS: readonly PanelKind[] = [
   'processes'
 ]
 
-/** Every panel a new instance can be added of, in display order. */
+/** Settings' cards on their own (one each per task: adding one the task has shows it). */
+const TASK_KINDS: readonly PanelKind[] = ['description', 'subtasks', 'details']
+
+/** A new Web page (asks for its URL when it first shows). */
+const WEB_PAGE_CHOICE: NewPanelChoice = {
+  key: 'web-page',
+  kind: 'web',
+  label: 'Web page',
+  icon: Link,
+  settings: webPageSettings()
+}
+
+/**
+ * Every panel a new instance can be added of, in display order: the kinds, a Web
+ * page, each configured web panel (a web page preset), Artifact ▸ one per task
+ * file, and Settings' cards on their own.
+ */
 export function newPanelChoices(
   webPanels: readonly { id: string; name: string }[],
-  isEnabled: (legacyId: string) => boolean
+  isEnabled: (legacyId: string) => boolean,
+  artifacts: readonly { id: string; title: string }[] = []
 ): NewPanelChoice[] {
+  const enabled = (kind: PanelKind): boolean => {
+    const enableId = panelEnableId(kind)
+    return !!enableId && isEnabled(enableId)
+  }
   const out: NewPanelChoice[] = []
   for (const kind of KINDS) {
     const def = PANEL_KINDS[kind]
-    const enableId = panelEnableId(kind)
-    if (!def.multiInstance || !enableId || !isEnabled(enableId)) continue
+    if (!def.multiInstance || !enabled(kind)) continue
     out.push({ key: kind, kind, label: def.label, icon: def.icon })
   }
+  out.push(WEB_PAGE_CHOICE)
   for (const wp of webPanels)
     out.push({
       key: wp.id,
@@ -69,6 +97,27 @@ export function newPanelChoices(
       icon: PANEL_KINDS.web.icon,
       settings: { panelId: wp.id }
     })
+  if (enabled('artifact') && artifacts.length > 0) {
+    const def = PANEL_KINDS.artifact
+    out.push({
+      key: 'artifact',
+      kind: 'artifact',
+      label: def.label,
+      icon: def.icon,
+      children: artifacts.map((a) => ({
+        key: `artifact:${a.id}`,
+        kind: 'artifact',
+        label: a.title,
+        icon: def.icon,
+        settings: { artifactId: a.id }
+      }))
+    })
+  }
+  for (const kind of TASK_KINDS) {
+    if (!enabled(kind)) continue
+    const def = PANEL_KINDS[kind]
+    out.push({ key: kind, kind, label: def.label, icon: def.icon })
+  }
   return out
 }
 
@@ -89,6 +138,9 @@ export function newPanelChoiceLike(
 ): NewPanelChoice | null {
   if (!isRenderableKind(instance.kind) || !PANEL_KINDS[instance.kind].multiInstance) return null
   const def = PANEL_KINDS[instance.kind]
+  // An Artifact panel is about one file: another needs a file (⋯ → Artifact).
+  if (instance.kind === 'artifact') return null
+  if (isWebPageInstance(instance)) return WEB_PAGE_CHOICE
   if (instance.kind !== 'web')
     return { key: def.kind, kind: def.kind, label: def.label, icon: def.icon }
   const webId =
@@ -156,9 +208,38 @@ export function NewPanelMenu({
               {section.label}
             </DropdownMenuLabel>
             {section.choices.map((c) => {
+              if (c.children)
+                return (
+                  <DropdownMenuSub key={c.key}>
+                    <DropdownMenuSubTrigger className="gap-2.5" data-testid={`new-panel-${c.key}`}>
+                      <c.icon className={cn('size-4', PANEL_KINDS[c.kind].iconClassName)} />
+                      <span className="flex-1 truncate">{c.label}</span>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-max min-w-48 max-w-80 max-h-80 overflow-y-auto">
+                      {c.children.map((child) => (
+                        <DropdownMenuItem
+                          key={child.key}
+                          className="gap-2.5"
+                          data-testid={`new-panel-${child.key}`}
+                          onSelect={() => onAdd(child)}
+                        >
+                          <child.icon
+                            className={cn('size-4', PANEL_KINDS[child.kind].iconClassName)}
+                          />
+                          <span className="flex-1 truncate">{child.label}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )
               const shortcut = shortcutOf(c)
               return (
-                <DropdownMenuItem key={c.key} className="gap-2.5" onSelect={() => onAdd(c)}>
+                <DropdownMenuItem
+                  key={c.key}
+                  className="gap-2.5"
+                  data-testid={`new-panel-${c.key}`}
+                  onSelect={() => onAdd(c)}
+                >
                   <c.icon className={cn('size-4', PANEL_KINDS[c.kind].iconClassName)} />
                   <span className="flex-1 truncate">{c.label}</span>
                   {shortcut && (

@@ -45,6 +45,9 @@ import {
   browserInstanceOfTab,
   browserTabsForInstance,
   claimedTerminalGroupIds,
+  existingInstanceFor,
+  findTab,
+  isWebPageInstance,
   getProviderFlags,
   instancesOfKind,
   isInstanceVisible,
@@ -162,7 +165,12 @@ import { layoutDialogs } from './layouts/manageLayoutsStore'
 import { isClassicCustomized, resolveClientLayouts, useTaskLayouts } from './layouts/useTaskLayouts'
 import { columnMoveOf, layoutGroups, type LayoutGroup } from './layout/header/groups'
 import { usePanelShortcuts } from './layout/header/usePanelShortcuts'
-import { isRenderableKind, panelEnableId, panelTabMeta } from './layout/panelTabMeta'
+import {
+  isRenderableKind,
+  panelEnableId,
+  panelTabMeta,
+  TASK_FIELD_KINDS
+} from './layout/panelTabMeta'
 import { InstanceHandles } from './panels/instanceHandles'
 import { PANEL_KINDS, type PanelKind } from './panels/registry'
 import { usePanelConfig } from './usePanelConfig'
@@ -398,9 +406,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [uploadImageFiles]
   )
-  const [addingSubTask, setAddingSubTask] = useState(false)
-  const [subTaskTitle, setSubTaskTitle] = useState('')
-  const subTaskInputRef = useRef<HTMLInputElement>(null)
   const [parentTask] = useState<Task | null>(initialData?.parentTask ?? null)
 
   // Project path validation.
@@ -419,7 +424,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     initialData?.projectPathMissing ?? false
   )
   const [workspaceUnreachable, setWorkspaceUnreachable] = useState(false)
-  const [baseDirPickerOpen, setBaseDirPickerOpen] = useState(false)
   const [projectFolderPickerOpen, setProjectFolderPickerOpen] = useState(false)
 
   // The project's folder on the computer this task's work runs on (a project has
@@ -1341,6 +1345,24 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   })
 
   // ── New and closed panel instances ──────────────────────────────────────────────
+  /** Show an instance the layout holds: back from Parked, its group and tab shown and active. */
+  const revealInstance = useStableCallback((instanceId: string) => {
+    const loc = findTab(taskLayout.layout, instanceId)
+    if (!loc) return
+    const tab = taskLayout.layout.columns[loc.columnIndex].slots[loc.slotIndex].tabs[loc.tabIndex]
+    if (tab.parked) taskLayout.unpark(instanceId)
+    else if (!isInstanceShown(instanceId)) void handlePanelToggle(instanceId, true)
+    activateTab(instanceId)
+  })
+
+  /** A provider (agent mode) this app runs, from an agent panel's settings; else null. */
+  const providerOf = (settings: Record<string, unknown> | undefined): AgentId | null => {
+    const provider = settings?.provider
+    return typeof provider === 'string' && modes.some((m) => m.id === provider)
+      ? (provider as AgentId)
+      : null
+  }
+
   /**
    * Add a new instance of `kind`: a tab in `nextTo`'s group, else a new column. An
    * agent/terminal panel gets its first terminal group (a terminal_tabs row, the
@@ -1349,6 +1371,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const addPanel = useStableCallback(
     (kind: PanelKind, nextTo?: string, settings?: Record<string, unknown>) => {
       if (!task || !taskLayout.supportsInstances) return
+      // A one-per-task kind the task has (Description…), or the Artifact panel
+      // already showing that file: show it rather than add another.
+      const existing = existingInstanceFor(taskLayout.layout, kind, settings)
+      if (existing) {
+        revealInstance(existing)
+        return
+      }
       const slotId = nextTo ? taskLayout.slotOf(nextTo) : null
       const placement = slotId ? { type: 'tab' as const, slotId } : { type: 'column' as const }
       const show = (id: string): void => {
@@ -1356,7 +1385,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         lastFocusedByKindRef.current[kind] = id
       }
       if (kind === 'agent' || kind === 'terminal') {
-        const mode = kind === 'agent' ? task.agent_id : 'terminal'
+        const mode = kind === 'agent' ? (providerOf(settings) ?? task.agent_id) : 'terminal'
         terminalGroups
           .createGroup(task.id, mode)
           .then((tab) => {
@@ -1378,6 +1407,40 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       if (kind === 'browser') browserHandles.whenReady(id, (h) => h.newTab())
     }
   )
+
+  /** Artifact `artifactId` in an Artifact panel of its own: the one showing it, else a new one. */
+  const openArtifactInOwnPanel = useStableCallback((artifactId: string, nextTo?: string) =>
+    addPanel('artifact', nextTo, { artifactId })
+  )
+
+  /**
+   * An agent panel's provider: the primary switches the task's agent (fresh start,
+   * like the provider menu on its main tab). Any other agent panel changes the mode
+   * of its own agent — the first terminal of the first group it claims (terminal_tabs,
+   * the session restarts in the new mode); a panel with no terminal yet starts one.
+   */
+  const setPanelProvider = useStableCallback(async (instanceId: string, mode: AgentId) => {
+    if (!task) return
+    if (instanceId === PRIMARY_INSTANCE_IDS.agent) {
+      if (mode !== task.agent_id) await handleModeChange(mode)
+      return
+    }
+    const inst = taskLayout.layout.instances[instanceId]
+    if (inst?.kind !== 'agent') return
+    const groupIds = terminalGroupIdsOf(inst)
+    try {
+      if (groupIds.length === 0) {
+        const tab = await terminalGroups.createGroup(task.id, mode)
+        updateInstanceSettings(instanceId, { terminalGroupIds: [tab.groupId] })
+        return
+      }
+      const from = await terminalGroups.setGroupMode(task.id, groupIds[0], mode)
+      if (from) track('terminal_mode_switched', { from, to: mode })
+    } catch (error) {
+      console.warn("[task] changing an agent panel's provider failed:", error)
+      toast.error("Couldn't change the panel's agent")
+    }
+  })
 
   /** Let go of a removed instance's state; a primary's lives in the task's columns and stays. */
   const releaseInstance = useStableCallback((inst: PanelInstance) => {
@@ -1461,8 +1524,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const inst = result.layout.instances[id]
       if (!inst || (inst.kind !== 'agent' && inst.kind !== 'terminal')) continue
       if (terminalGroupIdsOf(inst).length > 0) continue
+      const mode = inst.kind === 'agent' ? (providerOf(inst.settings) ?? task.agent_id) : 'terminal'
       terminalGroups
-        .createGroup(task.id, inst.kind === 'agent' ? task.agent_id : 'terminal')
+        .createGroup(task.id, mode)
         .then((tab) => updateInstanceSettings(id, { terminalGroupIds: [tab.groupId] }))
         .catch((error: unknown) =>
           console.warn('[task] starting a terminal for a layout panel failed:', error)
@@ -1525,7 +1589,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const parkedPanels: ParkedPanel[] = parkedInstances(taskLayout.layout).flatMap((inst) => {
     if (!isRenderableKind(inst.kind)) return []
-    const meta = panelTabMeta(inst, enabledWebPanels)
+    const meta = panelTabMeta(inst, enabledWebPanels, artifacts)
     return [
       {
         instanceId: inst.id,
@@ -1813,15 +1877,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onTaskUpdated(updated)
   }
 
-  const handleCreateSubTask = async (): Promise<void> => {
-    if (!task || !subTaskTitle.trim()) return
+  const handleCreateSubTask = async (title: string): Promise<void> => {
+    if (!task || !title.trim()) return
     await createSubTask({
       projectId: task.project_id,
-      title: subTaskTitle.trim(),
+      title: title.trim(),
       status: getDefaultStatus(project?.columns_config)
     })
-    setSubTaskTitle('')
-    setAddingSubTask(false)
   }
 
   // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
@@ -2260,14 +2322,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const headerAlign = taskHeaderPanelAlign === 'left' ? 'start' : 'end'
   const headerGroups = layoutGroups(taskLayout.layout, {
     webPanels: enabledWebPanels,
+    artifacts,
     isTabListed: (inst) => {
+      // A web page needs no configured web panel: it is its own.
+      if (isWebPageInstance(inst)) return true
       if (inst.kind === 'web') {
         const webId = typeof inst.settings.panelId === 'string' ? inst.settings.panelId : inst.id
         return enabledWebPanels.some((wp) => wp.id === webId)
       }
       const enableId = panelEnableId(inst.kind)
       if (!enableId || !isBuiltinEnabled(enableId, 'task')) return false
-      return !(task.is_temporary && inst.kind === 'settings')
+      return !(task.is_temporary && TASK_FIELD_KINDS.has(inst.kind))
     },
     // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
     excludesGroup: (inst) =>
@@ -2328,7 +2393,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       )}
       {canAddPanels && (
         <NewPanelMenu
-          choices={newPanelChoices(enabledWebPanels, (id) => isBuiltinEnabled(id, 'task'))}
+          choices={newPanelChoices(
+            enabledWebPanels,
+            (id) => isBuiltinEnabled(id, 'task') && !(task.is_temporary && id === 'settings'),
+            artifacts
+          )}
           onAdd={(c) => addPanel(c.kind, undefined, c.settings)}
           shortcutOf={(c) =>
             c.kind === 'web'
@@ -2431,6 +2500,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       handleLoopConfigChange,
       slayNudge,
       handleModeChange,
+      setPanelProvider,
       flagsPopoverOpen,
       setFlagsPopoverOpen,
       flagsInputValue,
@@ -2460,7 +2530,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       handleArtifactsSidebarChange,
       sharingEnabled: sharing.enabled,
       sharingArtifact,
-      setSharingArtifact
+      setSharingArtifact,
+      openArtifactInOwnPanel
     },
     web: { enabledWebPanels, handleWebPanelUrlChange, handleWebPanelFaviconChange },
     git: {
@@ -2482,8 +2553,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       taskPathLocation,
       taskFolderLabel,
       baseDir,
-      baseDirPickerOpen,
-      setBaseDirPickerOpen,
       isArchived,
       handleUnarchive,
       setArchiveDialogOpen,
@@ -2520,12 +2589,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       handleSubTaskDragEnd,
       handleUpdateSubTask,
       handleDeleteSubTask,
-      addingSubTask,
-      setAddingSubTask,
-      subTaskTitle,
-      setSubTaskTitle,
-      subTaskInputRef,
-      handleCreateSubTask,
+      createSubTask: handleCreateSubTask,
       onNavigateToTask,
       artifacts,
       selectArtifactInPanel,

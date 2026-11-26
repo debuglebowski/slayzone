@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { use, useMemo } from 'react'
 import { terminalGroupIdsOf } from '@slayzone/task-contracts'
 import { TerminalContainer } from '@slayzone/task-terminals'
-import { PanelFrame } from '../PanelFrame'
+import { PanelFrame, PanelStripContext } from '../PanelFrame'
 import { useTaskPageContext } from '../TaskPageContext'
+import { AgentProviderMenu } from './AgentProviderMenu'
 import type { PanelKindProps } from './types'
 
 /**
@@ -38,6 +39,8 @@ export function TerminalInstanceKind({ panelId, instance }: PanelKindProps): Rea
     [claimedKey]
   )
   const kind = instance.kind === 'terminal' ? 'terminal' : 'agent'
+  // An agent panel's provider: on its tab when the group has a strip, else here.
+  const inStrip = use(PanelStripContext)
   return (
     <PanelFrame kind={kind} panelId={panelId} className="overflow-hidden flex flex-col">
       {mainAgentCwd ? (
@@ -69,6 +72,11 @@ export function TerminalInstanceKind({ panelId, instance }: PanelKindProps): Rea
           onOpenFile={handleQuickOpenFile}
           onOpenArtifact={handleChatOpenArtifact}
           onOpenTask={agent.handleChatOpenTask}
+          rightContent={
+            kind === 'agent' && !inStrip ? (
+              <AgentProviderMenu instance={instance} variant="header" />
+            ) : undefined
+          }
         />
       ) : (
         <div className="flex h-full items-center justify-center px-6 text-center text-xs text-muted-foreground">

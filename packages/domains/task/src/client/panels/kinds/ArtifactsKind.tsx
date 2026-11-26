@@ -19,7 +19,8 @@ export function ArtifactsKind({ panelId }: PanelKindProps): React.JSX.Element {
     handleArtifactsSidebarChange,
     sharingEnabled,
     sharingArtifact,
-    setSharingArtifact
+    setSharingArtifact,
+    openArtifactInOwnPanel
   } = artifacts
   const { ArtifactsPanel } = getTaskPanels()
   const primary = panelId === PRIMARY_INSTANCE_IDS.artifacts
@@ -81,6 +82,9 @@ export function ArtifactsKind({ panelId }: PanelKindProps): React.JSX.Element {
         }
         onOpenUrl={openDevServerInBrowser}
         onShareArtifact={sharingEnabled ? setSharingArtifact : undefined}
+        onOpenInOwnPanel={
+          panels.canAddPanels ? (artifact) => openArtifactInOwnPanel(artifact.id) : undefined
+        }
         readOnly={!canEdit}
       />
     </PanelFrame>

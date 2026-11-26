@@ -41,7 +41,8 @@ function Harness({
   const placements: PanelPlacement[] = ids.map((id) => ({
     instance: inst(id),
     active: true,
-    inCell: false
+    inCell: false,
+    inStrip: false
   }))
   return (
     <PanelNodePoolContext value={pool}>

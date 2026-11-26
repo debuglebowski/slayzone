@@ -7,7 +7,7 @@ import { LayoutActionsContext, type LayoutActions } from './LayoutContext'
 import { LayoutDnd } from './LayoutDnd'
 import type { DragItem, DropTarget } from './layoutDnd'
 import { PANEL_KIND_COMPONENTS } from '../panels/kinds'
-import { PanelCellContext } from '../panels/PanelFrame'
+import { PanelCellContext, PanelStripContext } from '../panels/PanelFrame'
 import { TaskPageProvider, useTaskPageContext } from '../panels/TaskPageContext'
 import { isRenderableKind } from './panelTabMeta'
 import { PanelHosts, PanelNodePool, PanelNodePoolContext, PanelTarget } from './PanelHosts'
@@ -31,14 +31,16 @@ const FALLBACK_COMPACT_AGENT: PanelInstance = { id: 'terminal', kind: 'agent', s
  */
 function PlacedPanel({ placement }: { placement: PanelPlacement }): React.JSX.Element | null {
   const page = useTaskPageContext()
-  const { instance, active, inCell } = placement
+  const { instance, active, inCell, inStrip } = placement
   if (!isRenderableKind(instance.kind)) return null
   const Kind = PANEL_KIND_COMPONENTS[instance.kind]
   const value = active ? page : { ...page, isActive: false, shortcutActive: false }
   return (
     <TaskPageProvider value={value}>
       <PanelCellContext value={inCell}>
-        <Kind panelId={instance.id} instance={instance} />
+        <PanelStripContext value={inStrip}>
+          <Kind panelId={instance.id} instance={instance} />
+        </PanelStripContext>
       </PanelCellContext>
     </TaskPageProvider>
   )
@@ -107,7 +109,12 @@ export function TaskLayoutView({
   const [pool] = useState(() => new PanelNodePool())
   const placements = placePanels(layout, columns, compact)
   if (compact && compactAgent === null)
-    placements.push({ instance: FALLBACK_COMPACT_AGENT, active: true, inCell: false })
+    placements.push({
+      instance: FALLBACK_COMPACT_AGENT,
+      active: true,
+      inCell: false,
+      inStrip: false
+    })
   const placedKey = placements.map((p) => p.instance.id).join(' ')
   useEffect(() => {
     pool.retain(new Set(placedKey.split(' ')))

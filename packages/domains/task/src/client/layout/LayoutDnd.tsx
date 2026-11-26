@@ -326,7 +326,7 @@ function DragChip({
   item: DragItem
   merging: boolean
 }): React.JSX.Element | null {
-  const { web } = useTaskPageContext()
+  const { web, settings } = useTaskPageContext()
   let instanceId: string | null = null
   let more = 0
   if (item.type === 'tab') instanceId = item.instanceId
@@ -338,7 +338,7 @@ function DragChip({
   }
   const instance = instanceId ? layout.instances[instanceId] : undefined
   if (!instance) return null
-  const { label, icon: Icon } = panelTabMeta(instance, web.enabledWebPanels)
+  const { label, icon: Icon } = panelTabMeta(instance, web.enabledWebPanels, settings.artifacts)
   return (
     <div
       data-testid="layout-drag-chip"

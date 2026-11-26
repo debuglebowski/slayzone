@@ -13,6 +13,12 @@ import { useTaskPageContext } from './TaskPageContext'
  */
 export const PanelCellContext = createContext(false)
 
+/**
+ * True when the panel's group shows a tab strip: its tab carries the kind's
+ * accessory (an agent's provider picker), so the panel's own header leaves it out.
+ */
+export const PanelStripContext = createContext(false)
+
 const FOCUS_GLOW = 'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
 
 interface PanelFrameProps {

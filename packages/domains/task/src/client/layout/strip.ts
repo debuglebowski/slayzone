@@ -149,6 +149,8 @@ export interface PanelPlacement {
   active: boolean
   /** Fills a layout cell (a stacked group or a tab strip's body) rather than taking a strip column's width and order. */
   inCell: boolean
+  /** Its group shows a tab strip (the tab carries the kind's accessory, not the panel). */
+  inStrip: boolean
 }
 
 /**
@@ -168,21 +170,23 @@ export function placePanels(
     if (slots.length === 0) continue
     if (compact || isBareColumn(column)) {
       const shown = shownTabOf(layout, slots[0])
-      if (shown) out.push({ instance: layout.instances[shown], active: true, inCell: false })
+      if (shown)
+        out.push({ instance: layout.instances[shown], active: true, inCell: false, inStrip: false })
       continue
     }
     for (const slot of slots) {
       const shown = shownTabOf(layout, slot)
       if (!shown) continue
       if (!showsTabStrip(slot)) {
-        out.push({ instance: layout.instances[shown], active: true, inCell: true })
+        out.push({ instance: layout.instances[shown], active: true, inCell: true, inStrip: false })
         continue
       }
       for (const t of renderedTabs(layout, slot))
         out.push({
           instance: layout.instances[t.instanceId],
           active: t.instanceId === shown,
-          inCell: true
+          inCell: true,
+          inStrip: true
         })
     }
   }

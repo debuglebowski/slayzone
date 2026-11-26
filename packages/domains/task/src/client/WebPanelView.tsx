@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef } from 'react'
 import { useTRPCClient } from './trpc'
-import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
+import { RotateCw, X, Globe, Copy, Check, RotateCcw, Pencil } from 'lucide-react'
 import {
   IconButton,
   Tooltip,
@@ -35,6 +35,8 @@ interface WebPanelViewProps {
   handoffHostScope?: string
   onUrlChange: (panelId: string, url: string) => void
   onFaviconChange?: (panelId: string, favicon: string) => void
+  /** "Edit URL" in the header (a Web page panel); absent: no button. */
+  onEditUrl?: () => void
   isResizing?: boolean
   isActive?: boolean
 }
@@ -50,6 +52,7 @@ export function WebPanelView({
   handoffHostScope,
   onUrlChange,
   onFaviconChange,
+  onEditUrl,
   isResizing,
   isActive
 }: WebPanelViewProps) {
@@ -196,6 +199,25 @@ export function WebPanelView({
           </TooltipTrigger>
           <TooltipContent>{copied ? 'Copied!' : 'Copy URL'}</TooltipContent>
         </Tooltip>
+
+        {onEditUrl && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <IconButton
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Edit URL"
+                  data-testid="web-page-edit-url"
+                  onClick={onEditUrl}
+                >
+                  <Pencil className="size-3.5" />
+                </IconButton>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Edit URL</TooltipContent>
+          </Tooltip>
+        )}
 
         <Tooltip>
           <TooltipTrigger asChild>

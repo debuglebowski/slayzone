@@ -1,78 +1,31 @@
-import { Suspense } from 'react'
+import { ChevronRight, Expand, MoveVertical, Paperclip, Plus } from 'lucide-react'
+import { getExtensionFromTitle } from '@slayzone/task-contracts'
 import {
-  Archive,
-  ChevronRight,
-  Expand,
-  FileCode,
-  GitBranch,
-  Info,
-  MoveVertical,
-  Paperclip,
-  Plus,
-  Trash2,
-  X
-} from 'lucide-react'
-import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { isTerminalStatus } from '@slayzone/projects-contracts'
-import {
-  getExtensionFromTitle,
-  getEffectiveRenderMode,
-  RENDER_MODE_INFO
-} from '@slayzone/task-contracts'
-import {
-  Button,
   cn,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
   IconButton,
-  Input,
-  toast,
   Tooltip,
   TooltipContent,
   TooltipTrigger
 } from '@slayzone/ui'
-import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
-import { hasOwnFolder } from '../../../shared/main-terminal'
-import { TaskMetadataSidebar } from '../../TaskMetadataSidebar'
 import { TaskSettingsPanel } from '../../TaskSettingsPanel'
-import { RichTextEditor } from '../../task-detail/lazyPanels'
-import { SortableSubTask } from '../../task-detail/TaskOverviewRow'
 import { getTaskPanels } from '../registry'
 import { PanelFrame } from '../PanelFrame'
 import { useTaskPageContext } from '../TaskPageContext'
+import { DescriptionEditor, DetailsBody, SubtasksList, useSubtaskProgress } from './taskSections'
 import type { PanelKindProps } from './types'
 
 /**
  * The task's settings (`settings`): external sync links, the Description /
  * Sub-tasks / Artifacts cards and Details (metadata, working directory, danger zone).
+ * The cards' bodies are shared with the Description / Subtasks / Details panels
+ * (./taskSections); only here do open cards share the height (useSharedCardHeights).
  */
 export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
+  const { task, handleTaskUpdate, settings } = useTaskPageContext()
   const {
-    task,
-    project,
-    canEdit,
-    effectiveRepoPath,
-    handleTaskUpdate,
-    updateTaskAndNotify,
-    settings
-  } = useTaskPageContext()
-  const {
-    tags,
-    setTags,
-    taskTagIds,
-    handleTagsChange,
-    taskPath,
-    taskPathLocation,
-    taskFolderLabel,
-    baseDir,
-    baseDirPickerOpen,
-    setBaseDirPickerOpen,
-    isArchived,
-    handleUnarchive,
-    setArchiveDialogOpen,
-    setDeleteDialogOpen,
     settingsCardsGridRef,
     settingsCols,
     descFullHeight,
@@ -87,40 +40,12 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
     detailsOpen,
     setDetailsOpen,
     setDescriptionFullscreen,
-    descriptionValue,
-    setDescriptionValue,
-    descriptionDirty,
-    handleDescriptionSave,
-    handleUploadImages,
-    handleDescriptionOpenLink,
-    notes,
-    statusOptions,
-    subTasks,
-    handleSubTaskDragEnd,
-    handleUpdateSubTask,
-    handleDeleteSubTask,
-    addingSubTask,
-    setAddingSubTask,
-    subTaskTitle,
-    setSubTaskTitle,
-    subTaskInputRef,
-    handleCreateSubTask,
-    onNavigateToTask,
     artifacts,
     selectArtifactInPanel,
     createArtifactInPanel
   } = settings
-  const {
-    fontFamily: notesFontFamily,
-    checkedHighlight: notesCheckedHighlight,
-    showToolbar: notesShowToolbar,
-    spellcheck: notesSpellcheck,
-    themeColors: notesThemeColors
-  } = notes
+  const subtaskProgress = useSubtaskProgress()
   const { ExternalSyncCard } = getTaskPanels()
-  const subTaskSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  )
 
   // Built OUTSIDE the frame's JSX, so the compiler memoizes it on its own inputs:
   // the frame re-renders on every tab switch (`isActive`), this panel must not.
@@ -141,148 +66,7 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
         // normal mode (always shown, unshrinkable), or as a 4th card INSIDE
         // the grid in full-height mode (collapsible, shares space via the
         // water-fill). Body is shared via this const.
-        const detailsBody = (
-          <fieldset disabled={!canEdit} className="contents" data-testid="task-details">
-            <TaskMetadataSidebar
-              task={task}
-              tags={tags}
-              taskTagIds={taskTagIds}
-              onUpdate={handleTaskUpdate}
-              onTagsChange={handleTagsChange}
-              onTagCreated={(tag) => setTags((prev) => [...prev, tag])}
-            />
-
-            <div className="flex flex-col gap-3 mt-5">
-              {/* Working directory */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  Working directory
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="size-3 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-72 text-xs">
-                      <p>Override the project directory for this task.</p>
-                      <p className="mt-1.5">Priority (highest first):</p>
-                      <ol className="mt-0.5 list-decimal list-inside">
-                        <li>Worktree</li>
-                        <li>Custom directory</li>
-                        <li>Project path</li>
-                      </ol>
-                    </TooltipContent>
-                  </Tooltip>
-                </span>
-                <div className="flex items-center gap-1">
-                  <div
-                    className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
-                    title={effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel}
-                  >
-                    {taskPath.state === 'loading' && hasOwnFolder(task)
-                      ? '…'
-                      : (effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel)}
-                    {task.has_worktree && (
-                      <span className="ml-1 text-[10px] opacity-60">(worktree)</span>
-                    )}
-                    {!task.has_worktree && task.has_base_dir && (
-                      <span className="ml-1 text-[10px] opacity-60">(custom)</span>
-                    )}
-                  </div>
-                  <button
-                    className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                    title="Change working directory"
-                    onClick={() => setBaseDirPickerOpen(true)}
-                  >
-                    <FileCode className="size-3.5 text-muted-foreground" />
-                  </button>
-                  {task.has_base_dir && (
-                    <button
-                      className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                      title="Clear custom directory"
-                      onClick={() => {
-                        // A refusal leaves the terminal running in the old folder.
-                        updateTaskAndNotify({ id: task.id, baseDir: null }).catch((err: unknown) =>
-                          toast.error("Couldn't change the working directory", {
-                            description: err instanceof Error ? err.message : String(err)
-                          })
-                        )
-                      }}
-                    >
-                      <X className="size-3.5 text-muted-foreground" />
-                    </button>
-                  )}
-                  {/* Scoped to the TASK, so it browses the computer
-                      this task's agents spawn on — a cwd chosen on
-                      any other machine would not exist for them. */}
-                  <WorkspaceDirPicker
-                    open={baseDirPickerOpen}
-                    onOpenChange={setBaseDirPickerOpen}
-                    onSelect={(picked) => {
-                      // Judged by the task's computer first; a refusal leaves the
-                      // terminal running in the old folder.
-                      updateTaskAndNotify({ id: task.id, baseDir: picked }).catch((err: unknown) =>
-                        toast.error("Couldn't use that folder", {
-                          description: err instanceof Error ? err.message : String(err)
-                        })
-                      )
-                    }}
-                    target={{ taskId: task.id }}
-                    title="Select working directory"
-                    defaultPath={baseDir ?? effectiveRepoPath ?? null}
-                  />
-                </div>
-                {task.has_worktree && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs w-full justify-start"
-                    onClick={() => {
-                      void updateTaskAndNotify({
-                        id: task.id,
-                        worktreePath: null,
-                        worktreeParentBranch: null
-                      })
-                    }}
-                  >
-                    <GitBranch className="mr-1.5 size-3" />
-                    Detach worktree
-                  </Button>
-                )}
-                {task.has_worktree && task.has_base_dir && (
-                  <span className="text-[10px] text-amber-400/80">
-                    Worktree active — custom dir overridden
-                  </span>
-                )}
-              </div>
-
-              {/* Danger zone */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Danger zone
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 text-xs"
-                    onClick={isArchived ? handleUnarchive : () => setArchiveDialogOpen(true)}
-                  >
-                    <Archive className="mr-1.5 size-3" />
-                    {isArchived ? 'Unarchive' : 'Archive'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 text-xs text-destructive hover:text-destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="mr-1.5 size-3" />
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </fieldset>
-        )
+        const detailsBody = <DetailsBody />
         // Layout tier from the panel's resolved width: 1 column (stacked, as
         // before), 2 (Description | cards + Details), 3 (Description | cards |
         // Details). Multi-column gives Description its own full-height column.
@@ -362,33 +146,7 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
             </div>
             {descriptionOpen && (
               <div className="flex flex-col min-h-0 flex-1">
-                <Suspense fallback={<div className="h-20" />}>
-                  <RichTextEditor
-                    value={descriptionValue}
-                    onChange={(md) => {
-                      descriptionDirty.current = true
-                      setDescriptionValue(md)
-                    }}
-                    onBlur={handleDescriptionSave}
-                    placeholder={canEdit ? 'Add description...' : ''}
-                    readOnly={!canEdit}
-                    testId="task-description-editor"
-                    variant="inline"
-                    fontFamily={notesFontFamily}
-                    checkedHighlight={notesCheckedHighlight}
-                    showToolbar={notesShowToolbar}
-                    spellcheck={notesSpellcheck}
-                    themeColors={notesThemeColors}
-                    artifacts={artifacts.map((a) => ({
-                      id: a.id,
-                      title: a.title,
-                      type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
-                    }))}
-                    onArtifactClick={selectArtifactInPanel}
-                    onUploadImages={handleUploadImages}
-                    onOpenLink={handleDescriptionOpenLink}
-                  />
-                </Suspense>
+                <DescriptionEditor />
               </div>
             )}
           </Collapsible>
@@ -412,78 +170,14 @@ export function SettingsKind({ panelId }: PanelKindProps): React.JSX.Element {
               <CollapsibleTrigger className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/sub:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
                 <ChevronRight className="size-3 transition-transform" />
                 Sub-tasks
-                {subTasks.length > 0 && (
+                {subtaskProgress && (
                   <span className="ml-auto text-muted-foreground/60 text-[10px]">
-                    {
-                      subTasks.filter((s) =>
-                        isTerminalStatus(s.status, project?.columns_config ?? null)
-                      ).length
-                    }
-                    /{subTasks.length}
+                    {subtaskProgress}
                   </span>
                 )}
               </CollapsibleTrigger>
               <CollapsibleContent className="p-2 flex flex-col flex-1 min-h-0">
-                <DndContext
-                  sensors={subTaskSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleSubTaskDragEnd}
-                >
-                  <SortableContext
-                    items={subTasks.map((s) => s.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div
-                      data-card-scroll
-                      className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
-                    >
-                      {subTasks.map((sub) => (
-                        <SortableSubTask
-                          key={sub.id}
-                          sub={sub}
-                          columns={project?.columns_config}
-                          statusOptions={statusOptions}
-                          onNavigate={onNavigateToTask}
-                          onUpdate={handleUpdateSubTask}
-                          onDelete={handleDeleteSubTask}
-                        />
-                      ))}
-                      {addingSubTask ? (
-                        <div className="flex items-center gap-2 py-1 px-1">
-                          <Input
-                            ref={subTaskInputRef}
-                            value={subTaskTitle}
-                            onChange={(e) => setSubTaskTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                handleCreateSubTask()
-                              }
-                              if (e.key === 'Escape') {
-                                setAddingSubTask(false)
-                                setSubTaskTitle('')
-                              }
-                            }}
-                            placeholder="Sub-task title..."
-                            className="h-6 text-xs"
-                            autoFocus
-                          />
-                        </div>
-                      ) : (
-                        canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => setAddingSubTask(true)}
-                            className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
-                          >
-                            <Plus className="size-3" />
-                            Add subtask
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </SortableContext>
-                </DndContext>
+                <SubtasksList />
               </CollapsibleContent>
             </Collapsible>
 

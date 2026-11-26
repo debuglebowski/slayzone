@@ -25,7 +25,8 @@ import {
   instanceDefaultLayout,
   renameLayout,
   saveLayoutTree,
-  setSlotHidden
+  setSlotHidden,
+  webPageSettings
 } from '@slayzone/task-contracts'
 import {
   Button,
@@ -68,7 +69,10 @@ const PALETTE_KINDS: readonly PanelKind[] = [
   'git',
   'artifacts',
   'processes',
-  'settings'
+  'settings',
+  'description',
+  'subtasks',
+  'details'
 ]
 
 /** A new layout's start: one agent panel. */
@@ -143,6 +147,8 @@ function EditorBody({
 
   const palette: PaletteEntry[] = [
     ...PALETTE_KINDS.map((kind) => ({ key: kind, kind, label: PANEL_KINDS[kind].label })),
+    // A web page asks for its URL when a task first shows it.
+    { key: 'web-page', kind: 'web', label: 'Web page', settings: webPageSettings() },
     ...enabledWebPanels.map((wp) => ({
       key: wp.id,
       kind: 'web' as const,

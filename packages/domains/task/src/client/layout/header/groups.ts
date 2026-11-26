@@ -27,6 +27,8 @@ export interface LayoutGroup {
 
 export interface LayoutGroupsOptions {
   webPanels: readonly { id: string; name: string }[]
+  /** The task's artifacts (an Artifact panel is named after its file). */
+  artifacts?: readonly { id: string; title: string }[]
   /** A tab that gets no toggle (its kind is disabled, or this app can't render it). */
   isTabListed: (instance: PanelInstance) => boolean
   /**
@@ -74,7 +76,9 @@ function groupOf(
   const shown = listed.filter((t) => !t.tab.hidden)
   const named = shown.length > 0 ? shown : listed
   const icon = shown.find((t) => t.instance.id === slot.activeInstanceId) ?? shown[0] ?? listed[0]
-  const autoName = groupNameOf(named.map((t) => panelTabMeta(t.instance, opts.webPanels).label))
+  const autoName = groupNameOf(
+    named.map((t) => panelTabMeta(t.instance, opts.webPanels, opts.artifacts).label)
+  )
   return {
     slotId: slot.id,
     columnId,

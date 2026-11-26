@@ -1,9 +1,13 @@
 import type { ComponentType, RefAttributes } from 'react'
 import {
+  AlignLeft,
   Cpu,
   FileCode,
+  FileText,
   GitBranch,
   Globe,
+  ListChecks,
+  ListTree,
   Paperclip,
   Settings2,
   SquareTerminal,
@@ -37,8 +41,12 @@ export type PanelKind =
   | 'web'
   | 'editor'
   | 'artifacts'
+  | 'artifact'
   | 'git'
   | 'settings'
+  | 'description'
+  | 'subtasks'
+  | 'details'
   | 'processes'
 
 /**
@@ -90,7 +98,8 @@ export interface PanelKindDef {
   secondaryWindow: boolean
   /**
    * More than one instance may exist ("New <kind> panel"): each keeps its own state
-   * (docs/plans/panel-model.md step 7). Settings stays single: one task, one form.
+   * (docs/plans/panel-model.md step 7). Settings and its cards (Description,
+   * Subtasks, Details) stay single: one task, one form (ONE_PER_TASK_KINDS).
    */
   multiInstance: boolean
   /**
@@ -185,6 +194,18 @@ export const PANEL_KINDS = {
     secondaryWindow: true,
     multiInstance: true
   },
+  artifact: {
+    kind: 'artifact',
+    primaryPanelId: null,
+    label: 'Artifact',
+    icon: FileText,
+    iconClassName: 'text-chart-5',
+    shortcutId: null,
+    keepAlive: 'activity',
+    suspense: true,
+    secondaryWindow: true,
+    multiInstance: true
+  },
   web: {
     kind: 'web',
     primaryPanelId: null,
@@ -216,6 +237,42 @@ export const PANEL_KINDS = {
     icon: Settings2,
     iconClassName: 'text-muted-foreground',
     shortcutId: 'panel-settings',
+    keepAlive: 'activity',
+    suspense: false,
+    secondaryWindow: true,
+    multiInstance: false
+  },
+  description: {
+    kind: 'description',
+    primaryPanelId: null,
+    label: 'Description',
+    icon: AlignLeft,
+    iconClassName: 'text-muted-foreground',
+    shortcutId: null,
+    keepAlive: 'activity',
+    suspense: false,
+    secondaryWindow: true,
+    multiInstance: false
+  },
+  subtasks: {
+    kind: 'subtasks',
+    primaryPanelId: null,
+    label: 'Subtasks',
+    icon: ListChecks,
+    iconClassName: 'text-muted-foreground',
+    shortcutId: null,
+    keepAlive: 'activity',
+    suspense: false,
+    secondaryWindow: true,
+    multiInstance: false
+  },
+  details: {
+    kind: 'details',
+    primaryPanelId: null,
+    label: 'Details',
+    icon: ListTree,
+    iconClassName: 'text-muted-foreground',
+    shortcutId: null,
     keepAlive: 'activity',
     suspense: false,
     secondaryWindow: true,
@@ -269,6 +326,13 @@ export interface ArtifactsPanelProps {
   onShareArtifact?: (artifact: { id: string; title: string }) => void
   /** A View member's panel (T-100): files open and download, nothing changes them. */
   readOnly?: boolean
+  /**
+   * Show this one artifact only (an Artifact panel): no sidebar, no selection —
+   * the panel is about this file. Read at mount; a different id remounts.
+   */
+  pinnedArtifactId?: string
+  /** "Open in its own panel" on a file (an Artifact panel for it). Absent: no entry. */
+  onOpenInOwnPanel?: (artifact: { id: string; title: string }) => void
 }
 
 export interface UnifiedGitPanelHandle {

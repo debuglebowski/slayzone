@@ -194,31 +194,31 @@ describe('placePanels', () => {
       layout,
       compact ? (compactColumns(layout) ?? []) : resolveLayoutStrip(layout, 1200).columns,
       compact
-    ).map((p) => [p.instance.id, p.active, p.inCell])
+    ).map((p) => [p.instance.id, p.active, p.inCell, p.inStrip])
 
   it('Classic panels are bare strip columns', () => {
     expect(place(classic)).toEqual([
-      ['terminal', true, false],
-      ['browser', true, false],
-      ['settings', true, false]
+      ['terminal', true, false, false],
+      ['browser', true, false, false],
+      ['settings', true, false, false]
     ])
   })
 
   it('every shown tab of a strip renders; only the selected one is active', () => {
     const merged = mergeInto(classic, 'browser', 'terminal')
     expect(place(merged)).toEqual([
-      ['terminal', false, true],
-      ['browser', true, true],
-      ['settings', true, false]
+      ['terminal', false, true, true],
+      ['browser', true, true, true],
+      ['settings', true, false, false]
     ])
     // A hidden tab does not render; the group left with one tab drops its strip.
     expect(place(setTabHidden(merged, 'terminal', true))).toEqual([
-      ['browser', true, true],
-      ['settings', true, false]
+      ['browser', true, true, false],
+      ['settings', true, false, false]
     ])
   })
 
   it('a compact cell places the agent alone', () => {
-    expect(place(classic, true)).toEqual([['terminal', true, false]])
+    expect(place(classic, true)).toEqual([['terminal', true, false, false]])
   })
 })

@@ -2,6 +2,7 @@ import { use, useRef, useState } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { X } from 'lucide-react'
 import type { LayoutSlot, LayoutTab, PanelInstance, TaskLayout } from '@slayzone/task-contracts'
+import { isWebPageInstance, webPageUrlOf } from '@slayzone/task-contracts'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,10 +11,12 @@ import {
   ContextMenuTrigger,
   cn
 } from '@slayzone/ui'
+import { PANEL_TAB_ACCESSORIES } from '../panels/kinds'
+import { WebPageUrlDialog } from '../panels/kinds/WebPageUrl'
 import { useTaskPageContext } from '../panels/TaskPageContext'
 import { LayoutActionsContext, LayoutDragItemContext } from './LayoutContext'
 import { newPanelChoiceLike } from './header/NewPanelMenu'
-import { panelTabMeta } from './panelTabMeta'
+import { isRenderableKind, panelTabMeta } from './panelTabMeta'
 import type { DragItem } from './layoutDnd'
 
 interface TabStripProps {
@@ -82,8 +85,13 @@ interface PanelTabProps {
 
 function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): React.JSX.Element {
   const actions = use(LayoutActionsContext)
-  const { web, panels } = useTaskPageContext()
-  const { label, icon: Icon } = panelTabMeta(instance, web.enabledWebPanels)
+  const { web, panels, settings, canEdit } = useTaskPageContext()
+  const { label, icon: Icon } = panelTabMeta(instance, web.enabledWebPanels, settings.artifacts)
+  const Accessory = isRenderableKind(instance.kind)
+    ? PANEL_TAB_ACCESSORIES[instance.kind]
+    : undefined
+  const webPage = isWebPageInstance(instance)
+  const [editingUrl, setEditingUrl] = useState(false)
   // Another panel like this one, as a tab of this group (the title row ⋯ adds a column).
   const another = panels.canAddPanels ? newPanelChoiceLike(instance, web.enabledWebPanels) : null
   const [renaming, setRenaming] = useState(false)
@@ -152,6 +160,7 @@ function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): Reac
           ) : (
             <span className="truncate">{label}</span>
           )}
+          {Accessory && <Accessory instance={instance} selected={selected} />}
           <button
             type="button"
             aria-label={`Close ${label}`}
@@ -193,6 +202,11 @@ function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): Reac
         >
           Rename
         </ContextMenuItem>
+        {webPage && canEdit && (
+          <ContextMenuItem data-testid="panel-tab-edit-url" onSelect={() => setEditingUrl(true)}>
+            Edit URL…
+          </ContextMenuItem>
+        )}
         {another && (
           <ContextMenuItem
             onSelect={() => panels.addPanel(another.kind, instance.id, another.settings)}
@@ -219,6 +233,14 @@ function PanelTab({ instance, selected, canSplit, dimmed }: PanelTabProps): Reac
           Close
         </ContextMenuItem>
       </ContextMenuContent>
+      {webPage && (
+        <WebPageUrlDialog
+          open={editingUrl}
+          url={webPageUrlOf(instance) ?? ''}
+          onOpenChange={setEditingUrl}
+          onSubmit={(url) => panels.updateInstanceSettings(instance.id, { url })}
+        />
+      )}
     </ContextMenu>
   )
 }
