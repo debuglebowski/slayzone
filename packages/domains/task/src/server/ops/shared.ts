@@ -9,6 +9,11 @@ import type {
   UpdateTaskInput
 } from '@slayzone/task-contracts'
 import {
+  applyLegacyWrite,
+  parsePanelSizes,
+  parseTaskLayout,
+  projectToLegacy,
+  serializeTaskLayout,
   prioritySchema,
   validateReparent,
   reparentErrorMessage,
@@ -391,6 +396,8 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     opencode_flags: providerConfig['opencode']?.flags ?? '',
     panel_visibility: safeJsonParse(row.panel_visibility),
     panel_sizes: safeJsonParse(row.panel_sizes),
+    panel_layout: parseTaskLayout(row.panel_layout),
+    panel_instance_state: safeJsonParse(row.panel_instance_state),
     browser_tabs: safeJsonParse(row.browser_tabs),
     web_panel_urls: safeJsonParse(row.web_panel_urls),
     editor_open_files: safeJsonParse(row.editor_open_files),
@@ -1015,6 +1022,86 @@ export async function notifyTaskPaths(taskId: string, change: TaskPathChange): P
   taskEvents.emit('task:paths-changed', { taskId })
 }
 
+/**
+ * The panel columns of a task update, dual-written (docs/plans/panel-model.md §1.4,
+ * like provider_config → *_flags above):
+ *
+ * - `panelLayout` (a layout) is stored and ALSO projected into panel_visibility /
+ *   panel_sizes (`projectToLegacy`), so older apps, the CLI and REST see it. Keys the
+ *   layout does not own are kept from the incoming legacy fields, else the stored ones.
+ *   `panelLayout: null` drops the stored layout (back to derived); the legacy columns
+ *   are written only as given.
+ * - A legacy-only write (an older client) is stored as given and, when the task has a
+ *   stored layout, applied to it too (`applyLegacyWrite`) so the two never disagree.
+ */
+async function pushPanelLayoutFields(
+  db: SlayzoneDb,
+  data: UpdateTaskInput,
+  fields: string[],
+  values: unknown[]
+): Promise<void> {
+  const json = (v: unknown): string | null => (v ? JSON.stringify(v) : null)
+  if (data.panelInstanceState !== undefined) {
+    fields.push('panel_instance_state = ?')
+    values.push(json(data.panelInstanceState))
+  }
+  const legacyWrite = data.panelVisibility !== undefined || data.panelSizes !== undefined
+  if (data.panelLayout === undefined && !legacyWrite) return
+
+  if (data.panelLayout) {
+    const layout = parseTaskLayout(data.panelLayout)
+    if (!layout) throw new Error('Invalid panelLayout')
+    const current = await db.get<{ panel_visibility: string | null; panel_sizes: string | null }>(
+      'SELECT panel_visibility, panel_sizes FROM tasks WHERE id = ?',
+      [data.id]
+    )
+    const legacy = projectToLegacy(layout, {
+      panelVisibility:
+        (data.panelVisibility !== undefined
+          ? data.panelVisibility
+          : (safeJsonParse(current?.panel_visibility) as Record<string, boolean> | null)) ??
+        undefined,
+      panelSizes: parsePanelSizes(
+        data.panelSizes !== undefined ? data.panelSizes : safeJsonParse(current?.panel_sizes)
+      )
+    })
+    fields.push('panel_layout = ?', 'panel_visibility = ?', 'panel_sizes = ?')
+    values.push(
+      serializeTaskLayout(layout),
+      JSON.stringify(legacy.panelVisibility),
+      JSON.stringify(legacy.panelSizes)
+    )
+    return
+  }
+
+  if (data.panelVisibility !== undefined) {
+    fields.push('panel_visibility = ?')
+    values.push(json(data.panelVisibility))
+  }
+  if (data.panelSizes !== undefined) {
+    fields.push('panel_sizes = ?')
+    values.push(json(data.panelSizes))
+  }
+  if (data.panelLayout === null) {
+    fields.push('panel_layout = ?')
+    values.push(null)
+    return
+  }
+  const stored = await db.get<{ panel_layout: string | null }>(
+    'SELECT panel_layout FROM tasks WHERE id = ?',
+    [data.id]
+  )
+  const layout = parseTaskLayout(stored?.panel_layout)
+  if (!layout) return
+  const next = applyLegacyWrite(layout, {
+    ...(data.panelVisibility !== undefined ? { panelVisibility: data.panelVisibility } : {}),
+    ...(data.panelSizes !== undefined ? { panelSizes: data.panelSizes } : {})
+  })
+  if (next === layout) return
+  fields.push('panel_layout = ?')
+  values.push(serializeTaskLayout(next))
+}
+
 export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
   const target = await readUpdateTarget(db, data)
   assertValidTaskUpdate(data, target)
@@ -1290,14 +1377,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       }
     }
   }
-  if (data.panelVisibility !== undefined) {
-    fields.push('panel_visibility = ?')
-    values.push(data.panelVisibility ? JSON.stringify(data.panelVisibility) : null)
-  }
-  if (data.panelSizes !== undefined) {
-    fields.push('panel_sizes = ?')
-    values.push(data.panelSizes ? JSON.stringify(data.panelSizes) : null)
-  }
+  await pushPanelLayoutFields(db, data, fields, values)
   // A project move clears these too (`moveTasksToProject`).
   // As given: the task-paths delegate judges them (`apply`), once.
   if (data.worktreePath !== undefined) pathPatch.worktreePath = data.worktreePath

@@ -25,6 +25,8 @@ export interface TaskRowData {
   dangerouslySkipPermissions: boolean
   panelVisibility: string | null
   panelSizes: string | null
+  /** The panel layout (serialized TaskLayout). Omitted: NULL, derived from the legacy columns. */
+  panelLayout?: string | null
   browserTabs: string | null
   webPanelUrls: string | null
   /**
@@ -51,10 +53,10 @@ const INSERT_SQL = `
     status, priority, due_date, agent_id, provider_config,
     claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
     is_temporary, repo_name,
-    dangerously_skip_permissions, panel_visibility, panel_sizes, browser_tabs, web_panel_urls,
-    external_id, external_provider,
+    dangerously_skip_permissions, panel_visibility, panel_sizes, panel_layout, browser_tabs,
+    web_panel_urls, external_id, external_provider,
     updated_at, "order", created_by_user_id
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     COALESCE(?, datetime('now')), COALESCE(?, 0),
     COALESCE(?, (SELECT owner_user_id FROM projects WHERE id = ?)))
 `
@@ -92,6 +94,7 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
     row.dangerouslySkipPermissions ? 1 : 0,
     row.panelVisibility,
     row.panelSizes,
+    row.panelLayout ?? null,
     row.browserTabs,
     row.webPanelUrls,
     row.externalId ?? null,

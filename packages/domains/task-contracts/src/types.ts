@@ -2,6 +2,7 @@ import type { AgentId, LoopConfig } from '@slayzone/terminal-contracts'
 import type { BrowserTabsState } from './browser-tabs'
 import type { EditorOpenFilesState } from './editor-open-files'
 import type { ArtifactsSidebarState } from './artifacts-sidebar'
+import type { TaskLayout } from './layout/types'
 
 // Built-in starter statuses used as defaults for new projects.
 export const BUILTIN_STATUSES = [
@@ -131,6 +132,9 @@ export type PanelSizeOverride = { unit: PanelUnit; value: number }
 
 /** panel_sizes column / home store: runtime-panel-id → size override. */
 export type PanelSizes = Record<string, PanelSizeOverride>
+
+/** panel_instance_state column: instance id → that instance's own state (editor files, git tab …). */
+export type PanelInstanceState = Record<string, Record<string, unknown>>
 
 export const DEFAULT_PANEL_MIN_WIDTH = 200
 
@@ -776,6 +780,14 @@ export interface Task {
   panel_visibility: PanelVisibility | null
   // Panel sizes (JSON) — per-task widths for the split-view panels
   panel_sizes: PanelSizes | null
+  /**
+   * The applied panel layout (docs/plans/panel-model.md §1.2); null = derived from
+   * panel_visibility / panel_sizes (`deriveLayoutFromLegacy`). The hub dual-writes
+   * the legacy columns on every layout write. Optional: an older hub has no column.
+   */
+  panel_layout?: TaskLayout | null
+  /** Heavy state of non-primary panel instances, keyed by instance id. */
+  panel_instance_state?: PanelInstanceState | null
   // The computer this task's work runs on; null = its project's (v149 column).
   computer_id?: string | null
   // Worktree. The PATHS (worktree, custom working folder) live only on the computer
@@ -922,6 +934,13 @@ export interface UpdateTaskInput {
   panelVisibility?: PanelVisibility | null
   // Panel sizes
   panelSizes?: PanelSizes | null
+  /**
+   * The panel layout. Also rewrites panel_visibility / panel_sizes from it
+   * (`projectToLegacy`); null = back to the derived layout. A legacy-only write
+   * (panelVisibility / panelSizes) updates a stored layout (`applyLegacyWrite`).
+   */
+  panelLayout?: TaskLayout | null
+  panelInstanceState?: PanelInstanceState | null
   // Worktree
   worktreePath?: string | null
   worktreeParentBranch?: string | null

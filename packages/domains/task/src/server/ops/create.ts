@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { readEffectiveSettingValue } from '@slayzone/settings-core/server'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task-contracts'
+import { parseTaskLayout, projectToLegacy, serializeTaskLayout } from '@slayzone/task-contracts'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects-contracts'
 import {
   agentStartsOnOpen,
@@ -113,9 +114,19 @@ export async function createTaskOp(
 
   const priority = data.priority ?? template?.default_priority ?? 3
   const dangerouslySkipPerms = template?.dangerously_skip_permissions ? true : false
-  const panelVisibility = template?.panel_visibility
-    ? JSON.stringify(template.panel_visibility)
-    : null
+  // A template's layout is the task's starting layout, with the legacy columns
+  // projected from it (dual-write, docs/plans/panel-model.md §1.4).
+  const templateLayout = parseTaskLayout(template?.panel_layout)
+  const panelLayout = templateLayout ? serializeTaskLayout({ ...templateLayout, rev: 0 }) : null
+  const projected =
+    templateLayout &&
+    projectToLegacy(templateLayout, { panelVisibility: template?.panel_visibility ?? undefined })
+  const panelVisibility = projected
+    ? JSON.stringify(projected.panelVisibility)
+    : template?.panel_visibility
+      ? JSON.stringify(template.panel_visibility)
+      : null
+  const panelSizes = projected ? JSON.stringify(projected.panelSizes) : null
   const browserTabs = template?.browser_tabs ? JSON.stringify(template.browser_tabs) : null
   const webPanelUrls = template?.web_panel_urls ? JSON.stringify(template.web_panel_urls) : null
 
@@ -143,7 +154,8 @@ export async function createTaskOp(
     repoName: data.repoName ?? null,
     dangerouslySkipPermissions: dangerouslySkipPerms,
     panelVisibility,
-    panelSizes: null,
+    panelSizes,
+    panelLayout,
     browserTabs,
     webPanelUrls,
     externalId: data.externalId ?? null,

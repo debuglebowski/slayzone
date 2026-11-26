@@ -23,6 +23,7 @@ export interface CreateTemplateTxnParams {
   // Pre-serialized JSON (or null) — the IPC layer stringifies before sending.
   providerConfig: string | null
   panelVisibility: string | null
+  panelLayout: string | null
   browserTabs: string | null
   webPanelUrls: string | null
   dangerouslySkipPermissions: number | null
@@ -52,10 +53,10 @@ export const templatesTxns = {
     db.prepare(`
       INSERT INTO task_templates (
         id, project_id, name, description,
-        agent_id, provider_config, panel_visibility, browser_tabs, web_panel_urls,
+        agent_id, provider_config, panel_visibility, panel_layout, browser_tabs, web_panel_urls,
         dangerously_skip_permissions, default_status, default_priority,
         is_default, sort_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       p.id,
       p.projectId,
@@ -64,6 +65,7 @@ export const templatesTxns = {
       p.agentId,
       p.providerConfig,
       p.panelVisibility,
+      p.panelLayout,
       p.browserTabs,
       p.webPanelUrls,
       p.dangerouslySkipPermissions,

@@ -616,6 +616,8 @@ run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migr
 run_harness packages/shared/db-migrations/src/v215-computer-retirement-chains-reason-codes-migration.test.ts
 run_harness packages/shared/db-migrations/src/v226-open-task-tabs-migration.test.ts
 run_harness packages/shared/db-migrations/src/v227-sharing-members-only-migration.test.ts
+# v228: panel model columns (tasks.panel_layout / panel_instance_state, task_templates.panel_layout), no backfill.
+run_harness packages/shared/db-migrations/src/v228-panel-layout-migration.test.ts
 run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts
 run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts
@@ -1389,6 +1391,8 @@ run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
 run_harness packages/domains/task/src/server/ops/chat-starting-values.test.ts
 run_harness packages/domains/task/src/server/ops/task-paths-delegate.test.ts
 run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
+# Panel layout dual-write: panelLayout ↔ panel_visibility/panel_sizes, templates copy it.
+run_harness packages/domains/task/src/server/ops/panel-layout-dual-write.test.ts
 run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
