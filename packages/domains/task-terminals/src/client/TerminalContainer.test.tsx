@@ -187,6 +187,49 @@ test('a failed load is an error with a retry, never the start-your-own offer', (
   expect(reload).toHaveBeenCalledTimes(1)
 })
 
+// Several agent/terminal panels split a task's terminal groups (panel-model step 7).
+test('a group filter shows only its groups; the active one falls back to the first shown', () => {
+  const { unmount } = render(
+    <TerminalContainer
+      isActive
+      taskId="task"
+      cwd="/repo"
+      defaultMode="claude-chat"
+      groupFilter={{ only: ['other'] }}
+    />
+  )
+  // The main group (active in the hook) belongs to another panel: `other` shows.
+  expect(screen.queryByTestId('group task:task')).toBeNull()
+  expect(screen.getByTestId('group task:other').dataset.active).toBe('true')
+  unmount()
+  render(
+    <TerminalContainer
+      isActive
+      taskId="task"
+      cwd="/repo"
+      defaultMode="claude-chat"
+      groupFilter={{ except: ['other'] }}
+    />
+  )
+  act(() => setActive('other'))
+  expect(screen.queryByTestId('group task:other')).toBeNull()
+  expect(screen.getByTestId('group task:task').dataset.active).toBe('true')
+})
+
+test('a panel showing no group gets its own empty state, not the start-your-own offer', () => {
+  render(
+    <TerminalContainer
+      taskId="task"
+      cwd="/repo"
+      defaultMode="claude-chat"
+      groupFilter={{ only: [] }}
+      emptyState={<div data-testid="panel-empty" />}
+    />
+  )
+  expect(screen.queryByTestId('panel-empty')).not.toBeNull()
+  expect(screen.queryByTestId('terminal-empty-own')).toBeNull()
+})
+
 test('while loading, neither the offer nor the error shows', () => {
   loadOverride = { loadState: 'loading', empty: true }
   render(<TerminalContainer taskId="task" cwd="/repo" defaultMode="claude-chat" />)

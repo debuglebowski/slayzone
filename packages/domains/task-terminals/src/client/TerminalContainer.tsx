@@ -111,6 +111,27 @@ interface TerminalContainerProps {
   mainTabAccessories?: React.ReactNode
   mainTabContextMenu?: React.ReactNode
   overlay?: React.ReactNode
+  /**
+   * Which of the task's terminal groups this container shows, when several panels
+   * share the task's terminals (docs/plans/panel-model.md step 7): `only` these
+   * (another agent/terminal panel), or all `except` these (the primary agent panel,
+   * without the groups other panels claim). Absent: every group.
+   */
+  groupFilter?: { only?: readonly string[]; except?: readonly string[] }
+  /** A group was created here (new-group button, ⌘T): the panel claims it. */
+  onGroupCreated?: (groupId: string) => void
+  /** Shown instead of the "start your own agent" state when this container shows no group. */
+  emptyState?: React.ReactNode
+}
+
+/** `groups` narrowed by a container's `groupFilter`. */
+export function filterTerminalGroups(
+  groups: TerminalGroup[],
+  filter: TerminalContainerProps['groupFilter']
+): TerminalGroup[] {
+  if (!filter) return groups
+  const { only, except } = filter
+  return groups.filter((g) => (!only || only.includes(g.id)) && (!except || !except.includes(g.id)))
 }
 
 /** A non-main tab running a terminal agent (not a plain shell, not a chat). Its
@@ -162,7 +183,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       rightContent,
       mainTabAccessories,
       mainTabContextMenu,
-      overlay
+      overlay,
+      groupFilter,
+      onGroupCreated,
+      emptyState
     }: TerminalContainerProps,
     ref
   ) {
@@ -170,10 +194,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       tabs,
       loadState,
       reload,
-      groups,
-      activeGroupId,
+      groups: allGroups,
+      activeGroupId: requestedGroupId,
       setActiveGroupId,
-      createTab,
+      createTab: createTaskTab,
       splitTab,
       closeTab,
       movePane,
@@ -182,6 +206,23 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       getSessionId
     } = useTaskTerminals(taskId, defaultMode)
     const { chatFontSize: defaultChatFontSize } = useAppearance()
+
+    // The groups this container shows (several panels may split the task's terminals).
+    // Pass a stable `groupFilter`: a new one re-filters (new `groups`) on every render.
+    const groups = filterTerminalGroups(allGroups, groupFilter)
+    // The active group is one this container shows: its first one while the
+    // requested group is another panel's (or not loaded yet).
+    const activeGroupId = groups.some((g) => g.id === requestedGroupId)
+      ? requestedGroupId
+      : (groups[0]?.id ?? requestedGroupId)
+    const createTab = useCallback(
+      async (mode?: AgentId): Promise<TerminalTab> => {
+        const tab = await createTaskTab(mode)
+        onGroupCreated?.(tab.groupId)
+        return tab
+      },
+      [createTaskTab, onGroupCreated]
+    )
 
     // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
     const shortcutActive = hasShortcutFocus ?? isActive
@@ -729,7 +770,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
                 </div>
               </div>
             )}
-            {groups.length === 0 && loadState === 'loaded' && (
+            {groups.length === 0 && loadState === 'loaded' && emptyState}
+            {groups.length === 0 && loadState === 'loaded' && !emptyState && (
               // No tab of one's own yet: someone working on a task another person created
               // (T-100) — the main agent is theirs, on their computer.
               <div
