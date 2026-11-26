@@ -121,7 +121,7 @@ test.describe('Client-local settings drive the native menu', () => {
     mainWindow,
     electronApp
   }) => {
-    await rebind(mainWindow, 'Settings', 'Meta+Alt+u')
+    await rebind(mainWindow, 'Global Settings', 'Meta+Alt+u')
     await openTaskById(mainWindow, taskId)
 
     // A real key in the main window: `sendInputEvent` runs main's `before-input-event`
