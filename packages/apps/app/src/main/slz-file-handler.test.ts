@@ -38,7 +38,7 @@ describe('isolated HTML artifact URLs', () => {
     const url = await toHtmlArtifactPreviewUrl('remote-1', 'a1', '/hub/report.html', 2, 'dark')
     const res = await handler(req(url))
     expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toBe('text/html')
+    expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8')
     expect(res.headers.get('content-security-policy')).toBe(
       'sandbox allow-scripts allow-same-origin'
     )
@@ -106,7 +106,7 @@ describe('source URLs', () => {
       taskId: 't1'
     })
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer tok')
-    expect(res.headers.get('content-type')).toBe('text/html')
+    expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8')
     expect(await res.text()).toBe('remote-bytes')
   })
 
@@ -240,5 +240,75 @@ describe('artifact controls runtime', () => {
     const { handler } = setup()
     const url = withArtifactPreviewMode(toSlzFileUrl(`${HOME}/a.png`), { kind: 'screen' })
     expect(await (await handler(req(url))).text()).toBe('local-bytes')
+  })
+})
+
+describe('HTML charset', () => {
+  const UTF8 = 'text/html; charset=utf-8'
+  const page = (head: string) =>
+    `<!doctype html><html><head>${head}</head><body>A · B</body></html>`
+  const local = async (body: string | Buffer) => {
+    const { handler } = setup({ readFile: vi.fn(async () => Buffer.from(body)) })
+    return handler(req(toSlzFileUrl(`${HOME}/page.html`)))
+  }
+  const remote = async (body: BodyInit, init: ResponseInit = { status: 200 }) => {
+    const { handler } = setup({ fetch: vi.fn(async () => new Response(body, init)) as never })
+    return handler(req(toSlzSourceUrl(workspace, 'page.html')))
+  }
+
+  it('decodes a page that declares no charset as UTF-8, bytes untouched', async () => {
+    const res = await local(page('<title>t</title>'))
+    expect(res.headers.get('content-type')).toBe(UTF8)
+    expect(await res.text()).toBe(page('<title>t</title>'))
+  })
+
+  it.each([
+    ['a meta charset', '<meta charset="windows-1252">'],
+    [
+      'an http-equiv content type',
+      '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">'
+    ],
+    ['an unquoted meta charset', '<META CHARSET=shift_jis>']
+  ])('leaves the decoding to %s', async (_, meta) => {
+    expect((await local(page(meta))).headers.get('content-type')).toBe('text/html')
+    expect((await remote(page(meta))).headers.get('content-type')).toBe('text/html')
+  })
+
+  it('leaves a byte order mark to decide', async () => {
+    const bom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(page(''))])
+    expect((await local(bom)).headers.get('content-type')).toBe('text/html')
+  })
+
+  it('only counts a declaration in the first 1024 bytes, as the browser does', async () => {
+    const late = page('<style>' + ' '.repeat(1100) + '</style><meta charset="windows-1252">')
+    expect((await local(late)).headers.get('content-type')).toBe(UTF8)
+  })
+
+  it('streams a hub page through whole, in any chunking', async () => {
+    const html = page('<title>t</title>') + 'x'.repeat(5000)
+    const bytes = new TextEncoder().encode(html)
+    const chunks = [
+      bytes.slice(0, 3),
+      bytes.slice(3, 700),
+      bytes.slice(700, 1500),
+      bytes.slice(1500)
+    ]
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk)
+        controller.close()
+      }
+    })
+    const res = await remote(body)
+    expect(res.headers.get('content-type')).toBe(UTF8)
+    expect(await res.text()).toBe(html)
+  })
+
+  it('leaves a partial response alone', async () => {
+    const res = await remote('<p>part', {
+      status: 206,
+      headers: { 'content-range': 'bytes 0-6/99' }
+    })
+    expect(res.headers.get('content-type')).toBe('text/html')
   })
 })

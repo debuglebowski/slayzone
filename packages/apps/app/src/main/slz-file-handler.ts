@@ -45,10 +45,72 @@ export interface SlzFileHandlerDeps {
   readFile?: (path: string) => Promise<Buffer<ArrayBuffer>>
 }
 
-/** Bare media type: no charset, so a page's own `<meta charset>` still decides
- *  how it is decoded (the handler never sent one). */
+/** Bare media type: the charset is decided per page (see {@link withHtmlCharset}). */
 function mediaType(path: string): string {
   return contentTypeForPath(path).split(';')[0].trim()
+}
+
+/** How far the browser's encoding prescan reads into a page (HTML spec). */
+const PRESCAN_BYTES = 1024
+/** `<meta charset=…>` or `<meta http-equiv="Content-Type" content="…; charset=…">`. */
+const CHARSET_DECLARATION = /<meta\b[^>]*\bcharset\s*=/i
+
+/** Whether a page decides its own encoding: a byte order mark, or a declaration
+ *  where the browser's prescan finds it. */
+function declaresEncoding(head: Uint8Array): boolean {
+  const [a, b, c] = head
+  if (
+    (a === 0xef && b === 0xbb && c === 0xbf) ||
+    (a === 0xfe && b === 0xff) ||
+    (a === 0xff && b === 0xfe)
+  ) {
+    return true
+  }
+  return CHARSET_DECLARATION.test(Buffer.from(head.subarray(0, PRESCAN_BYTES)).toString('latin1'))
+}
+
+/**
+ * A page that declares no encoding is decoded as UTF-8, not the browser's
+ * windows-1252 fallback that turns `·` into `Â·`. One that does declare one keeps
+ * it: the header would override its `<meta charset>`.
+ */
+function withHtmlCharset(contentType: string, head: Uint8Array): string {
+  return contentType === 'text/html' && !declaresEncoding(head)
+    ? 'text/html; charset=utf-8'
+    : contentType
+}
+
+/** The first `bytes` of a stream, and the whole stream again to send on. */
+async function peekStream(
+  body: ReadableStream<Uint8Array>,
+  bytes: number
+): Promise<{ head: Uint8Array; body: ReadableStream<Uint8Array> }> {
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  while (size < bytes) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    size += value.length
+  }
+  const head = Buffer.concat(chunks)
+  return {
+    head,
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (head.length > 0) controller.enqueue(head)
+      },
+      async pull(controller) {
+        const { done, value } = await reader.read()
+        if (done) controller.close()
+        else controller.enqueue(value)
+      },
+      cancel(reason) {
+        return reader.cancel(reason)
+      }
+    })
+  }
 }
 
 function messagePage(title: string, detail: string): Response {
@@ -126,7 +188,10 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
     const doctor = htmlDoctor(url, contentType)
     const body = doctor ? doctor(data.toString('utf-8')) : data
     return new Response(body, {
-      headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
+      headers: {
+        'content-type': withHtmlCharset(contentType, data),
+        'cache-control': 'no-cache'
+      }
     })
   }
 
@@ -184,14 +249,25 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
       // Apply the sandbox to the document as well as to the preview iframe.
       out.set('content-security-policy', 'sandbox allow-scripts allow-same-origin')
     }
+    // A partial response is not the start of the page: no prescan to mirror.
+    if (contentType !== 'text/html' || res.status !== 200 || !res.body) {
+      return new Response(res.body, { status: res.status, headers: out })
+    }
+    let peeked: Awaited<ReturnType<typeof peekStream>>
+    try {
+      peeked = await peekStream(res.body, PRESCAN_BYTES)
+    } catch {
+      return messagePage("Couldn't load file", `The hub stopped sending ${name}.`)
+    }
+    out.set('content-type', withHtmlCharset(contentType, peeked.head))
     const doctor = htmlDoctor(url, contentType)
-    if (doctor && res.status === 200) {
-      const doctored = doctor(await res.text())
+    if (doctor) {
+      const doctored = doctor(await new Response(peeked.body).text())
       out.delete('content-length')
       out.delete('etag')
       return new Response(doctored, { status: 200, headers: out })
     }
-    return new Response(res.body, { status: res.status, headers: out })
+    return new Response(peeked.body, { status: 200, headers: out })
   }
 
   return async function slzFileHandler(request: Request): Promise<Response> {
