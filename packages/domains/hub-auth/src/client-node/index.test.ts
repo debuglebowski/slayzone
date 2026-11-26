@@ -123,6 +123,21 @@ describe('nodeHubTransport', () => {
     expect(res.text).not.toContain('c')
   })
 
+  it('caps a body that arrives in one chunk exactly at maxResponseChars', async () => {
+    const base = await listen((_req, res) => {
+      res.writeHead(200)
+      res.end('a'.repeat(9000))
+    })
+    const res = await nodeHubTransport({
+      method: 'GET',
+      url: `${base}/health`,
+      headers: {},
+      timeoutMs: 5000,
+      maxResponseChars: 4096
+    })
+    expect(res.text).toBe('a'.repeat(4096))
+  })
+
   it('a wedged hub rejects with the timeout error', async () => {
     const base = await listen(() => {
       /* never answer */
