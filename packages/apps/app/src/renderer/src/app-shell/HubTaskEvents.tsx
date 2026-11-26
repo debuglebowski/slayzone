@@ -47,7 +47,7 @@ function HubTaskEventsListener({
       else openTask(taskId)
       // The hub asked for the window too; only the desktop can raise it (a host
       // procedure — forwarded to the local hub from a remote one).
-      if (raise) void trpcClient.app.window.raise.mutate().catch(() => {})
+      if (raise) void trpcClient.app.window.raise.mutate().catch(() => undefined)
     }
   )
   const onClose = useStableCallback((taskId: string) => {

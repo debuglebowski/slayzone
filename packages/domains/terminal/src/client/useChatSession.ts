@@ -1045,7 +1045,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     readsViaDirect,
     historyDisplay,
     restoreQueuedMs,
-    sessionReady
+    sessionReady,
+    noteLoadError,
+    noteHydrateError
   ])
 
   const createOpts = (): {

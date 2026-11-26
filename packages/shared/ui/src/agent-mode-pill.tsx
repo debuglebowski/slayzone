@@ -278,9 +278,7 @@ export function AgentModePill({
                 <div className="flex-1 min-w-0">
                   <div className={cn('text-xs font-medium', itemMeta.text)}>{itemMeta.label}</div>
                   {optInHint && (
-                    <div className="text-2xs text-muted-foreground leading-snug">
-                      {optInHint}
-                    </div>
+                    <div className="text-2xs text-muted-foreground leading-snug">{optInHint}</div>
                   )}
                 </div>
                 {m === defaultMode && <PickerDefaultTag />}

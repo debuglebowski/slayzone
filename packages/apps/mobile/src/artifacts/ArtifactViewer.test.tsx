@@ -542,7 +542,9 @@ describe('ArtifactViewer, Zoom', () => {
     expect(pageOf('artifact-page-markdown').source.html).toContain('html{zoom:1.1}')
     await user.press(screen.getByRole('button', { name: 'Reset zoom (110%)' }))
     // 100% is the default: saved as none, as desktop does.
-    await waitFor(() => expect(hub.callsTo('artifacts.update')).toContainEqual({ id: 'a1', zoomPct: null }))
+    await waitFor(() =>
+      expect(hub.callsTo('artifacts.update')).toContainEqual({ id: 'a1', zoomPct: null })
+    )
     await screen.findByRole('button', { name: 'Reset zoom (100%)' })
     expect(pageOf('artifact-page-markdown').source.html).not.toContain('zoom:')
   })
@@ -569,7 +571,7 @@ describe('ArtifactViewer, Zoom', () => {
     expect(pageOf('artifact-page-html').source.html).toContain('transform:scale(0.5)')
   })
 
-  it("SVG: no zoom control on the drawing (pinch zooms it), one on its source, as desktop", async () => {
+  it('SVG: no zoom control on the drawing (pinch zooms it), one on its source, as desktop', async () => {
     const hub = fakeArtifactsHub({
       artifacts: [artifactRow('a1', 'logo.svg', { zoom_pct: 150 })],
       content: { a1: '<svg viewBox="0 0 1 1"><rect/></svg>' }

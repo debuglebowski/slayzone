@@ -77,7 +77,7 @@ export function ProjectSettingsPanel({
   tab: rawTab,
   onTabChange,
   onClose,
-  onUpdated = () => {},
+  onUpdated = () => undefined,
   onChanged,
   groupBy = 'none',
   onGroupByChange,
@@ -194,7 +194,7 @@ export function ProjectSettingsPanel({
           groupBy={groupBy}
           // `groupBy` is lifted state owned by the host; a host without a setter gets
           // an inert control, not a crash.
-          onGroupByChange={onGroupByChange ?? (() => {})}
+          onGroupByChange={onGroupByChange ?? (() => undefined)}
         />
       )}
     </div>

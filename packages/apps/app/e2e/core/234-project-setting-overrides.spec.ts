@@ -19,7 +19,11 @@ test.describe('Project setting overrides', () => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
     await s.setSetting('default_agent_id', 'claude-code')
-    const p = await s.createProject({ name: 'Override P', color: '#3b82f6', path: TEST_PROJECT_PATH })
+    const p = await s.createProject({
+      name: 'Override P',
+      color: '#3b82f6',
+      path: TEST_PROJECT_PATH
+    })
     projectId = p.id
     await s.refreshData()
   })

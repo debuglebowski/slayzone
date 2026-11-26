@@ -610,8 +610,8 @@ run_harness packages/shared/db-migrations/src/v210-task-paths-to-computer-migrat
 run_harness packages/shared/db-migrations/src/v211-drop-hub-task-paths-migration.test.ts
 run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migration.test.ts
 run_harness packages/shared/db-migrations/src/v215-computer-retirement-chains-reason-codes-migration.test.ts
-run_harness packages/shared/db-migrations/src/v224-open-task-tabs-migration.test.ts
 run_harness packages/shared/db-migrations/src/v226-open-task-tabs-migration.test.ts
+run_harness packages/shared/db-migrations/src/v227-sharing-members-only-migration.test.ts
 run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts
 run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts

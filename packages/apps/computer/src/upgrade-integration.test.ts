@@ -19,7 +19,8 @@ import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import {
   hostEndpointDir,
   hostLauncherEndpoint,
-  prepareEndpointDir
+  prepareEndpointDir,
+  queryHostLauncher
 } from '@slayzone/platform/computer-endpoints'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { placeTestProject } from './project-scope.fixture'
@@ -593,18 +594,39 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   const { pid } = await lastHost.rpc.request<{ pid: number }>('health')
   lastHost.close()
   await stopForeground()
-  await eventually(
-    () => {
-      let alive = true
-      try {
-        process.kill(pid, 0)
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ESRCH') alive = false
-      }
-      expect(alive).toBe(false)
-    },
-    { timeout: 3000 }
+  const hostAlive = (): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code !== 'ESRCH'
+    }
+  }
+  if (process.platform === 'win32') {
+    // taskkill ends the tree at once, not through the supervisor's stop.
+    await eventually(() => expect(hostAlive()).toBe(false), { timeout: 3000 })
+    return
+  }
+  // A stopped computer has stopped its detached host too: by the time it exits, the
+  // host is gone and its launcher has released the root (logged its last line), so
+  // the root can be removed without racing their writes.
+  expect(hostAlive(), 'host exited before the stopped computer did').toBe(false)
+  expect(
+    await queryHostLauncher(root, 'status'),
+    'host launcher released before the stopped computer exited'
+  ).toBeNull()
+  // In order, too: the host launcher's last line precedes the supervisor's exit. The
+  // host answers `stop` before it stops, so a supervisor that does not wait exits first.
+  const lines = readFileSync(join(root, 'logs', 'computer.log'), 'utf8').split('\n')
+  const hostEnd = lines.findIndex(
+    (l) => l.includes('[launcher ') && l.includes(`pid=${pid} exited`)
   )
+  let supervisorExit = -1
+  lines.forEach((l, i) => {
+    if (/\[supervisor \d+\] process exit/.test(l)) supervisorExit = i
+  })
+  expect(hostEnd, logEnd(join(root, 'logs', 'computer.log'))).toBeGreaterThan(-1)
+  expect(supervisorExit, logEnd(join(root, 'logs', 'computer.log'))).toBeGreaterThan(hostEnd)
 }, 60_000)
 
 /** The last `maxBytes` of a log, as text, for a failure message (`''` when absent). */

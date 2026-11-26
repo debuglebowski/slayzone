@@ -362,7 +362,9 @@ export function ChatComposer({
               onClick={() => {
                 void handleSend()
               }}
-              disabled={(!draft.trim() && attachments.length === 0 && !attaching) || displaySessionEnded}
+              disabled={
+                (!draft.trim() && attachments.length === 0 && !attaching) || displaySessionEnded
+              }
               className={cn(
                 'shrink-0 size-8 rounded-full flex items-center justify-center transition-colors',
                 (draft.trim() || attachments.length > 0 || attaching) && !displaySessionEnded
