@@ -22,7 +22,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@trpc/server": "^11.24.0",
-    "zod": "^4.6.6",
+    "zod": "^4.6.7",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
