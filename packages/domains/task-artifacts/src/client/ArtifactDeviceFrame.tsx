@@ -197,12 +197,7 @@ export function DeviceChassisBody({ model, layout }: { model: string; layout: Ch
       style={{
         ...layout.layerStyle,
         borderRadius: cssRadius(shellRadius, false, adjustment),
-        background:
-          'linear-gradient(145deg, ' +
-          chassis.rim +
-          ', #282b30 32%, #35393e 70%, ' +
-          chassis.rim +
-          ')',
+        background: chassis.rim,
         boxShadow: '0 2px 7px #0004, inset 0 0 0 1px #ffffff14'
       }}
     >
@@ -210,7 +205,7 @@ export function DeviceChassisBody({ model, layout }: { model: string; layout: Ch
         className="absolute inset-[2px]"
         style={{
           borderRadius: cssRadius(shellRadius, false, adjustment - 2),
-          background: 'linear-gradient(145deg, #1e2024, #101114 38%, #101114 80%, #191b20)'
+          background: '#000'
         }}
       />
       {chassis.hinge === 'spine' && (
