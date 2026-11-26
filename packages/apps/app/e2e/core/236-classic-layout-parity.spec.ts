@@ -9,9 +9,10 @@ import type { ElectronApplication, Page } from '@playwright/test'
 // asserting). A strip wider than the window scrolls: its 15px scrollbar is in
 // the heights.
 //
-// Each entry is one direct child of #task-panels, left to right:
-// [id, x, y, width, height] relative to #task-panels. Panels are their
-// data-panel-id, resize handles `|`, the anchor gap `gap`.
+// Each entry is one flex item of #task-panels (a direct child, or the child of a
+// `display: contents` wrapper — the panel hosts that let panels survive moves add
+// no box), left to right: [id, x, y, width, height] relative to #task-panels.
+// Panels are their data-panel-id, resize handles `|`, the anchor gap `gap`.
 
 type Box = [string, number, number, number, number]
 
@@ -163,20 +164,36 @@ async function openScenario(page: Page, taskId: string, sc: Scenario) {
       .poll(
         () =>
           page
-            .locator('#task-panels:visible > [data-panel-id]')
-            .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.panelId).sort()),
+            .locator('#task-panels:visible')
+            .evaluate((root) => {
+              // The strip's flex items, seen through `display: contents` wrappers.
+              const items = (el: Element): HTMLElement[] =>
+                Array.from(el.children).flatMap((c) =>
+                  getComputedStyle(c).display === 'contents' ? items(c) : [c as HTMLElement]
+                )
+              return items(root)
+                .map((el) => el.dataset.panelId)
+                .filter((id): id is string => !!id)
+                .sort()
+            })
+            .catch(() => [] as string[]),
         { timeout: 5_000 }
       )
       .toEqual(want)
   }).toPass({ timeout: 20_000 })
 }
 
-/** Direct children of the visible #task-panels as [id, x, y, w, h] relative to it. */
+/** Flex items of the visible #task-panels as [id, x, y, w, h] relative to it. */
 async function stripBoxes(page: Page): Promise<Box[]> {
   return page.locator('#task-panels:visible').evaluate((root) => {
     const r = root.getBoundingClientRect()
     const out: [string, number, number, number, number][] = []
-    for (const el of Array.from(root.children) as HTMLElement[]) {
+    // The strip's flex items, seen through `display: contents` wrappers.
+    const items = (el: Element): HTMLElement[] =>
+      Array.from(el.children).flatMap((c) =>
+        getComputedStyle(c).display === 'contents' ? items(c) : [c as HTMLElement]
+      )
+    for (const el of items(root)) {
       const b = el.getBoundingClientRect()
       if (b.width === 0 && b.height === 0) continue
       const id =

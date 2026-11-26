@@ -8,11 +8,18 @@
 import type {
   LayoutColumn,
   LayoutSlot,
+  LayoutTab,
+  PanelInstance,
   PanelKind,
   PanelLayout,
   TaskLayout
 } from '@slayzone/task-contracts'
-import { columnEffectiveLayout, findTab, isColumnVisible } from '@slayzone/task-contracts'
+import {
+  columnEffectiveLayout,
+  findTab,
+  isColumnVisible,
+  isSlotVisible
+} from '@slayzone/task-contracts'
 import {
   planPanelStrip,
   resolveLayout,
@@ -111,6 +118,75 @@ export function compactColumns(layout: TaskLayout): LayoutColumn[] | null {
       ]
     }
   ]
+}
+
+/** A group's tabs that render: shown, with an instance the layout holds. */
+export function renderedTabs(layout: TaskLayout, slot: LayoutSlot): LayoutTab[] {
+  return slot.tabs.filter((t) => !t.hidden && layout.instances[t.instanceId])
+}
+
+/** The tab a group shows: its active one while rendered, else its first rendered tab. */
+export function shownTabOf(layout: TaskLayout, slot: LayoutSlot): string | undefined {
+  const tabs = renderedTabs(layout, slot)
+  return tabs.find((t) => t.instanceId === slot.activeInstanceId)?.instanceId ?? tabs[0]?.instanceId
+}
+
+/**
+ * A column showing just the panel it is named after (every Classic column): it
+ * renders that panel bare, the panel's frame taking the column's width and order.
+ */
+export function isBareColumn(column: LayoutColumn): boolean {
+  const slots = column.slots.filter(isSlotVisible)
+  if (slots.length !== 1 || slots[0].name) return false
+  const shown = slots[0].tabs.filter((t) => !t.hidden)
+  return shown.length === 1 && shown[0].instanceId === column.id
+}
+
+/** Where one rendered panel instance sits (see `placePanels`). */
+export interface PanelPlacement {
+  instance: PanelInstance
+  /** The tab its group shows. The others stay mounted out of view, their page inactive. */
+  active: boolean
+  /** Fills a layout cell (a stacked group or a tab strip's body) rather than taking a strip column's width and order. */
+  inCell: boolean
+}
+
+/**
+ * Every panel instance the layout renders right now, with what its frame needs to
+ * know about its place. The column tree renders a target per placement and the
+ * panels render ONCE each, keyed by instance id, into their target (TaskLayoutView):
+ * moving a tab to another group moves its DOM, it never remounts the panel.
+ */
+export function placePanels(
+  layout: TaskLayout,
+  columns: readonly LayoutColumn[],
+  compact: boolean
+): PanelPlacement[] {
+  const out: PanelPlacement[] = []
+  for (const column of columns) {
+    const slots = column.slots.filter(isSlotVisible)
+    if (slots.length === 0) continue
+    if (compact || isBareColumn(column)) {
+      const shown = shownTabOf(layout, slots[0])
+      if (shown) out.push({ instance: layout.instances[shown], active: true, inCell: false })
+      continue
+    }
+    for (const slot of slots) {
+      const shown = shownTabOf(layout, slot)
+      if (!shown) continue
+      if (!showsTabStrip(slot)) {
+        out.push({ instance: layout.instances[shown], active: true, inCell: true })
+        continue
+      }
+      for (const t of renderedTabs(layout, slot))
+        out.push({
+          instance: layout.instances[t.instanceId],
+          active: t.instanceId === shown,
+          inCell: true
+        })
+    }
+  }
+  return out
 }
 
 /** A group shows a tab strip: it is named, or more than one of its tabs is shown. */

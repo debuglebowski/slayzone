@@ -1,13 +1,52 @@
-import { Fragment } from 'react'
-import type { PanelSizes, TaskLayout } from '@slayzone/task-contracts'
+import { Fragment, useEffect, useState } from 'react'
+import type { PanelInstance, PanelSizes, TaskLayout } from '@slayzone/task-contracts'
 import { ResizeHandle } from '../ResizeHandle'
 import { applyBoundaryResize, minWidthFor, unstretchPx } from '../usePanelSizes'
 import { LayoutColumn } from './LayoutColumn'
 import { LayoutActionsContext, type LayoutActions } from './LayoutContext'
 import { LayoutDnd } from './LayoutDnd'
 import type { DragItem, DropTarget } from './layoutDnd'
-import { PanelInstanceView } from './TabGroup'
-import { compactColumns, domOrderedColumns, type LayoutStrip } from './strip'
+import { PANEL_KIND_COMPONENTS } from '../panels/kinds'
+import { PanelCellContext } from '../panels/PanelFrame'
+import { TaskPageProvider, useTaskPageContext } from '../panels/TaskPageContext'
+import { isRenderableKind } from './panelTabMeta'
+import { PanelHosts, PanelNodePool, PanelNodePoolContext, PanelTarget } from './PanelHosts'
+import {
+  compactColumns,
+  domOrderedColumns,
+  placePanels,
+  type LayoutStrip,
+  type PanelPlacement
+} from './strip'
+
+/** The agent an explode-mode cell shows when the layout holds none (a disabled, hidden agent). */
+const FALLBACK_COMPACT_AGENT: PanelInstance = { id: 'terminal', kind: 'agent', settings: {} }
+
+/**
+ * One placed panel: its kind's component (a kind this app cannot render shows
+ * nothing). An inactive tab sees its task page as inactive — the keep-alive a task
+ * tab in the background gets (PANEL_KINDS[kind].keepAlive): browser, web and the
+ * agent stay mounted and park themselves; every other kind goes into
+ * <Activity hidden> in its PanelFrame.
+ */
+function PlacedPanel({ placement }: { placement: PanelPlacement }): React.JSX.Element | null {
+  const page = useTaskPageContext()
+  const { instance, active, inCell } = placement
+  if (!isRenderableKind(instance.kind)) return null
+  const Kind = PANEL_KIND_COMPONENTS[instance.kind]
+  const value = active ? page : { ...page, isActive: false, shortcutActive: false }
+  return (
+    <TaskPageProvider value={value}>
+      <PanelCellContext value={inCell}>
+        <Kind panelId={instance.id} instance={instance} />
+      </PanelCellContext>
+    </TaskPageProvider>
+  )
+}
+
+const renderPlacedPanel = (placement: PanelPlacement): React.JSX.Element => (
+  <PlacedPanel placement={placement} />
+)
 
 interface TaskLayoutViewProps {
   layout: TaskLayout
@@ -60,6 +99,19 @@ export function TaskLayoutView({
 }: TaskLayoutViewProps): React.JSX.Element {
   const { resolved, plan, layouts } = strip
   const compactAgent = compact ? compactColumns(layout) : null
+  const columns = compact
+    ? (compactAgent ?? [])
+    : domOrderedColumns(layout, strip.columns, webPanelIds)
+  // Every panel renders once, keyed by instance id, into its target in the tree
+  // below (PanelHosts): moving a tab between groups never remounts its panel.
+  const [pool] = useState(() => new PanelNodePool())
+  const placements = placePanels(layout, columns, compact)
+  if (compact && compactAgent === null)
+    placements.push({ instance: FALLBACK_COMPACT_AGENT, active: true, inCell: false })
+  const placedKey = placements.map((p) => p.instance.id).join(' ')
+  useEffect(() => {
+    pool.retain(new Set(placedKey.split(' ')))
+  }, [pool, placedKey])
   const layoutActions: LayoutActions = {
     ...actions,
     onResizeStart,
@@ -123,31 +175,30 @@ export function TaskLayoutView({
         />
       )}
 
-      {compact && compactAgent === null && (
-        // No agent in the layout (a disabled, hidden agent): the cell still shows it.
-        <PanelInstanceView instance={{ id: 'terminal', kind: 'agent', settings: {} }} />
-      )}
-      {/* One element path in both modes (compact only changes the columns), so
-          entering/leaving explode mode keeps the agent mounted. */}
-      <LayoutActionsContext value={layoutActions}>
-        <LayoutDnd layout={layout} onDrop={onDrop} onDraggingChange={onDraggingChange}>
-          {(compact
-            ? (compactAgent ?? [])
-            : domOrderedColumns(layout, strip.columns, webPanelIds)
-          ).map((column) => (
-            <Fragment key={column.id}>
-              {renderHandle(column.id)}
-              <LayoutColumn
-                layout={layout}
-                column={column}
-                width={resolved.widths[column.id]}
-                order={plan.order[column.id] ?? 0}
-                compact={compact}
-              />
-            </Fragment>
-          ))}
-        </LayoutDnd>
-      </LayoutActionsContext>
+      <PanelNodePoolContext value={pool}>
+        {compact && compactAgent === null && (
+          // No agent in the layout (a disabled, hidden agent): the cell still shows it.
+          <PanelTarget instanceId={FALLBACK_COMPACT_AGENT.id} />
+        )}
+        <LayoutActionsContext value={layoutActions}>
+          <LayoutDnd layout={layout} onDrop={onDrop} onDraggingChange={onDraggingChange}>
+            {columns.map((column) => (
+              <Fragment key={column.id}>
+                {renderHandle(column.id)}
+                <LayoutColumn
+                  layout={layout}
+                  column={column}
+                  width={resolved.widths[column.id]}
+                  order={plan.order[column.id] ?? 0}
+                  compact={compact}
+                />
+              </Fragment>
+            ))}
+          </LayoutDnd>
+        </LayoutActionsContext>
+        {/* After the tree: its targets adopt the host nodes before the panels' layout effects run. */}
+        <PanelHosts placements={placements} pool={pool} render={renderPlacedPanel} />
+      </PanelNodePoolContext>
     </>
   )
 }

@@ -13,7 +13,13 @@ import {
   setTabHidden
 } from '@slayzone/task-contracts'
 import { planPanelStrip, resolvePanels } from '../usePanelSizes'
-import { compactColumns, domOrderedColumns, isInTabStrip, resolveLayoutStrip } from './strip'
+import {
+  compactColumns,
+  domOrderedColumns,
+  isInTabStrip,
+  placePanels,
+  resolveLayoutStrip
+} from './strip'
 
 const config = (patch: Partial<PanelConfig> = {}): PanelConfig => ({
   ...structuredClone(DEFAULT_PANEL_CONFIG),
@@ -175,5 +181,44 @@ describe('isInTabStrip', () => {
     expect(isInTabStrip(renameSlot(oneShown, 'terminal', 'Work'), 'terminal')).toBe(true)
     expect(isInTabStrip(setSlotHidden(merged, 'terminal', true), 'terminal')).toBe(false)
     expect(isInTabStrip(merged, 'nope')).toBe(false)
+  })
+})
+
+describe('placePanels', () => {
+  const classic = deriveLayoutFromLegacy(
+    { panel_visibility: { terminal: true, browser: true, settings: true } },
+    config()
+  )
+  const place = (layout: typeof classic, compact = false) =>
+    placePanels(
+      layout,
+      compact ? (compactColumns(layout) ?? []) : resolveLayoutStrip(layout, 1200).columns,
+      compact
+    ).map((p) => [p.instance.id, p.active, p.inCell])
+
+  it('Classic panels are bare strip columns', () => {
+    expect(place(classic)).toEqual([
+      ['terminal', true, false],
+      ['browser', true, false],
+      ['settings', true, false]
+    ])
+  })
+
+  it('every shown tab of a strip renders; only the selected one is active', () => {
+    const merged = mergeInto(classic, 'browser', 'terminal')
+    expect(place(merged)).toEqual([
+      ['terminal', false, true],
+      ['browser', true, true],
+      ['settings', true, false]
+    ])
+    // A hidden tab does not render; the group left with one tab drops its strip.
+    expect(place(setTabHidden(merged, 'terminal', true))).toEqual([
+      ['browser', true, true],
+      ['settings', true, false]
+    ])
+  })
+
+  it('a compact cell places the agent alone', () => {
+    expect(place(classic, true)).toEqual([['terminal', true, false]])
   })
 })
