@@ -192,6 +192,42 @@ describe('useTaskLayout', () => {
     expect(result.current.layout.rev).toBe(4)
   })
 
+  it('restoreLayout undoes an outside change as a new edit, unless the layout moved past it', async () => {
+    const base = { ...deriveLayoutFromLegacy({ panel_visibility: null }, config()), rev: 3 }
+    const props = (layout: TaskLayout): Props => ({
+      task: makeTask({ panel_layout: layout }),
+      panelConfig: config(),
+      initialVisibility: { ...DEFAULT_TASK_PANEL_VISIBILITY },
+      initialSizes: {},
+      isSecondaryWindow: false,
+      updateTask,
+      onTaskUpdated
+    })
+    const { result, rerender } = setup({ task: makeTask({ panel_layout: base }) })
+    // The agent hid the agent panel (rev 4, arriving with the row).
+    const changed = { ...setSlotHidden(base, 'terminal', true), rev: 4 }
+    rerender(props(changed))
+    expect(result.current.panelVisibility.terminal).toBe(false)
+
+    let undone = false
+    act(() => {
+      undone = result.current.restoreLayout(base, 4)
+    })
+    expect(undone).toBe(true)
+    expect(result.current.panelVisibility.terminal).toBe(true)
+    expect(result.current.layout.rev).toBe(5)
+    await flushSave()
+    const written = updateTask.mock.calls.at(-1)?.[0]
+    expect((written?.panelLayout as TaskLayout | undefined)?.rev).toBe(5)
+
+    // A later edit (rev 5) makes the rev-4 change no longer undoable.
+    act(() => {
+      undone = result.current.restoreLayout(changed, 4)
+    })
+    expect(undone).toBe(false)
+    expect(result.current.panelVisibility.terminal).toBe(true)
+  })
+
   it('keeps an id the layout cannot hold (tests) in the legacy visibility it writes', async () => {
     const { result } = setup()
     act(() => result.current.setPanelVisible('tests', true))

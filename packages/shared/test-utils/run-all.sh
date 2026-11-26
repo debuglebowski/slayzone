@@ -1226,6 +1226,7 @@ run_harness packages/apps/api/src/http/rest-api/tasks/create.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/delete.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/unarchive.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/update.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/layout.test.ts
 # `slay tasks done [--close]`: the done INTENT (project completed column) — not
 # PATCH's status-alias resolution. See tasks/done.ts.
 run_harness packages/apps/api/src/http/rest-api/tasks/done.test.ts
@@ -1303,6 +1304,7 @@ run_harness packages/apps/cli/test/tasks-ext.test.ts
 run_harness packages/apps/cli/test/projects-update.test.ts
 # Wave-3 CLI read commands routed through REST (hub-aware cutover).
 run_harness packages/apps/cli/test/cli-read-rest.test.ts
+run_harness packages/apps/cli/test/panels-layout.test.ts
 # slay chat / slay agent → /api/chat + /api/agent over a scripted chat runtime: exit codes, answers, self-wait guard.
 run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
@@ -1420,6 +1422,7 @@ run_harness packages/domains/task-contracts/src/layout/instances.test.ts
 run_harness packages/domains/task-contracts/src/layout/kinds.test.ts
 # Layout definitions: switching (match by kind, park live leftovers), dirty detection, task_layouts.
 run_harness packages/domains/task-contracts/src/layout/definitions.test.ts
+run_harness packages/domains/task-contracts/src/layout/remote.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
 run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts

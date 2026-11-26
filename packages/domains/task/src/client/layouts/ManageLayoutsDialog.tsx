@@ -51,6 +51,7 @@ import { usePanelConfig } from '../usePanelConfig'
 import { LayoutThumb } from './LayoutThumb'
 import { layoutDialogs } from './manageLayoutsStore'
 import { resolveClientLayouts, useTaskLayouts } from './useTaskLayouts'
+import { useAgentMayChangeLayout } from './useAgentMayChangeLayout'
 
 /**
  * Manage layouts (docs/plans/panel-model.md step 11): every layout, Built-in then
@@ -254,7 +255,32 @@ function ManageLayoutsBody({ onClose }: { onClose: () => void }): React.JSX.Elem
           </div>
         )}
       </div>
+      <AgentMayChangeLayoutRow />
     </>
+  )
+}
+
+/** The `agent_may_change_layout` setting: may agents run `slay panels layout …`? */
+export function AgentMayChangeLayoutRow(): React.JSX.Element {
+  const { allowed, setAllowed } = useAgentMayChangeLayout()
+  return (
+    <label
+      data-testid="agent-may-change-layout"
+      className="flex cursor-pointer items-start gap-2.5 border-t px-4 py-3"
+    >
+      <Checkbox
+        className="mt-0.5"
+        checked={allowed}
+        onCheckedChange={(v) => setAllowed(v === true)}
+        aria-label="Agent may change the layout"
+      />
+      <span className="flex flex-col gap-0.5">
+        <span className="text-sm">Agent may change the layout</span>
+        <span className="text-xs text-muted-foreground">
+          Agents can open, hide and close panels and switch layouts. Each change can be undone.
+        </span>
+      </span>
+    </label>
   )
 }
 

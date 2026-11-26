@@ -49,6 +49,7 @@ import {
   findTab,
   isWebPageInstance,
   getProviderFlags,
+  instanceHasLiveState as instanceHasStoredLiveState,
   instancesOfKind,
   isInstanceVisible,
   isClassicShaped,
@@ -62,9 +63,9 @@ import {
   terminalGroupIdsOf,
   type BrowserTab,
   type BrowserTabsState,
-  type EditorOpenFilesState,
   type PanelInstance,
-  type PanelKind as LayoutPanelKind
+  type PanelKind as LayoutPanelKind,
+  type TaskLayoutChangedEvent
 } from '@slayzone/task-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects-contracts'
@@ -1486,27 +1487,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
    * primary agent (the task's main session), agent/terminal panels with terminal
    * groups, browser panels with a page open, editors with open files.
    */
-  const instanceHasLiveState = useStableCallback((inst: PanelInstance): boolean => {
-    const primary = isPrimaryInstance(inst)
-    switch (inst.kind) {
-      case 'agent':
-        return primary || terminalGroupIdsOf(inst).length > 0
-      case 'terminal':
-        return terminalGroupIdsOf(inst).length > 0
-      case 'browser':
-        return browserTabsForInstance(browserTabsRef.current, inst.id, primary).tabs.some(
-          (t) => t.url !== '' && t.url !== 'about:blank'
-        )
-      case 'editor': {
-        const saved = primary
-          ? task?.editor_open_files
-          : (instanceState.get(inst.id).editorOpenFiles as EditorOpenFilesState | undefined)
-        return (saved?.files.length ?? 0) > 0
-      }
-      default:
-        return false
-    }
-  })
+  const instanceHasLiveState = useStableCallback((inst: PanelInstance): boolean =>
+    instanceHasStoredLiveState(inst, {
+      browserTabs: browserTabsRef.current,
+      editorOpenFiles: task?.editor_open_files,
+      instanceState: { [inst.id]: instanceState.get(inst.id) }
+    })
+  )
 
   /**
    * Switch the task to layout `layoutId`. Nothing live is lost: instances move to
@@ -2131,6 +2118,50 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     })
   )
 
+  /**
+   * A layout change made outside this view (`slay panels layout …`, docs/plans/
+   * panel-model.md step 13). The new layout arrives with the task row; here the
+   * panels it removed let go of their state, like a close in this view. An agent's
+   * change offers Undo first: the removed panels are released only once the toast
+   * goes without it, so Undo brings them back whole.
+   */
+  const handleLayoutChanged = useStableCallback((ev: TaskLayoutChangedEvent) => {
+    if (!task || ev.taskId !== task.id || isSecondaryWindow) return
+    let settled = false
+    const release = (): void => {
+      if (settled) return
+      settled = true
+      for (const inst of ev.removed) releaseInstance(inst)
+    }
+    if (ev.origin !== 'agent') {
+      release()
+      return
+    }
+    toast('Agent changed the layout', {
+      id: `layout-changed:${ev.taskId}:${ev.rev}`,
+      duration: 10_000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          if (settled) return
+          if (taskLayout.restoreLayout(ev.before, ev.rev)) settled = true
+          else {
+            release()
+            toast("The layout changed again, so this change can't be undone")
+          }
+        }
+      },
+      onDismiss: release,
+      onAutoClose: release
+    })
+  })
+  useSubscription(
+    trpc.task.onLayoutChanged.subscriptionOptions(undefined, {
+      enabled: !!task,
+      onData: handleLayoutChanged
+    })
+  )
+
   // Events for this task that arrived before this page mounted (a hidden tab
   // still waiting for its idle hydration, or a tab opened a beat ago) were held
   // for it by TaskPaneEventCatcher: run them through the same handlers now, then
@@ -2141,14 +2172,22 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     for (const ev of takeTaskPaneEvents(liveTaskId, [
       'browser-ensure-panel-open',
       'browser-create-tab',
-      'open-artifact'
+      'open-artifact',
+      'layout-changed'
     ])) {
       if (ev.kind === 'browser-ensure-panel-open') handleBrowserEnsurePanelOpen(ev.payload)
       else if (ev.kind === 'browser-create-tab') handleBrowserCreateTab(ev.payload)
       else if (ev.kind === 'open-artifact') handleOpenArtifact(ev.payload)
+      else if (ev.kind === 'layout-changed') handleLayoutChanged(ev.payload)
     }
     return markTaskPaneLive(liveTaskId)
-  }, [liveTaskId, handleBrowserEnsurePanelOpen, handleBrowserCreateTab, handleOpenArtifact])
+  }, [
+    liveTaskId,
+    handleBrowserEnsurePanelOpen,
+    handleBrowserCreateTab,
+    handleOpenArtifact,
+    handleLayoutChanged
+  ])
 
   const handleTagsChange = (newTagIds: string[]): void => {
     setTaskTagIds(newTagIds)

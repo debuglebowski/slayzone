@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import type { TaskLayoutChangedEvent } from '@slayzone/task-contracts'
 
 interface TaskEventBase {
   taskId: string
@@ -19,6 +20,13 @@ export interface TaskEventMap {
    * drop their copy of the task's paths and read them again (`task.onPathsChanged`).
    */
   'task:paths-changed': { taskId: string }
+  /**
+   * The task's panel layout was changed outside the task view (REST / `slay panels
+   * layout`). The new layout reaches clients with the task row; open task views use
+   * this to offer Undo on an agent's change and to release removed panels' state
+   * (`task.onLayoutChanged`).
+   */
+  'task:layout-changed': TaskLayoutChangedEvent
 }
 
 export interface AgentSessionsEventMap {

@@ -97,6 +97,17 @@ export {
   whyTaskAgentsEnded,
   type TaskAgentsEndedReason
 } from './ops'
+// Layout changes from outside the task view (`/api/tasks/:id/layout`, `/panels`).
+export {
+  changeTaskLayoutOp,
+  readTaskLayoutOp,
+  readTaskLayoutSettings,
+  TaskLayoutChangeError,
+  type TaskLayoutChange,
+  type TaskLayoutChangeResult,
+  type TaskLayoutSettings,
+  type TaskLayoutView
+} from './ops/task-layout'
 export type {
   CreateImportedTaskInput,
   LedgerSessionRow,

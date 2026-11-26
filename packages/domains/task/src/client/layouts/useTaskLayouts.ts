@@ -18,12 +18,13 @@ import type {
 import {
   defaultTaskLayoutsSetting,
   parseTaskLayoutsSetting,
-  resolveLayoutDefinitions
+  resolveLayoutDefinitions,
+  TASK_LAYOUTS_SETTING_KEY
 } from '@slayzone/task-contracts'
 import { PANEL_KINDS, type PanelKind } from '../panels/registry'
 import { getTrpcClient } from '../trpc'
 
-export const TASK_LAYOUTS_SETTING_KEY = 'task_layouts'
+export { TASK_LAYOUTS_SETTING_KEY }
 const CHANGE_EVENT = 'task-layouts-changed'
 const SETTINGS_CHANGED_PATH = 'notify.onSettingsChanged'
 
@@ -167,7 +168,5 @@ export function resolveClientLayouts(
   return resolveLayoutDefinitions(setting, config, CLIENT_LAYOUT_CAPABILITIES)
 }
 
-/** The user edited the Classic definition: it no longer follows Settings → Panels. */
-export function isClassicCustomized(setting: TaskLayoutsSetting): boolean {
-  return !!setting.builtinOverrides.classic?.columns
-}
+/** The user edited the Classic definition (moved to contracts; re-exported for callers here). */
+export { isClassicCustomized } from '@slayzone/task-contracts'

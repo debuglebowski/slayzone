@@ -150,6 +150,12 @@ export interface TaskLayoutApi {
   unpark: (instanceId: string) => void
   /** Record that the layout now IS definition `layoutId` (it was just saved as it). Persists. */
   setLayoutId: (layoutId: string) => void
+  /**
+   * Undo a change made outside the view (`task.onLayoutChanged`): put `before` back as
+   * a new edit, unless the layout moved past `rev` (the change's rev) since — then
+   * nothing happens and it returns false. Persists.
+   */
+  restoreLayout: (before: TaskLayout, rev: number) => boolean
 }
 
 interface LayoutState {
@@ -458,6 +464,16 @@ export function useTaskLayout({
     edit((current) => ({ ...current, layoutId, rev: current.rev + 1 }), true)
   })
 
+  const restoreLayout = useStableCallback((before: TaskLayout, rev: number): boolean => {
+    if (state.stored.rev > rev) return false
+    setState((prev) => ({
+      ...prev,
+      stored: { ...before, rev: Math.max(prev.stored.rev, rev) + 1 },
+      saveSeq: prev.saveSeq + 1
+    }))
+    return true
+  })
+
   return {
     layout,
     panelVisibility,
@@ -482,6 +498,7 @@ export function useTaskLayout({
     updateInstanceSettings,
     applyDefinition,
     unpark,
-    setLayoutId
+    setLayoutId,
+    restoreLayout
   }
 }

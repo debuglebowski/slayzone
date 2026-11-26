@@ -41,6 +41,11 @@ export function TaskPaneEventCatcher({ isOpenTask, onWake }: TaskPaneEventCatche
     })
   )
   useSubscription(
+    trpc.task.onLayoutChanged.subscriptionOptions(undefined, {
+      onData: (payload) => catchEvent({ kind: 'layout-changed', payload }, payload.taskId)
+    })
+  )
+  useSubscription(
     trpc.pty.onRespawnSuggested.subscriptionOptions(undefined, {
       onData: (payload) =>
         catchEvent(

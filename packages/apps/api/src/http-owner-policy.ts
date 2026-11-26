@@ -483,6 +483,14 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   ),
   'GET /api/tasks/:id/blocking': then(checked(taskPrefix('params.id')), taskRowsById),
   'POST /api/tasks/:id/done': checked(taskPrefix('params.id')),
+  // The layout: reading and hiding/renaming like a task update; switching and opening
+  // panels may start terminals (terminal_tabs rows), so the task's owner only, like
+  // POST /api/tabs/create.
+  'GET /api/tasks/:id/layout': checked(taskPrefix('params.id')),
+  'PUT /api/tasks/:id/layout': checked(taskOwnerPrefix('params.id')),
+  'POST /api/tasks/:id/panels': checked(taskOwnerPrefix('params.id')),
+  'PATCH /api/tasks/:id/panels/:instanceId': checked(taskPrefix('params.id')),
+  'DELETE /api/tasks/:id/panels/:instanceId': checked(taskPrefix('params.id')),
   'GET /api/tasks/:id/progress': checked(taskPrefix('params.id')),
   'POST /api/tasks/:id/reset-conversation': checked(taskOwnerPrefix('params.id')),
   'GET /api/tasks/:id/subtasks': then(checked(taskPrefix('params.id')), taskRowsById),
