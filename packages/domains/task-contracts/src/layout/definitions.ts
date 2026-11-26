@@ -49,7 +49,7 @@ function randomId8(): string {
 // ── Live state that never belongs to a definition ────────────────────────────
 
 /** Settings keys that point at one task's live data, not at how a layout looks. */
-const LIVE_SETTING_KEYS = ['terminalGroupIds'] as const
+export const LIVE_SETTING_KEYS = ['terminalGroupIds'] as const
 
 function withoutLiveSettings(inst: PanelInstance): PanelInstance {
   const settings = { ...inst.settings }
@@ -179,6 +179,32 @@ export interface SwitchLayoutResult {
 export const PARKED_SLOT_ID = 'slot:parked'
 
 /**
+ * Park instances `ids` (their tabs are not in `columns`): hidden, parked tabs in the
+ * one hidden parked group, made in the last column when the layout has none.
+ * Mutates `columns`.
+ */
+export function appendParkedTabs(columns: LayoutColumn[], ids: readonly string[]): void {
+  if (ids.length === 0) return
+  const tabs = ids.map((instanceId) => ({ instanceId, hidden: true, parked: true }))
+  const existing = columns.flatMap((c) => c.slots).find((s) => s.id === PARKED_SLOT_ID)
+  if (existing) {
+    existing.tabs.push(...tabs)
+    existing.activeInstanceId ??= ids[0]
+    return
+  }
+  const slot: LayoutSlot = {
+    id: PARKED_SLOT_ID,
+    hidden: true,
+    weight: 1,
+    activeInstanceId: ids[0],
+    tabs
+  }
+  const last = columns.at(-1)
+  if (last) last.slots.push(slot)
+  else columns.push({ id: 'column:parked', size: { unit: 'fr', value: 1 }, slots: [slot] })
+}
+
+/**
  * Apply definition `def` to the task's `current` layout. Instances are matched by
  * kind (web panels by page) in order — an instance with the same id first, then
  * the rest in layout order — and keep their ids, names coming from the definition.
@@ -264,18 +290,7 @@ export function switchLayout(
       instances[cur.id] = cur
     } else dropped.push(cur)
   }
-  if (parked.length > 0) {
-    const slot: LayoutSlot = {
-      id: PARKED_SLOT_ID,
-      hidden: true,
-      weight: 1,
-      activeInstanceId: parked[0],
-      tabs: parked.map((instanceId) => ({ instanceId, hidden: true, parked: true }))
-    }
-    const last = columns.at(-1)
-    if (last) last.slots.push(slot)
-    else columns.push({ id: 'column:parked', size: { unit: 'fr', value: 1 }, slots: [slot] })
-  }
+  appendParkedTabs(columns, parked)
 
   const layout = finishDraft<TaskLayout>({
     v: 1,
@@ -327,6 +342,11 @@ export function resolveLayoutDefinitions(
     .map((def, i) => ({ def, key: rank.get(def.id) ?? setting.order.length + i }))
     .sort((a, b) => a.key - b.key)
     .map((e) => e.def)
+}
+
+/** The user edited the Classic definition: it no longer follows Settings → Panels. */
+export function isClassicCustomized(setting: TaskLayoutsSetting): boolean {
+  return !!setting.builtinOverrides.classic?.columns
 }
 
 /** The layout ⌃⌥`n` (1–9) switches to: the n-th enabled one, in display order. */

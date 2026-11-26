@@ -1,5 +1,10 @@
 import type { PanelConfig, WebPanelDefinition } from './types'
-import { PREDEFINED_WEB_PANELS, DEFAULT_PANEL_ORDER, PANEL_ORDER_IDS } from './types'
+import {
+  DEFAULT_PANEL_CONFIG,
+  PREDEFINED_WEB_PANELS,
+  DEFAULT_PANEL_ORDER,
+  PANEL_ORDER_IDS
+} from './types'
 import { inferHostScopeFromUrl, inferProtocolFromUrl } from './handoff'
 
 /** Migrate legacy IDs to current names (e.g. 'assets' → 'artifacts').
@@ -118,4 +123,23 @@ export function validatePanelShortcut(
   const existing = existingPanels.find((wp) => wp.shortcut === l && wp.id !== excludeId)
   if (existing) return `Cmd+${l.toUpperCase()} is already used by ${existing.name}`
   return null
+}
+
+/**
+ * The per-user `panel_config` setting as stored (JSON) → a full PanelConfig:
+ * predefined web panels merged, order completed. Anything unreadable is the
+ * default config. A config missing `webPanels` is tolerated (the merge helpers
+ * index it, and throwing would silently reset the user's whole panel setup).
+ */
+export function parsePanelConfig(raw: string | null | undefined): PanelConfig {
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as PanelConfig
+      if (!Array.isArray(parsed.webPanels)) parsed.webPanels = []
+      return mergePanelOrder(mergePredefinedWebPanels(parsed))
+    } catch {
+      /* ignore */
+    }
+  }
+  return DEFAULT_PANEL_CONFIG
 }
