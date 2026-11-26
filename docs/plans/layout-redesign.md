@@ -9,7 +9,7 @@ The design is the prototype artifact `slayzone-layout.html` in the task "🧭 De
 - Footer: one evenly spaced toolbar, with labels when the sidebar is at least 420px wide:
   - **New** opens a menu: New project…, New folder.
   - **Search** opens search (⌘K).
-  - **Lens** opens the lens menu. Until phase 2 it opens the display settings.
+  - **Lens** shows the active lens and opens the lens menu.
   - **Setup** is the Getting started checklist with a count. It is hidden at 5/5 and moves into More.
   - **Shared** only appears when something is shared (phase 5).
   - **More** opens a menu:
@@ -32,6 +32,8 @@ The design is the prototype artifact `slayzone-layout.html` in the task "🧭 De
 - Edit modal tabs: Structure / What to show / How rows look.
 - Settings page: the lens list, the editor, and a preview with Mock/Real data.
 - Today's global `tree*` display settings become the first lens, so nothing is lost on upgrade.
+- Built: the model is `packages/domains/tabs-state/src/lenses.ts`. Lenses and the active id live in the `viewState` slice next to the live `tree*` fields. The sidebar reads only the live fields: applying a lens writes them, saving copies them back, and "dirty" means they differ. The cross-project lists and the looks are in `packages/domains/sidebar/src/views/tree-view/lens-lists.tsx` and `TreeView.tsx`. The menu, editor and settings page are in `packages/domains/sidebar/src/lenses/`. The lens editor replaced the display-settings popover, and every setting moved into it.
+- ⌃1–9 switches lenses on macOS. Windows and Linux use Alt+1–9, because Ctrl+1–9 already switches tabs there.
 
 ## Phase 3: Computer chip
 

@@ -185,6 +185,9 @@ export function SettingsNav() {
         <NavItem route={prefs('layout')} testId="settings-nav-layout">
           Layout
         </NavItem>
+        <NavItem route={prefs('lenses')} testId="settings-nav-lenses">
+          Lenses
+        </NavItem>
         <NavItem route={prefs('telemetry')} testId="settings-nav-telemetry">
           Privacy & telemetry
         </NavItem>

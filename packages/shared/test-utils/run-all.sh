@@ -375,6 +375,7 @@ run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/treeGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
+run_harness packages/domains/sidebar/src/views/lensLists.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
 run_harness packages/domains/tasks/src/client/scratch-task.test.ts

@@ -755,6 +755,7 @@ export function HomeView({
           // onProjectSettings is routed through here.
           onProjectSettings={(project) => openProjectSettings(project.id)}
           onSettings={() => openSettings()}
+          onManageLenses={() => openSettings({ kind: 'prefs', page: 'lenses' })}
           onUsageAnalytics={() => useTabStore.getState().setActiveView('usage-analytics')}
           onLeaderboard={() => useTabStore.getState().setActiveView('leaderboard')}
           onTaskClick={openTask}

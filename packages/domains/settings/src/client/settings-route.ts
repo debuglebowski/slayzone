@@ -29,7 +29,7 @@ export type SettingsRoute =
 
 export const DEFAULT_SETTINGS_ROUTE: SettingsRoute = { kind: 'prefs', page: 'appearance' }
 
-const PREFS_PAGES = new Set(['appearance', 'layout', 'panels', 'telemetry'])
+const PREFS_PAGES = new Set(['appearance', 'layout', 'lenses', 'panels', 'telemetry'])
 const APP_PAGES = new Set(['labs', 'about', 'cli'])
 /** Old dialog tab keys whose content is hub-wide. */
 const HUB_TABS: Record<string, string> = {

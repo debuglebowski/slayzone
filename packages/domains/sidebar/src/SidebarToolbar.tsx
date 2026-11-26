@@ -13,7 +13,6 @@ import {
   Plus,
   Search,
   Settings,
-  SlidersHorizontal,
   Trophy,
   Eye
 } from 'lucide-react'
@@ -33,7 +32,9 @@ import {
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTabStore } from '@slayzone/tabs-state'
 import type { Project } from '@slayzone/projects-contracts'
-import { TreeDisplaySettings } from './TreeDisplaySettings'
+import { LensMenu, useActiveLens } from './lenses/LensMenu'
+import { LensEditDialog } from './lenses/LensEditDialog'
+import { LensIconView } from './lenses/lens-icons'
 import { GettingStartedPopover } from './GettingStartedPopover'
 import { viewRegistry } from './views/registry'
 import type { OnboardingChecklistState, SidebarFooterSlot } from './types'
@@ -54,7 +55,8 @@ export function SidebarToolbar({
   onCreateProjectGroup,
   convexConfigured,
   moreItems,
-  sharedSlot
+  sharedSlot,
+  onManageLenses
 }: {
   projects: Project[]
   onboardingChecklist: OnboardingChecklistState | null
@@ -66,6 +68,8 @@ export function SidebarToolbar({
   moreItems?: ReactNode
   /** App-supplied "Shared" entry (files shared with the user on their own); nothing while nothing is shared. */
   sharedSlot?: SidebarFooterSlot
+  /** Open Settings › Lenses; absent = no "Manage lenses…" entry. */
+  onManageLenses?: () => void
 }): React.JSX.Element {
   const searchShortcut = useShortcutDisplay('search')
   const settingsShortcut = useShortcutDisplay('global-settings')
@@ -73,6 +77,7 @@ export function SidebarToolbar({
   const showAll = useTabStore((s) => s.treeShowAllProjects)
   const openProjects = useTabStore((s) => s.treeOpenProjects)
   const anyOpen = projects.some((p) => openProjects[p.id])
+  const { lens, dirty } = useActiveLens()
   const setupPending =
     onboardingChecklist !== null &&
     onboardingChecklist.hasRemaining &&
@@ -106,11 +111,21 @@ export function SidebarToolbar({
           onClick={() => useDialogStore.getState().openSearch()}
         />
 
-        <TreeDisplaySettings
-          side="right"
-          align="end"
-          trigger={<ToolbarButton icon={<SlidersHorizontal />} label="Lens" title="Lens" />}
+        <LensMenu
+          onManageLenses={onManageLenses}
+          trigger={
+            <ToolbarButton
+              icon={<LensIconView icon={lens.icon} />}
+              label={lens.name}
+              ariaLabel="Lens"
+              title={`Lens: ${lens.name}${dirty ? ' (unsaved changes)' : ''}`}
+              dot={dirty}
+              data-testid="lens-button"
+              data-lens-id={lens.id}
+            />
+          }
         />
+        <LensEditDialog />
 
         {onboardingChecklist && setupPending && (
           <GettingStartedPopover
@@ -258,25 +273,30 @@ export function SidebarLayoutSubmenu({ current }: { current: string }): React.JS
 
 /**
  * One toolbar button: an icon, plus its label when the toolbar is at least 420px wide.
- * Forwards props so it can be a Radix trigger (`asChild`).
+ * Forwards props so it can be a Radix trigger (`asChild`). `ariaLabel` names it when the
+ * visible label varies (the Lens button shows the lens name); `dot` marks unsaved edits.
  */
 function ToolbarButton({
   icon,
   label,
+  ariaLabel,
   title,
   badge,
+  dot,
   className,
   ...props
 }: {
   icon: ReactNode
   label: string
+  ariaLabel?: string
   title: string
   badge?: number
+  dot?: boolean
 } & React.ComponentProps<'button'>): React.JSX.Element {
   return (
     <button
       type="button"
-      aria-label={label}
+      aria-label={ariaLabel ?? label}
       title={title}
       className={cn(
         'relative inline-flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground [&_svg]:size-4',
@@ -285,7 +305,14 @@ function ToolbarButton({
       {...props}
     >
       {icon}
-      <span className="hidden @[420px]/toolbar:inline">{label}</span>
+      <span className="hidden max-w-[120px] truncate @[420px]/toolbar:inline">{label}</span>
+      {dot && (
+        <span
+          aria-hidden
+          data-testid="toolbar-button-dot"
+          className="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
+        />
+      )}
       {badge != null && badge > 0 && (
         <span className="absolute -top-0.5 right-0 min-w-4 rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground">
           {badge}

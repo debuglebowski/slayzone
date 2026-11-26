@@ -35,6 +35,8 @@ interface AppSidebarProps {
   onSelectProject: (id: string, opts?: { home?: boolean }) => void
   onProjectSettings: (project: Project) => void
   onSettings: () => void
+  /** Open Settings › Lenses (the lens menu's "Manage lenses…"). Omitted = no entry. */
+  onManageLenses?: () => void
   onUsageAnalytics: () => void
   onLeaderboard: () => void
   // Task navigation is required, not optional: every host must wire it. An
@@ -178,6 +180,7 @@ export function AppSidebar({
   onSelectProject,
   onProjectSettings,
   onSettings,
+  onManageLenses,
   onUsageAnalytics,
   onLeaderboard,
   onTaskClick,
@@ -358,6 +361,7 @@ export function AppSidebar({
               convexConfigured={convexConfigured}
               moreItems={toolbarMoreItems}
               sharedSlot={sharedSlot}
+              onManageLenses={onManageLenses}
             />
             {/* The toolbar's "Send feedback" opens it; the slot shows no button of its own here. */}
             {convexConfigured && feedbackSlot}

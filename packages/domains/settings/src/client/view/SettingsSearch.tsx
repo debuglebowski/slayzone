@@ -19,6 +19,11 @@ const PREFS: Array<[string, string, string]> = [
   ['appearance', 'Appearance', 'theme color dark light font size reduce motion tint badge icon'],
   ['layout', 'Layout', 'sidebar tabs tree view chat width project scoped'],
   [
+    'lenses',
+    'Lenses',
+    'lens sidebar tree preset group agent status recent accordion dense filter display needs you'
+  ],
+  [
     'panels',
     'Panels',
     'panel web panels browser editor git terminal font family scrollback option meta diff word wrap whitespace commit graph shortcut'

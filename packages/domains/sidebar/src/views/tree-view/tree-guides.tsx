@@ -13,27 +13,30 @@ export const tgPaddingLeft = (depth: number) =>
 
 export function TreeGuides({
   depth,
-  ancestorFlags
+  ancestorFlags,
+  height = TG_ROW_HEIGHT
 }: {
   depth: number
   ancestorFlags: boolean[]
+  /** Row height (the dense look's rows are shorter). */
+  height?: number
 }): ReactNode {
   if (depth <= 0) return null
   const parentX = tgGuideX(depth - 1)
-  const mid = TG_ROW_HEIGHT / 2
+  const mid = height / 2
   const r = TG_CURVE_R
   const endX = parentX + TG_ELBOW_END_OFFSET
   const continueBelow = ancestorFlags[depth - 1] ?? false
   const connector =
     `M ${parentX} 0 V ${mid - r} Q ${parentX} ${mid} ${parentX + r} ${mid} H ${endX}` +
-    (continueBelow ? ` M ${parentX} ${mid - r} V ${TG_ROW_HEIGHT}` : '')
+    (continueBelow ? ` M ${parentX} ${mid - r} V ${height}` : '')
   const svgWidth = endX + 2
   return (
     <svg
       aria-hidden
       className="pointer-events-none absolute top-0 left-0 text-border"
       width={svgWidth}
-      height={TG_ROW_HEIGHT}
+      height={height}
     >
       {ancestorFlags
         .slice(0, -1)
@@ -44,7 +47,7 @@ export function TreeGuides({
               x1={tgGuideX(a)}
               x2={tgGuideX(a)}
               y1={0}
-              y2={TG_ROW_HEIGHT}
+              y2={height}
               stroke="currentColor"
               strokeWidth={1}
             />

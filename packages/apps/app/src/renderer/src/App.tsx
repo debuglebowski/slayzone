@@ -1414,6 +1414,7 @@ function App(): React.JSX.Element {
             onSelectProject={handleSidebarSelectProject}
             onProjectSettings={(project) => openProjectSettings(project)}
             onSettings={handleOpenSettings}
+            onManageLenses={() => openSettings({ kind: 'prefs', page: 'lenses' })}
             onLeaderboard={() => {
               useTabStore.getState().setActiveView('leaderboard')
             }}

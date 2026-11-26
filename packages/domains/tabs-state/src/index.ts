@@ -28,6 +28,7 @@ export {
   liveSpec,
   specEqual,
   specToLive,
+  uniqueLensName,
   visibleLenses,
   LENS_GROUPS,
   LENS_LOOKS,
