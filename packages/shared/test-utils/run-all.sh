@@ -1405,6 +1405,11 @@ run_harness packages/domains/task-contracts/src/panel-config.test.ts
 # Render modes: video is inferred from its extension and stays binary (never read as text).
 run_harness packages/domains/task-contracts/src/render-modes.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
+# Task panel layout (columns of tab groups): pure ops, legacy panel_visibility/panel_sizes
+# adapters (derive ∘ project round-trip), parsing from disk, built-in layouts.
+run_harness packages/domains/task-contracts/src/layout/ops.test.ts
+run_harness packages/domains/task-contracts/src/layout/legacy.test.ts
+run_harness packages/domains/task-contracts/src/layout/settings.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
 run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts
