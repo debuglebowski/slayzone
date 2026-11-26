@@ -173,6 +173,17 @@ describe('loadWebglRenderer', () => {
     expect(h.termCalls.loadAddon, 'loadAddon not called').toBe(0)
   })
 
+  test('activation throws (no WebGL2 context): latches WebGL off, never throws, no active addon', () => {
+    const h = harness()
+    h.opts.terminal.loadAddon = () => {
+      throw new Error('WebGL2 not supported null')
+    }
+    expect(() => loadWebglRenderer(h.opts)).not.toThrow()
+    expect(h.state.onWebglDisabledCalls).toBe(1)
+    expect(h.state.activeAddon).toBeNull()
+    expect(h.state.frames).toHaveLength(0)
+  })
+
   test('cold-start correction: re-rasterizes + repaints on the frame then each straggler', () => {
     const h = harness()
     loadWebglRenderer(h.opts)
