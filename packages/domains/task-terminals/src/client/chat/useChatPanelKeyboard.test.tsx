@@ -428,3 +428,83 @@ describe('useChatPanelKeyboard: Cmd+↓', () => {
     expect(scrollTo).not.toHaveBeenCalled()
   })
 })
+
+describe('useChatPanelKeyboard: Cmd+↑ / ↓ in a text field move the caret first', () => {
+  function setup(value: string, caret: number) {
+    const root = document.createElement('div')
+    const composer = document.createElement('textarea')
+    composer.value = value
+    root.appendChild(composer)
+    document.body.appendChild(root)
+    composer.focus()
+    composer.setSelectionRange(caret, caret)
+    const scrollToBottom = vi.fn()
+    const scrollTo = vi.fn()
+    const unstick = vi.fn()
+    renderHook(() =>
+      useChatPanelKeyboard({
+        panelRef: { current: root },
+        scrollRef: Object.assign(() => {}, { current: { scrollTo } }) as never,
+        search: { requestOpen: () => {} },
+        inFlight: false,
+        chatMode: 'auto-accept',
+        handleModeChange: () => Promise.resolve(),
+        autoCapability: { optedIn: false } as never,
+        autocomplete: { show: false },
+        handleStop: () => {},
+        mode: 'claude-chat',
+        scrollToBottom,
+        unstick
+      })
+    )
+    return { composer, scrollTo, scrollToBottom, unstick }
+  }
+  const press = (init: KeyboardEventInit) => {
+    const e = new KeyboardEvent('keydown', { cancelable: true, ...init })
+    window.dispatchEvent(e)
+    return e
+  }
+
+  it("caret mid-text: Cmd+↑ / ↓ are the field's (native caret move), no timeline jump", () => {
+    const { scrollTo, scrollToBottom, unstick } = setup('line one\nline two', 5)
+    expect(press({ key: 'ArrowUp', metaKey: true }).defaultPrevented).toBe(false)
+    expect(press({ key: 'ArrowDown', metaKey: true }).defaultPrevented).toBe(false)
+    expect(press({ key: 'ArrowUp', ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(scrollToBottom).not.toHaveBeenCalled()
+    expect(unstick).not.toHaveBeenCalled()
+  })
+
+  it('caret at the start: Cmd+↑ jumps the timeline; Cmd+↓ still moves the caret', () => {
+    const { scrollTo, scrollToBottom } = setup('some text', 0)
+    expect(press({ key: 'ArrowDown', metaKey: true }).defaultPrevented).toBe(false)
+    expect(scrollToBottom).not.toHaveBeenCalled()
+    expect(press({ key: 'ArrowUp', metaKey: true }).defaultPrevented).toBe(true)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
+  })
+
+  it('caret at the end: Cmd+↓ jumps the timeline; Cmd+↑ still moves the caret', () => {
+    const { scrollTo, scrollToBottom } = setup('some text', 9)
+    expect(press({ key: 'ArrowUp', metaKey: true }).defaultPrevented).toBe(false)
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(press({ key: 'ArrowDown', metaKey: true }).defaultPrevented).toBe(true)
+    expect(scrollToBottom).toHaveBeenCalledTimes(1)
+  })
+
+  it('a selection is not "at the start/end": Cmd+↑ / ↓ collapse it natively', () => {
+    const { composer, scrollTo, scrollToBottom } = setup('some text', 0)
+    composer.setSelectionRange(0, 9)
+    expect(press({ key: 'ArrowUp', metaKey: true }).defaultPrevented).toBe(false)
+    expect(press({ key: 'ArrowDown', metaKey: true }).defaultPrevented).toBe(false)
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(scrollToBottom).not.toHaveBeenCalled()
+  })
+
+  it('empty composer: Cmd+↑ / ↓ jump the timeline (unchanged)', () => {
+    const { scrollTo, scrollToBottom } = setup('', 0)
+    expect(press({ key: 'ArrowUp', metaKey: true }).defaultPrevented).toBe(true)
+    expect(press({ key: 'ArrowDown', metaKey: true }).defaultPrevented).toBe(true)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
+    expect(scrollToBottom).toHaveBeenCalledTimes(1)
+  })
+})
