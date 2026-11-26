@@ -6,7 +6,6 @@ import type {
   ArtifactsSidebarState,
   BrowserTabsState,
   GitTabId,
-  PanelVisibility,
   Task,
   TaskArtifact
 } from '@slayzone/task-contracts'
@@ -50,7 +49,6 @@ type TaskUpdater = (data: {
 
 /** The panel strip: visibility, ownership across windows, focus glow, sizes. */
 export interface TaskPanelStripContext {
-  panelVisibility: PanelVisibility
   handlePanelToggle: (panelId: string, active: boolean) => Promise<void>
   ownership: ReturnType<typeof usePanelOwnership>
   /** The panel holding focus (glow), by panel id. */

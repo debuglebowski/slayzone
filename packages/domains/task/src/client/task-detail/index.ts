@@ -15,14 +15,9 @@ export { useWorkspacePathProbe } from './useWorkspacePathProbe'
 export { TaskCompletedScreen } from './TaskCompletedScreen'
 export { gitViewPath } from './gitViewPath'
 export {
-  registerTaskPanels,
-  getTaskPanels,
   useTaskArtifacts,
   useTaskProjectRepos,
   useTaskDetectedRepos,
-  type TaskPanels,
   type ArtifactsPanelHandle,
-  type ArtifactsPanelProps,
-  type UnifiedGitPanelHandle,
-  type UnifiedGitPanelProps
+  type UnifiedGitPanelHandle
 } from '../panels/registry'

@@ -11,7 +11,7 @@ import type { PanelKindProps } from './types'
  */
 export function BrowserKind({ panelId }: PanelKindProps): React.JSX.Element {
   const { task, isActive, isResizing, panels, browser } = useTaskPageContext()
-  const { panelVisibility, handlePanelToggle } = panels
+  const { isInstanceShown, handlePanelToggle } = panels
   const {
     browserHandles,
     browserTabsFor,
@@ -38,7 +38,7 @@ export function BrowserKind({ panelId }: PanelKindProps): React.JSX.Element {
         isActive={isActive}
         onElementSnippet={handleInsertElementSnippet}
         onScreenshot={handleScreenshot}
-        canUseDomPicker={panelVisibility.terminal}
+        canUseDomPicker={isInstanceShown(PRIMARY_INSTANCE_IDS.agent as string)}
         primaryInstance={panelId === PRIMARY_INSTANCE_IDS.browser}
       />
     </PanelFrame>

@@ -32,7 +32,6 @@ import {
 } from '../shared/main-terminal'
 import { useHeldTaskPath, useTaskPath, useTaskPathLocation } from './useTaskPath'
 import {
-  BUILTIN_PANEL_IDS,
   DEFAULT_TASK_PANEL_VISIBILITY,
   LAYOUT_SHORTCUT_COUNT,
   addUserLayout,
@@ -735,27 +734,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const claimingTaskId = task?.id
   useEffect(() => {
     if (!claimingTaskId || ownership.windowId == null) return
-    const claimableIds = [
-      'terminal',
-      'browser',
-      'editor',
-      'diff',
-      'artifacts',
-      'processes',
-      'settings'
-    ] as const
-    for (const id of claimableIds) {
-      if (panelVisibility[id] && ownership.ownerOf(id) == null) ownership.claim(id)
+    // Every shown panel instance, by its own id (a primary's id is its legacy one).
+    for (const id of Object.keys(taskLayout.layout.instances)) {
+      if (isInstanceVisible(taskLayout.layout, id) && ownership.ownerOf(id) == null)
+        ownership.claim(id)
     }
-    for (const wp of enabledWebPanels) {
-      if (panelVisibility[wp.id] && ownership.ownerOf(wp.id) == null) ownership.claim(wp.id)
-    }
-    // Every other panel instance, by its own id.
-    for (const inst of Object.values(taskLayout.layout.instances)) {
-      if (isPrimaryInstance(inst) || !isInstanceVisible(taskLayout.layout, inst.id)) continue
-      if (ownership.ownerOf(inst.id) == null) ownership.claim(inst.id)
-    }
-  }, [claimingTaskId, panelVisibility, enabledWebPanels, ownership, taskLayout.layout])
+  }, [claimingTaskId, ownership, taskLayout.layout])
 
   // When a secondary window closes, primary's renderer flips local visibility off for the
   // panels it owned — they must NOT auto-pop back open here. User clicks toggle to reopen.
@@ -889,7 +873,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     devUrlToastDismissedRef
   } = useDevServerDetection({
     task,
-    browserVisible: panelVisibility.browser,
+    browserVisible: isInstanceVisible(taskLayout.layout, PRIMARY_INSTANCE_IDS.browser as string),
     settingsRevision,
     subscribeDevServer,
     getMainSessionId
@@ -1325,7 +1309,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const togglePanelKind = useStableCallback((legacyId: string) => {
     const kind = legacyKindOf(legacyId)
     if (!kind || kind === 'web') {
-      handlePanelToggle(legacyId, !panelVisibility[legacyId])
+      handlePanelToggle(legacyId, !(kind ? isInstanceShown(legacyId) : panelVisibility[legacyId]))
       return
     }
     const target = focusedInstanceOf(kind) ?? legacyId
@@ -1820,7 +1804,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         isBuiltinEnabled('settings', 'task')
       ) {
         e.preventDefault()
-        handlePanelToggle('settings', !panelVisibility.settings)
+        handlePanelToggle('settings', !isInstanceShown('settings'))
       } else if (matchesShortcut(e, keys('task-computer'))) {
         e.preventDefault()
         setComputerMenuOpen((open) => !open)
@@ -1830,7 +1814,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         for (const wp of enabledWebPanels) {
           if (matchesShortcut(e, webPanelShortcutKeys(wp.shortcut))) {
             e.preventDefault()
-            handlePanelToggle(wp.id, !panelVisibility[wp.id])
+            handlePanelToggle(wp.id, !isInstanceShown(wp.id))
             return
           }
         }
@@ -2219,19 +2203,20 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Cmd+K "Current task" section — the same handlers the page's own controls run.
   const palettePanels: PalettePanel[] = []
   const addPalettePanel = (id: string, label: string, shortcutId?: string, open?: boolean) => {
-    palettePanels.push({ id, label, shortcutId, open: open ?? !!panelVisibility[id] })
+    palettePanels.push({ id, label, shortcutId, open: open ?? isInstanceShown(id) })
   }
   if (isBuiltinEnabled('terminal', 'task'))
     addPalettePanel('terminal', 'Terminal', 'panel-terminal')
   if (isBuiltinEnabled('browser', 'task')) addPalettePanel('browser', 'Browser', 'panel-browser')
   if (isBuiltinEnabled('editor', 'task')) addPalettePanel('editor', 'Editor', 'panel-editor')
   if (isBuiltinEnabled('diff', 'task')) {
-    addPalettePanel('git', 'Git', 'panel-git', !!panelVisibility.diff)
-    addPalettePanel('git-diff', 'Git diff', 'panel-git-diff', !!panelVisibility.diff)
+    addPalettePanel('git', 'Git', 'panel-git', isInstanceShown('diff'))
+    addPalettePanel('git-diff', 'Git diff', 'panel-git-diff', isInstanceShown('diff'))
   }
   if (isBuiltinEnabled('processes', 'task'))
     addPalettePanel('processes', 'Processes', 'panel-processes')
-  if (isBuiltinEnabled('tests', 'task')) addPalettePanel('tests', 'Tests', 'panel-tests')
+  if (isBuiltinEnabled('tests', 'task'))
+    addPalettePanel('tests', 'Tests', 'panel-tests', !!panelVisibility.tests)
   if (isBuiltinEnabled('artifacts', 'task'))
     addPalettePanel('artifacts', 'Artifacts', 'panel-artifacts')
   if (isBuiltinEnabled('settings', 'task'))
@@ -2308,7 +2293,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onCopyHistory: handleCopyHistory,
     onEditFlags: () => {
       // The flags dialog lives in the primary agent panel's header.
-      if (!panelVisibility.terminal) handlePanelToggle('terminal', true)
+      if (!isInstanceShown('terminal')) handlePanelToggle('terminal', true)
       setFlagsPopoverOpen(true)
     },
     onResetFlags: handleSetDefaultFlags,
@@ -2342,14 +2327,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     )
   }
 
-  const visiblePanelCount =
-    [...BUILTIN_PANEL_IDS, ...enabledWebPanels.map((wp) => wp.id)].filter(
-      (panelId) => !!panelVisibility[panelId]
-    ).length +
-    // Panels beyond a kind's first (not in the legacy projection).
-    Object.values(taskLayout.layout.instances).filter(
-      (inst) => !isPrimaryInstance(inst) && isInstanceVisible(taskLayout.layout, inst.id)
-    ).length
+  const visiblePanelCount = Object.keys(taskLayout.layout.instances).filter((id) =>
+    isInstanceVisible(taskLayout.layout, id)
+  ).length
   const hasVisiblePanels = visiblePanelCount > 0
   const multipleVisiblePanels = visiblePanelCount > 1
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
@@ -2490,7 +2470,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     updateTaskAndNotify,
     getMainSessionId,
     panels: {
-      panelVisibility,
       handlePanelToggle,
       ownership,
       focusedPanel,
