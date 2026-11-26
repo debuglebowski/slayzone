@@ -1416,6 +1416,8 @@ run_harness packages/domains/task-contracts/src/layout/legacy.test.ts
 run_harness packages/domains/task-contracts/src/layout/settings.test.ts
 run_harness packages/domains/task-contracts/src/layout/classic.test.ts
 run_harness packages/domains/task-contracts/src/layout/instances.test.ts
+# Step 12 kinds: web page URLs, Artifact panels, one-per-task kinds (settings parse, adding).
+run_harness packages/domains/task-contracts/src/layout/kinds.test.ts
 # Layout definitions: switching (match by kind, park live leftovers), dirty detection, task_layouts.
 run_harness packages/domains/task-contracts/src/layout/definitions.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts

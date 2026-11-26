@@ -134,8 +134,12 @@ export function isLayoutDirty(layout: LayoutTree, def: LayoutTree | null | undef
 
 // ── Switching ────────────────────────────────────────────────────────────────
 
-/** What an instance is for matching: its kind, and for a web panel which page. */
+/** What an instance is for matching: its kind, for a web panel which page, for an Artifact panel which file. */
 function matchKey(inst: PanelInstance): string {
+  if (inst.kind === 'artifact') {
+    const id = typeof inst.settings.artifactId === 'string' ? inst.settings.artifactId : ''
+    return `artifact|${id}`
+  }
   if (inst.kind !== 'web') return inst.kind
   const panelId = typeof inst.settings.panelId === 'string' ? inst.settings.panelId : ''
   const url = typeof inst.settings.url === 'string' ? inst.settings.url : ''
