@@ -294,6 +294,19 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     defaultKeys: 'mod+y',
     scope: 'task'
   },
+  // Task layouts 1–9, in Layout-menu order (the enabled ones). ⌃⌥ everywhere: ⌃ / Alt
+  // + digit switches sidebar lenses, mod + digit switches tabs, and ⌥ + digit types
+  // characters in a terminal on macOS (docs/plans/panel-model.md open question 3).
+  ...Array.from(
+    { length: 9 },
+    (_, i): ShortcutDefinition => ({
+      id: `switch-layout-${i + 1}`,
+      label: `Switch to Layout ${i + 1}`,
+      group: 'Layouts',
+      defaultKeys: `ctrl+alt+${i + 1}`,
+      scope: 'task'
+    })
+  ),
   {
     id: 'editor-search',
     label: 'Editor Search',

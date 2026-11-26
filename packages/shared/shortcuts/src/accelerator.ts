@@ -159,7 +159,7 @@ export function matchesShortcut(e: KeyboardEvent, keys: string | null): boolean 
   // On macOS, Alt produces special characters (e.g. Alt+R → ®), so e.key won't
   // match the shortcut letter. Fall back to e.code (e.g. "KeyR" → "r") when Alt is held.
   if (wantAlt && isMac && e.code && key.length === 1) {
-    return e.code.replace(/^Key/, '').toLowerCase() === key
+    return e.code.replace(/^(Key|Digit)/, '').toLowerCase() === key
   }
   const expectedKey = NAME_TO_PUNCT[key] ?? key
   return e.key.toLowerCase() === expectedKey
