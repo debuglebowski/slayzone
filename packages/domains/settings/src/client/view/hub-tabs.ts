@@ -15,6 +15,7 @@ export const HUB_PAGE_TABS: ReadonlyArray<{
 }> = [
   { key: 'overview', label: 'Overview', multiHub: true },
   { key: 'computers', label: 'Computers', multiHub: true },
+  { key: 'projects', label: 'Projects' },
   { key: 'agents', label: 'Agents & providers' },
   { key: 'worktrees', label: 'Worktrees' },
   { key: 'mcp', label: 'MCP', defaultOnly: true },

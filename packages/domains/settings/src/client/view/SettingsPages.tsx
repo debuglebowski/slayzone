@@ -22,6 +22,7 @@ import { AboutSettingsTab } from '../tabs/AboutSettingsTab'
 import { CliSettingsTab } from '../tabs/CliSettingsTab'
 import { ConnectionsSettingsTab } from '../tabs/ConnectionsSettingsTab'
 import { HubsSettingsTab } from '../tabs/HubsSettingsTab'
+import { HubProjectsTab } from '../tabs/HubProjectsTab'
 import { SettingsTabIntro } from '../tabs/SettingsTabIntro'
 import { AgentHubSettings } from '../tabs/panels-settings/AgentHubSettings'
 import { AllProjectsPage } from './AllProjectsPage'
@@ -253,7 +254,7 @@ function HubPage({ route }: { route: HubRoute }) {
           <HubOverview
             isDefault={isDefault}
             openTab={(t) => go({ tab: t })}
-            openProjects={() => navigate({ kind: 'projects' })}
+            openProjects={() => go({ tab: 'projects' })}
           />
         )}
         {tab === 'agents' && (
@@ -268,6 +269,7 @@ function HubPage({ route }: { route: HubRoute }) {
             {!route.sub && <AgentHubSettings />}
           </div>
         )}
+        {tab === 'projects' && <HubProjectsTab hubId={hub?.id ?? null} />}
         {tab === 'worktrees' && <WorktreesSettingsTab />}
         {tab === 'mcp' && <McpSettingsTab />}
         {tab === 'backups' && <BackupSettingsTab />}

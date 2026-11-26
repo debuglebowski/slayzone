@@ -1,4 +1,5 @@
 export { CreateProjectDialog } from './CreateProjectDialog'
+export { openCreateProject } from './open-create-project'
 export type { ProjectCreationContext, ProjectStartMode } from './CreateProjectDialog'
 export {
   ProjectSettingsPanel,

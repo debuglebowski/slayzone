@@ -43,6 +43,7 @@ const HUB_TABS: Array<[string, string, string, boolean]> = [
     false
   ],
   ['computers', 'Computers', 'computers enroll add machine restart disable replace', false],
+  ['projects', 'Projects', 'projects list new create add project', false],
   [
     'agents',
     'Agents & providers',
@@ -137,7 +138,7 @@ function HubResults({ hub, query }: { hub: NavHub; query: string }) {
     ...(projects.data ?? []).map((p) => ({
       label: p.name,
       path: `${path} · project`,
-      keywords: 'project',
+      keywords: 'project folder path repository computers',
       route: { kind: 'project', projectId: p.id, tab: 'general' } as SettingsRoute
     }))
   ].filter((e) => matches(query, e))

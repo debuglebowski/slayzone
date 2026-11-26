@@ -8,6 +8,7 @@ describe('hubPageTabs', () => {
     expect(keys({ isDefault: true, solo: false })).toEqual([
       'overview',
       'computers',
+      'projects',
       'agents',
       'worktrees',
       'mcp',
@@ -17,13 +18,15 @@ describe('hubPageTabs', () => {
     expect(keys({ isDefault: false, solo: false })).toEqual([
       'overview',
       'computers',
+      'projects',
       'agents',
       'worktrees'
     ])
   })
 
-  it('the only hub, local: no hub or computer pages as such', () => {
+  it('the only hub, local: no hub or computer pages as such (its projects stay)', () => {
     expect(keys({ isDefault: true, solo: true })).toEqual([
+      'projects',
       'agents',
       'worktrees',
       'mcp',
