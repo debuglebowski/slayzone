@@ -54,6 +54,10 @@ interface Host {
   /** The isolated tabs among `tabIds` (see `BrowserRelayTabsState`). */
   isolatedTabIds: Set<string>
   activeTabId: string | null
+  /** The task's primary browser panel (see `BrowserRelayTabsState.primary`). */
+  primary: boolean
+  /** Use clock of the last time this panel's own chrome was used (0: never). */
+  usedSeq: number
   /** When it came online — the tie-break among hosts nobody used. */
   attachedSeq: number
   pending: Set<string>
@@ -125,6 +129,8 @@ export class BrowserRelay {
       tabIds: new Set(),
       isolatedTabIds: new Set(),
       activeTabId: null,
+      primary: true,
+      usedSeq: 0,
       attachedSeq: ++this.attachClock,
       pending: new Set()
     }
@@ -139,14 +145,22 @@ export class BrowserRelay {
     host.tabIds = new Set(state.tabIds)
     host.isolatedTabIds = new Set((state.isolatedTabIds ?? []).filter((t) => host.tabIds.has(t)))
     host.activeTabId = state.activeTabId
+    host.primary = state.primary !== false
     this.settleWaiters(host.taskId)
   }
 
-  /** The user used task `taskId`'s browser on client `clientKey` (input, focus). */
-  noteUse(principalKey: string | null, clientKey: string, taskId: string): void {
+  /**
+   * The user used task `taskId`'s browser on client `clientKey` (input, focus);
+   * `hostId`: in that panel's own chrome, so among the task's browser panels on the
+   * client, that one is reached first.
+   */
+  noteUse(principalKey: string | null, clientKey: string, taskId: string, hostId?: string): void {
     const key = lastUseKey(principalKey, clientKey, taskId)
     this.lastUse.delete(key)
     this.lastUse.set(key, ++this.useClock)
+    const host = hostId ? this.hosts.get(hostId) : undefined
+    if (host && host.principalKey === principalKey && host.taskId === taskId)
+      host.usedSeq = this.useClock
     if (this.lastUse.size > MAX_USE_RECORDS) {
       const oldest = this.lastUse.keys().next().value
       if (oldest !== undefined) this.lastUse.delete(oldest)
@@ -225,15 +239,30 @@ export class BrowserRelay {
     return host ? defaultTabOf(host, scope) : null
   }
 
-  /** The owner's tabs (the most recently used host that has any). */
+  /**
+   * The owner's tabs: the most recently used host that has any, plus the tabs of the
+   * task's other browser panels on the same client (tab ids are unique per task, so
+   * `--tab` reaches each). `active` is the owner's active tab.
+   */
   listTabs(principalKey: string | null, taskId: string): BrowserRelayTabInfo[] {
-    const owner = this.hostsFor(principalKey, taskId).find((h) => h.tabIds.size > 0)
+    const hosts = this.hostsFor(principalKey, taskId)
+    const owner = hosts.find((h) => h.tabIds.size > 0)
     if (!owner) return []
-    return [...owner.tabIds].map((id) => ({
-      tabId: id,
-      active: owner.activeTabId === id,
-      isolated: owner.isolatedTabIds.has(id)
-    }))
+    const out: BrowserRelayTabInfo[] = []
+    const seen = new Set<string>()
+    for (const host of hosts) {
+      if (host.clientKey !== owner.clientKey) continue
+      for (const id of host.tabIds) {
+        if (seen.has(id)) continue
+        seen.add(id)
+        out.push({
+          tabId: id,
+          active: host === owner && owner.activeTabId === id,
+          isolated: host.isolatedTabIds.has(id)
+        })
+      }
+    }
+    return out
   }
 
   /** True when a live tab (in scope) is registered — the "is the panel open?" probe. */
@@ -374,13 +403,23 @@ export class BrowserRelay {
     return host
   }
 
-  /** `principalKey`'s hosts serving `taskId`: most recently used client first, then first online. */
+  /**
+   * `principalKey`'s hosts serving `taskId`: most recently used client first; on one
+   * client (several browser panels of the task) the panel used last, else the
+   * primary panel; then first online.
+   */
   private hostsFor(principalKey: string | null, taskId: string): Host[] {
     const used = (h: Host): number =>
       this.lastUse.get(lastUseKey(h.principalKey, h.clientKey, h.taskId)) ?? 0
     return [...this.hosts.values()]
       .filter((h) => h.taskId === taskId && h.principalKey === principalKey)
-      .sort((a, b) => used(b) - used(a) || a.attachedSeq - b.attachedSeq)
+      .sort(
+        (a, b) =>
+          used(b) - used(a) ||
+          b.usedSeq - a.usedSeq ||
+          Number(b.primary) - Number(a.primary) ||
+          a.attachedSeq - b.attachedSeq
+      )
   }
 
   private ownerForActive(principalKey: string | null, taskId: string): Host | null {

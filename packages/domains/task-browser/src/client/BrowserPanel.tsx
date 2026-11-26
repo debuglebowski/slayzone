@@ -36,6 +36,15 @@ import { useBrowserImportUrls } from './useBrowserImportUrls'
 
 export type { BrowserPanelHandle } from './BrowserPanel.types'
 
+/**
+ * Which browser panel shows each live view (viewId → panel), across every mounted
+ * BrowserPanel. A task may have several browser panels (instances): a tab request
+ * from main (a link opened in a new tab, an extension's tab) goes to the panel whose
+ * view sent it; one from a view no browser panel shows (a web panel's) goes to the
+ * task's primary browser panel.
+ */
+const viewOwners = new Map<string, symbol>()
+
 export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(function BrowserPanel(
   {
     className,
@@ -48,12 +57,14 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     isActive,
     onElementSnippet,
     onScreenshot,
-    canUseDomPicker = true
+    canUseDomPicker = true,
+    primaryInstance = true
   }: BrowserPanelProps,
   ref
 ) {
   const hasBrowserHost = getBrowserHost() !== null
-  const relayHost = useBrowserRelayHost(taskId)
+  const relayHost = useBrowserRelayHost(taskId, primaryInstance)
+  const [ownerKey] = useState(() => Symbol('browser-panel'))
   const { browserDefaultUrl, browserDefaultZoom, browserDeviceDefaults } = useAppearance()
   const elementPickerShortcut = useShortcutDisplay('browser-element-picker')
   const { track } = useTrack()
@@ -129,6 +140,15 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       return { ...prev, [tabId]: view }
     })
   }, [])
+
+  // Claim this panel's views so main's tab requests from them come here (viewOwners).
+  useEffect(() => {
+    const ids = Object.values(tabViews).flatMap((v) => (v.viewId ? [v.viewId] : []))
+    for (const id of ids) viewOwners.set(id, ownerKey)
+    return () => {
+      for (const id of ids) if (viewOwners.get(id) === ownerKey) viewOwners.delete(id)
+    }
+  }, [tabViews, ownerKey])
 
   // Convenience accessors for active tab
   const activeView = tabs.activeTabId ? tabViews[tabs.activeTabId] : undefined
@@ -319,6 +339,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const handleNewTabRequest = (raw: unknown): void => {
     const event = raw as {
       type: string
+      viewId?: string
       taskId?: string
       url?: string
       background?: boolean
@@ -327,6 +348,13 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       isolated?: boolean
     }
     if (event.taskId !== taskId) return
+    // Another browser panel of the task handles requests for its own tabs and views.
+    if (event.type === 'select-tab-request' || event.type === 'close-tab-request') {
+      if (!tabsRef.current.tabs.some((t) => t.id === event.tabId)) return
+    } else {
+      const owner = event.viewId ? viewOwners.get(event.viewId) : undefined
+      if (owner ? owner !== ownerKey : !primaryInstance) return
+    }
     if (event.type === 'select-tab-request' && event.tabId) {
       switchToTab(event.tabId)
       return
