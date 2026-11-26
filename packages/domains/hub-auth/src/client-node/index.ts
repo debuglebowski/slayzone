@@ -32,7 +32,10 @@ export const nodeHubTransport: HubTransport = (request) =>
         let text = ''
         res.setEncoding('utf8')
         res.on('data', (chunk: string) => {
-          if (text.length < request.maxResponseChars) text += chunk
+          // Capped exactly, like the other transports: one chunk can carry the whole
+          // body (Node coalesces small writes), so a per-chunk check is no cap.
+          if (text.length < request.maxResponseChars)
+            text += chunk.slice(0, request.maxResponseChars - text.length)
         })
         res.on('end', () =>
           resolve({

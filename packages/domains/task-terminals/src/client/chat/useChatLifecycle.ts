@@ -240,7 +240,7 @@ export function useChatLifecycle({
         // Best-effort — the chat still spawns when the user types.
         setStartDecision('none')
       })
-  }, [hydrating, openState, trpcClient, tabId])
+  }, [hydrating, openState, trpcClient, tabId, taskId])
   // Still coming up (the startup card counts it, see chat-loading.ts): until the
   // decision lands. A 'now' start is requested in the same commit (effect below),
   // after which the hub reports the agent itself. A failed load is shown in the

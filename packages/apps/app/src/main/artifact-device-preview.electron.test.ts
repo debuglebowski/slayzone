@@ -88,7 +88,17 @@ app.whenReady().then(async () => {
     await mouse({ type: 'mouseReleased', x, y, buttons: 0 })
     await sleep(300)
   }
-  const drain = (contents) => contents.executeJavaScript('log.splice(0)')
+  // A forwarded tap reaches the guest asynchronously (preload -> IPC -> main -> CDP), so
+  // wait for the condition (bounded) instead of a fixed sleep a slow runner outlasts.
+  const settle = (contents, cond) => contents.executeJavaScript(
+    'new Promise((r) => { const t0 = Date.now(); (function f() {' +
+    ' if ((' + cond + ') || Date.now() - t0 > 5000) r(); else setTimeout(f, 25) })() })'
+  )
+  // Every click ends in a click event; take the log once it is there.
+  const drain = async (contents) => {
+    await settle(contents, "log.some((e) => e.startsWith('click:'))")
+    return contents.executeJavaScript('log.splice(0)')
+  }
   const out = {}
   await click(100, 100)
   out.hostMobile = await drain(wc)
@@ -98,9 +108,10 @@ app.whenReady().then(async () => {
   await mouse({ type: 'mousePressed', x: 550, y: 450, buttons: 1 })
   for (let y = 430; y >= 50; y -= 20) await mouse({ type: 'mouseMoved', x: 550, y, buttons: 1 })
   await mouse({ type: 'mouseReleased', x: 550, y: 50, buttons: 0 })
-  await sleep(600)
+  await settle(guest, 'scrollY > 100')
+  await sleep(300)
   out.guestScrollMobile = await guest.executeJavaScript('scrollY')
-  await drain(guest)
+  await guest.executeJavaScript('log.splice(0)')
   await previews.configure(wc, guest.id, ARTIFACT_URL, DESKTOP)
   await sleep(200)
   await click(550, 50)
@@ -121,28 +132,52 @@ app.whenReady().then(async () => {
 })
 `
 
-/** Same Linux CI flags as artifact-export.electron.test.ts. */
-function linuxLaunchArgs(): string[] {
-  if (process.platform !== 'linux') return []
-  const args: string[] = []
+/**
+ * Linux launch. `--no-sandbox` as in artifact-export.electron.test.ts. No display
+ * (the CI runner): run under `xvfb-run`, NOT `--ozone-platform=headless` — headless
+ * ozone routes no mouse input into a `<webview>` guest at all (every click at the
+ * preview, desktop viewport included, lands on the host page), so the test would
+ * measure nothing. Under X11 (Xvfb) the routing and the touch replay work as on macOS.
+ */
+function hasDisplay(): boolean {
+  return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
+}
+
+function onPath(bin: string): boolean {
+  return (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .some((dir) => dir && fs.existsSync(path.join(dir, bin)))
+}
+
+const NEEDS_XVFB = process.platform === 'linux' && !hasDisplay()
+const CANT_RUN = process.platform === 'win32' || (NEEDS_XVFB && !onPath('xvfb-run'))
+
+function launchCommand(args: string[]): [string, string[]] {
+  if (process.platform !== 'linux') return [ELECTRON_BIN, args]
   const helper = path.join(path.dirname(ELECTRON_BIN), 'chrome-sandbox')
   const st = fs.statSync(helper, { throwIfNoEntry: false })
-  if (!st || st.uid !== 0 || (st.mode & 0o4000) === 0) args.push('--no-sandbox')
-  if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) args.push('--ozone-platform=headless')
-  return args
+  if (!st || st.uid !== 0 || (st.mode & 0o4000) === 0) args = ['--no-sandbox', ...args]
+  return NEEDS_XVFB ? ['xvfb-run', ['-a', ELECTRON_BIN, ...args]] : [ELECTRON_BIN, args]
 }
 
 let child: ChildProcess | null = null
+
+/** Kills xvfb-run's Xvfb and Electron too: the run is its own process group. */
+function kill(p: ChildProcess) {
+  if (p.pid === undefined) return
+  try {
+    process.kill(-p.pid, 'SIGKILL')
+  } catch {
+    p.kill('SIGKILL')
+  }
+}
 
 function run(config: Record<string, string>, budgetMs = 90_000): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const env: NodeJS.ProcessEnv = { ...process.env, SLZ_TEST_CONFIG: JSON.stringify(config) }
     delete env.ELECTRON_RUN_AS_NODE
-    const p = spawn(
-      ELECTRON_BIN,
-      [...linuxLaunchArgs(), driver, `--user-data-dir=${path.join(tmp, 'profile')}`],
-      { env, stdio: ['ignore', 'pipe', 'pipe'] }
-    )
+    const [command, args] = launchCommand([driver, `--user-data-dir=${path.join(tmp, 'profile')}`])
+    const p = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
     child = p
     let out = ''
     let err = ''
@@ -153,7 +188,7 @@ function run(config: Record<string, string>, budgetMs = 90_000): Promise<RunResu
       err += d
     })
     const timer = setTimeout(() => {
-      p.kill('SIGKILL')
+      kill(p)
       reject(new Error(`Electron run exceeded ${budgetMs} ms\n${err.slice(-2000)}`))
     }, budgetMs)
     p.on('exit', () => {
@@ -191,11 +226,12 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(() => {
-  child?.kill('SIGKILL')
+  if (child) kill(child)
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-describe.skipIf(process.platform === 'win32')('artifact device preview in a real Electron', () => {
+// Windows: never run here. Linux without a display needs xvfb-run (see launchCommand).
+describe.skipIf(CANT_RUN)('artifact device preview in a real Electron', () => {
   test('mobile touch stays inside the preview; the host window keeps its mouse', async () => {
     const r = await run({
       ARTIFACT_DEVICE_PARTITION: 'persist:artifact-device-previews',

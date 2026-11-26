@@ -25,7 +25,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
     "@trpc/server": "^11.24.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

@@ -101,9 +101,7 @@ export function RewindPicker({
               >
                 <Icon className="text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{firstLine(m.text)}</span>
-                <span className="shrink-0 text-2xs text-muted-foreground">
-                  {ago(m.timestamp)}
-                </span>
+                <span className="shrink-0 text-2xs text-muted-foreground">{ago(m.timestamp)}</span>
               </CommandItem>
             ))}
           </CommandList>

@@ -119,9 +119,7 @@ export function McpToolCard({ invocation: call, timestamp }: ToolProps) {
         )}
         {blocks.length > 0 && (
           <div className="grid gap-1">
-            <div className="text-2xs text-muted-foreground/70">
-              {isError ? 'Error' : 'Output'}
-            </div>
+            <div className="text-2xs text-muted-foreground/70">{isError ? 'Error' : 'Output'}</div>
             {blocks.map((b, i) => (
               <OutputBlock key={i} block={b} isError={isError} />
             ))}

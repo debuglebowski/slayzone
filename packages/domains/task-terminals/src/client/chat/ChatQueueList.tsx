@@ -300,9 +300,7 @@ function QueueRowBody({
         </span>
         {label}
         <RowTip label="Sent: the agent reads it after its current step">
-          <span className="shrink-0 text-3xs text-muted-foreground animate-pulse">
-            With agent…
-          </span>
+          <span className="shrink-0 text-3xs text-muted-foreground animate-pulse">With agent…</span>
         </RowTip>
         {withdrawSteered && (
           <RowTip label="Take it back before the agent reads it">

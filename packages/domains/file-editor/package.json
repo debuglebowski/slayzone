@@ -60,7 +60,7 @@
     "ignore": "^7.0.14",
     "lezer-toml": "^1.0.0",
     "lucide-react": "^1.68.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "react": "^19.3.1"

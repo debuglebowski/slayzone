@@ -30,7 +30,7 @@
     "@trpc/server": "^11.24.0",
     "date-fns": "^4.4.0",
     "lucide-react": "^1.68.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "react": "^19.3.1"

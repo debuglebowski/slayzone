@@ -23,7 +23,7 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.105.3",
     "picomatch": "^4.0.7",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "react": "^19.3.1"

@@ -38,7 +38,11 @@ import { useMutation } from '@tanstack/react-query'
 import { electronBootstrap, useHubId, useHubRegistryStore } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
-import { DEFAULT_ZOOM_PCT, getEffectiveRenderMode, isBinaryRenderMode } from '@slayzone/task-contracts'
+import {
+  DEFAULT_ZOOM_PCT,
+  getEffectiveRenderMode,
+  isBinaryRenderMode
+} from '@slayzone/task-contracts'
 import { useAppearance, safeClipboardWriteText, toast } from '@slayzone/ui'
 import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'

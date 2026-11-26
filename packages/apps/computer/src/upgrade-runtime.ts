@@ -657,6 +657,47 @@ async function awaitLauncherHost(
   )
 }
 
+/**
+ * How long an explicit stop waits for the stopped host's launcher to let go of the
+ * root. Above the stopped host's own exit grace (cli-main STOPPED_HOST_EXIT_GRACE_MS,
+ * 5s), so a host whose event loop does not drain is still waited out.
+ */
+const STOPPED_HOST_RELEASE_WAIT_MS = 10_000
+
+/**
+ * After a forced host `stop`: wait until the root's launcher has released its endpoint.
+ * The host answers `stop` before it stops (session-host.ts), then exits and logs its
+ * exit, and its launcher logs that too before it releases — all into the root
+ * (logs/computer.log). The launcher and host are detached, so without this a stopped
+ * `slayzone-computer` exits while they still write, and whoever removes the root next
+ * races them (ENOTEMPTY). `null` from the launcher = released (or none, as with a
+ * pre-lock launcher). Bounded: a launcher that restarts its host instead (it crashed
+ * while stopping) is logged and left to its own policy.
+ */
+async function awaitStoppedHostReleased(root: string, log?: Log): Promise<void> {
+  const deadline = Date.now() + STOPPED_HOST_RELEASE_WAIT_MS
+  let status: HostLauncherStatus | null = null
+  for (;;) {
+    try {
+      status = await queryHostLauncher(root, 'status')
+      if (!status) return
+    } catch (err) {
+      if (!(err instanceof HostLauncherBusyError)) {
+        log?.('cannot confirm the stopped session host exited', { error: String(err) })
+        return
+      }
+      /* Busy: still there. */
+    }
+    if (Date.now() >= deadline) {
+      log?.(`stopped session host's launcher still holds the root${describeLastExit(status)}`, {
+        waitedMs: STOPPED_HOST_RELEASE_WAIT_MS
+      })
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
 /** Remember explicit stops throughout boot, including reconnect probes and host startup. */
 export async function superviseUpgrades(...args: Parameters<typeof initializeUpgradeSupervisor>) {
   let stopRequested = false
@@ -675,6 +716,7 @@ export async function superviseUpgrades(...args: Parameters<typeof initializeUpg
       if (peer) {
         await peer.rpc.request('stop', { force: true }).catch(() => undefined)
         peer.close()
+        await awaitStoppedHostReleased(args[2], args[3])
       }
     }
     throw err
@@ -1076,6 +1118,8 @@ async function initializeUpgradeSupervisor(
     await Promise.all(controllers.map((c) => c.stop()))
     if (shutdownHost) await control.rpc.request('stop', { force: true }).catch(() => undefined)
     control.close()
+    // Stopped = the host is gone too: nothing of this computer still writes its root.
+    if (shutdownHost) await awaitStoppedHostReleased(root, log)
   }
   process.on('SIGINT', onStop)
   process.on('SIGTERM', onStop)

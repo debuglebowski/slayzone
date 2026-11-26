@@ -343,19 +343,35 @@ test.each([false, true])(
       })
       connected = !dropped
       const owner = (await services.ownership.forTab('tab'))!
-      const read = () =>
+      const invoke = (target: 'ops' | 'queue', method: string, args: unknown[]) =>
         pc.request({
           kind: 'invoke',
-          value: {
-            route: { id: owner.id, epoch: owner.epoch },
-            target: 'ops',
-            method: 'getReplay',
-            args: ['tab', -1]
-          }
+          value: { route: { id: owner.id, epoch: owner.epoch }, target, method, args }
         })
-      await vi.waitFor(async () => expect(JSON.stringify(await read())).toContain(marker), {
-        timeout: 15_000
-      })
+      const read = () => invoke('ops', 'getReplay', ['tab', -1])
+      // The turn is over on the computer, not just its text saved: the message is
+      // answered (after the result, on the idle transition).
+      await vi.waitFor(
+        async () => {
+          const replay = (await read()) as { events: Array<{ event: Record<string, unknown> }> }
+          expect(JSON.stringify(replay)).toContain(marker)
+          expect(
+            replay.events.some(
+              ({ event }) =>
+                event.kind === 'user-message-delivery' &&
+                event.id === 'request' &&
+                event.state === 'answered'
+            )
+          ).toBe(true)
+        },
+        { timeout: 15_000 }
+      )
+      // ...and so is the queue drain that idle transition starts: its first read of
+      // this tab's queue repairs the queue identities once — a write that moves the
+      // task state version. Landing after the recovery below, it made the "nothing
+      // changed" recovery re-read this chat. Reading the queue here does that repair
+      // now (whichever read comes first does it; the other writes nothing).
+      await invoke('queue', 'list', ['tab'])
       if (dropped) expect(JSON.stringify(notifications)).not.toContain(marker)
       connected = true
       services.invalidateRecovery('pc')

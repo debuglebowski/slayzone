@@ -96,9 +96,7 @@ export function CodexFileChangeCard({ invocation, timestamp }: ToolProps) {
                 {diff ? (
                   <ChatDiffView diff={diff} />
                 ) : (
-                  <div className="px-2 py-1 text-2xs italic text-muted-foreground">
-                    No changes
-                  </div>
+                  <div className="px-2 py-1 text-2xs italic text-muted-foreground">No changes</div>
                 )}
               </div>
             ))}
