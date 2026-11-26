@@ -188,7 +188,7 @@ test('ordinary restore commits the handoff, keeps pid/output routing and never r
   expect(h.processes.get(sid)?.pid).toBe(42)
   h.connect()
   await vi.waitFor(() => expect(h.ops.unattachedList()).toEqual([]))
-  expect(writePty(sid, 'restored')).toBe(true)
+  await expect(writePty(sid, 'restored')).resolves.toBe(true)
   await new Promise((r) => setTimeout(r, 0))
   expect(h.calls.filter((c) => ['pty.spawn', 'pty.kill', 'pty.resize'].includes(c.method))).toEqual(
     []
@@ -305,7 +305,7 @@ test.each(['before-delivery', 'before-commit', 'during-commit', 'after-commit'] 
     await vi.waitFor(() => expect(hasLivePty(sid)).toBe(false))
     await vi.waitFor(() => expect(h.processes.has(sid)).toBe(false))
     expect(hasLivePty(other)).toBe(true)
-    expect(writePty(other, 'still alive')).toBe(true)
+    await expect(writePty(other, 'still alive')).resolves.toBe(true)
   }
 )
 
@@ -338,7 +338,7 @@ test('late provisional release cannot stop or remove a newer manager registratio
     await new Promise((r) => setTimeout(r, 0))
     expect(h.processes.get(sid)?.spawnId).toBe(fresh)
     expect(hasLivePty(sid)).toBe(true)
-    expect(writePty(sid, 'fresh')).toBe(true)
+    await expect(writePty(sid, 'fresh')).resolves.toBe(true)
     await new Promise((r) => setTimeout(r, 0))
     expect(h.calls.filter((c) => c.method === 'pty.write').at(-1)?.params.spawnId).toBe(fresh)
     expect(

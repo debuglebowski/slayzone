@@ -23,23 +23,32 @@ const deferred = <T,>(): Deferred<T> => {
 }
 
 type SettingsGet = (input: { key: string }) => Promise<string | null>
+type SettingsEffective = (input: {
+  key: string
+  taskId: string
+}) => Promise<{ value: string | null }>
 type RecordClientEvent = (input: Record<string, unknown>) => Promise<unknown>
 type AvailabilityQuery = (input: { tabId: string }) => Promise<{ state: string }>
 
 const m = vi.hoisted(() => {
   const settingsGet = vi.fn<SettingsGet>()
+  const settingsEffective = vi.fn<SettingsEffective>()
   const recordClientEvent = vi.fn<RecordClientEvent>()
   const availability = vi.fn<AvailabilityQuery>()
   return {
     availability,
     hubAllows: vi.fn<(client: unknown, path: string) => Promise<boolean>>(),
     settingsGet,
+    settingsEffective,
     recordClientEvent,
     toast: vi.fn(),
     // One identity for the hook's lifetime, like the real client. The procedures
     // are swappable: a leak test installs a plain function (see `leakable`).
     client: {
-      settings: { get: { query: settingsGet as SettingsGet } },
+      settings: {
+        get: { query: settingsGet as SettingsGet },
+        effective: { query: settingsEffective as SettingsEffective }
+      },
       chat: { availability: { query: availability as AvailabilityQuery } },
       diagnostics: { recordClientEvent: { mutate: recordClientEvent as RecordClientEvent } }
     }
@@ -154,10 +163,12 @@ async function unhandledRejectionsDuring(fn: () => Promise<void>): Promise<unkno
 
 beforeEach(() => {
   m.hubAllows.mockReset().mockResolvedValue(true)
+  m.settingsEffective.mockReset().mockResolvedValue({ value: 'auto' })
   m.settingsGet.mockReset().mockResolvedValue('auto')
   m.recordClientEvent.mockReset().mockResolvedValue(undefined)
   m.toast.mockReset()
   m.availability.mockReset().mockResolvedValue({ state: 'ready' })
+  m.client.settings.effective.query = m.settingsEffective
   m.client.settings.get.query = m.settingsGet
   m.client.diagnostics.recordClientEvent.mutate = m.recordClientEvent
 })
@@ -236,19 +247,19 @@ describe('useChatLifecycle startup (non-main tab)', () => {
   it('leaves a stopped agent for the user to start (the default state)', async () => {
     const { chatApi } = setup()
     await flush()
-    expect(m.settingsGet).toHaveBeenCalledTimes(1)
+    expect(m.settingsEffective).toHaveBeenCalledTimes(1)
     expect(chatApi.start).not.toHaveBeenCalled()
   })
 
   it('leaves a new agent alone even under instant startup', async () => {
-    m.settingsGet.mockResolvedValue('instant')
+    m.settingsEffective.mockResolvedValue({ value: 'instant' })
     const { chatApi } = setup({ agentState: 'new' })
     await flush()
     expect(chatApi.start).not.toHaveBeenCalled()
   })
 
   it('restores a running agent even under manual startup', async () => {
-    m.settingsGet.mockResolvedValue('manual')
+    m.settingsEffective.mockResolvedValue({ value: 'manual' })
     const { chatApi } = setup({ agentState: 'running' })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
@@ -274,7 +285,7 @@ describe('useChatLifecycle startup decision', () => {
     'skips auto-start when scope denies chat.start (main: %s)',
     async (isMain) => {
       m.hubAllows.mockResolvedValue(false)
-      m.settingsGet.mockResolvedValue('instant')
+      m.settingsEffective.mockResolvedValue({ value: 'instant' })
       const { chatApi } = setup({ isMain, agentState: 'running' })
       await flush()
       expect(m.hubAllows).toHaveBeenCalledWith(m.client, 'chat.start')
@@ -299,13 +310,26 @@ describe('useChatLifecycle startup decision', () => {
   it('reads the startup setting by its key', async () => {
     setup()
     await flush()
+    expect(m.settingsEffective).toHaveBeenCalledWith({
+      key: 'terminal_agent_startup',
+      taskId: 'task1'
+    })
+  })
+
+  it('falls back to the hub-wide setting on a hub without project overrides', async () => {
+    // An older hub has no `settings.effective` procedure: the call rejects.
+    m.settingsEffective.mockRejectedValue(new Error('No procedure found'))
+    m.settingsGet.mockResolvedValue('instant')
+    const { chatApi } = setup({ isMain: true, agentState: 'stopped', shown: true })
+    await flush()
     expect(m.settingsGet).toHaveBeenCalledWith({ key: 'terminal_agent_startup' })
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
   })
 
   it('waits for hydration before deciding', async () => {
     const { chatApi, update } = setup({ agentState: 'running', hydrating: true })
     await flush()
-    expect(m.settingsGet).not.toHaveBeenCalled()
+    expect(m.settingsEffective).not.toHaveBeenCalled()
     expect(chatApi.start).not.toHaveBeenCalled()
     update({ hydrating: false })
     await flush()
@@ -318,7 +342,7 @@ describe('useChatLifecycle startup decision', () => {
     update({ hydrating: true })
     update({ hydrating: false })
     await flush()
-    expect(m.settingsGet).toHaveBeenCalledTimes(1)
+    expect(m.settingsEffective).toHaveBeenCalledTimes(1)
   })
 
   it('starts once, even when chatApi changes identity', async () => {
@@ -340,13 +364,17 @@ describe('useChatLifecycle startup decision', () => {
   })
 
   it('keeps the chat lazy when the setting read fails', async () => {
+    // Both reads fail: the project-scoped one, then the hub-wide fallback.
+    const effective = leakable<{ key: string; taskId: string }>('hub down')
     const settings = leakable<{ key: string }>('hub down')
+    m.client.settings.effective.query = effective.fn
     m.client.settings.get.query = settings.fn
     let chatApi!: ReturnType<typeof makeChatApi>
     const leaked = await unhandledRejectionsDuring(async () => {
       chatApi = setup({ agentState: 'running', isMain: true }).chatApi
       await flush()
     })
+    expect(effective.calls).toHaveLength(1)
     expect(settings.calls).toHaveLength(1)
     expect(leaked).toEqual([])
     expect(chatApi.start).not.toHaveBeenCalled()
@@ -385,28 +413,28 @@ describe('useChatLifecycle startup (main tab)', () => {
   })
 
   it('falls back to auto when the setting is unset', async () => {
-    m.settingsGet.mockResolvedValue(null)
+    m.settingsEffective.mockResolvedValue({ value: null })
     const { chatApi } = setup({ isMain: true, agentState: 'new' })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
   })
 
   it('manual: never starts, even a running agent on screen', async () => {
-    m.settingsGet.mockResolvedValue('manual')
+    m.settingsEffective.mockResolvedValue({ value: 'manual' })
     const { chatApi } = setup({ isMain: true, agentState: 'running', shown: true })
     await flush()
     expect(chatApi.start).not.toHaveBeenCalled()
   })
 
   it('instant: starts a stopped agent that is on screen', async () => {
-    m.settingsGet.mockResolvedValue('instant')
+    m.settingsEffective.mockResolvedValue({ value: 'instant' })
     const { chatApi } = setup({ isMain: true, agentState: 'stopped', shown: true })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
   })
 
   it('instant: waits off screen until the task is shown', async () => {
-    m.settingsGet.mockResolvedValue('instant')
+    m.settingsEffective.mockResolvedValue({ value: 'instant' })
     const { chatApi, update } = setup({ isMain: true, agentState: 'auto_stopped', shown: false })
     await flush()
     expect(chatApi.start).not.toHaveBeenCalled()
@@ -417,7 +445,7 @@ describe('useChatLifecycle startup (main tab)', () => {
   })
 
   it('instant: starts only once across show / hide', async () => {
-    m.settingsGet.mockResolvedValue('instant')
+    m.settingsEffective.mockResolvedValue({ value: 'instant' })
     const { chatApi, update } = setup({ isMain: true, agentState: 'stopped', shown: false })
     await flush()
     update({ shown: true })
@@ -427,7 +455,7 @@ describe('useChatLifecycle startup (main tab)', () => {
   })
 
   it('temporary task: always starts, even under manual', async () => {
-    m.settingsGet.mockResolvedValue('manual')
+    m.settingsEffective.mockResolvedValue({ value: 'manual' })
     const { chatApi } = setup({
       isMain: true,
       isTemporary: true,
@@ -457,13 +485,14 @@ describe('useChatLifecycle loading (startup card)', () => {
   })
 
   it('stops counting once it decides to wait until shown', async () => {
-    m.settingsGet.mockResolvedValue('instant')
+    m.settingsEffective.mockResolvedValue({ value: 'instant' })
     setup({ isMain: true, agentState: 'stopped', shown: false })
     await flush()
     expect(chatsLoadingCount()).toBe(0)
   })
 
   it('stops counting when the setting read fails', async () => {
+    m.settingsEffective.mockRejectedValue(new Error('hub down'))
     m.settingsGet.mockRejectedValue(new Error('hub down'))
     setup({ agentState: 'running' })
     await flush()

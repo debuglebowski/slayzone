@@ -75,13 +75,16 @@ function optionAction({
 
 function ToolbarOptionPopover({
   action,
-  caption = action.label
+  caption: captionProp
 }: {
   action: Omit<ArtifactToolbarAction, 'control'> & {
     content: NonNullable<ArtifactToolbarAction['content']>
   }
   caption?: string
 }) {
+  // Not a `caption = action.label` default: the React Compiler cannot reorder
+  // a member-expression default parameter.
+  const caption = captionProp ?? action.label
   const [open, setOpen] = useState(false)
   const Icon = action.icon
   return (

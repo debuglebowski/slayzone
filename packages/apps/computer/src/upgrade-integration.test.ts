@@ -1,17 +1,35 @@
 import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { once } from 'node:events'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import http from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { createServer, type AddressInfo } from 'node:net'
 import { afterEach, expect, it, vi } from 'vitest'
 import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import {
+  hostEndpointDir,
+  hostLauncherEndpoint,
+  prepareEndpointDir
+} from '@slayzone/platform/computer-endpoints'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { placeTestProject } from './project-scope.fixture'
 import { createUpgradeController, type UpgradeWorker } from './auto-upgrade'
-import { launchUpgradeWorker, releaseEntry, superviseUpgrades } from './upgrade-runtime'
+import {
+  ensureSessionHost,
+  launchUpgradeWorker,
+  releaseEntry,
+  superviseUpgrades
+} from './upgrade-runtime'
 
 const eventually = <T>(check: () => T, options: { timeout?: number; interval?: number } = {}) =>
   vi.waitFor(check, { timeout: 10_000, ...options })
@@ -589,6 +607,22 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   )
 }, 60_000)
 
+/** The last `maxBytes` of a log, as text, for a failure message (`''` when absent). */
+function logEnd(path: string, maxBytes = 8000): string {
+  try {
+    return readFileSync(path, 'utf8').slice(-maxBytes)
+  } catch {
+    return ''
+  }
+}
+function readJsonOr(path: string): { phase?: string } | undefined {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
 it('changed hub configuration waits for active work then reloads with auto-upgrades disabled', async () => {
   const { spawn } = await import('node:child_process')
   const { hostControl } = await import('./session-host')
@@ -638,6 +672,18 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
   })
   child.stdout.on('data', (chunk) => (output += chunk))
   child.stderr.on('data', (chunk) => (output += chunk))
+  // The supervisor's output alone does not say why a host never came back (windows-latest
+  // CI): the host's and every launcher's own lines are in these two logs.
+  const diagnostics = (): string =>
+    [
+      output,
+      `--- computer-runtime/host.log (end) ---\n${logEnd(join(root, 'computer-runtime', 'host.log'))}`,
+      `--- logs/computer.log (end) ---\n${logEnd(join(root, 'logs', 'computer.log'))}`
+    ].join('\n')
+  const withDiagnostics = <T>(pending: Promise<T>): Promise<T> =>
+    pending.catch((err: Error) => {
+      throw new Error(`${err.message}\n${diagnostics()}`, { cause: err })
+    })
   cleanups.push(async () => {
     if (child.exitCode === null) {
       const exit = once(child, 'exit')
@@ -652,7 +698,7 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
       peer.close()
     }
   })
-  await eventually(() => expect(first.gateway.listComputers(), output).toHaveLength(1), {
+  await eventually(() => expect(first.gateway.listComputers(), diagnostics()).toHaveLength(1), {
     timeout: 15000
   })
   const id = first.gateway.listComputers()[0].computerId
@@ -680,21 +726,18 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
     'upgrade-status.json'
   )
   await eventually(
-    () =>
-      expect(JSON.parse(readFileSync(statusPath, 'utf8')).phase, output).toBe(
-        'maintenance-required'
-      ),
+    () => expect(readJsonOr(statusPath)?.phase, diagnostics()).toBe('maintenance-required'),
     { timeout: 15000 }
   )
-  const same = await hostControl(root)
+  const same = await withDiagnostics(hostControl(root))
   expect(await same.rpc.request('health')).toMatchObject(health)
   same.close()
   expect(() => process.kill(shellPid, 0)).not.toThrow()
   process.kill(shellPid, 'SIGKILL')
-  await eventually(() => expect(second.gateway.listComputers(), output).toHaveLength(1), {
+  await eventually(() => expect(second.gateway.listComputers(), diagnostics()).toHaveLength(1), {
     timeout: 15000
   })
-  const reloaded = await hostControl(root)
+  const reloaded = await withDiagnostics(hostControl(root))
   expect((await reloaded.rpc.request<{ epoch: string }>('health')).epoch).not.toBe(health.epoch)
   reloaded.close()
   expect(JSON.parse(readFileSync(configPath, 'utf8')).autoUpgrade).toBe(false)
@@ -753,3 +796,35 @@ it('a connector that loses its session-host link exits and the supervisor brings
   })
   expect(hub.auth.enrollCalls).toHaveLength(1)
 }, 30_000)
+
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+  'a launcher endpoint that cannot be queried fails host startup at once, never waited on as busy',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'computer-launcher-unreachable-'))
+    const dir = hostEndpointDir(root)!
+    cleanups.push(() => {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true })
+    })
+    prepareEndpointDir(dir)
+    // Something is bound there, but this user may not connect: no evidence of a
+    // launcher either way (as an EINVAL from an overlong path was not).
+    const server = createServer((socket) => socket.end())
+    await new Promise<void>((resolve) => server.listen(hostLauncherEndpoint(root), resolve))
+    cleanups.push(() => new Promise((resolve) => server.close(resolve)))
+    chmodSync(hostLauncherEndpoint(root), 0)
+    const config = {
+      hubUrl: 'ws://127.0.0.1:9/computers',
+      name: 'launcher-unreachable',
+      allowedRoots: [root],
+      capabilities: ['fs'],
+      joinToken: 'jt-valid'
+    }
+    const started = Date.now()
+    await expect(
+      ensureSessionHost(config, { version: '1.0.0', entry: join(root, 'none.cjs') }, root)
+    ).rejects.toMatchObject({ code: 'EACCES' })
+    expect(Date.now() - started).toBeLessThan(5000)
+  },
+  15_000
+)

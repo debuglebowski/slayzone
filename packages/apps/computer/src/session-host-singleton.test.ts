@@ -40,7 +40,9 @@ const posix = process.platform !== 'win32'
 let base: string
 const previousTmp = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP }
 beforeAll(() => {
-  base = mkdtempSync(join(tmpdir(), 'slz-ep-'))
+  // Under /tmp on POSIX: macOS's per-user tmpdir (/var/folders/…/T/) makes the
+  // endpoint socket paths overflow the 104-byte sun_path limit.
+  base = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'slz-ep-'))
   process.env.TMPDIR = process.env.TEMP = process.env.TMP = base
 })
 afterAll(() => {

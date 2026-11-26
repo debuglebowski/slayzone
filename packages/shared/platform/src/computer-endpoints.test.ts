@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   utimesSync,
   writeFileSync
 } from 'node:fs'
@@ -20,13 +21,15 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ensureComputerLauncher } from './computer-launcher'
 import {
+  assertUnixSocketPathFits,
   hostEndpoint,
   hostEndpointDir,
   hostLauncherEndpoint,
   prepareEndpointDir,
   probeEndpoint,
   releaseEndpointDir,
-  sweepStaleEndpointDirs
+  sweepStaleEndpointDirs,
+  unixSocketPathMaxBytes
 } from './computer-endpoints'
 
 const posix = process.platform !== 'win32'
@@ -103,7 +106,8 @@ describe('computer endpoints', () => {
       cleanup.push(() => rmSync(elsewhere, { recursive: true, force: true }))
       symlinkSync(elsewhere, dir)
       expect(() => prepareEndpointDir(dir)).toThrow(/unsafe/)
-      rmSync(dir, { force: true })
+      // unlink, not rmSync: Node 24's rmSync refuses a symlink to a directory.
+      unlinkSync(dir)
     }
   )
 
@@ -120,6 +124,63 @@ describe('computer endpoints', () => {
       releaseEndpointDir(dir)
       expect(existsSync(dir)).toBe(false)
       releaseEndpointDir(dir) // already gone
+    }
+  )
+
+  it.skipIf(!posix)(
+    'the launcher endpoint is never the one that outgrows the socket path limit',
+    () => {
+      const root = tempRoot('endpoints-length-')
+      const control = Buffer.byteLength(hostEndpoint(root))
+      const launcher = Buffer.byteLength(hostLauncherEndpoint(root))
+      // control.sock is released (running hosts are found there); it is the bound.
+      // On macOS it already sits near 104 bytes: the launcher keeps a margin below it.
+      expect(launcher).toBeLessThanOrEqual(control - 4)
+      expect(control).toBeLessThanOrEqual(unixSocketPathMaxBytes())
+    }
+  )
+
+  it('a Unix socket path over the platform limit fails loudly, naming path and limit', () => {
+    expect(unixSocketPathMaxBytes('darwin')).toBe(104)
+    expect(unixSocketPathMaxBytes('linux')).toBe(108)
+    const at = (n: number): string => '/' + 'x'.repeat(n - 1)
+    expect(assertUnixSocketPathFits(at(104), 'darwin')).toBe(at(104))
+    expect(assertUnixSocketPathFits(at(108), 'linux')).toBe(at(108))
+    expect(() => assertUnixSocketPathFits(at(105), 'darwin')).toThrow(
+      `computer endpoint ${at(105)} is 105 bytes, over the 104-byte Unix socket path limit on darwin`
+    )
+    expect(() => assertUnixSocketPathFits(at(109), 'linux')).toThrow(/109 bytes.*108-byte.*linux/)
+    // Named pipes have no such limit here.
+    expect(assertUnixSocketPathFits(at(200), 'win32')).toBe(at(200))
+  })
+
+  it.skipIf(!posix)('naming an endpoint under an overlong temp dir fails loudly', () => {
+    const root = tempRoot('endpoints-overlong-')
+    const before = process.env.TMPDIR
+    process.env.TMPDIR = join(tmpdir(), 'y'.repeat(90))
+    try {
+      expect(() => hostEndpoint(root)).toThrow(/byte Unix socket path limit/)
+      expect(() => hostLauncherEndpoint(root)).toThrow(/byte Unix socket path limit/)
+    } finally {
+      if (before === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = before
+    }
+  })
+
+  it.skipIf(!posix || process.getuid?.() === 0)(
+    'probe surfaces an error that says nothing about liveness instead of guessing "live"',
+    async () => {
+      const root = tempRoot('endpoints-probe-error-')
+      const path = hostEndpoint(root)
+      prepareEndpointDir(hostEndpointDir(root)!)
+      const server = await listen(path)
+      cleanup.push(() => server.close())
+      chmodSync(path, 0)
+      await expect(probeEndpoint(path)).rejects.toMatchObject({ code: 'EACCES' })
+      // A path the OS refuses outright (over sun_path): EINVAL, not "live".
+      await expect(probeEndpoint('/' + 'z'.repeat(200))).rejects.toMatchObject({
+        code: 'EINVAL'
+      })
     }
   )
 

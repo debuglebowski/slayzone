@@ -110,6 +110,9 @@ vi.mock('@slayzone/projects', () => ({ ProjectSelect: () => null }))
 vi.mock('@slayzone/projects/client', () => ({ TaskSharingCard: () => null }))
 vi.mock('./AssigneeCard', () => ({ AssigneeCard: () => null }))
 vi.mock('./SnoozePicker', () => ({ SnoozePicker: () => null }))
+// ComputerCard -> ChangeComputerDialog -> WorkspaceDirPicker, whose module binds the
+// file-editor typed client (typedTrpc) at import. The picker is out of scope here.
+vi.mock('@slayzone/file-editor/client/WorkspaceDirPicker', () => ({ WorkspaceDirPicker: () => null }))
 vi.mock('@slayzone/projects-contracts', () => ({
   isTerminalStatus: (status: string, columns?: Array<{ id: string; category?: string }>) => {
     const column = columns?.find((item) => item.id === status)

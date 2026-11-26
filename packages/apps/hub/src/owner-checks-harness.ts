@@ -593,5 +593,9 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'sharing.onChanged': (o) => emitSharingChanged({ userIds: o.userId ? [o.userId] : [] })
 }
 
-/** Subscriptions an owner's own `task.update` (a real mutation) produces events on. */
-export const BY_MUTATION = ['notify.onTasksChanged', 'task.onChanged']
+/**
+ * Subscriptions an owner's own real mutation produces events on: `task.update` for the
+ * task streams, `openTabs.open` for `openTabs.onChanged` (its router keys the event by
+ * the caller's verified user, so no synthetic emit can stand in for it).
+ */
+export const BY_MUTATION = ['notify.onTasksChanged', 'task.onChanged', 'openTabs.onChanged']

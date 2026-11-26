@@ -1,7 +1,7 @@
 /** Stable, dependency-free entrypoint pinned by computer service units. */
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { HOST_SUPERSEDED_EXIT_CODE } from './computer-endpoints'
+import { HOST_SUPERSEDED_EXIT_CODE, UNIX_SOCKET_PATH_MAX_BYTES } from './computer-endpoints'
 export const COMPUTER_LAUNCHER = String.raw`#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path'), cp = require('node:child_process');
 const net = require('node:net'), os = require('node:os'), crypto = require('node:crypto');
@@ -17,8 +17,15 @@ const SUPERSEDED_EXIT = ${HOST_SUPERSEDED_EXIT_CODE};
 const endpointKey = crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 24);
 const endpointDir = process.platform === 'win32' ? null : path.join(os.tmpdir(), 'slay-computer-' + (process.getuid ? process.getuid() : 'user') + '-' + endpointKey);
 const endpoints = endpointDir
-  ? {control: path.join(endpointDir, 'control.sock'), launcher: path.join(endpointDir, 'launcher.sock')}
+  ? {control: path.join(endpointDir, 'control.sock'), launcher: path.join(endpointDir, 'l.sock')}
   : {control: '\\\\.\\pipe\\slay-computer-' + endpointKey, launcher: '\\\\.\\pipe\\slay-computer-launcher-' + endpointKey};
+// Longest Unix socket path Node accepts (computer-endpoints.ts UNIX_SOCKET_PATH_MAX_BYTES):
+// a longer one fails listen/connect with a bare EINVAL, so it is refused by name first.
+const SOCKET_PATH_MAX = ${JSON.stringify(UNIX_SOCKET_PATH_MAX_BYTES)}[process.platform] || 104;
+function socketPathError(p) {
+  const bytes = Buffer.byteLength(p);
+  return bytes <= SOCKET_PATH_MAX ? null : 'computer endpoint ' + p + ' is ' + bytes + ' bytes, over the ' + SOCKET_PATH_MAX + '-byte Unix socket path limit on ' + process.platform + '; point TMPDIR at a shorter directory';
+}
 if (process.argv.includes('--print-endpoints')) { process.stdout.write(JSON.stringify(endpoints) + '\n'); return; }
 let child, stopping = false, healthy = false, timer, probation, killTimer, failures = 0, nextTimer, lock;
 // What a waiting supervisor asks over the launcher endpoint (queryHostLauncher).
@@ -54,12 +61,14 @@ function prepareEndpointDir() {
   if (st.isSymbolicLink() || !st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || (st.mode & 0o077))
     throw Error('unsafe computer endpoint directory ' + endpointDir + ': must be a directory owned by this user with mode 0700');
 }
+// live / stale / absent as probeEndpoint (computer-endpoints.ts) tells them; any other
+// connect error says nothing about an owner and is passed on (cb(null, err)).
 function probe(cb) {
   const s = net.connect(endpoints.launcher); let done = false;
-  const fin = (r) => { if (done) return; done = true; clearTimeout(t); s.destroy(); cb(r); };
+  const fin = (r, err) => { if (done) return; done = true; clearTimeout(t); s.destroy(); cb(r, err); };
   const t = setTimeout(() => fin('live'), 2000);
   s.once('connect', () => fin('live'));
-  s.once('error', (e) => fin(e.code === 'ENOENT' ? 'absent' : e.code === 'ECONNREFUSED' ? 'stale' : 'live'));
+  s.once('error', (e) => e.code === 'ENOENT' ? fin('absent') : e.code === 'ECONNREFUSED' ? fin('stale') : e.code === 'EAGAIN' ? fin('live') : fin(null, e));
 }
 function serveStatus(socket) {
   let buf = '';
@@ -76,12 +85,14 @@ function bail(msg) { log(msg + '; stopping'); process.exit(1); }
 function acquire(then, attempt) {
   attempt = attempt || 0;
   if (attempt > 50) return bail('cannot take the launcher endpoint ' + endpoints.launcher);
+  if (endpointDir) { const tooLong = socketPathError(endpoints.launcher) || socketPathError(endpoints.control); if (tooLong) return bail(tooLong); }
   try { prepareEndpointDir(); } catch (e) { return bail(e.message); }
   const retry = (ms) => setTimeout(() => acquire(then, attempt + 1), ms);
   const server = net.createServer(serveStatus);
   server.once('error', (err) => {
     if (err.code !== 'EADDRINUSE') return bail('cannot bind ' + endpoints.launcher + ': ' + err.message);
-    probe((state) => {
+    probe((state, probeErr) => {
+      if (probeErr) return bail('cannot probe ' + endpoints.launcher + ': ' + (probeErr.code || probeErr.message));
       if (state === 'live') { log('launcher already running for this root; superseded, stopping'); process.exit(0); }
       if (state === 'absent' || !endpointDir) return retry(50);
       // A socket file whose launcher died. Replace it only inside a short critical
@@ -94,7 +105,8 @@ function acquire(then, attempt) {
         return retry(100);
       }
       const unguard = () => { try { fs.rmdirSync(guard); } catch {} };
-      probe((again) => {
+      probe((again, probeErr) => {
+        if (probeErr) { unguard(); return bail('cannot probe ' + endpoints.launcher + ': ' + (probeErr.code || probeErr.message)); }
         if (again !== 'stale') { unguard(); return retry(0); }
         try { fs.unlinkSync(endpoints.launcher); } catch {}
         const taken = net.createServer(serveStatus);

@@ -528,6 +528,7 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
       clear()
       for (const path of Object.keys(EMIT)) EMIT[path]!(A)
       await call(ca.client, 'task.update', { id: A.task, title: 'A_SECRET_renamed' })
+      await call(ca.client, 'openTabs.open', { taskId: A.task })
       await sleep(500)
       const wrong = [
         ...streamPaths
@@ -546,6 +547,7 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
       clear()
       for (const path of Object.keys(EMIT)) EMIT[path]!(B)
       await call(cb.client, 'task.update', { id: B.task, title: 'B_OWN_renamed' })
+      await call(cb.client, 'openTabs.open', { taskId: B.task })
       await sleep(500)
       const missing = streamPaths.filter((p) => got.b[p]!.length === 0)
       // B got nothing on these

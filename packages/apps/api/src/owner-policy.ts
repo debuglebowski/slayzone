@@ -1603,6 +1603,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.getResolvedCommitDag': checked(...TARGET),
   'worktrees.getResolvedForkGraph': checked(...TARGET),
   'worktrees.getResolvedUpstreamGraph': checked(...TARGET),
+  'worktrees.getBranchGraph': checked(...TARGET),
+  'worktrees.getGitSummary': checked(...TARGET),
   'worktrees.getResolvedRecentCommits': checked(...TARGET),
   'worktrees.listStashes': checked(...TARGET),
   'worktrees.createStash': checked(...TARGET),

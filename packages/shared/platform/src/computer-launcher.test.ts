@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,14 +10,17 @@ import {
   rmSync,
   writeFileSync
 } from 'node:fs'
+import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { ensureComputerLauncher } from './computer-launcher'
 import {
   HOST_SUPERSEDED_EXIT_CODE,
+  HostLauncherBusyError,
   hostEndpointDir,
   hostLauncherEndpoint,
+  prepareEndpointDir,
   queryHostLauncher
 } from './computer-endpoints'
 
@@ -241,44 +245,49 @@ it('logs every child exit (code, signal, uptime) to computer.log, with a growing
   }
 }, 10_000)
 
-it('logs a child killed by a signal (the OOM killer SIGKILLs) and the rollback it caused', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'computer-launcher-signal-'))
-  const good = join(root, 'good.cjs'),
-    bad = join(root, 'bad.cjs')
-  writeFileSync(good, "process.send({type:'supervisor-ready'},()=>process.disconnect())")
-  writeFileSync(bad, "process.kill(process.pid, 'SIGKILL')")
-  const launcher = ensureComputerLauncher(root, { version: '1', entry: good })
-  writeFileSync(
-    join(root, 'computer-runtime', 'supervisor.json'),
-    JSON.stringify({
-      current: { version: '2', entry: bad },
-      previous: { version: '1', entry: good }
-    })
-  )
-  writeFileSync(
-    launcher,
-    readFileSync(launcher, 'utf8').replace('BACKOFF_MIN_MS = 2000', 'BACKOFF_MIN_MS = 10')
-  )
-  try {
-    await new Promise<void>((resolve, reject) =>
-      execFile(
-        process.execPath,
-        [launcher],
-        { env: { ...process.env, SLAYZONE_ROOT: root }, timeout: 5000 },
-        (err) => (err ? reject(err) : resolve())
+// Windows has no signals: a "SIGKILL" there is TerminateProcess, seen as code=1 signal=null.
+it.skipIf(process.platform === 'win32')(
+  'logs a child killed by a signal (the OOM killer SIGKILLs) and the rollback it caused',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'computer-launcher-signal-'))
+    const good = join(root, 'good.cjs'),
+      bad = join(root, 'bad.cjs')
+    writeFileSync(good, "process.send({type:'supervisor-ready'},()=>process.disconnect())")
+    writeFileSync(bad, "process.kill(process.pid, 'SIGKILL')")
+    const launcher = ensureComputerLauncher(root, { version: '1', entry: good })
+    writeFileSync(
+      join(root, 'computer-runtime', 'supervisor.json'),
+      JSON.stringify({
+        current: { version: '2', entry: bad },
+        previous: { version: '1', entry: good }
+      })
+    )
+    writeFileSync(
+      launcher,
+      readFileSync(launcher, 'utf8').replace('BACKOFF_MIN_MS = 2000', 'BACKOFF_MIN_MS = 10')
+    )
+    try {
+      await new Promise<void>((resolve, reject) =>
+        execFile(
+          process.execPath,
+          [launcher],
+          { env: { ...process.env, SLAYZONE_ROOT: root }, timeout: 5000 },
+          (err) => (err ? reject(err) : resolve())
+        )
       )
-    )
-    const log = computerLog(root)
-    expect(log).toMatch(
-      /supervisor 2 pid=\d+ exited code=null signal=SIGKILL after \d+ms; quarantined, rolled back to 1; restarting in 10ms \(failure 1\)/
-    )
-    expect(log).toMatch(
-      /supervisor 1 pid=\d+ exited code=0 signal=null after \d+ms; not restarting/
-    )
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-}, 10_000)
+      const log = computerLog(root)
+      expect(log).toMatch(
+        /supervisor 2 pid=\d+ exited code=null signal=SIGKILL after \d+ms; quarantined, rolled back to 1; restarting in 10ms \(failure 1\)/
+      )
+      expect(log).toMatch(
+        /supervisor 1 pid=\d+ exited code=0 signal=null after \d+ms; not restarting/
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  },
+  10_000
+)
 
 it.skipIf(process.platform === 'win32')(
   'the session host launcher keeps its host.log bounded: copied to .1, truncated in place',
@@ -400,28 +409,33 @@ function track(child: ChildProcess): ChildProcess {
   return child
 }
 
-it('a second host launcher for the same root exits superseded and starts no child', async () => {
-  const root = launcherRoot('launcher-single-')
-  const host = hostEntry(root)
-  ensureComputerLauncher(root, { entry: host.entry, version: '1' })
-  const first = track(hostLauncher(root))
-  await until(() => host.boots().length === 1)
-  killPids.push(...host.boots())
-  const second = track(hostLauncher(root))
-  expect(await exitOf(second)).toBe(0)
-  await new Promise((r) => setTimeout(r, 200))
-  expect(host.boots()).toHaveLength(1)
-  expect(computerLog(root)).toMatch(
-    /host launcher already running for this root; superseded, stopping/
-  )
-  // The live one is untouched, and its endpoint answers.
-  expect(first.exitCode).toBeNull()
-  expect((await queryHostLauncher(root, 'status'))?.state).toBe('running')
-  first.kill('SIGTERM')
-  expect(await exitOf(first)).toBe(0)
-  const dir = hostEndpointDir(root)
-  if (dir) expect(existsSync(dir)).toBe(false)
-}, 15_000)
+// Windows: SIGTERM is TerminateProcess, so the first launcher cannot exit 0 on it.
+it.skipIf(process.platform === 'win32')(
+  'a second host launcher for the same root exits superseded and starts no child',
+  async () => {
+    const root = launcherRoot('launcher-single-')
+    const host = hostEntry(root)
+    ensureComputerLauncher(root, { entry: host.entry, version: '1' })
+    const first = track(hostLauncher(root))
+    await until(() => host.boots().length === 1)
+    killPids.push(...host.boots())
+    const second = track(hostLauncher(root))
+    expect(await exitOf(second)).toBe(0)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(host.boots()).toHaveLength(1)
+    expect(computerLog(root)).toMatch(
+      /host launcher already running for this root; superseded, stopping/
+    )
+    // The live one is untouched, and its endpoint answers.
+    expect(first.exitCode).toBeNull()
+    expect((await queryHostLauncher(root, 'status'))?.state).toBe('running')
+    first.kill('SIGTERM')
+    expect(await exitOf(first)).toBe(0)
+    const dir = hostEndpointDir(root)
+    if (dir) expect(existsSync(dir)).toBe(false)
+  },
+  15_000
+)
 
 it('five host launchers started at once: exactly one ever starts a child', async () => {
   const root = launcherRoot('launcher-race-')
@@ -523,3 +537,75 @@ it('no launcher: the status query answers null', async () => {
   const root = launcherRoot('launcher-none-')
   expect(await queryHostLauncher(root, 'status')).toBeNull()
 })
+
+/** Bind something (not a launcher) to the root's launcher endpoint. */
+async function occupyLauncherEndpoint(
+  root: string,
+  onConnection: (s: import('node:net').Socket) => void
+): Promise<Server> {
+  const dir = hostEndpointDir(root)
+  if (dir) prepareEndpointDir(dir)
+  const server = createServer(onConnection)
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(hostLauncherEndpoint(root), resolve)
+  })
+  launcherCleanup.push(() => server.close())
+  return server
+}
+
+it('a launcher bound but not answering is reported busy (still the owner)', async () => {
+  const root = launcherRoot('launcher-busy-')
+  await occupyLauncherEndpoint(root, () => undefined)
+  await expect(queryHostLauncher(root, 'status', 300)).rejects.toBeInstanceOf(HostLauncherBusyError)
+})
+
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+  'a launcher endpoint that cannot be reached is an error, never "busy"',
+  async () => {
+    const root = launcherRoot('launcher-eacces-')
+    await occupyLauncherEndpoint(root, (s) => s.end())
+    chmodSync(hostLauncherEndpoint(root), 0)
+    const err = await queryHostLauncher(root, 'status').catch((e: unknown) => e)
+    expect(err).toMatchObject({ code: 'EACCES' })
+    expect(err).not.toBeInstanceOf(HostLauncherBusyError)
+  }
+)
+
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+  'a host launcher that cannot probe its endpoint stops with the error, not as superseded',
+  async () => {
+    const root = launcherRoot('launcher-probe-error-')
+    const host = hostEntry(root)
+    ensureComputerLauncher(root, { entry: host.entry, version: '1' })
+    await occupyLauncherEndpoint(root, (s) => s.end())
+    chmodSync(hostLauncherEndpoint(root), 0)
+    const launcher = track(hostLauncher(root))
+    expect(await exitOf(launcher)).toBe(1)
+    expect(host.boots()).toHaveLength(0)
+    expect(computerLog(root)).toMatch(/cannot probe .*EACCES/)
+    expect(computerLog(root)).not.toMatch(/superseded/)
+  },
+  15_000
+)
+
+it.skipIf(process.platform === 'win32')(
+  'a host launcher whose endpoint path is over the socket path limit says so and stops',
+  async () => {
+    const root = launcherRoot('launcher-overlong-')
+    const host = hostEntry(root)
+    ensureComputerLauncher(root, { entry: host.entry, version: '1' })
+    const launcher = track(
+      spawn(process.execPath, [join(root, 'computer-runtime', 'launch.cjs'), '--session-host'], {
+        env: { ...process.env, SLAYZONE_ROOT: root, TMPDIR: join(root, 'y'.repeat(100)) },
+        stdio: 'ignore'
+      })
+    )
+    expect(await exitOf(launcher)).toBe(1)
+    expect(host.boots()).toHaveLength(0)
+    expect(computerLog(root)).toMatch(
+      /computer endpoint .* is \d+ bytes, over the 10[48]-byte Unix socket path limit/
+    )
+  },
+  15_000
+)

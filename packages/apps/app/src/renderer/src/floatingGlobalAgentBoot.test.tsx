@@ -69,7 +69,9 @@ const boot = () =>
 describe('bootFloatingGlobalAgentPanel', () => {
   it("renders the panel on this window's default hub", async () => {
     await boot()
-    expect(initTrpcClient).toHaveBeenCalledWith('ws://127.0.0.1:1/trpc?windowId=7')
+    expect(initTrpcClient).toHaveBeenCalledWith('ws://127.0.0.1:1/trpc?windowId=7', {
+      links: [expect.any(Function)]
+    })
     expect(screen.getByTestId('hub-local').contains(screen.getByTestId('floating-agent'))).toBe(
       true
     )

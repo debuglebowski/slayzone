@@ -977,6 +977,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'worktrees.getResolvedForkGraph': 'never',
   'worktrees.getResolvedRecentCommits': 'never',
   'worktrees.getResolvedUpstreamGraph': 'never',
+  'worktrees.getBranchGraph': 'never',
+  'worktrees.getGitSummary': 'never',
   'worktrees.getStashDiff': 'never',
   'worktrees.getStatusSummary': 'never',
   'worktrees.getUntrackedFileDiff': 'never',

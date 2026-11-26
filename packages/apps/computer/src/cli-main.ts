@@ -65,6 +65,9 @@ import { StructuralFaultError } from '@slayzone/platform/isolation'
 import { readJsonTolerant } from '@slayzone/platform/quarantine'
 import { createComputerLog, installProcessFateLog } from './file-log'
 
+/** How long a stopped session host may take to exit on its own before it is ended. */
+const STOPPED_HOST_EXIT_GRACE_MS = 5000
+
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
  * {@link canPrompt} and the computer has no usable way to reach a hub yet:
@@ -249,6 +252,12 @@ async function main(): Promise<void> {
     process.send?.({ type: 'supervisor-ready' }, () => undefined)
     void host.closed.then(() => {
       if (process.connected) process.disconnect()
+      // Stopped: nothing is left to do, but a native handle can keep the event loop
+      // alive (node-pty's ConPTY reader worker on Windows, as with --upgrade-probe).
+      // Its launcher would then hold the root, and the next supervisor wait on a host
+      // that never comes back. Unref'd: where the loop drains on its own (POSIX), this
+      // process exits 0 exactly as before and the timer never fires.
+      setTimeout(() => process.exit(0), STOPPED_HOST_EXIT_GRACE_MS).unref()
     })
     process.on('SIGINT', () => void host.stop())
     process.on('SIGTERM', () => void host.stop())

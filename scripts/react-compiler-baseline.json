@@ -33,7 +33,6 @@
   "packages/domains/projects/src/client/TasksGeneralTab.tsx": ["TasksGeneralTab"],
   "packages/domains/projects/src/client/WorktreesTab.tsx": ["WorktreesTab"],
   "packages/domains/settings/src/client/CliInstallDialog.tsx": ["CliInstallDialog"],
-  "packages/domains/settings/src/client/tabs/AboutSettingsTab.tsx": ["AboutSettingsTab"],
   "packages/domains/settings/src/client/tabs/ai-providers/UsageConfigSection.tsx": [
     "UsageConfigSection"
   ],

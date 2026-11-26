@@ -42,28 +42,31 @@ export function CliSettingsTab() {
   const handleInstallCli = async () => {
     setCliInstalling(true)
     setCliMessage('')
-    try {
-      const result = await installCliMutation.mutateAsync()
-      if (result.ok) {
-        setCliInstalled(true)
-        if (result.path) setCliPath(result.path)
-        let msg = 'Installed successfully.'
-        if (result.pathNotInPATH)
-          msg +=
-            " Note: the install directory is not in your PATH. Add it to use 'slay' from any terminal."
-        setCliMessage(msg)
-      } else if (result.elevationCancelled) {
-        setCliMessage('Install cancelled. You can try again later from Settings.')
-      } else if (result.permissionDenied) {
-        setCliMessage(`Permission denied. Run in Terminal:\n${result.error}`)
-      } else {
-        setCliMessage(result.error ?? 'Install failed.')
-      }
-    } catch (err) {
-      setCliMessage(err instanceof Error ? err.message : 'Install failed.')
-    } finally {
-      setCliInstalling(false)
-    }
+    // A promise chain, not try/catch/finally: the React Compiler cannot compile
+    // a `finally` clause or conditional expressions inside a try block.
+    await installCliMutation
+      .mutateAsync()
+      .then((result) => {
+        if (result.ok) {
+          setCliInstalled(true)
+          if (result.path) setCliPath(result.path)
+          let msg = 'Installed successfully.'
+          if (result.pathNotInPATH)
+            msg +=
+              " Note: the install directory is not in your PATH. Add it to use 'slay' from any terminal."
+          setCliMessage(msg)
+        } else if (result.elevationCancelled) {
+          setCliMessage('Install cancelled. You can try again later from Settings.')
+        } else if (result.permissionDenied) {
+          setCliMessage(`Permission denied. Run in Terminal:\n${result.error}`)
+        } else {
+          setCliMessage(result.error ?? 'Install failed.')
+        }
+      })
+      .catch((err: unknown) => {
+        setCliMessage(err instanceof Error ? err.message : 'Install failed.')
+      })
+    setCliInstalling(false)
   }
 
   return (

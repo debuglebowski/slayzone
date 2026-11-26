@@ -426,23 +426,19 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
               : source.name
           const upload = { name }
           setActiveUploads((active) => [...active, upload])
-          try {
-            if (allowDirectories && typeof source === 'string') {
-              try {
-                await uploadDir(source)
-                continue
-              } catch {
-                // A dropped path may be a regular file.
-              }
-            }
-            await uploadArtifact(source)
-          } catch (err) {
+          // A promise chain, not try/catch/finally: the React Compiler cannot
+          // compile a `finally` clause or conditional expressions inside a try block.
+          const uploaded =
+            allowDirectories && typeof source === 'string'
+              ? // A dropped path may be a regular file.
+                uploadDir(source).catch(() => uploadArtifact(source))
+              : uploadArtifact(source)
+          await uploaded.catch((err: unknown) => {
             toast.error('Upload failed', {
               description: `${name}: ${err instanceof Error ? err.message : String(err)}`
             })
-          } finally {
-            setActiveUploads((active) => active.filter((entry) => entry !== upload))
-          }
+          })
+          setActiveUploads((active) => active.filter((entry) => entry !== upload))
         }
       },
       [uploadArtifact, uploadDir]

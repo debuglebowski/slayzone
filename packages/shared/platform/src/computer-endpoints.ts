@@ -9,8 +9,12 @@
  *   It also answers a one-line status query for `ensureSessionHost`.
  *
  * POSIX: Unix sockets in one private (0700, owned, not a symlink) per-root directory
- * under the OS temp dir — a short path, as `sun_path` is ~104 bytes. Windows: named
- * pipes, which the OS makes exclusive and removes with their owner.
+ * under the OS temp dir. Their paths must fit `sun_path` (macOS 104 bytes, Linux 108):
+ * Node refuses a longer one with EINVAL. macOS's temp dir is long — `control.sock`
+ * (released; running hosts are found there, so its path never changes) already sits
+ * at 104 bytes with a 3-digit uid — so the launcher's name is kept far shorter, and a
+ * path over the limit throws a clear error when named. Windows: named pipes, which the
+ * OS makes exclusive and removes with their owner.
  *
  * `launch.cjs` (computer-launcher.ts) is dependency-free, so it derives the same
  * names itself; computer-endpoints.test.ts asserts the two agree.
@@ -20,6 +24,43 @@ import { lstatSync, mkdirSync, readdirSync, rmdirSync, type Stats } from 'node:f
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+
+/**
+ * Longest Unix socket path Node's `listen`/`connect` accept on each platform:
+ * `sizeof(sockaddr_un.sun_path)`. Node (libuv `UV_PIPE_NO_TRUNCATE`) refuses, never
+ * truncates, a longer one, with an EINVAL that names nothing. BSDs share macOS's 104.
+ */
+export const UNIX_SOCKET_PATH_MAX_BYTES: Readonly<Record<string, number>> = {
+  darwin: 104,
+  linux: 108
+}
+const DEFAULT_UNIX_SOCKET_PATH_MAX_BYTES = 104
+
+/** `UNIX_SOCKET_PATH_MAX_BYTES` for `platform`; `Infinity` on Windows (named pipes). */
+export function unixSocketPathMaxBytes(platform: NodeJS.Platform = process.platform): number {
+  if (platform === 'win32') return Infinity
+  return UNIX_SOCKET_PATH_MAX_BYTES[platform] ?? DEFAULT_UNIX_SOCKET_PATH_MAX_BYTES
+}
+
+/**
+ * `path`, or a thrown `ENAMETOOLONG` naming the path and the limit when it cannot be
+ * bound or connected on `platform`. launch.cjs (computer-launcher.ts) applies the
+ * same check, with the same message, before it binds.
+ */
+export function assertUnixSocketPathFits(
+  path: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  const max = unixSocketPathMaxBytes(platform)
+  const bytes = Buffer.byteLength(path)
+  if (bytes <= max) return path
+  throw Object.assign(
+    new Error(
+      `computer endpoint ${path} is ${bytes} bytes, over the ${max}-byte Unix socket path limit on ${platform}; point TMPDIR at a shorter directory`
+    ),
+    { code: 'ENAMETOOLONG' }
+  )
+}
 
 /**
  * Exit code of a session host that found another live host on its control
@@ -38,17 +79,26 @@ export function hostEndpointDir(root: string): string | null {
   return join(tmpdir(), `slay-computer-${process.getuid?.() ?? 'user'}-${endpointKey(root)}`)
 }
 
-/** The session host's control endpoint. Pure: creates nothing. */
+/**
+ * The session host's control endpoint. Pure: creates nothing. Throws when the path
+ * cannot be a Unix socket here (`assertUnixSocketPathFits`).
+ */
 export function hostEndpoint(root: string): string {
   const dir = hostEndpointDir(root)
-  return dir ? join(dir, 'control.sock') : `\\\\.\\pipe\\slay-computer-${endpointKey(root)}`
+  return dir
+    ? assertUnixSocketPathFits(join(dir, 'control.sock'))
+    : `\\\\.\\pipe\\slay-computer-${endpointKey(root)}`
 }
 
-/** The session-host launcher's single-instance endpoint. Pure: creates nothing. */
+/**
+ * The session-host launcher's single-instance endpoint. Pure: creates nothing. Throws
+ * like `hostEndpoint`. One letter: it must never be the path that outgrows `sun_path`
+ * first (`control.sock`, the fixed one, is 6 bytes longer).
+ */
 export function hostLauncherEndpoint(root: string): string {
   const dir = hostEndpointDir(root)
   return dir
-    ? join(dir, 'launcher.sock')
+    ? assertUnixSocketPathFits(join(dir, 'l.sock'))
     : `\\\\.\\pipe\\slay-computer-launcher-${endpointKey(root)}`
 }
 
@@ -126,30 +176,52 @@ export function sweepStaleEndpointDirs(
 }
 
 /**
- * Is something bound to this endpoint? `live`: a connection was accepted (or the
- * attempt neither succeeded nor was refused in time — assume an owner, never
- * delete what might be someone's). `stale`: a POSIX socket file with no listener.
- * `absent`: nothing there.
+ * Connect errors that prove a listener exists but cannot take this connection now:
+ * Linux answers a Unix socket whose accept backlog is full with EAGAIN. Every other
+ * error besides ENOENT/ECONNREFUSED (EINVAL, ENAMETOOLONG, EACCES, ...) says nothing
+ * about an owner: it is the caller's to surface, never a reason to wait. launch.cjs
+ * classifies the same way (its `probe`).
+ */
+const BUSY_CONNECT_ERRORS: ReadonlySet<string> = new Set(['EAGAIN'])
+
+/**
+ * Is something bound to this endpoint? `live`: a connection was accepted, or the
+ * attempt timed out or met a full backlog (assume an owner, never delete what might
+ * be someone's). `stale`: a POSIX socket file with no listener. `absent`: nothing
+ * there. Rejects with the connect error for anything else.
  */
 export function probeEndpoint(
   path: string,
   timeoutMs = 2000
 ): Promise<'live' | 'stale' | 'absent'> {
-  return new Promise((done) => {
+  return new Promise((done, fail) => {
     const socket = connect(path)
-    const finish = (result: 'live' | 'stale' | 'absent'): void => {
+    const finish = (settle: () => void): void => {
       clearTimeout(timer)
       socket.destroy()
-      done(result)
+      settle()
     }
-    const timer = setTimeout(() => finish('live'), timeoutMs)
-    socket.once('connect', () => finish('live'))
+    const timer = setTimeout(() => finish(() => done('live')), timeoutMs)
+    socket.once('connect', () => finish(() => done('live')))
     socket.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'ENOENT') finish('absent')
-      else if (err.code === 'ECONNREFUSED') finish('stale')
-      else finish('live')
+      if (err.code === 'ENOENT') finish(() => done('absent'))
+      else if (err.code === 'ECONNREFUSED') finish(() => done('stale'))
+      else if (err.code && BUSY_CONNECT_ERRORS.has(err.code)) finish(() => done('live'))
+      else finish(() => fail(err))
     })
   })
+}
+
+/**
+ * A live session-host launcher that did not answer in time (or hung up without an
+ * answer). It is still the root's owner: callers wait on it, never start another.
+ * Any other `queryHostLauncher` failure is a real error.
+ */
+export class HostLauncherBusyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'HostLauncherBusyError'
+  }
 }
 
 /** What the live session-host launcher reports (launch.cjs `status`). */
@@ -168,8 +240,10 @@ export interface HostLauncherStatus {
 
 /**
  * Ask this root's session-host launcher for its status (`launch-now` also ends a
- * restart backoff at once). `null`: no live launcher. Throws when one is bound but
- * does not answer in time — it is still the owner; callers must not start another.
+ * restart backoff at once). `null`: no live launcher. Throws `HostLauncherBusyError`
+ * when one is bound but does not answer in time — it is still the owner; callers must
+ * not start another. Throws anything else (unusable endpoint path, EACCES, a garbled
+ * answer) as it is: no evidence of an owner, so never to be waited on.
  */
 export function queryHostLauncher(
   root: string,
@@ -188,7 +262,10 @@ export function queryHostLauncher(
       fn()
     }
     const timer = setTimeout(
-      () => finish(() => fail(new Error('session host launcher did not answer its status query'))),
+      () =>
+        finish(() =>
+          fail(new HostLauncherBusyError('session host launcher did not answer its status query'))
+        ),
       timeoutMs
     )
     socket.setEncoding('utf8')
@@ -206,10 +283,17 @@ export function queryHostLauncher(
       })
     })
     socket.once('error', (err: NodeJS.ErrnoException) =>
-      finish(() => (err.code === 'ENOENT' || err.code === 'ECONNREFUSED' ? done(null) : fail(err)))
+      finish(() => {
+        if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') done(null)
+        else if (err.code && BUSY_CONNECT_ERRORS.has(err.code))
+          fail(new HostLauncherBusyError(`session host launcher is busy (${err.code})`))
+        else fail(err)
+      })
     )
     socket.once('close', () =>
-      finish(() => fail(new Error('session host launcher closed without answering')))
+      finish(() =>
+        fail(new HostLauncherBusyError('session host launcher closed without answering'))
+      )
     )
   })
 }

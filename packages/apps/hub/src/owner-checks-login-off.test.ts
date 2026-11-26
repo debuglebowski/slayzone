@@ -138,6 +138,7 @@ describe('T-17 owner checks: the desktop app’s hub (login off) is unchanged', 
     )
     for (const o of [A, B]) for (const path of Object.keys(EMIT)) EMIT[path]!(o)
     await procedureAt(c.client, 'task.update').mutate({ id: A.task, title: 'renamed' })
+    await procedureAt(c.client, 'openTabs.open').mutate({ taskId: A.task })
     await sleep(500)
     const short = paths.filter((p) => got[p]!.length < (BY_MUTATION.includes(p) ? 1 : 2))
     expect(short, 'subscriptions missing events').toEqual([])

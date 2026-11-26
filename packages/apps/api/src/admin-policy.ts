@@ -878,6 +878,8 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'worktrees.getResolvedForkGraph': 'user',
   'worktrees.getResolvedRecentCommits': 'user',
   'worktrees.getResolvedUpstreamGraph': 'user',
+  'worktrees.getBranchGraph': 'user',
+  'worktrees.getGitSummary': 'user',
   'worktrees.getStashDiff': 'user',
   'worktrees.getStatusSummary': 'user',
   'worktrees.getUntrackedFileDiff': 'user',

@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
-import { afterAll, beforeEach, describe, expect, test } from 'vitest'
+import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { appRouter, setAuthGate } from '@slayzone/api'
 import { ptyEvents, setPtyDeps, type PtyDeps } from '@slayzone/terminal/server'
@@ -72,8 +72,12 @@ afterAll(() => {
   setAuthGate(() => false)
 })
 
-/** Hydrate + spawn a chat tab, then run one turn (running → idle). */
-async function runOneTurn(taskId: string, tabId: string): Promise<void> {
+/**
+ * Hydrate + spawn a chat tab, then run one turn (running → idle). Resolves once
+ * `events` shows the turn's end — not after a fixed sleep, which a loaded runner
+ * outlasts before the transport has parsed the stream.
+ */
+async function runOneTurn(taskId: string, tabId: string, events: StateEvent[]): Promise<void> {
   await chat.hydrateSession({
     tabId,
     taskId,
@@ -89,7 +93,12 @@ async function runOneTurn(taskId: string, tabId: string): Promise<void> {
   ;(chat.__getSessionChildForTests(tabId) as unknown as EventEmitter).emit('spawn')
   await ready
   child._stdout.write(readFileSync(join(FIXTURES, 'bash.ndjson'), 'utf8'))
-  await new Promise((r) => setTimeout(r, 50))
+  await vi.waitFor(
+    () => {
+      expect(events.map((e) => `${e.oldState}->${e.newState}`)).toContain('running->idle')
+    },
+    { timeout: 5_000, interval: 5 }
+  )
 }
 
 type StateEvent = { sessionId: string; newState: string; oldState: string }
@@ -132,7 +141,7 @@ describe('chat agent state on pty.onStateChange', () => {
     const taskId = seedTask(null)
     const tabId = 'chat-tab-1'
     const sub = await subscribe()
-    await runOneTurn(taskId, tabId)
+    await runOneTurn(taskId, tabId, sub.events)
     sub.stop()
 
     const sessionId = `${taskId}:${tabId}`
@@ -161,8 +170,10 @@ describe('chat agent state on pty.onStateChange', () => {
       const taskId = seedTask('owner-a')
       const owner = await subscribe({ userId: 'owner-a' })
       const stranger = await subscribe({ userId: 'stranger-b' })
-      await runOneTurn(taskId, 'chat-tab-2')
-      // Decisions are async (an access lookup per session); let them land.
+      // The owner's gated stream reaching the turn's end = its decisions have landed.
+      await runOneTurn(taskId, 'chat-tab-2', owner.events)
+      // The stranger's decisions run alongside the owner's; give any stray one a beat
+      // to land so the empty-stream assertion below means something.
       await new Promise((r) => setTimeout(r, 50))
       owner.stop()
       stranger.stop()

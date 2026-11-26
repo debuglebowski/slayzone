@@ -4,7 +4,7 @@
  * the tool-aware watchdog — driven through the real transport with fake
  * children speaking Claude's stream-json.
  */
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
@@ -370,7 +370,8 @@ test('a resumed first turn that fails for another reason shows the error', async
   const h = harness()
   await mgr.hydrateSession({ ...OPTS, conversationId: 'exists' })
   await mgr.dispatchUserMessage(OPTS.tabId, { id: 'm1', content: [{ type: 'text', text: 'hi' }] })
-  await wait(30)
+  // Condition waits, not fixed sleeps: a loaded runner outlasts any fixed delay.
+  await vi.waitFor(() => expect(h.fakes).toHaveLength(1), { timeout: 5_000, interval: 5 })
   const f = h.fakes[0]
   line(f, init('exists'))
   line(f, {
@@ -380,11 +381,14 @@ test('a resumed first turn that fails for another reason shows the error', async
     num_turns: 1,
     result: 'Invalid API key · Please run /login'
   })
-  await wait(30)
-  expect(saved(h).find((e) => e.kind === 'result')).toMatchObject({
-    isError: true,
-    text: 'Invalid API key · Please run /login'
-  })
+  await vi.waitFor(
+    () =>
+      expect(saved(h).find((e) => e.kind === 'result')).toMatchObject({
+        isError: true,
+        text: 'Invalid API key · Please run /login'
+      }),
+    { timeout: 5_000, interval: 5 }
+  )
   expect(h.fakes).toHaveLength(1)
 })
 

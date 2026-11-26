@@ -26,7 +26,11 @@ import { npmCommand } from './npm-command'
 import { hostControl, runtimeDir, atomicRuntimeJson } from './session-host'
 import type { LocalPeer } from '@slayzone/computer-runtime'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
-import { queryHostLauncher, type HostLauncherStatus } from '@slayzone/platform/computer-endpoints'
+import {
+  HostLauncherBusyError,
+  queryHostLauncher,
+  type HostLauncherStatus
+} from '@slayzone/platform/computer-endpoints'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import type { ConnectorGrant } from './session-host'
 import { rotateLogFile } from './file-log'
@@ -611,7 +615,9 @@ async function pollHostControl(
 /**
  * The host of the root's live launcher, waited for: a launcher backing off is asked
  * to launch now (once). `null` when no launcher holds the root. Throws when one does
- * but its host does not come up in time — never a reason to start another.
+ * but its host does not come up in time — never a reason to start another. Only a
+ * launcher that is bound but busy (`HostLauncherBusyError`) is waited on; any other
+ * query failure (an endpoint path the OS refuses, EACCES) is thrown at once.
  */
 async function awaitLauncherHost(
   root: string,
@@ -620,7 +626,8 @@ async function awaitLauncherHost(
   let status: HostLauncherStatus | null
   try {
     status = await queryHostLauncher(root, 'status')
-  } catch {
+  } catch (err) {
+    if (!(err instanceof HostLauncherBusyError)) throw err
     // Bound but not answering (busy): still the owner.
     status = { state: 'starting', childPid: null, nextLaunchAt: null, lastExit: null }
   }
@@ -639,7 +646,8 @@ async function awaitLauncherHost(
       status = await queryHostLauncher(root, kick ? 'launch-now' : 'status')
       // Its launcher is gone: whoever calls next decides afresh.
       if (!status) return null
-    } catch {
+    } catch (err) {
+      if (!(err instanceof HostLauncherBusyError)) throw err
       /* Busy: still the owner. */
     }
     await new Promise((resolve) => setTimeout(resolve, 100))

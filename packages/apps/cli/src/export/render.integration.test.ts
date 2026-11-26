@@ -245,20 +245,36 @@ function pngSize(buf: Buffer): { w: number; h: number } {
 
 describe.skipIf(!BROWSER)('render in a local browser', () => {
   // Review 4, C1: a large document prints although printing takes far longer than
-  // the per-command deadline (cut to 1 s here), and its PDF streams back in pieces.
+  // the per-command deadline, and its PDF streams back in pieces.
+  // The deadline is cut to 3 s, not lower: it also bounds every ordinary command before
+  // the print (loading the 15,000 lines, `document.fonts.ready`), which a loaded runner
+  // stretches past 1 s. What proves the point is the print phase alone outlasting it
+  // (~4 s on an idle M-series Mac), timed from the moment the long command starts.
   test('a 15,000-line code artifact → PDF (no fixed print deadline)', {
     timeout: 180_000
   }, async () => {
+    const commandTimeoutMs = 3_000
     const code = Array.from(
       { length: 15_000 },
       (_, i) => `const line${i} = ${i} // ${'x'.repeat(40)}`
     ).join('\n')
-    const started = Date.now()
+    let printStarted: number | undefined
     const pdf = await renderPdf(BROWSER as string, buildDocumentHtml(code, 'code', 'big.ts'), {
       waitReady: false,
-      browser: { commandTimeoutMs: 1_000 }
+      browser: {
+        commandTimeoutMs,
+        // The long command's page watch starts with it: the print's start.
+        debug: (what, detail) => {
+          if (what === 'watch-page' && detail?.method === 'Page.printToPDF') {
+            printStarted ??= Date.now()
+          }
+        }
+      }
     })
-    expect(Date.now() - started).toBeGreaterThan(1_000)
+    expect(printStarted).toBeDefined()
+    // Printing (and streaming the PDF back) took longer than any one ordinary command
+    // may: a fixed deadline on it would have failed the export.
+    expect(Date.now() - (printStarted as number)).toBeGreaterThan(commandTimeoutMs)
     expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
     // Hundreds of A4 pages.
     expect((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length).toBeGreaterThan(200)

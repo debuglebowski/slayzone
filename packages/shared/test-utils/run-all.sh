@@ -611,6 +611,7 @@ run_harness packages/shared/db-migrations/src/v211-drop-hub-task-paths-migration
 run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migration.test.ts
 run_harness packages/shared/db-migrations/src/v215-computer-retirement-chains-reason-codes-migration.test.ts
 run_harness packages/shared/db-migrations/src/v224-open-task-tabs-migration.test.ts
+run_harness packages/shared/db-migrations/src/v226-open-task-tabs-migration.test.ts
 run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts
 run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts
@@ -624,6 +625,7 @@ run_harness packages/apps/app/src/main/lifecycle/unload-veto.test.ts
 run_harness packages/apps/app/src/main/auto-updater.test.ts
 run_harness packages/apps/app/src/main/client-save.test.ts
 run_harness packages/apps/app/src/main/artifact-export.electron.test.ts
+run_harness packages/apps/app/src/main/artifact-device-preview.electron.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
 # The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).
@@ -760,6 +762,8 @@ run_harness packages/domains/worktrees/src/server/git-command.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
+run_harness packages/domains/worktrees/src/server/panel-reads.test.ts
+run_harness packages/domains/worktrees/src/server/panel-reads-routing.test.ts
 run_harness packages/domains/worktrees/src/server/git-watch-routing.test.ts
 run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-index.test.ts
@@ -1102,6 +1106,7 @@ run_harness packages/domains/chat-runtime/src/server/legacy-session-authority.te
 run_harness packages/domains/chat-runtime/src/server/queue-message-identities.test.ts
 run_harness packages/domains/chat-runtime/src/server/tab-state-ownership.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/queued-submissions.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/chat-type-scale.test.ts
 run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
 run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
 run_harness packages/apps/computer/src/handlers/chat-durable-ack.test.ts
@@ -1470,6 +1475,9 @@ run_harness packages/domains/worktrees/src/client/diff-text-loader.test.ts
 run_harness packages/shared/diff-view/src/parse-diff.test.ts
 run_harness packages/domains/file-editor/src/client/long-lines.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts
+# Git panel reads: batched per hub/computer, routed to the task's target.
+run_harness packages/domains/worktrees/src/client/useProjectRepos.test.tsx
+run_harness packages/domains/task/src/client/task-detail/gitViewPath.test.ts
 run_harness packages/domains/worktrees/src/server/list-project-repos.test.ts
 run_harness packages/domains/worktrees/src/server/remove-worktree.test.ts
 run_harness packages/domains/worktrees/src/server/resolve-graph.test.ts
@@ -1641,6 +1649,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/editor/src/rich-text-editor.tab-switch.test.tsx \
   packages/domains/projects/src/client/ProjectSettingsPanel.test.tsx \
   packages/domains/projects/src/client/project-settings-reseed.test.tsx \
+  packages/domains/projects/src/client/ProjectComputerFolders.test.tsx \
   packages/domains/integrations/src/client/useIntegrationsTab.test.tsx \
   packages/domains/integrations/src/client/ProjectIntegrationConnectionModal.test.tsx \
   packages/domains/integrations/src/client/useStatusSyncLockLookup.test.ts \
@@ -1893,6 +1902,7 @@ run_harness packages/apps/cli/src/commands/init-path.test.ts
 run_harness packages/apps/hub/src/slay-routing.test.ts
 run_harness packages/apps/computer/src/handlers/slay.test.ts
 run_harness packages/domains/terminal/src/client/useSlayNudge.test.tsx
+run_harness packages/domains/settings/src/client/view/hub-tabs.test.ts
 run_harness packages/apps/hub/src/security-headers.test.ts
 run_harness packages/apps/hub/src/security-headers-served.test.ts
 
