@@ -39,6 +39,7 @@ DOM-free subpaths): the mobile chat resolves a chat tab's folder with it.
 ## Client (client/)
 
 - `TaskDetailPage` - Full task view with terminal
+- `layout/` - the task's panels as a layout (columns of tab groups, docs/plans/panel-model.md): `useTaskLayout` owns the state (stored `panel_layout`, else Classic derived from `panel_visibility`/`panel_sizes`; debounced write from the primary window, merged by `rev`), `TaskLayoutView` renders it inside `#task-panels` through the same width resolver as before, so Classic is the legacy strip. `handlePanelToggle(id, on)` hides/shows the group holding panel `id`.
 - `CreateTaskDialog` / `EditTaskDialog` / `DeleteTaskDialog`
 - `TaskMetadataSidebar` - Priority, status, project, tags, blockers
 

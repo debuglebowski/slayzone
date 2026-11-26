@@ -146,7 +146,9 @@ vi.mock('@slayzone/projects-contracts', () => ({
   workComputerId: () => null
 }))
 
-vi.mock('@slayzone/task-contracts', () => ({
+// The real contracts (the panel layout model is pure) with a few fixed values.
+vi.mock('@slayzone/task-contracts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@slayzone/task-contracts')>()),
   BUILTIN_PANEL_IDS: ['terminal', 'browser', 'diff', 'settings', 'editor', 'processes'],
   getProviderConversationId: () => null,
   getProviderFlags: () => '',
@@ -229,20 +231,10 @@ vi.mock('./useTaskTagIds', () => ({
   useTaskTagIds: () => ({ tagIds: [], setTagIds: vi.fn() })
 }))
 
-vi.mock('./usePanelSizes', () => ({
-  usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn(), vi.fn()],
-  resolvePanels: () => ({ widths: {}, gapPx: 0, overflow: false, leftKeys: [], rightKeys: [] }),
-  planPanelStrip: () => ({
-    renderOrder: [],
-    rightStart: 0,
-    order: {},
-    spacerOrder: null,
-    leftNeighbor: {},
-    gapPx: 0
-  }),
-  effectiveLayout: () => ({ unit: 'fr', value: 1, min: 200, align: 'left' }),
-  minWidthFor: () => 200,
-  applyBoundaryResize: () => ({})
+// The real resolver (pure): the layout strip resolves through it.
+vi.mock('./usePanelSizes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./usePanelSizes')>()),
+  usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn(), vi.fn()]
 }))
 
 // Per-test web panels. One array instance, mutated in place, so the page's
@@ -253,7 +245,8 @@ const panelConfigMock = vi.hoisted(() => ({
 
 vi.mock('./usePanelConfig', () => ({
   usePanelConfig: () => ({
-    config: { order: [], webPanels: [] },
+    // Like the real store: every configured web panel has a place in the order.
+    config: { order: [], webPanels: panelConfigMock.enabledWebPanels },
     updateConfig: vi.fn().mockResolvedValue(undefined),
     enabledWebPanels: panelConfigMock.enabledWebPanels,
     isBuiltinEnabled: () => true,

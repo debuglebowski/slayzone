@@ -4,9 +4,9 @@
  * The others need panel kinds or multi-instance support that later steps add;
  * each declares what it requires, and is unavailable until the app has it.
  */
-import type { PanelConfig } from '../types'
+import type { PanelConfig, PanelSizes } from '../types'
 import { DEFAULT_TASK_PANEL_VISIBILITY, legacyPanelColumns } from './legacy'
-import { instanceDefaultLayout } from './ops'
+import { instanceDefaultLayout, legacyIdOf } from './ops'
 import {
   CLASSIC_LAYOUT_ID,
   type BuiltinLayoutId,
@@ -183,4 +183,47 @@ export function layoutFromDefinition(def: LayoutDefinition): TaskLayout {
     columns: structuredClone(def.columns),
     instances: structuredClone(def.instances)
   }
+}
+
+/**
+ * A layout still in Classic's shape: applied from Classic, and every column holds
+ * one unnamed group with one shown tab of a primary instance, all three ids equal
+ * to its legacy id. Only the hidden flags and size overrides differ from what
+ * `panel_config` builds, so the strip keeps following `panel_config`.
+ */
+export function isClassicShaped(layout: TaskLayout): boolean {
+  if (layout.layoutId !== CLASSIC_LAYOUT_ID) return false
+  return layout.columns.every((column) => {
+    if (column.slots.length !== 1) return false
+    const [slot] = column.slots
+    if (slot.id !== column.id || slot.name !== undefined || slot.tabs.length !== 1) return false
+    const [tab] = slot.tabs
+    const inst = layout.instances[tab.instanceId]
+    return !tab.hidden && tab.instanceId === column.id && !!inst && legacyIdOf(inst) === column.id
+  })
+}
+
+/**
+ * Classic follows `panel_config` until the user edits it (docs/plans/panel-model.md
+ * §1.3): a Classic-shaped layout is rebuilt from the config's order, enabled panels
+ * and default sizes, keeping its hidden flags and size overrides (a panel the
+ * layout lacks starts hidden; a disabled panel stays while shown, like today's
+ * strip). Any other layout is returned as is. Keeps `rev`, so the result is a view,
+ * not an edit.
+ */
+export function reconcileClassicLayout(layout: TaskLayout, config: PanelConfig): TaskLayout {
+  if (!isClassicShaped(layout)) return layout
+  const visibility: Record<string, boolean> = {}
+  const sizes: PanelSizes = {}
+  for (const column of layout.columns) {
+    visibility[column.id] = !column.slots[0].hidden
+    if (column.sizeOverride) sizes[column.id] = column.sizeOverride
+  }
+  const tree = legacyPanelColumns(
+    config,
+    visibility,
+    sizes,
+    (enabled, visible) => enabled || visible
+  )
+  return { ...layout, ...tree }
 }

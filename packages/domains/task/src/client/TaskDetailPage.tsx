@@ -27,13 +27,7 @@ import {
 import { terminalOnThisDevice } from './terminal-on-this-device'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
-import type {
-  Task,
-  PanelVisibility,
-  PanelSizes,
-  UpdateTaskInput,
-  GitTabId
-} from '@slayzone/task-contracts'
+import type { Task, PanelVisibility, UpdateTaskInput, GitTabId } from '@slayzone/task-contracts'
 import type { TaskTemplate } from '@slayzone/task-contracts'
 import type { TaskDetailData } from './taskDetailCache'
 import {
@@ -47,6 +41,8 @@ import {
 import { useHeldTaskPath, useTaskPath, useTaskPathLocation } from './useTaskPath'
 import {
   BUILTIN_PANEL_IDS,
+  DEFAULT_TASK_PANEL_VISIBILITY,
+  SECONDARY_WINDOW_PANEL_VISIBILITY,
   getProviderFlags,
   setProviderFlags,
   priorityOptions
@@ -140,15 +136,9 @@ import type { LinkOpenTarget } from '@slayzone/editor'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useTrack } from '@slayzone/telemetry/client'
-import {
-  usePanelSizes,
-  resolvePanels,
-  planPanelStrip,
-  effectiveLayout,
-  minWidthFor,
-  applyBoundaryResize,
-  unstretchPx
-} from './usePanelSizes'
+import { useTaskLayout } from './layout/useTaskLayout'
+import { resolveLayoutStrip } from './layout/strip'
+import { TaskLayoutView } from './layout/TaskLayoutView'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
@@ -158,7 +148,6 @@ import { useTaskPaletteCommands, type PalettePanel } from './useTaskPaletteComma
 import { CustomSnoozeDialog } from './SnoozePicker'
 import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
 import { markTaskPaneLive, takeTaskPaneEvents } from './taskPaneEvents'
-import { ResizeHandle } from './ResizeHandle'
 import {
   useCanEdit,
   useMyRole,
@@ -166,8 +155,6 @@ import {
   useSharingStatus
 } from '@slayzone/projects/client'
 import { useSharedCardHeights } from './useSharedCardHeights'
-import { PANEL_KINDS } from './panels/registry'
-import { PANEL_KIND_COMPONENTS } from './panels/kinds'
 import { TaskPageProvider, type TaskPageContextValue } from './panels/TaskPageContext'
 import {
   DescriptionDialog,
@@ -186,8 +173,6 @@ import {
   type ArtifactsPanelHandle,
   type UnifiedGitPanelHandle
 } from './task-detail'
-
-const { agent: AgentKind, web: WebKind } = PANEL_KIND_COMPONENTS
 
 export interface TaskDetailPageProps {
   taskId: string
@@ -555,36 +540,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [flagsInputValue, setFlagsInputValue] = useState('')
   const [flagsPopoverOpen, setFlagsPopoverOpen] = useState(false)
 
-  // Panel visibility state. Initial value sourced from initialData (secondary lifts via parent).
-  const defaultPanelVisibility: PanelVisibility = isSecondaryWindow
-    ? {
-        terminal: false,
-        browser: false,
-        diff: false,
-        settings: false,
-        editor: false,
-        artifacts: false,
-        processes: false
-      }
-    : {
-        terminal: true,
-        browser: false,
-        diff: false,
-        settings: true,
-        editor: false,
-        artifacts: false,
-        processes: false
-      }
-  const [panelVisibility, setPanelVisibility] = useState<PanelVisibility>(
-    initialData?.panelVisibility ?? defaultPanelVisibility
-  )
-
-  // Notify parent on every visibility change (used by SecondaryTaskWindow to persist
-  // panel layout across Follow-current-tab swaps that remount this component).
-  useEffect(() => {
-    onPanelVisibilityChange?.(panelVisibility)
-  }, [panelVisibility, onPanelVisibilityChange])
-
   // Secondary: release all panel ownership for this task on unmount (Follow-current-tab
   // swaps unmount + remount with a new taskId; without this, primary keeps seeing
   // "active in other window" stubs for the previous task).
@@ -645,12 +600,35 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     getOrderedTaskIds
   } = usePanelConfig()
   const orderedTaskIds = useMemo(() => getOrderedTaskIds(), [getOrderedTaskIds])
-  // Visible panels in config order (pre-cluster). Cluster order + handle neighbors
-  // are derived from `resolved` (left-anchored then right-anchored) below.
-  const visiblePanelOrder = useMemo(
-    () => orderedTaskIds.filter((id) => panelVisibility[id]),
-    [orderedTaskIds, panelVisibility]
-  )
+  // Web panels in config order: their stable DOM order in the strip.
+  const webPanelIds = useMemo(() => enabledWebPanels.map((wp) => wp.id), [enabledWebPanels])
+
+  // The panel layout (columns of tab groups; Classic until the user edits it). The
+  // initial legacy visibility comes from initialData (a secondary window lifts it
+  // via its parent, through onPanelVisibilityChange). `panelVisibility` is its
+  // legacy projection, what the toggles, shortcuts and palette read.
+  const taskLayout = useTaskLayout({
+    task,
+    panelConfig,
+    initialVisibility:
+      initialData?.panelVisibility ??
+      (isSecondaryWindow ? SECONDARY_WINDOW_PANEL_VISIBILITY : DEFAULT_TASK_PANEL_VISIBILITY),
+    initialSizes: initialData?.panelSizes ?? {},
+    isSecondaryWindow,
+    updateTask: updateTaskAsync,
+    onTaskUpdated,
+    onPanelVisibilityChange
+  })
+  const {
+    panelVisibility,
+    setPanelVisible,
+    hidePanelsLocally,
+    replaceVisibilityLocally,
+    resizeColumns,
+    commitSizes,
+    resetAllSizes,
+    activateTab
+  } = taskLayout
 
   // Drag-reorder of the PanelToggle button row. Receives the reordered subset of
   // task-view panel ids (only the buttons actually shown) and merges it back into
@@ -690,47 +668,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // panels it owned — they must NOT auto-pop back open here. User clicks toggle to reopen.
   useEffect(() => {
     if (!ownership.releasedOnClose || ownership.releasedOnClose.length === 0) return
-    const ids = ownership.releasedOnClose.map((r) => r.panelId)
-    setPanelVisibility((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const id of ids) {
-        if (next[id]) {
-          next[id] = false
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
+    hidePanelsLocally(ownership.releasedOnClose.map((r) => r.panelId))
     ownership.consumeReleasedOnClose()
-  }, [ownership.releasedOnClose, ownership])
+  }, [ownership.releasedOnClose, ownership, hidePanelsLocally])
 
   // "Take over and close" from another window: flip local visibility false (no DB write)
   useSubscription(
     trpc.app.taskWindows.onPanelCloseRequest.subscriptionOptions(undefined, {
       onData: (payload) => {
         if (!task || payload.taskId !== task.id) return
-        setPanelVisibility((prev) =>
-          prev[payload.panelId] ? { ...prev, [payload.panelId]: false } : prev
-        )
+        hidePanelsLocally([payload.panelId])
       }
     })
   )
 
-  // Panel sizes for resizable panels — per-task, persisted to the DB (mirrors
-  // panel_visibility). Secondary windows keep sizes local (no DB write).
   const loadedTaskId = task?.id
-  const persistPanelSizes = useCallback(
-    (sizes: PanelSizes) => {
-      if (!loadedTaskId || isSecondaryWindow) return
-      void updateTaskAsync({ id: loadedTaskId, panelSizes: sizes }).then((updated) => {
-        if (updated) onTaskUpdated(updated)
-      })
-    },
-    [loadedTaskId, isSecondaryWindow, onTaskUpdated, updateTaskAsync]
-  )
-  const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
-    usePanelSizes(initialData?.panelSizes, persistPanelSizes)
   const [isLocalResizing, setIsResizing] = useState(false)
   const isResizing = isLocalResizing || !!isSidePanelResizing
 
@@ -772,13 +724,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [])
 
-  // Resolve the Figma-style layout: per-panel px widths, the anchor gap, and the
-  // left/right cluster order. Reflows on size/config/container-width change.
-  const resolved = useMemo(
-    () => resolvePanels(visiblePanelOrder, panelConfig, panelSizes, containerWidth),
-    [visiblePanelOrder, panelConfig, panelSizes, containerWidth]
+  // Resolve the strip: per-column px widths, the anchor gap, the left/right
+  // cluster order. Reflows on layout/config/container-width change.
+  const layoutStrip = useMemo(
+    () => resolveLayoutStrip(taskLayout.layout, containerWidth),
+    [taskLayout.layout, containerWidth]
   )
-  const resolvedWidths = resolved.widths
+  const resolvedWidths = layoutStrip.resolved.widths
 
   // Settings panel layout tier by its width (see the settings render): wide
   // panels split into columns instead of stretching one column edge to edge.
@@ -795,52 +747,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     detailsOpen
   ])
 
-  // Placement (flex order, gap spacer, handle neighbors) — shared with the home tab.
-  const strip = useMemo(() => planPanelStrip(resolved), [resolved])
-  const panelOrderIdx = strip.order
-  const spacerOrder = strip.spacerOrder ?? 0
-  const panelOrderStyle = (id: string): { order: number } => ({ order: panelOrderIdx[id] ?? 0 })
-  const getLeftNeighborId = (id: string): string | null => strip.leftNeighbor[id] ?? null
-
-  // Renders the divider before `panelId`. Boundary drag transfers width between
-  // the panel and its same-cluster left neighbor, keeping each panel's unit (fr
-  // stays fr, px/pct stay static). Persisted once on drag end.
-  const renderResizeHandle = (panelId: string): React.ReactNode => {
-    const leftId = getLeftNeighborId(panelId)
-    if (!leftId) return null
-    const leftL = effectiveLayout(leftId, panelConfig, panelSizes)
-    const rightL = effectiveLayout(panelId, panelConfig, panelSizes)
-    return (
-      <ResizeHandle
-        leftWidth={resolvedWidths[leftId] ?? 200}
-        rightWidth={resolvedWidths[panelId] ?? 200}
-        leftMinWidth={resolved.minPx[leftId] ?? minWidthFor(leftId)}
-        rightMinWidth={resolved.minPx[panelId] ?? minWidthFor(panelId)}
-        leftMaxWidth={resolved.maxPx[leftId]}
-        rightMaxWidth={resolved.maxPx[panelId]}
-        onResize={(lw, rw) =>
-          updatePanelSizes(
-            applyBoundaryResize(
-              leftL,
-              rightL,
-              leftId,
-              panelId,
-              unstretchPx(resolved, leftId, lw),
-              unstretchPx(resolved, panelId, rw),
-              containerWidth
-            )
-          )
-        }
-        onDragStart={() => setIsResizing(true)}
-        onDragEnd={() => {
-          setIsResizing(false)
-          commitPanelSizes()
-        }}
-        onReset={resetAllPanels}
-        style={panelOrderStyle(panelId)}
-      />
-    )
-  }
+  const panelOrderIdx = layoutStrip.plan.order
 
   // Terminal API (exposed via onReady callback)
   const terminalApiRef = useRef<{
@@ -1245,15 +1152,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     setFlagsInputValue(getProviderFlagsForMode(task))
   }, [task, getProviderFlagsForMode])
 
-  // Handle panel visibility toggle
+  // Handle panel visibility toggle: shows/hides the layout group holding `panelId`
+  // (opening resets its size). The layout persists it (primary window only).
   const handlePanelToggle = useCallback(
     async (panelId: string, active: boolean) => {
       if (!task) return
       track('panel_toggled', { panel: panelId, active, context: 'task' })
-      // Reset panel size to default when opening
-      if (active) resetPanelSize(panelId)
-      const newVisibility = { ...panelVisibility, [panelId]: active }
-      setPanelVisibility(newVisibility)
+      setPanelVisible(panelId, active)
       // Multi-window: claim ownership only if no one owns yet (or already mine).
       // If another window owns, opening here renders a stub w/ Take over buttons —
       // first owner keeps priority until user explicitly takes over or releases.
@@ -1273,24 +1178,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           browserPanelRef.current?.focus()
         })
       }
-      // Persist to DB only for primary window — secondary's visibility is local-only
-      if (isSecondaryWindow) return
-      const updated = await updateTaskAsync({
-        id: task.id,
-        panelVisibility: newVisibility
-      })
-      onTaskUpdated(updated)
     },
-    [
-      task,
-      panelVisibility,
-      onTaskUpdated,
-      resetPanelSize,
-      ownership,
-      isSecondaryWindow,
-      updateTaskAsync,
-      track
-    ]
+    [task, setPanelVisible, ownership, track]
   )
 
   // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
@@ -1589,7 +1478,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const updated = await updateTaskAsync(updates)
       handleTaskUpdate(updated)
 
-      if (template.panel_visibility) setPanelVisibility(template.panel_visibility)
+      if (template.panel_visibility) replaceVisibilityLocally(template.panel_visibility)
       if (template.browser_tabs) setBrowserTabs(template.browser_tabs)
       if (template.web_panel_urls) webPanelUrlsRef.current = { ...template.web_panel_urls }
 
@@ -1604,6 +1493,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       trpcClient,
       updateTaskAsync,
       handleTaskUpdate,
+      replaceVisibilityLocally,
       webPanelUrlsRef
     ]
   )
@@ -2146,21 +2036,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     processes: { processesCwdUnavailable }
   }
 
-  // A built-in panel other than the agent: its resize handle, then the panel.
-  const renderPanel = (
-    kind: 'browser' | 'editor' | 'artifacts' | 'git' | 'settings' | 'processes'
-  ): React.ReactNode => {
-    const panelId = PANEL_KINDS[kind].primaryPanelId
-    if (compact || !panelVisibility[panelId]) return null
-    const Kind = PANEL_KIND_COMPONENTS[kind]
-    return (
-      <>
-        {renderResizeHandle(panelId)}
-        <Kind panelId={panelId} />
-      </>
-    )
-  }
-
   return (
     <div
       id="task-detail"
@@ -2693,53 +2568,22 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               onTaskUpdate={handleTaskUpdate}
             />
           ) : (
-            <>
-              {!compact && !hasVisiblePanels && (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
-                    <p className="text-2xl font-semibold">No panel tab is shown</p>
-                    <p className="mt-3 text-base text-muted-foreground">
-                      Use the panel tabs in the header to open one.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Anchor gap: leftover space pushing right-aligned panels to the right edge */}
-              {!compact && resolved.rightKeys.length > 0 && (
-                <div
-                  aria-hidden
-                  data-testid="panel-gap"
-                  className="shrink-0"
-                  style={{ width: resolved.gapPx, order: spacerOrder }}
-                />
-              )}
-
-              {/* Agent (terminal): in compact mode the whole cell */}
-              {!compact && panelVisibility.terminal && renderResizeHandle('terminal')}
-              {(compact || panelVisibility.terminal) && <AgentKind panelId="terminal" />}
-
-              {/* Non-terminal panels are hidden in compact mode */}
-              {renderPanel('browser')}
-              {renderPanel('editor')}
-              {renderPanel('artifacts')}
-
-              {/* Web Panels (custom + predefined) */}
-              {!compact &&
-                enabledWebPanels.map((wp) => {
-                  if (!panelVisibility[wp.id]) return null
-                  return (
-                    <div key={wp.id} className="contents">
-                      {renderResizeHandle(wp.id)}
-                      <WebKind panelId={wp.id} />
-                    </div>
-                  )
-                })}
-
-              {renderPanel('git')}
-              {renderPanel('settings')}
-              {renderPanel('processes')}
-            </>
+            <TaskLayoutView
+              layout={taskLayout.layout}
+              strip={layoutStrip}
+              compact={!!compact}
+              containerWidth={containerWidth}
+              webPanelIds={webPanelIds}
+              empty={!hasVisiblePanels}
+              onResize={resizeColumns}
+              onResizeStart={() => setIsResizing(true)}
+              onResizeEnd={() => {
+                setIsResizing(false)
+                commitSizes()
+              }}
+              onResetSizes={resetAllSizes}
+              onActivateTab={activateTab}
+            />
           )}
         </div>
       </TaskPageProvider>
