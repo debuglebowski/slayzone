@@ -1,33 +1,20 @@
-import React, { Activity, useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import {
-  MoreHorizontal,
-  Archive,
-  Trash2,
-  AlertTriangle,
   Loader2,
   Terminal as TerminalIcon,
   Globe,
   Settings2,
   GitBranch,
   FileCode,
-  ChevronDown,
-  ChevronRight,
-  Flag,
-  Plus,
-  X,
   Info,
   CheckCircle2,
   XCircle,
   Stethoscope,
   Cpu,
   Circle,
-  Repeat,
   LayoutTemplate,
   Paperclip,
-  Power,
-  PanelsTopLeft,
-  MoveVertical,
-  Expand
+  PanelsTopLeft
 } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -40,8 +27,6 @@ import {
 import { terminalOnThisDevice } from './terminal-on-this-device'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
-import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import type {
   Task,
   PanelVisibility,
@@ -73,22 +58,16 @@ import {
   getDefaultStatus,
   getDoneStatus,
   isCompletedStatus,
-  isTerminalStatus,
   placementOn,
   resolveRepoPath,
   taskProjectRoot,
   workComputerId
 } from '@slayzone/projects-contracts'
 import type { AgentId } from '@slayzone/terminal-contracts'
-import { isChatSupported } from '@slayzone/terminal-contracts'
 import {
   Button,
-  IconButton,
   PanelToggle,
   DevServerToast,
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
   formatKeysForDisplay,
   webPanelShortcutKeys
 } from '@slayzone/ui'
@@ -96,17 +75,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@slayzone/ui'
-import { Input } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
-import {
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuRadioGroup,
-  ContextMenuRadioItem
-} from '@slayzone/ui'
 import { DeleteTaskDialog } from './DeleteTaskDialog'
 import { MoveTaskDialog } from './MoveTaskDialog'
 import { DuplicateTaskDialog } from './DuplicateTaskDialog'
@@ -124,13 +95,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { safeRandomUUID, safeClipboardWriteText } from '@slayzone/ui'
-import { TaskMetadataSidebar } from './TaskMetadataSidebar'
 import { TaskComputerChip } from './TaskComputerChip'
 import { TaskStatusMenu } from './TaskStatusMenu'
 import {
   normalizeDescription,
   stripMarkdown,
-  getExtensionFromTitle,
   getEffectiveRenderMode,
   RENDER_MODE_INFO
 } from '@slayzone/task-contracts'
@@ -141,26 +110,15 @@ import {
   markSkipCache,
   usePty,
   useAgents,
-  getVisibleModes,
-  getModeLabel,
-  groupAgents,
   useLoopMode,
-  isLoopActive,
   stripAnsi,
   serializeTerminalHistory,
-  LoopModeBanner,
   LoopModeDialog,
-  SlayNudgeBanner,
   useSlayNudge,
   PtyStateDot
 } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal-contracts'
-import {
-  TerminalContainer,
-  type TerminalContainerHandle,
-  MODE_ICONS,
-  resolveIdRef
-} from '@slayzone/task-terminals'
+import { type TerminalContainerHandle, resolveIdRef } from '@slayzone/task-terminals'
 import {
   buildStatusOptions,
   cn,
@@ -179,7 +137,6 @@ import {
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
 import { getBrowserHost, planHubSuppliedUrl, queueUntrustedLoad } from '@slayzone/task-browser'
 import type { LinkOpenTarget } from '@slayzone/editor'
-import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useTrack } from '@slayzone/telemetry/client'
@@ -195,32 +152,25 @@ import {
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
-import { PanelOwnerStub } from './PanelOwnerStub'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { useTaskTagIds } from './useTaskTagIds'
 import { useTaskPaletteCommands, type PalettePanel } from './useTaskPaletteCommands'
 import { CustomSnoozeDialog } from './SnoozePicker'
 import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
 import { markTaskPaneLive, takeTaskPaneEvents } from './taskPaneEvents'
-import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
-import { ProcessesPanel } from './ProcessesPanel'
-import { TaskSettingsPanel } from './TaskSettingsPanel'
-import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
 import {
-  ArtifactShareDialog,
   useCanEdit,
   useMyRole,
   useRunsAgentsHere,
   useSharingStatus
 } from '@slayzone/projects/client'
 import { useSharedCardHeights } from './useSharedCardHeights'
+import { PANEL_KINDS } from './panels/registry'
+import { PANEL_KIND_COMPONENTS } from './panels/kinds'
+import { TaskPageProvider, type TaskPageContextValue } from './panels/TaskPageContext'
 import {
-  SortableSubTask,
   DescriptionDialog,
-  RichTextEditor,
-  BrowserPanel,
-  FileEditorView,
   useTaskTemplates,
   useTaskDoctor,
   useTaskTitleEditing,
@@ -230,13 +180,14 @@ import {
   useWorkspacePathProbe,
   TaskCompletedScreen,
   gitViewPath,
-  getTaskPanels,
   useTaskArtifacts,
   useTaskProjectRepos,
   useTaskDetectedRepos,
   type ArtifactsPanelHandle,
   type UnifiedGitPanelHandle
 } from './task-detail'
+
+const { agent: AgentKind, web: WebKind } = PANEL_KIND_COMPONENTS
 
 export interface TaskDetailPageProps {
   taskId: string
@@ -317,9 +268,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  // Artifacts + git panels + external sync card, injected by the composing app
-  // (registerTaskPanels).
-  const { ArtifactsPanel, UnifiedGitPanel, ExternalSyncCard } = getTaskPanels()
   // mutateAsync is stable; the mutation result object is not (new each render).
   const { mutateAsync: updateTaskAsync } = useMutation(trpc.task.update.mutationOptions())
 
@@ -550,11 +498,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const panelProcessesShortcut = useShortcutDisplay('panel-processes')
   const panelSettingsShortcut = useShortcutDisplay('panel-settings')
   const panelArtifactsShortcut = useShortcutDisplay('panel-artifacts')
-
-  const terminalInjectTitleShortcut = useShortcutDisplay('terminal-inject-title')
-  const terminalInjectDescShortcut = useShortcutDisplay('terminal-inject-desc')
-  const terminalRestartShortcut = useShortcutDisplay('terminal-restart')
-  const syncSessionIdShortcut = useShortcutDisplay('sync-session-id')
 
   // Title editing state
   const {
@@ -919,23 +862,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [loadedTaskId, onTaskUpdated, updateTaskAsync]
   )
-  const {
-    status: loopStatus,
-    iteration: loopIteration,
-    startLoop,
-    pauseLoop,
-    resumeLoop,
-    stopLoop
-  } = useLoopMode({
+  const loop = useLoopMode({
     sessionId: mainSessionId,
     onConfigChange: handleLoopConfigChange
   })
 
-  const {
-    showBanner: showSlayNudge,
-    dismiss: dismissSlayNudge,
-    recheck: recheckSlayNudge
-  } = useSlayNudge({
+  const slayNudge = useSlayNudge({
     computerId: workComputerId(task, project),
     taskId: task?.id ?? null,
     projectId: task?.project_id ?? null,
@@ -1060,26 +992,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
 
   // Terminal session lifecycle: session-id discovery, restart/reset/stop, revive, ensure-alive
-  const {
-    sessionIdCommand,
-    showSessionBanner,
-    showUnavailableBanner,
-    detectedSessionId,
-    setSessionUnavailableDismissed,
-    handleDetectSessionId,
-    getConversationIdForMode,
-    handleUpdateSessionId,
-    handleRestartTerminal,
-    handleStopAgent,
-    handleResetTerminal,
-    handleSwitchSession,
-    handleDeleteSession,
-    handleTabSessionReset,
-    handleTabSessionSwitch,
-    handleReattachTerminal,
-    handoffMode,
-    handleHandoff
-  } = useTaskTerminalSession({
+  const terminalSession = useTaskTerminalSession({
     task,
     // The main agent's cwd, exactly as the terminal container gets it (a chat
     // tab is identified by it).
@@ -1091,6 +1004,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     subscribeSessionDetected,
     setTerminalKey
   })
+  const {
+    getConversationIdForMode,
+    handleRestartTerminal,
+    handleStopAgent,
+    handleResetTerminal,
+    handleReattachTerminal
+  } = terminalSession
 
   // Inject task title into the main agent's input (no execute)
   const handleInjectTitle = useCallback(async () => {
@@ -1625,10 +1545,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     setAddingSubTask(false)
   }
 
-  const subTaskSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  )
-
   // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
   const {
     webPanelUrlsRef,
@@ -2061,511 +1977,183 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const multipleVisiblePanels = visiblePanelCount > 1
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
 
-  // Built OUTSIDE the main JSX, so the compiler memoizes it on its own inputs. Inline,
-  // it shared the page's one reactive scope, which `isActive` invalidates: every tab
-  // switch rebuilt `renderDefaultContent` and re-rendered the whole settings panel, in
-  // the tab being shown and (deferred, hidden) in the tab being left.
-  const taskSettingsPanel = (
-    <TaskSettingsPanel
-      taskId={task.id}
-      renderDefaultContent={() => {
-        // The grid holds Description / Sub-tasks / Artifacts (and, in
-        // full-height, Details). Open cards SHARE the available height via
-        // useSharedCardHeights: each hugs its content, tall cards cap at a
-        // shared water-level and scroll internally, short neighbours' unused
-        // space flows to the tall ones, and nothing is squeezed below 9rem
-        // by sharing alone (the grid scrolls instead). `grid-template-rows`
-        // is set imperatively by the hook — keep none here.
-        //
-        // Details (task metadata + working dir + danger zone) renders in two
-        // places depending on mode: pinned at the bottom of the panel in
-        // normal mode (always shown, unshrinkable), or as a 4th card INSIDE
-        // the grid in full-height mode (collapsible, shares space via the
-        // water-fill). Body is shared via this const.
-        const detailsBody = (
-          <fieldset disabled={!canEdit} className="contents" data-testid="task-details">
-            <TaskMetadataSidebar
-              task={task}
-              tags={tags}
-              taskTagIds={taskTagIds}
-              onUpdate={handleTaskUpdate}
-              onTagsChange={handleTagsChange}
-              onTagCreated={(tag) => setTags((prev) => [...prev, tag])}
-            />
-
-            <div className="flex flex-col gap-3 mt-5">
-              {/* Working directory */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  Working directory
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="size-3 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-72 text-xs">
-                      <p>Override the project directory for this task.</p>
-                      <p className="mt-1.5">Priority (highest first):</p>
-                      <ol className="mt-0.5 list-decimal list-inside">
-                        <li>Worktree</li>
-                        <li>Custom directory</li>
-                        <li>Project path</li>
-                      </ol>
-                    </TooltipContent>
-                  </Tooltip>
-                </span>
-                <div className="flex items-center gap-1">
-                  <div
-                    className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
-                    title={effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel}
-                  >
-                    {taskPath.state === 'loading' && hasOwnFolder(task)
-                      ? '…'
-                      : (effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel)}
-                    {task.has_worktree && (
-                      <span className="ml-1 text-[10px] opacity-60">(worktree)</span>
-                    )}
-                    {!task.has_worktree && task.has_base_dir && (
-                      <span className="ml-1 text-[10px] opacity-60">(custom)</span>
-                    )}
-                  </div>
-                  <button
-                    className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                    title="Change working directory"
-                    onClick={() => setBaseDirPickerOpen(true)}
-                  >
-                    <FileCode className="size-3.5 text-muted-foreground" />
-                  </button>
-                  {task.has_base_dir && (
-                    <button
-                      className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                      title="Clear custom directory"
-                      onClick={() => {
-                        // A refusal leaves the terminal running in the old folder.
-                        updateTaskAndNotify({ id: task.id, baseDir: null }).catch((err: unknown) =>
-                          toast.error("Couldn't change the working directory", {
-                            description: err instanceof Error ? err.message : String(err)
-                          })
-                        )
-                      }}
-                    >
-                      <X className="size-3.5 text-muted-foreground" />
-                    </button>
-                  )}
-                  {/* Scoped to the TASK, so it browses the computer
-                      this task's agents spawn on — a cwd chosen on
-                      any other machine would not exist for them. */}
-                  <WorkspaceDirPicker
-                    open={baseDirPickerOpen}
-                    onOpenChange={setBaseDirPickerOpen}
-                    onSelect={(picked) => {
-                      // Judged by the task's computer first; a refusal leaves the
-                      // terminal running in the old folder.
-                      updateTaskAndNotify({ id: task.id, baseDir: picked }).catch((err: unknown) =>
-                        toast.error("Couldn't use that folder", {
-                          description: err instanceof Error ? err.message : String(err)
-                        })
-                      )
-                    }}
-                    target={{ taskId: task.id }}
-                    title="Select working directory"
-                    defaultPath={baseDir ?? effectiveRepoPath ?? null}
-                  />
-                </div>
-                {task.has_worktree && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs w-full justify-start"
-                    onClick={() => {
-                      void updateTaskAndNotify({
-                        id: task.id,
-                        worktreePath: null,
-                        worktreeParentBranch: null
-                      })
-                    }}
-                  >
-                    <GitBranch className="mr-1.5 size-3" />
-                    Detach worktree
-                  </Button>
-                )}
-                {task.has_worktree && task.has_base_dir && (
-                  <span className="text-[10px] text-amber-400/80">
-                    Worktree active — custom dir overridden
-                  </span>
-                )}
-              </div>
-
-              {/* Danger zone */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Danger zone
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 text-xs"
-                    onClick={isArchived ? handleUnarchive : () => setArchiveDialogOpen(true)}
-                  >
-                    <Archive className="mr-1.5 size-3" />
-                    {isArchived ? 'Unarchive' : 'Archive'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 text-xs text-destructive hover:text-destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="mr-1.5 size-3" />
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </fieldset>
-        )
-        // Layout tier from the panel's resolved width: 1 column (stacked, as
-        // before), 2 (Description | cards + Details), 3 (Description | cards |
-        // Details). Multi-column gives Description its own full-height column.
-        const descriptionCard = (
-          <Collapsible
-            data-testid="settings-description-card"
-            data-card
-            data-card-open={descriptionOpen}
-            open={descriptionOpen}
-            onOpenChange={setDescriptionOpen}
-            className={cn(
-              'flex flex-col rounded-md border border-border overflow-hidden min-h-0',
-              settingsCols > 1 && descriptionOpen && 'flex-1'
-            )}
-          >
-            <div
-              className={cn(
-                'flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground',
-                descriptionOpen && 'border-b border-border'
-              )}
-            >
-              <CollapsibleTrigger className="flex flex-1 items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Description
-              </CollapsibleTrigger>
-              <div className="ml-auto flex items-center gap-0.5">
-                {/* Multi-column: Description already owns a full-height column */}
-                {settingsCols === 1 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <IconButton
-                        type="button"
-                        variant="ghost"
-                        aria-label={descriptionExpanded ? 'Default height' : 'Full height'}
-                        className={cn(
-                          'size-5 hover:text-foreground',
-                          descriptionExpanded ? 'text-foreground bg-muted' : 'text-muted-foreground'
-                        )}
-                        onClick={() =>
-                          setDescriptionExpanded((v) => {
-                            if (!v) {
-                              setDetailsOpen(false)
-                              setSubTasksOpen(false)
-                              setArtifactsOpen(false)
-                            } else {
-                              setDetailsOpen(true)
-                              setSubTasksOpen(true)
-                              setArtifactsOpen(true)
-                            }
-                            return !v
-                          })
-                        }
-                      >
-                        <MoveVertical size={12} />
-                      </IconButton>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {descriptionExpanded ? 'Default height' : 'Full height'}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <IconButton
-                      type="button"
-                      variant="ghost"
-                      aria-label="Fullscreen"
-                      className="size-5 text-muted-foreground hover:text-foreground"
-                      onClick={() => setDescriptionFullscreen(true)}
-                    >
-                      <Expand size={12} />
-                    </IconButton>
-                  </TooltipTrigger>
-                  <TooltipContent>Fullscreen</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-            {descriptionOpen && (
-              <div className="flex flex-col min-h-0 flex-1">
-                <Suspense fallback={<div className="h-20" />}>
-                  <RichTextEditor
-                    value={descriptionValue}
-                    onChange={(md) => {
-                      descriptionDirty.current = true
-                      setDescriptionValue(md)
-                    }}
-                    onBlur={handleDescriptionSave}
-                    placeholder={canEdit ? 'Add description...' : ''}
-                    readOnly={!canEdit}
-                    testId="task-description-editor"
-                    variant="inline"
-                    fontFamily={notesFontFamily}
-                    checkedHighlight={notesCheckedHighlight}
-                    showToolbar={notesShowToolbar}
-                    spellcheck={notesSpellcheck}
-                    themeColors={notesThemeColors}
-                    artifacts={artifacts.map((a) => ({
-                      id: a.id,
-                      title: a.title,
-                      type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
-                    }))}
-                    onArtifactClick={(artifactId) => {
-                      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                      artifactsPanelRef.current?.selectArtifact(artifactId)
-                    }}
-                    onUploadImages={handleUploadImages}
-                    onOpenLink={handleDescriptionOpenLink}
-                  />
-                </Suspense>
-              </div>
-            )}
-          </Collapsible>
-        )
-        const cardsGrid = (
-          <div
-            ref={settingsCardsGridRef}
-            data-testid="settings-cards-grid"
-            className="flex-1 min-h-0 overflow-hidden grid gap-4 content-start"
-          >
-            {settingsCols === 1 && descriptionCard}
-            {/* Sub-tasks */}
-            <Collapsible
-              data-testid="settings-subtasks-card"
-              data-card
-              data-card-open={subTasksOpen}
-              open={subTasksOpen}
-              onOpenChange={setSubTasksOpen}
-              className="group/sub rounded-md border border-border overflow-hidden flex flex-col min-h-0"
-            >
-              <CollapsibleTrigger className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/sub:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Sub-tasks
-                {subTasks.length > 0 && (
-                  <span className="ml-auto text-muted-foreground/60 text-[10px]">
-                    {
-                      subTasks.filter((s) =>
-                        isTerminalStatus(s.status, project?.columns_config ?? null)
-                      ).length
-                    }
-                    /{subTasks.length}
-                  </span>
-                )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="p-2 flex flex-col flex-1 min-h-0">
-                <DndContext
-                  sensors={subTaskSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleSubTaskDragEnd}
-                >
-                  <SortableContext
-                    items={subTasks.map((s) => s.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div
-                      data-card-scroll
-                      className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
-                    >
-                      {subTasks.map((sub) => (
-                        <SortableSubTask
-                          key={sub.id}
-                          sub={sub}
-                          columns={project?.columns_config}
-                          statusOptions={statusOptions}
-                          onNavigate={onNavigateToTask}
-                          onUpdate={handleUpdateSubTask}
-                          onDelete={handleDeleteSubTask}
-                        />
-                      ))}
-                      {addingSubTask ? (
-                        <div className="flex items-center gap-2 py-1 px-1">
-                          <Input
-                            ref={subTaskInputRef}
-                            value={subTaskTitle}
-                            onChange={(e) => setSubTaskTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                handleCreateSubTask()
-                              }
-                              if (e.key === 'Escape') {
-                                setAddingSubTask(false)
-                                setSubTaskTitle('')
-                              }
-                            }}
-                            placeholder="Sub-task title..."
-                            className="h-6 text-xs"
-                            autoFocus
-                          />
-                        </div>
-                      ) : (
-                        canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => setAddingSubTask(true)}
-                            className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
-                          >
-                            <Plus className="size-3" />
-                            Add subtask
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </SortableContext>
-                </DndContext>
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* Artifacts */}
-            <Collapsible
-              data-testid="settings-artifacts-card"
-              data-card
-              data-card-open={artifactsOpen}
-              open={artifactsOpen}
-              onOpenChange={setArtifactsOpen}
-              className="group/artifacts rounded-md border border-border overflow-hidden flex flex-col min-h-0"
-            >
-              <CollapsibleTrigger className="flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/artifacts:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Artifacts
-                {artifacts.length > 0 && (
-                  <span className="ml-auto text-muted-foreground/60 text-[10px]">
-                    {artifacts.length}
-                  </span>
-                )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="p-2 flex flex-col flex-1 min-h-0">
-                <div
-                  data-card-scroll
-                  className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
-                >
-                  {artifacts.map((artifact) => (
-                    <button
-                      key={artifact.id}
-                      type="button"
-                      className="flex items-center gap-2 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 text-left"
-                      onClick={() => {
-                        if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                        artifactsPanelRef.current?.selectArtifact(artifact.id)
-                      }}
-                    >
-                      <Paperclip className="size-3 shrink-0" />
-                      <span className="truncate">{artifact.title}</span>
-                      <span className="ml-auto text-[10px] opacity-60">
-                        {getExtensionFromTitle(artifact.title) || 'file'}
-                      </span>
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                      artifactsPanelRef.current?.createArtifact()
-                    }}
-                    className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
-                  >
-                    <Plus className="size-3" />
-                    Add artifact
-                  </button>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-            {/* Details — in full-height mode this becomes a 4th card that
-                shares the grid via the water-fill (collapsed by default
-                when entering full-height). */}
-            {descFullHeight && (
-              <Collapsible
-                data-testid="settings-details-card"
-                data-card
-                data-card-open={detailsOpen}
-                open={detailsOpen}
-                onOpenChange={setDetailsOpen}
-                className="group/details rounded-md border border-border overflow-hidden flex flex-col min-h-0"
-              >
-                <CollapsibleTrigger className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/details:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
-                  <ChevronRight className="size-3 transition-transform" />
-                  Details
-                </CollapsibleTrigger>
-                <CollapsibleContent className="flex flex-col flex-1 min-h-0">
-                  <div data-card-scroll className="flex-1 min-h-0 overflow-y-auto p-2.5">
-                    {detailsBody}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-          </div>
-        )
-        return (
-          <>
-            {/* External sync links — pinned above the cards */}
-            <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
-
-            {settingsCols === 1 ? (
-              <>
-                {/* Cards grid: flex-1 min-h-0 → height is the spare space
-                  between ExternalSync and the pinned Details (definite, so
-                  the water-level caps resolve). useSharedCardHeights also sets
-                  a min-height = floored content, so a short window scrolls the
-                  PANEL (keeping cards usable) instead of crushing them; the
-                  grid itself never overflows. content-start → short cards leave
-                  the leftover as empty space above the pinned meta. */}
-                {cardsGrid}
-
-                {/* Details — normal mode: pinned at the bottom of the panel,
-                  always visible, never shrinks. */}
-                {!descFullHeight && (
-                  <div data-testid="settings-details-pinned" className="shrink-0 mt-auto">
-                    {detailsBody}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div
-                data-testid="settings-columns"
-                data-columns={settingsCols}
-                className="flex-1 min-h-0 flex gap-4"
-              >
-                <div className="flex-1 min-w-0 min-h-0 flex flex-col">{descriptionCard}</div>
-                <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4">
-                  {cardsGrid}
-                  {settingsCols === 2 && (
-                    <div data-testid="settings-details-pinned" className="shrink-0 mt-auto">
-                      {detailsBody}
-                    </div>
-                  )}
-                </div>
-                {settingsCols === 3 && (
-                  <div
-                    data-testid="settings-details-column"
-                    className="flex-1 min-w-0 min-h-0 overflow-y-auto"
-                  >
-                    {detailsBody}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )
-      }}
-    />
-  )
-
   const mainTerminal = mainTerminalProps(task, project, modes)
+
+  // What the panels read from this page (see panels/TaskPageContext). Each section
+  // is its own object, so the compiler keeps a section stable while its inputs are:
+  // a tab switch changes `isActive`, not what the settings panel shows.
+  const taskPage: TaskPageContextValue = {
+    task,
+    project,
+    isActive,
+    shortcutActive,
+    compact,
+    isResizing,
+    canEdit,
+    effectiveRepoPath,
+    mainAgentCwd,
+    openDevServerInBrowser,
+    handleTaskUpdate,
+    updateTaskAndNotify,
+    getMainSessionId,
+    panels: {
+      panelVisibility,
+      handlePanelToggle,
+      ownership,
+      focusedPanel,
+      multipleVisiblePanels,
+      containerWidth,
+      resolvedWidths,
+      panelOrderIdx
+    },
+    agent: {
+      runsAgentsHere,
+      canRunOwnAgents,
+      projectRoot,
+      chosenFolder,
+      projectPathMissing,
+      workspaceUnreachable,
+      taskPathPending,
+      taskPathLocation,
+      taskFolderMissing,
+      worktreePath,
+      baseDir,
+      terminalContainerRef,
+      terminalKey,
+      mainTerminal,
+      modes,
+      terminalFocusRequestId,
+      handleTerminalReady,
+      handleTerminalFocusRequestHandled,
+      isMainTabActive,
+      setIsMainTabActive,
+      handleQuickOpenFile,
+      handleChatOpenArtifact,
+      handleChatOpenTask,
+      session: terminalSession,
+      loop,
+      loopConfigured,
+      loopModeAvailable,
+      setLoopDialogOpen,
+      handleLoopConfigChange,
+      slayNudge,
+      handleModeChange,
+      flagsPopoverOpen,
+      setFlagsPopoverOpen,
+      flagsInputValue,
+      setFlagsInputValue,
+      handleFlagsSave,
+      getProviderFlagsForMode,
+      handleSetDefaultFlags,
+      handleInjectTitle,
+      handleInjectDescription,
+      handleCopyHistory,
+      handleCopyConversationId,
+      handleDoctor,
+      projectFolderPickerOpen,
+      setProjectFolderPickerOpen
+    },
+    browser: {
+      browserPanelRef,
+      browserTabs,
+      handleBrowserTabsChange,
+      handleInsertElementSnippet,
+      handleScreenshot
+    },
+    editor: { fileEditorRefCallback, handleEditorStateChange },
+    artifacts: {
+      artifactsPanelRef,
+      artifactsPanelRefCallback,
+      handleActiveArtifactIdChange,
+      handleArtifactsSidebarChange,
+      sharingEnabled: sharing.enabled,
+      sharingArtifact,
+      setSharingArtifact
+    },
+    web: { enabledWebPanels, handleWebPanelUrlChange, handleWebPanelFaviconChange },
+    git: {
+      gitPanelRef,
+      resolvedGitViewPath,
+      completedStatus,
+      gitDefaultTab,
+      handleGitTabChange,
+      viewableRepos,
+      handleRepoChange
+    },
+    settings: {
+      tags,
+      setTags,
+      taskTagIds,
+      handleTagsChange,
+      taskPath,
+      taskPathLocation,
+      taskFolderLabel,
+      baseDir,
+      baseDirPickerOpen,
+      setBaseDirPickerOpen,
+      isArchived,
+      handleUnarchive,
+      setArchiveDialogOpen,
+      setDeleteDialogOpen,
+      settingsCardsGridRef,
+      settingsCols,
+      descFullHeight,
+      descriptionOpen,
+      setDescriptionOpen,
+      descriptionExpanded,
+      setDescriptionExpanded,
+      subTasksOpen,
+      setSubTasksOpen,
+      artifactsOpen,
+      setArtifactsOpen,
+      detailsOpen,
+      setDetailsOpen,
+      setDescriptionFullscreen,
+      descriptionValue,
+      setDescriptionValue,
+      descriptionDirty,
+      handleDescriptionSave,
+      handleUploadImages,
+      handleDescriptionOpenLink,
+      notes: {
+        fontFamily: notesFontFamily,
+        checkedHighlight: notesCheckedHighlight,
+        showToolbar: notesShowToolbar,
+        spellcheck: notesSpellcheck,
+        themeColors: notesThemeColors
+      },
+      statusOptions,
+      subTasks,
+      handleSubTaskDragEnd,
+      handleUpdateSubTask,
+      handleDeleteSubTask,
+      addingSubTask,
+      setAddingSubTask,
+      subTaskTitle,
+      setSubTaskTitle,
+      subTaskInputRef,
+      handleCreateSubTask,
+      onNavigateToTask,
+      artifacts,
+      artifactsPanelRef
+    },
+    processes: { processesCwdUnavailable }
+  }
+
+  // A built-in panel other than the agent: its resize handle, then the panel.
+  const renderPanel = (
+    kind: 'browser' | 'editor' | 'artifacts' | 'git' | 'settings' | 'processes'
+  ): React.ReactNode => {
+    const panelId = PANEL_KINDS[kind].primaryPanelId
+    if (compact || !panelVisibility[panelId]) return null
+    const Kind = PANEL_KIND_COMPONENTS[kind]
+    return (
+      <>
+        {renderResizeHandle(panelId)}
+        <Kind panelId={panelId} />
+      </>
+    )
+  }
 
   return (
     <div
@@ -3082,965 +2670,73 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           same `pt-4` keeps the top symmetric with the sides). The dev-server toast is
           position:fixed, so it's unaffected. containerWidth comes from contentRect
           (excludes padding) → panel sizing unchanged. */}
-      <div
-        id="task-panels"
-        ref={splitContainerRef}
-        className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
-      >
-        {isTaskCompleted && !openCompletedAnyway ? (
-          <TaskCompletedScreen
-            task={task}
-            project={project}
-            completedVariant={completedVariant}
-            setCompletedVariant={setCompletedVariant}
-            onCloseTab={onCloseTab}
-            onShowDetails={() => setOpenCompletedAnyway(true)}
-            onTaskUpdate={handleTaskUpdate}
-          />
-        ) : (
-          <>
-            {!compact && !hasVisiblePanels && (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
-                  <p className="text-2xl font-semibold">No panel tab is shown</p>
-                  <p className="mt-3 text-base text-muted-foreground">
-                    Use the panel tabs in the header to open one.
-                  </p>
+      <TaskPageProvider value={taskPage}>
+        <div
+          id="task-panels"
+          ref={splitContainerRef}
+          className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
+        >
+          {isTaskCompleted && !openCompletedAnyway ? (
+            <TaskCompletedScreen
+              task={task}
+              project={project}
+              completedVariant={completedVariant}
+              setCompletedVariant={setCompletedVariant}
+              onCloseTab={onCloseTab}
+              onShowDetails={() => setOpenCompletedAnyway(true)}
+              onTaskUpdate={handleTaskUpdate}
+            />
+          ) : (
+            <>
+              {!compact && !hasVisiblePanels && (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
+                    <p className="text-2xl font-semibold">No panel tab is shown</p>
+                    <p className="mt-3 text-base text-muted-foreground">
+                      Use the panel tabs in the header to open one.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Anchor gap: leftover space pushing right-aligned panels to the right edge */}
-            {!compact && resolved.rightKeys.length > 0 && (
-              <div
-                aria-hidden
-                data-testid="panel-gap"
-                className="shrink-0"
-                style={{ width: resolved.gapPx, order: spacerOrder }}
-              />
-            )}
+              {/* Anchor gap: leftover space pushing right-aligned panels to the right edge */}
+              {!compact && resolved.rightKeys.length > 0 && (
+                <div
+                  aria-hidden
+                  data-testid="panel-gap"
+                  className="shrink-0"
+                  style={{ width: resolved.gapPx, order: spacerOrder }}
+                />
+              )}
 
-            {/* Resize handle before Terminal */}
-            {!compact && panelVisibility.terminal && renderResizeHandle('terminal')}
+              {/* Agent (terminal): in compact mode the whole cell */}
+              {!compact && panelVisibility.terminal && renderResizeHandle('terminal')}
+              {(compact || panelVisibility.terminal) && <AgentKind panelId="terminal" />}
 
-            {/* Terminal Panel */}
-            {(compact || panelVisibility.terminal) && (
-              <div
-                data-panel-id="terminal"
-                className={cn(
-                  'min-w-0 shrink-0 overflow-hidden flex flex-col transition-shadow duration-200',
-                  !compact && 'rounded-md bg-surface-1 border border-border',
-                  !compact &&
-                    multipleVisiblePanels &&
-                    focusedPanel === 'terminal' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={
-                  compact
-                    ? { flex: 1 }
-                    : containerWidth > 0
-                      ? { width: resolvedWidths.terminal, order: panelOrderIdx.terminal ?? 0 }
-                      : { flex: 1, order: panelOrderIdx.terminal ?? 0 }
-                }
-              >
-                {!runsAgentsHere && !canRunOwnAgents ? (
-                  // A shared task you may only view (T-100): its agents and terminals are
-                  // the people's running them, on their own computers — never shown here.
-                  <div
-                    className="flex h-full w-full items-center justify-center p-6"
-                    data-testid="agent-pane-not-yours"
-                  >
-                    <div className="max-w-sm space-y-2 text-center">
-                      <TerminalIcon className="mx-auto size-10 text-muted-foreground/60" />
-                      <div className="text-sm font-medium text-muted-foreground">
-                        You can view this task
-                      </div>
-                      <div className="text-xs text-muted-foreground/70">
-                        To run agents on it from your own computer, ask for edit access.
-                      </div>
+              {/* Non-terminal panels are hidden in compact mode */}
+              {renderPanel('browser')}
+              {renderPanel('editor')}
+              {renderPanel('artifacts')}
+
+              {/* Web Panels (custom + predefined) */}
+              {!compact &&
+                enabledWebPanels.map((wp) => {
+                  if (!panelVisibility[wp.id]) return null
+                  return (
+                    <div key={wp.id} className="contents">
+                      {renderResizeHandle(wp.id)}
+                      <WebKind panelId={wp.id} />
                     </div>
-                  </div>
-                ) : ownership.hasOtherOwner('terminal') ? (
-                  <PanelOwnerStub
-                    panelLabel="Agent"
-                    icon={TerminalIcon}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('terminal')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('terminal')}
-                  />
-                ) : (
-                  <>
-                    {projectPathMissing && projectRoot && (
-                      <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                        <span className="text-sm text-amber-500">
-                          Project path not found:{' '}
-                          <code className="bg-amber-500/10 px-1 rounded">{projectRoot}</code>
-                        </span>
-                      </div>
-                    )}
-                    {(() => {
-                      const currentConversationId = getConversationIdForMode(task)
-                      return (
-                        detectedSessionId &&
-                        currentConversationId &&
-                        detectedSessionId !== currentConversationId
-                      )
-                    })() && (
-                      <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                        <span className="text-sm text-amber-500">
-                          Session mismatch: terminal using {detectedSessionId}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-auto h-6 text-xs"
-                          onClick={handleUpdateSessionId}
-                        >
-                          Update DB
-                          <kbd className="ml-2 opacity-70" style={{ fontFamily: 'system-ui' }}>
-                            {syncSessionIdShortcut}
-                          </kbd>
-                        </Button>
-                      </div>
-                    )}
-                    {showSessionBanner && (
-                      <div className="shrink-0 bg-blue-500/10 border-b border-blue-500/20 px-4 py-1.5 flex items-center gap-2">
-                        <TerminalIcon className="h-3.5 w-3.5 text-blue-500" />
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="text-xs text-blue-500 cursor-default">
-                              {task.agent_id === 'codex'
-                                ? 'Session not saved yet — automatic detection after first prompt'
-                                : "Session not saved — resume won't work until detected"}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" className="max-w-72">
-                            {task.agent_id === 'codex' ? (
-                              <>
-                                Codex creates its saved session after the first prompt. SlayZone
-                                captures it automatically. If this remains after a prompt, use "Run
-                                /status" to retry detection.
-                              </>
-                            ) : (
-                              <>
-                                The AI provider's session ID hasn't been captured yet. Without it,
-                                closing and reopening this task will start a fresh conversation
-                                instead of resuming. Click "Run {sessionIdCommand}" to detect it
-                                automatically.
-                              </>
-                            )}
-                          </TooltipContent>
-                        </Tooltip>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-auto h-6 text-xs"
-                          onClick={handleDetectSessionId}
-                        >
-                          Run {sessionIdCommand}
-                        </Button>
-                      </div>
-                    )}
-                    {showUnavailableBanner && (
-                      <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 flex items-center gap-2">
-                        <Info className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                        <span className="text-xs text-amber-500">
-                          Session ID detection not available for this provider — don't close the tab
-                          or resume won't work. Providers with resume: Claude Code, Codex, Gemini,
-                          Qwen, Copilot
-                        </span>
-                        <button
-                          className="ml-auto text-amber-500 hover:text-amber-400 shrink-0"
-                          onClick={() => setSessionUnavailableDismissed(task?.id ?? null)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
-                    {showSlayNudge && (
-                      <SlayNudgeBanner
-                        taskId={task.id}
-                        projectPath={effectiveRepoPath ?? projectRoot ?? ''}
-                        projectId={task?.project_id ?? project?.id}
-                        onDismiss={dismissSlayNudge}
-                        onSetupComplete={recheckSlayNudge}
-                      />
-                    )}
-                    {/* Terminal + mode bar wrapper */}
-                    <div className="relative flex-1 min-h-0 overflow-hidden">
-                      {taskPathPending ? (
-                        // The task's folder is on its computer: no terminal until it
-                        // answers — never one started in the project folder instead.
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          {taskPathLocation
-                            ? `This task's folder is ${taskPathLocation} — connect it to start`
-                            : 'Loading the task folder…'}
-                        </div>
-                      ) : taskFolderMissing ? (
-                        // Its computer answered and holds no folder for it: never
-                        // the project folder in its place (S7).
-                        <div className="flex h-full items-center justify-center px-6 text-center text-xs text-muted-foreground">
-                          This task's folder was not found on its computer
-                        </div>
-                      ) : mainAgentCwd && !projectPathMissing ? (
-                        <TerminalContainer
-                          ref={terminalContainerRef}
-                          paused={isResizing}
-                          key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${worktreePath || ''}-${baseDir || ''}`}
-                          taskId={task.id}
-                          isTemporary={task.is_temporary}
-                          isActive={isActive}
-                          hasShortcutFocus={shortcutActive}
-                          cwd={mainAgentCwd}
-                          // Spawn props shared with the terminal-first pane (one
-                          // derivation — see mainTerminalProps). No conversation
-                          // hint: the agent's computer resolves the resume at spawn.
-                          defaultMode={mainTerminal.mode}
-                          supportsSessionId={mainTerminal.supportsSessionId}
-                          providerFlags={mainTerminal.providerFlags}
-                          executionContext={mainTerminal.executionContext}
-                          focusRequestId={terminalFocusRequestId}
-                          onStartFresh={handleResetTerminal}
-                          onReady={handleTerminalReady}
-                          onRetry={handleRestartTerminal}
-                          onFocusRequestHandled={handleTerminalFocusRequestHandled}
-                          onMainTabActiveChange={setIsMainTabActive}
-                          onOpenUrl={openDevServerInBrowser}
-                          onOpenFile={handleQuickOpenFile}
-                          onOpenArtifact={handleChatOpenArtifact}
-                          onOpenTask={handleChatOpenTask}
-                          onMainReset={handleResetTerminal}
-                          onSwitchSession={handleSwitchSession}
-                          {...(handoffMode ? { onMainHandoff: () => void handleHandoff() } : {})}
-                          onDeleteSession={handleDeleteSession}
-                          onTabSessionReset={handleTabSessionReset}
-                          onTabSessionSwitch={handleTabSessionSwitch}
-                          overlay={
-                            isActive && loopConfigured ? (
-                              <LoopModeBanner
-                                config={task.loop_config!}
-                                status={loopStatus}
-                                iteration={loopIteration}
-                                onStart={startLoop}
-                                onPause={pauseLoop}
-                                onResume={resumeLoop}
-                                onStop={stopLoop}
-                                onEditConfig={() => setLoopDialogOpen(true)}
-                              />
-                            ) : undefined
-                          }
-                          mainTabContextMenu={
-                            <>
-                              <ContextMenuRadioGroup
-                                value={task.agent_id}
-                                onValueChange={(value) => {
-                                  if (modes.some((m) => m.id === value))
-                                    handleModeChange(value as AgentId)
-                                }}
-                              >
-                                {(() => {
-                                  const visibleModes = getVisibleModes(modes, task.agent_id)
-                                  const { builtin, custom } = groupAgents(visibleModes)
-                                  const renderItem = (mode: (typeof visibleModes)[number]) => {
-                                    const ModeIcon = MODE_ICONS[mode.id as AgentId] ?? TerminalIcon
-                                    return (
-                                      <ContextMenuRadioItem key={mode.id} value={mode.id}>
-                                        <span className="flex items-center gap-2">
-                                          {/* Decorative: the provider logos carry an SVG
-                                              <title>, which would name the item twice
-                                              ("Codex Codex"). The label says it. */}
-                                          <span aria-hidden="true" className="flex">
-                                            <ModeIcon className="size-3.5" />
-                                          </span>
-                                          {getModeLabel(mode)}
-                                        </span>
-                                      </ContextMenuRadioItem>
-                                    )
-                                  }
-                                  return (
-                                    <>
-                                      {builtin.map(renderItem)}
-                                      {custom.map(renderItem)}
-                                    </>
-                                  )
-                                })()}
-                              </ContextMenuRadioGroup>
-                              <ContextMenuSeparator />
-                              <ContextMenuItem onSelect={() => setFlagsPopoverOpen(true)}>
-                                <span className="flex items-center gap-2">
-                                  <Flag className="size-3.5" />
-                                  Edit flags
-                                </span>
-                              </ContextMenuItem>
-                            </>
-                          }
-                          mainTabAccessories={
-                            <div
-                              data-testid="agent-trigger"
-                              className="flex items-center gap-1"
-                              onDoubleClick={(e) => e.stopPropagation()}
-                            >
-                              <span className="truncate text-sm">
-                                {getModeLabel(
-                                  modes.find((m) => m.id === task.agent_id) ?? {
-                                    id: task.agent_id,
-                                    label: task.agent_id
-                                  }
-                                )}
-                              </span>
-                              <ChevronDown
-                                data-testid="agent-dropdown"
-                                aria-label="Open provider menu"
-                                role="button"
-                                className="size-3 cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  const tab = (e.currentTarget as unknown as HTMLElement).closest(
-                                    '[data-tab-main="true"]'
-                                  )
-                                  if (!tab) return
-                                  const rect = (
-                                    e.currentTarget as unknown as HTMLElement
-                                  ).getBoundingClientRect()
-                                  tab.dispatchEvent(
-                                    new MouseEvent('contextmenu', {
-                                      bubbles: true,
-                                      cancelable: true,
-                                      view: window,
-                                      clientX: rect.left,
-                                      clientY: rect.bottom
-                                    })
-                                  )
-                                }}
-                              />
-                            </div>
-                          }
-                          rightContent={
-                            <Tooltip
-                              open={!isMainTabActive && !task.is_temporary ? undefined : false}
-                            >
-                              <TooltipTrigger asChild>
-                                <div
-                                  className={cn(
-                                    'flex items-center gap-2 transition-opacity',
-                                    !isMainTabActive &&
-                                      !task.is_temporary &&
-                                      'opacity-40 pointer-events-none'
-                                  )}
-                                >
-                                  {loopModeAvailable && task.agent_id !== 'terminal' && (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <IconButton
-                                          variant={loopConfigured ? 'default' : 'ghost'}
-                                          className="size-7"
-                                          aria-label="Loop command"
-                                          onClick={() => {
-                                            if (isLoopActive(loopStatus)) stopLoop()
-                                            if (loopConfigured) {
-                                              handleLoopConfigChange(null)
-                                            } else {
-                                              setLoopDialogOpen(true)
-                                            }
-                                          }}
-                                        >
-                                          <Repeat className="size-3.5" />
-                                        </IconButton>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom">Loop command</TooltipContent>
-                                    </Tooltip>
-                                  )}
+                  )
+                })}
 
-                                  {task.agent_id !== 'terminal' && (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <IconButton
-                                          data-testid="agent-power-off"
-                                          variant="ghost"
-                                          className="size-7"
-                                          aria-label="Shut down agent"
-                                          onClick={() => void handleStopAgent()}
-                                        >
-                                          <Power className="size-3.5" />
-                                        </IconButton>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom">Shut down agent</TooltipContent>
-                                    </Tooltip>
-                                  )}
-
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <IconButton
-                                        data-testid="terminal-menu-trigger"
-                                        variant="ghost"
-                                        aria-label="Terminal menu"
-                                        className="size-7"
-                                      >
-                                        <MoreHorizontal className="size-3.5" />
-                                      </IconButton>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-60">
-                                      <DropdownMenuItem onClick={handleInjectTitle}>
-                                        Inject title
-                                        <span className="ml-auto text-xs text-muted-foreground">
-                                          {terminalInjectTitleShortcut}
-                                        </span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => void handleInjectDescription()}
-                                      >
-                                        Inject description
-                                        <span className="ml-auto text-xs text-muted-foreground">
-                                          {terminalInjectDescShortcut}
-                                        </span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={handleCopyHistory}>
-                                        Copy history
-                                      </DropdownMenuItem>
-                                      {task.agent_id !== 'terminal' && (
-                                        <DropdownMenuItem
-                                          disabled={!getConversationIdForMode(task)}
-                                          onClick={handleCopyConversationId}
-                                        >
-                                          Copy conversation ID
-                                        </DropdownMenuItem>
-                                      )}
-                                      {handoffMode && (
-                                        <DropdownMenuItem
-                                          data-testid="terminal-menu-handoff"
-                                          disabled={!getConversationIdForMode(task)}
-                                          onClick={() => void handleHandoff()}
-                                        >
-                                          {isChatSupported(task.agent_id)
-                                            ? 'Continue in terminal'
-                                            : 'Continue in chat'}
-                                        </DropdownMenuItem>
-                                      )}
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={handleReattachTerminal}>
-                                        Re-attach terminal
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={handleRestartTerminal}>
-                                        Restart session
-                                        <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                                          {terminalRestartShortcut}
-                                        </span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={handleResetTerminal}>
-                                        Reset session
-                                      </DropdownMenuItem>
-                                      {task.agent_id !== 'terminal' && (
-                                        <>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem onClick={() => void handleDoctor()}>
-                                            Doctor
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                  <Dialog
-                                    open={flagsPopoverOpen}
-                                    onOpenChange={setFlagsPopoverOpen}
-                                  >
-                                    <DialogContent className="max-w-md">
-                                      <DialogHeader>
-                                        <DialogTitle>
-                                          {`CLI flags for ${task.agent_id}`}
-                                        </DialogTitle>
-                                      </DialogHeader>
-                                      {
-                                        <div className="space-y-3">
-                                          <div className="text-xs text-muted-foreground">
-                                            Passed to the provider on startup (e.g. --no-cache).
-                                            Overrides defaults in settings.
-                                          </div>
-                                          <Input
-                                            autoFocus
-                                            value={flagsInputValue}
-                                            onChange={(e) => setFlagsInputValue(e.target.value)}
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Enter') {
-                                                e.preventDefault()
-                                                void handleFlagsSave(flagsInputValue)
-                                                setFlagsPopoverOpen(false)
-                                              } else if (e.key === 'Escape') {
-                                                e.preventDefault()
-                                                setFlagsInputValue(getProviderFlagsForMode(task))
-                                                setFlagsPopoverOpen(false)
-                                              }
-                                            }}
-                                            placeholder="Flags"
-                                          />
-                                          <div className="flex gap-2 justify-end">
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={() => {
-                                                void handleSetDefaultFlags()
-                                              }}
-                                              disabled={task.agent_id === 'terminal'}
-                                            >
-                                              Reset to default
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              onClick={() => {
-                                                void handleFlagsSave(flagsInputValue)
-                                                setFlagsPopoverOpen(false)
-                                              }}
-                                            >
-                                              Save
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      }
-                                    </DialogContent>
-                                  </Dialog>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                Switch to Main tab to use these controls
-                              </TooltipContent>
-                            </Tooltip>
-                          }
-                        />
-                      ) : (
-                        // Three different situations, three different messages.
-                        // They were one line — "No repository path configured" —
-                        // which was a false claim in two of the three cases: it
-                        // told users to set a path they had already set, while the
-                        // real cause was a probe run against the wrong machine or
-                        // a computer that was simply offline.
-                        <div className="h-full flex items-center justify-center text-muted-foreground">
-                          <div className="text-center p-8">
-                            {!projectRoot && !effectiveRepoPath && !chosenFolder ? (
-                              // A project needs no folder; its agents do, on the
-                              // computer this task runs on. Picked here, it is
-                              // recorded on that computer (the hub routes by task).
-                              <>
-                                {project?.placements?.length ? (
-                                  // It has one, on another computer: only possible
-                                  // with several, so naming computers is no news.
-                                  <>
-                                    <p className="mb-2">
-                                      This project has no folder on this task’s computer
-                                    </p>
-                                    <p className="text-sm">
-                                      Pick the folder its agents should start in.
-                                    </p>
-                                  </>
-                                ) : (
-                                  // No folder anywhere: the desktop app's own words,
-                                  // unchanged — its users need not know of computers.
-                                  <>
-                                    <p className="mb-2">No repository path configured</p>
-                                    <p className="text-sm">
-                                      Set a repository path in project settings to use the terminal
-                                    </p>
-                                  </>
-                                )}
-                                <Button
-                                  size="sm"
-                                  className="mt-3"
-                                  data-testid="pick-project-folder"
-                                  onClick={() => setProjectFolderPickerOpen(true)}
-                                >
-                                  Pick folder
-                                </Button>
-                                {projectFolderPickerOpen && (
-                                  <WorkspaceDirPicker
-                                    open={projectFolderPickerOpen}
-                                    onOpenChange={setProjectFolderPickerOpen}
-                                    onSelect={(picked) => {
-                                      // A refusal (outside that computer's allowed
-                                      // folders) is the user's to see and act on.
-                                      trpcClient.workspace.setProjectPath
-                                        .mutate({
-                                          taskId: task.id,
-                                          projectId: task.project_id,
-                                          path: picked
-                                        })
-                                        .catch((err: unknown) =>
-                                          toast.error("Couldn't use that folder", {
-                                            description:
-                                              err instanceof Error ? err.message : String(err)
-                                          })
-                                        )
-                                    }}
-                                    target={{ taskId: task.id }}
-                                    title="Select project folder"
-                                    allowCreate
-                                  />
-                                )}
-                              </>
-                            ) : workspaceUnreachable ? (
-                              <>
-                                <p className="mb-2">Can’t reach the machine for this task</p>
-                                <p className="text-sm">
-                                  Its computer is offline, so the workspace can’t be opened. The
-                                  path itself is unchanged.
-                                </p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="mb-2">Folder not found on this task’s machine</p>
-                                <p className="text-sm font-mono text-xs">
-                                  {effectiveRepoPath ?? projectRoot ?? chosenFolder}
-                                </p>
-                                <p className="text-sm mt-2">
-                                  It may have moved or been deleted. Pick it again in project
-                                  settings.
-                                </p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {/* Black cover during a panel resize. The terminal stays
-                          mounted underneath — preserving active group + focused
-                          pane — while the `paused` prop skips xterm fit churn. */}
-                      {isResizing && <div className="absolute inset-0 z-10 bg-black" />}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Non-terminal panels hidden in compact mode */}
-            {!compact && panelVisibility.browser && renderResizeHandle('browser')}
-
-            {/* Browser Panel */}
-            {!compact && panelVisibility.browser && (
-              <div
-                data-panel-id="browser"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'browser' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.browser, ...panelOrderStyle('browser') }}
-              >
-                {ownership.hasOtherOwner('browser') ? (
-                  <PanelOwnerStub
-                    panelLabel="Browser"
-                    icon={Globe}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('browser')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('browser')}
-                  />
-                ) : (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    {/* NOT wrapped in Activity: useBrowserViewLifecycle's cleanup
-                        would destroy the WebContentsView on hide and recreate it
-                        on show, resetting video playback. BrowserPanel keeps the
-                        active WCV painting at off-screen bounds when the parent
-                        task tab is hidden (see useBrowserViewBounds offScreen). */}
-                    <BrowserPanel
-                      ref={browserPanelRef}
-                      className="h-full"
-                      tabs={browserTabs}
-                      onTabsChange={handleBrowserTabsChange}
-                      onRequestHide={() => handlePanelToggle('browser', false)}
-                      taskId={task.id}
-                      projectId={task.project_id}
-                      isResizing={isResizing}
-                      isActive={isActive}
-                      onElementSnippet={handleInsertElementSnippet}
-                      onScreenshot={handleScreenshot}
-                      canUseDomPicker={panelVisibility.terminal}
-                    />
-                  </Suspense>
-                )}
-              </div>
-            )}
-
-            {/* Resize handle before Editor */}
-            {!compact && panelVisibility.editor && renderResizeHandle('editor')}
-
-            {/* File Editor Panel */}
-            {!compact && panelVisibility.editor && (
-              <div
-                data-panel-id="editor"
-                className={cn(
-                  'shrink-0 overflow-hidden rounded-md bg-surface-1 border border-border transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'editor' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.editor, ...panelOrderStyle('editor') }}
-              >
-                {ownership.hasOtherOwner('editor') ? (
-                  <PanelOwnerStub
-                    panelLabel="Editor"
-                    icon={FileCode}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('editor')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('editor')}
-                  />
-                ) : effectiveRepoPath ? (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <FileEditorView
-                        ref={fileEditorRefCallback}
-                        projectPath={effectiveRepoPath}
-                        // Read and write the SAME filesystem the task's agents
-                        // work in. Without this the panel reads the hub's disk,
-                        // so a remote task's editor shows files no agent can see
-                        // and a save lands where nothing is running.
-                        target={{ taskId: task.id }}
-                        initialEditorState={task.editor_open_files}
-                        onEditorStateChange={handleEditorStateChange}
-                        onOpenUrl={openDevServerInBrowser}
-                      />
-                    </Activity>
-                  </Suspense>
-                ) : null}
-              </div>
-            )}
-
-            {/* Resize handle before Artifacts */}
-            {!compact && panelVisibility.artifacts && renderResizeHandle('artifacts')}
-
-            {/* Artifacts Panel */}
-            {!compact && panelVisibility.artifacts && (
-              <div
-                data-panel-id="artifacts"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'artifacts' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.artifacts, ...panelOrderStyle('artifacts') }}
-              >
-                {ownership.hasOtherOwner('artifacts') ? (
-                  <PanelOwnerStub
-                    panelLabel="Artifacts"
-                    icon={Paperclip}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('artifacts')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('artifacts')}
-                  />
-                ) : (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <ArtifactsPanel
-                        ref={artifactsPanelRefCallback}
-                        taskId={task.id}
-                        isResizing={isResizing}
-                        initialActiveArtifactId={task.active_artifact_id}
-                        // The open file and sidebar are saved on the task: a View member's
-                        // stay local (T-100).
-                        onActiveArtifactIdChange={
-                          canEdit ? handleActiveArtifactIdChange : undefined
-                        }
-                        initialSidebarState={task.artifacts_sidebar}
-                        onSidebarStateChange={canEdit ? handleArtifactsSidebarChange : undefined}
-                        onOpenUrl={openDevServerInBrowser}
-                        onShareArtifact={sharing.enabled ? setSharingArtifact : undefined}
-                        readOnly={!canEdit}
-                      />
-                    </Activity>
-                    {sharingArtifact && (
-                      <ArtifactShareDialog
-                        artifactId={sharingArtifact.id}
-                        projectId={task.project_id}
-                        title={sharingArtifact.title}
-                        open
-                        onOpenChange={(open) => !open && setSharingArtifact(null)}
-                        onMoved={(newId) => {
-                          setSharingArtifact((a) => (a ? { ...a, id: newId } : a))
-                          artifactsPanelRef.current?.selectArtifact(newId)
-                        }}
-                      />
-                    )}
-                  </Suspense>
-                )}
-              </div>
-            )}
-
-            {/* Web Panels (custom + predefined) */}
-            {!compact &&
-              enabledWebPanels.map((wp) => {
-                if (!panelVisibility[wp.id]) return null
-                return (
-                  <div key={wp.id} className="contents">
-                    {renderResizeHandle(wp.id)}
-                    <div
-                      data-panel-id={wp.id}
-                      className={cn(
-                        'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200',
-                        multipleVisiblePanels &&
-                          focusedPanel === wp.id &&
-                          'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                      )}
-                      style={{ width: resolvedWidths[wp.id], ...panelOrderStyle(wp.id) }}
-                    >
-                      {ownership.hasOtherOwner(wp.id) ? (
-                        <PanelOwnerStub
-                          panelLabel={wp.name}
-                          icon={Globe}
-                          activeElsewhere
-                          onActivate={() => ownership.claim(wp.id)}
-                          onActivateAndClose={() => ownership.claimAndCloseOther(wp.id)}
-                        />
-                      ) : (
-                        // NOT wrapped in Activity: same reason as BrowserPanel —
-                        // useBrowserViewLifecycle would destroy the WCV on hide.
-                        // Off-screen park (offScreen prop on useBrowserView) keeps
-                        // it painting while parent task tab is hidden.
-                        <WebPanelView
-                          taskId={task.id}
-                          panelId={wp.id}
-                          url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
-                          baseUrl={wp.baseUrl}
-                          name={wp.name}
-                          blockDesktopHandoff={wp.blockDesktopHandoff === true}
-                          handoffProtocol={wp.handoffProtocol}
-                          handoffHostScope={wp.handoffHostScope}
-                          onUrlChange={handleWebPanelUrlChange}
-                          onFaviconChange={handleWebPanelFaviconChange}
-                          isResizing={isResizing}
-                          isActive={isActive}
-                        />
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-
-            {/* Resize handle before Diff */}
-            {!compact && panelVisibility.diff && renderResizeHandle('diff')}
-
-            {/* Git Panel */}
-            {!compact && panelVisibility.diff && (
-              <div
-                data-panel-id="diff"
-                data-testid="task-git-panel"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'diff' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.diff, ...panelOrderStyle('diff') }}
-              >
-                {ownership.hasOtherOwner('diff') ? (
-                  <PanelOwnerStub
-                    panelLabel="Git"
-                    icon={GitBranch}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('diff')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('diff')}
-                  />
-                ) : (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <UnifiedGitPanel
-                        ref={gitPanelRef}
-                        task={task}
-                        projectId={task.project_id}
-                        projectPath={resolvedGitViewPath}
-                        completedStatus={completedStatus}
-                        visible={panelVisibility.diff}
-                        defaultTab={gitDefaultTab}
-                        onTabChange={handleGitTabChange}
-                        pollIntervalMs={5000}
-                        onUpdateTask={updateTaskAndNotify}
-                        onTaskUpdated={handleTaskUpdate}
-                        detectedRepos={viewableRepos.map((r) => ({
-                          name: r.name,
-                          path: r.path,
-                          kind: r.kind
-                        }))}
-                        selectedRepoName={
-                          viewableRepos.find((r) => r.path === resolvedGitViewPath)?.name ?? null
-                        }
-                        isRepoStale={false}
-                        onRepoChange={handleRepoChange}
-                      />
-                    </Activity>
-                  </Suspense>
-                )}
-              </div>
-            )}
-
-            {/* Resize handle before Settings */}
-            {!compact && panelVisibility.settings && renderResizeHandle('settings')}
-
-            {/* Settings Panel */}
-            {!compact && panelVisibility.settings && (
-              <div
-                data-panel-id="settings"
-                data-testid="task-settings-panel"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'settings' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.settings, ...panelOrderStyle('settings') }}
-              >
-                {ownership.hasOtherOwner('settings') ? (
-                  <PanelOwnerStub
-                    panelLabel="Settings"
-                    icon={Settings2}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('settings')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('settings')}
-                  />
-                ) : (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>{taskSettingsPanel}</Activity>
-                )}
-              </div>
-            )}
-
-            {/* Resize handle before Processes */}
-            {!compact && panelVisibility.processes && renderResizeHandle('processes')}
-
-            {/* Processes Panel */}
-            {!compact && panelVisibility.processes && (
-              <div
-                data-panel-id="processes"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'processes' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.processes, ...panelOrderStyle('processes') }}
-              >
-                {ownership.hasOtherOwner('processes') ? (
-                  <PanelOwnerStub
-                    panelLabel="Processes"
-                    icon={Cpu}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('processes')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('processes')}
-                  />
-                ) : (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>
-                    <ProcessesPanel
-                      taskId={task.id}
-                      projectId={project?.id ?? null}
-                      cwd={mainAgentCwd}
-                      cwdUnavailable={processesCwdUnavailable}
-                      terminalSessionId={getMainSessionId(task.id)}
-                      onOpenUrl={openDevServerInBrowser}
-                    />
-                  </Activity>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+              {renderPanel('git')}
+              {renderPanel('settings')}
+              {renderPanel('processes')}
+            </>
+          )}
+        </div>
+      </TaskPageProvider>
 
       <LoopModeDialog
         open={loopDialogOpen}
