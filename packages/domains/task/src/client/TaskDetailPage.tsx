@@ -751,7 +751,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // for that transient-wide box → the terminal renders wider than its panel
       // until a later resize corrects it. The ResizeObserver below only reports
       // on a subsequent frame, which is too late for the mount fit.
-      const initialWidth = Math.floor(el.getBoundingClientRect().width)
+      // Content width, like the observer's contentRect: the strip's own padding
+      // (p-4) is not panel space. The border box here overflowed the strip by
+      // 32px (and showed a scrollbar) whenever the observer never corrected it.
+      const cs = getComputedStyle(el)
+      const initialWidth = Math.floor(
+        el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      )
       if (initialWidth > 0 && Math.abs(initialWidth - lastWidthRef.current) >= 2) {
         lastWidthRef.current = initialWidth
         setContainerWidth(initialWidth)
