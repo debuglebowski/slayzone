@@ -12,8 +12,7 @@ import {
   FolderPlus,
   Home,
   MoreHorizontal,
-  Plus,
-  Search,
+  PanelLeftClose,
   Settings,
   Star,
   TerminalSquare
@@ -53,7 +52,6 @@ import {
   type TreeGroup
 } from './treeGrouping'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client/hooks'
-import { TreeDisplaySettings } from '../TreeDisplaySettings'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
 import { resolveProjectDrop, applyProjectDrop } from './projectDrop'
 import logo from '../assets/logo.svg'
@@ -135,7 +133,8 @@ export function TreeView({
   onSetTasksPinned,
   onSetCollapsed,
   onPinnedReorder,
-  onSetProjectStarred
+  onSetProjectStarred,
+  headerSlot
 }: SidebarViewContext) {
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
@@ -520,7 +519,9 @@ export function TreeView({
   const openProjects = useTabStore((s) => s.treeOpenProjects)
   const setTreeProjectOpen = useTabStore((s) => s.setTreeProjectOpen)
 
-  const [showAll, setShowAll] = useState(false)
+  // Persisted: the toolbar's More menu toggles it too.
+  const showAll = useTabStore((s) => s.treeShowAllProjects)
+  const setShowAll = useTabStore((s) => s.setTreeShowAllProjects)
 
   const activeProjects = useMemo(
     () => sortedProjects.filter((p) => activeProjectIds.has(p.id) || p.starred),
@@ -1508,8 +1509,7 @@ export function TreeView({
     )
   }
 
-  const openSearch = useDialogStore((s) => s.openSearch)
-  const searchShortcut = useShortcutDisplay('search')
+  const autoHideShortcut = useShortcutDisplay('sidebar-auto-hide')
 
   return (
     <div className="@container flex h-full min-h-0 flex-col gap-3 px-1">
@@ -1529,36 +1529,24 @@ export function TreeView({
           <img src={logo} alt="" draggable={false} className="h-4 w-auto" />
           <span>Zone</span>
         </div>
-        <div className="flex items-center ml-auto">
+        {/* Search, lens and New moved to the bottom toolbar (SidebarToolbar). */}
+        <div className="flex items-center gap-1 ml-auto">
+          {headerSlot && <div className="window-no-drag flex items-center">{headerSlot}</div>}
           <Tooltip delayDuration={500}>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => openSearch()}
-                aria-label="Search"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors window-no-drag"
-              >
-                <Search className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              {searchShortcut ? `Search (${searchShortcut})` : 'Search'}
-            </TooltipContent>
-          </Tooltip>
-          <TreeDisplaySettings />
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="Add project"
-                onClick={() => useDialogStore.getState().openCreateProject()}
+                aria-label="Hide sidebar"
+                onClick={() => useTabStore.getState().setSidebarAutoHide(true)}
                 className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors mr-0.5 window-no-drag"
               >
-                <Plus className="size-3.5" />
+                <PanelLeftClose className="size-3.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              Add project
+              {autoHideShortcut
+                ? `Hide sidebar · shows on hover at the left edge (${autoHideShortcut})`
+                : 'Hide sidebar · shows on hover at the left edge'}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -1697,7 +1685,7 @@ export function TreeView({
         {hiddenProjects.length > 0 && (
           <button
             type="button"
-            onClick={() => setShowAll((v) => !v)}
+            onClick={() => setShowAll(!showAll)}
             className="flex items-center justify-center gap-1 px-2 py-2 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
           >
             <span>{showAll ? 'Hide inactive' : 'Show all projects'}</span>

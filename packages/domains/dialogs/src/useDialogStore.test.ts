@@ -107,6 +107,17 @@ test('boolean dialogs toggle independently', () => {
   expect(s.showAnimatedTour, 'tour still closed').toBeFalsy()
 })
 
+test('feedback and shortcuts dialogs open and close', () => {
+  store.getState().openFeedback()
+  store.getState().openShortcuts()
+  expect(store.getState().feedbackOpen, 'feedback').toBeTruthy()
+  expect(store.getState().shortcutsOpen, 'shortcuts').toBeTruthy()
+  store.getState().closeFeedback()
+  store.getState().closeShortcuts()
+  expect(store.getState().feedbackOpen, 'feedback closed').toBeFalsy()
+  expect(store.getState().shortcutsOpen, 'shortcuts closed').toBeFalsy()
+})
+
 test('closing one dialog does not affect others', () => {
   store.getState().openSearch()
   store.getState().openChangelog()

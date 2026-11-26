@@ -197,6 +197,7 @@ export function HomeView({
   // Tree sidebar mode hides the top tab-bar header (mirrors the Electron App.tsx
   // `headerHidden = sidebarView === 'tree'`); the tree sidebar owns navigation.
   const sidebarView = useTabStore((s) => s.sidebarView)
+  const feedbackOpen = useDialogStore((s) => s.feedbackOpen)
   const storeProjectId = useTabStore((s) => s.selectedProjectId)
   const selectedProjectId = storeProjectId || projects[0]?.id || ''
 
@@ -766,7 +767,16 @@ export function HomeView({
           convexConfigured={convexConfigured}
           feedbackSlot={
             <ConvexScope>
-              <FeedbackDialog />
+              <FeedbackDialog
+                open={feedbackOpen}
+                onOpenChange={(open) =>
+                  open
+                    ? useDialogStore.getState().openFeedback()
+                    : useDialogStore.getState().closeFeedback()
+                }
+                // The tree toolbar's More menu opens it; only the rail shows the icon.
+                showTrigger={sidebarView !== 'tree'}
+              />
             </ConvexScope>
           }
           sharedSlot={(placement) => (

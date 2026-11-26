@@ -461,3 +461,38 @@ describe('resolveTaskTabHubs: the hub each task tab belongs to (for the shared o
     ])
   })
 })
+
+describe('tree sidebar state', () => {
+  test('a view state without a sidebar view opens the tree', () => {
+    store.getState()._loadState({ tabs: [], activeTabIndex: 0, selectedProjectId: '' })
+    expect(store.getState().sidebarView).toBe('tree')
+  })
+
+  test('setTreeProjectsOpen collapses or expands every listed project at once', () => {
+    store.setState({ treeOpenProjects: { a: true, b: false, other: true } })
+    store.getState().setTreeProjectsOpen(['a', 'b'], false)
+    expect(JSON.stringify(store.getState().treeOpenProjects)).toBe(
+      '{"a":false,"b":false,"other":true}'
+    )
+    store.getState().setTreeProjectsOpen(['a', 'b'], true)
+    const open = store.getState().treeOpenProjects
+    expect(open.a && open.b, 'both expanded').toBe(true)
+  })
+
+  test('show-all-projects is restored only when saved as true', () => {
+    store.getState()._loadState({
+      tabs: [],
+      activeTabIndex: 0,
+      selectedProjectId: '',
+      treeShowAllProjects: true
+    })
+    expect(store.getState().treeShowAllProjects).toBe(true)
+    store.getState()._loadState({
+      tabs: [],
+      activeTabIndex: 0,
+      selectedProjectId: '',
+      treeShowAllProjects: 'yes' as unknown as boolean
+    })
+    expect(store.getState().treeShowAllProjects).toBe(false)
+  })
+})

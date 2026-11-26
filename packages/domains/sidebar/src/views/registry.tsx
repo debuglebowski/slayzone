@@ -8,7 +8,7 @@ const TreeView = lazy(() => import('./TreeView').then((m) => ({ default: m.TreeV
 export const viewRegistry: SidebarView[] = [
   {
     id: 'projects',
-    label: 'Projects',
+    label: 'Tabs',
     icon: LayoutGrid,
     width: 'w-18',
     footerLayout: 'vertical',

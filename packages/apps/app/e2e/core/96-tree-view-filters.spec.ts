@@ -196,34 +196,33 @@ test.describe('TreeView setting combinations', () => {
     await expect(taskRow(mainWindow, rootDone)).toHaveCount(0)
   })
 
-  test('top toolbar remains a window drag region', async ({ mainWindow }) => {
+  test('top header remains a window drag region', async ({ mainWindow }) => {
     const regions = await mainWindow.evaluate(() => {
-      const searchButton = document.querySelector<HTMLButtonElement>('button[aria-label="Search"]')
-      const settingsButton = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="View settings"]'
+      const hideButton = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Hide sidebar"]'
       )
-      const addButton = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Add project"]'
-      )
-      const toolbar = searchButton?.parentElement?.parentElement as HTMLElement | null
-      if (!toolbar || !searchButton || !settingsButton || !addButton) {
-        throw new Error('Tree toolbar not found')
-      }
+      const header = hideButton?.parentElement?.parentElement as HTMLElement | null
+      if (!header || !hideButton) throw new Error('Tree header not found')
       const region = (el: Element) => getComputedStyle(el).getPropertyValue('-webkit-app-region')
-      return {
-        toolbar: region(toolbar),
-        search: region(searchButton),
-        settings: region(settingsButton),
-        add: region(addButton)
-      }
+      return { header: region(header), hide: region(hideButton) }
     })
 
-    expect(regions).toEqual({
-      toolbar: 'drag',
-      search: 'no-drag',
-      settings: 'no-drag',
-      add: 'no-drag'
-    })
+    expect(regions).toEqual({ header: 'drag', hide: 'no-drag' })
+  })
+
+  test('bottom toolbar holds New, Search, Lens and More', async ({ mainWindow }) => {
+    const footer = mainWindow.locator('[data-sidebar="footer"]')
+    for (const name of ['New', 'Search', 'Lens', 'More']) {
+      await expect(footer.getByRole('button', { name, exact: true })).toBeVisible()
+    }
+    await footer.getByRole('button', { name: 'New', exact: true }).click()
+    await expect(mainWindow.getByRole('menuitem', { name: 'New project…' })).toBeVisible()
+    await mainWindow.keyboard.press('Escape')
+    await footer.getByRole('button', { name: 'More', exact: true }).click()
+    for (const name of ['Show all projects', 'Settings', 'Keyboard Shortcuts', "What's New"]) {
+      await expect(mainWindow.getByRole('menuitem', { name })).toBeVisible()
+    }
+    await mainWindow.keyboard.press('Escape')
   })
 
   test('archived task never shows', async ({ mainWindow }) => {

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -127,5 +128,36 @@ describe('FeedbackDialog reopen', () => {
     await openDialog()
     await act(async () => {})
     expect(document.activeElement).toBe(newFeedbackIcon())
+  })
+})
+
+describe('FeedbackDialog opened from outside', () => {
+  it('a menu entry opens it on the start screen with threads loaded, without the icon button', async () => {
+    const Wrapper = wrapper
+    function Host(): React.JSX.Element {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Send feedback
+          </button>
+          <FeedbackDialog open={open} onOpenChange={setOpen} showTrigger={false} />
+        </>
+      )
+    }
+    render(
+      <Wrapper>
+        <TooltipProvider>
+          <Host />
+        </TooltipProvider>
+      </Wrapper>
+    )
+    expect(screen.queryByRole('button', { name: 'Feedback' })).toBeNull()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    })
+    await screen.findByText('Thread one')
+    expect(startScreen()).not.toBeNull()
+    await closeDialog()
   })
 })

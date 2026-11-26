@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { SlidersHorizontal } from 'lucide-react'
 import {
   Popover,
@@ -26,7 +26,19 @@ import {
 } from '@slayzone/tabs-state'
 import { PRIORITY_LABELS } from '@slayzone/tasks'
 
-export function TreeDisplaySettings() {
+/**
+ * The tree's display settings in a popover. `trigger` replaces the default icon button
+ * (the sidebar toolbar passes its labelled Lens button); `side` places the popover.
+ */
+export function TreeDisplaySettings({
+  trigger,
+  side = 'right',
+  align = 'start'
+}: {
+  trigger?: ReactNode
+  side?: 'right' | 'top'
+  align?: 'start' | 'end'
+} = {}) {
   const treeShowStatus = useTabStore((s) => s.treeShowStatus)
   const treeShowPriority = useTabStore((s) => s.treeShowPriority)
   const treeShowSubtasks = useTabStore((s) => s.treeShowSubtasks)
@@ -101,19 +113,21 @@ export function TreeDisplaySettings() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="View settings"
-          title="View settings"
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors window-no-drag"
-        >
-          <SlidersHorizontal className="size-3.5" />
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            aria-label="View settings"
+            title="View settings"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors window-no-drag"
+          >
+            <SlidersHorizontal className="size-3.5" />
+          </button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         className="w-[400px] p-3 max-h-[var(--radix-popover-content-available-height)] overflow-y-auto"
-        side="right"
-        align="start"
+        side={side}
+        align={align}
       >
         <div className="space-y-8">
           {/* Groups — bucketing & ordering (decoupled from kanban) */}

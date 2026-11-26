@@ -138,7 +138,7 @@ import {
   TemplatesSettingsTab,
   useLazyMounted,
   AppHeaderActions,
-  CompactFooter,
+  TreeToolbarMoreItems,
   SidebarTaskContextMenu,
   HomeDetail,
   AppSidePanels,
@@ -272,6 +272,7 @@ function App(): React.JSX.Element {
 
   // Dialog state (from zustand store — see useDialogStore)
   const createTaskOpen = useDialogStore((s) => s.createTaskOpen)
+  const feedbackOpen = useDialogStore((s) => s.feedbackOpen)
   const createTaskDraft = useDialogStore((s) => s.createTaskDraft)
   const editingTask = useDialogStore((s) => s.editingTask)
   const deletingTask = useDialogStore((s) => s.deletingTask)
@@ -1375,11 +1376,8 @@ function App(): React.JSX.Element {
       />
     </div>
   )
-  const compactFooterContent = (
-    <CompactFooter
-      usageData={usageData}
-      refreshUsage={refreshUsage}
-      handleOpenSettings={handleOpenSettings}
+  const treeToolbarMoreItems = (
+    <TreeToolbarMoreItems
       explodeMode={explodeMode}
       setExplodeMode={setExplodeMode}
       openTaskIds={openTaskIds}
@@ -1390,8 +1388,6 @@ function App(): React.JSX.Element {
       agentStatusState={agentStatusState}
       setAgentStatusState={setAgentStatusState}
       idleTasks={idleTasks}
-      sidebarView={sidebarView}
-      sidebarAutoHide={sidebarAutoHide}
       updateVersion={updateVersion}
     />
   )
@@ -1442,7 +1438,16 @@ function App(): React.JSX.Element {
             convexConfigured={leaderboardAuth.configured}
             feedbackSlot={
               <ConvexScope>
-                <FeedbackDialog />
+                <FeedbackDialog
+                  open={feedbackOpen}
+                  onOpenChange={(open) =>
+                    open
+                      ? useDialogStore.getState().openFeedback()
+                      : useDialogStore.getState().closeFeedback()
+                  }
+                  // The tree toolbar's More menu opens it; only the rail shows the icon.
+                  showTrigger={headerHidden === false}
+                />
               </ConvexScope>
             }
             sharedSlot={(placement) => (
@@ -1480,7 +1485,8 @@ function App(): React.JSX.Element {
             tags={tags}
             taskTags={taskTags}
             blockedTaskIds={blockedTaskIds}
-            compactFooter={headerHidden ? compactFooterContent : undefined}
+            toolbarMoreItems={treeToolbarMoreItems}
+            headerSlot={<UsagePopover data={usageData} onRefresh={refreshUsage} compact />}
             statusSlot={<StartupProgressStatus />}
             updateState={
               updateDownloadPercent != null

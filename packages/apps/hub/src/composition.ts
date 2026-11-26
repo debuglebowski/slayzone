@@ -892,7 +892,7 @@ export function composeServer(opts: {
     // in e2e — specs that test it set `cli_install_dismissed` back themselves.
     bootBestEffort('e2e-onboarding-seed', () =>
       db.run(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true'), ('cli_install_dismissed', 'true'), ('tutorial_prompted', 'true')"
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true'), ('cli_install_dismissed', 'true'), ('tutorial_prompted', 'true'), ('viewState', '{\"sidebarView\":\"projects\"}')"
       )
     )
   }
@@ -3297,6 +3297,8 @@ export function composeServer(opts: {
         // "Want a quick tour?" toast off: it would land in every spec's first
         // seconds and shift any toast a spec is driving.
         ['tutorial_prompted', 'true'],
+        // Specs were written against the projects rail; the app's own default is the tree.
+        ['viewState', JSON.stringify({ sidebarView: 'projects' })],
         [AGENT_STARTUP_SETTING, 'manual']
       ]
       // Boot-time write the wipe erased: the CLI/agents discover this process via

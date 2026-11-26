@@ -180,6 +180,8 @@ interface TabState {
   // here rather than in TreeView component state so a remount (renderer reload,
   // wake from sleep) doesn't silently reset every project to collapsed.
   treeOpenProjects: Record<string, boolean>
+  // Tree view: list every project, not just the active/starred ones.
+  treeShowAllProjects: boolean
   // Each slot is a hub ID; rows within a hub retain server order.
   sidebarHubOrder: string[]
   // Explode-mode arrangement. Task ids in the order the user dragged them into,
@@ -235,6 +237,8 @@ interface TabState {
   setTreeGroupPinned: (group: boolean) => void
   setTreeShowEmptyGroups: (show: boolean) => void
   setTreeProjectOpen: (projectId: string, open: boolean) => void
+  setTreeProjectsOpen: (projectIds: string[], open: boolean) => void
+  setTreeShowAllProjects: (show: boolean) => void
   setSidebarHubOrder: (hubOrder: string[]) => void
   setExplodeArrangement: (arrangement: { order?: string[]; minimized?: string[] }) => void
   setTaskHeaderPanelMode: (mode: TaskHeaderPanelMode) => void
@@ -293,6 +297,7 @@ interface TabState {
     treeGroupPinned?: boolean
     treeShowEmptyGroups?: boolean
     treeOpenProjects?: Record<string, boolean>
+    treeShowAllProjects?: boolean
     sidebarHubOrder?: string[]
     explodeOrder?: string[]
     explodeMinimized?: string[]
@@ -361,7 +366,7 @@ export const useTabStore = create<TabState>()(
     openTabsSync: {},
     projectScopedTabs: false,
     isLoaded: false,
-    sidebarView: 'projects',
+    sidebarView: 'tree',
     sidebarWidth: null,
     sidebarAutoHide: false,
     treeStatusFilter: ['in_progress'],
@@ -388,6 +393,7 @@ export const useTabStore = create<TabState>()(
     treeGroupPinned: true,
     treeShowEmptyGroups: false,
     treeOpenProjects: {},
+    treeShowAllProjects: false,
     sidebarHubOrder: [],
     explodeOrder: [],
     explodeMinimized: [],
@@ -465,6 +471,14 @@ export const useTabStore = create<TabState>()(
 
     setTreeProjectOpen: (projectId, open) =>
       set((s) => ({ treeOpenProjects: { ...s.treeOpenProjects, [projectId]: open } })),
+    setTreeProjectsOpen: (projectIds, open) =>
+      set((s) => ({
+        treeOpenProjects: {
+          ...s.treeOpenProjects,
+          ...Object.fromEntries(projectIds.map((id) => [id, open]))
+        }
+      })),
+    setTreeShowAllProjects: (treeShowAllProjects) => set({ treeShowAllProjects }),
     setSidebarHubOrder: (sidebarHubOrder) => set({ sidebarHubOrder }),
     // Partial on purpose: a drag changes only the order and a minimize changes only
     // the tray, so neither has to restate the other and race it.
@@ -620,7 +634,7 @@ export const useTabStore = create<TabState>()(
         selectedProjectId:
           typeof state.selectedProjectId === 'string' ? state.selectedProjectId : '',
         projectScopedTabs: !!state.projectScopedTabs,
-        sidebarView: typeof state.sidebarView === 'string' ? state.sidebarView : 'projects',
+        sidebarView: typeof state.sidebarView === 'string' ? state.sidebarView : 'tree',
         sidebarWidth:
           typeof state.sidebarWidth === 'number' && state.sidebarWidth > 0
             ? state.sidebarWidth
@@ -697,6 +711,7 @@ export const useTabStore = create<TabState>()(
           state.treeOpenProjects && typeof state.treeOpenProjects === 'object'
             ? state.treeOpenProjects
             : {},
+        treeShowAllProjects: state.treeShowAllProjects === true,
         // Element-level validation: this JSON is on disk and a malformed entry
         // would flow straight into layout as an undefined task id.
         sidebarHubOrder: Array.isArray(state.sidebarHubOrder)
@@ -929,6 +944,7 @@ useTabStore.subscribe(
     treeGroupPinned: state.treeGroupPinned,
     treeShowEmptyGroups: state.treeShowEmptyGroups,
     treeOpenProjects: state.treeOpenProjects,
+    treeShowAllProjects: state.treeShowAllProjects,
     sidebarHubOrder: state.sidebarHubOrder,
     explodeOrder: state.explodeOrder,
     explodeMinimized: state.explodeMinimized,

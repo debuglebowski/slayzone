@@ -373,7 +373,7 @@ test.describe('TreeView drag and drop', () => {
       await expect
         .poll(() => scroller.evaluate((el) => el.scrollHeight > el.clientHeight))
         .toBe(true)
-      const toolbar = mainWindow.getByRole('button', { name: 'View settings', exact: true })
+      const toolbar = mainWindow.getByRole('button', { name: 'Lens', exact: true })
       const before = await toolbar.boundingBox()
       const projectBefore = await taskRow(mainWindow, rootA).boundingBox()
       const box = await scroller.boundingBox()
@@ -405,7 +405,7 @@ test.describe('TreeView drag and drop', () => {
     try {
       await patchStore(mainWindow, { treeShowBlocked: true })
       await seed(mainWindow).refreshData()
-      await mainWindow.getByRole('button', { name: 'View settings', exact: true }).click()
+      await mainWindow.getByRole('button', { name: 'Lens', exact: true }).click()
       await mainWindow.getByRole('switch', { name: 'Group blocked tasks', exact: true }).click()
       await mainWindow.keyboard.press('Escape')
       const header = mainWindow.locator(
@@ -432,7 +432,7 @@ test.describe('TreeView drag and drop', () => {
         expect(task?.status).toBe('in_progress')
         expect(task?.priority).toBe(3)
       }
-      await mainWindow.getByRole('button', { name: 'View settings', exact: true }).click()
+      await mainWindow.getByRole('button', { name: 'Lens', exact: true }).click()
       await mainWindow.getByRole('switch', { name: 'Group blocked tasks', exact: true }).click()
       await mainWindow.keyboard.press('Escape')
       await expect(header).toHaveCount(0)

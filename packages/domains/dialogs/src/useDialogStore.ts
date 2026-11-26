@@ -66,6 +66,14 @@ interface DialogState {
   openChangelog: () => void
   closeChangelog: () => void
 
+  feedbackOpen: boolean
+  openFeedback: () => void
+  closeFeedback: () => void
+
+  shortcutsOpen: boolean
+  openShortcuts: () => void
+  closeShortcuts: () => void
+
   searchOpen: boolean
   searchFileContext: SearchFileContext | null
   openSearch: (payload?: { fileContext?: SearchFileContext }) => void
@@ -128,6 +136,14 @@ export const useDialogStore = create<DialogState>()((set) => ({
   changelogOpen: false,
   openChangelog: () => set({ changelogOpen: true }),
   closeChangelog: () => set({ changelogOpen: false }),
+
+  feedbackOpen: false,
+  openFeedback: () => set({ feedbackOpen: true }),
+  closeFeedback: () => set({ feedbackOpen: false }),
+
+  shortcutsOpen: false,
+  openShortcuts: () => set({ shortcutsOpen: true }),
+  closeShortcuts: () => set({ shortcutsOpen: false }),
 
   searchOpen: false,
   searchFileContext: null,
