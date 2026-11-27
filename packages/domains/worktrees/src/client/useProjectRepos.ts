@@ -20,7 +20,6 @@ import type { RepoEntry } from '@slayzone/worktrees/shared'
 
 export interface UseProjectReposResult {
   repos: RepoEntry[]
-  loading: boolean
   /** The list has answered (or failed), or there is no project to list. */
   settled: boolean
   refresh: () => void
@@ -43,9 +42,14 @@ export function useProjectRepos(
     )
   )
 
+  // Only `data` and `status` are read from the query: react-query re-renders a
+  // component for the result fields it read, and every open task page of a project
+  // observes this ONE list. Reading its fetch status (a `loading` flag no one used)
+  // re-rendered all of them twice each time one more page mounted and refetched it.
+  const { refetch } = query
   const refresh = useCallback(() => {
-    void query.refetch()
-  }, [query])
+    void refetch()
+  }, [refetch])
 
   const data = query.data ?? NO_REPOS
   const repos = useMemo(
@@ -60,7 +64,6 @@ export function useProjectRepos(
 
   return {
     repos,
-    loading: query.isFetching,
     settled: !listed || query.status !== 'pending',
     refresh
   }

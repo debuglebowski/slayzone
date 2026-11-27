@@ -11,7 +11,7 @@
     "ios": {
       "bundleIdentifier": "zone.slay.app",
       "appleTeamId": "DRAYKWYC94",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "supportsTablet": true,
       "infoPlist": {
         "NSAppTransportSecurity": {

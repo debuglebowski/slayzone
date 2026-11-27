@@ -277,6 +277,79 @@ describe('startOpenTabsSync', () => {
     stop()
   })
 
+  test('a tab opened here while a sync is in flight is pushed next, never closed', async () => {
+    const hub = fakeHub([])
+    const desk = fakeDesktop([{ taskId: 'a', hubId: 'h' }], {})
+    const real = hub.client.openTabs
+    let opened = false
+    const slow = {
+      ...real,
+      open: {
+        mutate: async (i: { taskId: string }) => {
+          await real.open.mutate(i)
+          // The user opens another tab while this sync still awaits the hub.
+          if (!opened) {
+            opened = true
+            desk.tabs.push({ taskId: 'b', hubId: 'h' })
+          }
+        }
+      }
+    }
+    const client = { openTabs: slow } as unknown as TabsStateTrpcClient
+    const stop = startOpenTabsSync(desk.host, { hubIds: () => ['h'], clientOf: () => client })
+    hub.connect()
+    await flush()
+    // `b` never reached the hub, so it is not agreed yet.
+    expect(desk.base.h).toEqual(['a'])
+    // The next sync (its tab change, or any hub ping) pushes it instead of closing it.
+    hub.connect()
+    await flush()
+    expect(desk.tabs.map((t) => t.taskId)).toEqual(['a', 'b'])
+    expect(hub.list).toEqual(['a', 'b'])
+    expect(desk.base.h).toEqual(['a', 'b'])
+    stop()
+  })
+
+  test('a tab closed here while a sync is in flight is pushed closed next, never reopened', async () => {
+    const hub = fakeHub(['a', 'b'])
+    const desk = fakeDesktop(
+      [
+        { taskId: 'a', hubId: 'h' },
+        { taskId: 'b', hubId: 'h' },
+        { taskId: 'c', hubId: 'h' }
+      ],
+      { h: ['a', 'b'] }
+    )
+    const real = hub.client.openTabs
+    let closed = false
+    const slow = {
+      ...real,
+      open: {
+        mutate: async (i: { taskId: string }) => {
+          await real.open.mutate(i)
+          // The user closes `b` while this sync still pushes `c`.
+          if (!closed) {
+            closed = true
+            desk.tabs.splice(
+              desk.tabs.findIndex((t) => t.taskId === 'b'),
+              1
+            )
+          }
+        }
+      }
+    }
+    const client = { openTabs: slow } as unknown as TabsStateTrpcClient
+    const stop = startOpenTabsSync(desk.host, { hubIds: () => ['h'], clientOf: () => client })
+    hub.connect()
+    await flush()
+    hub.connect()
+    await flush()
+    expect(desk.tabs.map((t) => t.taskId)).toEqual(['a', 'c'])
+    expect(hub.list).toEqual(['a', 'c'])
+    expect(desk.base.h).toEqual(['a', 'c'])
+    stop()
+  })
+
   test('a hub that cannot answer changes nothing', async () => {
     const desk = fakeDesktop([{ taskId: 'a', hubId: 'h' }], { h: ['a'] })
     const broken = {

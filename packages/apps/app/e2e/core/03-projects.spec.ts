@@ -41,7 +41,7 @@ test.describe('Projects', () => {
     await mainWindow.locator('button').filter({ hasText: 'Sync with Linear' }).first().click()
     await mainWindow.getByRole('button', { name: 'Create and continue' }).click()
 
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).toBeVisible({
+    await expect(mainWindow.getByTestId('settings-project-page')).toBeVisible({
       timeout: 5_000
     })
     await expect
@@ -62,7 +62,7 @@ test.describe('Projects', () => {
       .toBe(true)
 
     await mainWindow.keyboard.press('Escape')
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).not.toBeVisible({
+    await expect(mainWindow.getByTestId('settings-project-page')).not.toBeVisible({
       timeout: 3_000
     })
   })
@@ -80,7 +80,7 @@ test.describe('Projects', () => {
       .click()
     await mainWindow.getByRole('button', { name: 'Create and continue' }).click()
 
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).toBeVisible({
+    await expect(mainWindow.getByTestId('settings-project-page')).toBeVisible({
       timeout: 5_000
     })
     await expect
@@ -101,7 +101,7 @@ test.describe('Projects', () => {
       .toBe(true)
 
     await mainWindow.keyboard.press('Escape')
-    await expect(mainWindow.getByRole('heading', { name: 'Project Settings' })).not.toBeVisible({
+    await expect(mainWindow.getByTestId('settings-project-page')).not.toBeVisible({
       timeout: 3_000
     })
   })

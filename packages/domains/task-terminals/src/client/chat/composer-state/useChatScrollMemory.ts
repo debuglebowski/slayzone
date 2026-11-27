@@ -12,25 +12,52 @@ const SAVE_DELAY_MS = 500
 const MAX_RESTORE_FRAMES = 120
 
 /**
+ * Frames to keep putting a restored anchor back once its row rendered (~0.5 s).
+ * The rows around it are measured over the next frames — the anchor's own row
+ * among them — and the virtualizer's compensation for a row the view's top is
+ * inside of keeps that row's bottom in place, not its top: the restored offset
+ * would be off by however much the row's estimate was.
+ */
+const HOLD_FRAMES = 30
+
+/** What the user does to move the view: the restore yields to it at once. */
+const USER_INPUT = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+
+/**
  * Try to restore `anchor` each frame until its row is rendered (the window was
- * just widened to include it) or the frame budget runs out. Returns a cancel.
+ * just widened to include it) or the frame budget runs out, then hold it there
+ * while the rows around it settle. Any user input on `el` ends both. Returns a
+ * cancel.
  */
 function restoreWhenRendered(
   anchor: ChatScrollAnchor,
-  restoreAnchor: (anchor: ChatScrollAnchor) => boolean
+  restoreAnchor: (anchor: ChatScrollAnchor) => boolean,
+  el: HTMLElement | null
 ): () => void {
   let frames = 0
+  let held = 0
   let frame: number | null = null
+  const stop = (): void => {
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
+    for (const type of USER_INPUT) el?.removeEventListener(type, stop)
+  }
   const attempt = (): void => {
     frame = null
-    frames += 1
-    if (restoreAnchor(anchor) || frames >= MAX_RESTORE_FRAMES) return
+    if (held > 0) {
+      restoreAnchor(anchor)
+      held += 1
+      if (held > HOLD_FRAMES) return stop()
+    } else {
+      frames += 1
+      if (restoreAnchor(anchor)) held = 1
+      else if (frames >= MAX_RESTORE_FRAMES) return stop()
+    }
     frame = requestAnimationFrame(attempt)
   }
+  for (const type of USER_INPUT) el?.addEventListener(type, stop, { passive: true })
   frame = requestAnimationFrame(attempt)
-  return () => {
-    if (frame !== null) cancelAnimationFrame(frame)
-  }
+  return stop
 }
 
 /** Call `onPause` once scrolling of `el` pauses; the returned stop also runs a pending one. */
@@ -112,8 +139,18 @@ export function useChatScrollMemory({
     // At the bottom is where a timeline opens anyway.
     if (!anchor || anchor.atBottom) return
     revealKey(anchor.key, anchor.row)
-    cancelRestoreRef.current = restoreWhenRendered(anchor, restoreAnchor)
-  }, [enabled, ready, isSuccess, isFetchedAfterMount, mode, data, restoreAnchor, revealKey])
+    cancelRestoreRef.current = restoreWhenRendered(anchor, restoreAnchor, scrollRef.current)
+  }, [
+    enabled,
+    ready,
+    isSuccess,
+    isFetchedAfterMount,
+    mode,
+    data,
+    restoreAnchor,
+    revealKey,
+    scrollRef
+  ])
 
   useEffect(() => () => cancelRestoreRef.current?.(), [])
 

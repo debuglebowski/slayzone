@@ -66,6 +66,25 @@ describe('useProjectRepos', () => {
     await waitFor(() => expect(hook.result.current.settled).toBe(true))
   })
 
+  it('a refetch of the same list (another page of the project mounting) re-renders nobody', async () => {
+    // Every open task page of a project observes this one list: reading its fetch
+    // status re-rendered all of them each time one more page mounted (117 e2e).
+    let renders = 0
+    const hook = renderHook(
+      () => {
+        renders += 1
+        return useProjectRepos('/p', null, 'p1')
+      },
+      { wrapper }
+    )
+    await waitFor(() => expect(hook.result.current.settled).toBe(true))
+    const settledRenders = renders
+    await client.refetchQueries()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(fetched).toHaveLength(2)
+    expect(renders).toBe(settledRenders)
+  })
+
   it('no project: nothing to wait for', () => {
     const hook = renderHook(() => useProjectRepos(null, null, 'p1'), { wrapper })
     expect(hook.result.current.settled).toBe(true)
