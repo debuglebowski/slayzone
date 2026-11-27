@@ -1,6 +1,106 @@
 # Changelog
 
 
+## v0.44.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.43.0...v0.44.0)
+
+### 🚀 Enhancements
+
+- **artifacts:** Add device previews ([9772caf38](https://github.com/debuglebowski/slayzone/commit/9772caf38))
+- **artifacts:** Render device frames ([5554f269c](https://github.com/debuglebowski/slayzone/commit/5554f269c))
+- **settings:** Full-window Settings view with per-hub pages ([589e11738](https://github.com/debuglebowski/slayzone/commit/589e11738))
+- **settings:** Project overrides, device prefs, all projects, hub locks ([7b34d53c7](https://github.com/debuglebowski/slayzone/commit/7b34d53c7))
+- **settings:** List Terminal, Editor, Git and Browser under Preferences ([5d2a51ca2](https://github.com/debuglebowski/slayzone/commit/5d2a51ca2))
+- **settings:** Fold Panels and hubs in the nav; About, CLI, Labs ([0e625d828](https://github.com/debuglebowski/slayzone/commit/0e625d828))
+- **artifacts:** Show artifact title in header when sidebar hidden ([9e4055a9d](https://github.com/debuglebowski/slayzone/commit/9e4055a9d))
+- **artifacts:** Expand device preview controls ([7dfe0e17b](https://github.com/debuglebowski/slayzone/commit/7dfe0e17b))
+- **artifacts:** Add pinnable toolbar actions ([123a65096](https://github.com/debuglebowski/slayzone/commit/123a65096))
+- **tabs:** Share open task tabs between desktop and iPad via the hub ([6469f4a4d](https://github.com/debuglebowski/slayzone/commit/6469f4a4d))
+- **artifacts:** Show upload and preview status ([77ed801cb](https://github.com/debuglebowski/slayzone/commit/77ed801cb))
+- **mobile:** Artifact zoom control, saved on the artifact ([8cbfd12ff](https://github.com/debuglebowski/slayzone/commit/8cbfd12ff))
+- **chat:** Send while attaching waits for the files ([f077cdc2d](https://github.com/debuglebowski/slayzone/commit/f077cdc2d))
+- **computer:** Change computer from a dialog; set up the destination in place ([7bccecf65](https://github.com/debuglebowski/slayzone/commit/7bccecf65))
+- **sharing:** Add person to a task through one button and a dialog ([a38b9918f](https://github.com/debuglebowski/slayzone/commit/a38b9918f))
+- **settings:** Tidy nav — left dots, Panels section, search at bottom ([ac02bd122](https://github.com/debuglebowski/slayzone/commit/ac02bd122))
+- **settings:** Hub Overview summary + Computers tab ([15402aecf](https://github.com/debuglebowski/slayzone/commit/15402aecf))
+- **settings:** Hide hubs/computers when local hub is the only one ([b9a92646f](https://github.com/debuglebowski/slayzone/commit/b9a92646f))
+- **projects:** Set or clone the project's folder on each computer ([df8227a32](https://github.com/debuglebowski/slayzone/commit/df8227a32))
+- **sharing:** Put "Add person" next to the sharing dropdown ([9b7d39e5d](https://github.com/debuglebowski/slayzone/commit/9b7d39e5d))
+- **sharing:** Share tasks and artifacts with project members only ([abd614975](https://github.com/debuglebowski/slayzone/commit/abd614975))
+- **artifacts:** <slay-artifact-controls> for HTML prototype controls ([98f618cf0](https://github.com/debuglebowski/slayzone/commit/98f618cf0))
+- **settings:** Per-computer project folders UI ([8bda494e1](https://github.com/debuglebowski/slayzone/commit/8bda494e1))
+- **settings:** Hub Projects tab — list + create ([bcd318be1](https://github.com/debuglebowski/slayzone/commit/bcd318be1))
+- **hub:** Users tab — add, enable, change role, erase accounts ([fbe593797](https://github.com/debuglebowski/slayzone/commit/fbe593797))
+- **artifacts:** Display zoom inside device previews ([8bc6cfb8d](https://github.com/debuglebowski/slayzone/commit/8bc6cfb8d))
+- **hub:** Client ↔ hub API version contract ([3a138f909](https://github.com/debuglebowski/slayzone/commit/3a138f909))
+
+### 🔥 Performance
+
+- **git:** Batch git panel reads for remote hubs/computers ([3fddc9fb5](https://github.com/debuglebowski/slayzone/commit/3fddc9fb5))
+
+### 🩹 Fixes
+
+- **computer:** Agent cgroups never kill agents; fall back on cgroup failure ([d145cf917](https://github.com/debuglebowski/slayzone/commit/d145cf917))
+- **agent-panels:** Show unreachable hub + retry instead of blank panel ([793451e68](https://github.com/debuglebowski/slayzone/commit/793451e68))
+- **terminal:** Prevent dropped prompt submissions ([bb6491d24](https://github.com/debuglebowski/slayzone/commit/bb6491d24))
+- **chat:** Open message links in-app, never navigate the app window ([e4e6f9ef5](https://github.com/debuglebowski/slayzone/commit/e4e6f9ef5))
+- **cli:** CLI update notice only when CLI is older; themed toast ([1afc538cc](https://github.com/debuglebowski/slayzone/commit/1afc538cc))
+- **mobile:** Address iOS QA regressions ([be3c71e1a](https://github.com/debuglebowski/slayzone/commit/be3c71e1a))
+- **artifacts:** Upload files to remote hubs ([f27554be6](https://github.com/debuglebowski/slayzone/commit/f27554be6))
+- **chat:** Make chat font size scale chat text ([febbb427a](https://github.com/debuglebowski/slayzone/commit/febbb427a))
+- **chat:** Block send while attachments upload ([8cc62c4bb](https://github.com/debuglebowski/slayzone/commit/8cc62c4bb))
+- **settings:** Keep HubCard's useTRPCClient import for computer health types ([bfa3e54e0](https://github.com/debuglebowski/slayzone/commit/bfa3e54e0))
+- **chat:** Load earlier messages at chat end ([f03155b79](https://github.com/debuglebowski/slayzone/commit/f03155b79))
+- **mobile:** Keep landscape shortcuts reachable ([76f046575](https://github.com/debuglebowski/slayzone/commit/76f046575))
+- **mobile:** Allow chat table swipes on iOS ([4dee0a853](https://github.com/debuglebowski/slayzone/commit/4dee0a853))
+- **artifacts:** Keep device-preview touch inside preview ([ccf898c44](https://github.com/debuglebowski/slayzone/commit/ccf898c44))
+- **chat:** Narrow side gutter in narrow panes ([5906e0fea](https://github.com/debuglebowski/slayzone/commit/5906e0fea))
+- **tasks:** Slay tasks open reaches the window from remote hubs ([38cfb1537](https://github.com/debuglebowski/slayzone/commit/38cfb1537))
+- **computer:** One session host launcher per root; crash diagnostics ([3c91968b1](https://github.com/debuglebowski/slayzone/commit/3c91968b1))
+- **chat:** Reopen chats after hub reconnect ([bfdd6e6d9](https://github.com/debuglebowski/slayzone/commit/bfdd6e6d9))
+- **settings:** Align nav header action, mute section labels ([a97e1ad90](https://github.com/debuglebowski/slayzone/commit/a97e1ad90))
+- **settings:** Tighter gap between nav sections ([42235d270](https://github.com/debuglebowski/slayzone/commit/42235d270))
+- **computer:** Local link queues write bursts instead of dropping the connector ([51afba89b](https://github.com/debuglebowski/slayzone/commit/51afba89b))
+- **ci:** Green main — macOS launcher socket, stale tests, registrations ([46f3f37cc](https://github.com/debuglebowski/slayzone/commit/46f3f37cc))
+- **ci:** Lint/format debt, stopped computer waits for its host, test races ([bfa1d5c50](https://github.com/debuglebowski/slayzone/commit/bfa1d5c50))
+- **hub-auth:** Node transport caps response body exactly ([0c20b54ca](https://github.com/debuglebowski/slayzone/commit/0c20b54ca))
+- **chat:** Cmd+↑/↓ move composer caret before jumping timeline ([c6607d448](https://github.com/debuglebowski/slayzone/commit/c6607d448))
+- **artifacts:** Solid device frame rim + black bezel ([01975732f](https://github.com/debuglebowski/slayzone/commit/01975732f))
+- **artifacts:** Decode undeclared HTML previews as UTF-8 ([32fcd67fb](https://github.com/debuglebowski/slayzone/commit/32fcd67fb))
+- **e2e:** Guard null artifact in 94 device-controls test ([aa24817ff](https://github.com/debuglebowski/slayzone/commit/aa24817ff))
+- **computer:** StopTask waits for final pty history write; survive sweep race ([26c37a6ef](https://github.com/debuglebowski/slayzone/commit/26c37a6ef))
+- **platform:** One host per root under concurrent launchers ([ea9ba94a0](https://github.com/debuglebowski/slayzone/commit/ea9ba94a0))
+
+### 💅 Refactors
+
+- **tasks:** Name temporary tasks "Temporary N" ([65e288f84](https://github.com/debuglebowski/slayzone/commit/65e288f84))
+- **artifacts:** Explicit early return in prototype target effect ([0f948cd80](https://github.com/debuglebowski/slayzone/commit/0f948cd80))
+
+### 📖 Documentation
+
+- Client ↔ hub version compatibility plan ([aad9509bf](https://github.com/debuglebowski/slayzone/commit/aad9509bf))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.43.0 ([275085568](https://github.com/debuglebowski/slayzone/commit/275085568))
+- **mobile:** Bump iOS build number to 5 ([fe22f69b2](https://github.com/debuglebowski/slayzone/commit/fe22f69b2))
+- Ignore .vitest/ cache ([aa06b9e02](https://github.com/debuglebowski/slayzone/commit/aa06b9e02))
+
+### ✅ Tests
+
+- **migrations:** V0.43.0 persona ([88327cf73](https://github.com/debuglebowski/slayzone/commit/88327cf73))
+- **migrations:** Refresh p01–p16 expected for v0.43.0 ([b09d53407](https://github.com/debuglebowski/slayzone/commit/b09d53407))
+- **e2e:** Stop a hub computer's detached session host too ([74e5ce447](https://github.com/debuglebowski/slayzone/commit/74e5ce447))
+- **e2e:** 112's computer stop waits for its session host ([4534e2995](https://github.com/debuglebowski/slayzone/commit/4534e2995))
+- **transport:** Make frozen-process watchdog test truly silent ([a3bcc217f](https://github.com/debuglebowski/slayzone/commit/a3bcc217f))
+- **artifacts:** Device-preview touch test reliable on Linux CI ([298764da0](https://github.com/debuglebowski/slayzone/commit/298764da0))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Ubuntu
+
 ## v0.43.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.42.0...v0.43.0)
