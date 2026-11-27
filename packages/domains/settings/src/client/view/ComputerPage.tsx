@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { useFederationOrNull } from '@slayzone/transport/client'
-import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 import { capabilityNote, computerRowStatus } from '@slayzone/computers/labels'
 import type { SettingsRoute } from '../settings-route'
 import { useSettingsViewStore } from '../settings-view-store'
@@ -55,10 +54,6 @@ function ComputerPageBody({ route }: { route: ComputerRoute }) {
   ]
   const tab = tabs.some(([k]) => k === route.tab) ? route.tab : 'general'
   const capabilities = capabilityNote(computer.capabilities)
-  const renamable = !(
-    isLocalHub &&
-    (hub.isOwnComputer(computer) || computer.name === DEFAULT_LOCAL_COMPUTER_NAME)
-  )
   return (
     <div className="space-y-6" data-testid="settings-computer-page">
       <div className="space-y-1">
@@ -84,7 +79,7 @@ function ComputerPageBody({ route }: { route: ComputerRoute }) {
           <ComputerUnattachedSessions computerId={computer.id} />
           <div className="divide-y rounded-lg border">
             <Row label="Name">
-              <ComputerName computer={computer} renamable={renamable} />
+              <ComputerName computer={computer} hub={hub} />
             </Row>
             <Row label="Machine">
               <MachineLabel machine={computer.machine ?? null} />

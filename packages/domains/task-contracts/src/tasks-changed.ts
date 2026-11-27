@@ -12,7 +12,22 @@
  */
 export interface TasksChange {
   taskIds: readonly string[]
+  /**
+   * Board lists that changed besides those rows ({@link BoardPart}). A writer that
+   * changed tag definitions (and no task row) sends `{ taskIds: [], parts: ['tags'] }`:
+   * the renderer reloads that list alone instead of the whole board. Same promise as
+   * `taskIds`: nothing else the board shows changed.
+   */
+  parts?: readonly BoardPart[]
 }
+
+/**
+ * Board lists a {@link TasksChange} can name besides task rows: `tags` = tag
+ * definitions and which tasks carry them, `projects` = project rows, `projectGroups` =
+ * sidebar project groups.
+ */
+export const BOARD_PARTS = ['tags', 'projects', 'projectGroups'] as const
+export type BoardPart = (typeof BOARD_PARTS)[number]
 
 /**
  * What `notify.onTasksChanged` delivers. `taskIds: null` = unknown scope (full
@@ -22,4 +37,10 @@ export interface TasksChange {
  */
 export interface TasksChangedEvent {
   taskIds: string[] | null
+  /**
+   * The board lists that changed besides `taskIds` (see `TasksChange.parts`). Sent
+   * only to a subscriber that asked for them (`{ boardParts: true }`); any other gets
+   * `taskIds: null` for an event that names a part, since it cannot read one.
+   */
+  parts?: BoardPart[]
 }

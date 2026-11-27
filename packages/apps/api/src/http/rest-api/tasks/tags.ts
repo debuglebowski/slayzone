@@ -97,7 +97,8 @@ export function registerTaskTagsRoutes(app: Express, deps: RestApiDeps): void {
         ])
       }
 
-      deps.notifyRenderer()
+      // Only this task's tags changed: clients patch its row.
+      deps.notifyRenderer({ taskIds: [task.id] })
       res.json({ ok: true, data: await currentTagNames(db, task.id) })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -135,7 +136,8 @@ export function registerTaskTagsRoutes(app: Express, deps: RestApiDeps): void {
         await db.run(`DELETE FROM task_tags WHERE task_id = ? AND tag_id = ?`, [task.id, tagId])
       }
 
-      deps.notifyRenderer()
+      // Only this task's tags changed: clients patch its row.
+      deps.notifyRenderer({ taskIds: [task.id] })
       res.json({ ok: true, data: await currentTagNames(db, task.id) })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })

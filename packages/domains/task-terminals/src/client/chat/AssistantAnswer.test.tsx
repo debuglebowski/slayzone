@@ -11,7 +11,7 @@ vi.mock('@slayzone/diff-view', () => ({ DiffView: () => null }))
 import { ChatViewContext, defaultChatView } from './ChatViewContext'
 import { AssistantAnswer } from './AssistantAnswer'
 import { MessageDetails } from './MessageDetails'
-import { activityView } from './activity-view'
+import { activityView } from '@slayzone/terminal/chat-activity'
 import type { ConversationActionsView } from './useConversationActions'
 
 vi.stubGlobal(

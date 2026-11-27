@@ -63,7 +63,9 @@ export async function duplicateTaskOp(
     descriptionFormat: source.description_format,
     events: buildTaskDuplicatedEvents(source, copy, target.name)
   })
-  // Created tags change every card's tag list: then a full reload, else the copy's row.
-  deps.onMutation?.(createdTagIds.length > 0 ? undefined : { taskIds: [copy.id] })
+  // The copy's row; created tags change the tags list too.
+  deps.onMutation?.(
+    createdTagIds.length > 0 ? { taskIds: [copy.id], parts: ['tags'] } : { taskIds: [copy.id] }
+  )
   return { taskId: copy.id }
 }

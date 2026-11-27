@@ -130,7 +130,7 @@ export function registerTaskBlockedRoutes(app: Express, deps: RestApiDeps): void
         body.toggle === true ||
         typeof body.comment === 'string' ||
         (hasComment && body.comment === null)
-      if (isWrite) deps.notifyRenderer()
+      if (isWrite) deps.notifyRenderer({ taskIds: [task.id] })
 
       res.json({ ok: true, data: await readState(db, task.id) })
     } catch (err) {

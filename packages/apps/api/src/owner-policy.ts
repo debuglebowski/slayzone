@@ -494,14 +494,23 @@ const byActor: EventFilter = (event, { userId }) => {
  * (`TasksChangedEvent`). Named ids are cut to the tasks the caller may see, whoever
  * caused the change — a ping naming none of them is not sent (nothing the caller can
  * see changed). One naming nothing (`taskIds` absent or null: unknown scope) is
- * attributed like {@link byActor}: the actor's own.
+ * attributed like {@link byActor}: the actor's own, and so are its named board
+ * `parts` (another user's are stripped, the visible rows still sent).
  */
 const tasksChangedEvents: EventFilter = async (event, state) => {
   // A ping naming its tasks goes to everyone who may see one of them — whoever
   // caused it: a member of a shared project sees another's edit live (T-100).
   if (isRecord(event) && Array.isArray(event.taskIds)) {
+    // Named board parts (tag definitions, projects, groups) carry no content and no
+    // owner: attributed like a ping naming nothing. Decided before the await, while
+    // the acting user is still on the async context.
+    const named = Array.isArray(event.parts) && event.parts.length > 0
+    const partsReach = named && byActor(event, state) !== DROP
     const taskIds = (await ids('task')(event.taskIds, state.scope)) as unknown[]
-    return taskIds.length > 0 ? { ...event, taskIds } : DROP
+    if (partsReach) return { ...event, taskIds }
+    if (taskIds.length === 0) return DROP
+    const { parts: _parts, ...rows } = event
+    return { ...rows, taskIds }
   }
   // Naming nothing: attributed to its actor (byActor reads the async context, so it
   // runs before any await).

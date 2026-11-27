@@ -30,7 +30,7 @@ export async function restoreTaskOp(
   })
   const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const task = parseTask(row)
-  onMutation?.()
+  onMutation?.({ taskIds: [id] })
   if (task) {
     const projectId = task.project_id
     taskEvents.emit('task:restored', { taskId: id, projectId })

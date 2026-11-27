@@ -114,7 +114,7 @@ const { useVirtualTimeline } = await import('./useVirtualTimeline')
 const { installTimelineLayout } = await import('./__tests__/timeline-layout')
 const { ChatViewContext } = await import('./ChatViewContext')
 const { CommandTaskContext } = await import('./tool-cards')
-const { activityView } = await import('./activity-view')
+const { activityView } = await import('@slayzone/terminal/chat-activity')
 const { appearanceDefaults } = await import('@slayzone/ui')
 import type { AgentEvent, ChatAvailability } from '@slayzone/terminal-contracts'
 import type { ChatTimelineState, TimelineItem } from '@slayzone/terminal/client'

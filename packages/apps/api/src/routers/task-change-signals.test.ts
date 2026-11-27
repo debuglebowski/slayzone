@@ -54,10 +54,13 @@ function seedTask(title: string): string {
 }
 const [a, b, c] = [seedTask('A'), seedTask('B'), seedTask('C')]
 
-/** Every `tasks-changed` signal, in order; `null` = one that named no tasks. */
+/** Every `tasks-changed` signal, in order: its task ids then its named board parts
+ *  (`part:<name>`); `null` = one that named nothing (a full reload). */
 let signals: Array<string[] | null> = []
 notifyEvents.on('tasks-changed', (change?: TasksChange) => {
-  signals.push(change ? [...change.taskIds].sort() : null)
+  signals.push(
+    change ? [...[...change.taskIds].sort(), ...(change.parts ?? []).map((p) => `part:${p}`)] : null
+  )
 })
 beforeEach(() => {
   signals = []
@@ -114,19 +117,20 @@ describe('tags', () => {
     expect(signals).toEqual([[a]])
   })
 
-  test('create, update, delete and reorder each reload the whole board', async () => {
+  test('create, update, delete and reorder each name the tags list, never a full reload', async () => {
+    const tags = [['part:tags']]
     const tag = await caller.tags.create({ name: 'feature', projectId, color: '#111111' })
-    expect(signals).toEqual([null])
+    expect(signals).toEqual(tags)
     const other = await caller.tags.create({ name: 'chore', projectId, color: '#222222' })
     signals = []
     await caller.tags.update({ id: tag.id, name: 'feat' })
-    expect(signals).toEqual([null])
+    expect(signals).toEqual(tags)
     signals = []
     await caller.tags.reorder({ tagIds: [other.id, tag.id] })
-    expect(signals).toEqual([null])
+    expect(signals).toEqual(tags)
     signals = []
     await caller.tags.delete({ id: other.id })
-    expect(signals).toEqual([null])
+    expect(signals).toEqual(tags)
   })
 })
 

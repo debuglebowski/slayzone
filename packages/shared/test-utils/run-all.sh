@@ -92,6 +92,7 @@ run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
 run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
 run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
 run_vitest_files 'board-tasks readers cost O(1) per board patch' packages/domains/task/src/client/useBoardTasks.test.tsx
+run_vitest_files 'task page full row: board fields + task.get for the rest' packages/domains/task/src/client/useTaskFullRow.test.tsx
 run_vitest_files 'task view-only readers share one cache listener' packages/domains/projects/src/client/sharing/useIsTaskViewOnly.test.tsx
 run_vitest_files 'cross-hub move engine: steps, pause, fail, crash recovery' packages/domains/task/src/client/task-move-engine.test.ts packages/domains/task/src/client/task-move-steps-sessions.test.ts
 # Every client delete asks first (subtasks too) and reports blocked/incomplete/failed
@@ -1405,6 +1406,7 @@ run_harness packages/domains/task/src/server/ops/task-paths-delegate.test.ts
 run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
 run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
+run_harness packages/domains/task/src/server/ops/mutation-scope.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
 # shared by the desktop task page and the hub's task.startMainAgent.
 run_harness packages/domains/task/src/shared/main-terminal.test.ts
@@ -1854,7 +1856,9 @@ run_vitest_files "vitest (swept-in suites)" \
 # shared panel config, and the first-paint theme cache.
 run_vitest_files "vitest (tasks-changed refresh)" \
   packages/shared/notify/src/server/notify-coalescer.test.ts \
+  packages/shared/notify/src/server/notify-router.test.ts \
   packages/domains/tasks/src/client/board-patch.test.ts \
+  packages/domains/tasks/src/client/board-load-report.test.ts \
   packages/domains/task/src/client/taskScopedQueries.test.tsx \
   packages/domains/task/src/client/usePanelConfig.test.tsx \
   packages/domains/settings/src/client/theme-cache.test.ts

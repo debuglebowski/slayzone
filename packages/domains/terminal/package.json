@@ -43,6 +43,8 @@
     "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
     "./claude-transcripts": "./src/server/claude-transcripts.ts",
     "./chat-presentation": "./src/shared/chat-presentation.ts",
+    "./chat-activity": "./src/shared/chat-activity.ts",
+    "./chat-turn-changes": "./src/shared/chat-turn-changes.ts",
     "./chat-direct": "./src/client/chat-direct.ts",
     "./chat-tool-details": "./src/client/chat-tool-details.ts",
     "./chat-session-ready": "./src/shared/chat-session-ready.ts",

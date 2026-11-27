@@ -18,8 +18,8 @@ import { isRenderable, stableAnchorKey } from '@slayzone/terminal/chat-presentat
 import { useVirtualTimeline } from './useVirtualTimeline'
 import type { TimelineFollow } from './virtual-timeline'
 import type { FollowBottomApi } from './useFollowBottom'
-import { activityView } from './activity-view'
-import { unifiedChangeRows } from './files-changed/turn-changes'
+import { activityView } from '@slayzone/terminal/chat-activity'
+import { unifiedChangeRows } from '@slayzone/terminal/chat-turn-changes'
 
 export interface UseChatDisplayOpts {
   /** The rows (`undefined`: not loaded here — not shown). */

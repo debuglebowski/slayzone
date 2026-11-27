@@ -66,5 +66,5 @@ export async function archiveManyTasksOp(
       taskEvents.emit('task:archived', { taskId: id, projectId: projectRow.project_id })
     }
   }
-  onMutation?.()
+  onMutation?.({ taskIds: allIds })
 }

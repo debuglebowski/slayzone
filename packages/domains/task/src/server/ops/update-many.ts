@@ -65,7 +65,8 @@ export async function updateManyTasksOp(
       })
     }
   }
-  if (results.some((r) => r.next)) onMutation?.()
+  const updated = results.flatMap((r) => (r.next ? [r.id] : []))
+  if (updated.length > 0) onMutation?.({ taskIds: updated })
 
   return results.flatMap((r) => (r.next ? [r.next] : []))
 }

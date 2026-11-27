@@ -1,11 +1,12 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { TasksChange } from '@slayzone/task-contracts'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { HubMenuEventMap } from '../../app-deps'
 import type { TaskAgentsAccess, TaskOpsBus } from '../rest-api/types'
 
 export interface McpToolsDeps {
   db: SlayzoneDb
-  notifyRenderer: () => void
+  notifyRenderer: (change?: TasksChange) => void
   /** Structural completion-event bus the task ops emit on (Electron: ipcMain).
    *  Absent → completion events drop (standalone server). */
   taskBus?: TaskOpsBus

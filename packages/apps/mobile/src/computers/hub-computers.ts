@@ -1,6 +1,6 @@
 /**
  * A hub's computers as the app reads them: the rows of `computers.list` (the procedure
- * desktop's Settings → Connections lists them with). Their words — status, names,
+ * desktop's Settings (a hub's Computers tab) lists them with). Their words — status, names,
  * choice labels — are desktop's, from `@slayzone/computers/labels`.
  */
 import { DISABLED_MARK, OFFLINE_MARK } from '@slayzone/computers/labels'

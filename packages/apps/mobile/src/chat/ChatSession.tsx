@@ -368,6 +368,7 @@ function ChatView({
             productName={provider.product}
             hydrating={session.hydrating}
             working={session.inFlight && !awaitingUser}
+            inFlight={session.inFlight}
             reconnecting={session.reconnecting}
             olderHistory={session.olderHistory}
             loadHistoryRows={session.loadHistoryRows}

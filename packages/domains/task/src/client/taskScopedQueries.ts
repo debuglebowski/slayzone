@@ -24,6 +24,8 @@ import { useTRPC } from './trpc'
  * works on any hub's QueryClient (keys carry no client identity).
  */
 const TASK_SCOPED_INPUT: Record<string, string> = {
+  // The task's own full row: the fields the board may not carry (useTaskFullRow).
+  'task.get': 'id',
   'tags.getForTask': 'taskId',
   'task.getSubTasks': 'parentId',
   'artifacts.getByTask': 'taskId',

@@ -265,8 +265,8 @@ export function chatAvailabilityMessage(
           title: `${name} is offline`,
           detail:
             status.heldBy.name === name
-              ? `Another computer named ${name} holds this chat, possibly this one enrolled again. If so, replace the offline ${name} with it in Settings → Connections.`
-              : `${status.heldBy.name} holds this chat. If ${status.heldBy.name} is ${name} enrolled again, replace ${name} with it in Settings → Connections.`
+              ? `Another computer named ${name} holds this chat, possibly this one enrolled again. If so, replace the offline ${name} with it on the hub’s Computers tab in Settings.`
+              : `${status.heldBy.name} holds this chat. If ${status.heldBy.name} is ${name} enrolled again, replace ${name} with it on the hub’s Computers tab in Settings.`
         }
       if (status.lastSeenAt !== undefined) {
         const lastSeen = new Date(status.lastSeenAt).toLocaleString()

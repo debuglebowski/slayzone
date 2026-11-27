@@ -11,7 +11,7 @@ import {
 } from './tag-store'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getTaskTriggerBus } from './task-trigger-bus'
-import { signalBoardChanged, signalTasksChanged } from './tags-router-deps'
+import { signalTagsChanged, signalTasksChanged } from './tags-router-deps'
 
 const createTagInput = z.object({
   name: z.string().min(1),
@@ -32,22 +32,22 @@ export const tagsRouter = router({
   list: publicProcedure.query(({ ctx }) => listAllTags(ctx.db)),
 
   // A project's tags show on every card, filter and picker: each change to the tags
-  // themselves reloads every client's board (after the write lands).
+  // themselves makes every client reload its tags (after the write lands).
   create: publicProcedure.input(createTagInput).mutation(async ({ ctx, input }) => {
     const tag = await createTag(ctx.db, input)
-    signalBoardChanged()
+    signalTagsChanged()
     return tag
   }),
 
   update: publicProcedure.input(updateTagInput).mutation(async ({ ctx, input }) => {
     const tag = await updateTag(ctx.db, input)
-    signalBoardChanged()
+    signalTagsChanged()
     return tag
   }),
 
   delete: publicProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const result = await deleteTag(ctx.db, input.id)
-    signalBoardChanged()
+    signalTagsChanged()
     return result
   }),
 
@@ -55,7 +55,7 @@ export const tagsRouter = router({
     .input(z.object({ tagIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       const result = await reorderTags(ctx.db, input.tagIds)
-      signalBoardChanged()
+      signalTagsChanged()
       return result
     }),
 

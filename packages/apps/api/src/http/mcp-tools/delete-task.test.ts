@@ -24,12 +24,15 @@ h.db
   .run(projectId, 'P', '#000', '/tmp/p')
 
 let notifyCount = 0
+/** Pings naming no rows: each one reloads every client's whole board. */
+let unscopedCount = 0
 const stub = captureMcpServer()
 registerDeleteTaskTool(stub.server as never, {
   db: h.slayDb,
   taskBus: ipcMain,
-  notifyRenderer: () => {
+  notifyRenderer: (change?: { taskIds: readonly string[] }) => {
     notifyCount++
+    if (!change) unscopedCount++
   }
 })
 
@@ -54,6 +57,7 @@ describe('mcp delete_task', () => {
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:deleted')
     notifyCount = 0
+    unscopedCount = 0
     const res = (await stub.invoke('delete_task', { id })) as {
       content: { text: string }[]
       isError?: boolean
@@ -69,6 +73,7 @@ describe('mcp delete_task', () => {
     expect(row).toBeUndefined()
     expect(spy.calls.length).toBe(1)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
+    expect(unscopedCount, 'every ping names its rows').toBe(0)
   })
 
   test('error: returns isError when task missing', async () => {

@@ -24,12 +24,15 @@ h.db
   .run(projectId, 'P', '#000', '/tmp/p')
 
 let notifyCount = 0
+/** Pings naming no rows: each one reloads every client's whole board. */
+let unscopedCount = 0
 const stub = captureMcpServer()
 registerArchiveTaskTool(stub.server as never, {
   db: h.slayDb,
   taskBus: ipcMain,
-  notifyRenderer: () => {
+  notifyRenderer: (change?: { taskIds: readonly string[] }) => {
     notifyCount++
+    if (!change) unscopedCount++
   }
 })
 
@@ -58,6 +61,7 @@ describe('mcp archive_task', () => {
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:archived')
     notifyCount = 0
+    unscopedCount = 0
     const res = (await stub.invoke('archive_task', { id })) as {
       content: { type: string; text: string }[]
       isError?: boolean
@@ -72,6 +76,7 @@ describe('mcp archive_task', () => {
     const archiveEmits = __ipcEmitCalls.filter((c) => c[0] === 'db:tasks:archive:done')
     expect(archiveEmits.length).toBeGreaterThanOrEqual(1)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
+    expect(unscopedCount, 'every ping names its rows').toBe(0)
   })
 
   test('error: returns isError when task not found', async () => {

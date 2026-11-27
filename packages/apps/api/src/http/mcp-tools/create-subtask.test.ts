@@ -27,11 +27,14 @@ function seedParent(): string {
 }
 
 let notifyCount = 0
+/** Pings naming no rows: each one reloads every client's whole board. */
+let unscopedCount = 0
 const stub = captureMcpServer()
 registerCreateSubtaskTool(stub.server as never, {
   db: h.slayDb,
-  notifyRenderer: () => {
+  notifyRenderer: (change?: { taskIds: readonly string[] }) => {
     notifyCount++
+    if (!change) unscopedCount++
   }
 })
 
@@ -49,6 +52,7 @@ describe('mcp create_subtask', () => {
   test('explicit parent_task_id', async () => {
     const parent = seedParent()
     notifyCount = 0
+    unscopedCount = 0
     const res = (await stub.invoke('create_subtask', {
       parent_task_id: parent,
       title: 'Sub'
@@ -57,6 +61,7 @@ describe('mcp create_subtask', () => {
     const parsed = JSON.parse(res.content[0].text) as { parent_id: string }
     expect(parsed.parent_id).toBe(parent)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
+    expect(unscopedCount, 'every ping names its rows').toBe(0)
   })
 
   test('a created subtask gets its task.created history entry', async () => {

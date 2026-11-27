@@ -16,7 +16,11 @@
  * as it scrolls (`onScrollFromNewest`: the page makes its bars compact while the user
  * reads back).
  */
-import { type ChatTimelineState, deriveLoadingLabel } from '@slayzone/terminal/reducer'
+import {
+  type ChatTimelineState,
+  deriveLoadingLabel,
+  type TimelineItem
+} from '@slayzone/terminal/reducer'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -37,7 +41,9 @@ import { TextViewer } from './TextViewer'
 import { TimelineRow } from './TimelineRow'
 import type { OlderChatHistory } from './useChatSession'
 import { ExpandedStore, type TimelineUi, TimelineUiContext } from './timeline-ui'
-import { subAgentItems, type TimelineRow as Row, timelineRows } from './timeline-rows'
+import { subAgentItems, type TimelineRow as Row, turnRows } from './timeline-rows'
+import { TurnActivity } from './TurnActivity'
+import { useChatDisplayPrefs } from './chat-display-prefs-file'
 
 /** Within this of the newest row (pt), a change scrolls back to it. */
 const FOLLOW_THRESHOLD = 80
@@ -52,6 +58,7 @@ export function ChatTimeline({
   productName,
   hydrating,
   working,
+  inFlight = working,
   reconnecting = false,
   emptyText,
   topInset = 0,
@@ -65,6 +72,8 @@ export function ChatTimeline({
   hydrating: boolean
   /** A turn runs and the agent is not waiting for the user. */
   working: boolean
+  /** A turn runs (waiting for the user too): its activity block shows it live. */
+  inFlight?: boolean
   /** Not in step with the hub: the turn state is the last known one, so it says so. */
   reconnecting?: boolean
   emptyText: string
@@ -112,9 +121,10 @@ export function ChatTimeline({
     })
   }, [])
   const rows = useMemo(
-    () => timelineRows(state.timeline, openBranches).reverse(),
-    [state.timeline, openBranches]
+    () => turnRows(state.timeline, openBranches, inFlight).reverse(),
+    [state.timeline, openBranches, inFlight]
   )
+  const [display] = useChatDisplayPrefs()
   const { timeline, childIndex } = state
   const loadSubAgent = useCallback(
     (id: string) => {
@@ -130,24 +140,41 @@ export function ChatTimeline({
   }, [olderHistory])
   // Not keyed on the whole state: a streaming delta changes only `state.live`, which
   // reaches its row through the live store, not through the list.
-  const renderItem = useCallback<ListRenderItem<Row>>(
-    ({ item }) => (
+  const renderRow = useCallback(
+    (item: TimelineItem, key: string) => (
       <TimelineRow
-        item={item.item}
+        item={item}
         agentName={agentName}
         productName={productName}
         childItems={
-          item.item.kind === 'sub-agent'
-            ? subAgentItems({ timeline, childIndex }, item.item.toolUseId)
+          item.kind === 'sub-agent'
+            ? subAgentItems({ timeline, childIndex }, item.toolUseId)
             : undefined
         }
-        rowKey={item.key}
+        rowKey={key}
         loadSubAgent={loadSubAgent}
-        branchOpen={item.item.kind === 'conversation-branch' && openBranches.has(item.item.id)}
+        branchOpen={item.kind === 'conversation-branch' && openBranches.has(item.id)}
         onToggleBranch={toggleBranch}
       />
     ),
     [timeline, childIndex, loadSubAgent, openBranches, toggleBranch, agentName, productName]
+  )
+  const renderItem = useCallback<ListRenderItem<Row>>(
+    ({ item: row }) =>
+      row.turn ? (
+        <View>
+          {row.turn.hostIsActivity ? null : renderRow(row.item, row.key)}
+          <TurnActivity
+            turn={row.turn}
+            settings={display}
+            rowKey={row.key}
+            renderEntry={renderRow}
+          />
+        </View>
+      ) : (
+        renderRow(row.item, row.key)
+      ),
+    [renderRow, display]
   )
   // The last row streams: it shows the progress itself.
   const last = rows[0]?.item
@@ -186,6 +213,8 @@ export function ChatTimeline({
           testID="chat-timeline"
           inverted
           data={rows}
+          // The display settings change rows' contents, not the rows.
+          extraData={display}
           keyExtractor={(row) => row.key}
           renderItem={renderItem}
           ListHeaderComponent={

@@ -61,7 +61,7 @@ export class NoComputerForFolderError extends Error {
   constructor() {
     super(
       'No computer is connected, so the project folder has nowhere to live. ' +
-        'Start the local computer (Settings → Connections) or enroll one, then try again.'
+        'Start the local computer (Settings → This machine) or enroll one, then try again.'
     )
     this.name = 'NoComputerForFolderError'
   }

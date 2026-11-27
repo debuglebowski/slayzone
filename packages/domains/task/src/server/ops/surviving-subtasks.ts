@@ -20,6 +20,21 @@ export async function survivingSubtasks(db: SlayzoneDb, ids: string[]): Promise<
   )
 }
 
+/**
+ * Tasks linked to `ids` by a dependency, either way: deleting one of `ids` drops the
+ * link, which changes the other task's blocked state. Read before deleting.
+ */
+export async function dependencyNeighbours(db: SlayzoneDb, ids: string[]): Promise<string[]> {
+  const selected = JSON.stringify(ids)
+  const rows = await db.all<{ id: string }>(
+    `SELECT blocks_task_id AS id FROM task_dependencies WHERE task_id IN (SELECT value FROM json_each(?))
+      UNION
+      SELECT task_id AS id FROM task_dependencies WHERE blocks_task_id IN (SELECT value FROM json_each(?))`,
+    [selected, selected]
+  )
+  return rows.map((r) => r.id)
+}
+
 /** `task:updated` for each re-parented subtask that still exists. */
 export async function announceSurvivingSubtasks(
   db: SlayzoneDb,

@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { electronBootstrap, useSubscription } from '@slayzone/transport/client'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 import { Button, cn, toast } from '@slayzone/ui'
-import { ArrowLeftRight, FolderCog, Power, PowerOff, RotateCw, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, FolderCog, Pencil, Power, PowerOff, RotateCw, Trash2 } from 'lucide-react'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { useComputerActions } from './ComputerActions'
 import { computerLabel } from './ComputerTakeovers'
@@ -91,6 +91,18 @@ export function useHubComputers({
     computer.id === ownComputerId || (isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME)
 
   /**
+   * Every computer but the desktop app's own on its local hub: that hub finds its
+   * default computer by name (`DEFAULT_LOCAL_COMPUTER_NAME`), so renaming it would
+   * lose it. The hub refuses it too (`COMPUTER_IS_LOCAL`).
+   */
+  const canRename = (computer: { id: string; name: string }): boolean =>
+    !(isLocalHub && isOwnComputer(computer))
+
+  // Which computer's name is being edited. Here, not in `ComputerName`, because
+  // the Rename action button and the name itself both open the same editor.
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+
+  /**
    * Replace `former` with a successor the user picks among this hub's other computers
    * (`preselect`: the one a takeover offer names). Hub-bound like delete.
    */
@@ -147,6 +159,10 @@ export function useHubComputers({
     ownComputerId,
     isLocalHub,
     isOwnComputer,
+    canRename,
+    renamingId,
+    startRename: (computerId: string) => setRenamingId(computerId),
+    stopRename: () => setRenamingId(null),
     askReplace,
     toggleDisabled,
     togglingDisabled: setDisabledMutation.isPending,
@@ -191,6 +207,18 @@ export function ComputerActionButtons({
         <FolderCog className="size-3.5" />
         {labels && 'Allowed folders'}
       </Button>
+      {hub.canRename(computer) && (
+        <Button
+          variant={variant}
+          size={size}
+          title="Rename this computer"
+          onClick={() => hub.startRename(computer.id)}
+          data-testid="computer-rename"
+        >
+          <Pencil className="size-3.5" />
+          {labels && 'Rename'}
+        </Button>
+      )}
       {/* The app's OWN supervised child — the one computer it can cycle as a process.
           Restarting kills every agent pty on this machine, so it is confirm-gated. */}
       {isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME && (

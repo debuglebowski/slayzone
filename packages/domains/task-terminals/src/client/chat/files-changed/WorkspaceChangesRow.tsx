@@ -10,8 +10,12 @@ import { useRowUiState } from '../row-ui-state'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { useChatView } from '../ChatViewContext'
 import { FilesChangedRow, useShowFileChange } from './FilesChangedRow'
-import { relativeToCwd } from './relative-path'
-import { turnChangeSources, workspaceChangesShows, type RecordedChanges } from './turn-changes'
+import {
+  relativeToCwd,
+  turnChangeSources,
+  workspaceChangesShows,
+  type RecordedChanges
+} from '@slayzone/terminal/chat-turn-changes'
 import { TurnFooterPanel } from '../turn-footer'
 
 type Row = Extract<TimelineItem, { kind: 'workspace-changes' }>

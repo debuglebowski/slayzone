@@ -314,7 +314,7 @@ export class ChatProcess implements OutboxProcess {
         id: randomUUID(),
         level: 'warning',
         code: 'computer-outdated',
-        text: 'This agent’s computer runs an older SlayZone that does not confirm messages, so one lost on the way is not noticed. Settings → Connections names the computer and how to update it.'
+        text: 'This agent’s computer runs an older SlayZone that does not confirm messages, so one lost on the way is not noticed. The hub’s Computers tab in Settings names the computer and how to update it.'
       })
     })
     this.handle.onGap?.(() => {

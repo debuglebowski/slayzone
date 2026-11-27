@@ -8,7 +8,7 @@ import { CardBadge } from '../tool-cards/links'
 import { ToolFocusContext } from '../tool-cards/tool-focus'
 import { flashRow, useRevealTimelineItem } from '../timeline-reveal'
 import { stableAnchorKey } from '@slayzone/terminal/chat-presentation'
-import { relativeToCwd } from './relative-path'
+import { relativeToCwd } from '@slayzone/terminal/chat-turn-changes'
 import { TurnFooterPanel } from '../turn-footer'
 
 type FilesChangedItem = Extract<TimelineItem, { kind: 'files-changed' }>

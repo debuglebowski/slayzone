@@ -48,7 +48,8 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
     try {
       // Owner = the signed-in user; null on a hub without login (no principal).
       const project = await createProject(deps.db, input, restPrincipalOf(req)?.userId ?? null)
-      deps.notifyRenderer()
+      // A project row only: clients reload their projects, not every task.
+      deps.notifyRenderer({ taskIds: [], parts: ['projects'] })
       res.json({ ok: true, data: { ...project, path: await projectFolder(deps.db, project.id) } })
     } catch (err) {
       if (respondFrameTooLarge(res, err)) return
@@ -112,7 +113,8 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
           await setProjectDefaultComputer(deps.db, resolved.row.id, previousComputerId)
         throw err
       })
-      deps.notifyRenderer()
+      // A project row only: clients reload their projects, not every task.
+      deps.notifyRenderer({ taskIds: [], parts: ['projects'] })
       res.json({ ok: true, data: { ...project, path: await projectFolder(deps.db, project.id) } })
     } catch (err) {
       if (respondFrameTooLarge(res, err)) return

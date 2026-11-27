@@ -74,6 +74,10 @@ const remoteMintSpy = vi.fn((_input: MintInput, hub?: string) =>
   })
 )
 const remoteDeleteSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
+/** `computers.rename`, tagged with the hub whose card asked. */
+const renameSpy = vi.fn((_input: { computerId: string; name: string }, _hub?: string) =>
+  Promise.resolve({ ok: true as const })
+)
 
 /**
  * The local computer is cycled over the DESKTOP BRIDGE, not tRPC — it is a child of
@@ -213,6 +217,12 @@ vi.mock('@tanstack/react-query', () => ({
       return {
         mutateAsync: (input: { computerId: string; successorId: string }) =>
           replaceSpy(input, opts.__hub),
+        isPending: false
+      }
+    }
+    if (opts?.__key === 'rename') {
+      return {
+        mutateAsync: (input: { computerId: string; name: string }) => renameSpy(input, opts.__hub),
         isPending: false
       }
     }
@@ -384,6 +394,7 @@ beforeEach(() => {
   mintSpy.mockClear()
   deleteSpy.mockClear()
   setDisabledSpy.mockClear()
+  renameSpy.mockClear()
   remoteMintSpy.mockClear()
   remoteDeleteSpy.mockClear()
   restartLocalComputerSpy.mockClear()
@@ -610,6 +621,67 @@ describe('HubCard', () => {
       fireEvent.click(screen.getByTestId('computer-enable'))
     })
     expect(setDisabledSpy).toHaveBeenCalledWith({ computerId: 'r-off', disabled: false }, 'local')
+  })
+
+  // Renaming used to hide behind a click on the bare name, with nothing saying the
+  // name was clickable. A Rename action sits with the others now.
+  it('renames a computer from its Rename action, against its own hub', async () => {
+    computersByHub = { 'hub-b': [makeComputer({ id: 'r-1', name: 'mac-studio' })] }
+    await renderRemote()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-rename'))
+    })
+    const input = screen.getByTestId('computer-rename-input') as HTMLInputElement
+    expect(input.value).toBe('mac-studio')
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'studio-2' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    expect(renameSpy).toHaveBeenCalledWith({ computerId: 'r-1', name: 'studio-2' }, 'hub-b')
+    expect(screen.queryByTestId('computer-rename-input')).toBeNull()
+  })
+
+  it('still renames by clicking the name, which shows a pencil', async () => {
+    computersByHub = { 'hub-b': [makeComputer({ id: 'r-1', name: 'mac-studio' })] }
+    await renderRemote()
+    const name = screen.getByTestId('computer-name')
+    expect(name.querySelector('[data-testid="computer-name-pencil"]')).not.toBeNull()
+    await act(async () => {
+      fireEvent.click(name)
+    })
+    const input = screen.getByTestId('computer-rename-input') as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'renamed' } })
+      fireEvent.blur(input)
+    })
+    expect(renameSpy).toHaveBeenCalledWith({ computerId: 'r-1', name: 'renamed' }, 'hub-b')
+  })
+
+  it('Escape cancels a rename without saving', async () => {
+    computersByHub = { 'hub-b': [makeComputer({ id: 'r-1', name: 'mac-studio' })] }
+    await renderRemote()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-rename'))
+    })
+    const input = screen.getByTestId('computer-rename-input')
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'nope' } })
+      fireEvent.keyDown(input, { key: 'Escape' })
+    })
+    expect(screen.queryByTestId('computer-rename-input')).toBeNull()
+    expect(renameSpy).not.toHaveBeenCalled()
+  })
+
+  it("offers no rename for the local hub's own computer, which that hub finds by name", async () => {
+    computersByHub = {
+      local: [
+        makeComputer({ id: 'r-local', name: 'local-computer' }),
+        makeComputer({ id: 'r-legacy', name: 'old-box' })
+      ]
+    }
+    await renderLocal()
+    expect(screen.getAllByTestId('computer-rename').length).toBe(1)
+    expect(screen.getAllByTestId('computer-name').length).toBe(1)
   })
 
   it("marks this app's own computer on a remote hub, from where main says it joined", async () => {

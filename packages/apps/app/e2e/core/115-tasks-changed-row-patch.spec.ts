@@ -119,4 +119,97 @@ test.describe('tasks-changed: row patches + hidden-tab deferral', () => {
     await expect(subtasks.getByText('Sub after')).toBeVisible({ timeout: 10_000 })
     expect((await sent(mainWindow)).filter(isParentSubs).length).toBeGreaterThanOrEqual(1)
   })
+
+  test('archiving a task patches its row, never a full board reload', async ({ mainWindow }) => {
+    await resetApp(mainWindow)
+    const s = seed(mainWindow)
+    const p = await s.createProject({
+      name: 'Archive Patch',
+      color: '#a855f7',
+      path: TEST_PROJECT_PATH
+    })
+    const a = await s.createTask({ projectId: p.id, title: 'AP task', status: 'todo' })
+    await s.refreshData()
+    await openTaskById(mainWindow, a.id)
+    await mainWindow.waitForTimeout(1_000)
+
+    await recordSends(mainWindow)
+    await s.archiveTask(a.id)
+    await mainWindow.waitForFunction(
+      () =>
+        (window as unknown as { __wp3Sent: { path: string }[] }).__wp3Sent.some(
+          (m) => m.path === 'task.loadBoardRows'
+        ),
+      undefined,
+      { timeout: 10_000 }
+    )
+    await mainWindow.waitForTimeout(500)
+    expect((await sent(mainWindow)).map((m) => m.path)).not.toContain('task.loadBoardData')
+  })
+
+  test('a tag rename reloads the tags alone, never the board', async ({ mainWindow }) => {
+    await resetApp(mainWindow)
+    const s = seed(mainWindow)
+    const p = await s.createProject({
+      name: 'Tag Patch',
+      color: '#f97316',
+      path: TEST_PROJECT_PATH
+    })
+    await s.createTask({ projectId: p.id, title: 'TP task', status: 'todo' })
+    const tag = await s.createTag({ name: 'before', projectId: p.id })
+    await s.refreshData()
+    await mainWindow.waitForTimeout(1_000)
+
+    await recordSends(mainWindow)
+    await s.updateTag({ id: tag.id, name: 'after' })
+    await mainWindow.waitForFunction(
+      () =>
+        (window as unknown as { __wp3Sent: { path: string }[] }).__wp3Sent.some(
+          (m) => m.path === 'tags.list'
+        ),
+      undefined,
+      { timeout: 10_000 }
+    )
+    await mainWindow.waitForTimeout(500)
+    expect((await sent(mainWindow)).map((m) => m.path)).not.toContain('task.loadBoardData')
+  })
+
+  test('focusing the window never reloads the board, even once it is stale', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(60_000) // waits out the board's 30s staleTime
+    await resetApp(mainWindow)
+    const s = seed(mainWindow)
+    await s.createProject({ name: 'Focus', color: '#14b8a6', path: TEST_PROJECT_PATH })
+    await s.refreshData()
+    // Past the board query's staleTime (30s): a focus refetch would fire now.
+    await mainWindow.waitForTimeout(31_000)
+    await recordSends(mainWindow)
+    await mainWindow.evaluate(() => {
+      window.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+    })
+    await mainWindow.waitForTimeout(1_500)
+    const paths = (await sent(mainWindow)).map((m) => m.path)
+    // The focus did reach react-query: other stale queries refetched on it.
+    expect(paths.length).toBeGreaterThan(0)
+    expect(paths).not.toContain('task.loadBoardData')
+  })
+
+  test('opening a task page never reloads the board, even once it is stale', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(60_000) // waits out the board's former 30s staleTime
+    await resetApp(mainWindow)
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Open', color: '#eab308', path: TEST_PROJECT_PATH })
+    const a = await s.createTask({ projectId: p.id, title: 'Open me', status: 'todo' })
+    await s.refreshData()
+    await mainWindow.waitForTimeout(31_000)
+    await recordSends(mainWindow)
+    // Its page reads every task (blockers picker, palette): from the board it holds.
+    await openTaskById(mainWindow, a.id)
+    await mainWindow.waitForTimeout(1_500)
+    expect((await sent(mainWindow)).map((m) => m.path)).not.toContain('task.loadBoardData')
+  })
 })

@@ -57,7 +57,7 @@ export function computerDisabledError(name?: string | null): ComputerStateError 
   const which = name ? `Computer "${name}"` : 'This computer'
   return new ComputerStateError(
     COMPUTER_DISABLED,
-    `${which} is disabled, so it takes no new work. Enable it in Settings → Connections, ` +
+    `${which} is disabled, so it takes no new work. Enable it on its hub’s Computers tab in Settings, ` +
       `or bind the task or project to another computer.`
   )
 }

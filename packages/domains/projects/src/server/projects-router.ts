@@ -107,7 +107,7 @@ export const projectsRouter = router({
     if (usable === 0) {
       throw new Error(
         'No computer is connected, so a project has no machine to live on. ' +
-          'Start the local computer (Settings → Connections) or enroll one, then try again.'
+          'Start the local computer (Settings → This machine) or enroll one, then try again.'
       )
     }
     // Owner = the signed-in user; null on a hub without login (no principal).

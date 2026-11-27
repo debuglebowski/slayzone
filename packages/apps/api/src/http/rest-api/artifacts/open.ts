@@ -12,7 +12,7 @@ export function registerOpenArtifactRoute(app: Express, deps: RestApiDeps): void
       return
     }
     const taskId = row.task_id
-    deps.notifyRenderer()
+    deps.notifyRenderer({ taskIds: [taskId] })
     deps.menu?.emit('open-artifact', { taskId, artifactId })
     deps.legacyBroadcast?.('app:open-artifact', { taskId, artifactId }) // slice 5: drop legacy send
     res.json({ ok: true })

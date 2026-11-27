@@ -116,7 +116,8 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
         }
       }
 
-      deps.notifyRenderer()
+      // The new row (placed by its board successor) and its parent's.
+      deps.notifyRenderer({ taskIds: [id, parent.id] })
       return {
         content: [
           {

@@ -3,7 +3,7 @@ import type { AddressInfo } from 'net'
 import { test, expect, clickSettings, resetApp, settingsView } from '../fixtures/electron'
 
 /**
- * Remote-hub URL /health probe from the Connections → Hubs "Add a hub" form.
+ * Remote-hub URL /health probe from the Settings → Hubs "Add a hub" form.
  *
  * The probe runs in the MAIN process (app:probe-server-health) against a real
  * HTTP server spun up by this spec — success answers GET /health with

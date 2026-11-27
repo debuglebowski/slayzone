@@ -187,7 +187,7 @@ async function writeContent(
       mutateRef,
       author
     })
-    deps.notifyRenderer()
+    deps.notifyRenderer({ taskIds: [artifact.task_id] })
     res.json({
       ok: true,
       data: { id: artifact.id, title: updated?.title ?? artifact.title, version }
@@ -347,7 +347,7 @@ export function registerArtifactsVersionsRoutes(app: Express, deps: RestApiDeps)
         artifactId: artifact.id,
         versionRef: ref
       })
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [artifact.task_id] })
       res.json({ ok: true, data: version })
     } catch (err) {
       sendError(res, err)

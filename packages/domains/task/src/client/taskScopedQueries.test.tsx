@@ -40,7 +40,8 @@ describe('taskScopedQueries', () => {
     expect(taskIdOfScopedQuery(key('task.getSubTasks', { parentId: 'p1' }))).toBe('p1')
     expect(taskIdOfScopedQuery(key('artifacts.getByTask', { taskId: 't2' }))).toBe('t2')
     expect(taskIdOfScopedQuery(key('artifacts.foldersGetByTask', { taskId: 't3' }))).toBe('t3')
-    expect(taskIdOfScopedQuery(key('task.get', { id: 't1' }))).toBeNull()
+    expect(taskIdOfScopedQuery(key('task.get', { id: 't1' }))).toBe('t1')
+    expect(taskIdOfScopedQuery(key('settings.get', { key: 'board' }))).toBeNull()
     expect(taskIdOfScopedQuery(key('settings.get', { key: 'x' }))).toBeNull()
   })
 
@@ -131,7 +132,7 @@ describe('useTaskScopedQueriesFreshOnTasksChanged', () => {
       }
     })
     const artifacts = observe(trpc.queryClient, key('artifacts.getByTask', { taskId: 't1' }))
-    const other = observe(trpc.queryClient, key('task.get', { id: 't1' }))
+    const other = observe(trpc.queryClient, key('settings.get', { key: 'other' }))
     render(<Listener />, { wrapper: trpc.wrapper })
     await settle()
     expect(emit).not.toBeNull()

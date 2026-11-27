@@ -1552,7 +1552,7 @@ export function composeServer(opts: {
         )
     },
     changed: (taskId) => {
-      notifyComputerBindingChanged()
+      notifyComputerBindingChanged({ taskId })
       taskEvents.emit('task:paths-changed', { taskId })
       agentSessionsEvents.emit('agent-sessions:changed', { taskId })
       notifyTasksChanged({ taskIds: [taskId] })
@@ -1720,9 +1720,12 @@ export function composeServer(opts: {
   })
 
   // --- Automation engine (constructed, never started — see header) -------------
-  const notifyAutomationsChanged = (): void => {
+  // A run finished: the automations UI reloads on `automations.onChanged`; the task
+  // it ran for got a timeline entry, so that task's row and tab refresh. Nothing else
+  // changed (the actions' own writes signal for themselves).
+  const notifyAutomationsChanged = (run: { taskId: string | null }): void => {
     automationsEvents.emit('changed')
-    notifyRenderer()
+    if (run.taskId) notifyTasksChanged({ taskIds: [run.taskId] })
   }
   const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
   // Single-owner engine (slice 9): this is the one process that sees EVERY task
@@ -3186,7 +3189,8 @@ export function composeServer(opts: {
             projectIds.map((id) => ({ id }))
           )
         ).map((r) => r.id),
-      onChanged: () => notifyTasksChanged(),
+      // Placements are project rows' data: clients reload their projects, not every task.
+      onChanged: () => notifyTasksChanged({ taskIds: [], parts: ['projects'] }),
       record: ({ level, event, message, payload }) =>
         recordDiagnosticEvent({ level, source: 'server', event, message, payload })
     })
@@ -3218,7 +3222,15 @@ export function composeServer(opts: {
         : placement.forProject(project.id)
     )
     // A changed computer choice changes which folder clients show.
-    setComputerBindingChangedListener(() => notifyTasksChanged())
+    setComputerBindingChangedListener((change) =>
+      notifyTasksChanged(
+        !change
+          ? undefined
+          : 'taskId' in change
+            ? { taskIds: [change.taskId] }
+            : { taskIds: [], parts: ['projects'] }
+      )
+    )
     // Every write of a project's folder (create, update, REST, CLI) lands on a
     // computer through the same per-computer sequence as connect.
     // Right after the app starts, the local computer is registered but not yet

@@ -1,6 +1,6 @@
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import type { TasksChange, TasksChangedEvent } from '@slayzone/task-contracts'
+import type { BoardPart, TasksChange, TasksChangedEvent } from '@slayzone/task-contracts'
 import { getNotifyEvents, type SettingsChange } from './notify-events'
 import { createNotifyCoalescer } from './notify-coalescer'
 
@@ -16,12 +16,35 @@ import { createNotifyCoalescer } from './notify-coalescer'
  * per subscriber (`createNotifyCoalescer`) so a storm of writes costs each
  * renderer one refetch per window, not one per write.
  */
+/**
+ * `onTasksChanged`'s input. `boardParts`: this subscriber reads `TasksChangedEvent.parts`
+ * (a tag/project/group list changed, reload just it). Without it (a client older than
+ * the field) an event that names a part arrives as unknown scope (`taskIds: null`), the
+ * full reload that client already does for it.
+ */
+export interface TasksChangedInput {
+  boardParts?: true
+}
+
+function parseTasksChangedInput(raw: unknown): TasksChangedInput | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object') throw new Error('notify.onTasksChanged: input must be an object')
+  return (raw as { boardParts?: unknown }).boardParts === true ? { boardParts: true } : {}
+}
+
 export const notifyRouter = router({
-  onTasksChanged: publicProcedure.subscription(() =>
+  onTasksChanged: publicProcedure.input(parseTasksChangedInput).subscription(({ input }) =>
     observable<TasksChangedEvent>((emit) => {
+      const readsParts = input?.boardParts === true
       const coalescer = createNotifyCoalescer<TasksChange>(
-        (taskIds) => emit.next({ taskIds }),
-        (change) => change?.taskIds
+        (taskIds, parts) => {
+          if (parts.length === 0) emit.next({ taskIds })
+          else if (readsParts) emit.next({ taskIds, parts: parts as BoardPart[] })
+          else emit.next({ taskIds: null })
+        },
+        (change) => change?.taskIds,
+        undefined,
+        (change) => change?.parts
       )
       const handler = (change?: TasksChange): void => coalescer.push(change)
       const ev = getNotifyEvents()

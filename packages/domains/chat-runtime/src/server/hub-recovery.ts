@@ -58,7 +58,7 @@ export class ChatHeldByAnotherComputerError extends Error {
     super(
       `${names.holder} holds this chat, but the hub assigns it to another computer, ${names.owner}. ` +
         `If ${names.holder} is ${names.owner} enrolled again, replace ${names.owner} with it ` +
-        '(Settings → Connections, or `slay hub computers replace`); otherwise reconnect ' +
+        '(the hub’s Computers tab in Settings, or `slay hub computers replace`); otherwise reconnect ' +
         `${names.owner}.`
     )
     this.name = 'ChatHeldByAnotherComputerError'
