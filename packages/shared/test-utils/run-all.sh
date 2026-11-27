@@ -1386,8 +1386,8 @@ run_harness packages/domains/task-terminals/src/client/chat/skill-filter.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-trigger-notification.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/history-summary.test.ts
-run_harness packages/domains/task-terminals/src/client/chat/activity-view.test.ts
-run_harness packages/domains/task-terminals/src/client/chat/files-changed/turn-changes.test.ts
+run_harness packages/domains/terminal/src/shared/chat-activity.test.ts
+run_harness packages/domains/terminal/src/shared/chat-turn-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/tool-cards/parsers.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/files-changed/session-file-changes.codex.test.ts
