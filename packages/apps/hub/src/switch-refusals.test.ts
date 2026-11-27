@@ -15,6 +15,7 @@
  *     --config packages/shared/test-utils/vitest.harness.config.ts \
  *     packages/apps/hub/src/switch-refusals.test.ts
  */
+import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
@@ -42,14 +43,15 @@ import { AutomationEngine } from '@slayzone/automations/server'
 import {
   createIntegrationOps,
   ensureIntegrationSchema,
-  setCredentialCipher,
+  setCredentialKeyRing,
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import { wireIntegrationPush } from './integrations-push.js'
 
 const h = await createTestHarness()
 await ensureIntegrationSchema(h.slayDb)
-setCredentialCipher(null)
+// The hub always holds a credential key (credentials-key.ts); tests use a random one.
+setCredentialKeyRing({ current: randomBytes(32) })
 
 // A persisted process row, as an earlier run would have left it (the hub keeps no
 // pid since v209: a run is its computer's).

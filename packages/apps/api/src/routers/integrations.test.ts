@@ -30,6 +30,7 @@
  *
  * Run with: vitest, packages/shared/test-utils/vitest.harness.config.ts (see run-all.sh).
  */
+import { randomBytes } from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { _mock } from '../../../../shared/test-utils/mock-linear-client.js'
@@ -37,7 +38,7 @@ import {
   createIntegrationOps,
   ensureIntegrationSchema,
   integrationsRouter,
-  setCredentialCipher,
+  setCredentialKeyRing,
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import type { LinearIssueSummary } from '@slayzone/integrations/shared'
@@ -63,7 +64,8 @@ const h = await createTestHarness()
 // No cipher injected → credentials use the plaintext fallback (allowed precisely
 // because no working cipher exists — cipher-availability is the gate now, no env
 // flag). Explicit for clarity / isolation from other suites in the computer.
-setCredentialCipher(null)
+// The hub always holds a credential key (credentials-key.ts); tests use a random one.
+setCredentialKeyRing({ current: randomBytes(32) })
 // Import auto-creates worktrees (issue #84) via task's injected adapters — wire the
 // in-process impls a composition root injects; unconfigured they reject silently.
 /**
@@ -96,10 +98,9 @@ configureTaskRuntimeAdapters({
   worktreePolicy: defaultWorktreePolicyAdapters
 })
 
-// Seed a readable credential via the plaintext fallback (the same row shape
-// `storeCredential` writes when no cipher is injected + plaintext is allowed).
-// `storeCredential` is not exported from the server barrel, so we write the row
-// directly rather than deep-import it.
+// Seed a readable credential as an older standalone hub left it (`plain:`), which
+// the store still reads (and re-encrypts). `storeCredential` is not exported from the
+// server barrel, so we write the row directly rather than deep-import it.
 const seedCredential = (ref: string, secret: string): void => {
   h.db
     .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')

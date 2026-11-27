@@ -111,7 +111,10 @@ const KEYS: Readonly<Record<string, SettingRule>> = {
   [LOCAL_COMPUTER_WORK_ROOTS_KEY]: { kind: 'internal', machineLocal: true },
   // When THIS database dropped its legacy chat tables: a record of this install's
   // schema, meaningless in any other.
-  [LEGACY_CHAT_TABLES_DROPPED_SETTING]: { kind: 'internal', machineLocal: true }
+  [LEGACY_CHAT_TABLES_DROPPED_SETTING]: { kind: 'internal', machineLocal: true },
+  // THIS database file may still hold plaintext integration-credential remnants until
+  // a VACUUM (integrations credentials.ts): a fact about one file, never shown.
+  'integration.credentials_compaction_pending': { kind: 'internal', machineLocal: true }
 }
 
 /** Key prefixes, checked in order when no exact key matches. */

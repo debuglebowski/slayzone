@@ -66,6 +66,13 @@ describe('settingScope', () => {
     expect(isMachineLocalSetting('chat.legacy_tables_dropped_at')).toBe(true)
   })
 
+  it('internal + this machine only: plaintext credentials await a compaction', () => {
+    // Says this database FILE may still hold plaintext remnants (integrations
+    // credentials.ts): meaningless in any other database, never shown to a client.
+    expect(settingScope('integration.credentials_compaction_pending')).toBe('internal')
+    expect(isMachineLocalSetting('integration.credentials_compaction_pending')).toBe(true)
+  })
+
   it('matches prefixes, not substrings', () => {
     expect(settingScope('my_ai_providers:p1')).toBe('user')
     expect(settingScope('x:integration:credential:abc')).toBe('user')

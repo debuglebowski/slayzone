@@ -1,5 +1,5 @@
-// Electron-free integrations surface. The credential store is seamed via
-// CredentialCipher (Electron injects safeStorage at boot); onTaskReachedTerminal
+// Electron-free integrations surface. The credential store encrypts with the hub's
+// own key (setCredentialKeyRing, resolved at hub boot); onTaskReachedTerminal
 // is imported from @slayzone/terminal/server (the no-op seam). Consumed by the
 // IPC handlers (../electron) and the tRPC integrations router.
 export { createIntegrationOps, ensureIntegrationSchema } from './handlers-store'
@@ -25,5 +25,12 @@ export {
 } from './sync'
 export { getAdapter, getRegisteredProviders, registerAdapter } from './adapters'
 export type { ProviderAdapter, NormalizedIssue, ExternalGroup, ExternalScope } from './adapters'
-export { setCredentialCipher } from './credentials'
-export type { CredentialCipher } from './credentials'
+export {
+  CREDENTIAL_RECONNECT_REQUIRED,
+  migrateStoredCredentials,
+  RECONNECT_AUTH_ERROR,
+  setCredentialKeyRing,
+  setLegacyCredentialDecryptor
+} from './credentials'
+export type { CredentialMigrationReport, LegacyCredentialDecryptor } from './credentials'
+export type { CredentialKeyRing } from './hub-cipher'

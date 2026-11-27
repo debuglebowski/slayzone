@@ -623,3 +623,52 @@ test('upgrade: a loopback hub published with its own secret in env keeps every s
   }
   expect(snapshot(statePath).mtime, 'state file untouched by the refusal').toBe(stateBefore.mtime)
 })
+
+test('integration credentials: a plaintext token an older hub stored is encrypted, and no copy survives in any file', async () => {
+  const root = newRoot()
+  const secret = randomBytes(32).toString('hex')
+  const token = `lin_api_${randomBytes(18).toString('hex')}`
+  const ref = 'secrets-at-rest-ref'
+  // First boot creates the database; then the row an older standalone hub wrote.
+  const first = spawnHub(root, reachable(secret))
+  let dbPath: string
+  try {
+    await bootAndGetPort(first)
+    dbPath = first.logs.find((l) => l.includes(' db='))!.match(/ db=([^)\s]+)/)![1]
+  } finally {
+    await first.stop()
+  }
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+  const seed = new Database(dbPath)
+  seed
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run(`integration:credential:${ref}`, `plain:${token}`)
+  seed.close()
+
+  const hub = spawnHub(root, reachable(secret))
+  try {
+    await bootAndGetPort(hub)
+    await poll(
+      async () => {
+        const db = new Database(dbPath, { readonly: true })
+        try {
+          const row = db
+            .prepare('SELECT value FROM settings WHERE key = ?')
+            .get(`integration:credential:${ref}`) as { value: string }
+          const pending = db
+            .prepare('SELECT 1 FROM settings WHERE key = ?')
+            .get('integration.credentials_compaction_pending')
+          return row.value.startsWith('hub1:') && !pending ? true : null
+        } finally {
+          db.close()
+        }
+      },
+      20_000,
+      `credential re-encrypted and file compacted (logs:\n${hub.logs.join('\n')})`
+    )
+  } finally {
+    await hub.stop()
+  }
+  assertNotOnDisk(root, { 'the integration token': forms(token) })
+  assertNotLogged(root, hub, { 'the integration token': forms(token) })
+})

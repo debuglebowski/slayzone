@@ -1,16 +1,22 @@
 /**
- * Credential storage fallback contract tests. Plaintext is gated on CIPHER
- * AVAILABILITY (a working OS keychain), not the former
- * SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS env flag: encrypt when a cipher works,
- * fall back to plaintext when none exists (headless standalone hub).
+ * Credential store contract. The hub writes only `hub1:` (its own key); it reads all
+ * three formats it may find — `hub1:`, `plain:` (an older standalone hub, or desktop
+ * Linux without a keyring) and bare-base64 Electron safeStorage (an older desktop
+ * hub) — and re-encrypts the old two under its key. A row it cannot decrypt is KEPT
+ * and reported as reconnect-required, never deleted.
  */
-import { afterAll, describe, expect, test } from 'vitest'
+import { randomBytes } from 'node:crypto'
+import { afterEach, describe, expect, test } from 'vitest'
 import {
-  type CredentialCipher,
+  CREDENTIAL_RECONNECT_REQUIRED,
+  credentialNeedsReconnect,
+  type LegacyCredentialDecryptor,
   readCredential,
-  setCredentialCipher,
+  setCredentialKeyRing,
+  setLegacyCredentialDecryptor,
   storeCredential
 } from './credentials.js'
+import { encryptHubCredential } from './hub-cipher.js'
 
 class FakeDb {
   private store = new Map<string, string>()
@@ -64,81 +70,162 @@ class FakeDb {
   raw(key: string): string | undefined {
     return this.store.get(key)
   }
-}
 
-const db = new FakeDb()
-
-// A fake OS keychain cipher (tagged "encryption" — enough to prove the encrypt
-// path is taken and round-trips). `available` toggles isEncryptionAvailable;
-// `key` is the current key version — ciphertext under an older key decrypts
-// with `shouldReEncrypt: true`, like safeStorage after a key rotation.
-function fakeCipher(available: boolean, key = 'k1'): CredentialCipher {
-  return {
-    isEncryptionAvailable: async () => available,
-    encryptString: async (s) => Buffer.from(`enc:${key}:${s}`, 'utf8'),
-    decryptString: async (b) => {
-      const [, k, ...rest] = b.toString('utf8').split(':')
-      return { result: rest.join(':'), shouldReEncrypt: k !== key }
-    }
+  seed(key: string, value: string): void {
+    this.store.set(key, value)
   }
 }
 
-const prevNodeEnv = process.env.NODE_ENV
+const db = new FakeDb()
+const k1 = randomBytes(32)
+const k2 = randomBytes(32)
+const settingKey = (ref: string) => `integration:credential:${ref}`
+const newRef = () => `cred-${crypto.randomUUID()}`
 
-describe('credentials fallback (cipher-availability gated)', () => {
-  afterAll(() => {
-    setCredentialCipher(null)
-    if (prevNodeEnv === undefined) delete process.env.NODE_ENV
-    else process.env.NODE_ENV = prevNodeEnv
+// Electron safeStorage stand-in: bare base64 of `ss:<secret>`.
+const legacyValue = (secret: string) => Buffer.from(`ss:${secret}`).toString('base64')
+const legacy: LegacyCredentialDecryptor = {
+  decrypt: async (encrypted) => {
+    const text = encrypted.toString('utf8')
+    if (!text.startsWith('ss:')) throw new Error('safeStorage: decrypt failed')
+    return { result: text.slice(3), shouldReEncrypt: false }
+  }
+}
+
+afterEach(() => {
+  setCredentialKeyRing(null)
+  setLegacyCredentialDecryptor(null)
+})
+
+async function errorOf(p: Promise<unknown>): Promise<unknown> {
+  try {
+    await p
+  } catch (e) {
+    return e
+  }
+  throw new Error('expected a rejection')
+}
+
+describe('credential store', () => {
+  test('writes hub1: under the hub key and reads it back', async () => {
+    setCredentialKeyRing({ current: k1 })
+    const ref = newRef()
+    await storeCredential(db as never, ref, 'lin_api_secret')
+    const stored = db.raw(settingKey(ref))!
+    expect(stored.startsWith('hub1:')).toBe(true)
+    expect(stored).not.toContain('lin_api_secret')
+    expect(await readCredential(db as never, ref)).toBe('lin_api_secret')
   })
 
-  test('encrypts when a working cipher is available', async () => {
-    setCredentialCipher(fakeCipher(true))
-    const ref = `cred-${crypto.randomUUID()}`
-    await storeCredential(db as never, ref, 'secret-enc')
-    expect(await readCredential(db as never, ref)).toBe('secret-enc')
+  test('never writes plaintext: with no key, storing refuses and writes nothing', async () => {
+    const ref = newRef()
+    await expect(storeCredential(db as never, ref, 'secret')).rejects.toThrow(/key/)
+    expect(db.raw(settingKey(ref))).toBeUndefined()
   })
 
-  test('falls back to plaintext when NO cipher is wired (headless hub)', async () => {
-    setCredentialCipher(null)
-    const ref = `cred-${crypto.randomUUID()}`
-    await storeCredential(db as never, ref, 'secret-plain')
-    expect(await readCredential(db as never, ref)).toBe('secret-plain')
+  test('a plain: row is still read once a key exists, and migrated to hub1:', async () => {
+    const ref = newRef()
+    db.seed(settingKey(ref), 'plain:ghp_old')
+    setCredentialKeyRing({ current: k1 })
+    expect(await readCredential(db as never, ref)).toBe('ghp_old')
+    expect(db.raw(settingKey(ref))!.startsWith('hub1:')).toBe(true)
+    expect(await readCredential(db as never, ref)).toBe('ghp_old')
   })
 
-  test('falls back to plaintext when cipher reports unavailable', async () => {
-    setCredentialCipher(fakeCipher(false))
-    const ref = `cred-${crypto.randomUUID()}`
-    await storeCredential(db as never, ref, 'secret-unavail')
-    expect(await readCredential(db as never, ref)).toBe('secret-unavail')
+  test('a plain: row is read (not migrated) on a hub without a key', async () => {
+    const ref = newRef()
+    db.seed(settingKey(ref), 'plain:ghp_old')
+    expect(await readCredential(db as never, ref)).toBe('ghp_old')
+    expect(db.raw(settingKey(ref))).toBe('plain:ghp_old')
   })
 
-  test('reading a plaintext cred is blocked once a working cipher exists', async () => {
-    setCredentialCipher(null)
-    const ref = `cred-${crypto.randomUUID()}`
-    await storeCredential(db as never, ref, 'secret-later-blocked')
-    // A working cipher now exists → the stored plaintext is no longer trusted.
-    setCredentialCipher(fakeCipher(true))
-    await expect(readCredential(db as never, ref)).rejects.toThrow()
+  test('a legacy safeStorage row decrypts through the legacy decryptor and migrates', async () => {
+    const ref = newRef()
+    db.seed(settingKey(ref), legacyValue('lin_legacy'))
+    setCredentialKeyRing({ current: k1 })
+    setLegacyCredentialDecryptor(legacy)
+    expect(await readCredential(db as never, ref)).toBe('lin_legacy')
+    expect(db.raw(settingKey(ref))!.startsWith('hub1:')).toBe(true)
+    // Migrated: no longer needs the legacy decryptor.
+    setLegacyCredentialDecryptor(null)
+    expect(await readCredential(db as never, ref)).toBe('lin_legacy')
   })
 
-  test('NODE_ENV=test does not unlock a plaintext cred once a working cipher exists', async () => {
-    setCredentialCipher(null)
-    const ref = `cred-${crypto.randomUUID()}`
-    await storeCredential(db as never, ref, 'secret-test-mode')
-    setCredentialCipher(fakeCipher(true))
-    process.env.NODE_ENV = 'test'
-    await expect(readCredential(db as never, ref)).rejects.toThrow()
+  test('a legacy row with no decryptor: reconnect required, row KEPT', async () => {
+    const ref = newRef()
+    const value = legacyValue('lin_legacy')
+    db.seed(settingKey(ref), value)
+    setCredentialKeyRing({ current: k1 })
+    const err = await errorOf(readCredential(db as never, ref))
+    expect(err).toMatchObject({ code: CREDENTIAL_RECONNECT_REQUIRED })
+    expect(db.raw(settingKey(ref))).toBe(value)
+    expect(credentialNeedsReconnect(value)).toBe(true)
   })
 
-  test('re-encrypts + persists when the keychain key rotated', async () => {
-    setCredentialCipher(fakeCipher(true, 'k1'))
-    const ref = `cred-${crypto.randomUUID()}`
-    await storeCredential(db as never, ref, 'secret:rot')
-    setCredentialCipher(fakeCipher(true, 'k2'))
-    expect(await readCredential(db as never, ref)).toBe('secret:rot')
-    const stored = Buffer.from(db.raw(`integration:credential:${ref}`)!, 'base64').toString()
-    expect(stored).toBe('enc:k2:secret:rot')
-    expect(await readCredential(db as never, ref)).toBe('secret:rot')
+  test('a hub1: row under a key this hub does not hold: reconnect required, row kept', async () => {
+    const ref = newRef()
+    const value = encryptHubCredential({ current: k2 }, settingKey(ref), 'x')
+    db.seed(settingKey(ref), value)
+    setCredentialKeyRing({ current: k1 })
+    const err = await errorOf(readCredential(db as never, ref))
+    expect(err).toMatchObject({ code: CREDENTIAL_RECONNECT_REQUIRED })
+    expect(db.raw(settingKey(ref))).toBe(value)
+    expect(credentialNeedsReconnect(value)).toBe(true)
+  })
+
+  test('a previous key still reads and re-encrypts under the current key', async () => {
+    const ref = newRef()
+    setCredentialKeyRing({ current: k1 })
+    await storeCredential(db as never, ref, 'rotate-me')
+    const before = db.raw(settingKey(ref))!
+    setCredentialKeyRing({ current: k2, previous: [k1] })
+    expect(await readCredential(db as never, ref)).toBe('rotate-me')
+    const after = db.raw(settingKey(ref))!
+    expect(after).not.toBe(before)
+    setCredentialKeyRing({ current: k2 })
+    expect(await readCredential(db as never, ref)).toBe('rotate-me')
+  })
+
+  test('re-encrypt is compare-and-swap: a concurrent store is never overwritten', async () => {
+    const ref = newRef()
+    db.seed(settingKey(ref), 'plain:old')
+    setCredentialKeyRing({ current: k1 })
+    // A store lands between the read's SELECT and its write-back.
+    const slowLegacy = db.prepare.bind(db)
+    let raced = false
+    ;(db as unknown as { prepare: typeof slowLegacy }).prepare = (sql: string) => {
+      const stmt = slowLegacy(sql)
+      if (!raced && sql.startsWith('UPDATE settings SET value')) {
+        raced = true
+        db.seed(settingKey(ref), 'plain:new-from-store')
+      }
+      return stmt
+    }
+    try {
+      expect(await readCredential(db as never, ref)).toBe('old')
+    } finally {
+      ;(db as unknown as { prepare: typeof slowLegacy }).prepare = slowLegacy
+    }
+    expect(db.raw(settingKey(ref))).toBe('plain:new-from-store')
+  })
+
+  test('a corrupt hub1: row fails loudly but is kept', async () => {
+    const ref = newRef()
+    setCredentialKeyRing({ current: k1 })
+    await storeCredential(db as never, ref, 'x')
+    const value = db.raw(settingKey(ref))!
+    const broken = `${value.slice(0, -4)}AAAA`
+    db.seed(settingKey(ref), broken)
+    const err = await errorOf(readCredential(db as never, ref))
+    expect(err).not.toMatchObject({ code: CREDENTIAL_RECONNECT_REQUIRED })
+    expect(db.raw(settingKey(ref))).toBe(broken)
+  })
+
+  test('credentialNeedsReconnect: readable formats are not flagged', () => {
+    setCredentialKeyRing({ current: k1 })
+    setLegacyCredentialDecryptor(legacy)
+    expect(credentialNeedsReconnect('plain:x')).toBe(false)
+    expect(credentialNeedsReconnect(legacyValue('x'))).toBe(false)
+    expect(credentialNeedsReconnect(encryptHubCredential({ current: k1 }, 'k', 'x'))).toBe(false)
   })
 })

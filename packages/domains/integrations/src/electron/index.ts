@@ -1,1 +1,1 @@
-export { getSafeStorageCipher } from './credentials-cipher'
+export { getSafeStorageCipher, type SafeStorageCipher } from './credentials-cipher'

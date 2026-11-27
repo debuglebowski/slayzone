@@ -46,6 +46,7 @@ import { type ComputerTaskDataRelay, createComputerTaskDataRelay } from './compu
 import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
 import { createItemFaultService } from './item-faults'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
+import { resolveCredentialKeyRing } from './credentials-key'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import {
@@ -271,7 +272,9 @@ import {
   createIntegrationOps,
   ensureIntegrationSchema,
   resetSyncFlags,
-  setCredentialCipher,
+  migrateStoredCredentials,
+  setCredentialKeyRing,
+  setLegacyCredentialDecryptor,
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
@@ -1617,21 +1620,45 @@ export function composeServer(opts: {
   // Pull-sync. v0.35.0's host started both pollers at boot; the slice-9 move to the hub
   // took push-on-edit and dropped these, so Linear/GitHub/Jira stopped pulling.
   startIntegrationPollers({ db, notifyTasksChanged: notifyRenderer })
-  // Credential encryption needs Electron safeStorage, absent in this
-  // ELECTRON_RUN_AS_NODE process. Supervised: forward encrypt/decrypt to the
-  // host's safeStorage over the capability bridge (base64 on the wire).
-  // Standalone (no host): leave the cipher unset — the plaintext fallback
-  // applies, gated purely on cipher availability (no env flag; see
-  // integrations/server/credentials.ts allowPlaintextFallback).
+  // Integration credentials are encrypted by THIS process under its own key (D1,
+  // ./credentials-key.ts): the desktop app's per-install key, an operator's
+  // SLAYZONE_HUB_CREDENTIALS_SECRET, or a derivation of a real auth secret. The
+  // bridge to Electron safeStorage is now decrypt-only, for rows an older desktop
+  // hub wrote (D4). The boot pass re-encrypts every older row (plaintext,
+  // safeStorage, a previous key) — including rows a restored backup brought back.
+  setCredentialKeyRing(
+    resolveCredentialKeyRing({
+      env: process.env,
+      hubAuthSecret,
+      devAuthSecret: DEV_HUB_AUTH_SECRET
+    })
+  )
   if (bridge) {
     const hostCipher = bridge.appDeps.credentialCipher
-    setCredentialCipher({
-      isEncryptionAvailable: () => hostCipher.isEncryptionAvailable(),
-      encryptString: async (secret) =>
-        Buffer.from(await hostCipher.encryptStringToB64(secret), 'base64'),
-      decryptString: (encrypted) => hostCipher.decryptStringFromB64(encrypted.toString('base64'))
+    setLegacyCredentialDecryptor({
+      decrypt: (encrypted) => hostCipher.decryptStringFromB64(encrypted.toString('base64'))
     })
+  } else {
+    setLegacyCredentialDecryptor(null)
   }
+  bootBestEffort('credential-migration', async () => {
+    const report = await migrateStoredCredentials(db, {
+      ledger: hubFaults,
+      // Re-encrypting a `plain:` row leaves its old bytes in the file until a VACUUM
+      // rewrites every page and the WAL is truncated (content-erasure compaction.ts).
+      compact: async () => {
+        await db.exec('PRAGMA secure_delete=ON')
+        await db.exec('VACUUM')
+        const checkpoint = await db.all<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
+        if (checkpoint.some((row) => row.busy)) throw new Error('WAL checkpoint is busy')
+      }
+    })
+    if (report.migrated || report.reconnect || report.failed) {
+      console.log(
+        `[hub] credential migration: ${report.migrated} re-encrypted, ${report.reconnect} need reconnect, ${report.failed} failed`
+      )
+    }
+  })
 
   // --- Processes ---------------------------------------------------------------
   // This process owns the process-manager runtime: the renderer drives process
@@ -1753,9 +1780,8 @@ export function composeServer(opts: {
       appFocusRenderer: noop,
       // No window to raise on a headless host.
       appRaiseMainWindow: noop,
-      // No Electron safeStorage on a headless host — report unavailable so the
-      // credential store uses its plaintext fallback (gated on availability). The encrypt/
-      // decrypt stubs are never reached because the cipher stays unset standalone.
+      // No Electron safeStorage on a headless host. The hub encrypts credentials with
+      // its own key and wires no legacy decryptor here, so none of these is reached.
       credentialCipher: {
         isEncryptionAvailable: async () => false,
         encryptStringToB64: stub('credentialCipher.encryptStringToB64'),

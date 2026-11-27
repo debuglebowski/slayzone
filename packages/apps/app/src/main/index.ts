@@ -618,7 +618,8 @@ import {
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { setTelemetryEvents } from '@slayzone/telemetry/server'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
-import { resetSyncFlags, setCredentialCipher } from '@slayzone/integrations/server'
+import { loadHubCredentialsSecret } from './hub-credentials-key'
+import { resetSyncFlags } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
 import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handlers'
@@ -2529,9 +2530,9 @@ app
     // in the SIDE-CAR, which owns the pty + chat runtime. The host's copies were
     // constructed against the shared DB and read by nothing.
     logBoot('ai-config tRPC-only')
-    // Inject the Electron safeStorage cipher into the electron-free credential store.
-    setCredentialCipher(getSafeStorageCipher())
-    // Same cipher backs the per-hub bearer-token store (multi-hub auth).
+    // The Electron safeStorage cipher backs the per-hub bearer-token store (multi-hub
+    // auth). Integration credentials are not stored here: the hub encrypts them with
+    // its own key (hub-credentials-key.ts hands it that key).
     setHubTokenCipher(getSafeStorageCipher())
     // Integration schema + ops live in the side-car (composition.ts), which is
     // where the sync pollers and push handlers now run too.
@@ -2668,9 +2669,11 @@ app
               appRaiseMainWindow: () => {
                 presentWindow(mainWindow ?? BrowserWindow.getAllWindows()[0])
               },
-              // Credential cipher — Electron safeStorage. The side-car runs as
-              // ELECTRON_RUN_AS_NODE (no safeStorage), so its credential store
-              // forwards encrypt/decrypt here over the bridge. Base64 on the wire.
+              // Credential cipher — Electron safeStorage. The hub encrypts integration
+              // credentials with its own key now; it uses ONLY `decryptStringFromB64`,
+              // to read rows an older desktop hub wrote with safeStorage (kept
+              // permanently: old backups live for years). `isEncryptionAvailable` and
+              // `encryptStringToB64` have no hub caller left. Base64 on the wire.
               credentialCipher: {
                 isEncryptionAvailable: async () =>
                   (await getSafeStorageCipher()?.isEncryptionAvailable()) ?? false,
@@ -2745,8 +2748,20 @@ app
     if (!isRemoteMode)
       setImmediate(() => {
         logBoot('sidecar server supervisor import dispatched')
-        Promise.all([import('./sidecar-server-supervisor'), desktopBridgeAddressPromise])
-          .then(([{ startSidecarServer }, desktopBridge]) => {
+        Promise.all([
+          import('./sidecar-server-supervisor'),
+          desktopBridgeAddressPromise,
+          // The hub's integration-credentials key: per install, safeStorage-wrapped on
+          // disk (hub-credentials-key.ts). Null only when an existing key cannot be
+          // unwrapped — the hub then asks to reconnect instead of losing anything.
+          loadHubCredentialsSecret(getSupervisedRoot('hub'), getSafeStorageCipher()).catch(
+            (err) => {
+              console.error('[hub-credentials-key] failed:', err)
+              return null
+            }
+          )
+        ])
+          .then(([{ startSidecarServer }, desktopBridge, hubCredentialsSecret]) => {
             const scriptPath = !app.isPackaged
               ? join(app.getAppPath(), '../hub/dist/bin.cjs')
               : join(process.resourcesPath, 'hub', 'bin.cjs')
@@ -2811,6 +2826,9 @@ app
                 // desktop-bridge-server.ts's `verifyClient` gate) — secret-scoped
                 // in ENV_MANIFEST so it never reaches a spawned user terminal.
                 SLAYZONE_DESKTOP_BRIDGE_TOKEN: desktopBridge.token,
+                // The key the hub encrypts integration credentials under — secret-scoped
+                // in ENV_MANIFEST, never inherited by a terminal. Unset = no key.
+                SLAYZONE_HUB_CREDENTIALS_SECRET: hubCredentialsSecret ?? undefined,
                 // Packaged resolution: only bin.js is copied to Resources/hub,
                 // so createRequire's walk-up never finds node_modules. Point the
                 // resolver at the unpacked natives (better-sqlite3 and its

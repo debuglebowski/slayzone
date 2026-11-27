@@ -7,14 +7,16 @@
  *
  * Driven through the ops' GitHub test mocks — no network.
  */
+import { randomBytes } from 'node:crypto'
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { createIntegrationOps, ensureIntegrationSchema } from './handlers-store.js'
-import { setCredentialCipher } from './credentials.js'
+import { setCredentialKeyRing } from './credentials.js'
 
 const h = await createTestHarness()
 await ensureIntegrationSchema(h.slayDb)
-setCredentialCipher(null)
+// The hub always holds a credential key (credentials-key.ts); tests use a random one.
+setCredentialKeyRing({ current: randomBytes(32) })
 const ops = createIntegrationOps(h.slayDb)
 
 type SyncMode = 'one_way' | 'two_way'

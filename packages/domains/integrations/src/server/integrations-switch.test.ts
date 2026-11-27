@@ -5,16 +5,18 @@
  * be made with it. One `integration.connect` audit line per refusal. Defaults (switch
  * unset) are credentials.test.ts and the integrations router test.
  */
+import { randomBytes } from 'node:crypto'
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import { createIntegrationOps, ensureIntegrationSchema } from './handlers-store.js'
-import { readCredential, setCredentialCipher, storeCredential } from './credentials.js'
+import { readCredential, setCredentialKeyRing, storeCredential } from './credentials.js'
 
 const h = await createTestHarness()
 await ensureIntegrationSchema(h.slayDb)
-setCredentialCipher(null)
+// The hub always holds a credential key (credentials-key.ts); tests use a random one.
+setCredentialKeyRing({ current: randomBytes(32) })
 const ops = createIntegrationOps(h.slayDb)
 
 const lines: Array<{ event: string; outcome: string; detail: Record<string, unknown> }> = []
