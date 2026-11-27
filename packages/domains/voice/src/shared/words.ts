@@ -43,3 +43,30 @@ export function stripTrailingPhrase(text: string, phrase: string): string | null
     .replace(/[\s,;:\-–—]+$/u, '')
     .trim()
 }
+
+/** Sounds a transcriber writes for a cough, a breath or a hesitation: not words. */
+const NON_WORDS = new Set([
+  'uh',
+  'uhh',
+  'um',
+  'umm',
+  'hm',
+  'hmm',
+  'mm',
+  'mhm',
+  'mmm',
+  'ah',
+  'er',
+  'erm',
+  'huh',
+  'eh',
+  // hyphenated forms normalize to one word
+  'mmhmm',
+  'uhhuh',
+  'uhuh'
+])
+
+/** At least one real word in `text` (fillers like "uh", "hmm" do not count). */
+export function hasWords(text: string): boolean {
+  return phraseWords(text).some((w) => !NON_WORDS.has(w))
+}

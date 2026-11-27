@@ -16,6 +16,7 @@ function harness() {
   const latencies: TurnLatency[] = []
   let current: { text: string; resolve: (done: boolean) => void } | null = null
   let tones = 0
+  const ducks: boolean[] = []
   const tts: TtsProvider = {
     id: 'fake',
     synthesize: (text, signal) =>
@@ -39,6 +40,9 @@ function harness() {
     },
     tone: () => {
       tones++
+    },
+    duck: (on) => {
+      ducks.push(on)
     }
   }
   const loop = new VoiceLoop({
@@ -64,6 +68,7 @@ function harness() {
     played,
     latencies,
     tones: () => tones,
+    ducks,
     at: (t: number) => {
       now = t
     },
@@ -168,9 +173,14 @@ describe('VoiceLoop', () => {
     await h.finishPlaying()
     expect(h.playing()).toBe('Second point.')
 
-    // The user talks over sentence 2; the agent's turn keeps streaming.
+    // The user talks over sentence 2: ducked at once, stopped once it is words.
     h.loop.speechStarted()
+    expect(h.ducks).toEqual([true])
+    expect(h.playing()).toBe('Second point.')
+    h.loop.speechProbe('Stop')
     expect(h.playing()).toBeNull()
+    expect(h.ducks).toEqual([true, false])
+    // The agent's turn keeps streaming; none of it is spoken.
     for (const e of reply('m2', { turnId: 't1', messageId: 'v1' }, ['More text after. ']))
       h.loop.agentEvent(e)
     h.loop.agentEvent(result('t1', 'v1'))
@@ -185,6 +195,43 @@ describe('VoiceLoop', () => {
     expect(h.sent[1].text).toBe(
       `${VOICE_TAG}\n[interrupted during sentence 2: "Second point."; later sentences were not heard]\nStop, just the summary.`
     )
+  })
+
+  it('a cough during a reply only ducks it; the reply plays on', async () => {
+    const h = harness()
+    await h.say('Explain the diff over', 1000)
+    for (const e of reply('m1', { turnId: 't1', messageId: 'v1' }, ['First point. Second point. ']))
+      h.loop.agentEvent(e)
+    await flush()
+    expect(h.playing()).toBe('First point.')
+
+    h.loop.speechStarted()
+    expect(h.ducks).toEqual([true])
+    h.loop.speechProbe('') // too short for the probe? nothing decided
+    h.loop.speechEnded(2000)
+    h.loop.transcript('hmm', 2100) // a cough / "hmm": not words
+    expect(h.ducks).toEqual([true, false])
+    expect(h.playing()).toBe('First point.')
+    await h.finishPlaying()
+    expect(h.played).toEqual(['First point.', 'Second point.'])
+    await h.finishPlaying()
+
+    // …and no interruption note on the next turn.
+    await h.say('thanks over', 4000)
+    expect(h.sent[1].text).toBe(`${VOICE_TAG}\nthanks`)
+  })
+
+  it('a word without a probe (short speech) still interrupts via its transcript', async () => {
+    const h = harness()
+    await h.say('Explain the diff over', 1000)
+    for (const e of reply('m1', { turnId: 't1', messageId: 'v1' }, ['First point. Second point. ']))
+      h.loop.agentEvent(e)
+    await flush()
+    h.loop.speechStarted()
+    h.loop.speechEnded(2000)
+    h.loop.transcript('Wait.', 2100)
+    expect(h.playing()).toBeNull()
+    expect(h.played).toEqual(['First point.'])
   })
 
   it('holds an unprompted message while the user is mid-turn, then speaks it', async () => {

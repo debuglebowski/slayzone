@@ -1,4 +1,4 @@
-import { stripTrailingPhrase } from './words'
+import { hasWords, stripTrailingPhrase } from './words'
 
 export interface TurnDetectorConfig {
   /** Spoken as the last word(s) of an utterance, it ends the turn (radio "over"). */
@@ -78,7 +78,9 @@ export class TurnDetector {
     if (this.pending > 0) this.pending--
     this.lastTranscriptAt = at
     const t = text.trim()
-    if (t) this.segments.push(t)
+    // A cough, breath or "hmm" is not part of the turn (it would also start the
+    // forgotten-keyword timeout and get sent on its own).
+    if (hasWords(t)) this.segments.push(t)
   }
 
   /** The user is in the middle of a turn: speaking, being transcribed, or has unsent words. */

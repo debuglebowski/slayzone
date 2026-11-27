@@ -6,6 +6,12 @@ import type { AudioSink, PcmAudio } from '../shared'
  */
 export class WebAudioSink implements AudioSink {
   private readonly ctx = new AudioContext({ latencyHint: 'interactive' })
+  /** Speech goes through this: ducked while a sound may be the user cutting in. */
+  private readonly volume = this.ctx.createGain()
+
+  constructor() {
+    this.volume.connect(this.ctx.destination)
+  }
   private current: { source: AudioBufferSourceNode; resolve: (done: boolean) => void } | null = null
 
   play(audio: PcmAudio, onStart: () => void): Promise<boolean> {
@@ -15,7 +21,7 @@ export class WebAudioSink implements AudioSink {
       buffer.copyToChannel(new Float32Array(audio.pcm), 0)
       const source = this.ctx.createBufferSource()
       source.buffer = buffer
-      source.connect(this.ctx.destination)
+      source.connect(this.volume)
       const entry = { source, resolve }
       this.current = entry
       source.onended = () => {
@@ -44,6 +50,12 @@ export class WebAudioSink implements AudioSink {
       // never started
     }
     entry.resolve(false)
+  }
+
+  duck(on: boolean): void {
+    const t = this.ctx.currentTime
+    this.volume.gain.cancelScheduledValues(t)
+    this.volume.gain.setTargetAtTime(on ? 0.2 : 1, t, on ? 0.02 : 0.08)
   }
 
   tone(): void {

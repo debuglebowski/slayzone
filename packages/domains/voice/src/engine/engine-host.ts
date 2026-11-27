@@ -171,6 +171,7 @@ function openSession(
         const vad = new SileroVad(modelsDir)
         input = new SpeechInput(vad, m.stt, voiceNow, {
           speechStart: (at) => send({ type: 'speech-start', at }),
+          speechProbe: (text, at) => send({ type: 'speech-probe', text, at }),
           speechEnd: (segmentId, at) => send({ type: 'speech-end', segmentId, at }),
           transcript: (segmentId, text, at, sttMs) =>
             send({ type: 'transcript', segmentId, text, at, sttMs }),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stripTrailingPhrase } from './words'
+import { hasWords, stripTrailingPhrase } from './words'
 import { TurnDetector, DEFAULT_TURN_DETECTOR_CONFIG } from './turn-detector'
 
 describe('stripTrailingPhrase', () => {
@@ -98,6 +98,14 @@ describe('TurnDetector', () => {
     expect(d.isMidTurn()).toBe(false)
   })
 
+  it('a cough or "hmm" never joins the turn or starts the fallback', () => {
+    const d = detector()
+    say(d, 'hmm', 1000)
+    say(d, 'Uh.', 2000)
+    expect(d.isMidTurn()).toBe(false)
+    expect(d.tick(20_000).kind).toBe('none')
+  })
+
   it('uses a configured keyword', () => {
     const d = new TurnDetector({ ...DEFAULT_TURN_DETECTOR_CONFIG, endKeyword: 'go ahead' })
     say(d, 'ship it, over', 1000)
@@ -105,5 +113,15 @@ describe('TurnDetector', () => {
     say(d, 'go ahead', 2000)
     const end = d.tick(2400)
     expect(end.kind === 'end' && end.text).toBe('ship it, over')
+  })
+})
+
+describe('hasWords', () => {
+  it('fillers and empty transcripts are not words', () => {
+    for (const t of ['', '  ', 'hmm', 'Uh.', 'um, uh', 'Mm-hmm', 'mhm'])
+      expect(hasWords(t)).toBe(false)
+  })
+  it('anything else is', () => {
+    for (const t of ['Stop', 'wait', 'no', 'uh, stop']) expect(hasWords(t)).toBe(true)
   })
 })

@@ -131,6 +131,7 @@ export class VoiceSession {
         else if (++ticks % 100 === 1) note(`tick ${ticks} (mic audio reaching the engine)`)
         if (m.type === 'tick') loop.tick()
         else if (m.type === 'speech-start') loop.speechStarted()
+        else if (m.type === 'speech-probe') loop.speechProbe(m.text)
         else if (m.type === 'speech-end') loop.speechEnded(m.at)
         else if (m.type === 'transcript') loop.transcript(m.text, m.at)
         else if (m.type === 'error') this.update({ error: m.message })

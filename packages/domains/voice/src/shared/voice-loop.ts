@@ -11,6 +11,7 @@ import {
   TurnDetector,
   type TurnDetectorConfig
 } from './turn-detector'
+import { hasWords } from './words'
 
 /**
  * Sent once, with the first voice turn of a conversation-mode session: how to
@@ -86,9 +87,11 @@ interface OpenLatency {
  *   speech segments → transcripts → turn buffer → keyword + silence → send
  *   agent reply stream → no-speak gate → sentences → TTS → playback
  *
- * Barge-in: speech while reply audio plays (or waits to) stops it, drops the
- * rest of that reply, and prepends where it was cut to the user's next turn.
- * The agent's turn itself keeps running — only the speaking stops.
+ * Barge-in: a sound while reply audio plays (or waits to) ducks it at once; once
+ * the sound turns out to be words (early probe or its transcript) it stops the
+ * reply, drops the rest of it, and prepends where it was cut to the user's next
+ * turn. A cough, breath or "hmm" just un-ducks. The agent's turn keeps running —
+ * only the speaking stops.
  */
 export class VoiceLoop {
   private readonly detector: TurnDetector
@@ -105,6 +108,8 @@ export class VoiceLoop {
   private waitingReply = false
   private playing = false
   private toneSounded = false
+  /** A sound started during a reply: playback is ducked until we know if it is words. */
+  private bargePending = false
   private latency: OpenLatency | null = null
   private lastStatus = ''
   private disposed = false
@@ -152,8 +157,17 @@ export class VoiceLoop {
   speechStarted(): void {
     this.detector.speechStarted()
     this.toneSounded = false
-    if (this.speech.busy()) this.bargeIn()
+    if (this.speech.busy() && !this.bargePending) {
+      this.bargePending = true
+      this.opts.sink.duck(true)
+    }
     this.status()
+  }
+
+  /** Early words of the speech going on (see `SpeechInputEvents.speechProbe`). */
+  speechProbe(text: string): void {
+    // No words yet decides nothing: the speech may go on; its transcript decides.
+    if (this.bargePending && hasWords(text)) this.confirmBargeIn()
   }
 
   speechEnded(at: number): void {
@@ -163,6 +177,10 @@ export class VoiceLoop {
 
   transcript(text: string, at: number): void {
     this.detector.transcript(text, at)
+    if (this.bargePending) {
+      if (hasWords(text)) this.confirmBargeIn()
+      else this.cancelBargeIn()
+    }
     this.status()
   }
 
@@ -317,6 +335,18 @@ export class VoiceLoop {
       // Its end already arrived while held: nothing more will come for it.
       if (m.ended) this.messages.delete(id)
     }
+  }
+
+  private confirmBargeIn(): void {
+    this.bargePending = false
+    this.opts.sink.duck(false)
+    this.bargeIn()
+  }
+
+  /** Not words (a cough, a breath, "hmm"): the reply plays on at full volume. */
+  private cancelBargeIn(): void {
+    this.bargePending = false
+    this.opts.sink.duck(false)
   }
 
   private bargeIn(): void {

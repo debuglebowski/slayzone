@@ -11,6 +11,11 @@ export interface AudioSink {
   stop(): void
   /** The short "still there?" tone of the forgotten-keyword fallback. */
   tone(): void
+  /**
+   * Turn playback down (true) or back up (false): a sound started while speaking,
+   * and it is not yet known whether it is words (barge-in) or a cough.
+   */
+  duck(on: boolean): void
 }
 
 export interface SpeechItem {

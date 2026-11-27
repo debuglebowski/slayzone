@@ -41,6 +41,8 @@ export type VoiceEngineMessage =
    */
   | { type: 'tick' }
   | { type: 'speech-start'; at: number }
+  /** Early words of speech still going on (barge-in: words or a cough?). */
+  | { type: 'speech-probe'; text: string; at: number }
   | { type: 'speech-end'; segmentId: number; at: number }
   | { type: 'transcript'; segmentId: number; text: string; at: number; sttMs: number }
   | { type: 'synthesized'; id: number; pcm: Float32Array; sampleRate: number; ms: number }
