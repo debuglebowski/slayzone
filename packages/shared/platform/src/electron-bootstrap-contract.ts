@@ -229,6 +229,27 @@ export interface ElectronBrowserHost {
   on: (listener: (event: string, payload: unknown) => void) => () => void
 }
 
+/**
+ * The client-local voice engine — speech models running on THIS device (an Electron
+ * utility process). A client-local host capability: voice I/O never goes through the
+ * hub. `@slayzone/voice`'s engine protocol is the typed contract over the ports.
+ */
+export interface ElectronVoiceHost {
+  /**
+   * Open an engine session. Its two MessagePorts (control, audio) arrive as a window
+   * `message` event `{ type: VOICE_HOST_PORTS_MESSAGE, requestId }` with
+   * `event.ports` — MessagePorts cannot cross the context bridge any other way.
+   */
+  connect: (requestId: string) => void
+  /** Store (or clear, with '') this device's key for a cloud voice provider. Encrypted. */
+  setKey: (provider: string, key: string) => Promise<void>
+  /** Which cloud voice providers have a key stored here (never the keys). */
+  keyStatus: () => Promise<Record<string, boolean>>
+}
+
+/** `data.type` of the window message that carries a voice session's ports. */
+export const VOICE_HOST_PORTS_MESSAGE = 'slayzone:voice-host-ports'
+
 /** The whole `window.api` surface. `@slayzone/types`' `ElectronAPI` extends it. */
 export interface ElectronBootstrapAPI {
   app: ElectronBootstrapApp
@@ -240,4 +261,6 @@ export interface ElectronBootstrapAPI {
    * IPC, `localStorage` in the web shell, the Mojo KV in the chromium shell.
    */
   clientHost?: ElectronClientHost
+  /** Absent where this device runs no voice engine (web shell). */
+  voiceHost?: ElectronVoiceHost
 }

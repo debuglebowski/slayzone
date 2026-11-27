@@ -109,9 +109,12 @@ export default defineConfig(({ mode, command }) => {
             // SQLite worker threads — bundled as separate entries so they can be
             // spawned via `new Worker(join(__dirname, 'diag-worker.js'))`. It
             // import only worker-safe modules (no node-pty/electron).
-            'diag-worker': resolve('src/main/db/diag-worker.ts')
+            'diag-worker': resolve('src/main/db/diag-worker.ts'),
+            // The voice engine utility process (voice-host.ts forks it). Speech models
+            // run there, off main and every renderer.
+            'voice-engine': resolve('src/main/voice-engine.ts')
           },
-          external: ['better-sqlite3', 'node-pty', 'posix']
+          external: ['better-sqlite3', 'node-pty', 'posix', 'sherpa-onnx-node']
         }
       }
     },

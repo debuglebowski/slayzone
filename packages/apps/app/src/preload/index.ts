@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ElectronAPI, HubEntry, LocalComputerHubs, LocalComputerStatus } from '@slayzone/types'
-import type {
-  ArtifactExportRequest,
-  ArtifactExportResult,
-  HostSaveResult,
-  SaveTargetOpenResult,
-  SaveTargetRequest
+import {
+  VOICE_HOST_PORTS_MESSAGE,
+  type ArtifactExportRequest,
+  type ArtifactExportResult,
+  type HostSaveResult,
+  type SaveTargetOpenResult,
+  type SaveTargetRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 
 // Intentional bootstrap + client-local host surface (ARCHITECTURE.md). Do not add domain
@@ -174,6 +175,15 @@ const api: ElectronAPI = {
       }
     }
   },
+  // Client-local host capability, not a domain API: the voice engine runs on THIS
+  // device (see voice-host.ts). Main answers with two MessagePorts, handed on to
+  // the page as a window message (ports cannot cross the context bridge).
+  voiceHost: {
+    connect: (requestId: string) => ipcRenderer.send('voice-host:connect', requestId),
+    setKey: (provider: string, key: string) =>
+      ipcRenderer.invoke('voice-host:set-key', provider, key) as Promise<void>,
+    keyStatus: () => ipcRenderer.invoke('voice-host:key-status') as Promise<Record<string, boolean>>
+  },
   files: {
     getDropPaths: () => {
       const paths = lastDropPaths
@@ -189,6 +199,12 @@ const api: ElectronAPI = {
 }
 
 contextBridge.exposeInMainWorld('api', api)
+
+ipcRenderer.on('voice-host:ports', (event, requestId: unknown) => {
+  if (typeof requestId !== 'string') return
+  // '*': this window posts to itself; a file:// page's origin is opaque ('null').
+  window.postMessage({ type: VOICE_HOST_PORTS_MESSAGE, requestId }, '*', event.ports)
+})
 
 if (isPlaywright) {
   contextBridge.exposeInMainWorld('__testInvoke', (channel: string, ...args: unknown[]) =>

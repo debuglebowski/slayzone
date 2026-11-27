@@ -40,6 +40,7 @@ packages/
 │   ├── tags/              # @slayzone/tags - Tag system
 │   ├── settings/          # @slayzone/settings - Preferences
 │   ├── onboarding/        # @slayzone/onboarding - Tutorial
+│   ├── voice/             # @slayzone/voice - Conversation mode (local STT/TTS, voice engine utility process)
 │   └── worktrees/         # @slayzone/worktrees - Git worktrees
 │       └── DOMAIN.md      # Each domain has DOMAIN.md
 └── shared/

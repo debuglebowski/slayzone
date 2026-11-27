@@ -424,6 +424,9 @@ importers:
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
+      sherpa-onnx-node:
+        specifier: 2.0.1
+        version: 2.0.1
       ws:
         specifier: ^8.22.1
         version: 8.22.1(bufferutil@4.1.0)
@@ -599,6 +602,9 @@ importers:
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics
+      '@slayzone/voice':
+        specifier: workspace:*
+        version: link:../../domains/voice
       '@slayzone/worktrees':
         specifier: workspace:*
         version: link:../../domains/worktrees
@@ -3055,6 +3061,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/voice':
+        specifier: workspace:*
+        version: link:../voice
       '@slayzone/workflow':
         specifier: workspace:*
         version: link:../../shared/workflow
@@ -3405,6 +3414,37 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+
+  packages/domains/voice:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/settings-core':
+        specifier: workspace:*
+        version: link:../../shared/settings-core
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../terminal-contracts
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
+      lucide-react:
+        specifier: ^1.68.0
+        version: 1.68.0(@types/react@19.3.0)(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      sherpa-onnx-node:
+        specifier: 2.0.1
+        version: 2.0.1
     devDependencies:
       '@types/react':
         specifier: ^19.3.0
@@ -13649,6 +13689,44 @@ packages:
   shell-quote@1.12.0:
     resolution: {integrity: sha512-PcByqNyT/38F2kDNi006HAMRJaULuBzq/FOsw3qdZvX/GA9W/jamDaRskgHjubHiftXK5sIFxLNkvrXUwcof6Q==}
     engines: {node: '>= 0.4'}
+
+  sherpa-onnx-darwin-arm64@2.0.1:
+    resolution: {integrity: sha512-agXmbbwiVPUSMViMhWhYAt59iG21ui7x6HxQFU35XzHOfQe9x6Pg9V160Pzak/66x0ePMjixsLUtMaaUrLfCwQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  sherpa-onnx-darwin-x64@2.0.1:
+    resolution: {integrity: sha512-SBnHa3LDOSI/5/rpBHGxKQDFq+yIdxowYY0InLzfojTUx+yGgqu7cYBrRxjzvHOiOKi0O4rmlFVZboyhIqpDgA==}
+    cpu: [x64]
+    os: [darwin]
+
+  sherpa-onnx-linux-arm64@2.0.1:
+    resolution: {integrity: sha512-5CJvLjFYIg23oELCsT7l07fMLT3PdquZ3tqh7KZK3Pzi+c2YiPKRe1DDUxoNdtCaw3ZiS4aQSQPBblB9JStuDA==}
+    cpu: [arm64]
+    os: [linux]
+
+  sherpa-onnx-linux-x64@2.0.1:
+    resolution: {integrity: sha512-w5mRRrIvPvcNWac7rQ8AN/t/cwElPGoRpH+ceCRBV7XfjCIQ9Rcr3Ig/kXcJLNOxgK4bGmef+Y47lIWiesDODw==}
+    cpu: [x64]
+    os: [linux]
+
+  sherpa-onnx-node@2.0.1:
+    resolution: {integrity: sha512-1PSACfQgPXAD7ExwCv1QW09EXTjcNlpZKBqDY+jxSdIzlyOSq0M13SILBoUQUfeJqiTTXnqp6Ha9jjMUQ6efXg==}
+
+  sherpa-onnx-win-arm64@2.0.1:
+    resolution: {integrity: sha512-Mb9iqy2Zp7GC5a99dk5E8EQJsEBnapf+IcwHLVCgtIf5mxYHO9Q8YptnAoOHZOD0Zi+R+MblFyG9qv0Q6tin4Q==}
+    cpu: [arm64]
+    os: [win32]
+
+  sherpa-onnx-win-ia32@2.0.1:
+    resolution: {integrity: sha512-q7qFCA3FK+tYc8pexC9Kzu9WGGoZ9X//UkpxVp6iT4E4W5tPhOEirPyvawS6zgfEW6K/GOISMcYe996Yc7d6iw==}
+    cpu: [ia32]
+    os: [win32]
+
+  sherpa-onnx-win-x64@2.0.1:
+    resolution: {integrity: sha512-7vwdAw9PGEb0JLSpK7UFxAdp1vabBHK9Nhw2jFRBWSFgtslUPHIB0T6syJfRgiUGyCeNW9fJvcFAk2F2u7hBEw==}
+    cpu: [x64]
+    os: [win32]
 
   shiki@4.5.0:
     resolution: {integrity: sha512-OcRW72ngQvc+MSVWBRIovC/BTW589iUE/Vxav7VeM4RcY9MUjqB+IR6ILG1k9nuW6LiG/nct9uma4/MBtnZbmQ==}
@@ -25776,6 +25854,37 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   shell-quote@1.12.0: {}
+
+  sherpa-onnx-darwin-arm64@2.0.1:
+    optional: true
+
+  sherpa-onnx-darwin-x64@2.0.1:
+    optional: true
+
+  sherpa-onnx-linux-arm64@2.0.1:
+    optional: true
+
+  sherpa-onnx-linux-x64@2.0.1:
+    optional: true
+
+  sherpa-onnx-node@2.0.1:
+    optionalDependencies:
+      sherpa-onnx-darwin-arm64: 2.0.1
+      sherpa-onnx-darwin-x64: 2.0.1
+      sherpa-onnx-linux-arm64: 2.0.1
+      sherpa-onnx-linux-x64: 2.0.1
+      sherpa-onnx-win-arm64: 2.0.1
+      sherpa-onnx-win-ia32: 2.0.1
+      sherpa-onnx-win-x64: 2.0.1
+
+  sherpa-onnx-win-arm64@2.0.1:
+    optional: true
+
+  sherpa-onnx-win-ia32@2.0.1:
+    optional: true
+
+  sherpa-onnx-win-x64@2.0.1:
+    optional: true
 
   shiki@4.5.0:
     dependencies:
