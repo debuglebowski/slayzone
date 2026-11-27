@@ -315,6 +315,7 @@ vi.mock('@slayzone/transport/client', () => ({
     }
   }),
   useFederationOrNull: () => null,
+  useHubId: () => null,
   // ProjectStatusCard re-reads a moved task through the vanilla client.
   useTRPCClient: () => ({ task: { get: { query: async () => null } } }),
   useSubscription: () => undefined

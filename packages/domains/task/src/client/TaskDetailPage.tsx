@@ -29,7 +29,8 @@ import {
   MoveVertical,
   Expand
 } from 'lucide-react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { mergeTaskRows, useTaskFullRow } from './useTaskFullRow'
 import {
   electronBootstrap,
   hubAllows,
@@ -292,7 +293,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   compact,
   zenMode,
   onBack,
-  onTaskUpdated,
+  onTaskUpdated: onTaskUpdatedProp,
   onArchiveTask,
   onDeleteTask,
   onNavigateToTask,
@@ -307,8 +308,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   onPanelVisibilityChange
 }: TaskDetailPageProps): React.JSX.Element {
   const { track, trackTask } = useTrack()
-  // Prefer live global state; fall back to suspense-cached data for subtask race window
-  const task = taskProp ?? initialData?.task ?? null
+  // The live board row (patched on every change, where optimistic edits land) for the
+  // fields it carries; the task's own full row for the rest — the board may carry only
+  // what a card shows. Before either, the suspense-loaded row (subtask race window).
+  const fullRow = useTaskFullRow(taskId, initialData?.task)
+  const initialTask = initialData?.task
+  const task = useMemo(
+    () => mergeTaskRows(taskProp, fullRow ?? initialTask),
+    [taskProp, fullRow, initialTask]
+  )
   const project = projectProp ?? initialData?.project ?? null
 
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
@@ -316,6 +324,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+  // Every write the page makes hands back the stored row: keep the full row in step
+  // with it too, so a board row without those fields never shows an older value.
+  // A write can answer null (the task is gone): passed on as before, nothing to store.
+  const onTaskUpdated = useStableCallback((updated: Task): void => {
+    if (updated) queryClient.setQueryData(trpc.task.get.queryKey({ id: updated.id }), updated)
+    onTaskUpdatedProp(updated)
+  })
   // Artifacts + git panels + external sync card, injected by the composing app
   // (registerTaskPanels).
   const { ArtifactsPanel, UnifiedGitPanel, ExternalSyncCard } = getTaskPanels()
