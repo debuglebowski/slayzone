@@ -1,6 +1,7 @@
 import { typedTrpc, type ResolvedHub } from '@slayzone/transport/client'
 // Type-only: erased from the client bundle. The routers' runtime stays server-side.
 import type { ComputersMounts } from '@slayzone/computers/server'
+import type { DiagnosticsMounts } from '@slayzone/diagnostics/server'
 import type { NotifyMounts } from '@slayzone/notify/server'
 import type { ProjectsMounts } from '@slayzone/projects/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
@@ -13,8 +14,8 @@ import type { PtyMounts } from '@slayzone/terminal/server'
  * This package's typed view of the shared tRPC client (one runtime, one socket per hub),
  * typed against only the routers tasks calls: `task`, `projects` + `projectGroups`,
  * `pty`, `settings`, `notify` and `computers` (the Needs-attention task badge),
- * `artifacts` (a move between hubs copies their files) and `tags` (a tags-only
- * change reloads them alone).
+ * `artifacts` (a move between hubs copies their files), `tags` (a tags-only
+ * change reloads them alone) and `diagnostics` (why a whole board was reloaded).
  */
 export const { useTRPC, useTRPCClient, getTrpcClient, getClientForHub } = typedTrpc<
   TaskMounts &
@@ -24,6 +25,7 @@ export const { useTRPC, useTRPCClient, getTrpcClient, getClientForHub } = typedT
     NotifyMounts &
     TagsMounts &
     ComputersMounts &
+    DiagnosticsMounts &
     ArtifactsMounts
 >()
 

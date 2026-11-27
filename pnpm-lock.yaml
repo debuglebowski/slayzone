@@ -3107,6 +3107,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../computers
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../diagnostics
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs

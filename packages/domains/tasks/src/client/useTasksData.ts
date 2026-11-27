@@ -23,6 +23,7 @@ import { applySidebarHubOrder, partitionSidebarOrder, sidebarTopLevelRefs } from
 import { toast, useStableCallback } from '@slayzone/ui'
 import type { GroupKey } from './kanban'
 import { useBoardRefresh, type BoardRefreshTarget } from './useBoardRefresh'
+import { reportBoardLoad, type BoardLoadReason } from './board-load-report'
 import { useBoardRoles, useSharingLiveUpdates } from '@slayzone/projects/client'
 import {
   MAX_PATCH_ROWS,
@@ -390,7 +391,8 @@ export function useTasksData(): UseTasksDataReturn {
   useEffect(() => {
     performance.mark('sz:loadBoardData:start')
     electronBootstrap.bootMark('loadBoardData start')
-  }, [])
+    reportBoardLoad(trpcClient, 'default', 'boot')
+  }, [trpcClient])
 
   // Project groups loaded imperatively via the `projectGroups` tRPC router and
   // mirrored into `projectGroups` state (the many optimistic mutation handlers
@@ -470,7 +472,8 @@ export function useTasksData(): UseTasksDataReturn {
         extraGroupsRef.current.set(hubId, groups as ProjectGroup[])
         recomposeGroups()
       })
-    const loadHub = (hubId: string, client: TasksTrpcClient): void => {
+    const loadHub = (hubId: string, client: TasksTrpcClient, reason: BoardLoadReason): void => {
+      reportBoardLoad(trpcClient, 'extra', reason)
       failedHubIds.delete(hubId)
       loadingHubIds.add(hubId)
       const fail = (): void => {
@@ -494,8 +497,9 @@ export function useTasksData(): UseTasksDataReturn {
       client: TasksTrpcClient,
       change: BoardChange
     ): Promise<void> => {
-      const reload = (): void => loadHub(hubId, client)
-      if (!extraBoardsRef.current.has(hubId) || loadingHubIds.has(hubId)) return reload()
+      const reload = (why: string): void => loadHub(hubId, client, `patch-fallback:${why}`)
+      if (!extraBoardsRef.current.has(hubId)) return reload('no-board')
+      if (loadingHubIds.has(hubId)) return reload('loading')
       if (change.parts.includes('projectGroups')) await loadGroupsOf(hubId, client)
       const lists = await loadBoardParts(client, change.parts)
       const rows =
@@ -504,13 +508,14 @@ export function useTasksData(): UseTasksDataReturn {
           : change.taskIds.length > MAX_PATCH_ROWS
             ? undefined
             : ((await client.task.loadBoardRows.query({ ids: change.taskIds })) as BoardRows)
-      if (rows === undefined) return reload()
-      if (cancelled || loadingHubIds.has(hubId)) return reload()
+      if (rows === undefined) return reload('too-many-rows')
+      if (cancelled) return
+      if (loadingHubIds.has(hubId)) return reload('loading')
       const before = extraBoardsRef.current.get(hubId)
-      if (!before) return reload()
+      if (!before) return reload('no-board')
       const withLists = withBoardParts(before, lists)
       const next = rows ? patchBoardRows(withLists, change.taskIds, rows) : withLists
-      if (!next) return reload()
+      if (!next) return reload('unplaceable')
       extraBoardsRef.current.set(hubId, next)
       recomposeBoards()
     }
@@ -518,11 +523,11 @@ export function useTasksData(): UseTasksDataReturn {
       const resolved = fed.resolve(hub.id)
       if (!resolved) continue
       const client = tasksClientOf(resolved.ws)
-      loadHub(hub.id, client)
+      loadHub(hub.id, client, 'boot')
       unsubs.push(
         watchReopen(resolved.ws.wsClient.connectionState, (dropped) => {
           if (!dropped && !failedHubIds.has(hub.id)) return
-          loadHub(hub.id, client)
+          loadHub(hub.id, client, dropped ? 'reconnect' : 'boot')
           if (dropped) void refreshTaskScopedQueries(resolved.queryClient, null)
         })
       )
@@ -533,11 +538,11 @@ export function useTasksData(): UseTasksDataReturn {
           onData: (event: TasksChangedEvent | undefined) => {
             const taskIds = event?.taskIds ?? null
             const parts = event?.parts ?? []
-            if (taskIds === null) loadHub(hub.id, client)
+            if (taskIds === null) loadHub(hub.id, client, 'unscoped-event')
             else if (taskIds.length > 0 || parts.length > 0) {
               patchChain = patchChain
                 .then(() => patchHub(hub.id, client, { taskIds, parts }))
-                .catch(() => loadHub(hub.id, client))
+                .catch(() => loadHub(hub.id, client, 'patch-fallback:error'))
             }
             // That hub's task tabs read their per-task queries from its own
             // QueryClient — refresh them there (scoped, hidden tabs deferred). A
@@ -554,7 +559,7 @@ export function useTasksData(): UseTasksDataReturn {
       cancelled = true
       for (const u of unsubs) u()
     }
-  }, [fed, extraHubs, recomposeBoards, recomposeGroups])
+  }, [fed, extraHubs, recomposeBoards, recomposeGroups, trpcClient])
 
   // Mutation routing: resolve the vanilla client that OWNS an entity so writes
   // land on the right hub. Falls back to the ambient default-hub client when the
@@ -610,6 +615,7 @@ export function useTasksData(): UseTasksDataReturn {
   }, [boardQ.isPending])
 
   const refreshData = useCallback((): Promise<void> => {
+    reportBoardLoad(trpcClient, 'default', 'refresh')
     const targets: BoardRefreshTarget[] = [
       {
         label: fed?.hubs.find((hub) => hub.id === defaultHubId)?.label ?? 'Local',
@@ -645,6 +651,7 @@ export function useTasksData(): UseTasksDataReturn {
     }
     return refresh(targets)
   }, [
+    trpcClient,
     fed,
     defaultHubId,
     extraHubs,
@@ -694,20 +701,28 @@ export function useTasksData(): UseTasksDataReturn {
     const boardFilter = trpc.task.loadBoardData.queryFilter()
     const boardKey = trpc.task.loadBoardData.queryKey()
     const before = queryClient.getQueryData<BoardData>(boardKey)
-    const reload = (): Promise<void> => queryClient.invalidateQueries(boardFilter)
+    const reload = (why: string): Promise<void> => {
+      reportBoardLoad(trpcClient, 'default', `patch-fallback:${why}`)
+      return queryClient.invalidateQueries(boardFilter)
+    }
     const refreshTabs = (after: readonly Task[]): Promise<void> =>
       refreshTaskScopedQueries(queryClient, [
         ...taskIds,
         ...parentIdsOf(taskIds, before?.tasks, after)
       ])
     if (!before || taskIds.length > MAX_PATCH_ROWS || queryClient.isFetching(boardFilter) > 0) {
-      await Promise.all([reload(), refreshTabs([])])
+      const why = !before
+        ? 'no-board'
+        : taskIds.length > MAX_PATCH_ROWS
+          ? 'too-many-rows'
+          : 'fetching'
+      await Promise.all([reload(why), refreshTabs([])])
       return
     }
     const startedAt = Date.now()
     const rows = await trpcClient.task.loadBoardRows.query({ ids: taskIds }).catch(() => null)
     if (!rows) {
-      await Promise.all([reload(), refreshTabs([])])
+      await Promise.all([reload('rows-failed'), refreshTabs([])])
       return
     }
     const state = queryClient.getQueryState(boardKey)
@@ -727,7 +742,7 @@ export function useTasksData(): UseTasksDataReturn {
         setTaskTags((prev) => patchMirrorTaskTags(prev, taskIds, current, next))
         setBlockedTaskIds((prev) => patchMirrorBlocked(prev, taskIds, current, next))
       } else {
-        void reload()
+        void reload('unplaceable')
       }
     }
     await refreshTabs((rows as unknown as BoardRows).tasks)
@@ -738,7 +753,10 @@ export function useTasksData(): UseTasksDataReturn {
   const patchBoardPartsFor = useStableCallback(async (parts: BoardPart[]): Promise<void> => {
     const boardFilter = trpc.task.loadBoardData.queryFilter()
     const boardKey = trpc.task.loadBoardData.queryKey()
-    const reload = (): Promise<void> => queryClient.invalidateQueries(boardFilter)
+    const reload = (why: string): Promise<void> => {
+      reportBoardLoad(trpcClient, 'default', `parts-fallback:${why}`)
+      return queryClient.invalidateQueries(boardFilter)
+    }
     const groups = parts.includes('projectGroups') ? loadGroups() : Promise.resolve()
     // A changed tag or project can show in any open tab (its tags, its folder).
     const tabs = refreshTaskScopedQueries(queryClient, null)
@@ -747,7 +765,11 @@ export function useTasksData(): UseTasksDataReturn {
       return
     }
     if (!queryClient.getQueryData(boardKey) || queryClient.isFetching(boardFilter) > 0) {
-      await Promise.all([reload(), groups, tabs])
+      await Promise.all([
+        reload(queryClient.getQueryData(boardKey) ? 'fetching' : 'no-board'),
+        groups,
+        tabs
+      ])
       return
     }
     const startedAt = Date.now()
@@ -755,13 +777,14 @@ export function useTasksData(): UseTasksDataReturn {
     const state = queryClient.getQueryState(boardKey)
     const fetchedSince = !state || state.dataUpdatedAt > startedAt
     const current = queryClient.getQueryData<BoardData>(boardKey)
-    if (!lists) await reload()
+    if (!lists) await reload('lists-failed')
     else if (current && !fetchedSince && queryClient.isFetching(boardFilter) === 0) {
       queryClient.setQueryData<BoardData>(boardKey, withBoardParts(current, lists))
     }
     await Promise.all([groups, tabs])
   })
-  const reloadEverything = useStableCallback(() => {
+  const reloadEverything = useStableCallback((reason: BoardLoadReason) => {
+    reportBoardLoad(trpcClient, 'default', reason)
     void queryClient
       .invalidateQueries(trpc.task.loadBoardData.queryFilter())
       .then(afterFullBoardReload)
@@ -772,7 +795,7 @@ export function useTasksData(): UseTasksDataReturn {
     // Hubs that predate the payload send nothing: unknown scope.
     const taskIds = event?.taskIds ?? null
     if (!taskIds) {
-      reloadEverything()
+      reloadEverything('unscoped-event')
       return
     }
     const parts = event?.parts ?? []
@@ -798,12 +821,13 @@ export function useTasksData(): UseTasksDataReturn {
     const ws = fed?.resolve(defaultHubId)?.ws
     if (!ws) return
     return watchReopen(ws.wsClient.connectionState, (dropped) => {
-      if (dropped) reloadEverything()
+      if (dropped) reloadEverything('reconnect')
     })
   }, [fed, defaultHubId, reloadEverything])
   // Sharing (T-100): gaining or losing a project or task changes which projects and
   // tasks exist for this user at all, so the whole board reloads.
-  useSharingLiveUpdates(reloadEverything)
+  const reloadForSharing = useStableCallback(() => reloadEverything('sharing'))
+  useSharingLiveUpdates(reloadForSharing)
   // Which of these tasks the user may only view (T-100): one request for the board.
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks])
   useBoardRoles(taskIds)
