@@ -170,6 +170,9 @@ describe('ChatSession against a recorded hub session', () => {
       await user.press(screen.getByLabelText('Send'))
       await deliver()
       await waitFor(() => expect(textOf('Two files.')).toBe(true))
+      // The turn's work folds into its Activities (desktop's grouping): opened, they list it.
+      expect(textOf('List files')).toBe(false)
+      await user.press(screen.getByTestId('chat-activities-toggle'))
       expect(textOf('List files')).toBe(true)
       expect(textOf(/Thought/)).toBe(true)
       expect(textOf(/Done in/)).toBe(true)

@@ -1,9 +1,12 @@
-import type { TimelineItem } from '@slayzone/terminal/client'
-import {
-  turnChangeSources,
-  unifiedChangeRows,
-  workspaceChangesShows
-} from './files-changed/turn-changes'
+/**
+ * How a chat shows a turn's work, as plain data shared by every chat UI (desktop's
+ * `ActivityTurn` / `AssistantAnswer`, the phone's turn blocks): which rows a turn
+ * folds into its "Activities" (`activityView`), and which of those the user's display
+ * settings show (`activityTurnDisplay`). The UIs only render what this decides.
+ */
+import type { ChatHistoryDisplay } from '@slayzone/terminal-contracts'
+import type { TimelineItem } from './chat-timeline'
+import { turnChangeSources, unifiedChangeRows, workspaceChangesShows } from './chat-turn-changes'
 
 export type ActivityItem = Extract<TimelineItem, { kind: 'text' | 'thinking' | 'tool' | 'stderr' }>
 export type SubAgentItem = Extract<TimelineItem, { kind: 'sub-agent' }>
@@ -178,4 +181,83 @@ export function activityView(
   }
   flush(inFlight && !completed)
   return { rows: output, turns, hosts }
+}
+
+/** The user's chat display settings for a turn's activity (desktop: Chat display options). */
+export interface ChatActivitySettings {
+  /** The "Activities" summary of a turn shows (else only its preview, files, sub-agents). */
+  showActivities: boolean
+  /** A running turn previews its latest activity. */
+  previewLatestActivity: boolean
+  /** Intermediate assistant messages are activities shown. */
+  showActivityMessages: boolean
+  showThinking: boolean
+  showActivityTools: boolean
+}
+
+export const DEFAULT_CHAT_ACTIVITY_SETTINGS: ChatActivitySettings = {
+  showActivities: true,
+  previewLatestActivity: true,
+  showActivityMessages: true,
+  showThinking: true,
+  showActivityTools: true
+}
+
+/** Whether the settings show this activity (process diagnostics always show). */
+export function activityShown(item: ActivityItem, settings: ChatActivitySettings): boolean {
+  switch (item.kind) {
+    case 'stderr':
+      return true
+    case 'text':
+      return settings.showActivityMessages
+    case 'thinking':
+      return settings.showThinking
+    case 'tool':
+      return settings.showActivityTools
+  }
+}
+
+export interface ActivityTurnDisplay {
+  /** The activities the summary lists (all of them while `forced`). */
+  items: ActivityItem[]
+  /** The "Activities" summary shows (the settings, or something inside asked to be seen). */
+  showSummary: boolean
+  /** The running turn's latest shown activity, previewed under it. */
+  latest: ActivityItem | undefined
+  /** Nothing of the turn's work shows: no block. */
+  empty: boolean
+}
+
+/**
+ * What a turn's activity block shows. `expanded`: the summary is open (its preview
+ * then is the list itself). `forced`: something inside was asked for (a file's tool
+ * card, a search hit), so every activity shows whatever the settings say.
+ */
+export function activityTurnDisplay(
+  turn: Pick<ActivityTurn, 'items' | 'files' | 'subAgents' | 'active'>,
+  settings: ChatActivitySettings,
+  { expanded = false, forced = false }: { expanded?: boolean; forced?: boolean } = {}
+): ActivityTurnDisplay {
+  const shown = turn.items.filter((item) => activityShown(item, settings))
+  const showSummary = settings.showActivities || forced
+  const latest =
+    turn.active && settings.previewLatestActivity && !(showSummary && expanded)
+      ? shown[shown.length - 1]
+      : undefined
+  const empty =
+    (!showSummary || !turn.items.length) && !latest && !turn.files.length && !turn.subAgents.length
+  return { items: forced ? turn.items : shown, showSummary, latest, empty }
+}
+
+/**
+ * What a client may ask the computer to leave out of history pages it never shows
+ * (`ChatHistoryDisplay`): the payload is cut to what these settings display.
+ */
+export function chatHistoryDisplayFor(settings: ChatActivitySettings): ChatHistoryDisplay {
+  return {
+    ...(!settings.showThinking ? { hideThinking: true as const } : {}),
+    ...(!settings.showActivities ? { hideActivities: true as const } : {}),
+    ...(!settings.showActivityMessages ? { hideActivityMessages: true as const } : {}),
+    ...(!settings.showActivityTools ? { hideActivityTools: true as const } : {})
+  }
 }

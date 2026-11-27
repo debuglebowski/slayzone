@@ -12,7 +12,7 @@ import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { ToolShell, shortenPath, resultTextOf, type ToolProps } from './card-shell'
 import { HighlightedText } from '../HighlightedText'
 import { FileLink } from './links'
-import { relativeToCwd } from '../files-changed/relative-path'
+import { relativeToCwd } from '@slayzone/terminal/chat-turn-changes'
 import { codexChangeFileDiff } from './file-diffs'
 
 const KIND_LABEL: Record<CodexFileChange['kind'], string> = {

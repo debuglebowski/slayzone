@@ -6,8 +6,12 @@ import { useChatView } from '../ChatViewContext'
 import { ChatDiffView } from '../diff-comments/ChatDiffView'
 import { CardBadge, FileLink } from '../tool-cards/links'
 import { LineCounts } from './FilesChangedRow'
-import { relativeToCwd } from './relative-path'
-import { turnChangeSources, type RecordedChanges, type WorkspaceChanges } from './turn-changes'
+import {
+  relativeToCwd,
+  turnChangeSources,
+  type RecordedChanges,
+  type WorkspaceChanges
+} from '@slayzone/terminal/chat-turn-changes'
 import { WorkspaceChangesContent } from './WorkspaceChangesRow'
 
 import {

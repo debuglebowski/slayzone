@@ -1,10 +1,16 @@
 import { useContext, useEffect, useId, useState } from 'react'
 import { Brain, ChevronRight, MessageSquare, Wrench } from 'lucide-react'
-import { cn, useNow, type AppearanceSettings } from '@slayzone/ui'
+import { cn, useNow } from '@slayzone/ui'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import { renderCodexFileCitations } from './codex-file-citations'
 import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
-import type { ActivityItem, ActivityTurn as ActivityTurnData, SubAgentItem } from './activity-view'
+import {
+  activityTurnDisplay,
+  type ActivityItem,
+  type ActivityTurn as ActivityTurnData,
+  type SubAgentItem
+} from '@slayzone/terminal/chat-activity'
+import { activitySettingsOf, type ActivityAppearance } from './activity-settings'
 import { HighlightedText } from './HighlightedText'
 import { renderTimelineItem } from './renderers'
 import { useTextDetail } from '@slayzone/terminal/chat-tool-details'
@@ -237,14 +243,7 @@ export function ActivityTurn({
   embedded = false
 }: {
   turn: ActivityTurnData
-  appearance: Pick<
-    AppearanceSettings,
-    | 'chatShowActivities'
-    | 'chatPreviewLatestActivity'
-    | 'chatShowActivityMessages'
-    | 'chatShowThinking'
-    | 'chatShowActivityTools'
-  >
+  appearance: ActivityAppearance
   rowOf?: (item: ActivityItem | SubAgentItem) => number | undefined
   embedded?: boolean
 }) {
@@ -268,28 +267,12 @@ export function ActivityTurn({
     check()
     return () => cleanups.forEach((cleanup) => cleanup())
   }, [focus, turn.items, setExpanded])
-  const filtered = turn.items.filter((item) =>
-    item.kind === 'stderr'
-      ? true
-      : item.kind === 'text'
-        ? appearance.chatShowActivityMessages
-        : item.kind === 'thinking'
-          ? appearance.chatShowThinking
-          : appearance.chatShowActivityTools
+  const { items, showSummary, latest, empty } = activityTurnDisplay(
+    turn,
+    activitySettingsOf(appearance),
+    { expanded, forced }
   )
-  const items = forced ? turn.items : filtered
-  const showSummary = appearance.chatShowActivities || forced
-  const latest =
-    turn.active && appearance.chatPreviewLatestActivity && !(showSummary && expanded)
-      ? filtered[filtered.length - 1]
-      : undefined
-  if (
-    (!showSummary || !turn.items.length) &&
-    !latest &&
-    !turn.files.length &&
-    !turn.subAgents.length
-  )
-    return null
+  if (empty) return null
   const content = (
     <>
       {showSummary && turn.items.length > 0 && (

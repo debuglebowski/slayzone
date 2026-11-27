@@ -1,5 +1,16 @@
-import type { TimelineItem, TimelineRows } from '@slayzone/terminal/client'
-import { relativeToCwd } from './relative-path'
+/**
+ * What a turn changed in the workspace, as plain data shared by every chat UI
+ * (desktop's files-changed rows, the phone's turn blocks): which recorded edits a
+ * workspace capture replaces, and whether a capture shows a card at all.
+ */
+import type { TimelineItem, TimelineRows } from './chat-timeline'
+
+/** `path` relative to the session's working directory when inside it, else as is. */
+export function relativeToCwd(path: string, cwd: string | undefined): string {
+  if (!cwd) return path
+  const base = cwd.endsWith('/') ? cwd : `${cwd}/`
+  return path.startsWith(base) ? path.slice(base.length) : path
+}
 
 export type WorkspaceChanges = Extract<TimelineItem, { kind: 'workspace-changes' }>
 export type RecordedChanges = Extract<TimelineItem, { kind: 'files-changed' }>

@@ -23,10 +23,13 @@ import {
   modeOptions,
   unlistedModelsHint
 } from './chat-controls'
+import { ChatDisplayOptions } from './ChatDisplayOptions'
 import { useThemedStyles } from './styles'
 import type { ChatSettings } from './useChatSettings'
 
 type Picker = 'mode' | 'model' | 'effort' | 'collaboration'
+/** What can open: a setting's choices, or the display options. */
+type Open = Picker | 'display'
 
 export function ChatControls({
   mode,
@@ -43,7 +46,7 @@ export function ChatControls({
   variant?: 'chips' | 'tiles'
 }) {
   const { s } = useThemedStyles(makeStyles)
-  const [picker, setPicker] = useState<Picker | null>(null)
+  const [picker, setPicker] = useState<Open | null>(null)
   const showEffort = !!settings.model && models.supportsEffort(settings.model)
   const effortLevels = settings.model ? models.effortLevels(settings.model) : undefined
 
@@ -125,6 +128,12 @@ export function ChatControls({
       onClose={() => setPicker(null)}
       testID="chat-control-sheet"
     >
+      {picker === 'display' && (
+        <>
+          <Text style={s.sheetTitle}>Display</Text>
+          <ChatDisplayOptions />
+        </>
+      )}
       {sheet && (
         <>
           <Text style={s.sheetTitle}>{sheet.title}</Text>
@@ -184,7 +193,31 @@ export function ChatControls({
               </Pressable>
             )
           })}
+          <Pressable
+            onPress={() => setPicker(picker === 'display' ? null : 'display')}
+            style={({ pressed }) => [
+              s.tile,
+              picker === 'display' && s.tileOpen,
+              pressed && s.chipBusy
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Display"
+            accessibilityState={{ expanded: picker === 'display' }}
+            testID="chat-control-display"
+          >
+            <Text style={s.tileLabel} numberOfLines={1}>
+              Display
+            </Text>
+            <Text style={s.tileValue} numberOfLines={2}>
+              Activities
+            </Text>
+          </Pressable>
         </View>
+        {picker === 'display' ? (
+          <View style={s.inlineChoices} testID="chat-control-choices">
+            <ChatDisplayOptions inset />
+          </View>
+        ) : null}
         {sheet ? (
           <View style={s.inlineChoices} testID="chat-control-choices">
             {sheet.options.length === 0 && sheet.hint ? (
@@ -252,6 +285,13 @@ export function ChatControls({
           s={s}
         />
       )}
+      <Chip
+        label="Display"
+        busy={false}
+        onPress={() => setPicker('display')}
+        a11y="Display"
+        s={s}
+      />
       {choices}
     </ScrollView>
   )

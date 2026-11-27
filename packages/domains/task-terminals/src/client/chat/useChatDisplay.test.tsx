@@ -14,7 +14,7 @@ vi.mock('@slayzone/markdown/client', () => ({
 }))
 
 import { useChatDisplay } from './useChatDisplay'
-import { activityView } from './activity-view'
+import { activityView } from '@slayzone/terminal/chat-activity'
 import { useFollowBottom, type CallbackRef } from './useFollowBottom'
 import { VirtualTimelineRows } from './VirtualTimelineRows'
 import { TimelineScroller } from './__tests__/TimelineScroller'

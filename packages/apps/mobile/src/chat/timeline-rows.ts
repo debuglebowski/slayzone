@@ -18,6 +18,7 @@ import {
 } from '@slayzone/terminal/reducer'
 import { chatBlobJsonReplacer } from '@slayzone/terminal-contracts'
 import { isRenderable, stableAnchorKey } from '@slayzone/terminal/chat-presentation'
+import { type ActivityTurn, activityView } from '@slayzone/terminal/chat-activity'
 
 export function isShown(item: TimelineItem): boolean {
   return item.parentToolUseId == null && isRenderable(item)
@@ -26,6 +27,8 @@ export function isShown(item: TimelineItem): boolean {
 export interface TimelineRow {
   key: string
   item: TimelineItem
+  /** The turn this row hosts (`activityView`): its work shows under the row. */
+  turn?: ActivityTurn
 }
 
 /**
@@ -42,6 +45,30 @@ export function timelineRows(
     if (item && !folded.has(index) && isShown(item)) rows.push({ key: rowKey(item, index), item })
   })
   return rows
+}
+
+/**
+ * The rows with each turn's work folded into the row hosting it (desktop's grouped
+ * chat, `activityView`): a turn shows its user message, its answer and, under the
+ * answer (or the row it is at so far), its activities. `inFlight`: a turn runs.
+ */
+export function turnRows(
+  timeline: Readonly<TimelineRows>,
+  openBranches: ReadonlySet<string> = new Set(),
+  inFlight = false
+): TimelineRow[] {
+  const rows = timelineRows(timeline, openBranches)
+  const keys = new Map(rows.map((row) => [row.item, row.key]))
+  const view = activityView(
+    rows.map((row) => row.item),
+    inFlight
+  )
+  return view.rows.flatMap((item) => {
+    const key = keys.get(item)
+    if (key === undefined) return []
+    const turn = view.turns.get(item)
+    return [turn ? { key, item, turn } : { key, item }]
+  })
 }
 
 export {

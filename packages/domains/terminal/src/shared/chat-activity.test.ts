@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { TimelineItem } from '@slayzone/terminal/client'
-import { activityView } from './activity-view'
+import type { TimelineItem } from './chat-timeline'
+import {
+  type ActivityItem,
+  activityTurnDisplay,
+  activityView,
+  chatHistoryDisplayFor,
+  DEFAULT_CHAT_ACTIVITY_SETTINGS
+} from './chat-activity'
 
 const reply = {
   kind: 'text',
@@ -311,5 +317,72 @@ describe('activity view: a capture that shows no card', () => {
       const view = activityView([user, reply, result, shown], false)
       expect(view.turns.get(reply)?.files).toEqual([shown])
     }
+  })
+})
+
+describe('activity turn display', () => {
+  const tool = {
+    kind: 'tool',
+    invocation: { id: 't1', name: 'Bash', input: {}, status: 'done' },
+    timestamp: 1
+  } as TimelineItem
+  const thinking = { kind: 'thinking', messageId: 'a', text: 'Hmm', timestamp: 0 } as TimelineItem
+  const progress = {
+    kind: 'text',
+    role: 'assistant',
+    messageId: 'p',
+    text: 'Looking',
+    timestamp: 1
+  } as TimelineItem
+  const stderr = { kind: 'stderr', text: 'warn', timestamp: 2 } as TimelineItem
+  const turnOf = (active: boolean) => ({
+    items: [thinking, progress, tool, stderr] as ActivityItem[],
+    files: [],
+    subAgents: [],
+    active
+  })
+  const all = DEFAULT_CHAT_ACTIVITY_SETTINGS
+
+  it('lists what the settings show; diagnostics always', () => {
+    const d = activityTurnDisplay(turnOf(false), {
+      ...all,
+      showThinking: false,
+      showActivityMessages: false
+    })
+    expect(d.items).toEqual([tool, stderr])
+    expect(d.showSummary).toBe(true)
+    expect(d.empty).toBe(false)
+  })
+
+  it('hidden activities leave no block; a running turn still previews its latest', () => {
+    const hidden = { ...all, showActivities: false }
+    expect(activityTurnDisplay(turnOf(false), hidden).empty).toBe(true)
+    const running = activityTurnDisplay(turnOf(true), { ...hidden, showActivityTools: false })
+    expect(running.latest).toBe(stderr)
+    expect(running.empty).toBe(false)
+    expect(
+      activityTurnDisplay(turnOf(true), { ...hidden, previewLatestActivity: false }).empty
+    ).toBe(true)
+  })
+
+  it('an open summary is the preview; asked-for items show whatever the settings', () => {
+    expect(activityTurnDisplay(turnOf(true), all, { expanded: true }).latest).toBeUndefined()
+    const forced = activityTurnDisplay(
+      turnOf(false),
+      { ...all, showActivities: false, showActivityTools: false },
+      { forced: true }
+    )
+    expect(forced.showSummary).toBe(true)
+    expect(forced.items).toHaveLength(4)
+  })
+
+  it('asks the computer to leave out only what the settings hide', () => {
+    expect(chatHistoryDisplayFor(all)).toEqual({})
+    expect(
+      chatHistoryDisplayFor({ ...all, showThinking: false, showActivityTools: false })
+    ).toEqual({
+      hideThinking: true,
+      hideActivityTools: true
+    })
   })
 })
