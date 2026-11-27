@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { launchdLabel, systemdUnitName } from '@slayzone/platform/service-unit'
+import { launchdLabel, systemdUnitName } from '@slayzone/platform/service-identity'
 import type { HubRespawner } from '@slayzone/types'
 
 /**

@@ -91,21 +91,27 @@ export function BackupSettingsTab() {
     retry: restartingFrom ? true : 3
   })
   const restoreStatus: RestoreStatus | undefined = restoreStatusQuery.data
-  // Back from the restart: the data underneath every open view changed, so reload
-  // the whole app (it used to relaunch); a refused backup keeps this view and says why.
-  const backFromRestart =
-    restartingFrom && restoreStatus && restoreStatus.bootId !== restartingFrom
-      ? restoreStatus
-      : null
-  useEffect(() => {
-    if (!backFromRestart) return
+  // Back from the restart (a new boot id): the data underneath every open view
+  // changed, so reload the whole app (it used to relaunch); a refused backup keeps
+  // this view and says why. State is adjusted while rendering; the effect only acts.
+  const [restoreOutcome, setRestoreOutcome] = useState<
+    { kind: 'applied' } | { kind: 'refused'; error: string } | null
+  >(null)
+  if (restartingFrom && restoreStatus && restoreStatus.bootId !== restartingFrom) {
     setRestartingFrom(null)
-    if (backFromRestart.lastRestore?.status === 'refused') {
-      toast.error(`Restore refused: ${backFromRestart.lastRestore.error}. Your data was kept.`)
+    const last = restoreStatus.lastRestore
+    setRestoreOutcome(
+      last?.status === 'refused' ? { kind: 'refused', error: last.error } : { kind: 'applied' }
+    )
+  }
+  useEffect(() => {
+    if (!restoreOutcome) return
+    if (restoreOutcome.kind === 'refused') {
+      toast.error(`Restore refused: ${restoreOutcome.error}. Your data was kept.`)
     } else {
       window.location.reload()
     }
-  }, [backFromRestart])
+  }, [restoreOutcome])
   const renameMutation = useMutation(trpc.app.backup.rename.mutationOptions())
   const setSettingsMutation = useMutation(trpc.app.backup.setSettings.mutationOptions())
   const revealInFinderMutation = useMutation(trpc.app.backup.revealInFinder.mutationOptions())
