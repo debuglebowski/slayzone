@@ -99,6 +99,33 @@ describe('useChatScrollMemory', () => {
     expect(api.revealKey).toHaveBeenCalledWith('user:m3', undefined)
   })
 
+  it('holds the restored anchor while the rows around it settle (their measuring moves it)', async () => {
+    const anchor: ChatScrollAnchor = { atBottom: false, key: 'text:a15:0', offsetPx: 47 }
+    server.state = { draft: { text: '', attachments: [], rev: 0 }, scroll: anchor }
+    const { api } = setup()
+    await vi.waitFor(() => expect(api.restoreAnchor).toHaveBeenCalled())
+    await act(() => vi.advanceTimersByTimeAsync(300))
+    // Put back on later frames too, not only the first one its row rendered in.
+    expect(api.restoreAnchor.mock.calls.length).toBeGreaterThan(3)
+    expect(api.restoreAnchor.mock.calls.every(([a]) => a === anchor)).toBe(true)
+    // …for a bounded settle window, then left alone.
+    await act(() => vi.advanceTimersByTimeAsync(3_000))
+    const settled = api.restoreAnchor.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(1_000))
+    expect(api.restoreAnchor.mock.calls.length).toBe(settled)
+  })
+
+  it('the user scrolling ends the hold at once', async () => {
+    const anchor: ChatScrollAnchor = { atBottom: false, key: 'text:a15:0', offsetPx: 47 }
+    server.state = { draft: { text: '', attachments: [], rev: 0 }, scroll: anchor }
+    const { api, el } = setup()
+    await vi.waitFor(() => expect(api.restoreAnchor).toHaveBeenCalled())
+    fireEvent.wheel(el, { deltaY: -100 })
+    const atInput = api.restoreAnchor.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(500))
+    expect(api.restoreAnchor.mock.calls.length).toBe(atInput)
+  })
+
   it('nothing saved / at the bottom: nothing to restore (the timeline follows the bottom)', async () => {
     server.state = { draft: { text: '', attachments: [], rev: 0 }, scroll: { atBottom: true } }
     const { api } = setup()
