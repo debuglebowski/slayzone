@@ -127,14 +127,13 @@ async function recoverSetAside(hubRoot: string, cipher: TokenCipher | null): Pro
   }
   const out: string[] = []
   for (const name of names.sort()) {
-    let raw: string
+    // One unreadable set-aside file never keeps the others from being tried.
     try {
-      raw = fs.readFileSync(join(hubRoot, name), 'utf8')
+      const got = await unwrap(parse(fs.readFileSync(join(hubRoot, name), 'utf8')), cipher)
+      if (got.kind === 'key') out.push(got.secret)
     } catch {
-      continue
+      /* stays set aside; tried again next start */
     }
-    const got = await unwrap(parse(raw), cipher)
-    if (got.kind === 'key') out.push(got.secret)
   }
   return out
 }
