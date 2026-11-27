@@ -39,6 +39,12 @@ DOM-free subpaths): the mobile chat resolves a chat tab's folder with it.
 ## Client (client/)
 
 - `TaskDetailPage` - Full task view with terminal
+- `layout/` - the task's panels as a layout (columns of tab groups, docs/plans/panel-model.md): `useTaskLayout` owns the state (stored `panel_layout`, else Classic derived from `panel_visibility`/`panel_sizes`; debounced write from the primary window, merged by `rev`), `TaskLayoutView` renders it inside `#task-panels` through the same width resolver as before, so Classic is the legacy strip. `handlePanelToggle(id, on)` hides/shows the group holding panel `id`. Each panel renders once, keyed by instance id, into the slot that holds it (`PanelHosts`): moving a tab moves its DOM, never remounts it.
+- Several panels of a kind (`PanelInstance`; the first keeps its legacy id, others are `<kind>:<uuid8>`): their state lives in `panel_instance_state` (editor, git, artifacts), `browser_tabs.byPanel` (browser) and `settings.terminalGroupIds` (agent/terminal; the primary agent shows every unclaimed group). Kind-wide actions (shortcuts, palette, CLI events) target `focusedInstanceOf(kind)`: the one focused last, else the primary.
+- `panels/` - the panel kinds: `registry.ts` (`PANEL_KINDS`: label, icon, shortcut, keep-alive, multi-instance, secondary-window rule; plus the `TaskPanels` contract the composing app fills through `registerTaskPanels`, exported as `@slayzone/task/client/TaskPanels`), `kinds/*` (one component per kind, rendered inside `PanelFrame`), `TaskPageContext` (what the panels read from the page).
+- `layout/header/` - the title row: group toggles, the ⋯ New panel menu (every kind, web panel presets, Web page, Artifact; Parked), the Layout button. `layouts/` - layout definitions (Classic and the other built-ins, the user's own): switch, save, revert, Manage layouts, the layout editor, ⌃⌥1–9.
+- Opening a kind (⋯, the tab menu's "New <kind> panel", `POST /api/tasks/:id/panels`) shows the panel the task already has instead of adding one when it is a one-per-task kind (Settings, Description, Subtasks, Details), the Artifact panel of that file, or — on Classic — the kind's hidden or parked primary (`existingInstanceFor`). Otherwise it adds an instance.
+- `server/ops/task-layout.ts` - layout changes from outside the task view (`/api/tasks/:id/layout`, `/panels`, `slay panels layout …`): one pure op on the layout the view renders, written through `updateTaskOp`; `task.onLayoutChanged` lets the view offer Undo for an agent's change. Gated per user by `agent_may_change_layout`.
 - `CreateTaskDialog` / `EditTaskDialog` / `DeleteTaskDialog`
 - `TaskMetadataSidebar` - Priority, status, project, tags, blockers
 
@@ -61,6 +67,9 @@ DOM-free subpaths): the mobile chat resolves a chat tab's folder with it.
 - `@slayzone/task-browser` - URL webview
 
 ## Decision Log
+
+**2026-11-26: Panel model — columns of tab groups (docs/plans/panel-model.md)**
+A task's panels are a layout (`panel_layout`: columns → slots → tabs of panel instances), not one visibility flag per panel type. Every kind can have several instances; the first keeps its legacy id so ownership, sizes, shortcuts and selectors keep working. Classic (the built-in default) is derived from the legacy `panel_visibility`/`panel_sizes`/`panel_config` and renders exactly like the old strip. The hub dual-writes the legacy columns on every `panelLayout` write (`projectToLegacy`) and maps legacy-only writes from older clients onto the layout (`applyLegacyWrite`); the dual-write stays until every app channel reads `panel_layout`. Layout ops are pure functions in `@slayzone/task-contracts` (`layout/`), shared by the task view, the hub and the REST routes.
 
 **2026-10-29: Hub-side main-agent start (`task.startMainAgent`)**
 Client-driven spawning (`pty.create` after `pty.attach`) let two clients race and kill each other's agent, and made every client re-implement spawn props + cwd. The hub now resolves both from stored data with the same shared module the desktop uses. Lives in `task` (not `task-terminals`): it needs task + project rows; `task-terminals` sits below `task`.

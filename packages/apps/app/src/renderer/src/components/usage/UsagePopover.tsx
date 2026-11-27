@@ -17,6 +17,8 @@ type PinnedBars = Record<string, string[]>
 interface UsagePopoverProps {
   data: ProviderUsage[]
   onRefresh: (force?: boolean) => void
+  /** Stacked mini bars without labels (the tree sidebar header); the names show on hover. */
+  compact?: boolean
 }
 
 function barColor(pct: number) {
@@ -53,6 +55,17 @@ function InlineBar({ pct, label }: { pct: number; label: string }) {
           style={{ width: `${Math.min(pct, 100)}%` }}
         />
       </div>
+    </div>
+  )
+}
+
+function MiniBar({ pct }: { pct: number }) {
+  return (
+    <div className="w-7 h-1 rounded-full bg-muted overflow-hidden">
+      <div
+        className={cn('h-full rounded-full transition-all', barColor(pct))}
+        style={{ width: `${Math.min(pct, 100)}%` }}
+      />
     </div>
   )
 }
@@ -170,7 +183,7 @@ function totalPinCount(pins: PinnedBars): number {
   return Object.values(pins).reduce((sum, arr) => sum + arr.length, 0)
 }
 
-export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
+export function UsagePopover({ data, onRefresh, compact = false }: UsagePopoverProps) {
   const trpcClient = useTRPCClient()
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(null)
@@ -263,7 +276,16 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
               </TooltipContent>
             </Tooltip>
           )}
-          {inlineBars.length > 0 ? (
+          {inlineBars.length > 0 && compact ? (
+            <div
+              className="flex flex-col gap-1"
+              aria-label={inlineBars.map((b) => `${b.label} ${Math.round(b.pct)}%`).join(', ')}
+            >
+              {inlineBars.map((b) => (
+                <MiniBar key={b.label} pct={b.pct} />
+              ))}
+            </div>
+          ) : inlineBars.length > 0 ? (
             inlineBars.map((b) => <InlineBar key={b.label} pct={b.pct} label={b.label} />)
           ) : (
             <span className="text-[10px]">Usage</span>

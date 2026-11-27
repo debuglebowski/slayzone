@@ -19,8 +19,11 @@ import type {
   TopLevelEntryRef
 } from '@slayzone/projects-contracts'
 import type { OnboardingChecklistState, KeyRecorderComponent, SidebarFooterSlot } from './types'
+import { useDialogStore } from '@slayzone/dialogs'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'
+import { SidebarToolbar } from './SidebarToolbar'
+import { ShortcutsDialog } from './ShortcutsDialog'
 import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { getView } from './views/registry'
 
@@ -32,6 +35,8 @@ interface AppSidebarProps {
   onSelectProject: (id: string, opts?: { home?: boolean }) => void
   onProjectSettings: (project: Project) => void
   onSettings: () => void
+  /** Open Settings › Lenses (the lens menu's "Manage lenses…"). Omitted = no entry. */
+  onManageLenses?: () => void
   onUsageAnalytics: () => void
   onLeaderboard: () => void
   // Task navigation is required, not optional: every host must wire it. An
@@ -52,11 +57,7 @@ interface AppSidebarProps {
   convexConfigured?: boolean
   /** App-supplied feedback entry, rendered in the footer when convex is configured. */
   feedbackSlot?: ReactNode
-  /**
-   * App-supplied "Shared" entry of the footer toolbar (T-100): files shared with the
-   * user on their own. Rendered with the toolbar's layout; renders nothing itself
-   * while nothing is shared.
-   */
+  /** App-supplied "Shared" toolbar entry (T-100): files shared with the user on their own; renders nothing while nothing is shared. */
   sharedSlot?: SidebarFooterSlot
   /** App-supplied renderless KeyRecorder, threaded to the shortcuts dialog. */
   keyRecorder: KeyRecorderComponent
@@ -99,7 +100,10 @@ interface AppSidebarProps {
   tags?: Tag[]
   taskTags?: Map<string, string[]>
   blockedTaskIds?: Set<string>
-  compactFooter?: ReactNode
+  /** Host-only More-menu entries for the tree toolbar (explode mode, agent panels, …). */
+  toolbarMoreItems?: ReactNode
+  /** Host-supplied controls at the right of the tree header (the usage meter). */
+  headerSlot?: ReactNode
   updateState?: UpdateState | null
   /**
    * Host-supplied status card at the top of the footer, above its icon row — the
@@ -176,6 +180,7 @@ export function AppSidebar({
   onSelectProject,
   onProjectSettings,
   onSettings,
+  onManageLenses,
   onUsageAnalytics,
   onLeaderboard,
   onTaskClick,
@@ -219,10 +224,12 @@ export function AppSidebar({
   tags,
   taskTags,
   blockedTaskIds,
-  compactFooter,
+  toolbarMoreItems,
+  headerSlot,
   updateState,
   statusSlot
 }: AppSidebarProps) {
+  const shortcutsOpen = useDialogStore((s) => s.shortcutsOpen)
   const sidebarView = useTabStore((s) => s.sidebarView)
   const setSidebarView = useTabStore((s) => s.setSidebarView)
   const sidebarWidth = useTabStore((s) => s.sidebarWidth)
@@ -329,18 +336,35 @@ export function AppSidebar({
               columnsByProjectId,
               tags,
               taskTags,
-              blockedTaskIds
+              blockedTaskIds,
+              headerSlot
             })}
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className={cn('py-4 gap-3', !compactFooter && 'border-t border-border/60')}>
+      <SidebarFooter
+        className={cn(
+          'gap-3',
+          view.footerLayout === 'horizontal' ? 'py-2 border-t border-border/60' : 'py-4'
+        )}
+      >
         {statusSlot}
-        {compactFooter ? (
+        {view.footerLayout === 'horizontal' ? (
           <>
-            {/* The compact footer has no toolbar: Shared stands on its own above it. */}
-            {sharedSlot?.({ layout: 'horizontal', tooltipSide: 'top' })}
-            {compactFooter}
+            <SidebarToolbar
+              projects={projects}
+              onboardingChecklist={onboardingChecklist}
+              onSettings={onSettings}
+              onUsageAnalytics={onUsageAnalytics}
+              onLeaderboard={onLeaderboard}
+              onCreateProjectGroup={onCreateProjectGroup}
+              convexConfigured={convexConfigured}
+              moreItems={toolbarMoreItems}
+              sharedSlot={sharedSlot}
+              onManageLenses={onManageLenses}
+            />
+            {/* The toolbar's "Send feedback" opens it; the slot shows no button of its own here. */}
+            {convexConfigured && feedbackSlot}
           </>
         ) : (
           <>
@@ -355,32 +379,27 @@ export function AppSidebar({
               convexConfigured={convexConfigured}
               feedbackSlot={feedbackSlot}
               sharedSlot={sharedSlot}
-              keyRecorder={keyRecorder}
-              trailing={
-                view.footerLayout === 'horizontal' ? (
-                  <SidebarViewSwitcher
-                    current={sidebarView}
-                    onChange={setSidebarView}
-                    compact
-                    autoHide={sidebarAutoHide}
-                    onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
-                  />
-                ) : null
-              }
             />
-            {view.footerLayout === 'vertical' && (
-              <div className="flex justify-center">
-                <SidebarViewSwitcher
-                  current={sidebarView}
-                  onChange={setSidebarView}
-                  compact
-                  autoHide={sidebarAutoHide}
-                  onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
-                />
-              </div>
-            )}
+            <div className="flex justify-center">
+              <SidebarViewSwitcher
+                current={sidebarView}
+                onChange={setSidebarView}
+                compact
+                autoHide={sidebarAutoHide}
+                onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
+              />
+            </div>
           </>
         )}
+        <ShortcutsDialog
+          open={shortcutsOpen}
+          onOpenChange={(open) =>
+            open
+              ? useDialogStore.getState().openShortcuts()
+              : useDialogStore.getState().closeShortcuts()
+          }
+          keyRecorder={keyRecorder}
+        />
         {updateState && <UpdateStatusCard state={updateState} />}
       </SidebarFooter>
       {isResizable && effectiveWidth != null && (

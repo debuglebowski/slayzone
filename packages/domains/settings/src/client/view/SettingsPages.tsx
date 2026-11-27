@@ -10,6 +10,7 @@ import { routeFromLegacyTab, type SettingsRoute } from '../settings-route'
 import { closeSettings, useSettingsViewStore } from '../settings-view-store'
 import { AppearanceSettingsTab } from '../tabs/AppearanceSettingsTab'
 import { LayoutSettingsTab } from '../tabs/LayoutSettingsTab'
+import { LensSettingsPage } from '@slayzone/sidebar/lenses'
 import { PanelsSettingsTab } from '../tabs/PanelsSettingsTab'
 import { AiProvidersSettingsTab } from '../tabs/AiProvidersSettingsTab'
 import { WorktreesSettingsTab } from '../tabs/WorktreesSettingsTab'
@@ -62,6 +63,7 @@ export function SettingsPage({
           </>
         )
       if (route.page === 'layout') return <LayoutSettingsTab />
+      if (route.page === 'lenses') return <LensSettingsPage />
       if (route.page === 'telemetry') return <TelemetryPage />
       return (
         <PanelsSettingsTab

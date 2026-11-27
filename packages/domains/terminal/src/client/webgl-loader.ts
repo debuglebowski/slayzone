@@ -272,7 +272,21 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
     )
   })
 
-  opts.terminal.loadAddon(addon)
+  try {
+    // Activation creates the WebGL2 context: it can fail here too ("WebGL2 not
+    // supported" — no context left, e.g. the browser's context cap) — the DOM
+    // renderer then, never an error thrown out of a render.
+    opts.terminal.loadAddon(addon)
+  } catch (err) {
+    console.warn('[terminal] WebGL renderer failed to start, using the DOM renderer:', err)
+    try {
+      addon.dispose()
+    } catch {
+      /* never activated */
+    }
+    opts.onWebglDisabled()
+    return
+  }
   opts.setActiveAddon(addon)
   diag(sid, 'webgl-load', { terminal: opts.terminal })
 

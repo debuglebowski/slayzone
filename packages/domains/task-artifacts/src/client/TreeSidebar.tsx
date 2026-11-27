@@ -16,7 +16,8 @@ import {
   ArrowRight,
   ImageDown,
   FileCode,
-  Archive
+  Archive,
+  PanelRight
 } from 'lucide-react'
 import {
   cn,
@@ -52,6 +53,8 @@ interface TreeSidebarProps {
   readOnly?: boolean
   /** Share one file with people (T-100); absent: no Share entry. */
   onShareArtifact?: (artifact: { id: string; title: string }) => void
+  /** Open one file in its own Artifact panel; absent: no entry. */
+  onOpenInOwnPanel?: (artifact: { id: string; title: string }) => void
   artifacts: TaskArtifact[]
   folders: ArtifactFolder[]
   selectedId: string | null
@@ -117,6 +120,7 @@ export function TreeSidebar(props: TreeSidebarProps) {
   const {
     readOnly = false,
     onShareArtifact,
+    onOpenInOwnPanel,
     artifacts,
     folders,
     selectedId,
@@ -463,6 +467,16 @@ export function TreeSidebar(props: TreeSidebarProps) {
                         </>
                       )}
                       <ContextMenuSeparator />
+                      {onOpenInOwnPanel && (
+                        <ContextMenuItem
+                          data-testid="artifact-open-own-panel"
+                          onSelect={() =>
+                            onOpenInOwnPanel({ id: artifact.id, title: artifact.title })
+                          }
+                        >
+                          <PanelRight className="size-3 mr-2" /> Open in its own panel
+                        </ContextMenuItem>
+                      )}
                       {onShareArtifact && (
                         <ContextMenuItem
                           onSelect={() =>

@@ -148,6 +148,9 @@ function TaskRowView({
     pointerEvents: effectivelyHidden ? 'none' : undefined
   }
 
+  const rowHeight = ctx.rowHeight ?? TG_ROW_HEIGHT
+  const dense = rowHeight < TG_ROW_HEIGHT
+  const project = ctx.projectsById?.get(task.project_id)
   const isActive = ctx.activeTaskId === task.id
   const isOpenTab = ctx.openTabTaskIds.has(task.id)
   const isSelected = ctx.selectedTaskIds.has(task.id)
@@ -183,12 +186,15 @@ function TaskRowView({
       onMouseDown={(e) => {
         if (e.button === 1) e.preventDefault()
       }}
-      style={{ ...style, paddingLeft: tgPaddingLeft(depth), minHeight: TG_ROW_HEIGHT }}
-      className="group/treerow relative flex w-full items-center pr-1 text-sm text-left touch-none"
+      style={{ ...style, paddingLeft: tgPaddingLeft(depth), minHeight: rowHeight }}
+      className={cn(
+        'group/treerow relative flex w-full items-center pr-1 text-left touch-none',
+        dense ? 'text-xs' : 'text-sm'
+      )}
       {...attributes}
       {...listeners}
     >
-      <TreeGuides depth={depth} ancestorFlags={ancestorFlags} />
+      <TreeGuides depth={depth} ancestorFlags={ancestorFlags} height={rowHeight} />
       {ctx.tasksWithChildren.has(task.id) && (
         <span
           role="button"
@@ -212,7 +218,7 @@ function TaskRowView({
             // ancestor guide curves to meet the row content. That's the
             // visual "path split". Centered on (parentX, mid).
             left: tgGuideX(depth - 1) - 6,
-            top: TG_ROW_HEIGHT / 2 - 6
+            top: rowHeight / 2 - 6
           }}
           className={cn(
             'absolute z-20 inline-flex size-3 items-center justify-center rounded-sm bg-background text-foreground ring-1 ring-border transition-opacity',
@@ -229,7 +235,8 @@ function TaskRowView({
       )}
       <span
         className={cn(
-          'relative flex flex-1 items-center gap-2 px-1.5 py-1 min-w-0 transition-colors',
+          'relative flex flex-1 items-center gap-2 px-1.5 min-w-0 transition-colors',
+          dense ? 'py-0' : 'py-1',
           // Selection = a self-contained border on every selected row (same for
           // any count, rows NOT aware of neighbors). Background + text stay
           // driven purely by active/open state — selecting never changes them.
@@ -260,6 +267,15 @@ function TaskRowView({
           size={8}
           activeSize={12}
         />
+        {project && (
+          <span
+            data-testid="task-row-project-dot"
+            title={project.name}
+            aria-label={project.name}
+            className="size-2 shrink-0 rounded-full"
+            style={{ backgroundColor: project.color }}
+          />
+        )}
         {isEditing ? (
           <RenameInput
             initialValue={task.title || ''}

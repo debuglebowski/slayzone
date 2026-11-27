@@ -113,6 +113,9 @@ export const AgentStatusSidePanel = lazyWithPreload(() =>
     default: m.AgentStatusSidePanel
   }))
 )
+export const ManageLayoutsHost = lazyWithPreload(() =>
+  import('@slayzone/task/client/layouts').then((m) => ({ default: m.ManageLayoutsHost }))
+)
 export const TerminalStatusDialog = lazyWithPreload(() =>
   import('@slayzone/terminal').then((m) => ({ default: m.TerminalStatusDialog }))
 )

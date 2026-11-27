@@ -5,6 +5,12 @@ import type {
   CreateTaskTemplateInput,
   UpdateTaskTemplateInput
 } from '@slayzone/task-contracts'
+import {
+  applyLegacyWrite,
+  parseTaskLayout,
+  projectToLegacy,
+  serializeTaskLayout
+} from '@slayzone/task-contracts'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './templates-txns'
 
@@ -32,6 +38,7 @@ export function parseTemplate(row: Record<string, unknown> | undefined): TaskTem
     agent_id: (row.agent_id as string) ?? null,
     provider_config: safeJsonParse(row.provider_config) as TaskTemplate['provider_config'],
     panel_visibility: safeJsonParse(row.panel_visibility) as TaskTemplate['panel_visibility'],
+    panel_layout: parseTaskLayout(row.panel_layout),
     browser_tabs: safeJsonParse(row.browser_tabs) as TaskTemplate['browser_tabs'],
     web_panel_urls: safeJsonParse(row.web_panel_urls) as TaskTemplate['web_panel_urls'],
     dangerously_skip_permissions:
@@ -82,10 +89,34 @@ export async function getTemplate(db: SlayzoneDb, id: string): Promise<TaskTempl
   return parseTemplate(row)
 }
 
+/**
+ * A template's panel layout and the legacy panel_visibility it dual-writes (like a
+ * task's, docs/plans/panel-model.md §1.4): a layout projects into the visibility, so
+ * an older app creating a task from the template still shows the same panels.
+ */
+function templatePanels(
+  panelLayout: unknown,
+  panelVisibility: Record<string, boolean> | null | undefined
+): { panelLayout: string | null; panelVisibility: string | null } {
+  if (!panelLayout)
+    return {
+      panelLayout: null,
+      panelVisibility: panelVisibility ? JSON.stringify(panelVisibility) : null
+    }
+  const layout = parseTaskLayout(panelLayout)
+  if (!layout) throw new Error('Invalid panelLayout')
+  const projected = projectToLegacy(layout, { panelVisibility: panelVisibility ?? undefined })
+  return {
+    panelLayout: serializeTaskLayout(layout),
+    panelVisibility: JSON.stringify(projected.panelVisibility)
+  }
+}
+
 export async function createTemplate(
   db: SlayzoneDb,
   data: CreateTaskTemplateInput
 ): Promise<TaskTemplate | null> {
+  const panels = templatePanels(data.panelLayout, data.panelVisibility)
   const row = await db.namedTxn('task-templates:create', {
     id: randomUUID(),
     projectId: data.projectId,
@@ -93,7 +124,8 @@ export async function createTemplate(
     description: data.description ?? null,
     agentId: data.agentId ?? null,
     providerConfig: data.providerConfig ? JSON.stringify(data.providerConfig) : null,
-    panelVisibility: data.panelVisibility ? JSON.stringify(data.panelVisibility) : null,
+    panelVisibility: panels.panelVisibility,
+    panelLayout: panels.panelLayout,
     browserTabs: data.browserTabs ? JSON.stringify(data.browserTabs) : null,
     webPanelUrls: data.webPanelUrls ? JSON.stringify(data.webPanelUrls) : null,
     dangerouslySkipPermissions:
@@ -144,9 +176,34 @@ export async function updateTemplate(
   ]
 
   for (const [key, col, transform] of fields) {
-    if (key in data) {
+    if (key in data && key !== 'panelVisibility') {
       sets.push(`${col} = ?`)
       values.push(transform(data[key]))
+    }
+  }
+  // Panel layout ↔ panel_visibility, dual-written: a layout write projects into the
+  // visibility; a visibility-only write (an older client) is applied to a stored layout.
+  if ('panelLayout' in data) {
+    const panels = templatePanels(
+      data.panelLayout,
+      'panelVisibility' in data
+        ? data.panelVisibility
+        : (safeJsonParse(existing.panel_visibility) as Record<string, boolean> | null)
+    )
+    sets.push('panel_layout = ?')
+    values.push(panels.panelLayout)
+    if (data.panelLayout || 'panelVisibility' in data) {
+      sets.push('panel_visibility = ?')
+      values.push(panels.panelVisibility)
+    }
+  } else if ('panelVisibility' in data) {
+    sets.push('panel_visibility = ?')
+    values.push(data.panelVisibility ? JSON.stringify(data.panelVisibility) : null)
+    const stored = parseTaskLayout(existing.panel_layout)
+    const next = stored && applyLegacyWrite(stored, { panelVisibility: data.panelVisibility })
+    if (next && next !== stored) {
+      sets.push('panel_layout = ?')
+      values.push(serializeTaskLayout(next))
     }
   }
 

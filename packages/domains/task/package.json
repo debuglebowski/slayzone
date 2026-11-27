@@ -15,7 +15,7 @@
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",
     "./client/TaskDetailDataLoader": "./src/client/TaskDetailDataLoader.tsx",
     "./client/lazyPanels": "./src/client/task-detail/lazyPanels.tsx",
-    "./client/TaskPanels": "./src/client/task-detail/TaskPanels.ts",
+    "./client/TaskPanels": "./src/client/panels/registry.ts",
     "./client/taskSessionsSource": "./src/client/agent-sessions-source.ts",
     "./client/taskDetailCache": "./src/client/taskDetailCache.ts",
     "./client/deleteTaskResult": "./src/client/deleteTaskResult.ts",
@@ -27,6 +27,8 @@
     "./client/ResizeHandle": "./src/client/ResizeHandle.tsx",
     "./client/usePanelSizes": "./src/client/usePanelSizes.ts",
     "./client/usePanelConfig": "./src/client/usePanelConfig.ts",
+    "./client/layouts": "./src/client/layouts/index.ts",
+    "./client/newTaskLayout": "./src/client/layouts/newTaskLayout.ts",
     "./main-terminal": "./src/shared/main-terminal.ts"
   },
   "scripts": {

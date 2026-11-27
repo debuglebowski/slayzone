@@ -80,6 +80,8 @@ export function demoTask(
     dangerously_skip_permissions: false,
     panel_visibility: null,
     panel_sizes: null,
+    panel_layout: null,
+    panel_instance_state: null,
     computer_id: null,
     has_worktree: false,
     worktree_parent_branch: null,

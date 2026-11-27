@@ -10,6 +10,9 @@ export {
   requestAgentStart,
   chatsLoadingCount,
   subscribeChatsLoading,
-  resolveIdRef
+  resolveIdRef,
+  useTerminalGroupsApi,
+  useTerminalGroupMode,
+  filterTerminalGroups
 } from './client'
 export type { TerminalContainerHandle } from './client'

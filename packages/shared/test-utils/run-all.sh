@@ -364,6 +364,7 @@ run_harness packages/domains/task/src/client/terminal-on-this-device.test.ts
 run_harness packages/shared/workflow/src/columns.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
 run_harness packages/domains/tabs-state/src/useTabStore.test.ts
+run_harness packages/domains/tabs-state/src/lenses.test.ts
 run_harness packages/domains/tabs-state/src/open-tabs-sync.test.ts
 run_harness packages/domains/tabs-state/src/server/router.test.ts
 # Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
@@ -374,6 +375,7 @@ run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/treeGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
+run_harness packages/domains/sidebar/src/views/lensLists.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
 run_harness packages/domains/tasks/src/client/scratch-task.test.ts
@@ -614,6 +616,8 @@ run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migr
 run_harness packages/shared/db-migrations/src/v215-computer-retirement-chains-reason-codes-migration.test.ts
 run_harness packages/shared/db-migrations/src/v226-open-task-tabs-migration.test.ts
 run_harness packages/shared/db-migrations/src/v227-sharing-members-only-migration.test.ts
+# v228: panel model columns (tasks.panel_layout / panel_instance_state, task_templates.panel_layout), no backfill.
+run_harness packages/shared/db-migrations/src/v228-panel-layout-migration.test.ts
 run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts
 run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts
@@ -1222,6 +1226,7 @@ run_harness packages/apps/api/src/http/rest-api/tasks/create.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/delete.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/unarchive.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/update.test.ts
+run_harness packages/apps/api/src/http/rest-api/tasks/layout.test.ts
 # `slay tasks done [--close]`: the done INTENT (project completed column) — not
 # PATCH's status-alias resolution. See tasks/done.ts.
 run_harness packages/apps/api/src/http/rest-api/tasks/done.test.ts
@@ -1299,6 +1304,7 @@ run_harness packages/apps/cli/test/tasks-ext.test.ts
 run_harness packages/apps/cli/test/projects-update.test.ts
 # Wave-3 CLI read commands routed through REST (hub-aware cutover).
 run_harness packages/apps/cli/test/cli-read-rest.test.ts
+run_harness packages/apps/cli/test/panels-layout.test.ts
 # slay chat / slay agent → /api/chat + /api/agent over a scripted chat runtime: exit codes, answers, self-wait guard.
 run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
@@ -1387,6 +1393,8 @@ run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
 run_harness packages/domains/task/src/server/ops/chat-starting-values.test.ts
 run_harness packages/domains/task/src/server/ops/task-paths-delegate.test.ts
 run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
+# Panel layout dual-write: panelLayout ↔ panel_visibility/panel_sizes, templates copy it.
+run_harness packages/domains/task/src/server/ops/panel-layout-dual-write.test.ts
 run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
@@ -1403,6 +1411,18 @@ run_harness packages/domains/task-contracts/src/panel-config.test.ts
 # Render modes: video is inferred from its extension and stays binary (never read as text).
 run_harness packages/domains/task-contracts/src/render-modes.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
+# Task panel layout (columns of tab groups): pure ops, legacy panel_visibility/panel_sizes
+# adapters (derive ∘ project round-trip), parsing from disk, built-in layouts.
+run_harness packages/domains/task-contracts/src/layout/ops.test.ts
+run_harness packages/domains/task-contracts/src/layout/legacy.test.ts
+run_harness packages/domains/task-contracts/src/layout/settings.test.ts
+run_harness packages/domains/task-contracts/src/layout/classic.test.ts
+run_harness packages/domains/task-contracts/src/layout/instances.test.ts
+# Step 12 kinds: web page URLs, Artifact panels, one-per-task kinds (settings parse, adding).
+run_harness packages/domains/task-contracts/src/layout/kinds.test.ts
+# Layout definitions: switching (match by kind, park live leftovers), dirty detection, task_layouts.
+run_harness packages/domains/task-contracts/src/layout/definitions.test.ts
+run_harness packages/domains/task-contracts/src/layout/remote.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts
 run_harness packages/domains/terminal/src/shared/codex-plan-review.test.ts
@@ -1814,6 +1834,17 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/TaskSettingsPanel.test.tsx \
   packages/domains/task/src/client/createTaskFormDefaults.test.ts \
   packages/domains/task/src/client/usePanelSizes.test.ts \
+  packages/domains/task/src/client/layout/strip.test.ts \
+  packages/domains/task/src/client/layout/useTaskLayout.test.tsx \
+  packages/domains/task/src/client/layout/layoutDnd.test.ts \
+  packages/domains/task/src/client/layout/usePanelCloseRequest.test.tsx \
+  packages/domains/task/src/client/layout/PanelHosts.test.tsx \
+  packages/domains/task/src/client/layout/usePanelInstanceState.test.tsx \
+  packages/domains/task/src/client/layout/header/NewPanelMenu.test.ts \
+  packages/domains/task/src/client/layout/header/groups.test.ts \
+  packages/domains/task/src/client/layout/header/GroupToggles.test.tsx \
+  packages/domains/task/src/client/layout/header/LayoutMenu.test.tsx \
+  packages/domains/task/src/client/panels/instanceHandles.test.ts \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.scope.test.tsx \

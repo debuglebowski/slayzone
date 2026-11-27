@@ -95,6 +95,8 @@ export interface SidebarViewContext {
   onPinnedReorder?: (taskIds: string[]) => void
   /** Star / unstar a project — starred projects stay visible when inactive projects are hidden. */
   onSetProjectStarred?: (projectId: string, starred: boolean) => void
+  /** Host-supplied controls at the right of the view's header (the usage meter). */
+  headerSlot?: ReactNode
 }
 
 export interface SidebarView {

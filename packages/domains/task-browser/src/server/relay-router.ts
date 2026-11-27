@@ -68,7 +68,8 @@ export const appBrowserRelayRouter = router({
         hostId: id,
         tabIds: z.array(id).max(500),
         activeTabId: id.nullable(),
-        isolatedTabIds: z.array(id).max(500).optional()
+        isolatedTabIds: z.array(id).max(500).optional(),
+        primary: z.boolean().optional()
       })
     )
     .mutation(({ input, ctx }) => onHost(() => relayDeps().relay.sync(principalKey(ctx), input))),
@@ -106,13 +107,14 @@ export const appBrowserRelayRouter = router({
    * task's web views (browser tabs AND web panels, panel open or not) or its panel.
    * Keeps the task's agent awake (idle-close) and makes that client the one
    * `slay browser` reaches. Sent by one app-level listener per window, so it needs no
-   * mounted panel.
+   * mounted panel. `hostId` (a panel's own chrome was used): that panel, of several
+   * browser panels of the task on the client, is the one `slay browser` reaches.
    */
   engaged: publicProcedure
-    .input(z.object({ taskId: id, clientKey: id }))
+    .input(z.object({ taskId: id, clientKey: id, hostId: id.optional() }))
     .mutation(({ input, ctx }) => {
       const { relay, onEngaged } = relayDeps()
-      relay.noteUse(principalKey(ctx), input.clientKey, input.taskId)
+      relay.noteUse(principalKey(ctx), input.clientKey, input.taskId, input.hostId)
       onEngaged(input.taskId)
     })
 })

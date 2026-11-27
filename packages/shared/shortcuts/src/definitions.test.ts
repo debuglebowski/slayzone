@@ -17,6 +17,32 @@ afterEach(() => {
   vi.resetModules()
 })
 
+describe('lens switching never collides with tab switching', () => {
+  it('macOS: ⌃1–9 (⌘1–9 switches tabs)', async () => {
+    const d = await defaultsOn('mac')
+    expect(d['switch-lens-1-9']).toBe('ctrl+1-9')
+  })
+
+  it('Windows/Linux: Alt+1–9 (mod is Ctrl there)', async () => {
+    const d = await defaultsOn('other')
+    expect(d['switch-lens-1-9']).toBe('alt+1-9')
+    expect(d['switch-tab-1-9']).toBe('mod+1-9')
+  })
+})
+
+describe('layout switching (⌃⌥1–9) collides with nothing', () => {
+  for (const platform of ['mac', 'other'] as const) {
+    it(`${platform}: ctrl+alt+N for layouts 1–9, no other default uses it`, async () => {
+      const d = await defaultsOn(platform)
+      for (let n = 1; n <= 9; n++) expect(d[`switch-layout-${n}`]).toBe(`ctrl+alt+${n}`)
+      const layoutKeys = new Set(Array.from({ length: 9 }, (_, i) => `ctrl+alt+${i + 1}`))
+      const others = Object.entries(d).filter(([id]) => !id.startsWith('switch-layout-'))
+      expect(others.filter(([, keys]) => keys && layoutKeys.has(keys))).toEqual([])
+      expect(d['switch-lens-1-9']?.startsWith('ctrl+alt')).toBe(false)
+    })
+  }
+})
+
 describe('task-tab shortcut defaults follow the platform convention', () => {
   it('macOS: ⌘⌥← / ⌘⌥→', async () => {
     const d = await defaultsOn('mac')

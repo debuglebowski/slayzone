@@ -1,4 +1,4 @@
-export { TerminalContainer } from './TerminalContainer'
+export { TerminalContainer, filterTerminalGroups } from './TerminalContainer'
 export type { TerminalContainerHandle } from './TerminalContainer'
 export { TerminalTabBar } from './TerminalTabBar'
 export { MODE_ICONS } from './mode-icons'
@@ -8,4 +8,9 @@ export { markForceStart, requestAgentStart } from './TerminalStarter'
 export { chatsLoadingCount, subscribeChatsLoading } from './chat/chat-loading'
 export { resolveIdRef } from './chat/chat-link'
 export { useTaskTerminals } from './useTaskTerminals'
+export {
+  useTerminalGroupMode,
+  useTerminalGroupsApi,
+  type TerminalGroupsApi
+} from './useTerminalGroupsApi'
 export { CHAT_SUPPORTED_MODES, isChatSupported } from '../shared/chat-modes'

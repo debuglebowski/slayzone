@@ -95,11 +95,10 @@ async function ensureGitPanelVisible(page: import('@playwright/test').Page) {
     // Prefer the header PanelToggle "Git" button — a deterministic, focus-
     // independent open. The old blind Meta+g retry could land a press, miss
     // the short visibility window while the panel mounted, and the next
-    // attempt's press would toggle it straight back off.
-    const gitToggle = page
-      .locator('button:visible')
-      .filter({ hasText: /^Git\b/ })
-      .first()
+    // attempt's press would toggle it straight back off. By role: a task page kept
+    // mounted `invisible` (visibility: hidden) has its own Git toggle, which `:visible`
+    // still matches but the accessibility tree leaves out.
+    const gitToggle = page.getByRole('button', { name: /^Git(?:\s|$)/ }).first()
     if (await gitToggle.isVisible().catch(() => false)) {
       await gitToggle.click().catch(() => {})
     } else {

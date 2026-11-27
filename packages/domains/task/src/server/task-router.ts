@@ -24,6 +24,7 @@ import {
   movePreviewInputSchema,
   duplicateTaskInputSchema,
   type CreateTaskInput,
+  type TaskLayoutChangedEvent,
   type UpdateTaskInput
 } from '@slayzone/task-contracts'
 import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
@@ -540,8 +541,9 @@ export const taskRouter = router({
     observable<{ taskId: string; projectId: string }>((emit) => {
       const handler = (e: { taskId: string; projectId: string }): void =>
         emit.next({ taskId: e.taskId, projectId: e.projectId })
-      // Row changes (each names its project); not `task:paths-changed` (onPathsChanged).
-      const events: Exclude<keyof TaskEventMap, 'task:paths-changed'>[] = [
+      // Row changes (each names its project); not `task:paths-changed` (onPathsChanged)
+      // nor `task:layout-changed` (onLayoutChanged; its write emits `task:updated`).
+      const events: Exclude<keyof TaskEventMap, 'task:paths-changed' | 'task:layout-changed'>[] = [
         'task:created',
         'task:archived',
         'task:unarchived',
@@ -566,6 +568,19 @@ export const taskRouter = router({
       taskEvents.on('task:paths-changed', handler)
       return () => {
         taskEvents.off('task:paths-changed', handler)
+      }
+    })
+  ),
+
+  // A layout change made outside the task view (`slay panels layout …`, REST). The
+  // layout itself arrives with the row; open views offer Undo on an agent's change
+  // and release removed panels' state.
+  onLayoutChanged: publicProcedure.subscription(() =>
+    observable<TaskLayoutChangedEvent>((emit) => {
+      const handler = (e: TaskLayoutChangedEvent): void => emit.next(e)
+      taskEvents.on('task:layout-changed', handler)
+      return () => {
+        taskEvents.off('task:layout-changed', handler)
       }
     })
   )

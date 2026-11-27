@@ -77,4 +77,8 @@ export interface TaskBranchCtx {
   tasksWithChildren: Set<string>
   collapsedTaskIds: Set<string>
   onToggleCollapse: (taskId: string) => void
+  /** Row height in px (default `TG_ROW_HEIGHT`); the dense lens look passes a shorter one. */
+  rowHeight?: number
+  /** Cross-project lists: each row leads with its project's color dot. */
+  projectsById?: ReadonlyMap<string, { name: string; color: string }>
 }

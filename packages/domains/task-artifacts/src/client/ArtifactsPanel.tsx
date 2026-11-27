@@ -104,10 +104,14 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       onSidebarStateChange,
       onOpenUrl,
       onShareArtifact,
-      readOnly = false
+      readOnly = false,
+      pinnedArtifactId,
+      onOpenInOwnPanel
     },
     ref
   ) {
+    // An Artifact panel: this one file, no sidebar (see ArtifactsPanelProps).
+    const pinned = pinnedArtifactId !== undefined
     const trpc = useTRPC()
     const { mutateAsync: showOpenDialog } = useMutation(
       trpc.app.dialog.showOpenDialog.mutationOptions()
@@ -152,7 +156,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       renameFolder,
       getArtifactPath,
       folderPathMap
-    } = useArtifacts(taskId, initialActiveArtifactId)
+    } = useArtifacts(taskId, pinnedArtifactId ?? initialActiveArtifactId)
 
     const {
       expandedFolders,
@@ -225,25 +229,26 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
     // Sidebar visibility + width: seeded from the task's saved state, every user
     // change reported to the parent (which saves it per task).
-    const [sidebarVisible, setSidebarVisible] = useState(initialSidebarState?.visible ?? true)
+    const [sidebarShown, setSidebarShown] = useState(initialSidebarState?.visible ?? true)
+    const sidebarVisible = sidebarShown && !pinned
     const [sidebarWidth, setSidebarWidth] = useState(
       initialSidebarState?.width ?? DEFAULT_SIDEBAR_WIDTH
     )
     const commitSidebar = useStableCallback((next: { visible?: boolean; width?: number }) => {
       const state = {
-        visible: next.visible ?? sidebarVisible,
+        visible: next.visible ?? sidebarShown,
         width: next.width ?? sidebarWidth
       }
-      setSidebarVisible(state.visible)
+      setSidebarShown(state.visible)
       setSidebarWidth(state.width)
       onSidebarStateChange?.(state)
     })
-    const toggleSidebar = useStableCallback(() => commitSidebar({ visible: !sidebarVisible }))
+    const toggleSidebar = useStableCallback(() => commitSidebar({ visible: !sidebarShown }))
     const sidebarKeys = useShortcutStore((s) => s.getKeys('artifacts-toggle-sidebar'))
     const isRecordingShortcut = useShortcutStore((s) => s.isRecording)
     const sidebarShortcut = useShortcutDisplay('artifacts-toggle-sidebar')
     useEffect(() => {
-      if (!sidebarKeys || isRecordingShortcut) return
+      if (!sidebarKeys || isRecordingShortcut || pinned) return
       const handleKeyDown = withModalGuard((event: KeyboardEvent) => {
         if (event.defaultPrevented || !matchesShortcut(event, sidebarKeys)) return
         event.preventDefault()
@@ -251,7 +256,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       })
       window.addEventListener('keydown', handleKeyDown)
       return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [sidebarKeys, isRecordingShortcut, toggleSidebar])
+    }, [sidebarKeys, isRecordingShortcut, pinned, toggleSidebar])
     const [findOpen, setFindOpen] = useState(false)
     const [findQuery, setFindQuery] = useState('')
     const [findActiveIndex, setFindActiveIndex] = useState(0)
@@ -294,7 +299,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       return () => cancelAnimationFrame(frame)
     }, [renaming])
 
-    const selectedArtifact = artifacts.find((a) => a.id === selectedId) ?? null
+    const shownId = pinnedArtifactId ?? selectedId
+    const selectedArtifact = artifacts.find((a) => a.id === shownId) ?? null
     const selectedRenderMode = selectedArtifact
       ? getEffectiveRenderMode(selectedArtifact.title, selectedArtifact.render_mode)
       : null
@@ -739,24 +745,29 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             )}
             {/* Top-right: action buttons + artifact controls */}
             <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                    onClick={toggleSidebar}
-                    aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
-                  >
-                    {sidebarVisible ? (
-                      <PanelLeftClose className="size-4" />
-                    ) : (
-                      <PanelLeft className="size-4" />
+              {!pinned && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                      onClick={toggleSidebar}
+                      aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+                    >
+                      {sidebarVisible ? (
+                        <PanelLeftClose className="size-4" />
+                      ) : (
+                        <PanelLeft className="size-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {withShortcut(
+                      sidebarVisible ? 'Hide sidebar' : 'Show sidebar',
+                      sidebarShortcut
                     )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {withShortcut(sidebarVisible ? 'Hide sidebar' : 'Show sidebar', sidebarShortcut)}
-                </TooltipContent>
-              </Tooltip>
+                  </TooltipContent>
+                </Tooltip>
+              )}
               {!sidebarVisible && selectedArtifact ? (
                 <span
                   data-testid="artifacts-header-title"
@@ -830,6 +841,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 <TreeSidebar
                   readOnly={readOnly}
                   onShareArtifact={onShareArtifact}
+                  onOpenInOwnPanel={onOpenInOwnPanel}
                   artifacts={artifacts}
                   folders={folders}
                   selectedId={selectedId}
@@ -1014,7 +1026,13 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground/60">
-                {artifacts.length > 0 ? 'Select an artifact' : 'Create an artifact to get started'}
+                {pinned
+                  ? isLoading
+                    ? null
+                    : 'This artifact no longer exists'
+                  : artifacts.length > 0
+                    ? 'Select an artifact'
+                    : 'Create an artifact to get started'}
               </div>
             )}
           </div>

@@ -84,6 +84,8 @@ interface TerminalRowExtras {
   is_temporary?: boolean
   terminal_shell?: string | null
   panel_visibility?: Task['panel_visibility']
+  panel_layout?: Task['panel_layout']
+  panel_instance_state?: Task['panel_instance_state']
   base_dir?: string | null
   worktree_path?: string | null
   provider_config?: Record<string, unknown> | null
@@ -209,6 +211,8 @@ function synthTask(
     opencode_flags: extras.opencode_flags ?? '',
     dangerously_skip_permissions: false,
     panel_visibility: extras.panel_visibility ?? null,
+    panel_layout: extras.panel_layout ?? null,
+    panel_instance_state: extras.panel_instance_state ?? null,
     // A task's paths live on its computer (§9 Phase 7d): the row says only whether set.
     has_worktree: !!(
       (typeof entry.worktree_path === 'string' && entry.worktree_path.length > 0) ||
@@ -362,6 +366,9 @@ export const dbShim = {
     if (data.opencodeFlags !== undefined) terminalPatch.opencode_flags = data.opencodeFlags
     if (data.isTemporary !== undefined) terminalPatch.is_temporary = data.isTemporary
     if (data.panelVisibility !== undefined) terminalPatch.panel_visibility = data.panelVisibility
+    if (data.panelLayout !== undefined) terminalPatch.panel_layout = data.panelLayout
+    if (data.panelInstanceState !== undefined)
+      terminalPatch.panel_instance_state = data.panelInstanceState
     // cap-migrate-all-tests (git-providers batch) — linearUrl is a renderer-cache
     // passthrough so 94-linear-indicator can seed the kanban/task-detail Linear
     // badge without an external_links table in the sidecar.

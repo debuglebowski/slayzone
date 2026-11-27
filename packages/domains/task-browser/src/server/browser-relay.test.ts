@@ -183,6 +183,52 @@ test('an explicit tab goes to the host that has it, even if another was used lat
   expect(b.requests()).toHaveLength(0)
 })
 
+test('several browser panels of a task on one client: the primary answers, until another panel is used', () => {
+  const relay = new BrowserRelay()
+  // The second instance mounted first (e.g. the primary was shown later).
+  const second = host(relay, 't1', null, 'desk')
+  const primary = host(relay, 't1', null, 'desk')
+  relay.sync(null, { hostId: second.hostId, tabIds: ['b1'], activeTabId: 'b1', primary: false })
+  relay.sync(null, { hostId: primary.hostId, tabIds: ['p1'], activeTabId: 'p1', primary: true })
+  expect(relay.getResolvedTabId(null, 't1')).toBe('p1')
+  // Using the second panel's own chrome makes it the target.
+  relay.noteUse(null, 'desk', 't1', second.hostId)
+  expect(relay.getResolvedTabId(null, 't1')).toBe('b1')
+  // Plain client use (input in a web view) changes nothing between the panels.
+  relay.noteUse(null, 'desk', 't1')
+  expect(relay.getResolvedTabId(null, 't1')).toBe('b1')
+  relay.noteUse(null, 'desk', 't1', primary.hostId)
+  expect(relay.getResolvedTabId(null, 't1')).toBe('p1')
+  // An explicit tab still goes to whichever panel has it.
+  void relay.run(null, 't1', 'b1', { op: 'getUrl' }, 'hub-machine')
+  expect(second.requests()).toHaveLength(1)
+})
+
+test('listTabs lists every browser panel’s tabs on the owning client', () => {
+  const relay = new BrowserRelay()
+  const primary = host(relay, 't1', null, 'desk')
+  const second = host(relay, 't1', null, 'desk')
+  const elsewhere = host(relay, 't1', null, 'laptop')
+  relay.sync(null, { hostId: primary.hostId, tabIds: ['p1'], activeTabId: 'p1' })
+  relay.sync(null, { hostId: second.hostId, tabIds: ['b1'], activeTabId: 'b1', primary: false })
+  relay.sync(null, { hostId: elsewhere.hostId, tabIds: ['l1'], activeTabId: 'l1' })
+  expect(relay.listTabs(null, 't1')).toEqual([
+    { tabId: 'p1', active: true, isolated: false },
+    { tabId: 'b1', active: false, isolated: false }
+  ])
+})
+
+test('host-level use from another principal or task is ignored', () => {
+  const relay = new BrowserRelay()
+  const primary = host(relay, 't1', 'u1', 'desk')
+  const second = host(relay, 't1', 'u1', 'desk')
+  relay.sync('u1', { hostId: primary.hostId, tabIds: ['p1'], activeTabId: 'p1' })
+  relay.sync('u1', { hostId: second.hostId, tabIds: ['b1'], activeTabId: 'b1', primary: false })
+  relay.noteUse('u2', 'desk', 't1', second.hostId)
+  relay.noteUse('u1', 'desk', 't2', second.hostId)
+  expect(relay.getResolvedTabId('u1', 't1')).toBe('p1')
+})
+
 test('run with no owner rejects', async () => {
   const relay = new BrowserRelay()
   await expect(relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere')).rejects.toThrow(

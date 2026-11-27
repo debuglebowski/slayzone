@@ -2,7 +2,7 @@ import { lazyWithPreload } from '@slayzone/ui'
 import { browserTaskSource } from './browserTaskSource'
 
 // Lazy-loaded heavy panels — split out of TaskDetailPage so each panel chunk loads on demand.
-// Artifacts + git panels are injected by the app (see TaskPanels.tsx).
+// Artifacts + git panels are injected by the app (see ../panels/registry.ts).
 export const DescriptionDialog = lazyWithPreload(() =>
   import('../DescriptionDialog').then((m) => ({ default: m.DescriptionDialog }))
 )

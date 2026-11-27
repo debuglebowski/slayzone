@@ -30,7 +30,7 @@ test.describe('Panel toggles', () => {
   /** Scope to visible PanelToggle buttons in the active task tab */
   const panelBtn = (page: import('@playwright/test').Page, label: string) =>
     page
-      .locator('.bg-surface-2.rounded-lg:visible')
+      .locator('[data-testid="panel-toggles"]:visible')
       .filter({ has: page.locator('button:has-text("Agent")') })
       .locator(`button:has-text("${label}")`)
 
@@ -94,7 +94,7 @@ test.describe('Panel toggles', () => {
   /** Ordered labels of the visible PanelToggle buttons in the active task tab */
   const buttonOrder = async (page: import('@playwright/test').Page) => {
     const container = page
-      .locator('.bg-surface-2.rounded-lg:visible')
+      .locator('[data-testid="panel-toggles"]:visible')
       .filter({ has: page.locator('button:has-text("Agent")') })
     const texts = await container.locator('button').allInnerTexts()
     return texts.map((t) => t.trim().split(/\s|⌘/)[0])

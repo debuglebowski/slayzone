@@ -1,4 +1,11 @@
-import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
+import React, {
+  Suspense,
+  useEffect,
+  useState,
+  type ComponentProps,
+  type Dispatch,
+  type SetStateAction
+} from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '../trpc'
 import {
@@ -22,7 +29,7 @@ import {
   useHubIdForTask
 } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/dialogs'
-import type { Task } from '@slayzone/task-contracts'
+import { OPEN_MANAGE_LAYOUTS_EVENT, type Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { type GlobalAgentPanelState } from '@slayzone/agent-panels'
@@ -40,6 +47,7 @@ import {
   CliInstallDialog,
   TutorialAnimationModal,
   ChangelogDialog,
+  ManageLayoutsHost,
   TerminalStatusDialog
 } from './lazy'
 
@@ -191,6 +199,7 @@ export function AppDialogs({
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
+  const layoutsOpenRequest = useManageLayoutsRequests()
   return (
     <>
       {/* Dialogs — lazy-mounted on first trigger, stay mounted for close/reopen animations */}
@@ -404,9 +413,28 @@ export function AppDialogs({
       <Suspense fallback={null}>
         <TerminalStatusDialog tasks={tasks} onTaskClick={openTask} />
       </Suspense>
+      {layoutsOpenRequest > 0 && (
+        <Suspense fallback={null}>
+          <ManageLayoutsHost openRequest={layoutsOpenRequest} />
+        </Suspense>
+      )}
       <Toaster position="bottom-right" theme="dark" closeButton />
     </>
   )
+}
+
+/**
+ * Counts requests to open Manage layouts (a task's Layout menu, Settings → Panels).
+ * Its host mounts on the first one, so none of it loads before it is wanted.
+ */
+function useManageLayoutsRequests(): number {
+  const [requests, setRequests] = useState(0)
+  useEffect(() => {
+    const onOpen = (): void => setRequests((n) => n + 1)
+    window.addEventListener(OPEN_MANAGE_LAYOUTS_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_MANAGE_LAYOUTS_EVENT, onOpen)
+  }, [])
+  return requests
 }
 
 /** The hub that owns the given task, else project; null = the default hub. */

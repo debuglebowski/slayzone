@@ -1475,6 +1475,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.loadBoardRows': listed(board),
   'task.onChanged': streamed(on('taskId', 'task')),
   'task.onPathsChanged': streamed(on('taskId', 'taskRunner')),
+  'task.onLayoutChanged': streamed(on('taskId', 'task')),
 
   // ── templates, terminal tabs ──
   'template.getByProject': checked(project('projectId')),

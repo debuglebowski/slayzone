@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 // Mirrors UpdateTaskInput (packages/domains/task-contracts/src/types.ts).
 // Scalars validated strictly; opaque JSON-blob shapes (providerConfig,
-// panelVisibility, browserTabs, webPanelUrls, editorOpenFiles, mergeState,
+// panelVisibility, panelSizes, panelLayout, browserTabs, webPanelUrls, editorOpenFiles, mergeState,
 // mergeContext, loopConfig) are passthrough — their structure is defined
 // and validated in their own domain modules.
 /**
@@ -39,6 +39,14 @@ export const updateTaskInputSchema = z
 
     // Panel visibility
     panelVisibility: z.unknown().nullable().optional(),
+    panelSizes: z.unknown().nullable().optional(),
+    // Panel layout (docs/plans/panel-model.md §1.2): shape checked by the hub
+    // (`parseTaskLayout`), which also dual-writes panelVisibility / panelSizes.
+    panelLayout: z.unknown().nullable().optional(),
+    panelInstanceState: z
+      .record(z.string(), z.record(z.string(), z.unknown()))
+      .nullable()
+      .optional(),
 
     // Worktree
     worktreePath: taskPath,

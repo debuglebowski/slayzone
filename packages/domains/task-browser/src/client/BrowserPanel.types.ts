@@ -19,6 +19,12 @@ export interface BrowserPanelProps {
   onElementSnippet?: (snippet: string) => void
   onScreenshot?: (viewId: string) => void
   canUseDomPicker?: boolean
+  /**
+   * The task's first browser panel (default). Another browser panel instance passes
+   * false: `slay browser` without a tab prefers the primary until another panel is
+   * used, and only the primary takes tab requests from views no panel shows.
+   */
+  primaryInstance?: boolean
 }
 
 export interface BrowserPanelHandle {

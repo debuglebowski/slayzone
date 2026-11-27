@@ -3,16 +3,18 @@
  *
  * A few events reach a task only through its mounted TaskDetailPage's own
  * subscription — `slay tasks browser` opening the panel / a new browser tab, an
- * artifact opened from the CLI, a respawn suggested after the task left a done
- * status. Hidden tabs hydrate a few seconds after a boot (see the app's
- * pane-hydration.ts), and any page mounts a beat after its tab opens, so such an
- * event can arrive while nobody listens and would be lost.
+ * artifact opened from the CLI, a layout change from the CLI, a respawn
+ * suggested after the task left a done status. Hidden tabs hydrate a few seconds
+ * after a boot (see the app's pane-hydration.ts), and any page mounts a beat after
+ * its tab opens, so such an event can arrive while nobody listens and would be lost.
  *
  * `TaskPaneEventCatcher` listens on behalf of open tabs whose page is not live:
  * it holds the event here and hydrates the tab; the page takes its held events
  * when it mounts and runs them through the very handlers the live subscription
  * uses. Pages mark themselves live, so a mounted page is never double-served.
  */
+
+import type { TaskLayoutChangedEvent } from '@slayzone/task-contracts'
 
 export interface TaskPaneEventPayloads {
   'browser-ensure-panel-open': {
@@ -32,6 +34,8 @@ export interface TaskPaneEventPayloads {
   }
   'open-artifact': { taskId: string; artifactId: string }
   'respawn-suggested': { taskId: string }
+  /** `slay panels layout …` changed the layout (Undo toast, release removed panels). */
+  'layout-changed': TaskLayoutChangedEvent
 }
 
 export type TaskPaneEventKind = keyof TaskPaneEventPayloads

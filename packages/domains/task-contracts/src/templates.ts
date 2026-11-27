@@ -1,6 +1,7 @@
 import type { AgentId } from '@slayzone/terminal-contracts'
 import type { ProviderConfig, PanelVisibility, WebPanelUrls } from './types'
 import type { BrowserTabsState } from './browser-tabs'
+import type { TaskLayout } from './layout/types'
 
 export interface TaskTemplate {
   id: string
@@ -10,6 +11,8 @@ export interface TaskTemplate {
   agent_id: AgentId | null
   provider_config: ProviderConfig | null
   panel_visibility: PanelVisibility | null
+  /** The panel layout a task made from this template starts with; null = derived. */
+  panel_layout?: TaskLayout | null
   browser_tabs: BrowserTabsState | null
   web_panel_urls: WebPanelUrls | null
   dangerously_skip_permissions: boolean | null
@@ -28,6 +31,7 @@ export interface CreateTaskTemplateInput {
   agentId?: AgentId | null
   providerConfig?: ProviderConfig | null
   panelVisibility?: PanelVisibility | null
+  panelLayout?: TaskLayout | null
   browserTabs?: BrowserTabsState | null
   webPanelUrls?: WebPanelUrls | null
   dangerouslySkipPermissions?: boolean | null
@@ -43,6 +47,7 @@ export interface UpdateTaskTemplateInput {
   agentId?: AgentId | null
   providerConfig?: ProviderConfig | null
   panelVisibility?: PanelVisibility | null
+  panelLayout?: TaskLayout | null
   browserTabs?: BrowserTabsState | null
   webPanelUrls?: WebPanelUrls | null
   dangerouslySkipPermissions?: boolean | null

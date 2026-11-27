@@ -73,6 +73,12 @@ export interface BrowserRelayTabsState {
    * client) = none.
    */
   isolatedTabIds?: string[]
+  /**
+   * The task's PRIMARY browser panel (its first instance) rather than another
+   * browser panel instance on the same client. With no host-level use yet, a request
+   * without a tab id goes to the primary. Absent (an older client: one panel) = true.
+   */
+  primary?: boolean
 }
 
 /** Which tabs a query may see: every tab (a trusted local caller) or the isolated ones. */

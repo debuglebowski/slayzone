@@ -6,25 +6,37 @@ import { getHubClient, getTrpcClient, type TabsStateTrpcClient } from './trpc'
 import { startOpenTabsSync } from './open-tabs-sync'
 import type { TaskStatus } from '@slayzone/task-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
+import {
+  DEFAULT_TREE_DISPLAY,
+  pickTreeDisplay,
+  type TreeGroupBy,
+  type TreeOrderBy,
+  type TreeOrderDir
+} from './tree-display'
+import {
+  cloneSpec,
+  defaultLenses,
+  liveSpec,
+  migrateLenses,
+  newLensId,
+  parseLiveLensFields,
+  resetLens,
+  specToLive,
+  TODAY_LENS_ID,
+  uniqueLensName,
+  visibleLenses,
+  type Lens,
+  type LensGroup,
+  type LensLook,
+  type LiveLensFields
+} from './lenses'
 
 export type ActiveView = 'tabs' | 'leaderboard' | 'usage-analytics' | 'context'
 
-export type TreeGroupBy = 'none' | 'status' | 'priority'
-export type TreeOrderBy =
-  | 'manual'
-  | 'priority'
-  | 'due_date'
-  | 'title'
-  | 'created'
-  | 'last_interaction'
-export type TreeOrderDir = 'asc' | 'desc'
+export type { TreeGroupBy, TreeOrderBy, TreeOrderDir }
 
 export type TaskHeaderPanelMode = 'tabs' | 'menu'
 export type TaskHeaderAlign = 'left' | 'right'
-
-// Legacy — kept for one-time read in `_loadState` migrations. New code uses
-// the boolean pair `treeShowSubtasks` + `treeShowAllSubtasks`.
-type LegacyTreeSubtaskMode = 'hide' | 'match' | 'all'
 
 // Tab type (matches TabBar.tsx in app)
 export type Tab =
@@ -106,7 +118,7 @@ export interface TaskLookup {
   projects: TaskLookupProject[]
 }
 
-interface TabState {
+interface TabState extends LiveLensFields {
   // State
   tabs: Tab[]
   activeTabIndex: number
@@ -127,55 +139,20 @@ interface TabState {
   sidebarWidth: number | null
   // When true, the sidebar collapses to a hover-revealed floating panel.
   sidebarAutoHide: boolean
-  // Tree-view status filter — task statuses to include.
-  treeStatusFilter: string[]
-  // Tree-view priority filter — priorities to include. Empty = no priority
-  // constraint (all priorities pass).
-  treePriorityFilter: number[]
-  // Tree-view display options — show indicators on each task row.
-  treeShowStatus: boolean
-  treeShowPriority: boolean
-  // Tree-view: render sub-tasks at all (off → roots only).
-  treeShowSubtasks: boolean
-  // Tree-view: when sub-tasks shown, include every descendant of a matching
-  // root (off → only descendants that themselves pass the filter).
-  treeShowAllSubtasks: boolean
-  // Tree-view: when sub-tasks shown, include every undone (non-completed)
-  // descendant of a matching root. Ignored when `treeShowAllSubtasks` is on.
-  treeShowAllUndoneSubtasks: boolean
-  // Tree-view: strikethrough completed (done) task rows.
-  treeCrossOutDone: boolean
-  // Tree-view: show only tasks with an active PTY/chat session (or pinned).
-  treeShowOnlyActive: boolean
-  // Tree-view: include temporary tasks in the tree.
-  treeShowTemporary: boolean
-  // Tree-view: include tasks with `is_blocked` flag set.
-  treeShowBlocked: boolean
-  // Tree-view: include tasks whose `snoozed_until` is in the future.
-  treeShowSnoozed: boolean
-  // Tree-view: bypass status filter — include every task that is not in a
-  // terminal (done/canceled) status.
-  treeShowAllOpen: boolean
-  // Tree-view: show worktree pill on tasks that have a worktree.
-  treeShowWorktree: boolean
-  treeShowTags: boolean
-  // Tree-view: "Blocked" icon on tasks that are flagged blocked or have open blockers.
-  treeShowBlockedBadge: boolean
-  // Tree-view: group root tasks by status within each project.
-  // Tree-view layout — decoupled from kanban filter.
-  treeGroupBy: TreeGroupBy
-  treeOrderBy: TreeOrderBy
-  treeOrderDir: TreeOrderDir
-  // When true, temporary tasks render in their own "Temporary" group at the top.
-  // When false, they mix into their natural status/priority bucket.
-  treeGroupTemporary: boolean
-  // When true, pinned tasks render in their own "Pinned" group at the top.
-  // When false, they mix into their natural status/priority bucket.
-  treeGroupPinned: boolean
-  // Split visible blocked tasks into their own group, including dependency blockers.
-  treeGroupBlocked: boolean
-  // Show group headers for groups with zero tasks (respecting treeStatusFilter).
-  treeShowEmptyGroups: boolean
+  // The tree display settings (`TreeDisplay`: the `tree*` filter/grouping/row fields)
+  // and the lens-driven live fields (`LiveLensFields`) come in through `extends`.
+  //
+  // Saved sidebar presets (`lenses.ts`), in menu order, and the one applied. Persisted
+  // in this same `viewState` slice rather than a settings key of their own: the live
+  // `tree*` fields they are applied to and compared against are here, so the upgrade
+  // migration (current settings → "Today") reads both from one record, and a reload
+  // can never restore lenses and live state from two different moments. One write,
+  // one read, one retry path (`loadTabStoreState`).
+  lenses: Lens[]
+  activeLensId: string
+  // Accordion look: the one project expanded (null = none). Separate from
+  // `treeOpenProjects` so switching to Accordion and back leaves the cards as they were.
+  treeAccordionOpen: string | null
   // projectId → whether that project's row is expanded in the tree view. Lives
   // here rather than in TreeView component state so a remount (renderer reload,
   // wake from sleep) doesn't silently reset every project to collapsed.
@@ -235,6 +212,35 @@ interface TabState {
   setTreeGroupPinned: (group: boolean) => void
   setTreeShowEmptyGroups: (show: boolean) => void
   setTreeProjectOpen: (projectId: string, open: boolean) => void
+  setTreeProjectsOpen: (projectIds: string[], open: boolean) => void
+  setTreeShowAllProjects: (show: boolean) => void
+  setTreeLensGroup: (group: LensGroup) => void
+  setTreeLensLook: (look: LensLook) => void
+  setTreeNeedsYou: (on: boolean) => void
+  setTreeAccordionOpen: (projectId: string | null) => void
+  // Lenses. Every edit goes to the live fields; these move lenses in and out of them.
+  /** Apply a lens: write its settings to the live fields and make it active. */
+  applyLens: (id: string) => void
+  /** Apply the `index`-th visible lens (⌃1–9). Out of range = nothing. */
+  applyLensAt: (index: number) => void
+  /** Save the live settings into the active lens (and rename it when `name` is given). */
+  saveActiveLens: (name?: string) => void
+  /** Save the live settings as a new lens, made active. Returns its id. */
+  saveLensAs: (name: string) => string
+  /** Drop unsaved edits: re-apply the active lens. */
+  revertActiveLens: () => void
+  /** A new lens from the live settings ("New lens"), made active. Returns its id. */
+  createLens: () => string
+  /** A copy of a lens right after it, applied. Returns its id. */
+  duplicateLens: (id: string) => string
+  /** Delete a user lens (built-ins only hide). */
+  deleteLens: (id: string) => void
+  renameLens: (id: string, name: string) => void
+  /** Hide or show a lens in the menu; the last visible one stays. */
+  setLensHidden: (id: string, hidden: boolean) => void
+  moveLens: (id: string, toIndex: number) => void
+  /** A built-in back as it ships (re-applied when active). */
+  resetLensToDefault: (id: string) => void
   setSidebarHubOrder: (hubOrder: string[]) => void
   setExplodeArrangement: (arrangement: { order?: string[]; minimized?: string[] }) => void
   setTaskHeaderPanelMode: (mode: TaskHeaderPanelMode) => void
@@ -265,33 +271,11 @@ interface TabState {
     sidebarView?: string
     sidebarWidth?: number | null
     sidebarAutoHide?: boolean
-    treeStatusFilter?: string[]
-    treePriorityFilter?: number[]
-    treeShowStatus?: boolean
-    treeShowPriority?: boolean
-    treeShowSubtasks?: boolean
-    treeShowAllSubtasks?: boolean
-    treeShowAllUndoneSubtasks?: boolean
-    treeSubtaskMode?: LegacyTreeSubtaskMode
-    treeIncludeAllSubtasks?: boolean
-    treeCrossOutDone?: boolean
-    treeShowOnlyActive?: boolean
-    treeShowTemporary?: boolean
-    treeShowBlocked?: boolean
-    treeShowSnoozed?: boolean
-    treeShowAllOpen?: boolean
-    treeHideInactive?: boolean
-    treeHideClosed?: boolean
-    treeShowWorktree?: boolean
-    treeShowTags?: boolean
-    treeShowBlockedBadge?: boolean
-    treeGroupBy?: TreeGroupBy
-    treeOrderBy?: TreeOrderBy
-    treeOrderDir?: TreeOrderDir
-    treeGroupTemporary?: boolean
-    treeGroupBlocked?: boolean
-    treeGroupPinned?: boolean
-    treeShowEmptyGroups?: boolean
+    // Display + lens fields, the saved lenses and any legacy keys: parsed in
+    // `parseLiveLensFields` / `migrateLenses`, which validate every value.
+    [key: `tree${string}`]: unknown
+    lenses?: unknown
+    activeLensId?: unknown
     treeOpenProjects?: Record<string, boolean>
     sidebarHubOrder?: string[]
     explodeOrder?: string[]
@@ -361,33 +345,18 @@ export const useTabStore = create<TabState>()(
     openTabsSync: {},
     projectScopedTabs: false,
     isLoaded: false,
-    sidebarView: 'projects',
+    sidebarView: 'tree',
     sidebarWidth: null,
     sidebarAutoHide: false,
-    treeStatusFilter: ['in_progress'],
-    treePriorityFilter: [1, 2, 3, 4, 5],
-    treeShowStatus: false,
-    treeShowPriority: true,
-    treeShowSubtasks: true,
-    treeShowAllSubtasks: false,
-    treeShowAllUndoneSubtasks: false,
-    treeCrossOutDone: false,
-    treeShowOnlyActive: false,
-    treeShowTemporary: true,
-    treeShowBlocked: true,
-    treeShowSnoozed: true,
-    treeShowAllOpen: true,
-    treeShowWorktree: true,
-    treeShowTags: false,
-    treeShowBlockedBadge: true,
-    treeGroupBy: 'status',
-    treeOrderBy: 'manual',
-    treeOrderDir: 'asc',
-    treeGroupTemporary: true,
-    treeGroupBlocked: false,
-    treeGroupPinned: true,
-    treeShowEmptyGroups: false,
+    ...pickTreeDisplay(DEFAULT_TREE_DISPLAY),
+    treeLensGroup: 'project' as LensGroup,
+    treeLensLook: 'cards' as LensLook,
+    treeNeedsYou: false,
+    treeAccordionOpen: null,
+    lenses: defaultLenses(),
+    activeLensId: TODAY_LENS_ID,
     treeOpenProjects: {},
+    treeShowAllProjects: false,
     sidebarHubOrder: [],
     explodeOrder: [],
     explodeMinimized: [],
@@ -465,6 +434,103 @@ export const useTabStore = create<TabState>()(
 
     setTreeProjectOpen: (projectId, open) =>
       set((s) => ({ treeOpenProjects: { ...s.treeOpenProjects, [projectId]: open } })),
+    setTreeProjectsOpen: (projectIds, open) =>
+      set((s) => ({
+        treeOpenProjects: {
+          ...s.treeOpenProjects,
+          ...Object.fromEntries(projectIds.map((id) => [id, open]))
+        }
+      })),
+    setTreeShowAllProjects: (treeShowAllProjects) => set({ treeShowAllProjects }),
+    setTreeLensGroup: (treeLensGroup) => set({ treeLensGroup }),
+    setTreeLensLook: (treeLensLook) => set({ treeLensLook }),
+    setTreeNeedsYou: (treeNeedsYou) => set({ treeNeedsYou }),
+    setTreeAccordionOpen: (treeAccordionOpen) => set({ treeAccordionOpen }),
+
+    applyLens: (id) => {
+      const lens = get().lenses.find((l) => l.id === id)
+      if (lens) set({ ...specToLive(lens.spec), activeLensId: id })
+    },
+    applyLensAt: (index) => {
+      const lens = visibleLenses(get().lenses)[index]
+      if (lens) get().applyLens(lens.id)
+    },
+    saveActiveLens: (name) => {
+      const { lenses, activeLensId } = get()
+      const spec = liveSpec(get())
+      const trimmed = name?.trim()
+      set({
+        lenses: lenses.map((l) =>
+          l.id === activeLensId ? { ...l, spec, name: trimmed || l.name } : l
+        )
+      })
+    },
+    saveLensAs: (name) => {
+      const { lenses } = get()
+      const lens: Lens = {
+        id: newLensId(),
+        name: name.trim() || uniqueLensName(lenses, 'New lens'),
+        icon: 'lens',
+        builtin: null,
+        hidden: false,
+        spec: liveSpec(get())
+      }
+      set({ lenses: [...lenses, lens], activeLensId: lens.id })
+      return lens.id
+    },
+    revertActiveLens: () => get().applyLens(get().activeLensId),
+    createLens: () => get().saveLensAs(uniqueLensName(get().lenses, 'New lens')),
+    duplicateLens: (id) => {
+      const { lenses } = get()
+      const index = lenses.findIndex((l) => l.id === id)
+      if (index < 0) return id
+      const source = lenses[index]
+      const copy: Lens = {
+        id: newLensId(),
+        name: uniqueLensName(lenses, `${source.name} copy`),
+        icon: source.icon,
+        builtin: null,
+        hidden: false,
+        spec: cloneSpec(source.spec)
+      }
+      set({ lenses: [...lenses.slice(0, index + 1), copy, ...lenses.slice(index + 1)] })
+      get().applyLens(copy.id)
+      return copy.id
+    },
+    deleteLens: (id) => {
+      const { lenses, activeLensId } = get()
+      const lens = lenses.find((l) => l.id === id)
+      if (!lens || lens.builtin) return
+      const rest = lenses.filter((l) => l.id !== id)
+      const next =
+        visibleLenses(rest).length > 0
+          ? rest
+          : rest.map((l, i) => (i === 0 ? { ...l, hidden: false } : l))
+      set({ lenses: next })
+      if (activeLensId === id) get().applyLens(visibleLenses(next)[0].id)
+    },
+    renameLens: (id, name) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      set({ lenses: get().lenses.map((l) => (l.id === id ? { ...l, name: trimmed } : l)) })
+    },
+    setLensHidden: (id, hidden) => {
+      const { lenses } = get()
+      if (hidden && visibleLenses(lenses).every((l) => l.id === id)) return
+      set({ lenses: lenses.map((l) => (l.id === id ? { ...l, hidden } : l)) })
+    },
+    moveLens: (id, toIndex) => {
+      const lenses = [...get().lenses]
+      const from = lenses.findIndex((l) => l.id === id)
+      if (from < 0) return
+      const [lens] = lenses.splice(from, 1)
+      lenses.splice(Math.max(0, Math.min(toIndex, lenses.length)), 0, lens)
+      set({ lenses })
+    },
+    resetLensToDefault: (id) => {
+      set({ lenses: get().lenses.map((l) => (l.id === id ? resetLens(l) : l)) })
+      if (get().activeLensId === id) get().applyLens(id)
+    },
     setSidebarHubOrder: (sidebarHubOrder) => set({ sidebarHubOrder }),
     // Partial on purpose: a drag changes only the order and a minimize changes only
     // the tray, so neither has to restate the other and race it.
@@ -613,6 +679,9 @@ export const useTabStore = create<TabState>()(
           ? state.activeView
           : 'tabs'
         : 'tabs'
+      // The live sidebar as saved; on the upgrade to lenses it also seeds "Today".
+      const live = parseLiveLensFields(state)
+      const { lenses, activeLensId } = migrateLenses(state, live)
       set({
         tabs: validTabs,
         activeTabIndex: clampedIndex,
@@ -620,79 +689,17 @@ export const useTabStore = create<TabState>()(
         selectedProjectId:
           typeof state.selectedProjectId === 'string' ? state.selectedProjectId : '',
         projectScopedTabs: !!state.projectScopedTabs,
-        sidebarView: typeof state.sidebarView === 'string' ? state.sidebarView : 'projects',
+        sidebarView: typeof state.sidebarView === 'string' ? state.sidebarView : 'tree',
         sidebarWidth:
           typeof state.sidebarWidth === 'number' && state.sidebarWidth > 0
             ? state.sidebarWidth
             : null,
         sidebarAutoHide: !!state.sidebarAutoHide,
-        treeStatusFilter:
-          Array.isArray(state.treeStatusFilter) &&
-          state.treeStatusFilter.every((s) => typeof s === 'string')
-            ? state.treeStatusFilter
-            : ['in_progress'],
-        treePriorityFilter:
-          Array.isArray(state.treePriorityFilter) &&
-          state.treePriorityFilter.every((p) => typeof p === 'number')
-            ? state.treePriorityFilter
-            : [1, 2, 3, 4, 5],
-        treeShowStatus: typeof state.treeShowStatus === 'boolean' ? state.treeShowStatus : false,
-        treeShowPriority:
-          typeof state.treeShowPriority === 'boolean' ? state.treeShowPriority : true,
-        treeShowSubtasks:
-          typeof state.treeShowSubtasks === 'boolean'
-            ? state.treeShowSubtasks
-            : state.treeSubtaskMode === 'hide'
-              ? false
-              : true,
-        treeShowAllSubtasks:
-          typeof state.treeShowAllSubtasks === 'boolean'
-            ? state.treeShowAllSubtasks
-            : state.treeSubtaskMode === 'all' || state.treeIncludeAllSubtasks === true,
-        treeShowAllUndoneSubtasks:
-          typeof state.treeShowAllUndoneSubtasks === 'boolean'
-            ? state.treeShowAllUndoneSubtasks
-            : false,
-        treeCrossOutDone:
-          typeof state.treeCrossOutDone === 'boolean' ? state.treeCrossOutDone : false,
-        treeShowOnlyActive:
-          typeof state.treeShowOnlyActive === 'boolean'
-            ? state.treeShowOnlyActive
-            : typeof state.treeHideInactive === 'boolean'
-              ? state.treeHideInactive
-              : typeof state.treeHideClosed === 'boolean'
-                ? state.treeHideClosed
-                : false,
-        treeShowTemporary:
-          typeof state.treeShowTemporary === 'boolean' ? state.treeShowTemporary : true,
-        treeShowBlocked: typeof state.treeShowBlocked === 'boolean' ? state.treeShowBlocked : true,
-        treeShowSnoozed: typeof state.treeShowSnoozed === 'boolean' ? state.treeShowSnoozed : true,
-        treeShowAllOpen: typeof state.treeShowAllOpen === 'boolean' ? state.treeShowAllOpen : true,
-        treeShowWorktree:
-          typeof state.treeShowWorktree === 'boolean' ? state.treeShowWorktree : true,
-        treeShowTags: typeof state.treeShowTags === 'boolean' ? state.treeShowTags : false,
-        treeShowBlockedBadge:
-          typeof state.treeShowBlockedBadge === 'boolean' ? state.treeShowBlockedBadge : true,
-        treeGroupBy:
-          state.treeGroupBy === 'priority' || state.treeGroupBy === 'none'
-            ? state.treeGroupBy
-            : 'status',
-        treeOrderBy:
-          state.treeOrderBy === 'priority' ||
-          state.treeOrderBy === 'due_date' ||
-          state.treeOrderBy === 'title' ||
-          state.treeOrderBy === 'created' ||
-          state.treeOrderBy === 'last_interaction'
-            ? state.treeOrderBy
-            : 'manual',
-        treeOrderDir: state.treeOrderDir === 'desc' ? 'desc' : 'asc',
-        treeGroupTemporary:
-          typeof state.treeGroupTemporary === 'boolean' ? state.treeGroupTemporary : true,
-        treeGroupBlocked:
-          typeof state.treeGroupBlocked === 'boolean' ? state.treeGroupBlocked : false,
-        treeGroupPinned: typeof state.treeGroupPinned === 'boolean' ? state.treeGroupPinned : true,
-        treeShowEmptyGroups:
-          typeof state.treeShowEmptyGroups === 'boolean' ? state.treeShowEmptyGroups : false,
+        ...live,
+        lenses,
+        activeLensId,
+        treeAccordionOpen:
+          typeof state.treeAccordionOpen === 'string' ? state.treeAccordionOpen : null,
         treeOpenProjects:
           state.treeOpenProjects && typeof state.treeOpenProjects === 'object'
             ? state.treeOpenProjects
@@ -929,6 +936,13 @@ useTabStore.subscribe(
     treeGroupPinned: state.treeGroupPinned,
     treeShowEmptyGroups: state.treeShowEmptyGroups,
     treeOpenProjects: state.treeOpenProjects,
+    treeShowAllProjects: state.treeShowAllProjects,
+    treeLensGroup: state.treeLensGroup,
+    treeLensLook: state.treeLensLook,
+    treeNeedsYou: state.treeNeedsYou,
+    treeAccordionOpen: state.treeAccordionOpen,
+    lenses: state.lenses,
+    activeLensId: state.activeLensId,
     sidebarHubOrder: state.sidebarHubOrder,
     explodeOrder: state.explodeOrder,
     explodeMinimized: state.explodeMinimized,

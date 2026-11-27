@@ -580,6 +580,14 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onAgentStarts': (o) => agentStarts.mark(o.session, 'queued'),
   'taskTerminals.onChanged': (o) => tabsEvents.emit('tabs:changed', { taskId: o.task }),
   'task.onPathsChanged': (o) => taskEvents.emit('task:paths-changed', { taskId: o.task }),
+  'task.onLayoutChanged': (o) =>
+    taskEvents.emit('task:layout-changed', {
+      taskId: o.task,
+      rev: 1,
+      origin: 'agent',
+      before: { v: 1, rev: 0, layoutId: 'classic', columns: [], instances: {} },
+      removed: []
+    }),
   'worktrees.onDiffChanged': (o) =>
     getGitWatcher().emit('git:diff-changed', {
       worktreePath: o.path,

@@ -816,6 +816,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.loadBoardData': 'tasks',
   'task.loadBoardRows': 'tasks',
   'task.onChanged': 'tasks',
+  'task.onLayoutChanged': 'tasks',
   'task.onPathsChanged': 'tasks',
   'task.removeBlocker': 'tasks',
   'task.reorder': 'tasks',

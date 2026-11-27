@@ -34,6 +34,7 @@ import { registerTaskBlockedRoutes } from './tasks/blocked'
 import { registerTaskTagsRoutes } from './tasks/tags'
 import { registerTaskResetConversationRoute } from './tasks/reset-conversation'
 import { registerTaskProgressRoute } from './tasks/progress'
+import { registerTaskLayoutRoutes } from './tasks/layout'
 import { registerTagsCrudRoutes } from './tags/crud'
 import { registerProjectsListRoute } from './projects/list'
 import { registerProjectsResolveByPathRoute } from './projects/resolve-by-path'
@@ -137,6 +138,8 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerTaskTagsRoutes(app, deps)
   registerTaskResetConversationRoute(app, deps)
   registerTaskProgressRoute(app, deps)
+  // `slay panels layout …`: the task's panel layout (docs/plans/panel-model.md step 13)
+  registerTaskLayoutRoutes(app, deps)
 
   // Tags
   registerTagsCrudRoutes(app, deps)

@@ -9,27 +9,13 @@ import {
   orderIdToTaskId,
   orderIdToHomeId
 } from '@slayzone/task-contracts'
-import { mergePanelOrder, mergePredefinedWebPanels } from '@slayzone/task-contracts'
+import { parsePanelConfig } from '@slayzone/task-contracts'
 
 const SETTINGS_KEY = 'panel_config'
 const CHANGE_EVENT = 'panel-config-changed'
 const SETTINGS_CHANGED_PATH = 'notify.onSettingsChanged'
 
-function parseConfig(raw: string | null | undefined): PanelConfig {
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as PanelConfig
-      // Tolerate partial configs: the merge helpers index `webPanels`, so a
-      // config missing it must not throw — that would silently reset the
-      // user's entire panel layout back to defaults.
-      if (!Array.isArray(parsed.webPanels)) parsed.webPanels = []
-      return mergePanelOrder(mergePredefinedWebPanels(parsed))
-    } catch {
-      /* ignore */
-    }
-  }
-  return DEFAULT_PANEL_CONFIG
-}
+const parseConfig = parsePanelConfig
 
 /**
  * ONE panel config for the whole window, shared by every `usePanelConfig()`
@@ -130,12 +116,22 @@ const panelConfigStore = (() => {
       }
     },
     get: (): PanelConfig => config,
+    /** The stored config (reads it when nobody has yet). */
+    async load(): Promise<PanelConfig> {
+      if (raw === undefined) await reload()
+      return config
+    },
     /** Optimistic local write (the caller persists it). */
     set(next: PanelConfig): void {
       publish(JSON.stringify(next), next)
     }
   }
 })()
+
+/** The window's panel config, read if no one has yet (task creation resolves layouts from it). */
+export function loadPanelConfig(): Promise<PanelConfig> {
+  return panelConfigStore.load()
+}
 
 export function usePanelConfig(): {
   config: PanelConfig

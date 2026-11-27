@@ -11,14 +11,20 @@ import {
 } from '@slayzone/ui'
 import type { OnboardingChecklistState } from './types'
 
+/**
+ * The Getting started checklist in a popover. `trigger` replaces the default icon
+ * button (the sidebar toolbar passes its labelled Setup button, or a menu row).
+ */
 export function GettingStartedPopover({
   layout,
   tooltipSide,
-  onboardingChecklist
+  onboardingChecklist,
+  trigger
 }: {
   layout: 'vertical' | 'horizontal'
   tooltipSide: 'top' | 'right'
   onboardingChecklist: OnboardingChecklistState
+  trigger?: React.ReactNode
 }) {
   const [checklistOpen, setChecklistOpen] = useState(false)
 
@@ -27,23 +33,25 @@ export function GettingStartedPopover({
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <button
-              type="button"
-              aria-label="Getting Started"
-              className={cn(
-                'relative inline-flex items-center justify-center rounded-lg transition-colors',
-                layout === 'horizontal' ? 'size-10' : 'h-11 w-11',
-                'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                onboardingChecklist.dismissed && 'opacity-80'
-              )}
-            >
-              <Handshake className="size-5" />
-              {onboardingChecklist.hasRemaining && !onboardingChecklist.dismissed && (
-                <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground">
-                  {onboardingChecklist.remainingCount}
-                </span>
-              )}
-            </button>
+            {trigger ?? (
+              <button
+                type="button"
+                aria-label="Getting Started"
+                className={cn(
+                  'relative inline-flex items-center justify-center rounded-lg transition-colors',
+                  layout === 'horizontal' ? 'size-10' : 'h-11 w-11',
+                  'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                  onboardingChecklist.dismissed && 'opacity-80'
+                )}
+              >
+                <Handshake className="size-5" />
+                {onboardingChecklist.hasRemaining && !onboardingChecklist.dismissed && (
+                  <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground">
+                    {onboardingChecklist.remainingCount}
+                  </span>
+                )}
+              </button>
+            )}
           </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side={tooltipSide}>Getting Started</TooltipContent>

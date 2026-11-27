@@ -54,8 +54,25 @@ function formatDate(iso: string): string {
   })
 }
 
-export function FeedbackDialog(): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+/**
+ * Uncontrolled by default: the sidebar icon button opens it. Pass `open` + `onOpenChange`
+ * (and `showTrigger={false}`) to open it from somewhere else, such as a menu entry.
+ */
+export function FeedbackDialog({
+  open: openProp,
+  onOpenChange,
+  showTrigger = true
+}: {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  showTrigger?: boolean
+} = {}): React.JSX.Element {
+  const [openState, setOpenState] = useState(false)
+  const open = openProp ?? openState
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setOpenState(next)
+    onOpenChange?.(next)
+  }
   const [threads, setThreads] = useState<FeedbackThread[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<FeedbackMessage[]>([])
@@ -69,10 +86,14 @@ export function FeedbackDialog(): React.JSX.Element {
 
   const selectedThread = threads.find((t) => t.id === selectedId) ?? null
 
-  const loadThreads = useCallback(async () => {
-    const rows = await trpcClient.feedback.listThreads.query()
-    setThreads(rows)
-  }, [trpcClient])
+  // Promise chain (not async/await) so the setState visibly runs after the fetch.
+  const loadThreads = useCallback(
+    (): Promise<void> =>
+      trpcClient.feedback.listThreads.query().then((rows) => {
+        setThreads(rows)
+      }),
+    [trpcClient]
+  )
 
   // Promise chain (not async/await) so the setState visibly runs after the fetch.
   const loadMessages = useCallback(
@@ -83,16 +104,23 @@ export function FeedbackDialog(): React.JSX.Element {
     [trpcClient]
   )
 
-  // Every open starts on the start screen with a fresh thread list — reset in the
-  // click that opens (the only way in), not in an effect on `open`.
-  const handleOpen = () => {
-    setSelectedId(null)
-    setMessages([])
-    setComposingNew(false)
-    setContent('')
-    loadThreads()
-    setOpen(true)
+  // Every open starts on the start screen with a fresh thread list, whoever opened it
+  // (the icon button or a host's menu entry): the draft resets during render on the
+  // closed→open edge, and the effect below fetches the threads.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    if (open) {
+      setSelectedId(null)
+      setMessages([])
+      setComposingNew(false)
+      setContent('')
+    }
   }
+  useEffect(() => {
+    if (open) void loadThreads()
+  }, [open, loadThreads])
+  const handleOpen = () => setOpen(true)
 
   // Selecting a thread leaves compose-new mode — adjusted during render on the
   // same trigger as the load effect below.
@@ -219,20 +247,22 @@ export function FeedbackDialog(): React.JSX.Element {
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <IconButton
-            aria-label="Feedback"
-            variant="ghost"
-            size="icon-lg"
-            onClick={handleOpen}
-            className="rounded-lg text-muted-foreground"
-          >
-            <MessageSquare className="size-5" />
-          </IconButton>
-        </TooltipTrigger>
-        <TooltipContent side="right">Feedback</TooltipContent>
-      </Tooltip>
+      {showTrigger && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <IconButton
+              aria-label="Feedback"
+              variant="ghost"
+              size="icon-lg"
+              onClick={handleOpen}
+              className="rounded-lg text-muted-foreground"
+            >
+              <MessageSquare className="size-5" />
+            </IconButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Feedback</TooltipContent>
+        </Tooltip>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex h-[60vh] max-h-[60vh] w-[1100px] !max-w-[1100px] flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="sr-only">

@@ -63,3 +63,4 @@ export {
   type TaskPathView,
   type TaskPathSubject
 } from './useTaskPath'
+export { withDefaultPanelLayout } from './layouts/newTaskLayout'

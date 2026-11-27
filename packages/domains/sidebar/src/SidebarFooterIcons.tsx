@@ -1,13 +1,11 @@
-import { useState } from 'react'
 import { Settings, Keyboard, Megaphone, Trophy, BarChart3 } from 'lucide-react'
 import { TerminalStatusPopover } from '@slayzone/terminal'
 import { IconButton, Tooltip, TooltipTrigger, TooltipContent, cn } from '@slayzone/ui'
 import { useDialogStore } from '@slayzone/dialogs'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task-contracts'
-import type { OnboardingChecklistState, KeyRecorderComponent, SidebarFooterSlot } from './types'
+import type { OnboardingChecklistState, SidebarFooterSlot } from './types'
 import { GettingStartedPopover } from './GettingStartedPopover'
-import { ShortcutsDialog } from './ShortcutsDialog'
 
 interface SidebarFooterIconsProps {
   layout: 'vertical' | 'horizontal'
@@ -24,8 +22,6 @@ interface SidebarFooterIconsProps {
   feedbackSlot?: ReactNode
   /** App-supplied "Shared" toolbar entry (T-100), given the toolbar's layout. */
   sharedSlot?: SidebarFooterSlot
-  /** App-supplied renderless KeyRecorder (threaded to the shortcuts dialog). */
-  keyRecorder: KeyRecorderComponent
   trailing?: React.ReactNode
   actions?: React.ReactNode
 }
@@ -41,12 +37,9 @@ export function SidebarFooterIcons({
   convexConfigured = false,
   feedbackSlot = null,
   sharedSlot,
-  keyRecorder,
   trailing,
   actions
 }: SidebarFooterIconsProps) {
-  const [shortcutsOpen, setShortcutsOpen] = useState(false)
-
   const tooltipSide: 'top' | 'right' = layout === 'horizontal' ? 'top' : 'right'
 
   const containerClass = cn(
@@ -118,7 +111,7 @@ export function SidebarFooterIcons({
             aria-label="Keyboard Shortcuts"
             variant="ghost"
             size="icon-lg"
-            onClick={() => setShortcutsOpen(true)}
+            onClick={() => useDialogStore.getState().openShortcuts()}
             className="rounded-lg text-muted-foreground"
           >
             <Keyboard className="size-5" />
@@ -127,11 +120,6 @@ export function SidebarFooterIcons({
         <TooltipContent side={tooltipSide}>Keyboard Shortcuts</TooltipContent>
       </Tooltip>
       {convexConfigured && feedbackSlot}
-      <ShortcutsDialog
-        open={shortcutsOpen}
-        onOpenChange={setShortcutsOpen}
-        keyRecorder={keyRecorder}
-      />
       {trailing}
       <Tooltip>
         <TooltipTrigger asChild>

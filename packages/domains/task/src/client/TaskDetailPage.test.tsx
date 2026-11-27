@@ -146,7 +146,9 @@ vi.mock('@slayzone/projects-contracts', () => ({
   workComputerId: () => null
 }))
 
-vi.mock('@slayzone/task-contracts', () => ({
+// The real contracts (the panel layout model is pure) with a few fixed values.
+vi.mock('@slayzone/task-contracts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@slayzone/task-contracts')>()),
   BUILTIN_PANEL_IDS: ['terminal', 'browser', 'diff', 'settings', 'editor', 'processes'],
   getProviderConversationId: () => null,
   getProviderFlags: () => '',
@@ -176,6 +178,12 @@ vi.mock('@slayzone/task-terminals', () => ({
       terminalMounts.count++
     }, [])
     return <div data-testid="terminal" />
+  }),
+  useTerminalGroupsApi: () => ({
+    createGroup: vi.fn(),
+    tabsOf: vi.fn(async () => []),
+    anyLive: vi.fn(async () => false),
+    closeGroups: vi.fn(async () => undefined)
   })
 }))
 // The task's paths as its computer answers them (per test). The page's own
@@ -229,20 +237,10 @@ vi.mock('./useTaskTagIds', () => ({
   useTaskTagIds: () => ({ tagIds: [], setTagIds: vi.fn() })
 }))
 
-vi.mock('./usePanelSizes', () => ({
-  usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn(), vi.fn()],
-  resolvePanels: () => ({ widths: {}, gapPx: 0, overflow: false, leftKeys: [], rightKeys: [] }),
-  planPanelStrip: () => ({
-    renderOrder: [],
-    rightStart: 0,
-    order: {},
-    spacerOrder: null,
-    leftNeighbor: {},
-    gapPx: 0
-  }),
-  effectiveLayout: () => ({ unit: 'fr', value: 1, min: 200, align: 'left' }),
-  minWidthFor: () => 200,
-  applyBoundaryResize: () => ({})
+// The real resolver (pure): the layout strip resolves through it.
+vi.mock('./usePanelSizes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./usePanelSizes')>()),
+  usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn(), vi.fn()]
 }))
 
 // Per-test web panels. One array instance, mutated in place, so the page's
@@ -253,13 +251,22 @@ const panelConfigMock = vi.hoisted(() => ({
 
 vi.mock('./usePanelConfig', () => ({
   usePanelConfig: () => ({
-    config: { order: [], webPanels: [] },
+    // Like the real store: every configured web panel has a place in the order.
+    config: { order: [], webPanels: panelConfigMock.enabledWebPanels },
     updateConfig: vi.fn().mockResolvedValue(undefined),
     enabledWebPanels: panelConfigMock.enabledWebPanels,
     isBuiltinEnabled: () => true,
     getOrderedTaskIds: () => []
   })
 }))
+
+// The task_layouts store reads the settings client; the page only needs its value.
+vi.mock('./layouts/useTaskLayouts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./layouts/useTaskLayouts')>()
+  const { defaultTaskLayoutsSetting } = await import('@slayzone/task-contracts')
+  const value = { setting: defaultTaskLayoutsSetting(), loaded: true, update: vi.fn() }
+  return { ...real, useTaskLayouts: () => value }
+})
 
 // useDevServerDetection reads the pty buffer as a string (`buf.match(...)`). The
 // transport proxy resolves every call to [] (universal-safe for list consumers),
@@ -351,7 +358,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 
 // --- Import component after mocks ---
 import { TaskDetailPage } from './TaskDetailPage'
-import { registerTaskPanels } from './task-detail/TaskPanels'
+import { registerTaskPanels } from './panels/registry'
 import { registerArtifactUploader } from '@slayzone/editor/hooks'
 import { detectPlatform } from '@slayzone/ui'
 

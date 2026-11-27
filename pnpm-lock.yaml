@@ -2474,6 +2474,9 @@ importers:
       '@slayzone/settings-core':
         specifier: workspace:*
         version: link:../../shared/settings-core
+      '@slayzone/sidebar':
+        specifier: workspace:*
+        version: link:../sidebar
       '@slayzone/tabs-state':
         specifier: workspace:*
         version: link:../tabs-state
@@ -2577,6 +2580,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../terminal-contracts
       '@slayzone/transport':
         specifier: workspace:*
         version: link:../../shared/transport

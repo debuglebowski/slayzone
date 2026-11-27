@@ -1,33 +1,12 @@
-import React, { Activity, useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import {
-  MoreHorizontal,
-  Archive,
-  Trash2,
-  AlertTriangle,
   Loader2,
-  Terminal as TerminalIcon,
-  Globe,
-  Settings2,
-  GitBranch,
-  FileCode,
-  ChevronDown,
-  ChevronRight,
-  Flag,
-  Plus,
-  X,
   Info,
   CheckCircle2,
   XCircle,
   Stethoscope,
-  Cpu,
   Circle,
-  Repeat,
-  LayoutTemplate,
-  Paperclip,
-  Power,
-  PanelsTopLeft,
-  MoveVertical,
-  Expand
+  LayoutTemplate
 } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -40,15 +19,7 @@ import {
 import { terminalOnThisDevice } from './terminal-on-this-device'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
-import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import type {
-  Task,
-  PanelVisibility,
-  PanelSizes,
-  UpdateTaskInput,
-  GitTabId
-} from '@slayzone/task-contracts'
+import type { Task, PanelVisibility, UpdateTaskInput, GitTabId } from '@slayzone/task-contracts'
 import type { TaskTemplate } from '@slayzone/task-contracts'
 import type { TaskDetailData } from './taskDetailCache'
 import {
@@ -61,52 +32,60 @@ import {
 } from '../shared/main-terminal'
 import { useHeldTaskPath, useTaskPath, useTaskPathLocation } from './useTaskPath'
 import {
-  BUILTIN_PANEL_IDS,
+  DEFAULT_TASK_PANEL_VISIBILITY,
+  LAYOUT_SHORTCUT_COUNT,
+  addUserLayout,
+  isLayoutDirty,
+  layoutAtShortcut,
+  parkedInstances,
+  saveLayoutTree,
+  PRIMARY_INSTANCE_IDS,
+  SECONDARY_WINDOW_PANEL_VISIBILITY,
+  browserInstanceOfTab,
+  browserTabsForInstance,
+  claimedTerminalGroupIds,
+  existingInstanceFor,
+  findTab,
+  isWebPageInstance,
   getProviderFlags,
+  instanceHasLiveState as instanceHasStoredLiveState,
+  instancesOfKind,
+  isInstanceVisible,
+  isClassicShaped,
+  isPrimaryInstance,
+  legacyKindOf,
+  priorityOptions,
+  removeBrowserInstanceTabs,
+  resolveTargetInstance,
+  setBrowserTabsForInstance,
   setProviderFlags,
-  priorityOptions
+  terminalGroupIdsOf,
+  type BrowserTab,
+  type BrowserTabsState,
+  type PanelInstance,
+  type PanelKind as LayoutPanelKind,
+  type TaskLayoutChangedEvent
 } from '@slayzone/task-contracts'
-import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects-contracts'
 import {
   getDefaultStatus,
   getDoneStatus,
   isCompletedStatus,
-  isTerminalStatus,
   placementOn,
   resolveRepoPath,
   taskProjectRoot,
   workComputerId
 } from '@slayzone/projects-contracts'
 import type { AgentId } from '@slayzone/terminal-contracts'
-import { isChatSupported } from '@slayzone/terminal-contracts'
-import {
-  Button,
-  IconButton,
-  PanelToggle,
-  DevServerToast,
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-  formatKeysForDisplay,
-  webPanelShortcutKeys
-} from '@slayzone/ui'
+import { Button, DevServerToast, webPanelShortcutKeys } from '@slayzone/ui'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@slayzone/ui'
-import { Input } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
-import {
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuRadioGroup,
-  ContextMenuRadioItem
-} from '@slayzone/ui'
 import { DeleteTaskDialog } from './DeleteTaskDialog'
 import { MoveTaskDialog } from './MoveTaskDialog'
 import { DuplicateTaskDialog } from './DuplicateTaskDialog'
@@ -124,12 +103,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { safeRandomUUID, safeClipboardWriteText } from '@slayzone/ui'
-import { TaskMetadataSidebar } from './TaskMetadataSidebar'
+import { TaskComputerChip } from './TaskComputerChip'
 import { TaskStatusMenu } from './TaskStatusMenu'
 import {
   normalizeDescription,
   stripMarkdown,
-  getExtensionFromTitle,
   getEffectiveRenderMode,
   RENDER_MODE_INFO
 } from '@slayzone/task-contracts'
@@ -140,25 +118,18 @@ import {
   markSkipCache,
   usePty,
   useAgents,
-  getVisibleModes,
-  getModeLabel,
-  groupAgents,
   useLoopMode,
-  isLoopActive,
   stripAnsi,
   serializeTerminalHistory,
-  LoopModeBanner,
   LoopModeDialog,
-  SlayNudgeBanner,
   useSlayNudge,
   PtyStateDot
 } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal-contracts'
 import {
-  TerminalContainer,
   type TerminalContainerHandle,
-  MODE_ICONS,
-  resolveIdRef
+  resolveIdRef,
+  useTerminalGroupsApi
 } from '@slayzone/task-terminals'
 import {
   buildStatusOptions,
@@ -168,7 +139,6 @@ import {
   useAppearance,
   matchesShortcut,
   useShortcutStore,
-  useShortcutDisplay,
   useStableCallback,
   withModalGuard,
   getThemeEditorColors,
@@ -178,48 +148,50 @@ import {
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
 import { getBrowserHost, planHubSuppliedUrl, queueUntrustedLoad } from '@slayzone/task-browser'
 import type { LinkOpenTarget } from '@slayzone/editor'
-import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useTrack } from '@slayzone/telemetry/client'
+import { useTaskLayout } from './layout/useTaskLayout'
+import { isInTabStrip } from './layout/strip'
+import { resolveLayoutStrip } from './layout/strip'
+import { TaskLayoutView } from './layout/TaskLayoutView'
+import { usePanelCloseRequest } from './layout/usePanelCloseRequest'
+import { usePanelInstanceState } from './layout/usePanelInstanceState'
+import { NewPanelMenu, newPanelChoices, type ParkedPanel } from './layout/header/NewPanelMenu'
+import { GroupToggles } from './layout/header/GroupToggles'
+import { LayoutMenu } from './layout/header/LayoutMenu'
+import { SaveLayoutAsDialog } from './layouts/SaveLayoutAsDialog'
+import { layoutDialogs } from './layouts/manageLayoutsStore'
+import { isClassicCustomized, resolveClientLayouts, useTaskLayouts } from './layouts/useTaskLayouts'
+import { columnMoveOf, layoutGroups, type LayoutGroup } from './layout/header/groups'
+import { usePanelShortcuts } from './layout/header/usePanelShortcuts'
 import {
-  usePanelSizes,
-  resolvePanels,
-  planPanelStrip,
-  effectiveLayout,
-  minWidthFor,
-  applyBoundaryResize,
-  unstretchPx
-} from './usePanelSizes'
+  isRenderableKind,
+  panelEnableId,
+  panelTabMeta,
+  TASK_FIELD_KINDS
+} from './layout/panelTabMeta'
+import { InstanceHandles } from './panels/instanceHandles'
+import { PANEL_KINDS, type PanelKind } from './panels/registry'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
-import { PanelOwnerStub } from './PanelOwnerStub'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { useTaskTagIds } from './useTaskTagIds'
 import { useTaskPaletteCommands, type PalettePanel } from './useTaskPaletteCommands'
 import { CustomSnoozeDialog } from './SnoozePicker'
 import { useTaskScopedQueriesFreshOnReveal } from './taskScopedQueries'
 import { markTaskPaneLive, takeTaskPaneEvents } from './taskPaneEvents'
-import { WebPanelView } from './WebPanelView'
-import { ResizeHandle } from './ResizeHandle'
-import { ProcessesPanel } from './ProcessesPanel'
-import { TaskSettingsPanel } from './TaskSettingsPanel'
-import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
 import {
-  ArtifactShareDialog,
   useCanEdit,
   useMyRole,
   useRunsAgentsHere,
   useSharingStatus
 } from '@slayzone/projects/client'
 import { useSharedCardHeights } from './useSharedCardHeights'
+import { TaskPageProvider, type TaskPageContextValue } from './panels/TaskPageContext'
 import {
-  SortableSubTask,
   DescriptionDialog,
-  RichTextEditor,
-  BrowserPanel,
-  FileEditorView,
   useTaskTemplates,
   useTaskDoctor,
   useTaskTitleEditing,
@@ -229,7 +201,6 @@ import {
   useWorkspacePathProbe,
   TaskCompletedScreen,
   gitViewPath,
-  getTaskPanels,
   useTaskArtifacts,
   useTaskProjectRepos,
   useTaskDetectedRepos,
@@ -308,15 +279,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Prefer live global state; fall back to suspense-cached data for subtask race window
   const task = taskProp ?? initialData?.task ?? null
   const project = projectProp ?? initialData?.project ?? null
+  // The title-row computer chip's menu; ⌘⇧M toggles it.
+  const [computerMenuOpen, setComputerMenuOpen] = useState(false)
 
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
   const shortcutActive = hasShortcutFocus ?? isActive
 
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  // Artifacts + git panels + external sync card, injected by the composing app
-  // (registerTaskPanels).
-  const { ArtifactsPanel, UnifiedGitPanel, ExternalSyncCard } = getTaskPanels()
   // mutateAsync is stable; the mutation result object is not (new each render).
   const { mutateAsync: updateTaskAsync } = useMutation(trpc.task.update.mutationOptions())
 
@@ -436,9 +406,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [uploadImageFiles]
   )
-  const [addingSubTask, setAddingSubTask] = useState(false)
-  const [subTaskTitle, setSubTaskTitle] = useState('')
-  const subTaskInputRef = useRef<HTMLInputElement>(null)
   const [parentTask] = useState<Task | null>(initialData?.parentTask ?? null)
 
   // Project path validation.
@@ -457,7 +424,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     initialData?.projectPathMissing ?? false
   )
   const [workspaceUnreachable, setWorkspaceUnreachable] = useState(false)
-  const [baseDirPickerOpen, setBaseDirPickerOpen] = useState(false)
   const [projectFolderPickerOpen, setProjectFolderPickerOpen] = useState(false)
 
   // The project's folder on the computer this task's work runs on (a project has
@@ -527,6 +493,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     taskBound: taskBoundRepoForView,
     hasWorktree: !!task?.has_worktree
   })
+  // Another git panel's view: its own pick (panel_instance_state), the same rules.
+  const gitViewPathFor = (picked: string | null): string | null =>
+    gitViewPath({
+      picked,
+      repos: viewableRepos,
+      reposSettled: viewableReposSettled,
+      taskBound: taskBoundRepoForView,
+      hasWorktree: !!task?.has_worktree
+    })
   const handleRepoChange = useCallback(
     (repoName: string) => {
       // Ephemeral: pick by name from discovered repos. Does NOT persist to task.repo_name.
@@ -538,20 +513,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // PTY context for buffer management
   const { resetTaskState, subscribeSessionDetected, subscribeDevServer } = usePty()
-
-  // Shortcut display strings (reactive to user customization)
-  const panelTerminalShortcut = useShortcutDisplay('panel-terminal')
-  const panelBrowserShortcut = useShortcutDisplay('panel-browser')
-  const panelEditorShortcut = useShortcutDisplay('panel-editor')
-  const panelGitShortcut = useShortcutDisplay('panel-git')
-  const panelProcessesShortcut = useShortcutDisplay('panel-processes')
-  const panelSettingsShortcut = useShortcutDisplay('panel-settings')
-  const panelArtifactsShortcut = useShortcutDisplay('panel-artifacts')
-
-  const terminalInjectTitleShortcut = useShortcutDisplay('terminal-inject-title')
-  const terminalInjectDescShortcut = useShortcutDisplay('terminal-inject-desc')
-  const terminalRestartShortcut = useShortcutDisplay('terminal-restart')
-  const syncSessionIdShortcut = useShortcutDisplay('sync-session-id')
 
   // Title editing state
   const {
@@ -609,36 +570,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [flagsInputValue, setFlagsInputValue] = useState('')
   const [flagsPopoverOpen, setFlagsPopoverOpen] = useState(false)
 
-  // Panel visibility state. Initial value sourced from initialData (secondary lifts via parent).
-  const defaultPanelVisibility: PanelVisibility = isSecondaryWindow
-    ? {
-        terminal: false,
-        browser: false,
-        diff: false,
-        settings: false,
-        editor: false,
-        artifacts: false,
-        processes: false
-      }
-    : {
-        terminal: true,
-        browser: false,
-        diff: false,
-        settings: true,
-        editor: false,
-        artifacts: false,
-        processes: false
-      }
-  const [panelVisibility, setPanelVisibility] = useState<PanelVisibility>(
-    initialData?.panelVisibility ?? defaultPanelVisibility
-  )
-
-  // Notify parent on every visibility change (used by SecondaryTaskWindow to persist
-  // panel layout across Follow-current-tab swaps that remount this component).
-  useEffect(() => {
-    onPanelVisibilityChange?.(panelVisibility)
-  }, [panelVisibility, onPanelVisibilityChange])
-
   // Secondary: release all panel ownership for this task on unmount (Follow-current-tab
   // swaps unmount + remount with a new taskId; without this, primary keeps seeing
   // "active in other window" stubs for the previous task).
@@ -695,16 +626,95 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     config: panelConfig,
     updateConfig: updatePanelConfig,
     enabledWebPanels,
-    isBuiltinEnabled,
-    getOrderedTaskIds
+    isBuiltinEnabled
   } = usePanelConfig()
-  const orderedTaskIds = useMemo(() => getOrderedTaskIds(), [getOrderedTaskIds])
-  // Visible panels in config order (pre-cluster). Cluster order + handle neighbors
-  // are derived from `resolved` (left-anchored then right-anchored) below.
-  const visiblePanelOrder = useMemo(
-    () => orderedTaskIds.filter((id) => panelVisibility[id]),
-    [orderedTaskIds, panelVisibility]
+  const panelShortcuts = usePanelShortcuts(enabledWebPanels)
+  // Layout definitions (the per-user task_layouts setting, step 10).
+  const taskLayouts = useTaskLayouts()
+  const classicCustomized = isClassicCustomized(taskLayouts.setting)
+  // Web panels in config order: their stable DOM order in the strip.
+  const webPanelIds = useMemo(() => enabledWebPanels.map((wp) => wp.id), [enabledWebPanels])
+
+  // The panel layout (columns of tab groups; Classic until the user edits it). The
+  // initial legacy visibility comes from initialData (a secondary window lifts it
+  // via its parent, through onPanelVisibilityChange). `panelVisibility` is its
+  // legacy projection, what the toggles, shortcuts and palette read.
+  const taskLayout = useTaskLayout({
+    task,
+    panelConfig,
+    initialVisibility:
+      initialData?.panelVisibility ??
+      (isSecondaryWindow ? SECONDARY_WINDOW_PANEL_VISIBILITY : DEFAULT_TASK_PANEL_VISIBILITY),
+    initialSizes: initialData?.panelSizes ?? {},
+    isSecondaryWindow,
+    updateTask: updateTaskAsync,
+    onTaskUpdated,
+    onPanelVisibilityChange,
+    followPanelConfig: !classicCustomized
+  })
+  const {
+    panelVisibility,
+    setPanelVisible,
+    hidePanelsLocally,
+    replaceVisibilityLocally,
+    resizeColumns,
+    commitSizes,
+    resetAllSizes,
+    activateTab,
+    dropPanel,
+    splitTab,
+    hideTab,
+    closeTab: closePanelTab,
+    renameTab,
+    addInstance,
+    updateInstanceSettings
+  } = taskLayout
+
+  // ── Panel instances (docs/plans/panel-model.md step 7) ──────────────────────────
+  // A kind may have several panels. Kind-wide actions (shortcuts, palette, CLI
+  // events) target the instance of that kind focused last while it is still in the
+  // layout, else the kind's primary (its legacy id).
+  const lastFocusedByKindRef = useRef<Partial<Record<LayoutPanelKind, string>>>({})
+  const focusedInstanceOf = useStableCallback((kind: LayoutPanelKind): string | null =>
+    resolveTargetInstance(taskLayout.layout, kind, lastFocusedByKindRef.current[kind])
   )
+  /** The target instance of a kind with a primary id (never null). */
+  const targetOf = useStableCallback(
+    (kind: 'agent' | 'browser' | 'editor' | 'artifacts' | 'git'): string =>
+      focusedInstanceOf(kind) ?? (PRIMARY_INSTANCE_IDS[kind] as string)
+  )
+  const kindOfPanel = useStableCallback(
+    (panelId: string): LayoutPanelKind | null => taskLayout.layout.instances[panelId]?.kind ?? null
+  )
+  const isInstanceShown = useStableCallback((instanceId: string): boolean =>
+    isInstanceVisible(taskLayout.layout, instanceId)
+  )
+  // The agent/terminal panel owning terminal shortcuts (⌘T, ⌘D): only one container
+  // may answer them, or every agent panel would open a tab.
+  const [focusedTerminalPanel, setFocusedTerminalPanel] = useState('terminal')
+  const terminalShortcutOwner = taskLayout.layout.instances[focusedTerminalPanel]
+    ? focusedTerminalPanel
+    : 'terminal'
+  const notePanelFocus = useStableCallback((panelId: string) => {
+    const kind = kindOfPanel(panelId)
+    if (!kind) return
+    lastFocusedByKindRef.current[kind] = panelId
+    if (kind === 'agent' || kind === 'terminal') setFocusedTerminalPanel(panelId)
+  })
+  // Terminal groups claimed by other agent/terminal panels (the primary hides them),
+  // keyed by content so the primary's filter stays stable across layout edits.
+  const claimedGroupsKey = claimedTerminalGroupIds(taskLayout.layout, 'terminal').join('\n')
+  const claimedGroups = useMemo(
+    () => (claimedGroupsKey === '' ? [] : claimedGroupsKey.split('\n')),
+    [claimedGroupsKey]
+  )
+  const instanceState = usePanelInstanceState(task, updateTaskAsync)
+  const terminalGroups = useTerminalGroupsApi()
+  const [terminalHandles] = useState(() => new InstanceHandles<TerminalContainerHandle>())
+  const [browserHandles] = useState(() => new InstanceHandles<BrowserPanelHandle>())
+  const [editorHandles] = useState(() => new InstanceHandles<FileEditorViewHandle>())
+  const [gitHandles] = useState(() => new InstanceHandles<UnifiedGitPanelHandle>())
+  const [artifactsHandles] = useState(() => new InstanceHandles<ArtifactsPanelHandle>())
 
   // Drag-reorder of the PanelToggle button row. Receives the reordered subset of
   // task-view panel ids (only the buttons actually shown) and merges it back into
@@ -721,70 +731,35 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Auto-claim panels for this window when visible AND no current owner.
   // First-owner priority: subsequent windows opening same panel render a
   // stub w/ Take over buttons until user explicitly takes over.
+  const claimingTaskId = task?.id
   useEffect(() => {
-    if (!task || ownership.windowId == null) return
-    const claimableIds = [
-      'terminal',
-      'browser',
-      'editor',
-      'diff',
-      'artifacts',
-      'processes',
-      'settings'
-    ] as const
-    for (const id of claimableIds) {
-      if (panelVisibility[id] && ownership.ownerOf(id) == null) ownership.claim(id)
+    if (!claimingTaskId || ownership.windowId == null) return
+    // Every shown panel instance, by its own id (a primary's id is its legacy one).
+    for (const id of Object.keys(taskLayout.layout.instances)) {
+      if (isInstanceVisible(taskLayout.layout, id) && ownership.ownerOf(id) == null)
+        ownership.claim(id)
     }
-    for (const wp of enabledWebPanels) {
-      if (panelVisibility[wp.id] && ownership.ownerOf(wp.id) == null) ownership.claim(wp.id)
-    }
-  }, [task?.id, ownership.windowId, panelVisibility, enabledWebPanels, ownership]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [claimingTaskId, ownership, taskLayout.layout])
 
   // When a secondary window closes, primary's renderer flips local visibility off for the
   // panels it owned — they must NOT auto-pop back open here. User clicks toggle to reopen.
   useEffect(() => {
     if (!ownership.releasedOnClose || ownership.releasedOnClose.length === 0) return
-    const ids = ownership.releasedOnClose.map((r) => r.panelId)
-    setPanelVisibility((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const id of ids) {
-        if (next[id]) {
-          next[id] = false
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
+    hidePanelsLocally(ownership.releasedOnClose.map((r) => r.panelId))
     ownership.consumeReleasedOnClose()
-  }, [ownership.releasedOnClose, ownership])
+  }, [ownership.releasedOnClose, ownership, hidePanelsLocally])
 
   // "Take over and close" from another window: flip local visibility false (no DB write)
   useSubscription(
     trpc.app.taskWindows.onPanelCloseRequest.subscriptionOptions(undefined, {
       onData: (payload) => {
         if (!task || payload.taskId !== task.id) return
-        setPanelVisibility((prev) =>
-          prev[payload.panelId] ? { ...prev, [payload.panelId]: false } : prev
-        )
+        hidePanelsLocally([payload.panelId])
       }
     })
   )
 
-  // Panel sizes for resizable panels — per-task, persisted to the DB (mirrors
-  // panel_visibility). Secondary windows keep sizes local (no DB write).
   const loadedTaskId = task?.id
-  const persistPanelSizes = useCallback(
-    (sizes: PanelSizes) => {
-      if (!loadedTaskId || isSecondaryWindow) return
-      void updateTaskAsync({ id: loadedTaskId, panelSizes: sizes }).then((updated) => {
-        if (updated) onTaskUpdated(updated)
-      })
-    },
-    [loadedTaskId, isSecondaryWindow, onTaskUpdated, updateTaskAsync]
-  )
-  const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
-    usePanelSizes(initialData?.panelSizes, persistPanelSizes)
   const [isLocalResizing, setIsResizing] = useState(false)
   const isResizing = isLocalResizing || !!isSidePanelResizing
 
@@ -805,7 +780,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // for that transient-wide box → the terminal renders wider than its panel
       // until a later resize corrects it. The ResizeObserver below only reports
       // on a subsequent frame, which is too late for the mount fit.
-      const initialWidth = Math.floor(el.getBoundingClientRect().width)
+      // Content width, like the observer's contentRect: the strip's own padding
+      // (p-4) is not panel space. The border box here overflowed the strip by
+      // 32px (and showed a scrollbar) whenever the observer never corrected it.
+      const cs = getComputedStyle(el)
+      const initialWidth = Math.floor(
+        el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      )
       if (initialWidth > 0 && Math.abs(initialWidth - lastWidthRef.current) >= 2) {
         lastWidthRef.current = initialWidth
         setContainerWidth(initialWidth)
@@ -820,13 +801,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [])
 
-  // Resolve the Figma-style layout: per-panel px widths, the anchor gap, and the
-  // left/right cluster order. Reflows on size/config/container-width change.
-  const resolved = useMemo(
-    () => resolvePanels(visiblePanelOrder, panelConfig, panelSizes, containerWidth),
-    [visiblePanelOrder, panelConfig, panelSizes, containerWidth]
+  // Resolve the strip: per-column px widths, the anchor gap, the left/right
+  // cluster order. Reflows on layout/config/container-width change.
+  const layoutStrip = useMemo(
+    () => resolveLayoutStrip(taskLayout.layout, containerWidth),
+    [taskLayout.layout, containerWidth]
   )
-  const resolvedWidths = resolved.widths
+  const resolvedWidths = layoutStrip.resolved.widths
 
   // Settings panel layout tier by its width (see the settings render): wide
   // panels split into columns instead of stretching one column edge to edge.
@@ -843,52 +824,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     detailsOpen
   ])
 
-  // Placement (flex order, gap spacer, handle neighbors) — shared with the home tab.
-  const strip = useMemo(() => planPanelStrip(resolved), [resolved])
-  const panelOrderIdx = strip.order
-  const spacerOrder = strip.spacerOrder ?? 0
-  const panelOrderStyle = (id: string): { order: number } => ({ order: panelOrderIdx[id] ?? 0 })
-  const getLeftNeighborId = (id: string): string | null => strip.leftNeighbor[id] ?? null
-
-  // Renders the divider before `panelId`. Boundary drag transfers width between
-  // the panel and its same-cluster left neighbor, keeping each panel's unit (fr
-  // stays fr, px/pct stay static). Persisted once on drag end.
-  const renderResizeHandle = (panelId: string): React.ReactNode => {
-    const leftId = getLeftNeighborId(panelId)
-    if (!leftId) return null
-    const leftL = effectiveLayout(leftId, panelConfig, panelSizes)
-    const rightL = effectiveLayout(panelId, panelConfig, panelSizes)
-    return (
-      <ResizeHandle
-        leftWidth={resolvedWidths[leftId] ?? 200}
-        rightWidth={resolvedWidths[panelId] ?? 200}
-        leftMinWidth={resolved.minPx[leftId] ?? minWidthFor(leftId)}
-        rightMinWidth={resolved.minPx[panelId] ?? minWidthFor(panelId)}
-        leftMaxWidth={resolved.maxPx[leftId]}
-        rightMaxWidth={resolved.maxPx[panelId]}
-        onResize={(lw, rw) =>
-          updatePanelSizes(
-            applyBoundaryResize(
-              leftL,
-              rightL,
-              leftId,
-              panelId,
-              unstretchPx(resolved, leftId, lw),
-              unstretchPx(resolved, panelId, rw),
-              containerWidth
-            )
-          )
-        }
-        onDragStart={() => setIsResizing(true)}
-        onDragEnd={() => {
-          setIsResizing(false)
-          commitPanelSizes()
-        }}
-        onReset={resetAllPanels}
-        style={panelOrderStyle(panelId)}
-      />
-    )
-  }
+  const panelOrderIdx = layoutStrip.plan.order
 
   // Terminal API (exposed via onReady callback)
   const terminalApiRef = useRef<{
@@ -916,23 +852,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [loadedTaskId, onTaskUpdated, updateTaskAsync]
   )
-  const {
-    status: loopStatus,
-    iteration: loopIteration,
-    startLoop,
-    pauseLoop,
-    resumeLoop,
-    stopLoop
-  } = useLoopMode({
+  const loop = useLoopMode({
     sessionId: mainSessionId,
     onConfigChange: handleLoopConfigChange
   })
 
-  const {
-    showBanner: showSlayNudge,
-    dismiss: dismissSlayNudge,
-    recheck: recheckSlayNudge
-  } = useSlayNudge({
+  const slayNudge = useSlayNudge({
     computerId: workComputerId(task, project),
     taskId: task?.id ?? null,
     projectId: task?.project_id ?? null,
@@ -948,12 +873,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     devUrlToastDismissedRef
   } = useDevServerDetection({
     task,
-    browserVisible: panelVisibility.browser,
+    browserVisible: isInstanceVisible(taskLayout.layout, PRIMARY_INSTANCE_IDS.browser as string),
     settingsRevision,
     subscribeDevServer,
     getMainSessionId
   })
-  const gitPanelRef = useRef<UnifiedGitPanelHandle>(null)
   const [gitDefaultTab, setGitDefaultTab] = useState<GitTabId>(
     () => task?.git_active_tab ?? 'general'
   )
@@ -970,10 +894,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     gitTabSyncedRef.current = true
     if (task?.id) void updateTaskAsync({ id: task.id, gitActiveTab: tab })
   }
-  const fileEditorRef = useRef<FileEditorViewHandle>(null)
-  const terminalContainerRef = useRef<TerminalContainerHandle>(null)
-  const browserPanelRef = useRef<BrowserPanelHandle>(null)
-  const artifactsPanelRef = useRef<ArtifactsPanelHandle>(null)
   // Sharing one file with people (T-100); only on a hub with login.
   const sharing = useSharingStatus()
   const runsAgentsHere = useRunsAgentsHere(task?.id)
@@ -984,27 +904,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // A View member (T-100) sees the task as it is: nothing on the page offers an edit.
   const canEdit = useCanEdit('task', task?.id)
   const [sharingArtifact, setSharingArtifact] = useState<{ id: string; title: string } | null>(null)
-  const pendingArtifactRef = useRef<string | null>(null)
-  const artifactsPanelRefCallback = useCallback((handle: ArtifactsPanelHandle | null) => {
-    artifactsPanelRef.current = handle
-    if (handle && pendingArtifactRef.current) {
-      handle.selectArtifact(pendingArtifactRef.current)
-      pendingArtifactRef.current = null
-    }
-  }, [])
-  const pendingEditorFileRef = useRef<string | null>(null)
-  const pendingSearchToggleRef = useRef(false)
-  const fileEditorRefCallback = useCallback((handle: FileEditorViewHandle | null) => {
-    fileEditorRef.current = handle
-    if (handle && pendingEditorFileRef.current) {
-      handle.openFile(pendingEditorFileRef.current)
-      pendingEditorFileRef.current = null
-    }
-    if (handle && pendingSearchToggleRef.current) {
-      handle.toggleSearch()
-      pendingSearchToggleRef.current = false
-    }
-  }, [])
   // One probe, shared by the focus listener and the project-change effect, so
   // the two can never disagree about how the question is asked.
   const probeTaskId = task?.id
@@ -1057,26 +956,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
 
   // Terminal session lifecycle: session-id discovery, restart/reset/stop, revive, ensure-alive
-  const {
-    sessionIdCommand,
-    showSessionBanner,
-    showUnavailableBanner,
-    detectedSessionId,
-    setSessionUnavailableDismissed,
-    handleDetectSessionId,
-    getConversationIdForMode,
-    handleUpdateSessionId,
-    handleRestartTerminal,
-    handleStopAgent,
-    handleResetTerminal,
-    handleSwitchSession,
-    handleDeleteSession,
-    handleTabSessionReset,
-    handleTabSessionSwitch,
-    handleReattachTerminal,
-    handoffMode,
-    handleHandoff
-  } = useTaskTerminalSession({
+  const terminalSession = useTaskTerminalSession({
     task,
     // The main agent's cwd, exactly as the terminal container gets it (a chat
     // tab is identified by it).
@@ -1088,6 +968,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     subscribeSessionDetected,
     setTerminalKey
   })
+  const {
+    getConversationIdForMode,
+    handleRestartTerminal,
+    handleStopAgent,
+    handleResetTerminal,
+    handleReattachTerminal
+  } = terminalSession
 
   // Inject task title into the main agent's input (no execute)
   const handleInjectTitle = useCallback(async () => {
@@ -1182,7 +1069,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Screenshot trigger (terminal-screenshot shortcut) from main process
   const handleScreenshotTrigger = useStableCallback(() => {
-    const viewId = browserPanelRef.current?.getActiveViewId()
+    const viewId = browserHandles.get(targetOf('browser'))?.getActiveViewId()
     if (viewId) void handleScreenshot(viewId)
   })
   useSubscription(
@@ -1198,26 +1085,94 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     browserTabsRef.current = browserTabs
   }, [browserTabs])
 
+  // The task's ONE flat browser tab list, plus which tabs each non-primary browser
+  // panel shows (`byPanel`): every write goes through here.
+  const commitBrowserTabs = useStableCallback(async (next: BrowserTabsState) => {
+    browserTabsRef.current = next
+    setBrowserTabs(next)
+    if (!task) return
+    // Persist to DB (debounced via the tab state itself)
+    await updateTaskAsync({ id: task.id, browserTabs: next })
+  })
+
+  // Browser instance `instanceId`'s panel changed its tabs.
+  const handleBrowserTabsChange = useStableCallback(
+    (instanceId: string, tabs: BrowserTabsState): Promise<void> =>
+      commitBrowserTabs(
+        setBrowserTabsForInstance(
+          browserTabsRef.current,
+          instanceId,
+          instanceId === PRIMARY_INSTANCE_IDS.browser,
+          tabs
+        )
+      )
+  )
+
+  // What each browser panel shows: stable per instance while the stored tabs are.
+  const browserInstanceIds = instancesOfKind(taskLayout.layout, 'browser')
+    .map((i) => i.id)
+    .join('\n')
+  const browserViews = useMemo(() => {
+    const out: Record<string, BrowserTabsState> = {}
+    for (const id of browserInstanceIds.split('\n'))
+      if (id) out[id] = browserTabsForInstance(browserTabs, id, id === PRIMARY_INSTANCE_IDS.browser)
+    return out
+  }, [browserTabs, browserInstanceIds])
+  const browserTabsFor = (instanceId: string): BrowserTabsState =>
+    browserViews[instanceId] ??
+    browserTabsForInstance(browserTabs, instanceId, instanceId === PRIMARY_INSTANCE_IDS.browser)
+
+  /** Add `tab` to browser instance `instanceId` (selected unless `background`). */
+  const addBrowserTab = useStableCallback(
+    (
+      instanceId: string,
+      tab: BrowserTab,
+      opts: { background?: boolean; replace?: boolean } = {}
+    ) => {
+      const primary = instanceId === PRIMARY_INSTANCE_IDS.browser
+      const view = browserTabsForInstance(browserTabsRef.current, instanceId, primary)
+      const tabs = opts.replace ? [tab] : [...view.tabs, tab]
+      const activeTabId = opts.background && view.tabs.length > 0 ? view.activeTabId : tab.id
+      void handleBrowserTabsChange(instanceId, { tabs, activeTabId })
+    }
+  )
+
   // Track last-focused sub-panel via focusin (macOS native menu accelerators clear activeElement by callback time).
   // Listened on this page's root, not the window: every open tab mounts a page, and a
   // window listener let a focus move in ANY tab re-render all of them (and record
   // another tab's panel as this one's Cmd+W target).
   const lastFocusedPanelRef = useRef<'terminal' | 'editor' | 'browser' | null>(null)
+  const lastFocusedPanelIdRef = useRef<string | null>(null)
   const [focusedPanel, setFocusedPanel] = useState<string | null>(null)
   useEffect(() => {
     if (!taskRootEl) return
     const handleFocusIn = (e: FocusEvent): void => {
       const target = e.target as HTMLElement | null
-      // Cmd+W tracking (sticky ref, specific selectors)
+      // Glow tracking (data-panel-id on all panel wrappers)
+      const panelId = target?.closest('[data-panel-id]')?.getAttribute('data-panel-id')
+      // Cmd+W tracking (sticky refs): the panel (or its tab in a strip) last focused,
+      // and which sub-item closer applies to it (specific selectors).
+      const panelTarget =
+        panelId ?? target?.closest('[data-panel-tab]')?.getAttribute('data-panel-tab')
+      if (panelTarget) {
+        lastFocusedPanelIdRef.current = panelTarget
+        notePanelFocus(panelTarget)
+      }
+      const kind = panelTarget ? kindOfPanel(panelTarget) : null
       if (target?.classList.contains('xterm-helper-textarea') || target?.closest('.xterm')) {
         lastFocusedPanelRef.current = 'terminal'
-      } else if (target?.closest('[data-panel-id="editor"]')) {
+      } else if (panelId && kind === 'editor') {
         lastFocusedPanelRef.current = 'editor'
       } else if (target?.closest('[data-browser-panel]')) {
         lastFocusedPanelRef.current = 'browser'
+      } else if (
+        panelTarget &&
+        !(kind === 'agent' || kind === 'terminal' || kind === 'editor' || kind === 'browser')
+      ) {
+        // Another panel (or its tab in a strip): a sub-item of the panel focused
+        // before is no longer what Cmd+W closes.
+        lastFocusedPanelRef.current = null
       }
-      // Glow tracking (data-panel-id on all panel wrappers)
-      const panelId = target?.closest('[data-panel-id]')?.getAttribute('data-panel-id')
       if (panelId) setFocusedPanel(panelId)
     }
     const handleFocusOut = (e: FocusEvent): void => {
@@ -1230,7 +1185,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       taskRootEl.removeEventListener('focusin', handleFocusIn)
       taskRootEl.removeEventListener('focusout', handleFocusOut)
     }
-  }, [taskRootEl])
+  }, [taskRootEl, notePanelFocus, kindOfPanel])
 
   // Cmd+R browser reload is handled globally in App.tsx
 
@@ -1316,15 +1271,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     setFlagsInputValue(getProviderFlagsForMode(task))
   }, [task, getProviderFlagsForMode])
 
-  // Handle panel visibility toggle
+  // Handle panel visibility toggle: shows/hides the layout group holding `panelId`
+  // (opening resets its size). The layout persists it (primary window only).
   const handlePanelToggle = useCallback(
     async (panelId: string, active: boolean) => {
       if (!task) return
       track('panel_toggled', { panel: panelId, active, context: 'task' })
-      // Reset panel size to default when opening
-      if (active) resetPanelSize(panelId)
-      const newVisibility = { ...panelVisibility, [panelId]: active }
-      setPanelVisibility(newVisibility)
+      setPanelVisible(panelId, active)
       // Multi-window: claim ownership only if no one owns yet (or already mine).
       // If another window owns, opening here renders a stub w/ Take over buttons —
       // first owner keeps priority until user explicitly takes over or releases.
@@ -1335,60 +1288,349 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         if (ownership.isOwnedByMe(panelId)) ownership.release(panelId)
       }
       // Auto-focus panel content so scope tracker detects the right scope
-      if (panelId === 'browser' && active) {
+      if (active && kindOfPanel(panelId) === 'browser') {
         requestAnimationFrame(() => {
+          const handle = browserHandles.get(panelId)
           // Create a fresh tab when reopening with no tabs (honors browserDefaultUrl)
-          if (browserTabsRef.current.tabs.length === 0) {
-            browserPanelRef.current?.newTab()
-          }
-          browserPanelRef.current?.focus()
+          const view = browserTabsForInstance(
+            browserTabsRef.current,
+            panelId,
+            panelId === PRIMARY_INSTANCE_IDS.browser
+          )
+          if (view.tabs.length === 0) handle?.newTab()
+          handle?.focus()
         })
       }
-      // Persist to DB only for primary window — secondary's visibility is local-only
-      if (isSecondaryWindow) return
-      const updated = await updateTaskAsync({
-        id: task.id,
-        panelVisibility: newVisibility
-      })
-      onTaskUpdated(updated)
     },
-    [
-      task,
-      panelVisibility,
-      onTaskUpdated,
-      resetPanelSize,
-      ownership,
-      isSecondaryWindow,
-      updateTaskAsync,
-      track
-    ]
+    [task, setPanelVisible, ownership, track, kindOfPanel, browserHandles]
   )
+
+  /** Toggle the target instance of a kind (shortcuts, palette); a legacy id with no kind (`tests`, a web panel) toggles itself. */
+  const togglePanelKind = useStableCallback((legacyId: string) => {
+    const kind = legacyKindOf(legacyId)
+    if (!kind || kind === 'web') {
+      handlePanelToggle(legacyId, !(kind ? isInstanceShown(legacyId) : panelVisibility[legacyId]))
+      return
+    }
+    const target = focusedInstanceOf(kind) ?? legacyId
+    handlePanelToggle(target, !isInstanceShown(target))
+  })
+
+  /** Show an artifact in the target artifacts panel, opening it (the panel selects it once mounted). */
+  const selectArtifactInPanel = useStableCallback((artifactId: string) => {
+    const id = targetOf('artifacts')
+    if (!isInstanceShown(id)) handlePanelToggle(id, true)
+    artifactsHandles.whenReady(id, (handle) => handle.selectArtifact(artifactId))
+  })
+  /** Start a new artifact in the target artifacts panel, opening it. */
+  const createArtifactInPanel = useStableCallback(() => {
+    const id = targetOf('artifacts')
+    if (!isInstanceShown(id)) handlePanelToggle(id, true)
+    artifactsHandles.whenReady(id, (handle) => handle.createArtifact())
+  })
+
+  // ── New and closed panel instances ──────────────────────────────────────────────
+  /** Show an instance the layout holds: back from Parked, its group and tab shown and active. */
+  const revealInstance = useStableCallback((instanceId: string) => {
+    const loc = findTab(taskLayout.layout, instanceId)
+    if (!loc) return
+    const tab = taskLayout.layout.columns[loc.columnIndex].slots[loc.slotIndex].tabs[loc.tabIndex]
+    if (tab.parked) taskLayout.unpark(instanceId)
+    else if (!isInstanceShown(instanceId)) void handlePanelToggle(instanceId, true)
+    activateTab(instanceId)
+  })
+
+  /** A provider (agent mode) this app runs, from an agent panel's settings; else null. */
+  const providerOf = (settings: Record<string, unknown> | undefined): AgentId | null => {
+    const provider = settings?.provider
+    return typeof provider === 'string' && modes.some((m) => m.id === provider)
+      ? (provider as AgentId)
+      : null
+  }
+
+  /**
+   * Add a new instance of `kind`: a tab in `nextTo`'s group, else a new column. An
+   * agent/terminal panel gets its first terminal group (a terminal_tabs row, the
+   * same path as the + in a terminal tab bar); a browser panel its first tab.
+   */
+  const addPanel = useStableCallback(
+    (kind: PanelKind, nextTo?: string, settings?: Record<string, unknown>) => {
+      if (!task || !taskLayout.supportsInstances) return
+      // A one-per-task kind the task has (Description…), or the Artifact panel
+      // already showing that file: show it rather than add another.
+      const existing = existingInstanceFor(taskLayout.layout, kind, settings)
+      if (existing) {
+        revealInstance(existing)
+        return
+      }
+      const slotId = nextTo ? taskLayout.slotOf(nextTo) : null
+      const placement = slotId ? { type: 'tab' as const, slotId } : { type: 'column' as const }
+      const show = (id: string): void => {
+        ownership.claim(id)
+        lastFocusedByKindRef.current[kind] = id
+      }
+      if (kind === 'agent' || kind === 'terminal') {
+        const mode = kind === 'agent' ? (providerOf(settings) ?? task.agent_id) : 'terminal'
+        terminalGroups
+          .createGroup(task.id, mode)
+          .then((tab) => {
+            const id = addInstance(kind, placement, {
+              ...settings,
+              terminalGroupIds: [tab.groupId]
+            })
+            show(id)
+            setFocusedTerminalPanel(id)
+          })
+          .catch((error: unknown) => {
+            console.warn('[task] creating a terminal for the new panel failed:', error)
+            toast.error("Couldn't start a terminal for the new panel")
+          })
+        return
+      }
+      const id = addInstance(kind, placement, settings)
+      show(id)
+      if (kind === 'browser') browserHandles.whenReady(id, (h) => h.newTab())
+    }
+  )
+
+  /** Artifact `artifactId` in an Artifact panel of its own: the one showing it, else a new one. */
+  const openArtifactInOwnPanel = useStableCallback((artifactId: string, nextTo?: string) =>
+    addPanel('artifact', nextTo, { artifactId })
+  )
+
+  /**
+   * An agent panel's provider: the primary switches the task's agent (fresh start,
+   * like the provider menu on its main tab). Any other agent panel changes the mode
+   * of its own agent — the first terminal of the first group it claims (terminal_tabs,
+   * the session restarts in the new mode); a panel with no terminal yet starts one.
+   */
+  const setPanelProvider = useStableCallback(async (instanceId: string, mode: AgentId) => {
+    if (!task) return
+    if (instanceId === PRIMARY_INSTANCE_IDS.agent) {
+      if (mode !== task.agent_id) await handleModeChange(mode)
+      return
+    }
+    const inst = taskLayout.layout.instances[instanceId]
+    if (inst?.kind !== 'agent') return
+    const groupIds = terminalGroupIdsOf(inst)
+    try {
+      if (groupIds.length === 0) {
+        const tab = await terminalGroups.createGroup(task.id, mode)
+        updateInstanceSettings(instanceId, { terminalGroupIds: [tab.groupId] })
+        return
+      }
+      const from = await terminalGroups.setGroupMode(task.id, groupIds[0], mode)
+      if (from) track('terminal_mode_switched', { from, to: mode })
+    } catch (error) {
+      console.warn("[task] changing an agent panel's provider failed:", error)
+      toast.error("Couldn't change the panel's agent")
+    }
+  })
+
+  /** Let go of a removed instance's state; a primary's lives in the task's columns and stays. */
+  const releaseInstance = useStableCallback((inst: PanelInstance) => {
+    const instanceId = inst.id
+    if (!isPrimaryInstance(inst) && task) {
+      if (inst.kind === 'browser')
+        void commitBrowserTabs(removeBrowserInstanceTabs(browserTabsRef.current, instanceId))
+      if (inst.kind === 'agent' || inst.kind === 'terminal') {
+        terminalGroups
+          .closeGroups(task.id, terminalGroupIdsOf(inst))
+          .catch((error: unknown) =>
+            console.warn("[task] closing a panel's terminals failed:", error)
+          )
+        terminalHandles.forget(instanceId)
+      }
+      instanceState.drop(instanceId)
+      if (ownership.isOwnedByMe(instanceId)) ownership.release(instanceId)
+      for (const handles of [browserHandles, editorHandles, gitHandles, artifactsHandles])
+        handles.forget(instanceId)
+    }
+  })
+
+  /**
+   * Close a panel tab: a primary instance only hides (legacy clients, shortcuts and
+   * ownership address it by its id). Any other instance is removed with its state:
+   * its `panel_instance_state` entry, a browser's tabs, an agent/terminal panel's
+   * terminal tabs (their sessions end — the close request asked first).
+   */
+  const closePanelInstance = useStableCallback((instanceId: string) => {
+    const inst = taskLayout.layout.instances[instanceId]
+    if (inst) releaseInstance(inst)
+    closePanelTab(instanceId)
+  })
+
+  // ── Layout definitions (docs/plans/panel-model.md step 10) ──────────────────────
+  const layoutDefs = resolveClientLayouts(taskLayouts.setting, panelConfig)
+  const currentLayoutDef = layoutDefs.find((d) => d.id === taskLayout.layout.layoutId) ?? null
+  const layoutDirty = isLayoutDirty(taskLayout.layout, currentLayoutDef)
+  const [saveLayoutAsOpen, setSaveLayoutAsOpen] = useState(false)
+
+  /**
+   * Whether an instance holds live state a layout switch must not throw away: the
+   * primary agent (the task's main session), agent/terminal panels with terminal
+   * groups, browser panels with a page open, editors with open files.
+   */
+  const instanceHasLiveState = useStableCallback((inst: PanelInstance): boolean =>
+    instanceHasStoredLiveState(inst, {
+      browserTabs: browserTabsRef.current,
+      editorOpenFiles: task?.editor_open_files,
+      instanceState: { [inst.id]: instanceState.get(inst.id) }
+    })
+  )
+
+  /**
+   * Switch the task to layout `layoutId`. Nothing live is lost: instances move to
+   * their match in the definition, unmatched ones with live state are parked (⋯ →
+   * Parked), the rest are released. A new agent/terminal panel gets its first
+   * terminal, like one added from the ⋯ menu.
+   */
+  const applyLayout = useStableCallback((layoutId: string) => {
+    if (!task || !taskLayout.supportsInstances) return
+    const def = layoutDefs.find((d) => d.id === layoutId)
+    if (!def) return
+    const result = taskLayout.applyDefinition(def, instanceHasLiveState)
+    for (const inst of result.dropped) releaseInstance(inst)
+    for (const id of result.added) {
+      const inst = result.layout.instances[id]
+      if (!inst || (inst.kind !== 'agent' && inst.kind !== 'terminal')) continue
+      if (terminalGroupIdsOf(inst).length > 0) continue
+      const mode = inst.kind === 'agent' ? (providerOf(inst.settings) ?? task.agent_id) : 'terminal'
+      terminalGroups
+        .createGroup(task.id, mode)
+        .then((tab) => updateInstanceSettings(id, { terminalGroupIds: [tab.groupId] }))
+        .catch((error: unknown) =>
+          console.warn('[task] starting a terminal for a layout panel failed:', error)
+        )
+    }
+  })
+
+  const saveLayoutOver = useStableCallback(() => {
+    const def = currentLayoutDef
+    if (!def) return
+    void taskLayouts
+      .update((s) => saveLayoutTree(s, def.id, taskLayout.layout))
+      .then(() => toast.success(`Saved “${def.name}”`))
+      .catch(() => toast.error("Couldn't save the layout"))
+  })
+
+  const saveLayoutAs = useStableCallback((name: string) => {
+    let newId: string | null = null
+    void taskLayouts
+      .update((s) => {
+        const added = addUserLayout(s, layoutDefs, name, taskLayout.layout, {
+          afterId: currentLayoutDef?.id
+        })
+        newId = added.id
+        return added.setting
+      })
+      .then(() => {
+        if (newId) taskLayout.setLayoutId(newId)
+        toast.success(`Saved “${name.trim() || 'Untitled layout'}”`)
+      })
+      .catch(() => toast.error("Couldn't save the layout"))
+  })
+
+  /** ⌃⌥N: switch to the N-th enabled layout. */
+  const switchLayoutAt = useStableCallback((n: number): boolean => {
+    const def = layoutAtShortcut(layoutDefs, n)
+    if (!def) return false
+    applyLayout(def.id)
+    return true
+  })
+  // Capture phase, like terminal-restart: the layout keys work from a focused
+  // terminal too (xterm would otherwise take them).
+  const layoutShortcutsEnabled = shortcutActive && taskLayout.supportsInstances
+  useEffect(() => {
+    if (!layoutShortcutsEnabled) return
+    const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
+      const { isRecording, getKeys } = useShortcutStore.getState()
+      if (isRecording) return
+      for (let n = 1; n <= LAYOUT_SHORTCUT_COUNT; n++) {
+        if (!matchesShortcut(e, getKeys(`switch-layout-${n}`))) continue
+        e.preventDefault()
+        e.stopPropagation()
+        switchLayoutAt(n)
+        return
+      }
+    })
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [layoutShortcutsEnabled, switchLayoutAt])
+
+  const parkedPanels: ParkedPanel[] = parkedInstances(taskLayout.layout).flatMap((inst) => {
+    if (!isRenderableKind(inst.kind)) return []
+    const meta = panelTabMeta(inst, enabledWebPanels, artifacts)
+    return [
+      {
+        instanceId: inst.id,
+        label: meta.label,
+        icon: meta.icon,
+        iconClassName: PANEL_KINDS[inst.kind].iconClassName
+      }
+    ]
+  })
+
+  // Closing a panel tab (×, ⌘W, the tab menu) asks its kind first: an agent or
+  // terminal panel confirms while a session of its runs.
+  const { requestClose: requestClosePanelTab, dialog: panelCloseDialog } = usePanelCloseRequest({
+    layout: taskLayout.layout,
+    closeTab: closePanelInstance,
+    isSessionLive: async (instanceId) => {
+      if (!task) return false
+      if (instanceId === PRIMARY_INSTANCE_IDS.agent)
+        return trpcClient.pty.exists.query({ sessionId: getMainSessionId(task.id) })
+      return terminalGroups.anyLive(
+        task.id,
+        terminalGroupIdsOf(taskLayout.layout.instances[instanceId])
+      )
+    }
+  })
 
   // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
   // or fall through to close the task tab if nothing to close
   const handleCloseCurrentFocus = useStableCallback(async () => {
     const panel = lastFocusedPanelRef.current
+    // The instance the sub-item belongs to: the panel focused last, if of that kind.
+    const focusedId = lastFocusedPanelIdRef.current
+    const focusedKind = focusedId ? kindOfPanel(focusedId) : null
+    const instanceOf = (...kinds: LayoutPanelKind[]): string | null =>
+      focusedId && focusedKind && kinds.includes(focusedKind) ? focusedId : null
     if (panel === 'terminal') {
-      const closed = (await terminalContainerRef.current?.closeActiveGroup()) ?? true
+      const id = instanceOf('agent', 'terminal') ?? 'terminal'
+      const closed = (await terminalHandles.get(id)?.closeActiveGroup()) ?? true
       if (closed) return
     } else if (panel === 'editor') {
-      const closed = fileEditorRef.current?.closeActiveFile()
+      const closed = editorHandles
+        .get(instanceOf('editor') ?? targetOf('editor'))
+        ?.closeActiveFile()
       if (closed) return
     } else if (panel === 'browser') {
-      const bt = browserTabsRef.current
+      const id = instanceOf('browser') ?? targetOf('browser')
+      const bt = browserTabsForInstance(
+        browserTabsRef.current,
+        id,
+        id === PRIMARY_INSTANCE_IDS.browser
+      )
       if (bt.tabs.length > 1) {
         const idx = bt.tabs.findIndex((t) => t.id === bt.activeTabId)
         const newTabs = bt.tabs.filter((t) => t.id !== bt.activeTabId)
         const newActiveId = newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null
-        setBrowserTabs({ tabs: newTabs, activeTabId: newActiveId })
+        void handleBrowserTabsChange(id, { tabs: newTabs, activeTabId: newActiveId })
         return
       } else if (bt.tabs.length === 1) {
-        setBrowserTabs({ tabs: [], activeTabId: null })
-        handlePanelToggle('browser', false)
+        void handleBrowserTabsChange(id, { tabs: [], activeTabId: null })
+        handlePanelToggle(id, false)
         return
       }
     }
-    // Nothing was closed — close the task tab
+    // No sub-item closed: close the focused panel's tab when it sits in a tab
+    // strip (a group of several tabs, or a named one) — else the task tab.
+    const panelId = lastFocusedPanelIdRef.current
+    if (panelId && isInTabStrip(taskLayout.layout, panelId)) {
+      requestClosePanelTab(panelId)
+      return
+    }
     onCloseTab?.(taskId)
   })
   useSubscription(
@@ -1401,9 +1643,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleOpenArtifact = useStableCallback(
     ({ taskId: targetTaskId, artifactId }: { taskId: string; artifactId: string }) => {
       if (!task || targetTaskId !== task.id) return
-      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-      if (artifactsPanelRef.current) artifactsPanelRef.current.selectArtifact(artifactId)
-      else pendingArtifactRef.current = artifactId
+      selectArtifactInPanel(artifactId)
     }
   )
   // Chat links name an artifact by full id or a short prefix (`artifact:416b87b4`).
@@ -1422,17 +1662,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     trpc.menu.onOpenArtifact.subscriptionOptions(undefined, { onData: handleOpenArtifact })
   )
 
-  const handleQuickOpenFile = useCallback(
-    (filePath: string, options?: OpenFileOptions) => {
-      if (fileEditorRef.current) {
-        fileEditorRef.current.openFile(filePath, options)
-      } else {
-        pendingEditorFileRef.current = filePath
-        handlePanelToggle('editor', true)
-      }
-    },
-    [handlePanelToggle]
-  )
+  // Opens in the target editor (the one focused last, else the primary), showing it.
+  const handleQuickOpenFile = useStableCallback((filePath: string, options?: OpenFileOptions) => {
+    const id = targetOf('editor')
+    const handle = editorHandles.get(id)
+    if (handle && isInstanceShown(id)) {
+      handle.openFile(filePath, options)
+      return
+    }
+    editorHandles.whenReady(id, (h) => h.openFile(filePath, options))
+    handlePanelToggle(id, true)
+  })
 
   // Snapshot of the task's file-open context for the unified palette.
   // Captured into the dialog payload at the moment the shortcut fires; cleared on close.
@@ -1448,14 +1688,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Git panel shortcuts (Cmd+G general, Cmd+Shift+G changes): open on `tab`, switch
   // to it, or close when already showing it. Shared by the shortcuts and Cmd+K.
   const toggleGitTab = useStableCallback((tab: GitTabId) => {
-    if (!panelVisibility.diff) {
+    const id = targetOf('git')
+    const handle = gitHandles.get(id)
+    if (!isInstanceShown(id)) {
       // The panel mounts on `tab`, so it is also the tab to save (and reopen on).
-      handleGitTabChange(tab)
-      handlePanelToggle('diff', true)
-    } else if (gitPanelRef.current?.getActiveTab() === tab) {
-      handlePanelToggle('diff', false)
+      if (id === PRIMARY_INSTANCE_IDS.git) handleGitTabChange(tab)
+      else instanceState.patch(id, { gitTab: tab })
+      handlePanelToggle(id, true)
+      // Shown again while still mounted (a tab of a strip): switch it now.
+      if (handle && handle.getActiveTab() !== tab) handle.switchToTab(tab)
+    } else if (handle?.getActiveTab() === tab) {
+      handlePanelToggle(id, false)
     } else {
-      gitPanelRef.current?.switchToTab(tab)
+      handle?.switchToTab(tab)
     }
   })
 
@@ -1470,31 +1715,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
       if (matchesShortcut(e, keys('editor-search')) && isBuiltinEnabled('editor', 'task')) {
         e.preventDefault()
-        if (fileEditorRef.current) {
-          if (!panelVisibility.editor) handlePanelToggle('editor', true)
-          fileEditorRef.current.toggleSearch()
-        } else {
-          pendingSearchToggleRef.current = true
-          handlePanelToggle('editor', true)
-        }
+        const id = targetOf('editor')
+        if (!isInstanceShown(id)) handlePanelToggle(id, true)
+        editorHandles.whenReady(id, (h) => h.toggleSearch())
         return
       }
-      if (
-        matchesShortcut(e, keys('browser-element-picker')) &&
-        isBuiltinEnabled('browser', 'task') &&
-        panelVisibility.browser
-      ) {
+      const browserId = targetOf('browser')
+      const browserShown = isBuiltinEnabled('browser', 'task') && isInstanceShown(browserId)
+      if (matchesShortcut(e, keys('browser-element-picker')) && browserShown) {
         e.preventDefault()
-        browserPanelRef.current?.pickElement()
+        browserHandles.get(browserId)?.pickElement()
         return
       }
-      if (
-        matchesShortcut(e, keys('browser-focus-url')) &&
-        isBuiltinEnabled('browser', 'task') &&
-        panelVisibility.browser
-      ) {
+      if (matchesShortcut(e, keys('browser-focus-url')) && browserShown) {
         e.preventDefault()
-        browserPanelRef.current?.focusUrlBar()
+        browserHandles.get(browserId)?.focusUrlBar()
         return
       }
       if (matchesShortcut(e, keys('panel-git-diff')) && isBuiltinEnabled('diff', 'task')) {
@@ -1513,7 +1748,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // Cmd+E: toggle editor panel — works even inside CodeMirror
       if (matchesShortcut(e, keys('panel-editor')) && isBuiltinEnabled('editor', 'task')) {
         e.preventDefault()
-        handlePanelToggle('editor', !panelVisibility.editor)
+        togglePanelKind('editor')
         return
       }
 
@@ -1524,24 +1759,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         return
       }
       // Cmd+T: new browser tab when browser panel is open
-      if (
-        matchesShortcut(e, keys('browser-new-tab')) &&
-        panelVisibility.browser &&
-        isBuiltinEnabled('browser', 'task')
-      ) {
+      if (matchesShortcut(e, keys('browser-new-tab')) && browserShown) {
         e.preventDefault()
-        browserPanelRef.current?.newTab()
-        requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
+        const handle = browserHandles.get(browserId)
+        handle?.newTab()
+        requestAnimationFrame(() => handle?.focusUrlBar())
         return
       }
       if (matchesShortcut(e, keys('panel-terminal')) && isBuiltinEnabled('terminal', 'task')) {
         e.preventDefault()
-        handlePanelToggle('terminal', !panelVisibility.terminal)
+        togglePanelKind('terminal')
         return
       }
       if (matchesShortcut(e, keys('panel-processes')) && isBuiltinEnabled('processes', 'task')) {
         e.preventDefault()
-        handlePanelToggle('processes', !panelVisibility.processes)
+        togglePanelKind('processes')
         return
       }
       if (matchesShortcut(e, keys('panel-tests')) && isBuiltinEnabled('tests', 'task')) {
@@ -1551,7 +1783,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       if (matchesShortcut(e, keys('panel-artifacts')) && isBuiltinEnabled('artifacts', 'task')) {
         e.preventDefault()
-        handlePanelToggle('artifacts', !panelVisibility.artifacts)
+        togglePanelKind('artifacts')
         return
       }
       // Skip shortcuts inside CodeMirror / contenteditable so editor bindings (e.g. Mod+B) win
@@ -1566,20 +1798,23 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         isBuiltinEnabled('browser', 'task')
       ) {
         e.preventDefault()
-        handlePanelToggle('browser', !panelVisibility.browser)
+        togglePanelKind('browser')
       } else if (
         matchesShortcut(e, keys('panel-settings')) &&
         isBuiltinEnabled('settings', 'task')
       ) {
         e.preventDefault()
-        handlePanelToggle('settings', !panelVisibility.settings)
+        handlePanelToggle('settings', !isInstanceShown('settings'))
+      } else if (matchesShortcut(e, keys('task-computer'))) {
+        e.preventDefault()
+        setComputerMenuOpen((open) => !open)
       } else {
         // Web panel shortcuts (not in registry — dynamic per-project config):
         // primary modifier + the panel's letter, exactly as its tab label shows it.
         for (const wp of enabledWebPanels) {
           if (matchesShortcut(e, webPanelShortcutKeys(wp.shortcut))) {
             e.preventDefault()
-            handlePanelToggle(wp.id, !panelVisibility[wp.id])
+            handlePanelToggle(wp.id, !isInstanceShown(wp.id))
             return
           }
         }
@@ -1594,7 +1829,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     isBuiltinEnabled,
     enabledWebPanels,
     buildTaskFileContext,
-    toggleGitTab
+    toggleGitTab,
+    togglePanelKind,
+    targetOf,
+    isInstanceShown,
+    editorHandles,
+    browserHandles
   ])
 
   const handleDescriptionSave = async (): Promise<void> => {
@@ -1608,20 +1848,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onTaskUpdated(updated)
   }
 
-  const handleCreateSubTask = async (): Promise<void> => {
-    if (!task || !subTaskTitle.trim()) return
+  const handleCreateSubTask = async (title: string): Promise<void> => {
+    if (!task || !title.trim()) return
     await createSubTask({
       projectId: task.project_id,
-      title: subTaskTitle.trim(),
+      title: title.trim(),
       status: getDefaultStatus(project?.columns_config)
     })
-    setSubTaskTitle('')
-    setAddingSubTask(false)
   }
-
-  const subTaskSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  )
 
   // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
   const {
@@ -1661,7 +1895,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const updated = await updateTaskAsync(updates)
       handleTaskUpdate(updated)
 
-      if (template.panel_visibility) setPanelVisibility(template.panel_visibility)
+      if (template.panel_visibility) replaceVisibilityLocally(template.panel_visibility)
       if (template.browser_tabs) setBrowserTabs(template.browser_tabs)
       if (template.web_panel_urls) webPanelUrlsRef.current = { ...template.web_panel_urls }
 
@@ -1676,6 +1910,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       trpcClient,
       updateTaskAsync,
       handleTaskUpdate,
+      replaceVisibilityLocally,
       webPanelUrlsRef
     ]
   )
@@ -1718,24 +1953,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     return updated
   }
 
-  // Handler for browser tabs changes
-  const handleBrowserTabsChange = useCallback(
-    async (tabs: BrowserTabsState) => {
-      setBrowserTabs(tabs)
-      if (!task) return
-      // Persist to DB (debounced via the tab state itself)
-      await updateTaskAsync({
-        id: task.id,
-        browserTabs: tabs
-      })
-    },
-    [task, updateTaskAsync]
-  )
-
-  // Open a dev server URL in the browser panel (used by both auto-open and toast)
-  const openDevServerInBrowser = useCallback(
+  // Open a URL in the target browser panel (used by auto-open, the toast, links)
+  const openDevServerInBrowser = useStableCallback(
     (url: string, tabId?: string, isolated?: boolean) => {
-      handlePanelToggle('browser', true)
+      const target = targetOf('browser')
+      handlePanelToggle(target, true)
       const id = tabId ?? `tab-${safeRandomUUID().slice(0, 8)}`
       const newTab = {
         id,
@@ -1743,13 +1965,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         title: url === 'about:blank' ? 'New Tab' : url,
         ...(isolated ? { isolated: true } : {})
       }
-      if (browserOpenRef.current) {
-        handleBrowserTabsChange({ tabs: [...browserTabs.tabs, newTab], activeTabId: newTab.id })
-      } else {
-        handleBrowserTabsChange({ tabs: [newTab], activeTabId: newTab.id })
-      }
-    },
-    [handlePanelToggle, handleBrowserTabsChange, browserTabs, browserOpenRef]
+      // A primary browser that was closed starts over with just this tab.
+      const replace = target === PRIMARY_INSTANCE_IDS.browser && !browserOpenRef.current
+      addBrowserTab(target, newTab, { replace })
+    }
   )
 
   useEffect(() => {
@@ -1799,18 +2018,26 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       if (!task || taskId !== task.id) return
       const load = planHubUrl(rawUrl, origin)
       if (tabId) {
-        // CLI targeted an existing tab — open panel and switch to that tab.
+        // CLI targeted an existing tab — open the panel showing it and switch to it.
         // The navigate route will load `url` into the targeted tab's webContents.
         // Anyone but the user's own local agent may only bring up an isolated tab.
-        handlePanelToggle('browser', true)
-        const tabs = browserTabsRef.current
+        const known = browserTabsRef.current.tabs.some((t) => t.id === tabId)
+        const panel = known
+          ? (browserInstanceOfTab(browserTabsRef.current, tabId) ?? PRIMARY_INSTANCE_IDS.browser!)
+          : targetOf('browser')
+        handlePanelToggle(panel, true)
+        const tabs = browserTabsForInstance(
+          browserTabsRef.current,
+          panel,
+          panel === PRIMARY_INSTANCE_IDS.browser
+        )
         const target = tabs.tabs.find((t) => t.id === tabId)
         if (
           target &&
           (target.isolated || callerIsTrustedLocal(origin)) &&
           tabs.activeTabId !== tabId
         ) {
-          handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+          void handleBrowserTabsChange(panel, { ...tabs, activeTabId: tabId })
         }
       } else if (load?.untrusted || isolated) {
         // Anyone but the user's own local agent works in a NEW isolated tab (the hub
@@ -1821,7 +2048,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       } else if (load) {
         openDevServerInBrowser(load.url)
       } else {
-        handlePanelToggle('browser', true)
+        handlePanelToggle(targetOf('browser'), true)
       }
     }
   )
@@ -1850,7 +2077,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       isolated?: boolean
     }) => {
       if (!task || taskId !== task.id) return
-      handlePanelToggle('browser', true)
+      // The new tab opens in the target browser panel (focused last, else the primary).
+      const panel = targetOf('browser')
+      handlePanelToggle(panel, true)
       const load = planHubUrl(url, origin)
       const tabUrl = load && !load.untrusted ? load.url : 'about:blank'
       // Anyone but the user's own local agent gets an isolated tab, whatever the hub says.
@@ -1860,17 +2089,60 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl,
         ...(isolated || !callerIsTrustedLocal(origin) ? { isolated: true } : {})
       }
-      const current = browserTabsRef.current
-      if (current.tabs.some((t) => t.id === tabId)) return
+      // Tab ids are unique per task, whichever panel shows them.
+      if (browserTabsRef.current.tabs.some((t) => t.id === tabId)) return
       if (load?.untrusted) queueUntrustedLoad(task.id, tabId, load.url)
-      const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
-      handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
+      addBrowserTab(panel, newTab, { background })
     }
   )
   useSubscription(
     trpc.menu.onBrowserCreateTab.subscriptionOptions(undefined, {
       enabled: !!task,
       onData: handleBrowserCreateTab
+    })
+  )
+
+  /**
+   * A layout change made outside this view (`slay panels layout …`, docs/plans/
+   * panel-model.md step 13). The new layout arrives with the task row; here the
+   * panels it removed let go of their state, like a close in this view. An agent's
+   * change offers Undo first: the removed panels are released only once the toast
+   * goes without it, so Undo brings them back whole.
+   */
+  const handleLayoutChanged = useStableCallback((ev: TaskLayoutChangedEvent) => {
+    if (!task || ev.taskId !== task.id || isSecondaryWindow) return
+    let settled = false
+    const release = (): void => {
+      if (settled) return
+      settled = true
+      for (const inst of ev.removed) releaseInstance(inst)
+    }
+    if (ev.origin !== 'agent') {
+      release()
+      return
+    }
+    toast('Agent changed the layout', {
+      id: `layout-changed:${ev.taskId}:${ev.rev}`,
+      duration: 10_000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          if (settled) return
+          if (taskLayout.restoreLayout(ev.before, ev.rev)) settled = true
+          else {
+            release()
+            toast("The layout changed again, so this change can't be undone")
+          }
+        }
+      },
+      onDismiss: release,
+      onAutoClose: release
+    })
+  })
+  useSubscription(
+    trpc.task.onLayoutChanged.subscriptionOptions(undefined, {
+      enabled: !!task,
+      onData: handleLayoutChanged
     })
   )
 
@@ -1884,14 +2156,22 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     for (const ev of takeTaskPaneEvents(liveTaskId, [
       'browser-ensure-panel-open',
       'browser-create-tab',
-      'open-artifact'
+      'open-artifact',
+      'layout-changed'
     ])) {
       if (ev.kind === 'browser-ensure-panel-open') handleBrowserEnsurePanelOpen(ev.payload)
       else if (ev.kind === 'browser-create-tab') handleBrowserCreateTab(ev.payload)
       else if (ev.kind === 'open-artifact') handleOpenArtifact(ev.payload)
+      else if (ev.kind === 'layout-changed') handleLayoutChanged(ev.payload)
     }
     return markTaskPaneLive(liveTaskId)
-  }, [liveTaskId, handleBrowserEnsurePanelOpen, handleBrowserCreateTab, handleOpenArtifact])
+  }, [
+    liveTaskId,
+    handleBrowserEnsurePanelOpen,
+    handleBrowserCreateTab,
+    handleOpenArtifact,
+    handleLayoutChanged
+  ])
 
   const handleTagsChange = (newTagIds: string[]): void => {
     setTaskTagIds(newTagIds)
@@ -1923,19 +2203,20 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Cmd+K "Current task" section — the same handlers the page's own controls run.
   const palettePanels: PalettePanel[] = []
   const addPalettePanel = (id: string, label: string, shortcutId?: string, open?: boolean) => {
-    palettePanels.push({ id, label, shortcutId, open: open ?? !!panelVisibility[id] })
+    palettePanels.push({ id, label, shortcutId, open: open ?? isInstanceShown(id) })
   }
   if (isBuiltinEnabled('terminal', 'task'))
     addPalettePanel('terminal', 'Terminal', 'panel-terminal')
   if (isBuiltinEnabled('browser', 'task')) addPalettePanel('browser', 'Browser', 'panel-browser')
   if (isBuiltinEnabled('editor', 'task')) addPalettePanel('editor', 'Editor', 'panel-editor')
   if (isBuiltinEnabled('diff', 'task')) {
-    addPalettePanel('git', 'Git', 'panel-git', !!panelVisibility.diff)
-    addPalettePanel('git-diff', 'Git diff', 'panel-git-diff', !!panelVisibility.diff)
+    addPalettePanel('git', 'Git', 'panel-git', isInstanceShown('diff'))
+    addPalettePanel('git-diff', 'Git diff', 'panel-git-diff', isInstanceShown('diff'))
   }
   if (isBuiltinEnabled('processes', 'task'))
     addPalettePanel('processes', 'Processes', 'panel-processes')
-  if (isBuiltinEnabled('tests', 'task')) addPalettePanel('tests', 'Tests', 'panel-tests')
+  if (isBuiltinEnabled('tests', 'task'))
+    addPalettePanel('tests', 'Tests', 'panel-tests', !!panelVisibility.tests)
   if (isBuiltinEnabled('artifacts', 'task'))
     addPalettePanel('artifacts', 'Artifacts', 'panel-artifacts')
   if (isBuiltinEnabled('settings', 'task'))
@@ -1990,7 +2271,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     parentTask,
     templates,
     windowAction: isSecondaryWindow ? 'reattach' : hasOpenSecondary ? null : 'detach',
-    browserOpen: !!panelVisibility.browser && isBuiltinEnabled('browser', 'task'),
+    browserOpen: isInstanceShown(targetOf('browser')) && isBuiltinEnabled('browser', 'task'),
     onConvertToTask: async () => {
       if (!task) return
       const converted = await onConvertTask?.(task)
@@ -2011,27 +2292,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onReattachTerminal: handleReattachTerminal,
     onCopyHistory: handleCopyHistory,
     onEditFlags: () => {
-      // The flags dialog lives in the terminal panel's header.
-      if (!panelVisibility.terminal) handlePanelToggle('terminal', true)
+      // The flags dialog lives in the primary agent panel's header.
+      if (!isInstanceShown('terminal')) handlePanelToggle('terminal', true)
       setFlagsPopoverOpen(true)
     },
     onResetFlags: handleSetDefaultFlags,
     onDoctor: handleDoctor,
     onEditDescription: () => setDescriptionFullscreen(true),
-    onNewArtifact: () => {
-      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-      artifactsPanelRef.current?.createArtifact()
-    },
+    onNewArtifact: createArtifactInPanel,
     onOpenExternal: (url) => void trpcClient.app.shell.openExternal.mutate({ url }),
     onNewBrowserTab: () => {
-      browserPanelRef.current?.newTab()
-      requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
+      const handle = browserHandles.get(targetOf('browser'))
+      handle?.newTab()
+      requestAnimationFrame(() => handle?.focusUrlBar())
     },
     onBrowserScreenshot: handleScreenshotTrigger,
     onTogglePanel: (panelId) => {
       if (panelId === 'git') toggleGitTab('general')
       else if (panelId === 'git-diff') toggleGitTab('changes')
-      else handlePanelToggle(panelId, !panelVisibility[panelId])
+      else togglePanelKind(panelId)
     }
   })
 
@@ -2048,518 +2327,294 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     )
   }
 
-  const visiblePanelCount = [...BUILTIN_PANEL_IDS, ...enabledWebPanels.map((wp) => wp.id)].filter(
-    (panelId) => !!panelVisibility[panelId]
+  const visiblePanelCount = Object.keys(taskLayout.layout.instances).filter((id) =>
+    isInstanceVisible(taskLayout.layout, id)
   ).length
   const hasVisiblePanels = visiblePanelCount > 0
   const multipleVisiblePanels = visiblePanelCount > 1
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
 
-  // Built OUTSIDE the main JSX, so the compiler memoizes it on its own inputs. Inline,
-  // it shared the page's one reactive scope, which `isActive` invalidates: every tab
-  // switch rebuilt `renderDefaultContent` and re-rendered the whole settings panel, in
-  // the tab being shown and (deferred, hidden) in the tab being left.
-  const taskSettingsPanel = (
-    <TaskSettingsPanel
-      taskId={task.id}
-      renderDefaultContent={() => {
-        // The grid holds Description / Sub-tasks / Artifacts (and, in
-        // full-height, Details). Open cards SHARE the available height via
-        // useSharedCardHeights: each hugs its content, tall cards cap at a
-        // shared water-level and scroll internally, short neighbours' unused
-        // space flows to the tall ones, and nothing is squeezed below 9rem
-        // by sharing alone (the grid scrolls instead). `grid-template-rows`
-        // is set imperatively by the hook — keep none here.
-        //
-        // Details (task metadata + working dir + danger zone) renders in two
-        // places depending on mode: pinned at the bottom of the panel in
-        // normal mode (always shown, unshrinkable), or as a 4th card INSIDE
-        // the grid in full-height mode (collapsible, shares space via the
-        // water-fill). Body is shared via this const.
-        const detailsBody = (
-          <fieldset disabled={!canEdit} className="contents" data-testid="task-details">
-            <TaskMetadataSidebar
-              task={task}
-              tags={tags}
-              taskTagIds={taskTagIds}
-              onUpdate={handleTaskUpdate}
-              onTagsChange={handleTagsChange}
-              onTagCreated={(tag) => setTags((prev) => [...prev, tag])}
-            />
+  const mainTerminal = mainTerminalProps(task, project, modes)
 
-            <div className="flex flex-col gap-3 mt-5">
-              {/* Working directory */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  Working directory
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="size-3 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-72 text-xs">
-                      <p>Override the project directory for this task.</p>
-                      <p className="mt-1.5">Priority (highest first):</p>
-                      <ol className="mt-0.5 list-decimal list-inside">
-                        <li>Worktree</li>
-                        <li>Custom directory</li>
-                        <li>Project path</li>
-                      </ol>
-                    </TooltipContent>
-                  </Tooltip>
-                </span>
-                <div className="flex items-center gap-1">
-                  <div
-                    className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
-                    title={effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel}
-                  >
-                    {taskPath.state === 'loading' && hasOwnFolder(task)
-                      ? '…'
-                      : (effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel)}
-                    {task.has_worktree && (
-                      <span className="ml-1 text-[10px] opacity-60">(worktree)</span>
-                    )}
-                    {!task.has_worktree && task.has_base_dir && (
-                      <span className="ml-1 text-[10px] opacity-60">(custom)</span>
-                    )}
-                  </div>
-                  <button
-                    className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                    title="Change working directory"
-                    onClick={() => setBaseDirPickerOpen(true)}
-                  >
-                    <FileCode className="size-3.5 text-muted-foreground" />
-                  </button>
-                  {task.has_base_dir && (
-                    <button
-                      className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                      title="Clear custom directory"
-                      onClick={() => {
-                        // A refusal leaves the terminal running in the old folder.
-                        updateTaskAndNotify({ id: task.id, baseDir: null }).catch((err: unknown) =>
-                          toast.error("Couldn't change the working directory", {
-                            description: err instanceof Error ? err.message : String(err)
-                          })
-                        )
-                      }}
-                    >
-                      <X className="size-3.5 text-muted-foreground" />
-                    </button>
-                  )}
-                  {/* Scoped to the TASK, so it browses the computer
-                      this task's agents spawn on — a cwd chosen on
-                      any other machine would not exist for them. */}
-                  <WorkspaceDirPicker
-                    open={baseDirPickerOpen}
-                    onOpenChange={setBaseDirPickerOpen}
-                    onSelect={(picked) => {
-                      // Judged by the task's computer first; a refusal leaves the
-                      // terminal running in the old folder.
-                      updateTaskAndNotify({ id: task.id, baseDir: picked }).catch((err: unknown) =>
-                        toast.error("Couldn't use that folder", {
-                          description: err instanceof Error ? err.message : String(err)
-                        })
-                      )
-                    }}
-                    target={{ taskId: task.id }}
-                    title="Select working directory"
-                    defaultPath={baseDir ?? effectiveRepoPath ?? null}
-                  />
-                </div>
-                {task.has_worktree && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs w-full justify-start"
-                    onClick={() => {
-                      void updateTaskAndNotify({
-                        id: task.id,
-                        worktreePath: null,
-                        worktreeParentBranch: null
-                      })
-                    }}
-                  >
-                    <GitBranch className="mr-1.5 size-3" />
-                    Detach worktree
-                  </Button>
-                )}
-                {task.has_worktree && task.has_base_dir && (
-                  <span className="text-[10px] text-amber-400/80">
-                    Worktree active — custom dir overridden
-                  </span>
-                )}
-              </div>
-
-              {/* Danger zone */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Danger zone
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 text-xs"
-                    onClick={isArchived ? handleUnarchive : () => setArchiveDialogOpen(true)}
-                  >
-                    <Archive className="mr-1.5 size-3" />
-                    {isArchived ? 'Unarchive' : 'Archive'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 text-xs text-destructive hover:text-destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="mr-1.5 size-3" />
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </fieldset>
-        )
-        // Layout tier from the panel's resolved width: 1 column (stacked, as
-        // before), 2 (Description | cards + Details), 3 (Description | cards |
-        // Details). Multi-column gives Description its own full-height column.
-        const descriptionCard = (
-          <Collapsible
-            data-testid="settings-description-card"
-            data-card
-            data-card-open={descriptionOpen}
-            open={descriptionOpen}
-            onOpenChange={setDescriptionOpen}
-            className={cn(
-              'flex flex-col rounded-md border border-border overflow-hidden min-h-0',
-              settingsCols > 1 && descriptionOpen && 'flex-1'
-            )}
-          >
-            <div
-              className={cn(
-                'flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground',
-                descriptionOpen && 'border-b border-border'
-              )}
-            >
-              <CollapsibleTrigger className="flex flex-1 items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Description
-              </CollapsibleTrigger>
-              <div className="ml-auto flex items-center gap-0.5">
-                {/* Multi-column: Description already owns a full-height column */}
-                {settingsCols === 1 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <IconButton
-                        type="button"
-                        variant="ghost"
-                        aria-label={descriptionExpanded ? 'Default height' : 'Full height'}
-                        className={cn(
-                          'size-5 hover:text-foreground',
-                          descriptionExpanded ? 'text-foreground bg-muted' : 'text-muted-foreground'
-                        )}
-                        onClick={() =>
-                          setDescriptionExpanded((v) => {
-                            if (!v) {
-                              setDetailsOpen(false)
-                              setSubTasksOpen(false)
-                              setArtifactsOpen(false)
-                            } else {
-                              setDetailsOpen(true)
-                              setSubTasksOpen(true)
-                              setArtifactsOpen(true)
-                            }
-                            return !v
-                          })
-                        }
-                      >
-                        <MoveVertical size={12} />
-                      </IconButton>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {descriptionExpanded ? 'Default height' : 'Full height'}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <IconButton
-                      type="button"
-                      variant="ghost"
-                      aria-label="Fullscreen"
-                      className="size-5 text-muted-foreground hover:text-foreground"
-                      onClick={() => setDescriptionFullscreen(true)}
-                    >
-                      <Expand size={12} />
-                    </IconButton>
-                  </TooltipTrigger>
-                  <TooltipContent>Fullscreen</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-            {descriptionOpen && (
-              <div className="flex flex-col min-h-0 flex-1">
-                <Suspense fallback={<div className="h-20" />}>
-                  <RichTextEditor
-                    value={descriptionValue}
-                    onChange={(md) => {
-                      descriptionDirty.current = true
-                      setDescriptionValue(md)
-                    }}
-                    onBlur={handleDescriptionSave}
-                    placeholder={canEdit ? 'Add description...' : ''}
-                    readOnly={!canEdit}
-                    testId="task-description-editor"
-                    variant="inline"
-                    fontFamily={notesFontFamily}
-                    checkedHighlight={notesCheckedHighlight}
-                    showToolbar={notesShowToolbar}
-                    spellcheck={notesSpellcheck}
-                    themeColors={notesThemeColors}
-                    artifacts={artifacts.map((a) => ({
-                      id: a.id,
-                      title: a.title,
-                      type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
-                    }))}
-                    onArtifactClick={(artifactId) => {
-                      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                      artifactsPanelRef.current?.selectArtifact(artifactId)
-                    }}
-                    onUploadImages={handleUploadImages}
-                    onOpenLink={handleDescriptionOpenLink}
-                  />
-                </Suspense>
-              </div>
-            )}
-          </Collapsible>
-        )
-        const cardsGrid = (
-          <div
-            ref={settingsCardsGridRef}
-            data-testid="settings-cards-grid"
-            className="flex-1 min-h-0 overflow-hidden grid gap-4 content-start"
-          >
-            {settingsCols === 1 && descriptionCard}
-            {/* Sub-tasks */}
-            <Collapsible
-              data-testid="settings-subtasks-card"
-              data-card
-              data-card-open={subTasksOpen}
-              open={subTasksOpen}
-              onOpenChange={setSubTasksOpen}
-              className="group/sub rounded-md border border-border overflow-hidden flex flex-col min-h-0"
-            >
-              <CollapsibleTrigger className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/sub:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Sub-tasks
-                {subTasks.length > 0 && (
-                  <span className="ml-auto text-muted-foreground/60 text-[10px]">
-                    {
-                      subTasks.filter((s) =>
-                        isTerminalStatus(s.status, project?.columns_config ?? null)
-                      ).length
-                    }
-                    /{subTasks.length}
-                  </span>
-                )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="p-2 flex flex-col flex-1 min-h-0">
-                <DndContext
-                  sensors={subTaskSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleSubTaskDragEnd}
-                >
-                  <SortableContext
-                    items={subTasks.map((s) => s.id)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div
-                      data-card-scroll
-                      className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
-                    >
-                      {subTasks.map((sub) => (
-                        <SortableSubTask
-                          key={sub.id}
-                          sub={sub}
-                          columns={project?.columns_config}
-                          statusOptions={statusOptions}
-                          onNavigate={onNavigateToTask}
-                          onUpdate={handleUpdateSubTask}
-                          onDelete={handleDeleteSubTask}
-                        />
-                      ))}
-                      {addingSubTask ? (
-                        <div className="flex items-center gap-2 py-1 px-1">
-                          <Input
-                            ref={subTaskInputRef}
-                            value={subTaskTitle}
-                            onChange={(e) => setSubTaskTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault()
-                                handleCreateSubTask()
-                              }
-                              if (e.key === 'Escape') {
-                                setAddingSubTask(false)
-                                setSubTaskTitle('')
-                              }
-                            }}
-                            placeholder="Sub-task title..."
-                            className="h-6 text-xs"
-                            autoFocus
-                          />
-                        </div>
-                      ) : (
-                        canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => setAddingSubTask(true)}
-                            className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
-                          >
-                            <Plus className="size-3" />
-                            Add subtask
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </SortableContext>
-                </DndContext>
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* Artifacts */}
-            <Collapsible
-              data-testid="settings-artifacts-card"
-              data-card
-              data-card-open={artifactsOpen}
-              open={artifactsOpen}
-              onOpenChange={setArtifactsOpen}
-              className="group/artifacts rounded-md border border-border overflow-hidden flex flex-col min-h-0"
-            >
-              <CollapsibleTrigger className="flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/artifacts:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Artifacts
-                {artifacts.length > 0 && (
-                  <span className="ml-auto text-muted-foreground/60 text-[10px]">
-                    {artifacts.length}
-                  </span>
-                )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="p-2 flex flex-col flex-1 min-h-0">
-                <div
-                  data-card-scroll
-                  className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
-                >
-                  {artifacts.map((artifact) => (
-                    <button
-                      key={artifact.id}
-                      type="button"
-                      className="flex items-center gap-2 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 text-left"
-                      onClick={() => {
-                        if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                        artifactsPanelRef.current?.selectArtifact(artifact.id)
-                      }}
-                    >
-                      <Paperclip className="size-3 shrink-0" />
-                      <span className="truncate">{artifact.title}</span>
-                      <span className="ml-auto text-[10px] opacity-60">
-                        {getExtensionFromTitle(artifact.title) || 'file'}
-                      </span>
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-                      artifactsPanelRef.current?.createArtifact()
-                    }}
-                    className="flex items-center gap-1.5 py-1 px-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 mt-1"
-                  >
-                    <Plus className="size-3" />
-                    Add artifact
-                  </button>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-            {/* Details — in full-height mode this becomes a 4th card that
-                shares the grid via the water-fill (collapsed by default
-                when entering full-height). */}
-            {descFullHeight && (
-              <Collapsible
-                data-testid="settings-details-card"
-                data-card
-                data-card-open={detailsOpen}
-                open={detailsOpen}
-                onOpenChange={setDetailsOpen}
-                className="group/details rounded-md border border-border overflow-hidden flex flex-col min-h-0"
-              >
-                <CollapsibleTrigger className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/details:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
-                  <ChevronRight className="size-3 transition-transform" />
-                  Details
-                </CollapsibleTrigger>
-                <CollapsibleContent className="flex flex-col flex-1 min-h-0">
-                  <div data-card-scroll className="flex-1 min-h-0 overflow-y-auto p-2.5">
-                    {detailsBody}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-          </div>
-        )
-        return (
-          <>
-            {/* External sync links — pinned above the cards */}
-            <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
-
-            {settingsCols === 1 ? (
-              <>
-                {/* Cards grid: flex-1 min-h-0 → height is the spare space
-                  between ExternalSync and the pinned Details (definite, so
-                  the water-level caps resolve). useSharedCardHeights also sets
-                  a min-height = floored content, so a short window scrolls the
-                  PANEL (keeping cards usable) instead of crushing them; the
-                  grid itself never overflows. content-start → short cards leave
-                  the leftover as empty space above the pinned meta. */}
-                {cardsGrid}
-
-                {/* Details — normal mode: pinned at the bottom of the panel,
-                  always visible, never shrinks. */}
-                {!descFullHeight && (
-                  <div data-testid="settings-details-pinned" className="shrink-0 mt-auto">
-                    {detailsBody}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div
-                data-testid="settings-columns"
-                data-columns={settingsCols}
-                className="flex-1 min-h-0 flex gap-4"
-              >
-                <div className="flex-1 min-w-0 min-h-0 flex flex-col">{descriptionCard}</div>
-                <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-4">
-                  {cardsGrid}
-                  {settingsCols === 2 && (
-                    <div data-testid="settings-details-pinned" className="shrink-0 mt-auto">
-                      {detailsBody}
-                    </div>
-                  )}
-                </div>
-                {settingsCols === 3 && (
-                  <div
-                    data-testid="settings-details-column"
-                    className="flex-1 min-w-0 min-h-0 overflow-y-auto"
-                  >
-                    {detailsBody}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )
-      }}
-    />
+  // ── Title row (docs/plans/panel-model.md step 9): group toggles, ⋯ New panel, Layout ──
+  const canAddPanels = taskLayout.supportsInstances && canEdit
+  const headerAlign = taskHeaderPanelAlign === 'left' ? 'start' : 'end'
+  const headerGroups = layoutGroups(taskLayout.layout, {
+    webPanels: enabledWebPanels,
+    artifacts,
+    isTabListed: (inst) => {
+      // A web page needs no configured web panel: it is its own.
+      if (isWebPageInstance(inst)) return true
+      if (inst.kind === 'web') {
+        const webId = typeof inst.settings.panelId === 'string' ? inst.settings.panelId : inst.id
+        return enabledWebPanels.some((wp) => wp.id === webId)
+      }
+      const enableId = panelEnableId(inst.kind)
+      if (!enableId || !isBuiltinEnabled(enableId, 'task')) return false
+      return !(task.is_temporary && TASK_FIELD_KINDS.has(inst.kind))
+    },
+    // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
+    excludesGroup: (inst) =>
+      isSecondaryWindow && (!isRenderableKind(inst.kind) || !PANEL_KINDS[inst.kind].secondaryWindow)
+  })
+  /** A group's shortcut: the `panel-*` (or web panel) one of a kind's primary panel in it. */
+  const groupShortcut = (group: LayoutGroup): string | null => {
+    for (const id of group.instanceIds) {
+      const inst = taskLayout.layout.instances[id]
+      if (!inst || !isPrimaryInstance(inst)) continue
+      const shortcut = panelShortcuts.ofInstance(inst)
+      if (shortcut) return shortcut
+    }
+    return null
+  }
+  const titleRowPanels = (
+    <div className="flex items-center gap-1 min-w-0">
+      <GroupToggles
+        groups={headerGroups}
+        webPanels={enabledWebPanels}
+        mode={taskHeaderPanelMode === 'menu' ? 'menu' : 'toggles'}
+        align={headerAlign}
+        onToggle={(group, active) => handlePanelToggle(group.iconInstance.id, active)}
+        shortcutOf={groupShortcut}
+        onReorder={(orderedSlotIds, move) => {
+          // Classic follows panel_config: its group ids are the legacy panel ids, and
+          // the order is the global one Settings → Panels edits too (until the user
+          // customizes the Classic layout itself).
+          if (isClassicShaped(taskLayout.layout) && !classicCustomized) {
+            handlePanelReorder(orderedSlotIds)
+            return
+          }
+          const m = columnMoveOf(taskLayout.layout, headerGroups, move.id, move.overId)
+          if (m) taskLayout.moveColumn(m.columnId, m.toIndex)
+        }}
+        onRename={canEdit ? taskLayout.renameGroup : undefined}
+        onClose={
+          canEdit
+            ? (group) => {
+                for (const id of group.instanceIds) requestClosePanelTab(id)
+              }
+            : undefined
+        }
+        // Gather a group into another shown one as tabs (the way into tab groups from
+        // Classic, whose panels have no strip).
+        onAddAsTab={
+          isSecondaryWindow
+            ? undefined
+            : (group, target) =>
+                dropPanel(
+                  { type: 'group', slotId: group.slotId },
+                  { type: 'zone', slotId: target.slotId, zone: 'merge' }
+                )
+        }
+      />
+      {headerGroups.length > 0 && (canAddPanels || taskLayout.supportsInstances) && (
+        <span aria-hidden className="size-1 shrink-0 rounded-full bg-muted-foreground/50 mx-1" />
+      )}
+      {canAddPanels && (
+        <NewPanelMenu
+          choices={newPanelChoices(
+            enabledWebPanels,
+            (id) => isBuiltinEnabled(id, 'task') && !(task.is_temporary && id === 'settings'),
+            artifacts
+          )}
+          onAdd={(c) => addPanel(c.kind, undefined, c.settings)}
+          shortcutOf={(c) =>
+            c.kind === 'web'
+              ? panelShortcuts.ofInstance({ id: c.key, kind: 'web', settings: c.settings ?? {} })
+              : panelShortcuts.ofKind(c.kind)
+          }
+          parked={parkedPanels}
+          onUnpark={taskLayout.unpark}
+          align={headerAlign}
+        />
+      )}
+      {taskLayout.supportsInstances && (
+        <LayoutMenu
+          layouts={layoutDefs}
+          current={currentLayoutDef}
+          dirty={layoutDirty}
+          onSelectLayout={applyLayout}
+          onRevert={() => {
+            if (currentLayoutDef) applyLayout(currentLayoutDef.id)
+          }}
+          onSave={saveLayoutOver}
+          onSaveAs={() => setSaveLayoutAsOpen(true)}
+          onManage={layoutDialogs.openManage}
+          align={headerAlign}
+        />
+      )}
+      <SaveLayoutAsDialog
+        open={saveLayoutAsOpen}
+        defaultName={currentLayoutDef ? `${currentLayoutDef.name} variant` : 'My layout'}
+        onOpenChange={setSaveLayoutAsOpen}
+        onSave={saveLayoutAs}
+      />
+    </div>
   )
 
-  const mainTerminal = mainTerminalProps(task, project, modes)
+  // What the panels read from this page (see panels/TaskPageContext). Each section
+  // is its own object, so the compiler keeps a section stable while its inputs are:
+  // a tab switch changes `isActive`, not what the settings panel shows.
+  const taskPage: TaskPageContextValue = {
+    task,
+    project,
+    isActive,
+    shortcutActive,
+    compact,
+    isResizing,
+    canEdit,
+    effectiveRepoPath,
+    mainAgentCwd,
+    openDevServerInBrowser,
+    handleTaskUpdate,
+    updateTaskAndNotify,
+    getMainSessionId,
+    panels: {
+      handlePanelToggle,
+      ownership,
+      focusedPanel,
+      multipleVisiblePanels,
+      containerWidth,
+      resolvedWidths,
+      panelOrderIdx,
+      focusedInstanceOf,
+      isInstanceShown,
+      instanceState,
+      updateInstanceSettings,
+      canAddPanels,
+      addPanel
+    },
+    agent: {
+      runsAgentsHere,
+      canRunOwnAgents,
+      projectRoot,
+      chosenFolder,
+      projectPathMissing,
+      workspaceUnreachable,
+      taskPathPending,
+      taskPathLocation,
+      taskFolderMissing,
+      worktreePath,
+      baseDir,
+      terminalHandles,
+      claimedTerminalGroupIds: claimedGroups,
+      terminalShortcutOwner,
+      terminalKey,
+      mainTerminal,
+      modes,
+      terminalFocusRequestId,
+      handleTerminalReady,
+      handleTerminalFocusRequestHandled,
+      isMainTabActive,
+      setIsMainTabActive,
+      handleQuickOpenFile,
+      handleChatOpenArtifact,
+      handleChatOpenTask,
+      session: terminalSession,
+      loop,
+      loopConfigured,
+      loopModeAvailable,
+      setLoopDialogOpen,
+      handleLoopConfigChange,
+      slayNudge,
+      handleModeChange,
+      setPanelProvider,
+      flagsPopoverOpen,
+      setFlagsPopoverOpen,
+      flagsInputValue,
+      setFlagsInputValue,
+      handleFlagsSave,
+      getProviderFlagsForMode,
+      handleSetDefaultFlags,
+      handleInjectTitle,
+      handleInjectDescription,
+      handleCopyHistory,
+      handleCopyConversationId,
+      handleDoctor,
+      projectFolderPickerOpen,
+      setProjectFolderPickerOpen
+    },
+    browser: {
+      browserHandles,
+      browserTabsFor,
+      handleBrowserTabsChange,
+      handleInsertElementSnippet,
+      handleScreenshot
+    },
+    editor: { editorHandles, handleEditorStateChange },
+    artifacts: {
+      artifactsHandles,
+      handleActiveArtifactIdChange,
+      handleArtifactsSidebarChange,
+      sharingEnabled: sharing.enabled,
+      sharingArtifact,
+      setSharingArtifact,
+      openArtifactInOwnPanel
+    },
+    web: { enabledWebPanels, handleWebPanelUrlChange, handleWebPanelFaviconChange },
+    git: {
+      gitHandles,
+      gitViewPathFor,
+      resolvedGitViewPath,
+      completedStatus,
+      gitDefaultTab,
+      handleGitTabChange,
+      viewableRepos,
+      handleRepoChange
+    },
+    settings: {
+      tags,
+      setTags,
+      taskTagIds,
+      handleTagsChange,
+      taskPath,
+      taskPathLocation,
+      taskFolderLabel,
+      baseDir,
+      isArchived,
+      handleUnarchive,
+      setArchiveDialogOpen,
+      setDeleteDialogOpen,
+      settingsCardsGridRef,
+      settingsCols,
+      descFullHeight,
+      descriptionOpen,
+      setDescriptionOpen,
+      descriptionExpanded,
+      setDescriptionExpanded,
+      subTasksOpen,
+      setSubTasksOpen,
+      artifactsOpen,
+      setArtifactsOpen,
+      detailsOpen,
+      setDetailsOpen,
+      setDescriptionFullscreen,
+      descriptionValue,
+      setDescriptionValue,
+      descriptionDirty,
+      handleDescriptionSave,
+      handleUploadImages,
+      handleDescriptionOpenLink,
+      notes: {
+        fontFamily: notesFontFamily,
+        checkedHighlight: notesCheckedHighlight,
+        showToolbar: notesShowToolbar,
+        spellcheck: notesSpellcheck,
+        themeColors: notesThemeColors
+      },
+      statusOptions,
+      subTasks,
+      handleSubTaskDragEnd,
+      handleUpdateSubTask,
+      handleDeleteSubTask,
+      createSubTask: handleCreateSubTask,
+      onNavigateToTask,
+      artifacts,
+      selectArtifactInPanel,
+      createArtifactInPanel
+    },
+    processes: { processesCwdUnavailable }
+  }
 
   return (
     <div
@@ -2815,6 +2870,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       <TooltipContent>You can see this task but not change it.</TooltipContent>
                     </Tooltip>
                   )}
+                  {canEdit && (
+                    <TaskComputerChip
+                      taskId={task.id}
+                      projectId={task.project_id}
+                      taskComputerId={(task as { computer_id?: string | null }).computer_id ?? null}
+                      projectDefaultComputerId={
+                        (project as { default_computer_id?: string | null } | null)
+                          ?.default_computer_id ?? null
+                      }
+                      open={computerMenuOpen}
+                      onOpenChange={setComputerMenuOpen}
+                    />
+                  )}
                 </div>
               )}
 
@@ -2879,142 +2947,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       {isSecondaryWindow ? 'Reattach' : 'Detach'}
                     </button>
                   ))}
-                {(() => {
-                  const entries: Record<
-                    string,
-                    { id: string; icon: typeof Globe; label: string; shortcut?: string | null }
-                  > = {
-                    terminal: {
-                      id: 'terminal',
-                      icon: TerminalIcon,
-                      label: 'Agent',
-                      shortcut: panelTerminalShortcut
-                    },
-                    browser: {
-                      id: 'browser',
-                      icon: Globe,
-                      label: 'Browser',
-                      shortcut: panelBrowserShortcut
-                    },
-                    editor: {
-                      id: 'editor',
-                      icon: FileCode,
-                      label: 'Editor',
-                      shortcut: panelEditorShortcut
-                    },
-                    artifacts: {
-                      id: 'artifacts',
-                      icon: Paperclip,
-                      label: 'Artifacts',
-                      shortcut: panelArtifactsShortcut
-                    },
-                    diff: { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
-                    processes: {
-                      id: 'processes',
-                      icon: Cpu,
-                      label: 'Processes',
-                      shortcut: panelProcessesShortcut
-                    },
-                    settings: {
-                      id: 'settings',
-                      icon: Settings2,
-                      label: 'Settings',
-                      shortcut: panelSettingsShortcut
-                    }
-                  }
-                  for (const wp of enabledWebPanels) {
-                    entries[wp.id] = {
-                      id: wp.id,
-                      icon: Globe,
-                      label: wp.name,
-                      shortcut: formatKeysForDisplay(webPanelShortcutKeys(wp.shortcut)) ?? undefined
-                    }
-                  }
-                  const ordered = orderedTaskIds
-                    .map((id) => entries[id])
-                    .filter((e): e is NonNullable<typeof e> => !!e)
-                    .filter((p) => {
-                      // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
-                      if (isSecondaryWindow && p.id === 'terminal') return false
-                      const isBuiltin = [
-                        'terminal',
-                        'browser',
-                        'editor',
-                        'artifacts',
-                        'diff',
-                        'processes',
-                        'settings'
-                      ].includes(p.id)
-                      if (isBuiltin)
-                        return (
-                          isBuiltinEnabled(p.id, 'task') &&
-                          !(task.is_temporary && p.id === 'settings')
-                        )
-                      return true // web panels already filtered by enabledWebPanels
-                    })
-                    .map((p) => ({ ...p, active: !!panelVisibility[p.id] }))
-
-                  if (taskHeaderPanelMode === 'menu') {
-                    const activeCount = ordered.filter((p) => p.active).length
-                    return (
-                      <DropdownMenu>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                aria-label="Panels"
-                                className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 hover:bg-surface-3 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                              >
-                                <PanelsTopLeft className="size-4" />
-                                {activeCount > 0 && (
-                                  <span className="tabular-nums text-[10px] text-muted-foreground/80">
-                                    {activeCount}
-                                  </span>
-                                )}
-                              </button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">Panels</TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent
-                          align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'}
-                          className="min-w-[180px]"
-                        >
-                          {ordered.map((p) => {
-                            const Icon = p.icon
-                            return (
-                              <DropdownMenuItem
-                                key={p.id}
-                                onSelect={(e) => {
-                                  e.preventDefault()
-                                  handlePanelToggle(p.id, !p.active)
-                                }}
-                                className={cn('cursor-pointer gap-2', p.active && 'bg-accent/50')}
-                              >
-                                <Icon className="size-4" />
-                                <span className="flex-1">{p.label}</span>
-                                {p.shortcut && (
-                                  <span className="text-[10px] text-muted-foreground tabular-nums">
-                                    {p.shortcut}
-                                  </span>
-                                )}
-                              </DropdownMenuItem>
-                            )
-                          })}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )
-                  }
-
-                  return (
-                    <PanelToggle
-                      panels={ordered}
-                      onChange={handlePanelToggle}
-                      onReorder={handlePanelReorder}
-                    />
-                  )
-                })()}
+                {titleRowPanels}
               </div>
             </div>
             {parentTask && (
@@ -3063,965 +2996,52 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           same `pt-4` keeps the top symmetric with the sides). The dev-server toast is
           position:fixed, so it's unaffected. containerWidth comes from contentRect
           (excludes padding) → panel sizing unchanged. */}
-      <div
-        id="task-panels"
-        ref={splitContainerRef}
-        className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
-      >
-        {isTaskCompleted && !openCompletedAnyway ? (
-          <TaskCompletedScreen
-            task={task}
-            project={project}
-            completedVariant={completedVariant}
-            setCompletedVariant={setCompletedVariant}
-            onCloseTab={onCloseTab}
-            onShowDetails={() => setOpenCompletedAnyway(true)}
-            onTaskUpdate={handleTaskUpdate}
-          />
-        ) : (
-          <>
-            {!compact && !hasVisiblePanels && (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
-                  <p className="text-2xl font-semibold">No panel tab is shown</p>
-                  <p className="mt-3 text-base text-muted-foreground">
-                    Use the panel tabs in the header to open one.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Anchor gap: leftover space pushing right-aligned panels to the right edge */}
-            {!compact && resolved.rightKeys.length > 0 && (
-              <div
-                aria-hidden
-                data-testid="panel-gap"
-                className="shrink-0"
-                style={{ width: resolved.gapPx, order: spacerOrder }}
-              />
-            )}
-
-            {/* Resize handle before Terminal */}
-            {!compact && panelVisibility.terminal && renderResizeHandle('terminal')}
-
-            {/* Terminal Panel */}
-            {(compact || panelVisibility.terminal) && (
-              <div
-                data-panel-id="terminal"
-                className={cn(
-                  'min-w-0 shrink-0 overflow-hidden flex flex-col transition-shadow duration-200',
-                  !compact && 'rounded-md bg-surface-1 border border-border',
-                  !compact &&
-                    multipleVisiblePanels &&
-                    focusedPanel === 'terminal' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={
-                  compact
-                    ? { flex: 1 }
-                    : containerWidth > 0
-                      ? { width: resolvedWidths.terminal, order: panelOrderIdx.terminal ?? 0 }
-                      : { flex: 1, order: panelOrderIdx.terminal ?? 0 }
-                }
-              >
-                {!runsAgentsHere && !canRunOwnAgents ? (
-                  // A shared task you may only view (T-100): its agents and terminals are
-                  // the people's running them, on their own computers — never shown here.
-                  <div
-                    className="flex h-full w-full items-center justify-center p-6"
-                    data-testid="agent-pane-not-yours"
-                  >
-                    <div className="max-w-sm space-y-2 text-center">
-                      <TerminalIcon className="mx-auto size-10 text-muted-foreground/60" />
-                      <div className="text-sm font-medium text-muted-foreground">
-                        You can view this task
-                      </div>
-                      <div className="text-xs text-muted-foreground/70">
-                        To run agents on it from your own computer, ask for edit access.
-                      </div>
-                    </div>
-                  </div>
-                ) : ownership.hasOtherOwner('terminal') ? (
-                  <PanelOwnerStub
-                    panelLabel="Agent"
-                    icon={TerminalIcon}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('terminal')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('terminal')}
-                  />
-                ) : (
-                  <>
-                    {projectPathMissing && projectRoot && (
-                      <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                        <span className="text-sm text-amber-500">
-                          Project path not found:{' '}
-                          <code className="bg-amber-500/10 px-1 rounded">{projectRoot}</code>
-                        </span>
-                      </div>
-                    )}
-                    {(() => {
-                      const currentConversationId = getConversationIdForMode(task)
-                      return (
-                        detectedSessionId &&
-                        currentConversationId &&
-                        detectedSessionId !== currentConversationId
-                      )
-                    })() && (
-                      <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                        <span className="text-sm text-amber-500">
-                          Session mismatch: terminal using {detectedSessionId}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-auto h-6 text-xs"
-                          onClick={handleUpdateSessionId}
-                        >
-                          Update DB
-                          <kbd className="ml-2 opacity-70" style={{ fontFamily: 'system-ui' }}>
-                            {syncSessionIdShortcut}
-                          </kbd>
-                        </Button>
-                      </div>
-                    )}
-                    {showSessionBanner && (
-                      <div className="shrink-0 bg-blue-500/10 border-b border-blue-500/20 px-4 py-1.5 flex items-center gap-2">
-                        <TerminalIcon className="h-3.5 w-3.5 text-blue-500" />
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="text-xs text-blue-500 cursor-default">
-                              {task.agent_id === 'codex'
-                                ? 'Session not saved yet — automatic detection after first prompt'
-                                : "Session not saved — resume won't work until detected"}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" className="max-w-72">
-                            {task.agent_id === 'codex' ? (
-                              <>
-                                Codex creates its saved session after the first prompt. SlayZone
-                                captures it automatically. If this remains after a prompt, use "Run
-                                /status" to retry detection.
-                              </>
-                            ) : (
-                              <>
-                                The AI provider's session ID hasn't been captured yet. Without it,
-                                closing and reopening this task will start a fresh conversation
-                                instead of resuming. Click "Run {sessionIdCommand}" to detect it
-                                automatically.
-                              </>
-                            )}
-                          </TooltipContent>
-                        </Tooltip>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-auto h-6 text-xs"
-                          onClick={handleDetectSessionId}
-                        >
-                          Run {sessionIdCommand}
-                        </Button>
-                      </div>
-                    )}
-                    {showUnavailableBanner && (
-                      <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 flex items-center gap-2">
-                        <Info className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                        <span className="text-xs text-amber-500">
-                          Session ID detection not available for this provider — don't close the tab
-                          or resume won't work. Providers with resume: Claude Code, Codex, Gemini,
-                          Qwen, Copilot
-                        </span>
-                        <button
-                          className="ml-auto text-amber-500 hover:text-amber-400 shrink-0"
-                          onClick={() => setSessionUnavailableDismissed(task?.id ?? null)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
-                    {showSlayNudge && (
-                      <SlayNudgeBanner
-                        taskId={task.id}
-                        projectPath={effectiveRepoPath ?? projectRoot ?? ''}
-                        projectId={task?.project_id ?? project?.id}
-                        onDismiss={dismissSlayNudge}
-                        onSetupComplete={recheckSlayNudge}
-                      />
-                    )}
-                    {/* Terminal + mode bar wrapper */}
-                    <div className="relative flex-1 min-h-0 overflow-hidden">
-                      {taskPathPending ? (
-                        // The task's folder is on its computer: no terminal until it
-                        // answers — never one started in the project folder instead.
-                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                          {taskPathLocation
-                            ? `This task's folder is ${taskPathLocation} — connect it to start`
-                            : 'Loading the task folder…'}
-                        </div>
-                      ) : taskFolderMissing ? (
-                        // Its computer answered and holds no folder for it: never
-                        // the project folder in its place (S7).
-                        <div className="flex h-full items-center justify-center px-6 text-center text-xs text-muted-foreground">
-                          This task's folder was not found on its computer
-                        </div>
-                      ) : mainAgentCwd && !projectPathMissing ? (
-                        <TerminalContainer
-                          ref={terminalContainerRef}
-                          paused={isResizing}
-                          key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${worktreePath || ''}-${baseDir || ''}`}
-                          taskId={task.id}
-                          isTemporary={task.is_temporary}
-                          isActive={isActive}
-                          hasShortcutFocus={shortcutActive}
-                          cwd={mainAgentCwd}
-                          // Spawn props shared with the terminal-first pane (one
-                          // derivation — see mainTerminalProps). No conversation
-                          // hint: the agent's computer resolves the resume at spawn.
-                          defaultMode={mainTerminal.mode}
-                          supportsSessionId={mainTerminal.supportsSessionId}
-                          providerFlags={mainTerminal.providerFlags}
-                          executionContext={mainTerminal.executionContext}
-                          focusRequestId={terminalFocusRequestId}
-                          onStartFresh={handleResetTerminal}
-                          onReady={handleTerminalReady}
-                          onRetry={handleRestartTerminal}
-                          onFocusRequestHandled={handleTerminalFocusRequestHandled}
-                          onMainTabActiveChange={setIsMainTabActive}
-                          onOpenUrl={openDevServerInBrowser}
-                          onOpenFile={handleQuickOpenFile}
-                          onOpenArtifact={handleChatOpenArtifact}
-                          onOpenTask={handleChatOpenTask}
-                          onMainReset={handleResetTerminal}
-                          onSwitchSession={handleSwitchSession}
-                          {...(handoffMode ? { onMainHandoff: () => void handleHandoff() } : {})}
-                          onDeleteSession={handleDeleteSession}
-                          onTabSessionReset={handleTabSessionReset}
-                          onTabSessionSwitch={handleTabSessionSwitch}
-                          overlay={
-                            isActive && loopConfigured ? (
-                              <LoopModeBanner
-                                config={task.loop_config!}
-                                status={loopStatus}
-                                iteration={loopIteration}
-                                onStart={startLoop}
-                                onPause={pauseLoop}
-                                onResume={resumeLoop}
-                                onStop={stopLoop}
-                                onEditConfig={() => setLoopDialogOpen(true)}
-                              />
-                            ) : undefined
-                          }
-                          mainTabContextMenu={
-                            <>
-                              <ContextMenuRadioGroup
-                                value={task.agent_id}
-                                onValueChange={(value) => {
-                                  if (modes.some((m) => m.id === value))
-                                    handleModeChange(value as AgentId)
-                                }}
-                              >
-                                {(() => {
-                                  const visibleModes = getVisibleModes(modes, task.agent_id)
-                                  const { builtin, custom } = groupAgents(visibleModes)
-                                  const renderItem = (mode: (typeof visibleModes)[number]) => {
-                                    const ModeIcon = MODE_ICONS[mode.id as AgentId] ?? TerminalIcon
-                                    return (
-                                      <ContextMenuRadioItem key={mode.id} value={mode.id}>
-                                        <span className="flex items-center gap-2">
-                                          {/* Decorative: the provider logos carry an SVG
-                                              <title>, which would name the item twice
-                                              ("Codex Codex"). The label says it. */}
-                                          <span aria-hidden="true" className="flex">
-                                            <ModeIcon className="size-3.5" />
-                                          </span>
-                                          {getModeLabel(mode)}
-                                        </span>
-                                      </ContextMenuRadioItem>
-                                    )
-                                  }
-                                  return (
-                                    <>
-                                      {builtin.map(renderItem)}
-                                      {custom.map(renderItem)}
-                                    </>
-                                  )
-                                })()}
-                              </ContextMenuRadioGroup>
-                              <ContextMenuSeparator />
-                              <ContextMenuItem onSelect={() => setFlagsPopoverOpen(true)}>
-                                <span className="flex items-center gap-2">
-                                  <Flag className="size-3.5" />
-                                  Edit flags
-                                </span>
-                              </ContextMenuItem>
-                            </>
-                          }
-                          mainTabAccessories={
-                            <div
-                              data-testid="agent-trigger"
-                              className="flex items-center gap-1"
-                              onDoubleClick={(e) => e.stopPropagation()}
-                            >
-                              <span className="truncate text-sm">
-                                {getModeLabel(
-                                  modes.find((m) => m.id === task.agent_id) ?? {
-                                    id: task.agent_id,
-                                    label: task.agent_id
-                                  }
-                                )}
-                              </span>
-                              <ChevronDown
-                                data-testid="agent-dropdown"
-                                aria-label="Open provider menu"
-                                role="button"
-                                className="size-3 cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  const tab = (e.currentTarget as unknown as HTMLElement).closest(
-                                    '[data-tab-main="true"]'
-                                  )
-                                  if (!tab) return
-                                  const rect = (
-                                    e.currentTarget as unknown as HTMLElement
-                                  ).getBoundingClientRect()
-                                  tab.dispatchEvent(
-                                    new MouseEvent('contextmenu', {
-                                      bubbles: true,
-                                      cancelable: true,
-                                      view: window,
-                                      clientX: rect.left,
-                                      clientY: rect.bottom
-                                    })
-                                  )
-                                }}
-                              />
-                            </div>
-                          }
-                          rightContent={
-                            <Tooltip
-                              open={!isMainTabActive && !task.is_temporary ? undefined : false}
-                            >
-                              <TooltipTrigger asChild>
-                                <div
-                                  className={cn(
-                                    'flex items-center gap-2 transition-opacity',
-                                    !isMainTabActive &&
-                                      !task.is_temporary &&
-                                      'opacity-40 pointer-events-none'
-                                  )}
-                                >
-                                  {loopModeAvailable && task.agent_id !== 'terminal' && (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <IconButton
-                                          variant={loopConfigured ? 'default' : 'ghost'}
-                                          className="size-7"
-                                          aria-label="Loop command"
-                                          onClick={() => {
-                                            if (isLoopActive(loopStatus)) stopLoop()
-                                            if (loopConfigured) {
-                                              handleLoopConfigChange(null)
-                                            } else {
-                                              setLoopDialogOpen(true)
-                                            }
-                                          }}
-                                        >
-                                          <Repeat className="size-3.5" />
-                                        </IconButton>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom">Loop command</TooltipContent>
-                                    </Tooltip>
-                                  )}
-
-                                  {task.agent_id !== 'terminal' && (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <IconButton
-                                          data-testid="agent-power-off"
-                                          variant="ghost"
-                                          className="size-7"
-                                          aria-label="Shut down agent"
-                                          onClick={() => void handleStopAgent()}
-                                        >
-                                          <Power className="size-3.5" />
-                                        </IconButton>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom">Shut down agent</TooltipContent>
-                                    </Tooltip>
-                                  )}
-
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <IconButton
-                                        data-testid="terminal-menu-trigger"
-                                        variant="ghost"
-                                        aria-label="Terminal menu"
-                                        className="size-7"
-                                      >
-                                        <MoreHorizontal className="size-3.5" />
-                                      </IconButton>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-60">
-                                      <DropdownMenuItem onClick={handleInjectTitle}>
-                                        Inject title
-                                        <span className="ml-auto text-xs text-muted-foreground">
-                                          {terminalInjectTitleShortcut}
-                                        </span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => void handleInjectDescription()}
-                                      >
-                                        Inject description
-                                        <span className="ml-auto text-xs text-muted-foreground">
-                                          {terminalInjectDescShortcut}
-                                        </span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={handleCopyHistory}>
-                                        Copy history
-                                      </DropdownMenuItem>
-                                      {task.agent_id !== 'terminal' && (
-                                        <DropdownMenuItem
-                                          disabled={!getConversationIdForMode(task)}
-                                          onClick={handleCopyConversationId}
-                                        >
-                                          Copy conversation ID
-                                        </DropdownMenuItem>
-                                      )}
-                                      {handoffMode && (
-                                        <DropdownMenuItem
-                                          data-testid="terminal-menu-handoff"
-                                          disabled={!getConversationIdForMode(task)}
-                                          onClick={() => void handleHandoff()}
-                                        >
-                                          {isChatSupported(task.agent_id)
-                                            ? 'Continue in terminal'
-                                            : 'Continue in chat'}
-                                        </DropdownMenuItem>
-                                      )}
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={handleReattachTerminal}>
-                                        Re-attach terminal
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={handleRestartTerminal}>
-                                        Restart session
-                                        <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                                          {terminalRestartShortcut}
-                                        </span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={handleResetTerminal}>
-                                        Reset session
-                                      </DropdownMenuItem>
-                                      {task.agent_id !== 'terminal' && (
-                                        <>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem onClick={() => void handleDoctor()}>
-                                            Doctor
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                  <Dialog
-                                    open={flagsPopoverOpen}
-                                    onOpenChange={setFlagsPopoverOpen}
-                                  >
-                                    <DialogContent className="max-w-md">
-                                      <DialogHeader>
-                                        <DialogTitle>
-                                          {`CLI flags for ${task.agent_id}`}
-                                        </DialogTitle>
-                                      </DialogHeader>
-                                      {
-                                        <div className="space-y-3">
-                                          <div className="text-xs text-muted-foreground">
-                                            Passed to the provider on startup (e.g. --no-cache).
-                                            Overrides defaults in settings.
-                                          </div>
-                                          <Input
-                                            autoFocus
-                                            value={flagsInputValue}
-                                            onChange={(e) => setFlagsInputValue(e.target.value)}
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Enter') {
-                                                e.preventDefault()
-                                                void handleFlagsSave(flagsInputValue)
-                                                setFlagsPopoverOpen(false)
-                                              } else if (e.key === 'Escape') {
-                                                e.preventDefault()
-                                                setFlagsInputValue(getProviderFlagsForMode(task))
-                                                setFlagsPopoverOpen(false)
-                                              }
-                                            }}
-                                            placeholder="Flags"
-                                          />
-                                          <div className="flex gap-2 justify-end">
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={() => {
-                                                void handleSetDefaultFlags()
-                                              }}
-                                              disabled={task.agent_id === 'terminal'}
-                                            >
-                                              Reset to default
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              onClick={() => {
-                                                void handleFlagsSave(flagsInputValue)
-                                                setFlagsPopoverOpen(false)
-                                              }}
-                                            >
-                                              Save
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      }
-                                    </DialogContent>
-                                  </Dialog>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                Switch to Main tab to use these controls
-                              </TooltipContent>
-                            </Tooltip>
-                          }
-                        />
-                      ) : (
-                        // Three different situations, three different messages.
-                        // They were one line — "No repository path configured" —
-                        // which was a false claim in two of the three cases: it
-                        // told users to set a path they had already set, while the
-                        // real cause was a probe run against the wrong machine or
-                        // a computer that was simply offline.
-                        <div className="h-full flex items-center justify-center text-muted-foreground">
-                          <div className="text-center p-8">
-                            {!projectRoot && !effectiveRepoPath && !chosenFolder ? (
-                              // A project needs no folder; its agents do, on the
-                              // computer this task runs on. Picked here, it is
-                              // recorded on that computer (the hub routes by task).
-                              <>
-                                {project?.placements?.length ? (
-                                  // It has one, on another computer: only possible
-                                  // with several, so naming computers is no news.
-                                  <>
-                                    <p className="mb-2">
-                                      This project has no folder on this task’s computer
-                                    </p>
-                                    <p className="text-sm">
-                                      Pick the folder its agents should start in.
-                                    </p>
-                                  </>
-                                ) : (
-                                  // No folder anywhere: the desktop app's own words,
-                                  // unchanged — its users need not know of computers.
-                                  <>
-                                    <p className="mb-2">No repository path configured</p>
-                                    <p className="text-sm">
-                                      Set a repository path in project settings to use the terminal
-                                    </p>
-                                  </>
-                                )}
-                                <Button
-                                  size="sm"
-                                  className="mt-3"
-                                  data-testid="pick-project-folder"
-                                  onClick={() => setProjectFolderPickerOpen(true)}
-                                >
-                                  Pick folder
-                                </Button>
-                                {projectFolderPickerOpen && (
-                                  <WorkspaceDirPicker
-                                    open={projectFolderPickerOpen}
-                                    onOpenChange={setProjectFolderPickerOpen}
-                                    onSelect={(picked) => {
-                                      // A refusal (outside that computer's allowed
-                                      // folders) is the user's to see and act on.
-                                      trpcClient.workspace.setProjectPath
-                                        .mutate({
-                                          taskId: task.id,
-                                          projectId: task.project_id,
-                                          path: picked
-                                        })
-                                        .catch((err: unknown) =>
-                                          toast.error("Couldn't use that folder", {
-                                            description:
-                                              err instanceof Error ? err.message : String(err)
-                                          })
-                                        )
-                                    }}
-                                    target={{ taskId: task.id }}
-                                    title="Select project folder"
-                                    allowCreate
-                                  />
-                                )}
-                              </>
-                            ) : workspaceUnreachable ? (
-                              <>
-                                <p className="mb-2">Can’t reach the machine for this task</p>
-                                <p className="text-sm">
-                                  Its computer is offline, so the workspace can’t be opened. The
-                                  path itself is unchanged.
-                                </p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="mb-2">Folder not found on this task’s machine</p>
-                                <p className="text-sm font-mono text-xs">
-                                  {effectiveRepoPath ?? projectRoot ?? chosenFolder}
-                                </p>
-                                <p className="text-sm mt-2">
-                                  It may have moved or been deleted. Pick it again in project
-                                  settings.
-                                </p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {/* Black cover during a panel resize. The terminal stays
-                          mounted underneath — preserving active group + focused
-                          pane — while the `paused` prop skips xterm fit churn. */}
-                      {isResizing && <div className="absolute inset-0 z-10 bg-black" />}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Non-terminal panels hidden in compact mode */}
-            {!compact && panelVisibility.browser && renderResizeHandle('browser')}
-
-            {/* Browser Panel */}
-            {!compact && panelVisibility.browser && (
-              <div
-                data-panel-id="browser"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'browser' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.browser, ...panelOrderStyle('browser') }}
-              >
-                {ownership.hasOtherOwner('browser') ? (
-                  <PanelOwnerStub
-                    panelLabel="Browser"
-                    icon={Globe}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('browser')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('browser')}
-                  />
-                ) : (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    {/* NOT wrapped in Activity: useBrowserViewLifecycle's cleanup
-                        would destroy the WebContentsView on hide and recreate it
-                        on show, resetting video playback. BrowserPanel keeps the
-                        active WCV painting at off-screen bounds when the parent
-                        task tab is hidden (see useBrowserViewBounds offScreen). */}
-                    <BrowserPanel
-                      ref={browserPanelRef}
-                      className="h-full"
-                      tabs={browserTabs}
-                      onTabsChange={handleBrowserTabsChange}
-                      onRequestHide={() => handlePanelToggle('browser', false)}
-                      taskId={task.id}
-                      projectId={task.project_id}
-                      isResizing={isResizing}
-                      isActive={isActive}
-                      onElementSnippet={handleInsertElementSnippet}
-                      onScreenshot={handleScreenshot}
-                      canUseDomPicker={panelVisibility.terminal}
-                    />
-                  </Suspense>
-                )}
-              </div>
-            )}
-
-            {/* Resize handle before Editor */}
-            {!compact && panelVisibility.editor && renderResizeHandle('editor')}
-
-            {/* File Editor Panel */}
-            {!compact && panelVisibility.editor && (
-              <div
-                data-panel-id="editor"
-                className={cn(
-                  'shrink-0 overflow-hidden rounded-md bg-surface-1 border border-border transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'editor' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.editor, ...panelOrderStyle('editor') }}
-              >
-                {ownership.hasOtherOwner('editor') ? (
-                  <PanelOwnerStub
-                    panelLabel="Editor"
-                    icon={FileCode}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('editor')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('editor')}
-                  />
-                ) : effectiveRepoPath ? (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <FileEditorView
-                        ref={fileEditorRefCallback}
-                        projectPath={effectiveRepoPath}
-                        // Read and write the SAME filesystem the task's agents
-                        // work in. Without this the panel reads the hub's disk,
-                        // so a remote task's editor shows files no agent can see
-                        // and a save lands where nothing is running.
-                        target={{ taskId: task.id }}
-                        initialEditorState={task.editor_open_files}
-                        onEditorStateChange={handleEditorStateChange}
-                        onOpenUrl={openDevServerInBrowser}
-                      />
-                    </Activity>
-                  </Suspense>
-                ) : null}
-              </div>
-            )}
-
-            {/* Resize handle before Artifacts */}
-            {!compact && panelVisibility.artifacts && renderResizeHandle('artifacts')}
-
-            {/* Artifacts Panel */}
-            {!compact && panelVisibility.artifacts && (
-              <div
-                data-panel-id="artifacts"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'artifacts' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.artifacts, ...panelOrderStyle('artifacts') }}
-              >
-                {ownership.hasOtherOwner('artifacts') ? (
-                  <PanelOwnerStub
-                    panelLabel="Artifacts"
-                    icon={Paperclip}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('artifacts')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('artifacts')}
-                  />
-                ) : (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <ArtifactsPanel
-                        ref={artifactsPanelRefCallback}
-                        taskId={task.id}
-                        isResizing={isResizing}
-                        initialActiveArtifactId={task.active_artifact_id}
-                        // The open file and sidebar are saved on the task: a View member's
-                        // stay local (T-100).
-                        onActiveArtifactIdChange={
-                          canEdit ? handleActiveArtifactIdChange : undefined
-                        }
-                        initialSidebarState={task.artifacts_sidebar}
-                        onSidebarStateChange={canEdit ? handleArtifactsSidebarChange : undefined}
-                        onOpenUrl={openDevServerInBrowser}
-                        onShareArtifact={sharing.enabled ? setSharingArtifact : undefined}
-                        readOnly={!canEdit}
-                      />
-                    </Activity>
-                    {sharingArtifact && (
-                      <ArtifactShareDialog
-                        artifactId={sharingArtifact.id}
-                        projectId={task.project_id}
-                        title={sharingArtifact.title}
-                        open
-                        onOpenChange={(open) => !open && setSharingArtifact(null)}
-                        onMoved={(newId) => {
-                          setSharingArtifact((a) => (a ? { ...a, id: newId } : a))
-                          artifactsPanelRef.current?.selectArtifact(newId)
-                        }}
-                      />
-                    )}
-                  </Suspense>
-                )}
-              </div>
-            )}
-
-            {/* Web Panels (custom + predefined) */}
-            {!compact &&
-              enabledWebPanels.map((wp) => {
-                if (!panelVisibility[wp.id]) return null
-                return (
-                  <div key={wp.id} className="contents">
-                    {renderResizeHandle(wp.id)}
-                    <div
-                      data-panel-id={wp.id}
-                      className={cn(
-                        'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200',
-                        multipleVisiblePanels &&
-                          focusedPanel === wp.id &&
-                          'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                      )}
-                      style={{ width: resolvedWidths[wp.id], ...panelOrderStyle(wp.id) }}
-                    >
-                      {ownership.hasOtherOwner(wp.id) ? (
-                        <PanelOwnerStub
-                          panelLabel={wp.name}
-                          icon={Globe}
-                          activeElsewhere
-                          onActivate={() => ownership.claim(wp.id)}
-                          onActivateAndClose={() => ownership.claimAndCloseOther(wp.id)}
-                        />
-                      ) : (
-                        // NOT wrapped in Activity: same reason as BrowserPanel —
-                        // useBrowserViewLifecycle would destroy the WCV on hide.
-                        // Off-screen park (offScreen prop on useBrowserView) keeps
-                        // it painting while parent task tab is hidden.
-                        <WebPanelView
-                          taskId={task.id}
-                          panelId={wp.id}
-                          url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
-                          baseUrl={wp.baseUrl}
-                          name={wp.name}
-                          blockDesktopHandoff={wp.blockDesktopHandoff === true}
-                          handoffProtocol={wp.handoffProtocol}
-                          handoffHostScope={wp.handoffHostScope}
-                          onUrlChange={handleWebPanelUrlChange}
-                          onFaviconChange={handleWebPanelFaviconChange}
-                          isResizing={isResizing}
-                          isActive={isActive}
-                        />
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-
-            {/* Resize handle before Diff */}
-            {!compact && panelVisibility.diff && renderResizeHandle('diff')}
-
-            {/* Git Panel */}
-            {!compact && panelVisibility.diff && (
-              <div
-                data-panel-id="diff"
-                data-testid="task-git-panel"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'diff' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.diff, ...panelOrderStyle('diff') }}
-              >
-                {ownership.hasOtherOwner('diff') ? (
-                  <PanelOwnerStub
-                    panelLabel="Git"
-                    icon={GitBranch}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('diff')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('diff')}
-                  />
-                ) : (
-                  <Suspense fallback={<PanelLoadingSkeleton />}>
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <UnifiedGitPanel
-                        ref={gitPanelRef}
-                        task={task}
-                        projectId={task.project_id}
-                        projectPath={resolvedGitViewPath}
-                        completedStatus={completedStatus}
-                        visible={panelVisibility.diff}
-                        defaultTab={gitDefaultTab}
-                        onTabChange={handleGitTabChange}
-                        pollIntervalMs={5000}
-                        onUpdateTask={updateTaskAndNotify}
-                        onTaskUpdated={handleTaskUpdate}
-                        detectedRepos={viewableRepos.map((r) => ({
-                          name: r.name,
-                          path: r.path,
-                          kind: r.kind
-                        }))}
-                        selectedRepoName={
-                          viewableRepos.find((r) => r.path === resolvedGitViewPath)?.name ?? null
-                        }
-                        isRepoStale={false}
-                        onRepoChange={handleRepoChange}
-                      />
-                    </Activity>
-                  </Suspense>
-                )}
-              </div>
-            )}
-
-            {/* Resize handle before Settings */}
-            {!compact && panelVisibility.settings && renderResizeHandle('settings')}
-
-            {/* Settings Panel */}
-            {!compact && panelVisibility.settings && (
-              <div
-                data-panel-id="settings"
-                data-testid="task-settings-panel"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'settings' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.settings, ...panelOrderStyle('settings') }}
-              >
-                {ownership.hasOtherOwner('settings') ? (
-                  <PanelOwnerStub
-                    panelLabel="Settings"
-                    icon={Settings2}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('settings')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('settings')}
-                  />
-                ) : (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>{taskSettingsPanel}</Activity>
-                )}
-              </div>
-            )}
-
-            {/* Resize handle before Processes */}
-            {!compact && panelVisibility.processes && renderResizeHandle('processes')}
-
-            {/* Processes Panel */}
-            {!compact && panelVisibility.processes && (
-              <div
-                data-panel-id="processes"
-                className={cn(
-                  'shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200',
-                  multipleVisiblePanels &&
-                    focusedPanel === 'processes' &&
-                    'shadow-[0_0_18px_rgba(255,255,255,0.25)]'
-                )}
-                style={{ width: resolvedWidths.processes, ...panelOrderStyle('processes') }}
-              >
-                {ownership.hasOtherOwner('processes') ? (
-                  <PanelOwnerStub
-                    panelLabel="Processes"
-                    icon={Cpu}
-                    activeElsewhere
-                    onActivate={() => ownership.claim('processes')}
-                    onActivateAndClose={() => ownership.claimAndCloseOther('processes')}
-                  />
-                ) : (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>
-                    <ProcessesPanel
-                      taskId={task.id}
-                      projectId={project?.id ?? null}
-                      cwd={mainAgentCwd}
-                      cwdUnavailable={processesCwdUnavailable}
-                      terminalSessionId={getMainSessionId(task.id)}
-                      onOpenUrl={openDevServerInBrowser}
-                    />
-                  </Activity>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      <TaskPageProvider value={taskPage}>
+        <div
+          id="task-panels"
+          ref={splitContainerRef}
+          className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
+        >
+          {isTaskCompleted && !openCompletedAnyway ? (
+            <TaskCompletedScreen
+              task={task}
+              project={project}
+              completedVariant={completedVariant}
+              setCompletedVariant={setCompletedVariant}
+              onCloseTab={onCloseTab}
+              onShowDetails={() => setOpenCompletedAnyway(true)}
+              onTaskUpdate={handleTaskUpdate}
+            />
+          ) : (
+            <TaskLayoutView
+              layout={taskLayout.layout}
+              strip={layoutStrip}
+              compact={!!compact}
+              containerWidth={containerWidth}
+              webPanelIds={webPanelIds}
+              empty={!hasVisiblePanels}
+              onResize={resizeColumns}
+              onResizeStart={() => setIsResizing(true)}
+              onResizeEnd={() => {
+                setIsResizing(false)
+                commitSizes()
+              }}
+              onResetSizes={resetAllSizes}
+              actions={{
+                activateTab,
+                requestCloseTab: requestClosePanelTab,
+                hideTab,
+                renameTab,
+                splitTab,
+                resizeSlots: taskLayout.resizeSlots
+              }}
+              onDrop={dropPanel}
+              onDraggingChange={setIsResizing}
+            />
+          )}
+        </div>
+      </TaskPageProvider>
+      {panelCloseDialog}
 
       <LoopModeDialog
         open={loopDialogOpen}
@@ -4181,10 +3201,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             title: a.title,
             type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
           }))}
-          onArtifactClick={(artifactId) => {
-            if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-            artifactsPanelRef.current?.selectArtifact(artifactId)
-          }}
+          onArtifactClick={selectArtifactInPanel}
           onUploadImages={handleUploadImages}
           onOpenLink={handleDescriptionOpenLink}
         />

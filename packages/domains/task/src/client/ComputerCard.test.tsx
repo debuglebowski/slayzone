@@ -61,7 +61,25 @@ vi.mock('@slayzone/ui', () => ({
     <option value={value}>{children}</option>
   ),
   SelectTrigger: () => null,
-  SelectValue: () => null
+  SelectValue: () => null,
+  // The title-row chip's menu: always rendered open-or-not by its `open` prop.
+  DropdownMenu: ({ children }: MockChildren) => <>{children}</>,
+  DropdownMenuTrigger: ({ children }: MockChildren) => <>{children}</>,
+  DropdownMenuContent: ({ children }: MockChildren) => <div role="menu">{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    disabled
+  }: MockChildren & { onSelect?: () => void; disabled?: boolean }) => (
+    <button role="menuitem" disabled={disabled} onClick={onSelect}>
+      {children}
+    </button>
+  ),
+  DropdownMenuLabel: ({ children }: MockChildren) => <>{children}</>,
+  DropdownMenuSeparator: () => null,
+  DropdownMenuShortcut: ({ children }: MockChildren) => <kbd>{children}</kbd>,
+  cn: (...c: unknown[]) => c.filter(Boolean).join(' '),
+  useShortcutDisplay: () => '⌘⇧M'
 }))
 
 // computers.list + computers.resolveTaskComputer drive useQuery; computers.setTaskComputer
@@ -145,6 +163,7 @@ vi.mock('@tanstack/react-query', () => ({
 }))
 
 import { ComputerCard } from './ComputerCard'
+import { TaskComputerChip } from './TaskComputerChip'
 
 afterEach(cleanup)
 beforeEach(() => {
@@ -408,5 +427,56 @@ describe('ComputerCard', () => {
       expect(await screen.findByText('/dest/project is not empty.')).toBeDefined()
       expect(screen.getByRole('dialog')).toBeDefined()
     })
+  })
+})
+
+describe('TaskComputerChip', () => {
+  const chip = (props: Partial<React.ComponentProps<typeof TaskComputerChip>> = {}) =>
+    render(
+      <TaskComputerChip
+        projectId="project-1"
+        taskId="task-1"
+        taskComputerId={null}
+        projectDefaultComputerId={null}
+        open
+        onOpenChange={() => {}}
+        {...props}
+      />
+    )
+
+  it('renders nothing when no computer is enrolled', () => {
+    const { container } = chip()
+    expect(container.innerHTML).toBe('')
+  })
+
+  it('shows the computer the task runs on', () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
+    resolvedComputerId = 'computer-a'
+    chip({ taskComputerId: 'computer-a' })
+    expect(screen.getByRole('button', { name: 'Computer: mac-studio' })).toBeDefined()
+  })
+
+  it('picking another computer opens the change dialog with it chosen, saving nothing yet', async () => {
+    computersData = [
+      { id: 'computer-a', name: 'mac-studio' },
+      { id: 'computer-b', name: 'golden-comet' }
+    ]
+    resolvedComputerId = 'computer-a'
+    chip({ taskComputerId: 'computer-a' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /golden-comet/ }))
+    expect(await screen.findByRole('dialog')).toBeDefined()
+    await waitFor(() =>
+      expect(previewSpy).toHaveBeenCalledWith({ taskId: 'task-1', computerId: 'computer-b' })
+    )
+    expect(setTaskComputerSpy).not.toHaveBeenCalled()
+  })
+
+  it('picking the current computer does nothing', () => {
+    computersData = [{ id: 'computer-a', name: 'mac-studio' }]
+    resolvedComputerId = 'computer-a'
+    chip({ taskComputerId: 'computer-a' })
+    fireEvent.click(screen.getByRole('menuitem', { name: /mac-studio/ }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(previewSpy).not.toHaveBeenCalled()
   })
 })

@@ -76,7 +76,7 @@ test.describe('File editor', () => {
   test('editor panel is visible with file tree', async ({ mainWindow }) => {
     // Editor button in PanelToggle should have active class (bg-surface-3)
     const btn = mainWindow
-      .locator('.bg-surface-2.rounded-lg:visible')
+      .locator('[data-testid="panel-toggles"]:visible')
       .locator('button:has-text("Editor")')
     await expect(btn).toHaveClass(/bg-surface-3/)
     await expect(editorPanel(mainWindow).getByText('Files')).toBeVisible()

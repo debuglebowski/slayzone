@@ -6057,6 +6057,21 @@ export const migrations: Migration[] = [
         ALTER TABLE artifact_grants ADD COLUMN opened_at TEXT;
       `)
     }
+  },
+  {
+    // Panel model (docs/plans/panel-model.md §1.2): a task's applied panel layout,
+    // the heavy state of its non-primary panel instances, and a template's layout.
+    // No backfill: NULL = derived on read from panel_visibility / panel_sizes and the
+    // reader's own panel_config (per user on a multi-user hub), so a stored copy
+    // would be wrong. The hub dual-writes the legacy columns on every layout write.
+    version: 228,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE tasks ADD COLUMN panel_layout TEXT;
+        ALTER TABLE tasks ADD COLUMN panel_instance_state TEXT;
+        ALTER TABLE task_templates ADD COLUMN panel_layout TEXT;
+      `)
+    }
   }
 ]
 

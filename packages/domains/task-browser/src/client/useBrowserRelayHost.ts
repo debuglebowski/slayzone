@@ -44,8 +44,16 @@ export function useBrowserRelayHostHandle(): BrowserRelayHostHandle | null {
   return useContext(BrowserRelayHostContext)
 }
 
-/** `taskId` undefined (a panel with no task) → no host: nothing to relay to. */
-export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHostHandle {
+/**
+ * `taskId` undefined (a panel with no task) → no host: nothing to relay to.
+ * `primary`: the task's first browser panel (false for another browser panel
+ * instance) — with several on this client, `slay browser` without a tab reaches the
+ * one used last, else the primary.
+ */
+export function useBrowserRelayHost(
+  taskId: string | undefined,
+  primary = true
+): BrowserRelayHostHandle {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const hasHost = getBrowserHost() !== null
@@ -68,7 +76,8 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
         hostId,
         tabIds: [...tabsRef.current],
         activeTabId: activeRef.current,
-        isolatedTabIds: [...isolatedRef.current]
+        isolatedTabIds: [...isolatedRef.current],
+        primary
       })
       .catch((err: unknown) => console.warn('[browser-relay] sync failed:', err))
   })
@@ -155,7 +164,7 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
     if (now - lastUseRef.current < USE_THROTTLE_MS) return
     lastUseRef.current = now
     trpcClient.app.browserRelay.engaged
-      .mutate({ taskId, clientKey: BROWSER_CLIENT_KEY })
+      .mutate({ taskId, clientKey: BROWSER_CLIENT_KEY, hostId: hostIdRef.current ?? undefined })
       .catch(() => {
         /* best effort: ownership follows the next interaction */
       })

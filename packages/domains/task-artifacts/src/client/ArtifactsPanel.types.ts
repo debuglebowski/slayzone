@@ -22,6 +22,13 @@ export interface ArtifactsPanelProps {
   onShareArtifact?: (artifact: { id: string; title: string }) => void
   /** A View member's panel (T-100): files open and download, nothing changes them. */
   readOnly?: boolean
+  /**
+   * Show this one artifact only (a task's Artifact panel): no sidebar and no
+   * selection of its own — the panel is about this file. Read at mount.
+   */
+  pinnedArtifactId?: string
+  /** "Open in its own panel" on a file (the task opens an Artifact panel). Absent: no entry. */
+  onOpenInOwnPanel?: (artifact: { id: string; title: string }) => void
 }
 
 export type ArtifactViewMode = 'preview' | 'split' | 'raw'

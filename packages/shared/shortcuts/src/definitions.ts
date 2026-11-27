@@ -203,6 +203,16 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     scope: 'global',
     customizable: false
   },
+  // Tree sidebar lenses, in menu order. macOS: ⌃1–9 (⌘1–9 is tab switching).
+  // Windows/Linux: Alt+1–9 — there `mod` IS Ctrl, so Ctrl+1–9 is taken by tab switching.
+  {
+    id: 'switch-lens-1-9',
+    label: 'Switch Sidebar Lens 1–9',
+    group: 'General',
+    defaultKeys: perPlatform({ mac: 'ctrl+1-9', other: 'alt+1-9' }),
+    scope: 'global',
+    customizable: false
+  },
   {
     id: 'toggle-project-tabs',
     label: 'Project-Scoped Tabs',
@@ -256,6 +266,13 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     scope: 'task'
   },
   {
+    id: 'task-computer',
+    label: 'Switch computer',
+    group: 'Task Panels',
+    defaultKeys: 'mod+shift+m',
+    scope: 'task'
+  },
+  {
     id: 'panel-processes',
     label: 'Processes',
     group: 'Task Panels',
@@ -277,6 +294,19 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     defaultKeys: 'mod+y',
     scope: 'task'
   },
+  // Task layouts 1–9, in Layout-menu order (the enabled ones). ⌃⌥ everywhere: ⌃ / Alt
+  // + digit switches sidebar lenses, mod + digit switches tabs, and ⌥ + digit types
+  // characters in a terminal on macOS (docs/plans/panel-model.md open question 3).
+  ...Array.from(
+    { length: 9 },
+    (_, i): ShortcutDefinition => ({
+      id: `switch-layout-${i + 1}`,
+      label: `Switch to Layout ${i + 1}`,
+      group: 'Layouts',
+      defaultKeys: `ctrl+alt+${i + 1}`,
+      scope: 'task'
+    })
+  ),
   {
     id: 'editor-search',
     label: 'Editor Search',

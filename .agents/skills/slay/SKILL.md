@@ -33,7 +33,7 @@ All ID arguments support prefix matching (e.g., `a1b2` matches the full UUID sta
 | slay-processes | `slay processes` | Inspect and control running processes |
 | slay-pty | `slay pty` | Interact with PTY terminal sessions |
 | slay-chat | `slay chat`, `slay agent` | Drive chat-mode agents; one surface for any task's main agent |
-| slay-panels | `slay panels` | Manage custom web panels |
+| slay-panels | `slay panels` | Manage web panels and a task's panel layout |
 | slay-auto-title | — | Auto-title tasks from conversation context |
 
 ## Other

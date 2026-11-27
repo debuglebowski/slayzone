@@ -113,6 +113,21 @@ describe('matchesShortcut', () => {
     ).toBe(true)
   })
 
+  it('matches ctrl+alt+1 via e.code when macOS Alt composes the digit (¡)', () => {
+    expect(
+      matchesShortcut(
+        makeKeyEvent({ key: '¡', code: 'Digit1', ctrlKey: true, altKey: true }),
+        'ctrl+alt+1'
+      )
+    ).toBe(true)
+    expect(
+      matchesShortcut(
+        makeKeyEvent({ key: '™', code: 'Digit2', ctrlKey: true, altKey: true }),
+        'ctrl+alt+1'
+      )
+    ).toBe(false)
+  })
+
   it('matches mod+alt+r when e.key is already correct', () => {
     expect(
       matchesShortcut(
