@@ -86,7 +86,10 @@ interface Hub {
   stop: () => Promise<void>
 }
 
-async function bootHub(root: string, opts: { keysOnPipe?: string } = {}): Promise<Hub> {
+async function bootHub(
+  root: string,
+  opts: { keysOnPipe?: string; keepPipe?: (write: (line: string) => void) => void } = {}
+): Promise<Hub> {
   const logs: string[] = []
   const proc: ChildProcess = spawn(ELECTRON_BIN, [HUB_BIN], {
     cwd: root,
@@ -101,8 +104,13 @@ async function bootHub(root: string, opts: { keysOnPipe?: string } = {}): Promis
     stdio:
       opts.keysOnPipe !== undefined ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
   })
-  if (opts.keysOnPipe !== undefined)
-    (proc.stdio[3] as import('node:stream').Writable).end(opts.keysOnPipe)
+  if (opts.keysOnPipe !== undefined) {
+    const pipe = proc.stdio[3] as import('node:stream').Writable
+    if (opts.keepPipe) {
+      pipe.write(`${opts.keysOnPipe}\n`)
+      opts.keepPipe((line) => pipe.write(`${line}\n`))
+    } else pipe.end(opts.keysOnPipe)
+  }
   const cap = (b: Buffer): void => {
     for (const line of b.toString().split('\n')) if (line.trim()) logs.push(line)
   }
@@ -497,6 +505,53 @@ test('M1: the key arrives on a pipe, is used, and is in no environment (ps eww)'
       expect(ps).not.toContain(key)
       expect(ps).not.toContain('SLAYZONE_HUB_CREDENTIALS_SECRET')
     }
+  } finally {
+    await hub.stop()
+  }
+})
+
+test('L4: a key the desktop unlocks after the hub started is used by the running hub', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-cred-late-'))
+  roots.push(root)
+  const key = randomBytes(32).toString('base64url')
+  const first = await bootHub(root)
+  await first.stop()
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+  const seed = new Database(first.dbPath)
+  seed
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run('integration:credential:late', 'plain:lin_api_late')
+  seed.close()
+
+  let send: (line: string) => void = () => {}
+  const hub = await bootHub(root, {
+    keysOnPipe: '{}',
+    keepPipe: (write) => {
+      send = write
+    }
+  })
+  try {
+    const { credentialKeyId } = await import(
+      '../../../domains/integrations/src/server/hub-cipher.js'
+    )
+    const { deriveHubCredentialsKey } = await import('@slayzone/platform/hub-auth-secret')
+    const kid = credentialKeyId(deriveHubCredentialsKey(key))
+    send(JSON.stringify({ current: key, previous: [] }))
+    await poll(
+      async () => {
+        const db = new Database(hub.dbPath, { readonly: true })
+        try {
+          const row = db
+            .prepare('SELECT value FROM settings WHERE key = ?')
+            .get('integration:credential:late') as { value: string }
+          return row.value.startsWith(`hub1:${kid}:`) ? true : null
+        } finally {
+          db.close()
+        }
+      },
+      20_000,
+      `row re-encrypted under the LATE key (logs:\n${hub.logs.join('\n')})`
+    )
   } finally {
     await hub.stop()
   }

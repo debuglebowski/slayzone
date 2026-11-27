@@ -82,6 +82,11 @@ const restartAfterReadyMs = Number(process.env.FAKE_RESTART_AFTER_READY_MS || '0
 // Lets a test read back the environment the supervisor actually handed the child.
 const envDumpFile = process.env.FAKE_ENV_DUMP_FILE || ''
 // Lets a test read back what the supervisor wrote on the credentials pipe.
+const fdLinesFile = process.env.FAKE_FD_LINES_FILE || ''
+if (fdLinesFile && process.env.SLAYZONE_HUB_CREDENTIALS_FD) {
+  fs.createReadStream('', { fd: Number(process.env.SLAYZONE_HUB_CREDENTIALS_FD) })
+    .on('data', function (chunk) { fs.appendFileSync(fdLinesFile, chunk) })
+}
 const fdDumpFile = process.env.FAKE_FD_DUMP_FILE || ''
 if (fdDumpFile && process.env.SLAYZONE_HUB_CREDENTIALS_FD) {
   try {
@@ -324,7 +329,42 @@ test('M1: the credentials key reaches the hub on an inherited pipe, never in its
     expect(env.SLAYZONE_HUB_CREDENTIALS_SECRET).toBeUndefined()
     expect(env.SLAYZONE_HUB_CREDENTIALS_FD).toBe('3')
     expect(JSON.stringify(env)).not.toContain('k'.repeat(43))
-    expect(fs.readFileSync(fdDump, 'utf8')).toBe(payload)
+    expect(fs.readFileSync(fdDump, 'utf8')).toBe(`${payload}\n`)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('L4: a key unlocked after the hub started is sent on the open pipe, one JSON line each', async () => {
+  const dir = mkTmp()
+  const lines = path.join(dir, 'fd-lines')
+  let send: ((payload: string) => void) | null = null
+  const { handle } = makeHarness(
+    dir,
+    { FAKE_FD_LINES_FILE: lines },
+    { healthPollIntervalMs: 40 },
+    {
+      secretPayload: () => null,
+      secretUpdates: (listener) => {
+        send = listener
+        return () => {
+          send = null
+        }
+      }
+    }
+  )
+  try {
+    await handle.waitForReady()
+    expect(send).not.toBeNull()
+    send!(JSON.stringify({ current: 'k'.repeat(43), previous: [] }))
+    await waitFor(
+      () => fs.existsSync(lines) && fs.readFileSync(lines, 'utf8').split('\n').length >= 3,
+      5_000,
+      'both lines arrived'
+    )
+    const got = fs.readFileSync(lines, 'utf8').trim().split('\n')
+    expect(JSON.parse(got[0])).toEqual({})
+    expect(JSON.parse(got[1])).toEqual({ current: 'k'.repeat(43), previous: [] })
   } finally {
     await handle.stop()
   }

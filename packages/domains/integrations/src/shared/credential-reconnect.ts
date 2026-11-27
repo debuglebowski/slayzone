@@ -10,6 +10,11 @@
 export const CREDENTIAL_KEY_UNAVAILABLE_ERROR =
   "This hub's key isn't available on this machine — reconnect to continue."
 
+/** The desktop has not unlocked this hub's key from the OS keychain yet (a prompt not
+ *  answered, access denied): reconnecting cannot help until it is (review-2 L4). */
+export const CREDENTIAL_KEY_LOCKED_ERROR =
+  "SlayZone hasn't unlocked this hub's key from the OS keychain. Allow keychain access, or restart SlayZone."
+
 /** A standalone hub: the key derives from its auth secret (or an operator's credentials
  *  secret), so a row under another key means one of those changed (review L5). */
 export const CREDENTIAL_KEY_CHANGED_ERROR =
@@ -22,6 +27,7 @@ export const CREDENTIAL_LEGACY_UNREADABLE_ERROR =
 
 const REASONS: readonly string[] = [
   CREDENTIAL_KEY_UNAVAILABLE_ERROR,
+  CREDENTIAL_KEY_LOCKED_ERROR,
   CREDENTIAL_KEY_CHANGED_ERROR,
   CREDENTIAL_LEGACY_UNREADABLE_ERROR
 ]

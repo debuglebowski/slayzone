@@ -200,12 +200,23 @@ export async function loadHubCredentialsKeys(
 export function createHubCredentialsKeySource(
   load: () => Promise<HubCredentialsKeys>,
   opts: { timeoutMs?: number; log?: (line: string) => void } = {}
-): { ready: () => Promise<string | null>; payload: () => string | null } {
+): {
+  ready: () => Promise<string | null>
+  payload: () => string | null
+  /** A key that arrives after `ready()` gave up: sent to the hub already running (L4). */
+  onLate: (listener: (payload: string) => void) => () => void
+} {
   const log = opts.log ?? ((line: string) => console.warn(line))
   let payload: string | null = null
+  let gaveUp = false
+  const lateListeners = new Set<(payload: string) => void>()
   const loaded = load().then(
     (keys) => {
       if (keys.current) payload = JSON.stringify({ current: keys.current, previous: keys.previous })
+      if (gaveUp && payload !== null) {
+        log('[hub-credentials-key] the OS keychain answered — sending the key to the running hub')
+        for (const listener of lateListeners) listener(payload)
+      }
       return payload
     },
     (err: unknown) => {
@@ -221,8 +232,9 @@ export function createHubCredentialsKeySource(
         new Promise<string | null>((resolve) => {
           const t = setTimeout(() => {
             if (payload === null) {
+              gaveUp = true
               log(
-                `[hub-credentials-key] the OS keychain has not answered in ${timeoutMs}ms — the hub starts without its key; integrations can't be saved until the next start`
+                `[hub-credentials-key] the OS keychain has not answered in ${timeoutMs}ms — the hub starts without its key and gets it once the keychain answers`
               )
             }
             resolve(payload)
@@ -230,6 +242,12 @@ export function createHubCredentialsKeySource(
           t.unref?.()
         })
       ]),
-    payload: () => payload
+    payload: () => payload,
+    onLate: (listener) => {
+      lateListeners.add(listener)
+      return () => {
+        lateListeners.delete(listener)
+      }
+    }
   }
 }

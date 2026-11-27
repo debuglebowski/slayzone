@@ -19,6 +19,7 @@ import { ensureIntegrationSchema } from './handlers-store.js'
 import { encryptHubCredential } from './hub-cipher.js'
 import {
   CREDENTIAL_KEY_CHANGED_ERROR,
+  CREDENTIAL_KEY_LOCKED_ERROR,
   CREDENTIAL_KEY_UNAVAILABLE_ERROR,
   CREDENTIAL_LEGACY_UNREADABLE_ERROR,
   credentialReconnectReason
@@ -210,10 +211,26 @@ describe('credential migration pass', () => {
     expect(stored('p')).toBe('plain:ghp_x')
   })
 
-  test('inert with no key: plaintext cannot be replaced, so it is left alone', async () => {
+  test('no key: plaintext cannot be replaced, so it is left alone', async () => {
     seed('p', 'plain:ghp_x')
     const report = await migrateStoredCredentials(h.slayDb)
-    expect(report.skipped).toBe(true)
+    expect(report.migrated).toBe(0)
     expect(stored('p')).toBe('plain:ghp_x')
+  })
+
+  test('L4: desktop with no key yet (keychain locked): "unlock", never "reconnect"; a late key clears it', async () => {
+    setCredentialKeyContext('desktop')
+    const connId = seed(
+      'd',
+      encryptHubCredential({ current: key }, 'integration:credential:d', 'x')
+    )
+    await migrateStoredCredentials(h.slayDb)
+    expect(conn(connId)).toEqual({ enabled: 0, auth_error: CREDENTIAL_KEY_LOCKED_ERROR })
+    expect(CREDENTIAL_KEY_LOCKED_ERROR).toMatch(/keychain/)
+    expect(CREDENTIAL_KEY_LOCKED_ERROR).not.toMatch(/reconnect/i)
+    // The key arrives later in the session (composition reruns the pass).
+    setCredentialKeyRing({ current: key })
+    await migrateStoredCredentials(h.slayDb)
+    expect(conn(connId)).toEqual({ enabled: 1, auth_error: null })
   })
 })

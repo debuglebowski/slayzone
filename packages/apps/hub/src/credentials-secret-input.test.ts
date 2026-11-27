@@ -9,7 +9,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { readCredentialsSecretInput } from './credentials-secret-input.js'
+import { readCredentialsSecretInput, watchCredentialsUpdates } from './credentials-secret-input.js'
+import { execFileSync, spawn } from 'node:child_process'
 
 const SECRET = 'an-operator-credentials-secret-0123456789abcdef'
 const dirs: string[] = []
@@ -56,4 +57,38 @@ describe('readCredentialsSecretInput', () => {
   test('nothing given: none', () => {
     expect(readCredentialsSecretInput({})).toEqual({ secret: null, previous: [], source: 'none' })
   })
+
+  test.skipIf(process.platform === 'win32')(
+    'L4: a key sent later on the still-open pipe reaches the running hub',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'slz-cred-fifo-'))
+      dirs.push(dir)
+      const fifo = join(dir, 'pipe')
+      execFileSync('mkfifo', [fifo])
+      const first = JSON.stringify({ current: null, previous: [] })
+      const later = JSON.stringify({ current: 'L'.repeat(43), previous: ['o'.repeat(43)] })
+      // One writer keeps the pipe open: the first line now, the key a little later.
+      const writer = spawn('sh', [
+        '-c',
+        `{ printf '%s\\n' '${first}'; sleep 0.3; printf '%s\\n' '${later}'; sleep 1; } > "$1"`,
+        'sh',
+        fifo
+      ])
+      const fd = openSync(fifo, 'r')
+      const env: NodeJS.ProcessEnv = { SLAYZONE_HUB_CREDENTIALS_FD: String(fd) }
+      expect(readCredentialsSecretInput(env, { keepOpen: true })).toEqual({
+        secret: null,
+        previous: [],
+        source: 'pipe'
+      })
+      const got = await new Promise((resolve) => {
+        const stop = watchCredentialsUpdates((input) => {
+          stop()
+          resolve(input)
+        })
+      })
+      expect(got).toEqual({ secret: 'L'.repeat(43), previous: ['o'.repeat(43)], source: 'pipe' })
+      writer.kill()
+    }
+  )
 })

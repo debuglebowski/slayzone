@@ -79,6 +79,8 @@ export type SidecarServerOpts = {
    * spawn, so a key unlocked late (a keychain prompt) reaches the next one.
    */
   secretPayload?: () => string | null
+  /** Later keys for the running hub (each written as one more line on its pipe). */
+  secretUpdates?: (send: (payload: string) => void) => () => void
   /**
    * The DB file the side-car will open, DERIVED by the caller (getDatabasePath()
    * — `<ROOT>/storage` + the dev-vs-packaged filename). Diagnostics-only: it is
@@ -507,21 +509,32 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           SLAYZONE_HUB_REQUIRE_LOGIN: '0',
           ...(opts.convexAddress ? { SLAYZONE_HUB_CONVEX_ADDRESS: opts.convexAddress } : {})
         }
-        // The credentials key goes on an inherited pipe (fd 3), written once and
-        // closed: never in the child's environment, where `ps eww` and every process
-        // the hub spawns (git, its hooks, setup scripts) would see it (review M1).
-        const secret = opts.secretPayload?.() ?? null
-        if (secret !== null) childEnv[HUB_CREDENTIALS_ENV.fd] = '3'
+        // The credentials key goes on an inherited pipe (fd 3), never in the child's
+        // environment, where `ps eww` and every process the hub spawns (git, its
+        // hooks, setup scripts) would see it (review M1).
+        // One JSON line per key set: the one known now ({} = none yet), then any key
+        // unlocked later (a keychain prompt answered after the hub started, L4) — the
+        // pipe stays open while `secretUpdates` can still send.
+        const wantsPipe = opts.secretPayload !== undefined
+        if (wantsPipe) childEnv[HUB_CREDENTIALS_ENV.fd] = '3'
         const proc = spawn(opts.execPath, [opts.scriptPath], {
           env: childEnv,
-          stdio: secret !== null ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
+          stdio: wantsPipe ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
         })
-        if (secret !== null) {
+        if (wantsPipe) {
           const pipe = proc.stdio[3] as import('node:stream').Writable | null
           pipe?.on('error', () => {
             /* the child exited before reading: it boots without a key */
           })
-          pipe?.end(secret)
+          pipe?.write(`${opts.secretPayload?.() ?? '{}'}\n`)
+          if (opts.secretUpdates && pipe) {
+            const unsubscribe = opts.secretUpdates((payload) => {
+              if (!pipe.destroyed) pipe.write(`${payload}\n`)
+            })
+            proc.once('exit', unsubscribe)
+          } else {
+            pipe?.end()
+          }
         }
         child = proc
         reaper.track(proc)

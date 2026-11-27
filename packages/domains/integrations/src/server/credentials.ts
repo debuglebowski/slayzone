@@ -14,6 +14,7 @@ import {
 } from './hub-cipher'
 import {
   CREDENTIAL_KEY_CHANGED_ERROR,
+  CREDENTIAL_KEY_LOCKED_ERROR,
   CREDENTIAL_KEY_UNAVAILABLE_ERROR,
   CREDENTIAL_LEGACY_UNREADABLE_ERROR,
   CREDENTIAL_RECONNECT_REASONS
@@ -63,6 +64,52 @@ export function setLegacyCredentialDecryptor(d: LegacyCredentialDecryptor | null
 }
 
 /**
+ * Prefix the desktop puts on the error when safeStorage itself refuses a ciphertext
+ * (another Mac's, a reset keychain item): the row can never be read here, unlike a
+ * bridge that is merely down (review-2 L5). Plain text, so it survives the bridge.
+ */
+const LEGACY_UNDECRYPTABLE_TAG = '[slayzone:legacy-undecryptable]'
+
+/** The row can never be decrypted by this desktop: reconnect replaces it. */
+export class LegacyCredentialUndecryptableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LegacyCredentialUndecryptableError'
+  }
+}
+
+/** Desktop side of the bridge: run safeStorage, tag ITS refusals. */
+export async function decryptLegacyForBridge(
+  decrypt: (encrypted: Buffer) => Promise<{ result: string; shouldReEncrypt: boolean }>,
+  b64: string
+): Promise<{ result: string; shouldReEncrypt: boolean }> {
+  try {
+    return await decrypt(Buffer.from(b64, 'base64'))
+  } catch (err) {
+    throw new Error(
+      `${LEGACY_UNDECRYPTABLE_TAG} ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+}
+
+/** Hub side: the bridge call, with a tagged refusal turned into the typed error. */
+export function legacyDecryptorOverBridge(
+  decryptB64: (b64: string) => Promise<{ result: string; shouldReEncrypt: boolean }>
+): LegacyCredentialDecryptor {
+  return {
+    decrypt: async (encrypted) => {
+      try {
+        return await decryptB64(encrypted.toString('base64'))
+      } catch (err) {
+        if (err instanceof Error && err.message.includes(LEGACY_UNDECRYPTABLE_TAG))
+          throw new LegacyCredentialUndecryptableError(err.message)
+        throw err
+      }
+    }
+  }
+}
+
+/**
  * Who holds this hub's key, so a missing or different key is explained in the user's
  * terms: `desktop` (the app's per-install key in the OS keychain) or `standalone`
  * (derived from the hub's auth secret / an operator's credentials secret, L5).
@@ -75,9 +122,9 @@ export function setCredentialKeyContext(context: CredentialKeyContext): void {
 }
 
 function wrongKeyReason(): string {
-  return keyContext === 'standalone'
-    ? CREDENTIAL_KEY_CHANGED_ERROR
-    : CREDENTIAL_KEY_UNAVAILABLE_ERROR
+  if (keyContext === 'standalone') return CREDENTIAL_KEY_CHANGED_ERROR
+  // No key at all on the desktop = the keychain has not answered: not a reconnect.
+  return keyRing ? CREDENTIAL_KEY_UNAVAILABLE_ERROR : CREDENTIAL_KEY_LOCKED_ERROR
 }
 
 /** Why storing refuses with no key at all — the user's next step, not a config var. */
@@ -155,8 +202,16 @@ async function decryptStored(
   if (!legacyDecryptor) {
     throw new CredentialReconnectRequiredError(CREDENTIAL_LEGACY_UNREADABLE_ERROR)
   }
-  const { result } = await legacyDecryptor.decrypt(Buffer.from(value, 'base64'))
-  return { secret: result, migrate: true }
+  try {
+    const { result } = await legacyDecryptor.decrypt(Buffer.from(value, 'base64'))
+    return { secret: result, migrate: true }
+  } catch (err) {
+    // The keychain refused it for good: reconnect. Anything else (the bridge is
+    // down) stays a plain error, retried later.
+    if (err instanceof LegacyCredentialUndecryptableError)
+      throw new CredentialReconnectRequiredError(CREDENTIAL_LEGACY_UNREADABLE_ERROR)
+    throw err
+  }
 }
 
 export async function readCredential(db: SlayzoneDb, ref: string): Promise<string> {
@@ -252,7 +307,9 @@ export async function migrateStoredCredentials(
   } = {}
 ): Promise<CredentialMigrationReport> {
   const report: CredentialMigrationReport = { skipped: false, migrated: 0, reconnect: 0, failed: 0 }
-  if (!hubIntegrationsEnabled() || !keyRing) return { ...report, skipped: true }
+  // Without a key it still runs, marking rows it cannot read (the keychain is locked)
+  // but writing nothing; a key that arrives later runs it again (composition).
+  if (!hubIntegrationsEnabled()) return { ...report, skipped: true }
   const prefix = toSettingKey('')
   const rows = (await db
     .prepare('SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?')
@@ -271,8 +328,8 @@ export async function migrateStoredCredentials(
       let readable = true
       try {
         const { secret, migrate } = await decryptStored(ref, value)
-        if (migrate && value.startsWith(PLAINTEXT_PREFIX)) await flagCompaction(db)
-        if (migrate) {
+        if (migrate && keyRing && value.startsWith(PLAINTEXT_PREFIX)) await flagCompaction(db)
+        if (migrate && keyRing) {
           await db
             .prepare('UPDATE settings SET value = ? WHERE key = ? AND value = ?')
             .run(encrypt(ref, secret), key, value)
@@ -308,7 +365,7 @@ export async function migrateStoredCredentials(
   const pending = await db
     .prepare('SELECT 1 AS one FROM settings WHERE key = ?')
     .get(COMPACTION_PENDING_SETTING)
-  if (pending && opts.compact) {
+  if (pending && opts.compact && keyRing) {
     await opts.compact()
     await db.prepare('DELETE FROM settings WHERE key = ?').run(COMPACTION_PENDING_SETTING)
   }

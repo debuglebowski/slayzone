@@ -10,6 +10,8 @@ import { afterEach, describe, expect, test } from 'vitest'
 import {
   CREDENTIAL_RECONNECT_REQUIRED,
   credentialNeedsReconnect,
+  decryptLegacyForBridge,
+  legacyDecryptorOverBridge,
   type LegacyCredentialDecryptor,
   readCredential,
   setCredentialKeyContext,
@@ -243,5 +245,37 @@ describe('credential store', () => {
     expect(credentialNeedsReconnect('plain:x')).toBe(false)
     expect(credentialNeedsReconnect(legacyValue('x'))).toBe(false)
     expect(credentialNeedsReconnect(encryptHubCredential({ current: k1 }, 'k', 'x'))).toBe(false)
+  })
+
+  test('L5: a legacy row the keychain cannot decrypt asks to reconnect (row kept)', async () => {
+    const ref = newRef()
+    const value = legacyValue('lin_other_mac')
+    db.seed(settingKey(ref), value)
+    setCredentialKeyRing({ current: k1 })
+    // As the desktop answers over the bridge: safeStorage threw, tagged as such.
+    setLegacyCredentialDecryptor(
+      legacyDecryptorOverBridge(() =>
+        decryptLegacyForBridge(async () => {
+          throw new Error('Error while decrypting the ciphertext provided to safeStorage')
+        }, 'AAAA')
+      )
+    )
+    const err = await errorOf(readCredential(db as never, ref))
+    expect(err).toMatchObject({ code: CREDENTIAL_RECONNECT_REQUIRED })
+    expect((err as Error).message).toMatch(/keychain/)
+    expect(db.raw(settingKey(ref))).toBe(value)
+  })
+
+  test('L5: the bridge being down is NOT a reconnect: a plain error, retried later', async () => {
+    const ref = newRef()
+    db.seed(settingKey(ref), legacyValue('x'))
+    setCredentialKeyRing({ current: k1 })
+    setLegacyCredentialDecryptor(
+      legacyDecryptorOverBridge(async () => {
+        throw new Error('desktop bridge is not connected')
+      })
+    )
+    const err = await errorOf(readCredential(db as never, ref))
+    expect(err).not.toMatchObject({ code: CREDENTIAL_RECONNECT_REQUIRED })
   })
 })

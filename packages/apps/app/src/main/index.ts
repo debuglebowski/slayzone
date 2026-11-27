@@ -620,7 +620,7 @@ import { setTelemetryEvents } from '@slayzone/telemetry/server'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
 import { createHubCredentialsKeySource, loadHubCredentialsKeys } from './hub-credentials-key'
 import { sidecarFailureMessage } from './sidecar-failure-message'
-import { resetSyncFlags } from '@slayzone/integrations/server'
+import { decryptLegacyForBridge, resetSyncFlags } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
 import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handlers'
@@ -2688,7 +2688,9 @@ app
                   const c = getSafeStorageCipher()
                   if (!c)
                     throw new Error('OS secure credential storage is unavailable on this machine')
-                  return c.decryptString(Buffer.from(b64, 'base64'))
+                  // safeStorage's own refusal is tagged: the hub then asks to reconnect
+                  // instead of retrying forever (review-2 L5).
+                  return decryptLegacyForBridge((buf) => c.decryptString(buf), b64)
                 }
               },
               floatingAgent: {
@@ -2805,6 +2807,8 @@ app
               convexAddress: convexAddressFromUrl(APP_CONVEX_URL),
               // Never in env (review M1): written on an inherited pipe at each spawn.
               secretPayload: hubCredentialsKeys.payload,
+              // A key the keychain releases after the hub started reaches it at once.
+              secretUpdates: hubCredentialsKeys.onLate,
               env: {
                 ...process.env,
                 // The sidecar IS this app's hub, so hand it this app's own

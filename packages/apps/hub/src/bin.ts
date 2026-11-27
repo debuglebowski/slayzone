@@ -1,7 +1,7 @@
 // First import: NODE_ENV defaults to production before any library reads it.
 import './default-node-env.js'
 import { canPrompt, runInteractiveConfig } from '@slayzone/platform/config-prompt'
-import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
+import { watchParent } from '@slayzone/platform/parent-watch'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { getHubConfigFilePath, loadHubConfigFile } from '@slayzone/platform/slayzone-config'
 import { bootRefusalRule } from './boot-rules.js'
@@ -9,6 +9,7 @@ import { runBreakGlassCommand } from './break-glass-command.js'
 import { HUB_RESTART_EXIT_CODE, setHubRestartHandler } from './hub-restart.js'
 import { takeCredentialsSecretInput } from './credentials-secret-input.js'
 import { startServer } from './server.js'
+import { createShutdown } from './hub-shutdown.js'
 import { applyStandaloneHubConfig } from './standalone-config.js'
 import type { ServerHandle } from './index.js'
 
@@ -78,49 +79,14 @@ async function main(): Promise<void> {
       `(data=${handle.dataRoot} db=${handle.dbPath})\n`
   )
 
-  let shuttingDown = false
-  /** `exitCode` 75 = a planned restart (hub-restart.ts): the process manager starts it again. */
-  const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
-    if (shuttingDown) return
-    shuttingDown = true
-    process.stdout.write(`[slayzone-server] shutting down (${reason})\n`)
-    // Supervised: bounded. A stop that hangs — a client connection the hub's HTTP
-    // server waits on before it closes (a `slay` subscription, a web-shell tab) —
-    // keeps the process alive; once the app is gone nothing else would end it, and
-    // the hub would be orphaned holding the port and the database the next app's
-    // hub needs. While the app lives, its supervisor's SIGKILL comes only after this
-    // deadline (a backstop for a loop too blocked to run it), so the stop gets the
-    // full deadline either way. Unref'd: a clean stop still exits the moment it
-    // completes.
-    // A restart (exit 75) is bounded on EVERY hub: a server hub that hung here would
-    // be a live process to systemd/launchd, so nothing would ever start it again and
-    // the staged restore would wait forever. Exiting 75 late is safe — the restore
-    // marker is durable and the database is swapped at the next start anyway.
-    if (exitCode === HUB_RESTART_EXIT_CODE) {
-      setTimeout(() => {
-        process.stderr.write(
-          `[slayzone-server] restart still stopping after ${SUPERVISED_STOP_DEADLINE_MS}ms — exiting ${HUB_RESTART_EXIT_CODE}\n`
-        )
-        process.exit(HUB_RESTART_EXIT_CODE)
-      }, SUPERVISED_STOP_DEADLINE_MS).unref()
-    } else if (supervised) {
-      setTimeout(() => {
-        process.stderr.write(
-          `[slayzone-server] still running ${SUPERVISED_STOP_DEADLINE_MS}ms after stop began — forcing exit\n`
-        )
-        process.exit(1)
-      }, SUPERVISED_STOP_DEADLINE_MS).unref()
-    }
-    try {
-      await handle.stop()
-      process.exit(exitCode)
-    } catch (err) {
-      process.stderr.write(
-        `[slayzone-server] shutdown error: ${err instanceof Error ? err.stack : String(err)}\n`
-      )
-      process.exit(1)
-    }
-  }
+  // How this process ends (hub-shutdown.ts): exit 75 for a restart, bounded stops.
+  const shutdown = createShutdown({
+    stop: () => handle.stop(),
+    supervised,
+    proc: process,
+    // stdout, as before: the supervisor and tests read the shutdown line there.
+    log: (line) => process.stdout.write(`${line}\n`)
+  })
 
   // A staged restore (backup.ts) asks for a restart: stop cleanly, exit 75, and the
   // desktop supervisor, launchd or systemd starts the hub again, which swaps the

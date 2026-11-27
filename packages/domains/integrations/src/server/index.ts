@@ -27,6 +27,8 @@ export { getAdapter, getRegisteredProviders, registerAdapter } from './adapters'
 export type { ProviderAdapter, NormalizedIssue, ExternalGroup, ExternalScope } from './adapters'
 export {
   CREDENTIAL_RECONNECT_REQUIRED,
+  decryptLegacyForBridge,
+  legacyDecryptorOverBridge,
   migrateStoredCredentials,
   setCredentialKeyContext,
   setCredentialKeyRing,

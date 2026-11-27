@@ -249,8 +249,10 @@ run_harness packages/apps/hub/src/hub-local-path-reads.test.ts
 # process) and that restore is refused on a hub the client merely connects to.
 run_harness packages/apps/hub/src/backup.test.ts
 run_harness packages/apps/hub/src/credentials-key.test.ts
+run_harness packages/apps/hub/src/credential-compaction.test.ts
 run_harness packages/apps/hub/src/credentials-secret-input.test.ts
 run_harness packages/apps/hub/src/hub-restart.test.ts
+run_harness packages/apps/hub/src/hub-shutdown.test.ts
 run_harness packages/apps/hub/src/restore-swap.test.ts
 run_harness packages/apps/hub/src/restore-restart.test.ts
 run_harness packages/apps/hub/src/chat-backup.test.ts

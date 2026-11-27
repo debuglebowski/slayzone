@@ -1,4 +1,4 @@
-import { closeSync, readFileSync } from 'node:fs'
+import { closeSync, createReadStream, readSync } from 'node:fs'
 import { HUB_CREDENTIALS_ENV } from '@slayzone/platform/hub-switches'
 
 /**
@@ -20,38 +20,103 @@ export interface CredentialsSecretInput {
   source: 'pipe' | 'env' | 'none'
 }
 
-export function readCredentialsSecretInput(env: NodeJS.ProcessEnv): CredentialsSecretInput {
+function parseKeys(line: string): CredentialsSecretInput {
+  try {
+    const parsed = JSON.parse(line) as { current?: unknown; previous?: unknown }
+    const current = typeof parsed.current === 'string' && parsed.current ? parsed.current : null
+    const previous = Array.isArray(parsed.previous)
+      ? parsed.previous.filter((p): p is string => typeof p === 'string' && p.length > 0)
+      : []
+    return { secret: current, previous, source: 'pipe' }
+  } catch {
+    return { secret: null, previous: [], source: 'pipe' }
+  }
+}
+
+/** The pipe stays open after the first line (L4): later lines are later keys. */
+let openPipe: { fd: number; rest: string } | null = null
+
+/**
+ * Read the first line (or everything up to EOF) from `fd`, synchronously — the
+ * desktop writes it at spawn. Returns what came after it, unparsed.
+ */
+function readFirstLine(fd: number): { line: string; rest: string; eof: boolean } {
+  const chunk = Buffer.alloc(4096)
+  let text = ''
+  for (;;) {
+    let n = 0
+    try {
+      n = readSync(fd, chunk, 0, chunk.length, null)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EAGAIN') continue
+      return { line: text, rest: '', eof: true }
+    }
+    if (n === 0) return { line: text, rest: '', eof: true }
+    text += chunk.subarray(0, n).toString('utf8')
+    const nl = text.indexOf('\n')
+    if (nl >= 0) return { line: text.slice(0, nl), rest: text.slice(nl + 1), eof: false }
+  }
+}
+
+export function readCredentialsSecretInput(
+  env: NodeJS.ProcessEnv,
+  opts: { keepOpen?: boolean } = {}
+): CredentialsSecretInput {
   const fdVar = env[HUB_CREDENTIALS_ENV.fd]
   const secretVar = env[HUB_CREDENTIALS_ENV.secret]
   delete env[HUB_CREDENTIALS_ENV.fd]
   delete env[HUB_CREDENTIALS_ENV.secret]
   if (fdVar !== undefined && /^\d+$/.test(fdVar)) {
     const fd = Number(fdVar)
-    let raw = ''
-    try {
-      raw = readFileSync(fd, 'utf8')
-    } catch {
-      /* not readable: no key this session */
-    } finally {
+    const { line, rest, eof } = readFirstLine(fd)
+    if (opts.keepOpen && !eof) {
+      openPipe = { fd, rest }
+    } else {
       try {
         closeSync(fd)
       } catch {
         /* already closed */
       }
     }
-    try {
-      const parsed = JSON.parse(raw) as { current?: unknown; previous?: unknown }
-      const current = typeof parsed.current === 'string' && parsed.current ? parsed.current : null
-      const previous = Array.isArray(parsed.previous)
-        ? parsed.previous.filter((p): p is string => typeof p === 'string' && p.length > 0)
-        : []
-      return { secret: current, previous, source: 'pipe' }
-    } catch {
-      return { secret: null, previous: [], source: 'pipe' }
-    }
+    return parseKeys(line)
   }
   if (secretVar) return { secret: secretVar, previous: [], source: 'env' }
   return { secret: null, previous: [], source: 'none' }
+}
+
+/**
+ * Keys the desktop sends AFTER the hub started (a keychain prompt answered late, L4):
+ * one JSON line each, on the pipe the first line came on. Returns the stop function.
+ * Nothing to watch when the keys came another way or the pipe already ended.
+ */
+export function watchCredentialsUpdates(
+  listener: (input: CredentialsSecretInput) => void
+): () => void {
+  const pipe = openPipe
+  if (!pipe) return () => {}
+  openPipe = null
+  let buffered = pipe.rest
+  const stream = createReadStream('', { fd: pipe.fd, autoClose: true, encoding: 'utf8' })
+  const flush = (): void => {
+    for (;;) {
+      const nl = buffered.indexOf('\n')
+      if (nl < 0) return
+      const line = buffered.slice(0, nl)
+      buffered = buffered.slice(nl + 1)
+      if (line.trim()) listener(parseKeys(line))
+    }
+  }
+  stream.on('data', (chunk) => {
+    buffered += chunk
+    flush()
+  })
+  stream.on('error', () => {
+    /* the desktop went away: nothing more will come */
+  })
+  flush()
+  return () => {
+    stream.destroy()
+  }
 }
 
 let taken: CredentialsSecretInput | null = null
@@ -61,6 +126,6 @@ let taken: CredentialsSecretInput | null = null
  * before the server starts; composition gets the same answer).
  */
 export function takeCredentialsSecretInput(): CredentialsSecretInput {
-  taken ??= readCredentialsSecretInput(process.env)
+  taken ??= readCredentialsSecretInput(process.env, { keepOpen: true })
   return taken
 }

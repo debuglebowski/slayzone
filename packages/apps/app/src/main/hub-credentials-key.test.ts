@@ -170,9 +170,13 @@ describe('L6: the hub never waits on a keychain prompt', () => {
       { timeoutMs: 20, log: () => {} }
     )
     expect(await source.ready()).toBeNull()
+    const late: string[] = []
+    source.onLate((payload) => late.push(payload))
     unlock({ current: 'k'.repeat(43), previous: [] })
     await new Promise((r) => setTimeout(r, 0))
     expect(JSON.parse(source.payload()!)).toEqual({ current: 'k'.repeat(43), previous: [] })
+    // …and to the hub already running (review-2 L4), not only the next start.
+    expect(late.map((p) => JSON.parse(p))).toEqual([{ current: 'k'.repeat(43), previous: [] }])
   })
 
   it('answered in time: the first start gets the key', async () => {

@@ -47,7 +47,8 @@ import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
 import { createItemFaultService, recordRefusedRestore } from './item-faults'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import { resolveCredentialKeyRing } from './credentials-key'
-import { takeCredentialsSecretInput } from './credentials-secret-input'
+import { takeCredentialsSecretInput, watchCredentialsUpdates } from './credentials-secret-input'
+import { compactAfterCredentialMigration } from './credential-compaction'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { detectHubRespawner, hasHubRestartHandler, requestHubRestart } from './hub-restart'
 import type { ApplyRestoreResult } from './restore-swap'
@@ -279,6 +280,7 @@ import {
   migrateStoredCredentials,
   setCredentialKeyContext,
   setCredentialKeyRing,
+  legacyDecryptorOverBridge,
   setLegacyCredentialDecryptor,
   setIntegrationOps
 } from '@slayzone/integrations/server'
@@ -1664,29 +1666,39 @@ export function composeServer(opts: {
   )
   if (bridge) {
     const hostCipher = bridge.appDeps.credentialCipher
-    setLegacyCredentialDecryptor({
-      decrypt: (encrypted) => hostCipher.decryptStringFromB64(encrypted.toString('base64'))
-    })
+    setLegacyCredentialDecryptor(
+      legacyDecryptorOverBridge((b64) => hostCipher.decryptStringFromB64(b64))
+    )
   } else {
     setLegacyCredentialDecryptor(null)
   }
-  bootBestEffort('credential-migration', async () => {
+  const runCredentialMigration = async (): Promise<void> => {
     const report = await migrateStoredCredentials(db, {
       ledger: hubFaults,
-      // Re-encrypting a `plain:` row leaves its old bytes in the file until a VACUUM
-      // rewrites every page and the WAL is truncated (content-erasure compaction.ts).
-      compact: async () => {
-        await db.exec('PRAGMA secure_delete=ON')
-        await db.exec('VACUUM')
-        const checkpoint = await db.all<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
-        if (checkpoint.some((row) => row.busy)) throw new Error('WAL checkpoint is busy')
-      }
+      compact: () => compactAfterCredentialMigration(db, (line) => console.log(line))
     })
     if (report.migrated || report.reconnect || report.failed) {
       console.log(
         `[hub] credential migration: ${report.migrated} re-encrypted, ${report.reconnect} need reconnect, ${report.failed} failed`
       )
     }
+  }
+  bootBestEffort('credential-migration', runCredentialMigration)
+  // A key the desktop could unlock only after this hub started (a keychain prompt
+  // answered late, review-2 L4): use it now — reads work again, and the pass reruns to
+  // clear the "unlock" marks and migrate what it could not before.
+  watchCredentialsUpdates((input) => {
+    if (!input.secret) return
+    setCredentialKeyRing(
+      resolveCredentialKeyRing({
+        secret: input.secret,
+        previousSecrets: input.previous,
+        hubAuthSecret,
+        devAuthSecret: DEV_HUB_AUTH_SECRET
+      })
+    )
+    console.log('[hub] credential key received from the desktop app')
+    bootBestEffort('credential-migration-late-key', runCredentialMigration)
   })
 
   // --- Processes ---------------------------------------------------------------
