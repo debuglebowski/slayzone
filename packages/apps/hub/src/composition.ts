@@ -47,6 +47,9 @@ import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
 import { createItemFaultService } from './item-faults'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import { resolveCredentialKeyRing } from './credentials-key'
+import { resolveHubName } from '@slayzone/platform/slayzone-config'
+import { detectHubRespawner, hasHubRestartHandler, requestHubRestart } from './hub-restart'
+import type { ApplyRestoreResult } from './restore-swap'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import {
@@ -531,6 +534,8 @@ export type ServerComposition = {
 export function composeServer(opts: {
   db: SlayzoneDb
   dataRoot: string
+  /** What this boot did with a staged restore (server.ts, before the db opened). */
+  lastRestore?: ApplyRestoreResult
   /** Standalone (non-supervised) boot: hydrate the process registry and ensure
    *  aux schemas. Supervised (dark, Electron-owned DB): skip — the host did. */
   standalone: boolean
@@ -723,16 +728,24 @@ export function composeServer(opts: {
   setAgentLifecycleEvents(agentLifecycleEvents)
   setAuthEvents(authEvents)
 
-  // Backup lives with the database now. `supervised` gates restore: on a hub a
-  // client merely connects to, a whole-DB overwrite plus an app relaunch is not
-  // something one client should be able to do to everyone.
+  // Backup lives with the database. Restore is staged here and applied at the next
+  // boot (restore-swap.ts); the hub restarts itself to get there (hub-restart.ts), so
+  // it works on every hub. Who may call it is the admin gate (api admin-policy.ts).
+  const respawner = detectHubRespawner({
+    supervised: !opts.standalone,
+    name: resolveHubName(),
+    env: process.env
+  })
   const backupOps = buildBackupOps({
     db,
     dataRoot,
     dbPath: getDatabasePathFromEnv(),
-    supervised: !opts.standalone,
-    closeDb: () => db.close(),
-    appRelaunch: () => bridge?.appDeps.appRelaunch(),
+    lastRestore: opts.lastRestore ?? { status: 'none' },
+    restart: {
+      available: hasHubRestartHandler,
+      respawner: () => respawner,
+      request: () => void requestHubRestart('restore')
+    },
     shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
   })
   setBackupOps(backupOps)
@@ -1705,8 +1718,8 @@ export function composeServer(opts: {
   } else {
     const silentEmitter = new EventEmitter()
     setAppDeps({
-      // No desktop to relaunch when standalone — restore is refused here anyway
-      // (see buildBackupOps `supervised`), so this should never be reached.
+      // No hub caller left: restore restarts the hub itself (hub-restart.ts), not the
+      // desktop. Removable with the bridge slot (task 230df85c).
       appRelaunch: stub('appRelaunch'),
       // Never reached: the only caller is gated on `bridge`, which is null here.
       diagnosticsConfigChanged: stub('diagnosticsConfigChanged'),

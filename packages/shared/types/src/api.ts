@@ -267,8 +267,14 @@ export type {
   LocalComputerStatus
 } from '@slayzone/platform/local-computer-status'
 
-import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
-export type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
+import type { BackupInfo, BackupSettings, RestoreResult } from '@slayzone/settings/shared'
+export type {
+  BackupInfo,
+  BackupSettings,
+  HubRespawner,
+  RestoreResult,
+  RestoreStatus
+} from '@slayzone/settings/shared'
 
 import type { LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from '@slayzone/usage-analytics/shared'
@@ -1647,7 +1653,7 @@ export interface _LegacyElectronAPI {
     create: (name?: string) => Promise<BackupInfo>
     rename: (filename: string, name: string) => Promise<void>
     delete: (filename: string) => Promise<void>
-    restore: (filename: string) => Promise<void>
+    restore: (filename: string) => Promise<RestoreResult>
     getSettings: () => Promise<BackupSettings>
     setSettings: (settings: Partial<BackupSettings>) => Promise<BackupSettings>
     revealInFinder: () => Promise<void>

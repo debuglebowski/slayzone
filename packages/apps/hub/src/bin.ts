@@ -6,6 +6,7 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { getHubConfigFilePath, loadHubConfigFile } from '@slayzone/platform/slayzone-config'
 import { bootRefusalRule } from './boot-rules.js'
 import { runBreakGlassCommand } from './break-glass-command.js'
+import { HUB_RESTART_EXIT_CODE, setHubRestartHandler } from './hub-restart.js'
 import { startServer } from './server.js'
 import { applyStandaloneHubConfig } from './standalone-config.js'
 import type { ServerHandle } from './index.js'
@@ -73,7 +74,8 @@ async function main(): Promise<void> {
   )
 
   let shuttingDown = false
-  const shutdown = async (reason: string): Promise<void> => {
+  /** `exitCode` 75 = a planned restart (hub-restart.ts): the process manager starts it again. */
+  const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
     if (shuttingDown) return
     shuttingDown = true
     process.stdout.write(`[slayzone-server] shutting down (${reason})\n`)
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
     }
     try {
       await handle.stop()
-      process.exit(0)
+      process.exit(exitCode)
     } catch (err) {
       process.stderr.write(
         `[slayzone-server] shutdown error: ${err instanceof Error ? err.stack : String(err)}\n`
@@ -104,6 +106,10 @@ async function main(): Promise<void> {
     }
   }
 
+  // A staged restore (backup.ts) asks for a restart: stop cleanly, exit 75, and the
+  // desktop supervisor, launchd or systemd starts the hub again, which swaps the
+  // backup in before opening the database (restore-swap.ts).
+  setHubRestartHandler((reason) => void shutdown(`restart (${reason})`, HUB_RESTART_EXIT_CODE))
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
   process.on('SIGINT', () => void shutdown('SIGINT'))
 

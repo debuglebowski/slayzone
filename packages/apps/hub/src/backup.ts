@@ -9,7 +9,21 @@ import {
   forEachIsolated,
   isStorageFatal
 } from '@slayzone/platform/isolation'
-import type { BackupInfo, BackupSettings } from '@slayzone/types'
+import type { BackupInfo, BackupSettings, RestoreResult, RestoreStatus } from '@slayzone/types'
+import { securityEvent } from '@slayzone/platform/security-log'
+import { LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
+import type { HubRespawner } from './hub-restart'
+import {
+  ACTIVE_MOVE_QUERIES,
+  type ApplyRestoreResult,
+  pendingRestore,
+  RestoreRefusedError,
+  stageRestore,
+  validateRestoreSource
+} from './restore-swap'
+
+/** This hub process. A client that saw another id knows the hub restarted. */
+const HUB_BOOT_ID = randomUUID()
 import {
   createArtifactBackupProtection,
   type ArtifactBackupProtection
@@ -19,10 +33,9 @@ import {
  * Backup, owned by the process that owns the database.
  *
  * `db.backup()` snapshots a LIVE connection, so this had to follow the connection
- * when schema ownership moved here. It lived in `apps/app/src/main` behind eight
- * AppDeps slots; its real Electron surface is two calls — `app.relaunch()` and
- * `shell.openPath()` — both injected below. A standalone hub had no backup at all
- * before this (the slots were fail-loud stubs), so the move turns the feature on.
+ * when schema ownership moved here. Its one Electron call, `shell.openPath()`, is
+ * injected. Restore no longer relaunches the desktop app: the hub stages it and
+ * restarts ITSELF (restore-swap.ts, hub-restart.ts), so it works on every hub.
  *
  * Everything ambient in the original is a parameter now. The db handle used to be
  * a module-level `_db` assigned as a side effect of `buildBackupOps`, and the paths
@@ -71,8 +84,11 @@ const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
 // now, `slayzone` / `slayzone.dev` before the main DB was renamed. Backups made under
 // the old prefix are the user's safety net and must keep listing, so `.data` is optional.
 // `slayzone.auth.*` and `slayzone.diagnostics.*` deliberately do not match.
+// `restore` = the copy of the current data taken just before a restore replaced it.
 const BACKUP_REGEX =
-  /^slayzone(?:\.dev)?(?:\.data)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration)\.sqlite$/
+  /^slayzone(?:\.dev)?(?:\.data)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration|restore)\.sqlite$/
+
+type BackupType = BackupInfo['type']
 
 export type BackupDeps = {
   sanitizeSnapshot?: (path: string) => Promise<void>
@@ -82,16 +98,22 @@ export type BackupDeps = {
   dataRoot: string
   /** The live database file this hub opened. */
   dbPath: string
+  /** What this boot did with a staged restore (server.ts applyPendingRestore). */
+  lastRestore?: ApplyRestoreResult
+  /** Newest schema this build runs; a newer backup is refused. Default: this build's. */
+  latestVersion?: number
   /**
-   * Supervised = this hub is the desktop app's own side-car. Restore is refused
-   * when false: it overwrites the whole database and relaunches the desktop, and
-   * on a hub a client merely connects to, that would silently overwrite everyone's
-   * data with semantics ("relaunch") that do not apply to a server it does not run.
+   * How the hub restarts itself once a restore is staged (hub-restart.ts). `available`
+   * is false for a hub embedded without an entrypoint: the restore then waits for its
+   * next start. `respawner` says whether that start is automatic.
    */
-  supervised: boolean
-  /** Close this hub's own connection before the file is overwritten. */
-  closeDb: () => Promise<void>
-  appRelaunch: () => void
+  restart: {
+    available: () => boolean
+    respawner: () => HubRespawner
+    request: () => void
+    /** Lets the restore's reply reach the client before the hub stops. */
+    delayMs?: number
+  }
   shellOpenPath: (p: string) => void
 }
 
@@ -117,9 +139,7 @@ function syncBackupDirectory(dir: string) {
   }
 }
 
-function parseBackupFilename(
-  filename: string
-): { timestamp: Date; type: 'auto' | 'manual' | 'migration' } | null {
+function parseBackupFilename(filename: string): { timestamp: Date; type: BackupType } | null {
   const match = filename.match(BACKUP_REGEX)
   if (!match) return null
   const isoStr = match[1].replace(
@@ -128,7 +148,7 @@ function parseBackupFilename(
   )
   const timestamp = new Date(isoStr)
   if (isNaN(timestamp.getTime())) return null
-  return { timestamp, type: match[2] as 'auto' | 'manual' | 'migration' }
+  return { timestamp, type: match[2] as BackupType }
 }
 
 // Backup display names live as a JSON map in `settings.backup_names`.
@@ -201,6 +221,18 @@ function resolveInsideBackups(dataRoot: string, filename: string): string {
   return containedPath(backupsDir(dataRoot), filename)
 }
 
+/** Unfinished moves in the live database (restore-swap.ts ACTIVE_MOVE_QUERIES). */
+async function countActiveMovesAsync(db: SlayzoneDb): Promise<number> {
+  let n = 0
+  for (const [table, sql] of Object.entries(ACTIVE_MOVE_QUERIES)) {
+    const exists = await db
+      .prepare("SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table)
+    if (exists) n += ((await db.prepare(sql).get()) as { n: number }).n
+  }
+  return n
+}
+
 export function buildBackupOps(deps: BackupDeps) {
   const { db, dataRoot } = deps
   collectAbandonedHubSnapshots(dataRoot)
@@ -224,7 +256,10 @@ export function buildBackupOps(deps: BackupDeps) {
     }
   }
 
-  const createSnapshot = async (type: 'auto' | 'manual', name?: string): Promise<BackupInfo> => {
+  const createSnapshot = async (
+    type: 'auto' | 'manual' | 'restore',
+    name?: string
+  ): Promise<BackupInfo> => {
     let filename: string, destPath: string
     do {
       lastSnapshotAt = Math.max(Date.now(), lastSnapshotAt + 1)
@@ -337,34 +372,53 @@ export function buildBackupOps(deps: BackupDeps) {
   }
 
   /**
-   * ORDER IS LOAD-BEARING AND IRREVERSIBLE.
-   *
-   * The relaunch kills this process (the side-car is the desktop's child), so
-   * anything sequenced after it may simply not run. Close the connection before
-   * overwriting the file it points at, drop the stale -wal/-shm (a `db.backup()`
-   * artifact is self-contained, so leaving them would corrupt the restore), and
-   * relaunch LAST.
+   * Restore = validate, fence, keep a copy of the current data, stage, then restart.
+   * Nothing here touches the live file: the next boot swaps it in before the
+   * database is opened (restore-swap.ts applyPendingRestore). Every refusal comes
+   * before the fence, so a refused restore leaves the hub exactly as it was.
    */
-  const restore = async (filename: string): Promise<void> => {
-    if (!deps.supervised) {
+  const restore = async (filename: string): Promise<RestoreResult> => {
+    const backupPath = resolveInsideBackups(dataRoot, filename)
+    if (restoring) throw new Error('A restore is already in progress on this hub')
+    try {
+      validateRestoreSource(backupPath, deps.latestVersion ?? LATEST_MIGRATION_VERSION)
+    } catch (err) {
+      if (err instanceof RestoreRefusedError) throw new Error(err.message)
+      throw err
+    }
+    if ((await countActiveMovesAsync(db)) > 0) {
       throw new Error(
-        'Restore is only available on your local hub — it overwrites the entire database and restarts the app.'
+        'A move is in progress on this hub — finish or cancel it before restoring a backup.'
       )
     }
-    const backupPath = resolveInsideBackups(dataRoot, filename)
-    if (!fs.existsSync(backupPath)) throw new Error('Backup file not found')
 
     stopAuto()
     restoring = true
-    await Promise.all(creations)
-    await protection.close()
-    await deps.closeDb()
-    fs.copyFileSync(backupPath, deps.dbPath)
-    for (const suffix of DB_SUFFIXES) {
-      const sidecarFile = `${deps.dbPath}${suffix}`
-      if (fs.existsSync(sidecarFile)) fs.unlinkSync(sidecarFile)
+    let pre: BackupInfo
+    try {
+      await Promise.all(creations)
+      const names = await getBackupNames(db)
+      pre = await createSnapshot('restore', `Before restoring "${names[filename] || filename}"`)
+      stageRestore({ dataRoot, backupFilename: filename })
+      securityEvent({
+        event: 'hub.restore',
+        outcome: 'success',
+        targetKind: 'hub',
+        detail: { phase: 'staged', backup: filename, preRestoreBackup: pre.filename }
+      })
+    } catch (err) {
+      // Never staged: unfence, the hub carries on as before.
+      restoring = false
+      await startAuto()
+      throw err
     }
-    deps.appRelaunch()
+    const restarting = deps.restart.available()
+    if (restarting) setTimeout(() => deps.restart.request(), deps.restart.delayMs ?? 500)
+    return {
+      restarting,
+      respawner: deps.restart.respawner(),
+      preRestoreBackup: pre.filename
+    }
   }
 
   return {
@@ -377,6 +431,16 @@ export function buildBackupOps(deps: BackupDeps) {
     },
     delete: remove,
     restore,
+    restoreStatus: async (): Promise<RestoreStatus> => {
+      const pending = pendingRestore(dataRoot)
+      const last = deps.lastRestore
+      return {
+        bootId: HUB_BOOT_ID,
+        respawner: deps.restart.respawner(),
+        pending: pending ? { backup: pending.backup } : null,
+        lastRestore: !last || last.status === 'none' ? null : last
+      }
+    },
     getSettings: (): Promise<BackupSettings> => getBackupSettings(db),
     setSettings: async (partial: Partial<BackupSettings>): Promise<BackupSettings> => {
       const updated = await setBackupSettings(db, partial)

@@ -8,6 +8,9 @@ import { HUB_DYNAMIC_PORT_RANGE } from '@slayzone/platform/paths'
 import { SUPERVISED_STOP_SIGKILL_GRACE_MS } from '@slayzone/platform/parent-watch'
 import { createChildReaper } from './child-reaper'
 
+/** The hub's "start me again" exit code (apps/hub hub-restart.ts HUB_RESTART_EXIT_CODE). */
+const HUB_RESTART_EXIT_CODE = 75
+
 /**
  * Supervises the @slayzone/hub side-car subprocess.
  *
@@ -541,6 +544,16 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
             return
           }
           const wasReady = health === 'ready'
+          if (code === HUB_RESTART_EXIT_CODE) {
+            // The hub asked to be started again (a staged backup restore, which it
+            // swaps in before opening its database). Not a crash: no backoff, a fresh
+            // budget, the same sticky port.
+            opts.logger(`[supervisor] sidecar exited code=${code} — planned restart`)
+            attempt = 0
+            health = 'restarting'
+            spawnChild()
+            return
+          }
           opts.logger(`[supervisor] sidecar exited code=${code} signal=${signal}`)
           if (wasReady) {
             // Crash after a healthy run — restart immediately, no backoff, on

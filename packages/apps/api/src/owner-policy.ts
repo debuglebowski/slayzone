@@ -1635,6 +1635,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.backup.list': none(BACKUP),
   'app.backup.rename': none(BACKUP),
   'app.backup.restore': none(BACKUP),
+  'app.backup.restoreStatus': none(BACKUP),
   'app.backup.revealInFinder': none(BACKUP),
   'app.backup.setSettings': none(BACKUP),
   'app.exportImport.import': none(IMPORT),

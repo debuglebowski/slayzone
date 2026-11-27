@@ -38,9 +38,7 @@ async function fixture() {
     db,
     dataRoot: dir,
     dbPath: join(dir, 'slayzone.data.sqlite'),
-    supervised: true,
-    closeDb: async () => {},
-    appRelaunch: () => {},
+    restart: { available: () => false, respawner: () => null, request: () => {} },
     shellOpenPath: () => {}
   }
   const ops = buildBackupOps(deps)
@@ -117,7 +115,7 @@ test('deleting during pin reconstruction cannot resurrect deleted backup pins', 
   }
 })
 
-test('restore keeps failed-reconstruction guard until the live connection closes', async () => {
+test('restore keeps the failed-reconstruction guard until the hub exits', async () => {
   const f = await fixture()
   const backup = await f.ops.create()
   await f.edit('B')
@@ -135,15 +133,7 @@ test('restore keeps failed-reconstruction guard until the live connection closes
       return f.db.batchTxn(ops)
     }
   }
-  const restored = buildBackupOps({
-    ...f.deps,
-    db,
-    // A queued GC may run before the asynchronous worker close request. This
-    // callback models that last live-connection operation, without real relaunch.
-    closeDb: async () => {
-      await f.gc()
-    }
-  })
+  const restored = buildBackupOps({ ...f.deps, db })
   cleanups.push(() => restored.close())
   await restored.prepare()
   expect(
@@ -156,6 +146,9 @@ test('restore keeps failed-reconstruction guard until the live connection closes
   ).toEqual({ n: 1 })
   fail = false
   await restored.restore(backup.filename)
+  // Staged, the hub keeps serving until it exits: a GC meanwhile must not collect
+  // a blob the backup being restored references.
+  await f.gc()
   expect(f.blobs.has(f.hash('A'))).toBe(true)
 })
 

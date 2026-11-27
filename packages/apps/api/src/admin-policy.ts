@@ -193,6 +193,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'app.backup.list': 'admin',
   'app.backup.rename': 'admin',
   'app.backup.restore': 'admin',
+  'app.backup.restoreStatus': 'admin',
   'app.backup.revealInFinder': 'admin',
   'app.backup.setSettings': 'admin',
   'app.browserRelay.engaged': 'user',

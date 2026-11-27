@@ -6,31 +6,23 @@
  * without the host keeping a connection open purely to serve it. Its actual
  * Electron surface is two calls: `app.relaunch()` and `shell.openPath()`.
  *
- * TWO THINGS ARE LOAD-BEARING HERE.
- *
- * 1. RESTORE ORDERING. Restore overwrites the live database file, then relaunches
- *    the desktop — which kills the side-car as a child process. If the relaunch
- *    is issued before the copy is complete and the connection closed, the restored
- *    file is truncated and the user's data is gone. The order must be:
- *    stop timer → close connection → copy → unlink -wal/-shm → relaunch LAST.
- *    This is the highest-consequence sequence in the whole DB-ownership change,
- *    so it is asserted directly rather than left to code review.
- *
- * 2. RESTORE IS REFUSED ON A REMOTE HUB. Once backup follows the database, a
- *    remote-mode client's Backups UI acts on whichever hub it is connected to.
- *    Creating and listing are fine. Restore is a destructive whole-DB overwrite
- *    plus a relaunch — on a shared hub one client would silently overwrite
- *    everyone's data, and the relaunch semantics do not even apply to a server the
- *    client does not run.
+ * RESTORE = STAGE, THEN THE HUB RESTARTS ITSELF (D2). Nothing overwrites the live
+ * file under an open connection: restore validates the backup (a file this build
+ * cannot run is refused with nothing changed), takes a pre-restore backup, writes the
+ * marker the next boot swaps from (restore-swap.ts), and only then — after its reply
+ * — asks the hub to restart (exit 75). Any hub may do this; who may call it is the
+ * admin gate (admin-policy.ts), not "is this the desktop's own hub".
  *
  * Run with: vitest (packages/shared/test-utils/vitest.harness.config.ts)
  */
+import Database from 'better-sqlite3'
 import { afterAll, expect, test } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { buildBackupOps } from './backup.js'
+import { RESTORE_MARKER_FILE } from './restore-swap.js'
 
 const h = await createTestHarness()
 
@@ -54,7 +46,10 @@ const db: typeof h.slayDb = {
   }
 }
 
-function ops(opts: { supervised?: boolean } = {}): ReturnType<typeof buildBackupOps> {
+let canRestart = true
+let respawner: 'desktop' | 'launchd' | 'systemd' | null = 'systemd'
+
+function ops(): ReturnType<typeof buildBackupOps> {
   trace = []
   return buildBackupOps({
     db,
@@ -65,22 +60,40 @@ function ops(opts: { supervised?: boolean } = {}): ReturnType<typeof buildBackup
       prepare: async () => {},
       begin: async () => ({ pinSnapshot: async () => {}, finish: async () => {} }),
       forget: async () => {},
-      close: async () => {}
+      close: async () => {
+        trace.push('protection-close')
+      }
     },
     dataRoot,
     dbPath,
-    supervised: opts.supervised ?? true,
-    closeDb: async () => {
-      trace.push('close')
-    },
-    appRelaunch: () => {
-      trace.push('relaunch')
+    latestVersion: 300,
+    restart: {
+      available: () => canRestart,
+      respawner: () => respawner,
+      request: () => {
+        trace.push('restart')
+      },
+      delayMs: 0
     },
     shellOpenPath: (p: string) => {
       trace.push(`reveal:${p}`)
     }
   })
 }
+
+/** Replace a listed backup's bytes with a real SQLite database. */
+function realBackup(filename: string, opts: { version?: number; marker?: string } = {}): void {
+  const file = path.join(dataRoot, 'backups', filename)
+  fs.rmSync(file, { force: true })
+  const b = new Database(file)
+  b.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+  b.prepare('INSERT INTO settings VALUES (?, ?)').run('marker', opts.marker ?? 'restored')
+  b.pragma(`user_version = ${opts.version ?? 200}`)
+  b.close()
+}
+
+const marker = () => path.join(dataRoot, RESTORE_MARKER_FILE)
+const flush = () => new Promise((r) => setTimeout(r, 20))
 
 test('create → list → rename → delete round-trips', async () => {
   const o = ops()
@@ -125,45 +138,133 @@ test('backups under every historical prefix still list', async () => {
   for (const n of [...names, `slayzone.auth.${ts}.manual.sqlite`]) fs.rmSync(path.join(dir, n))
 })
 
-test('restore: close → copy → unlink wal/shm → relaunch LAST', async () => {
+test('restore stages: pre-restore backup, marker, restart AFTER the reply; live file untouched', async () => {
+  canRestart = true
+  respawner = 'systemd'
   const o = ops()
   const made = await o.create('ToRestore')
-  // Make the on-disk backup distinguishable from the live file.
-  fs.writeFileSync(path.join(dataRoot, 'backups', made.filename), 'RESTORED-BYTES')
+  realBackup(made.filename)
   fs.writeFileSync(dbPath, 'LIVE-DB')
-  fs.writeFileSync(`${dbPath}-wal`, 'WAL')
-  fs.writeFileSync(`${dbPath}-shm`, 'SHM')
 
-  await o.restore(made.filename)
-
-  // The relaunch kills the side-car — anything after it may simply not happen.
-  expect(trace[trace.length - 1]).toBe('relaunch')
-  expect(trace.indexOf('close') < trace.indexOf('relaunch')).toBe(true)
-  expect(fs.readFileSync(dbPath, 'utf8')).toBe('RESTORED-BYTES')
-  expect(fs.existsSync(`${dbPath}-wal`)).toBe(false)
-  expect(fs.existsSync(`${dbPath}-shm`)).toBe(false)
+  const result = await o.restore(made.filename)
+  expect(result).toMatchObject({ restarting: true, respawner: 'systemd' })
+  // The reply goes out before the hub stops.
+  expect(trace).not.toContain('restart')
+  await flush()
+  expect(trace).toContain('restart')
+  // Staged, not swapped: the live file is only replaced at the next boot.
+  expect(fs.readFileSync(dbPath, 'utf8')).toBe('LIVE-DB')
+  expect(JSON.parse(fs.readFileSync(marker(), 'utf8'))).toMatchObject({ backup: made.filename })
+  // A pre-restore backup of the current data, listed like any other.
+  const pre = (await o.list()).find((b) => b.type === 'restore')
+  expect(pre?.filename, 'pre-restore backup').toBeDefined()
+  expect(result.preRestoreBackup).toBe(pre?.filename)
+  // Fenced: no backup can start while the hub is going down.
+  await expect(o.create('during')).rejects.toThrow(/restore/i)
+  await expect(o.restore(made.filename)).rejects.toThrow(/restore/i)
+  fs.rmSync(marker(), { force: true })
+  for (const b of await o.list()) fs.rmSync(path.join(dataRoot, 'backups', b.filename))
 })
 
-test('restore is REFUSED on a non-supervised (remote/standalone) hub', async () => {
-  const o = ops({ supervised: false })
-  const made = await o.create('NoRestore')
-  fs.writeFileSync(dbPath, 'UNTOUCHED')
+test('a hub with nothing to restart it still stages, and says so (D6)', async () => {
+  canRestart = true
+  respawner = null
+  const o = ops()
+  const made = await o.create('Manual')
+  realBackup(made.filename)
+  expect(await o.restore(made.filename)).toMatchObject({ restarting: true, respawner: null })
+  await flush()
+  expect(trace).toContain('restart')
+  fs.rmSync(marker(), { force: true })
+  for (const b of await o.list()) fs.rmSync(path.join(dataRoot, 'backups', b.filename))
+})
 
-  let threw = false
-  try {
-    await o.restore(made.filename)
-  } catch {
-    threw = true
-  }
-  expect(threw).toBe(true)
-  // Nothing destructive ran, and the live file is byte-identical.
-  expect(trace.length).toBe(0)
+test('an embedded hub (no restart handler): staged, restarting=false, no restart', async () => {
+  canRestart = false
+  const o = ops()
+  const made = await o.create('Embedded')
+  realBackup(made.filename)
+  expect(await o.restore(made.filename)).toMatchObject({ restarting: false })
+  await flush()
+  expect(trace).not.toContain('restart')
+  canRestart = true
+  fs.rmSync(marker(), { force: true })
+  for (const b of await o.list()) fs.rmSync(path.join(dataRoot, 'backups', b.filename))
+})
+
+test.each([
+  ['a newer schema', { version: 301 }, /newer/],
+  ['a corrupt file', null, /cannot be opened|not a database|integrity/]
+])('restore of %s is REFUSED with nothing changed', async (_what, opts, message) => {
+  const o = ops()
+  const made = await o.create('Bad')
+  if (opts) realBackup(made.filename, opts)
+  else fs.writeFileSync(path.join(dataRoot, 'backups', made.filename), 'not sqlite at all')
+  fs.writeFileSync(dbPath, 'UNTOUCHED')
+  const before = (await o.list()).length
+  await expect(o.restore(made.filename)).rejects.toThrow(message)
+  await flush()
+  expect(trace).not.toContain('restart')
+  expect(fs.existsSync(marker())).toBe(false)
+  expect((await o.list()).length, 'no pre-restore backup').toBe(before)
   expect(fs.readFileSync(dbPath, 'utf8')).toBe('UNTOUCHED')
+  // Not fenced: the hub keeps working.
+  const after = await o.create('still works')
+  await o.delete(after.filename)
   await o.delete(made.filename)
 })
 
-test('create and list still work on a non-supervised hub', async () => {
-  const o = ops({ supervised: false })
+test('restore is REFUSED while a move is in progress on this hub (R8)', async () => {
+  const o = ops()
+  const made = await o.create('MidMove')
+  realBackup(made.filename)
+  h.db
+    .prepare(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, step, status, created_at, updated_at)
+       VALUES ('m1', 'out', 'peer', 'p', '[]', 0, 'copy', 'running', 0, 0)`
+    )
+    .run()
+  try {
+    await expect(o.restore(made.filename)).rejects.toThrow(/move/)
+    expect(fs.existsSync(marker())).toBe(false)
+  } finally {
+    h.db.prepare("DELETE FROM task_moves WHERE id = 'm1'").run()
+    await o.delete(made.filename)
+  }
+})
+
+test('restoreStatus: boot id, respawner, the staged restore and what this boot did', async () => {
+  respawner = 'launchd'
+  const o = ops()
+  const idle = await o.restoreStatus()
+  expect(idle).toMatchObject({ respawner: 'launchd', pending: null, lastRestore: null })
+  expect(idle.bootId).toMatch(/^[0-9a-f-]{36}$/)
+  const made = await o.create('Status')
+  realBackup(made.filename)
+  await o.restore(made.filename)
+  await flush()
+  expect((await o.restoreStatus()).pending).toEqual({ backup: made.filename })
+  fs.rmSync(marker(), { force: true })
+  for (const b of await o.list()) fs.rmSync(path.join(dataRoot, 'backups', b.filename))
+  const booted = buildBackupOps({
+    db,
+    dataRoot,
+    dbPath,
+    lastRestore: { status: 'refused', backup: 'x.sqlite', error: 'corrupt' },
+    restart: { available: () => true, respawner: () => null, request: () => {} },
+    shellOpenPath: () => {}
+  })
+  expect((await booted.restoreStatus()).lastRestore).toEqual({
+    status: 'refused',
+    backup: 'x.sqlite',
+    error: 'corrupt'
+  })
+  await booted.close()
+})
+
+test('create and list work on any hub', async () => {
+  const o = ops()
   const made = await o.create('RemoteOk')
   expect((await o.list()).some((b) => b.filename === made.filename)).toBe(true)
   await o.delete(made.filename)
@@ -179,6 +280,7 @@ test('restore rejects a filename escaping the backups dir', async () => {
   }
   expect(threw).toBe(true)
   expect(trace.length).toBe(0)
+  expect(fs.existsSync(marker())).toBe(false)
 })
 
 test('delete/restore refuse a sibling sharing the dir prefix, the dir itself and NUL', async () => {

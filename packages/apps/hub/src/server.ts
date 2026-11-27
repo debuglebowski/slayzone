@@ -95,6 +95,8 @@ import {
   stopRetentionScheduler
 } from '@slayzone/diagnostics/server'
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
+import { LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
+import { type ApplyRestoreResult, applyPendingRestore } from './restore-swap'
 import { startEventLoopStallDetector } from '@slayzone/platform/event-loop-stall'
 import {
   adoptClientAddress,
@@ -152,6 +154,31 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const log = createLogger(dataRoot)
 
   const dbPath = getDatabasePathFromEnv()
+  // A restore staged before the last exit (backup.ts → restore-swap.ts) is swapped in
+  // HERE, before anything opens the database. A backup that cannot run is refused and
+  // the old database kept; an I/O failure mid-swap fails this boot and the next one
+  // resumes from the recorded phase. Only when this process owns the database.
+  const lastRestore: ApplyRestoreResult = cfg.db
+    ? { status: 'none' }
+    : applyPendingRestore({ dataRoot, dbPath, latestVersion: LATEST_MIGRATION_VERSION })
+  if (lastRestore.status !== 'none') {
+    log(
+      `[slayzone] restore ${lastRestore.status}: ${lastRestore.backup}${
+        lastRestore.status === 'refused' ? ` (${lastRestore.error})` : ''
+      }`
+    )
+    securityEvent({
+      event: 'hub.restore',
+      outcome: lastRestore.status === 'applied' ? 'success' : 'failure',
+      level: lastRestore.status === 'applied' ? 'info' : 'error',
+      targetKind: 'hub',
+      detail: {
+        phase: lastRestore.status,
+        backup: lastRestore.backup,
+        ...(lastRestore.status === 'refused' ? { error: lastRestore.error } : {})
+      }
+    })
+  }
   // The hub owns the schema however it was started. `supervised` still gates the
   // sidecar socket and the loopback-bind rule above — but not this: a second
   // migrator in the Electron host is exactly the two-writers-one-file split being
@@ -191,6 +218,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const composition = composeServer({
     db,
     dataRoot,
+    lastRestore,
     standalone: !supervised,
     requireLogin: switches.requireLogin,
     publicAddress: boot.publicAddress,

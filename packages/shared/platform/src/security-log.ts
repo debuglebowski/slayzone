@@ -131,6 +131,10 @@ export const SECURITY_EVENTS = [
   /** `denied`: a boot rule refused to start the hub (hub `boot-rules.ts`). `success`: a
    *  hub that requires login started; `detail.methods` = how it can be signed in to (T-10). */
   'hub.boot',
+  /** A backup restore (apps/hub restore-swap.ts): `detail.phase` `staged` (an admin
+   *  asked; the hub restarts to apply it), `applied` (swapped in at boot), `refused`
+   *  (at boot the backup could not run: the old database was kept, `detail.error`). */
+  'hub.restore',
   // Switch refusals (`hub-switch-refusal.ts`); `detail.op` names what was refused.
   /** T-04: a hub-local process, terminal or agent refused (`SLAYZONE_HUB_ENABLE_PROCESSES=0`). */
   'hub.process.spawn',

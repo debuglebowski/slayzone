@@ -76,6 +76,8 @@ const crashFirst = Number(process.env.FAKE_CRASH_FIRST || '0')
 const crashAlways = process.env.FAKE_CRASH_ALWAYS === '1'
 const nohealth = process.env.FAKE_NOHEALTH === '1'
 const crashAfterReadyMs = Number(process.env.FAKE_CRASH_AFTER_READY_MS || '0')
+// A planned restart (a staged restore): the hub exits 75 after it was ready.
+const restartAfterReadyMs = Number(process.env.FAKE_RESTART_AFTER_READY_MS || '0')
 
 // Lets a test read back the environment the supervisor actually handed the child.
 const envDumpFile = process.env.FAKE_ENV_DUMP_FILE || ''
@@ -140,6 +142,9 @@ server.listen(port, host, function () {
   process.stdout.write('fake-sidecar listening port=' + port + ' attempt=' + attempt + '\\n')
   if (!nohealth) {
     ready = true
+    if (restartAfterReadyMs > 0 && attempt === 1) {
+      setTimeout(function () { process.exit(75) }, restartAfterReadyMs)
+    }
     if (crashAfterReadyMs > 0 && attempt === 1) {
       setTimeout(function () { crash('crash-after-ready') }, crashAfterReadyMs)
     }
@@ -494,6 +499,27 @@ test('a ready child that exits respawns immediately — no backoff, no attempt++
     // The lifetime counter DOES move — crash e2e asserts on it since `restarts`
     // never increments on the healthy-crash immediate-respawn path.
     expect(handle.getStatus().totalRespawns, 'totalRespawns counts the respawn').toBe(1)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('exit 75 is a planned restart: respawned at once, logged as such, never a crash', async () => {
+  const dir = mkTmp()
+  const counterFile = path.join(dir, 'counter')
+  const { handle, ctx } = makeHarness(
+    dir,
+    { FAKE_COUNTER_FILE: counterFile, FAKE_RESTART_AFTER_READY_MS: '200' },
+    { backoffMs: [5_000], healthPollIntervalMs: 40 }
+  )
+  try {
+    await handle.waitForReady()
+    await waitFor(() => ctx.spawnTimes.length === 2, 5_000, 'hub never started again')
+    expect(ctx.spawnTimes[1] - ctx.spawnTimes[0]).toBeLessThan(2_000)
+    expect(ctx.logs.some((l) => l.line.includes('planned restart'))).toBe(true)
+    expect(ctx.logs.some((l) => l.line.includes('restart in'))).toBe(false)
+    await waitFor(() => handle.getHealth() === 'ready', 5_000, 'never returned to ready')
+    expect(handle.getStatus().restarts).toBe(0)
   } finally {
     await handle.stop()
   }

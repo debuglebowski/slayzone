@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
 import { FolderOpen, Trash2, RotateCcw, Download, Loader2, Pencil, Check, X } from 'lucide-react'
@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
   toast
 } from '@slayzone/ui'
-import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
+import type { BackupInfo, BackupSettings, RestoreStatus } from '@slayzone/settings/shared'
 import { useTrack } from '@slayzone/telemetry/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { ComputerChatBackups } from './ComputerChatBackups'
@@ -75,13 +75,37 @@ export function BackupSettingsTab() {
   const [creating, setCreating] = useState(false)
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BackupInfo | null>(null)
-  const [createSafetyBackup, setCreateSafetyBackup] = useState(true)
+  // Set while the hub restarts to apply a restore: the boot it is leaving.
+  const [restartingFrom, setRestartingFrom] = useState<string | null>(null)
   const [editingFilename, setEditingFilename] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
 
   const createMutation = useMutation(trpc.app.backup.create.mutationOptions())
   const deleteMutation = useMutation(trpc.app.backup.delete.mutationOptions())
   const restoreMutation = useMutation(trpc.app.backup.restore.mutationOptions())
+  // The hub restarts itself to apply a restore. While it does, ask it every second
+  // which boot it is: a new boot id = it is back (errors = still down, retried).
+  const restoreStatusQuery = useQuery({
+    ...trpc.app.backup.restoreStatus.queryOptions(),
+    refetchInterval: restartingFrom ? 1_000 : false,
+    retry: restartingFrom ? true : 3
+  })
+  const restoreStatus: RestoreStatus | undefined = restoreStatusQuery.data
+  // Back from the restart: the data underneath every open view changed, so reload
+  // the whole app (it used to relaunch); a refused backup keeps this view and says why.
+  const backFromRestart =
+    restartingFrom && restoreStatus && restoreStatus.bootId !== restartingFrom
+      ? restoreStatus
+      : null
+  useEffect(() => {
+    if (!backFromRestart) return
+    setRestartingFrom(null)
+    if (backFromRestart.lastRestore?.status === 'refused') {
+      toast.error(`Restore refused: ${backFromRestart.lastRestore.error}. Your data was kept.`)
+    } else {
+      window.location.reload()
+    }
+  }, [backFromRestart])
   const renameMutation = useMutation(trpc.app.backup.rename.mutationOptions())
   const setSettingsMutation = useMutation(trpc.app.backup.setSettings.mutationOptions())
   const revealInFinderMutation = useMutation(trpc.app.backup.revealInFinder.mutationOptions())
@@ -126,11 +150,19 @@ export function BackupSettingsTab() {
 
   const handleRestore = async () => {
     if (!restoreTarget) return
+    const bootId = restoreStatus?.bootId ?? null
     try {
-      if (createSafetyBackup) {
-        await createMutation.mutateAsync(undefined)
+      // The hub keeps a copy of the current data first (a `restore` backup), then
+      // restarts itself to swap the backup in.
+      const result = await restoreMutation.mutateAsync({ filename: restoreTarget.filename })
+      if (!result.restarting) {
+        toast.info('Restore staged. Restart the hub to apply it.')
+      } else if (result.respawner === null) {
+        toast.info('The hub is stopping to restore. Start it again to finish the restore.')
+      } else {
+        toast.info('Restoring — the hub is restarting…')
       }
-      await restoreMutation.mutateAsync({ filename: restoreTarget.filename })
+      if (result.restarting && bootId) setRestartingFrom(bootId)
     } catch (err) {
       toast.error(`Restore failed: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -298,7 +330,8 @@ export function BackupSettingsTab() {
                       {
                         auto: 'bg-blue-500/10 text-blue-500',
                         manual: 'bg-emerald-500/10 text-emerald-500',
-                        migration: 'bg-amber-500/10 text-amber-500'
+                        migration: 'bg-amber-500/10 text-amber-500',
+                        restore: 'bg-muted text-muted-foreground'
                       }[backup.type]
                     }`}
                   >
@@ -315,10 +348,8 @@ export function BackupSettingsTab() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setCreateSafetyBackup(true)
-                      setRestoreTarget(backup)
-                    }}
+                    disabled={restartingFrom !== null}
+                    onClick={() => setRestoreTarget(backup)}
                   >
                     <RotateCcw className="mr-1 size-3.5" />
                     Restore
@@ -349,19 +380,25 @@ export function BackupSettingsTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>Restore Backup</AlertDialogTitle>
             <AlertDialogDescription>
-              This will replace your current database with <strong>{restoreTarget?.name}</strong> (
-              {restoreTarget && formatTimestamp(restoreTarget.timestamp)}) and restart the app.
+              This replaces the hub's data with <strong>{restoreTarget?.name}</strong> (
+              {restoreTarget && formatTimestamp(restoreTarget.timestamp)}) — for every user of this
+              hub — and restarts the hub. A copy of the current data is kept as a backup first.
               Backups can contain content erased later. Reapply those erasures before reopening
               access.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="flex items-center gap-3 py-2">
-            <Switch checked={createSafetyBackup} onCheckedChange={setCreateSafetyBackup} />
-            <span className="text-sm">Create safety backup of current data first</span>
-          </div>
+          {restoreStatus && restoreStatus.respawner === null && (
+            <p
+              data-testid="restore-no-respawner-warning"
+              className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              Nothing restarts this hub automatically. It stops to apply the restore: start it again
+              to finish.
+            </p>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRestore}>Restore & Restart</AlertDialogAction>
+            <AlertDialogAction onClick={handleRestore}>Restore & restart hub</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

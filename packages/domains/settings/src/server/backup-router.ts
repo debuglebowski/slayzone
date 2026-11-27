@@ -18,9 +18,11 @@ export const appBackupRouter = router({
   delete: publicProcedure
     .input(z.object({ filename: z.string() }))
     .mutation(({ input }) => getBackupOps().delete(input.filename)),
+  // Stages the restore and returns; the hub then restarts itself to apply it.
   restore: publicProcedure
     .input(z.object({ filename: z.string() }))
     .mutation(({ input }) => getBackupOps().restore(input.filename)),
+  restoreStatus: publicProcedure.query(() => getBackupOps().restoreStatus()),
   getSettings: publicProcedure.query(() => getBackupOps().getSettings()),
   setSettings: publicProcedure
     .input(anyInput)

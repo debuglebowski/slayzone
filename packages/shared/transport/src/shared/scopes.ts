@@ -278,6 +278,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'app.backup.list': 'never',
   'app.backup.rename': 'never',
   'app.backup.restore': 'never',
+  'app.backup.restoreStatus': 'never',
   'app.backup.revealInFinder': 'never',
   'app.backup.setSettings': 'never',
   'app.browserRelay.engaged': 'never',

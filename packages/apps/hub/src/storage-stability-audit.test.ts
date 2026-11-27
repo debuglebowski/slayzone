@@ -113,9 +113,7 @@ test.each(['legacy', 'copying', 'verified'] as const)(
         },
         dataRoot: dir,
         dbPath: join(dir, 'slayzone.dev.data.sqlite'),
-        supervised: true,
-        closeDb: async () => {},
-        appRelaunch: () => {},
+        restart: { available: () => false, respawner: () => null, request: () => {} },
         shellOpenPath: () => {}
       })
       let rejected = false,
@@ -335,9 +333,7 @@ test.each(['legacy', 'copying'] as const)(
         },
         dataRoot: dir,
         dbPath: join(dir, 'slayzone.dev.data.sqlite'),
-        supervised: true,
-        closeDb: async () => {},
-        appRelaunch: () => {},
+        restart: { available: () => false, respawner: () => null, request: () => {} },
         shellOpenPath: () => {}
       })
       const backup = await ops.create('before-cutover')

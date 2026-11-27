@@ -37,9 +37,7 @@ async function fixture(sanitizeSnapshot?: (path: string) => Promise<void>) {
     db,
     dataRoot: dir,
     dbPath: join(dir, 'slayzone.data.sqlite'),
-    supervised: true,
-    closeDb: async () => {},
-    appRelaunch: () => {},
+    restart: { available: () => false, respawner: () => null, request: () => {} },
     shellOpenPath: () => {},
     ...(sanitizeSnapshot ? { sanitizeSnapshot } : {})
   })
@@ -131,9 +129,7 @@ test('restored hub rebuilds completed snapshot pins before garbage collection ca
     db: f.db,
     dataRoot: f.dir,
     dbPath: join(f.dir, 'slayzone.data.sqlite'),
-    supervised: true,
-    closeDb: async () => {},
-    appRelaunch: () => {},
+    restart: { available: () => false, respawner: () => null, request: () => {} },
     shellOpenPath: () => {}
   })
   cleanups.push(() => recovered.close())
@@ -236,9 +232,7 @@ test('restart under an unchanged clock never overwrites a completed backup', asy
     db: f.db,
     dataRoot: f.dir,
     dbPath: join(f.dir, 'slayzone.data.sqlite'),
-    supervised: true,
-    closeDb: async () => {},
-    appRelaunch: () => {},
+    restart: { available: () => false, respawner: () => null, request: () => {} },
     shellOpenPath: () => {}
   })
   cleanups.push(() => next.close())
@@ -257,9 +251,7 @@ test('hub startup erases abandoned unpublished source snapshots and their WAL fi
     db: f.db,
     dataRoot: f.dir,
     dbPath: join(f.dir, 'slayzone.data.sqlite'),
-    supervised: true,
-    closeDb: async () => {},
-    appRelaunch: () => {},
+    restart: { available: () => false, respawner: () => null, request: () => {} },
     shellOpenPath: () => {}
   })
   cleanups.push(() => next.close())

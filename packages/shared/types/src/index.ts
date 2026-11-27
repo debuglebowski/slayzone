@@ -10,7 +10,7 @@ export type {
 export type { ProcessStatus, ProcessInfo, ProcessStats, ProcessEventMap } from './api'
 export type { ExecutionContext } from './api'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from './api'
-export type { BackupInfo, BackupSettings } from './api'
+export type { BackupInfo, BackupSettings, HubRespawner, RestoreResult, RestoreStatus } from './api'
 export type { LocalComputerHubs, LocalComputerHubStatus, LocalComputerStatus } from './api'
 export type {
   BrowserCreateTaskFromLinkIntent,
