@@ -1905,11 +1905,11 @@ export function createPtyHandlers(
             await s.history?.cancel()
             s.history = undefined
           }
-      await Promise.all(
-        [...sessions.values()]
-          .filter((s) => belongsToTask(s.id, taskId, s.taskId))
-          .map((s) => stopPty(s))
-      )
+      const stopping = [...sessions.values()].filter((s) => belongsToTask(s.id, taskId, s.taskId))
+      await Promise.all(stopping.map((s) => stopPty(s)))
+      // Trashed: stopped once their last output is on disk (the exit started that
+      // write), so a restore — or a shutdown right after — finds all of it.
+      await Promise.all(stopping.map((s) => s.history?.close()))
       await Promise.allSettled(waiting.map(([, s]) => s.promise))
       if (purge) await options.history?.forgetTask(taskId)
       if (state === 'deleted') tombstones.forgetTask(taskId)

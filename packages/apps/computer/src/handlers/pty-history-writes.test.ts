@@ -11,7 +11,7 @@
  * Every file write the computer makes goes through the wrapped `node:fs` below,
  * which counts the bytes (and lets a test act at the moment a write is issued).
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -288,5 +288,22 @@ describe('a shutdown write overtaking one in flight', () => {
     expect(io.onAsyncWrite).toBeUndefined()
     const saved = savedFile(dir)
     expect(saved).toBe('FIRST\r\nSECOND\r\nTHIRD\r\n')
+  })
+})
+
+describe('the task dir removed under a write', () => {
+  it('a write whose task dir is removed between creating it and writing into it still lands', async () => {
+    const dir = historyDir()
+    const c = computer(dir, 20)
+    await c.spawn()
+    c.out('OUTPUT_UNDER_SWEEP\r\n')
+    // What the start-up sweep does to a task dir it found empty (`rmdir`), landing
+    // after this write created the dir and before it opened its temp file there.
+    io.onAsyncWrite = () => rmdirSync(join(dir, TASK))
+    await c.pty.stopTask(TASK, 'paused') // the last write of the session
+    expect(io.onAsyncWrite).toBeUndefined() // the hook ran
+    expect(savedFile(dir)).toBe('OUTPUT_UNDER_SWEEP\r\n')
+    expect(readdirSync(join(dir, TASK)).filter((f) => f.endsWith('.tmp'))).toEqual([])
+    c.pty.disposeAll()
   })
 })

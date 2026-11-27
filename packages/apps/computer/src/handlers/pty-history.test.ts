@@ -93,6 +93,20 @@ function computer(dir: string) {
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 80))
+/**
+ * The throttled write has landed: the task dir holds the saved file and no write in
+ * flight (its temp file). A fixed wait is not enough: under load (CI, a busy disk) a
+ * write's fsync outlasts it.
+ */
+const landed = (dir: string) =>
+  vi.waitFor(
+    () => {
+      const files = existsSync(join(dir, TASK)) ? readdirSync(join(dir, TASK)) : []
+      expect(files.filter((f) => f.endsWith('.txt'))).toHaveLength(1)
+      expect(files.filter((f) => f.endsWith('.tmp'))).toEqual([])
+    },
+    { timeout: 10_000, interval: 10 }
+  )
 
 describe('task terminal history across a computer restart', () => {
   it('the old output comes back first, then a divider, then the new shell', async () => {
@@ -330,7 +344,7 @@ describe('task terminal history across a computer restart', () => {
     const c = computer(dir)
     await c.spawn()
     c.child.out('x')
-    await settle()
+    await landed(dir)
     c.pty.disposeAll()
     expect(readdirSync(join(dir, TASK))).toHaveLength(1)
     const d = computer(dir)
@@ -347,12 +361,23 @@ describe('task terminal history across a computer restart', () => {
     d.pty.disposeAll()
   })
 
+  it('a trashed task (stopTask paused) is stopped only once its last output is on disk', async () => {
+    const dir = historyDir()
+    const c = computer(dir)
+    await c.spawn()
+    c.child.out('LAST_OUTPUT_BEFORE_TRASH') // still only in memory: no write has run yet
+    await c.pty.stopTask(TASK, 'paused')
+    expect(readdirSync(join(dir, TASK))).toHaveLength(1)
+    expect(createPtyHistory({ dir }).load(TASK, SESSION)).toContain('LAST_OUTPUT_BEFORE_TRASH')
+    c.pty.disposeAll()
+  })
+
   it('history files are private to the user, and stale ones are swept at start', async () => {
     const dir = historyDir()
     const c = computer(dir)
     await c.spawn()
     c.child.out('private')
-    await settle()
+    await landed(dir)
     c.pty.disposeAll()
     const [file] = readdirSync(join(dir, TASK))
     expect(statSync(join(dir, TASK, file)).mode & 0o777).toBe(0o600)
