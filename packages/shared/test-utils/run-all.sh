@@ -764,6 +764,8 @@ run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 run_harness packages/domains/worktrees/src/server/git-ops.test.ts
 run_harness packages/domains/worktrees/src/server/git-command.test.ts
+# The first hub git spawn probes the login-shell PATH without blocking the event loop.
+run_harness packages/domains/worktrees/src/server/exec-async-login-path.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts

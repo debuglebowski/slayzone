@@ -7,8 +7,11 @@ import { finished } from 'stream/promises'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/record'
 import type { DiagnosticEvent, DiagnosticSource } from '@slayzone/diagnostics/shared'
 import { gitCommand, mergePathLists } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { getEnrichedPath } from '@slayzone/terminal/shell-env'
+import {
+  assertHubLocalExecEnabled,
+  hubProcessesEnabled
+} from '@slayzone/platform/hub-switch-refusal'
+import { getEnrichedPath, getEnrichedPathAsync } from '@slayzone/terminal/shell-env'
 
 /**
  * Where this package's processes run and what they report to. The defaults are the
@@ -21,6 +24,12 @@ import { getEnrichedPath } from '@slayzone/terminal/shell-env'
 export interface GitExecEnvironment {
   /** The PATH to merge in front of the inherited one; null = inherit as is. */
   loginShellPath(): string | null
+  /**
+   * Resolves once {@link loginShellPath} answers without blocking (the hub probes its
+   * login shell asynchronously into the same cache). Never rejects: a refused or failed
+   * probe leaves `loginShellPath` to answer — or refuse — as it would have.
+   */
+  prepareLoginShellPath(): Promise<void>
   /** Throws to refuse starting `command` here. */
   refuse(command: string): void
   diagnostic(event: DiagnosticEvent): void
@@ -28,6 +37,16 @@ export interface GitExecEnvironment {
 
 const hubEnvironment: GitExecEnvironment = {
   loginShellPath: () => getEnrichedPath(),
+  prepareLoginShellPath: async () => {
+    // Processes switched off: nothing to warm, and the spawn's own refusal is the one
+    // that reports (and audits) it.
+    if (!hubProcessesEnabled()) return
+    try {
+      await getEnrichedPathAsync()
+    } catch {
+      /* failed probe: the spawn falls back to the cached answer (none) as before */
+    }
+  },
   refuse: (command) =>
     assertHubLocalExecEnabled({ op: 'exec', detail: { command: basename(command) } }),
   diagnostic: (event) => recordDiagnosticEvent(event)
@@ -37,7 +56,24 @@ let environment: GitExecEnvironment = hubEnvironment
 
 /** Replace (part of) the exec environment; `null` restores the hub's. */
 export function configureGitExec(next: Partial<GitExecEnvironment> | null): void {
-  environment = next ? { ...hubEnvironment, ...next } : hubEnvironment
+  if (!next) {
+    environment = hubEnvironment
+    return
+  }
+  // An own PATH source without its own preparation must not warm the hub's.
+  const prepare =
+    next.prepareLoginShellPath ??
+    (next.loginShellPath ? () => Promise.resolve() : hubEnvironment.prepareLoginShellPath)
+  environment = { ...hubEnvironment, ...next, prepareLoginShellPath: prepare }
+}
+
+/**
+ * Await before a {@link hubSpawn} on an async path: the login-shell PATH it merges in
+ * is then cached, so the spawn never runs the user's shell synchronously (a slow shell
+ * init would freeze the whole hub — requests, heartbeats, ptys — while it ran).
+ */
+export function loginShellPathReady(): Promise<void> {
+  return environment.prepareLoginShellPath()
 }
 
 /** Report through the configured environment (the hub's diagnostics by default). */
@@ -124,6 +160,14 @@ export function execAsync(
      *  `git diff --no-index` exits 1 when the files differ). Default `[0]`. */
     okExitCodes?: readonly number[]
   } = {}
+): Promise<ExecResult> {
+  return loginShellPathReady().then(() => execAsyncNow(command, args, opts))
+}
+
+function execAsyncNow(
+  command: string,
+  args: string[],
+  opts: Parameters<typeof execAsync>[2] = {}
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     const label = `${command} ${args.join(' ')}`
@@ -220,11 +264,12 @@ export function execGitFileList(args: string[], options: { cwd: string }): Promi
  * hundreds of MB). Each read chunk is parsed on its own tick, so a long listing
  * never holds the event loop. Rejects like {@link execGit} on a non-zero exit.
  */
-export function streamGitPaths(
+export async function streamGitPaths(
   args: string[],
   options: { cwd: string },
   onPath: (path: string) => void
 ): Promise<void> {
+  await loginShellPathReady()
   return new Promise((resolve, reject) => {
     const fullArgs = [...args, '-z']
     const label = `git ${fullArgs.join(' ')}`
@@ -326,6 +371,7 @@ async function streamCommand(
   onData: (chunk: Buffer) => boolean | Promise<boolean>,
   signal?: AbortSignal
 ): Promise<{ stopped: boolean; bytes: number; code: number | null }> {
+  await loginShellPathReady()
   const label = `${command} ${args.join(' ')}`
   const startedAt = Date.now()
   const child = hubSpawn(command, args, {
