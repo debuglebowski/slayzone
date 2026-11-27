@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
-import type { TimelineItem } from '@slayzone/terminal/client'
-import { turnChangeSources, unifiedChangeRows } from './turn-changes'
-import { activityView } from '../activity-view'
+import type { TimelineItem } from './chat-timeline'
+import { turnChangeSources, unifiedChangeRows } from './chat-turn-changes'
+import { activityView } from './chat-activity'
 
 const user = (id: string) => ({ kind: 'user-text', id, text: id, timestamp: 0 }) as TimelineItem
 const reply = {

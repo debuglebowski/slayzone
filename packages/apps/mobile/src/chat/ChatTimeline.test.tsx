@@ -9,6 +9,9 @@ import { act, fireEvent, render, screen, userEvent, within } from '@testing-libr
 import * as Clipboard from 'expo-clipboard'
 import { FlatList, Share } from 'react-native'
 import { trpcTest } from '../testing'
+import { DEFAULT_CHAT_ACTIVITY_SETTINGS } from '@slayzone/terminal/chat-activity'
+import { chatDisplayPrefsFile } from './chat-display-prefs-file'
+import { ChatDisplayOptions } from './ChatDisplayOptions'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatViewContext, type ChatViewValue } from './ChatViewContext'
 import { fakeHub } from './fake-hub'
@@ -28,6 +31,12 @@ const answer = (i: number, text = `Answer ${i}`): TimelineItem => ({
   text,
   timestamp: i
 })
+
+const result = (i: number): TimelineItem =>
+  ({ kind: 'result', isError: false, durationMs: 1000, timestamp: i }) as never
+
+/** A finished turn's answer (its result confirms it: else it is still progress). */
+const answered = (i: number, text?: string): TimelineItem[] => [answer(i, text), result(i)]
 
 const stateOf = (items: TimelineItem[]) => ({ ...initialState(), timeline: items }) as never
 
@@ -79,7 +88,7 @@ describe('ChatTimeline', () => {
       .spyOn(Share, 'share')
       .mockResolvedValue({ action: 'sharedAction', activityType: undefined })
     const text = 'Run this:\n\n```sh\npnpm test\n```\n\nThen commit.'
-    await show([answer(1, text)])
+    await show(answered(1, text))
     const user = userEvent.setup()
     const actions = async () => {
       await user.longPress(screen.getByText('Then commit.'))
@@ -94,7 +103,7 @@ describe('ChatTimeline', () => {
   })
 
   it('opens message actions from table cells without blocking the scroll view', async () => {
-    await show([answer(1, '| Name | Value |\n| --- | --- |\n| Limit | 123 |')])
+    await show(answered(1, '| Name | Value |\n| --- | --- |\n| Limit | 123 |'))
     let parent = screen.getByTestId('markdown-table-scroll').parent
     while (parent && parent.props.testID !== 'chat-timeline') {
       expect(parent.props.onResponderGrant).toBeUndefined()
@@ -107,7 +116,7 @@ describe('ChatTimeline', () => {
   })
 
   it('an answer without code offers no "code" action', async () => {
-    await show([answer(1, 'Plain words.')])
+    await show(answered(1, 'Plain words.'))
     await userEvent.setup().longPress(screen.getByText('Plain words.'))
     const sheet = within(await screen.findByTestId('message-actions'))
     expect(sheet.getByText('Copy text')).toBeOnTheScreen()
@@ -127,6 +136,8 @@ describe('ChatTimeline', () => {
       timestamp: 2
     } as never
     const view1 = await show([tool])
+    // The turn's work is in its Activities: opened, they list the card.
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Activities, 1 item' }))
     await userEvent.setup().press(screen.getByRole('button', { name: /Bash/ }))
     expect(screen.getByRole('button', { name: /Bash/ })).toBeExpanded()
     // The list unmounts an off-screen row and mounts it again later.
@@ -158,6 +169,7 @@ describe('ChatTimeline', () => {
     } as never
     await show([tool])
     const user = userEvent.setup()
+    await user.press(screen.getByRole('button', { name: 'Activities, 1 item' }))
     await user.press(screen.getByRole('button', { name: /Bash/ }))
     // `$ cat a.txt`, then the first 11 lines of output.
     expect(screen.getByText(/line 11$/)).toBeOnTheScreen()
@@ -197,5 +209,64 @@ describe('reconnecting', () => {
     )
     expect(screen.getByText('Reconnecting…')).toBeTruthy()
     expect(screen.queryByText('Working…')).toBeNull()
+  })
+})
+
+describe('display settings', () => {
+  const user1: TimelineItem = {
+    kind: 'user-text',
+    id: 'u1',
+    text: 'List files',
+    timestamp: 0
+  } as never
+  const thought: TimelineItem = {
+    kind: 'thinking',
+    messageId: 'm1',
+    text: 'Let me look',
+    timestamp: 1
+  } as never
+  const bash: TimelineItem = {
+    kind: 'tool',
+    invocation: { id: 'tu9', name: 'Bash', input: { command: 'ls' }, status: 'done' },
+    timestamp: 2
+  } as never
+  const turn = [user1, thought, bash, answer(3, 'Two files.'), result(4)]
+
+  afterEach(async () => {
+    await act(async () => chatDisplayPrefsFile.set(DEFAULT_CHAT_ACTIVITY_SETTINGS))
+  })
+
+  it("folds a turn's work into its Activities, under its answer", async () => {
+    await show(turn)
+    expect(screen.getByText('Two files.')).toBeOnTheScreen()
+    expect(screen.queryByRole('button', { name: /Bash/ })).toBeNull()
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Activities, 2 items' }))
+    expect(screen.getByRole('button', { name: /Bash/ })).toBeOnTheScreen()
+    expect(screen.getByText(/Thought/)).toBeOnTheScreen()
+  })
+
+  it('hides tool calls, or every activity, as the settings say', async () => {
+    await show(turn)
+    await act(async () =>
+      chatDisplayPrefsFile.set({ ...DEFAULT_CHAT_ACTIVITY_SETTINGS, showActivityTools: false })
+    )
+    await userEvent.setup().press(screen.getByRole('button', { name: 'Activities, 1 item' }))
+    expect(screen.queryByRole('button', { name: /Bash/ })).toBeNull()
+    expect(screen.getByText(/Thought/)).toBeOnTheScreen()
+    await act(async () =>
+      chatDisplayPrefsFile.set({ ...DEFAULT_CHAT_ACTIVITY_SETTINGS, showActivities: false })
+    )
+    expect(screen.queryByTestId('chat-activities-toggle')).toBeNull()
+    expect(screen.getByText('Two files.')).toBeOnTheScreen()
+  })
+
+  it('the Display options change what every chat shows', async () => {
+    const { wrapper } = trpcTest(fakeHub({ tabId: 't1', taskId: 't1' }).backend)
+    await render(<ChatDisplayOptions />, { wrapper })
+    await fireEvent(screen.getByTestId('chat-display-showActivityTools'), 'valueChange', false)
+    expect(chatDisplayPrefsFile.get().showActivityTools).toBe(false)
+    await fireEvent(screen.getByTestId('chat-display-showActivities'), 'valueChange', false)
+    // Its parts only matter while activities show.
+    expect(screen.queryByTestId('chat-display-showActivityTools')).toBeNull()
   })
 })

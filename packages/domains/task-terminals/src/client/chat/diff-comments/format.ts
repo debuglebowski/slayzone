@@ -1,5 +1,5 @@
 import type { DiffLine } from '@slayzone/diff-view'
-import { relativeToCwd } from '../files-changed/relative-path'
+import { relativeToCwd } from '@slayzone/terminal/chat-turn-changes'
 
 /** Longest quoted line; the rest is cut (the path:line finds it). */
 const MAX_QUOTED = 160

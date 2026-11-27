@@ -1,3 +1,5 @@
+import { chatHistoryDisplayFor } from '@slayzone/terminal/chat-activity'
+import { activitySettingsOf } from './activity-settings'
 import {
   forwardRef,
   useCallback,
@@ -211,12 +213,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       fontSize: fontSizeOverride
     } = props
     const appearance = useAppearance()
-    const displaySettings = {
-      ...(!appearance.chatShowThinking ? { hideThinking: true as const } : {}),
-      ...(!appearance.chatShowActivities ? { hideActivities: true as const } : {}),
-      ...(!appearance.chatShowActivityMessages ? { hideActivityMessages: true as const } : {}),
-      ...(!appearance.chatShowActivityTools ? { hideActivityTools: true as const } : {})
-    }
+    const displaySettings = chatHistoryDisplayFor(activitySettingsOf(appearance))
     const {
       state,
       timeline,
