@@ -104,6 +104,7 @@ import {
   rollbackRestore
 } from './restore-swap'
 import { readDataGeneration } from '@slayzone/platform/hub-data-generation'
+import { acquireHubRootLock } from './root-lock'
 import { startEventLoopStallDetector } from '@slayzone/platform/event-loop-stall'
 import {
   adoptClientAddress,
@@ -165,6 +166,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // HERE, before anything opens the database. A backup that cannot run is refused and
   // the old database kept; an I/O failure mid-swap fails this boot and the next one
   // resumes from the recorded phase. Only when this process owns the database.
+  // One hub per root, for this hub's whole life (root-lock.ts, review-2 L7): taken
+  // before a staged restore can swap the database file.
+  const rootLock = cfg.db ? null : acquireHubRootLock(dataRoot)
   let lastRestore: ApplyRestoreResult = cfg.db
     ? { status: 'none' }
     : applyPendingRestore({ dataRoot, dbPath, latestVersion: LATEST_MIGRATION_VERSION })
@@ -1052,6 +1056,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           /* ignore */
         }
       }
+      rootLock?.release()
       if (ownsDiagnosticsRetention) stopRetentionScheduler()
       stallDetector.stop()
       // Drain buffered diagnostics before closing their DB — otherwise a clean

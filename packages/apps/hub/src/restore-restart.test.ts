@@ -556,3 +556,35 @@ test('L4: a key the desktop unlocks after the hub started is used by the running
     await hub.stop()
   }
 })
+
+test('L7: a second hub on the same root refuses to start; the first keeps serving', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-root-twice-'))
+  roots.push(root)
+  const first = await bootHub(root)
+  try {
+    const second = spawn(ELECTRON_BIN, [HUB_BIN], {
+      cwd: root,
+      env: {
+        ...scrubbedEnv(root),
+        SLAYZONE_ROOT: root,
+        SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
+        ELECTRON_RUN_AS_NODE: '1'
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    let out = ''
+    second.stdout?.on('data', (b) => (out += b))
+    second.stderr?.on('data', (b) => (out += b))
+    const code = await Promise.race([
+      new Promise((r) => second.once('exit', (c) => r(c))),
+      new Promise((r) => setTimeout(() => r('still running'), 30_000))
+    ])
+    if (code === 'still running') second.kill('SIGKILL')
+    expect(code).not.toBe('still running')
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/already running/)
+    expect((await fetch(`http://127.0.0.1:${first.port}/health`)).ok).toBe(true)
+  } finally {
+    await first.stop()
+  }
+})

@@ -253,6 +253,7 @@ run_harness packages/apps/hub/src/credential-compaction.test.ts
 run_harness packages/apps/hub/src/credentials-secret-input.test.ts
 run_harness packages/apps/hub/src/hub-restart.test.ts
 run_harness packages/apps/hub/src/hub-shutdown.test.ts
+run_harness packages/apps/hub/src/root-lock.test.ts
 run_harness packages/apps/hub/src/restore-swap.test.ts
 run_harness packages/apps/hub/src/restore-restart.test.ts
 run_harness packages/apps/hub/src/chat-backup.test.ts
