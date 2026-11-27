@@ -59,3 +59,20 @@ test('stop clears the timer', () => {
   tick(120_000)
   expect(onWake).not.toHaveBeenCalled()
 })
+
+// Review 2 N2: the cron engine checks one minute per tick, so a sleep longer than a
+// minute can skip a catch-up slot. The default window must notice it (main's
+// powerMonitor fired on every resume): a 65 s gap is a wake; a busy tick is not.
+test('defaults: a 65 s sleep is a wake, a 25 s late tick is not', () => {
+  const onWake = vi.fn()
+  const stop = startWakeWatchdog({ onWake, now: () => now })
+  // A busy event loop: the next tick lands 25 s after the last one.
+  now += 25_000
+  vi.advanceTimersByTime(10_000)
+  expect(onWake).not.toHaveBeenCalled()
+  // A 65 s sleep: the wall clock jumps 65 s; the timer fires once on wake.
+  now += 65_000
+  vi.advanceTimersByTime(10_000)
+  expect(onWake).toHaveBeenCalledTimes(1)
+  stop()
+})

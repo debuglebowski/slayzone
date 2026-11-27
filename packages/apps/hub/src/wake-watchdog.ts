@@ -18,8 +18,12 @@ export function startWakeWatchdog(opts: {
   slackMs?: number
   now?: () => number
 }): () => void {
-  const intervalMs = opts.intervalMs ?? 30_000
-  const slackMs = opts.slackMs ?? 60_000
+  // A gap over 30 s is a wake. Under one cron minute: the engine checks only the
+  // current minute per tick, so a ~minute-long sleep can skip a catch-up slot, and
+  // Electron's powerMonitor (which this replaces) fired on every resume. A false
+  // positive is cheap — runCatchup fires a slot only if one matched since last_run_at.
+  const intervalMs = opts.intervalMs ?? 10_000
+  const slackMs = opts.slackMs ?? 20_000
   const now = opts.now ?? Date.now
   let last = now()
   const timer = setInterval(() => {

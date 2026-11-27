@@ -18,7 +18,12 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { test, expect } from 'vitest'
-import { readClientSettings, updateClientSettings, clientSettingsPath } from './client-settings.js'
+import {
+  readClientSettings,
+  updateClientSettings,
+  clientSettingsPath,
+  writeClientShortcuts
+} from './client-settings.js'
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-'))
 const file = clientSettingsPath(dir)
@@ -162,5 +167,38 @@ test('keeps the one-time shortcut adoption marker, written with the map in one p
   })
   // Hand-edited garbage reads as unset, not as adopted.
   fs.writeFileSync(clientSettingsPath(d), JSON.stringify({ shortcutsOwnedByDevice: 'yes' }))
+  expect(readClientSettings(d).shortcutsOwnedByDevice).toBeUndefined()
+})
+
+// Review 2 N1: the hub adoption is compare-and-set inside the serialized write. Once
+// the device owns the map (a local edit, or an earlier adoption), an adoption write
+// is a no-op — two windows adopting at once can never overwrite a fresh local edit.
+test('two concurrent adoptions + a local edit: the local edit wins', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-cas-'))
+  // Window A adopts, the person edits in A, window B's (older) adoption lands last.
+  const results = await Promise.all([
+    writeClientShortcuts({ 'go-home': 'mod+1' }, { adoptedFromHub: true }, d),
+    writeClientShortcuts({ 'go-home': 'mod+9' }, { localEdit: true }, d),
+    writeClientShortcuts({ 'go-home': 'mod+1' }, { adoptedFromHub: true }, d)
+  ])
+  expect(results.map((r) => r.applied)).toEqual([true, true, false])
+  expect(readClientSettings(d)).toMatchObject({
+    customShortcuts: { 'go-home': 'mod+9' },
+    shortcutsOwnedByDevice: true
+  })
+})
+
+test('a local edit first: a later adoption write changes nothing', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-cas2-'))
+  await writeClientShortcuts({ search: 'mod+p' }, { localEdit: true }, d)
+  const r = await writeClientShortcuts({ search: 'mod+k' }, { adoptedFromHub: true }, d)
+  expect(r.applied).toBe(false)
+  expect(readClientSettings(d).customShortcuts).toEqual({ search: 'mod+p' })
+})
+
+test('a plain write (normalization) neither claims the map nor is blocked', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-client-settings-cas3-'))
+  const r = await writeClientShortcuts({ a: null }, {}, d)
+  expect(r.applied).toBe(true)
   expect(readClientSettings(d).shortcutsOwnedByDevice).toBeUndefined()
 })

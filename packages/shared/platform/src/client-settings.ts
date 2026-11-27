@@ -220,14 +220,51 @@ export function updateClientSettings(
   patch: Partial<ClientSettings>,
   dir: string = getClientRoot()
 ): Promise<ClientSettings> {
+  return updateClientSettingsWith(() => patch, dir).then((r) => r.settings)
+}
+
+/**
+ * Read-modify-write on the same serialized chain: `decide` sees the CURRENT file (as
+ * parsed settings) and returns the patch, or null to write nothing. That makes a
+ * check-and-set atomic against every other writer in this process.
+ */
+function updateClientSettingsWith(
+  decide: (current: ClientSettings) => Partial<ClientSettings> | null,
+  dir: string
+): Promise<{ settings: ClientSettings; applied: boolean }> {
   const run = writeChain.then(() => {
     adoptLegacyFile(dir)
     const path = clientSettingsPath(dir)
     const raw = readJsonObject(path) ?? {}
-    const next = { ...raw, ...patch }
-    writeJsonAtomic(path, next)
-    return undefined
+    const patch = decide(coerce(raw))
+    if (patch === null) return false
+    writeJsonAtomic(path, { ...raw, ...patch })
+    return true
   })
-  writeChain = run.catch(() => undefined)
-  return run.then(() => readClientSettings(dir))
+  writeChain = run.then(
+    () => undefined,
+    () => undefined
+  )
+  return run.then((applied) => ({ settings: readClientSettings(dir), applied }))
+}
+
+/**
+ * Write the shortcut-override map. `localEdit` (the person changed a shortcut here)
+ * and `adoptedFromHub` (the one-time copy) both set `shortcutsOwnedByDevice` in the
+ * same write. The adoption is compare-and-set: once the device owns the map, an
+ * adoption write is a no-op (`applied: false`) — so a second window's adoption, which
+ * read the hub before this window's edit, can never overwrite that edit.
+ */
+export function writeClientShortcuts(
+  overrides: Record<string, string | null>,
+  opts: { adoptedFromHub?: boolean; localEdit?: boolean },
+  dir: string = getClientRoot()
+): Promise<{ settings: ClientSettings; applied: boolean }> {
+  return updateClientSettingsWith((current) => {
+    if (opts.adoptedFromHub && current.shortcutsOwnedByDevice) return null
+    return {
+      customShortcuts: overrides,
+      ...(opts.adoptedFromHub || opts.localEdit ? { shortcutsOwnedByDevice: true } : {})
+    }
+  }, dir)
 }

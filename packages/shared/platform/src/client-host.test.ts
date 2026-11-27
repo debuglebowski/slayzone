@@ -177,3 +177,29 @@ describe('several pages on one store (web-shell tabs)', () => {
     )
   })
 })
+
+// Review 2 N1: the storage host's adoption is compare-and-set too (several web-shell
+// tabs / renderers adopt on boot).
+it('storage host: two concurrent adoptions + a local edit: the local edit wins', async () => {
+  const host = createStorageClientHost({ kv: memoryKv(), systemTheme: () => 'dark' })
+  await call(host, 'settings.snapshot')
+  await Promise.all([
+    call(host, 'shortcuts.set', { 'go-home': 'mod+1' }, { adoptedFromHub: true }),
+    call(host, 'shortcuts.set', { 'go-home': 'mod+9' }, { localEdit: true }),
+    call(host, 'shortcuts.set', { 'go-home': 'mod+1' }, { adoptedFromHub: true })
+  ])
+  expect(await call(host, 'settings.snapshot')).toMatchObject({
+    shortcuts: { 'go-home': 'mod+9' },
+    shortcutsOwnedByDevice: true
+  })
+})
+
+it('storage host: an adoption after a local edit in ANOTHER page is a no-op', async () => {
+  const kv = memoryKv()
+  const a = createStorageClientHost({ kv, systemTheme: () => 'dark' })
+  const b = createStorageClientHost({ kv, systemTheme: () => 'dark' })
+  await call(b, 'settings.snapshot') // B boots, sees no marker, starts adopting…
+  await call(a, 'shortcuts.set', { search: 'mod+p' }, { localEdit: true })
+  await call(b, 'shortcuts.set', { search: 'mod+k' }, { adoptedFromHub: true })
+  expect(await call(a, 'settings.snapshot')).toMatchObject({ shortcuts: { search: 'mod+p' } })
+})

@@ -504,7 +504,11 @@ import {
   setTheme as nativeSetTheme
 } from '@slayzone/settings/theme'
 import { getClientRoot } from '@slayzone/platform'
-import { readClientSettings, updateClientSettings } from '@slayzone/platform/client-settings'
+import {
+  readClientSettings,
+  updateClientSettings,
+  writeClientShortcuts
+} from '@slayzone/platform/client-settings'
 import { convexAddressFromUrl } from '@slayzone/platform/hub-convex'
 import { migrateClientSettings } from './client-settings-migration'
 import { resolveAppConvexUrl } from './convex-deployment'
@@ -2373,15 +2377,16 @@ app
           clientSettingsChanged()
         },
         'shortcuts.set': async (overrides, opts) => {
-          // One write: the map and (on adoption or a local edit) the marker together —
-          // from then on the hub's older map never overwrites this device's.
-          clientSettings = await updateClientSettings(
-            {
-              customShortcuts: normalizeShortcutOverrides(overrides).overrides,
-              ...(opts?.adoptedFromHub || opts?.localEdit ? { shortcutsOwnedByDevice: true } : {})
-            },
+          // One serialized write: the map and (on adoption or a local edit) the marker
+          // together. Adoption is compare-and-set — a no-op once the device owns the
+          // map, so another window's late adoption never overwrites a local edit.
+          const written = await writeClientShortcuts(
+            normalizeShortcutOverrides(overrides).overrides,
+            opts ?? {},
             clientRoot
           )
+          clientSettings = written.settings
+          if (!written.applied) return
           currentOverrides = readShortcutOverrides()
           buildAppMenu(currentOverrides)
           clientSettingsChanged()

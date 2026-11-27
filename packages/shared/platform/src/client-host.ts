@@ -236,6 +236,37 @@ export function createStorageClientHost(opts: {
     }
   }
 
+  // Shortcut writes run one at a time, each re-reading the store, so the adoption's
+  // check-and-set below is atomic within this page. (Pages on one store — web-shell
+  // tabs — have no shared lock; the re-read still sees another page's marker.)
+  let shortcutWrites: Promise<unknown> = Promise.resolve()
+  const serialized = (fn: () => Promise<void>): Promise<void> => {
+    const run = shortcutWrites.then(fn)
+    shortcutWrites = run.catch(() => undefined)
+    return run
+  }
+
+  const writeShortcuts = async (
+    overrides: ShortcutOverrideMap,
+    o?: { adoptedFromHub?: boolean; localEdit?: boolean }
+  ): Promise<void> => {
+    // The one-time adoption is compare-and-set: once the device owns the map (a
+    // local edit, or an earlier adoption — in any page), it is a no-op.
+    if (o?.adoptedFromHub && (await kv.get(KEY.adopted)) === '1') return
+    const next = isRecord(overrides) ? overrides : {}
+    const merged = await readShortcuts()
+    for (const k of new Set([...Object.keys(seenShortcuts), ...Object.keys(next)])) {
+      const was = Object.hasOwn(seenShortcuts, k) ? seenShortcuts[k] : undefined
+      const now = Object.hasOwn(next, k) ? next[k] : undefined
+      if (was === now) continue
+      if (now === undefined) delete merged[k]
+      else merged[k] = now
+    }
+    await kv.set(KEY.shortcuts, JSON.stringify(merged))
+    if (o?.adoptedFromHub || o?.localEdit) await kv.set(KEY.adopted, '1')
+    await changed()
+  }
+
   const changed = async (): Promise<void> => emit('settings-changed', await snapshot())
   opts.watch?.(() => {
     void changed().catch(() => undefined)
@@ -254,23 +285,10 @@ export function createStorageClientHost(opts: {
       await kv.set(KEY.labs, JSON.stringify({ ...labs, [flag]: on === true }))
       await changed()
     },
-    'shortcuts.set': async (
+    'shortcuts.set': (
       overrides: ShortcutOverrideMap,
       o?: { adoptedFromHub?: boolean; localEdit?: boolean }
-    ): Promise<void> => {
-      const next = isRecord(overrides) ? overrides : {}
-      const merged = await readShortcuts()
-      for (const k of new Set([...Object.keys(seenShortcuts), ...Object.keys(next)])) {
-        const was = Object.hasOwn(seenShortcuts, k) ? seenShortcuts[k] : undefined
-        const now = Object.hasOwn(next, k) ? next[k] : undefined
-        if (was === now) continue
-        if (now === undefined) delete merged[k]
-        else merged[k] = now
-      }
-      await kv.set(KEY.shortcuts, JSON.stringify(merged))
-      if (o?.adoptedFromHub || o?.localEdit) await kv.set(KEY.adopted, '1')
-      await changed()
-    },
+    ): Promise<void> => serialized(() => writeShortcuts(overrides, o)),
     'zoom.get': () => 1,
     'zoom.adjust': () => 1,
     'update.restart': () => undefined,
