@@ -1843,6 +1843,7 @@ run_vitest_files "vitest (tasks-changed refresh)" \
   packages/shared/notify/src/server/notify-coalescer.test.ts \
   packages/shared/notify/src/server/notify-router.test.ts \
   packages/domains/tasks/src/client/board-patch.test.ts \
+  packages/domains/tasks/src/client/board-load-report.test.ts \
   packages/domains/task/src/client/taskScopedQueries.test.tsx \
   packages/domains/task/src/client/usePanelConfig.test.tsx \
   packages/domains/settings/src/client/theme-cache.test.ts
