@@ -29,7 +29,7 @@ import {
 } from './chat-queue-handlers'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../adapters/flag-parser'
-import { getEnrichedPath } from '../shell-env'
+import { getEnrichedPathAsync } from '../shell-env'
 import { supportsChatMode } from '../agents/registry'
 import { getAutoModeEligibility, type AutoModeEligibility } from '../auto-mode-eligibility'
 import { resolveAccountDefaultModel } from '../account-default-model'
@@ -365,12 +365,13 @@ async function buildHydrateOpts(
   // computer-routed spawn needs a remote-shaped env (no hub loopback hook URL).
   const computerId = await data.resolveComputerId(opts.taskId)
 
-  // PATH enrichment is HUB-local by construction — `getEnrichedPath()` probes
-  // THIS machine's login shell, so injecting it into a routed spawn would send
-  // hub paths to a computer whose toolchains live elsewhere (and could mask the
-  // computer's own PATH entirely). The computer supplies its own sanitized base env
-  // (see computer handlers/proc.ts buildEnv), so remote spawns omit it.
-  const enrichedPath = computerId == null ? getEnrichedPath() : null
+  // PATH enrichment is HUB-local by construction — the probe runs THIS machine's
+  // login shell, so injecting it into a routed spawn would send hub paths to a
+  // computer whose toolchains live elsewhere (and could mask the computer's own
+  // PATH entirely). The computer supplies its own sanitized base env (see computer
+  // handlers/proc.ts buildEnv), so remote spawns omit it. Async: a slow shell init
+  // must not freeze this process's other requests, heartbeats and ptys.
+  const enrichedPath = computerId == null ? await getEnrichedPathAsync() : null
   // The CLI version last seen for this project: gates spawn options an older
   // CLI would refuse (claude `--thinking-display`). Unknown = none of them.
   const cliVersion = await data

@@ -118,6 +118,8 @@ run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
 # Codex chat models through the chat ops: getModels / getModel / setModel against the CLI's model/list (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers-codex.test.ts
+# A local chat start probes the login-shell PATH without blocking the event loop.
+run_harness packages/domains/terminal/src/server/runtime/chat-handlers-login-path.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-handlers.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-attachment-guard.test.ts
