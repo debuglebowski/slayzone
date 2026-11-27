@@ -82,6 +82,10 @@ describe('manifest shape', () => {
   test('SLAYZONE_DESKTOP_BRIDGE_TOKEN is secret', () => {
     expect(ENV_MANIFEST.SLAYZONE_DESKTOP_BRIDGE_TOKEN).toBe('secret')
   })
+
+  test('SLAYZONE_HUB_CREDENTIALS_SECRET is secret', () => {
+    expect(ENV_MANIFEST.SLAYZONE_HUB_CREDENTIALS_SECRET).toBe('secret')
+  })
   // The pre-rename name is RETIRED, not aliased. It never shipped: the published
   // computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, so there is no
   // operator env anywhere carrying this name to keep working. Unmanifested → the
@@ -226,6 +230,7 @@ describe('sanitizeSpawnEnv behavior', () => {
     SLAYZONE_HUB_AUTH_SECRET: 'hmac',
     SLAYZONE_HUB_SSO_CLIENT_SECRET: 'entra-secret',
     SLAYZONE_DESKTOP_BRIDGE_TOKEN: 'cap-bearer',
+    SLAYZONE_HUB_CREDENTIALS_SECRET: 'credentials-key',
     // infra — must be stripped
     SLAYZONE_HUB_ADDRESS: 'hub.example:8443',
     SLAYZONE_HUB_LISTEN_ADDRESS: '0.0.0.0:51100',
@@ -314,6 +319,10 @@ describe('sanitizeSpawnEnv behavior', () => {
 
   test('strips secret SLAYZONE_DESKTOP_BRIDGE_TOKEN', () => {
     expect(out).not.toHaveProperty('SLAYZONE_DESKTOP_BRIDGE_TOKEN')
+  })
+
+  test('strips secret SLAYZONE_HUB_CREDENTIALS_SECRET', () => {
+    expect(out).not.toHaveProperty('SLAYZONE_HUB_CREDENTIALS_SECRET')
   })
 
   test('strips infra SLAYZONE_HUB_ADDRESS', () => {

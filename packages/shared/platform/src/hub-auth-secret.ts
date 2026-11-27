@@ -33,7 +33,9 @@ import { hkdfSync } from 'node:crypto'
 /** Every value derived from the hub auth secret, by use. Distinct by construction. */
 export const HUB_AUTH_SECRET_LABELS = {
   /** The bootstrap owner of a reachable password hub (apps/hub bootstrap-owner.ts). */
-  bootstrapOwnerPassword: 'slayzone-hub/bootstrap-owner-password/v1'
+  bootstrapOwnerPassword: 'slayzone-hub/bootstrap-owner-password/v1',
+  /** The key integration tokens are encrypted under (integrations hub-cipher.ts). */
+  integrationCredentials: 'slayzone-hub/integration-credentials/v1'
 } as const
 
 export type HubAuthSecretLabel =
@@ -64,4 +66,12 @@ export function deriveBootstrapOwnerPassword(secret: string): string {
     HUB_AUTH_SECRET_LABELS.bootstrapOwnerPassword,
     16
   ).toString('base64url')
+}
+
+/**
+ * The 256-bit key a hub encrypts its integration tokens under. A hub with a real auth
+ * secret derives it, so the operator holds one secret and no key file lands on disk.
+ */
+export function deriveHubCredentialsKey(secret: string): Buffer {
+  return deriveFromHubAuthSecret(secret, HUB_AUTH_SECRET_LABELS.integrationCredentials, 32)
 }

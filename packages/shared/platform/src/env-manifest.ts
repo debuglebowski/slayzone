@@ -49,8 +49,8 @@ export type EnvScope = 'global' | 'infra' | 'secret' | 'identity'
  * HUB_PUBLIC_URL — all folded into HUB_ADDRESS/HUB_PUBLIC_ADDRESS; MODE — replaced
  * by the per-hub switches below, a leftover value is ignored; STORE_DIR,
  * DB_DIR, DB_PATH — the DB file DERIVES from SLAYZONE_ROOT + SLAYZONE_DEV and is
- * not overridable; ALLOW_PLAINTEXT_CREDENTIALS — plaintext fallback now DERIVES
- * from cipher availability, see integrations/server/credentials.ts; AGENT_MODE,
+ * not overridable; ALLOW_PLAINTEXT_CREDENTIALS — retired: tokens are never written in
+ * plaintext any more, see integrations/server/credentials.ts; AGENT_MODE,
  * RUNNER_CONFIG, RUNNER_TRANSPORT_BASE_URL, RUNNER_ALLOWED_ROOTS, RUNNER_NAME,
  * RUNNER_CREDENTIALS_DIR, SEED_DEMO). An
  * unlisted SLAYZONE_* is stripped by default (fail closed), so omissions are
@@ -83,6 +83,10 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // the threat this closes is another loopback process finding the port — so
   // this is a real credential, `secret`-scoped like the two above it.
   SLAYZONE_DESKTOP_BRIDGE_TOKEN: 'secret',
+  // The key the hub encrypts integration tokens under (integrations hub-cipher.ts).
+  // Set by the desktop app (a per-install key, safeStorage-wrapped on disk) or by an
+  // operator; otherwise a hub derives it from SLAYZONE_HUB_AUTH_SECRET. Env only.
+  SLAYZONE_HUB_CREDENTIALS_SECRET: 'secret',
   // The pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` is deliberately UNLISTED: it is
   // retired, not aliased. It never shipped (the published computer betas read
   // `SLAYZONE_JOIN_TOKEN`), so no operator env carries it and there is nothing to

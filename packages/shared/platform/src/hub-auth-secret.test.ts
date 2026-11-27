@@ -5,6 +5,7 @@ import { createHmac, hkdfSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   deriveBootstrapOwnerPassword,
+  deriveHubCredentialsKey,
   deriveFromHubAuthSecret,
   HUB_AUTH_SECRET_LABELS
 } from './hub-auth-secret'
@@ -40,6 +41,18 @@ describe('hub auth secret derivations', () => {
   it('every label is distinct', () => {
     const labels = Object.values(HUB_AUTH_SECRET_LABELS)
     expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it('the integration-credentials key is 32 bytes, stable, and its own label', () => {
+    const key = deriveHubCredentialsKey(SECRET)
+    expect(key).toHaveLength(32)
+    expect(key.equals(deriveHubCredentialsKey(SECRET))).toBe(true)
+    expect(key.equals(deriveHubCredentialsKey(`${SECRET}x`))).toBe(false)
+    expect(HUB_AUTH_SECRET_LABELS.integrationCredentials).toBe(
+      'slayzone-hub/integration-credentials/v1'
+    )
+    const owner = deriveFromHubAuthSecret(SECRET, HUB_AUTH_SECRET_LABELS.bootstrapOwnerPassword, 32)
+    expect(key.equals(owner)).toBe(false)
   })
 
   it('refuses an empty secret rather than deriving from nothing', () => {
