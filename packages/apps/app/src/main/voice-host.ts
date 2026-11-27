@@ -1,7 +1,14 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { ipcMain, MessageChannelMain, utilityProcess, type UtilityProcess } from 'electron'
 import { getClientRoot } from '@slayzone/platform'
-import { isTtsChoice, VOICE_MODELS_DIRNAME, type CloudTtsProvider } from '@slayzone/voice/shared'
+import {
+  isTtsChoice,
+  PARAKEET_TDT_V3,
+  SILERO_VAD,
+  VOICE_MODELS_DIRNAME,
+  type CloudTtsProvider
+} from '@slayzone/voice/shared'
 import { isAppRenderer } from './browser-host-ipc'
 import type { TokenCipher } from './hub-tokens'
 import { readVoiceKeys, setVoiceKey, voiceKeyStatus } from './voice-keys'
@@ -64,6 +71,15 @@ export function registerVoiceHostIpc(cipher: TokenCipher | null): void {
     if (!isCloudProvider(provider) || typeof key !== 'string')
       throw new Error('voice host: bad key')
     await setVoiceKey(keysDir, cipher, provider, key)
+  })
+  // Voice needs the speech models on this device (the downloadable module); without
+  // them the UI offers no conversation mode at all.
+  ipcMain.handle('voice-host:available', (e) => {
+    if (!isAppRenderer(e.sender)) throw new Error('voice host: not an app renderer')
+    const dir = voiceModelsDir()
+    return [SILERO_VAD, PARAKEET_TDT_V3].every((spec) =>
+      spec.files.every((f) => existsSync(join(dir, f.installed)))
+    )
   })
   ipcMain.handle('voice-host:key-status', (e) => {
     if (!isAppRenderer(e.sender)) throw new Error('voice host: not an app renderer')

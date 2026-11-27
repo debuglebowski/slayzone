@@ -243,6 +243,8 @@ export interface ElectronVoiceHost {
   connect: (requestId: string) => void
   /** Store (or clear, with '') this device's key for a cloud voice provider. Encrypted. */
   setKey: (provider: string, key: string) => Promise<void>
+  /** The speech models (VAD + STT) are installed on this device. */
+  available: () => Promise<boolean>
   /** Which cloud voice providers have a key stored here (never the keys). */
   keyStatus: () => Promise<Record<string, boolean>>
 }

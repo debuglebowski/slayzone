@@ -1207,12 +1207,16 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                                   unpin={pinned.unpin}
                                   inBranchOf={pinned.inBranchOf}
                                 />
-                                <VoiceModeButton
-                                  enabled={voice.enabled}
-                                  status={voice.status}
-                                  onToggle={voice.toggle}
-                                />
-                                <VoiceSettingsPopover />
+                                {voice.available && (
+                                  <>
+                                    <VoiceModeButton
+                                      enabled={voice.enabled}
+                                      status={voice.status}
+                                      onToggle={voice.toggle}
+                                    />
+                                    <VoiceSettingsPopover />
+                                  </>
+                                )}
                               </>
                             }
                             backgroundJobs={

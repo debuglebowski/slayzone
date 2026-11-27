@@ -3,6 +3,7 @@ import { useStableCallback } from '@slayzone/ui'
 import { useTRPCClient } from './trpc'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { parseVoiceSettings, VOICE_SETTINGS_KEY } from '../shared'
+import { VoiceEngineClient } from './engine-client'
 import { VoiceSession, type VoiceSessionStatus } from './voice-session'
 
 /**
@@ -38,6 +39,8 @@ export interface UseVoiceModeOpts {
 }
 
 export interface UseVoiceModeResult {
+  /** The speech models are installed here (false until known): show no voice UI otherwise. */
+  available: boolean
   enabled: boolean
   toggle: () => void
   status: VoiceSessionStatus | null
@@ -51,6 +54,16 @@ export function useVoiceMode({
   const enabled = useSyncExternalStore(subscribe, () => activeTab === tabId)
   const revision = useSyncExternalStore(subscribe, () => settingsRevision)
   const [status, setStatus] = useState<VoiceSessionStatus | null>(null)
+  const [available, setAvailable] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void VoiceEngineClient.available().then((ok) => {
+      if (!cancelled) setAvailable(ok)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const trpc = useTRPCClient()
   const sendTurn = useStableCallback((text: string, id: string) => sendMessage(text, { id }))
   const onEvents = useStableCallback((listener: (event: AgentEvent) => void) =>
@@ -90,5 +103,5 @@ export function useVoiceMode({
   )
 
   const toggle = useStableCallback(() => setActiveTab(activeTab === tabId ? null : tabId))
-  return { enabled, toggle, status }
+  return { available, enabled, toggle, status }
 }

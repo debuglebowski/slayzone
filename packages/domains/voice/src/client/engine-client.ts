@@ -62,6 +62,12 @@ export class VoiceEngineClient {
     control.onmessage = (e: MessageEvent) => this.onMessage(e.data as VoiceEngineMessage)
   }
 
+  /** Conversation mode can run here: a voice host and the speech models. */
+  static available(): Promise<boolean> {
+    const host = electronBootstrap.voiceHost()
+    return host ? host.available().catch(() => false) : Promise.resolve(false)
+  }
+
   /** This device's stored cloud-voice keys: which are set (never the keys). */
   static keyStatus(): Promise<Record<string, boolean>> {
     return electronBootstrap.voiceHost()?.keyStatus() ?? Promise.resolve({})

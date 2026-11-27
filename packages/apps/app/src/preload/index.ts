@@ -182,6 +182,7 @@ const api: ElectronAPI = {
     connect: (requestId: string) => ipcRenderer.send('voice-host:connect', requestId),
     setKey: (provider: string, key: string) =>
       ipcRenderer.invoke('voice-host:set-key', provider, key) as Promise<void>,
+    available: () => ipcRenderer.invoke('voice-host:available') as Promise<boolean>,
     keyStatus: () => ipcRenderer.invoke('voice-host:key-status') as Promise<Record<string, boolean>>
   },
   files: {
