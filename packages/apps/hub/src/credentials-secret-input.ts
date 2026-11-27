@@ -93,7 +93,10 @@ export function watchCredentialsUpdates(
   listener: (input: CredentialsSecretInput) => void
 ): () => void {
   const pipe = openPipe
-  if (!pipe) return () => {}
+  if (!pipe)
+    return () => {
+      // Nothing was watched: keys came another way, or the pipe already ended.
+    }
   openPipe = null
   let buffered = pipe.rest
   const stream = createReadStream('', { fd: pipe.fd, autoClose: true, encoding: 'utf8' })
