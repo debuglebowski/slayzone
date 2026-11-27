@@ -449,6 +449,34 @@ it('five host launchers started at once: exactly one ever starts a child', async
   for (const c of all.filter((c) => c.exitCode !== null)) expect(c.exitCode).toBe(0)
 }, 20_000)
 
+// listen() is bind() then listen(): between them the socket file refuses connections,
+// exactly like a dead launcher's. 2026-11-27: under full CPU load a launcher probed a
+// winner preempted in that gap and "took over" its live endpoint — two hosts ran. So
+// every bind happens while holding the guard, and a launcher never binds without it.
+it.skipIf(process.platform === 'win32')(
+  'a host launcher binds only while holding the bind guard, and waits for it',
+  async () => {
+    const root = launcherRoot('launcher-guard-')
+    const host = hostEntry(root)
+    ensureComputerLauncher(root, { entry: host.entry, version: '1' })
+    prepareEndpointDir(hostEndpointDir(root)!)
+    const guard = `${hostLauncherEndpoint(root)}.takeover`
+    mkdirSync(guard, { mode: 0o700 })
+    const launcher = track(hostLauncher(root))
+    // Longer than 50 retries at the guard's poll interval: waiting is not failing.
+    await new Promise((r) => setTimeout(r, 2000))
+    expect(existsSync(hostLauncherEndpoint(root))).toBe(false)
+    expect(host.boots()).toHaveLength(0)
+    expect(launcher.exitCode).toBeNull()
+    rmSync(guard, { recursive: true })
+    await until(() => host.boots().length === 1)
+    killPids.push(...host.boots())
+    expect(existsSync(guard)).toBe(false)
+    expect((await queryHostLauncher(root, 'status'))?.state).toBe('running')
+  },
+  15_000
+)
+
 it.skipIf(process.platform === 'win32')(
   'a launcher endpoint left by a SIGKILLed launcher is taken over',
   async () => {

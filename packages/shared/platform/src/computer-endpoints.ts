@@ -185,6 +185,22 @@ export function sweepStaleEndpointDirs(
 const BUSY_CONNECT_ERRORS: ReadonlySet<string> = new Set(['EAGAIN'])
 
 /**
+ * `listen` errors meaning "something already holds this endpoint path" — the caller
+ * probes it (live owner → superseded; stale file → replace). EADDRINUSE is the usual
+ * answer. macOS returns EEXIST instead when another process binds the same Unix socket
+ * path at the same moment: its AF_UNIX bind looks the path up, then creates it, and a
+ * concurrent creator in between surfaces as EEXIST (five launchers started at once hit
+ * it about 1 run in 4). launch.cjs (computer-launcher.ts) classifies with this list.
+ */
+export const ENDPOINT_IN_USE_LISTEN_ERRORS: readonly string[] = ['EADDRINUSE', 'EEXIST']
+
+/** Did `listen` fail because the endpoint path is already held (`ENDPOINT_IN_USE_LISTEN_ERRORS`)? */
+export function isEndpointInUseError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code
+  return typeof code === 'string' && ENDPOINT_IN_USE_LISTEN_ERRORS.includes(code)
+}
+
+/**
  * Is something bound to this endpoint? `live`: a connection was accepted, or the
  * attempt timed out or met a full backlog (assume an owner, never delete what might
  * be someone's). `stale`: a POSIX socket file with no listener. `absent`: nothing

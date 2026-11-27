@@ -25,6 +25,7 @@ import {
   hostEndpoint,
   hostEndpointDir,
   hostLauncherEndpoint,
+  isEndpointInUseError,
   prepareEndpointDir,
   probeEndpoint,
   releaseEndpointDir,
@@ -89,6 +90,17 @@ describe('computer endpoints', () => {
       control: hostEndpoint(root),
       launcher: hostLauncherEndpoint(root)
     })
+  })
+
+  it('a listen error is "endpoint in use" for EADDRINUSE and for macOS\'s concurrent-bind EEXIST only', () => {
+    const err = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code })
+    expect(isEndpointInUseError(err('EADDRINUSE'))).toBe(true)
+    // macOS: another process binding the same Unix socket path at the same moment.
+    expect(isEndpointInUseError(err('EEXIST'))).toBe(true)
+    for (const code of ['EACCES', 'EINVAL', 'ENAMETOOLONG', 'ENOENT'])
+      expect(isEndpointInUseError(err(code))).toBe(false)
+    expect(isEndpointInUseError(new Error('no code'))).toBe(false)
+    expect(isEndpointInUseError(null)).toBe(false)
   })
 
   it.skipIf(!posix)(
