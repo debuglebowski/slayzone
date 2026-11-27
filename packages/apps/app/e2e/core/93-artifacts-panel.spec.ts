@@ -575,6 +575,15 @@ test.describe('Artifacts panel', () => {
       await expect(zoomValue).toHaveText(expected, { timeout: 3_000 })
     }
 
+    // The actions menu and its Zoom submenu sit over the document; close both so
+    // the click reaches the editor.
+    const actions = mainWindow.getByRole('dialog', { name: 'Artifact actions' })
+    await expect(async () => {
+      await mainWindow.keyboard.press('Escape')
+      await expect(zoom).toBeHidden({ timeout: 500 })
+      await expect(actions).toBeHidden({ timeout: 500 })
+    }).toPass({ timeout: 5_000 })
+
     const secondLine = panel.locator('.cm-line').nth(1)
     await secondLine.click()
     await expect
