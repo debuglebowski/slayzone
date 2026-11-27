@@ -75,3 +75,17 @@ export function routeFromProjectTab(projectId: string, tab?: string | null): Set
 export function sameRoute(a: SettingsRoute, b: SettingsRoute): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
+
+/**
+ * The identity of the page a route shows: the Settings view remounts its page when
+ * this changes. A project route's `onboarding` is a one-shot request (it forces the
+ * Integrations tab and is dropped once handled), not a different page: keying on it
+ * remounted the page on acknowledgement and threw the onboarding landing away.
+ */
+export function settingsPageKey(route: SettingsRoute): string {
+  if (route.kind === 'project' && route.onboarding) {
+    const { onboarding: _onboarding, ...page } = route
+    return JSON.stringify({ ...page, tab: 'integrations' })
+  }
+  return JSON.stringify(route)
+}

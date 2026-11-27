@@ -3,6 +3,7 @@ import {
   routeFromLegacyTab,
   routeFromProjectTab,
   sameRoute,
+  settingsPageKey,
   type SettingsRoute
 } from './settings-route'
 
@@ -60,5 +61,26 @@ describe('sameRoute', () => {
     expect(
       sameRoute({ kind: 'hub', hubId: 'a', tab: 'mcp' }, { kind: 'hub', hubId: 'a', tab: 'agents' })
     ).toBe(false)
+  })
+})
+
+describe('settingsPageKey', () => {
+  it('ignores the one-shot onboarding request, so acknowledging it keeps the page mounted', () => {
+    // The onboarding route forces Integrations; its acknowledgement navigates here.
+    expect(
+      settingsPageKey({ kind: 'project', projectId: 'p', tab: 'general', onboarding: 'linear' })
+    ).toBe(settingsPageKey({ kind: 'project', projectId: 'p', tab: 'integrations' }))
+  })
+
+  it('still tells real pages apart', () => {
+    expect(settingsPageKey({ kind: 'project', projectId: 'p', tab: 'general' })).not.toBe(
+      settingsPageKey({ kind: 'project', projectId: 'p', tab: 'integrations' })
+    )
+    expect(settingsPageKey({ kind: 'project', projectId: 'p', tab: 'general' })).not.toBe(
+      settingsPageKey({ kind: 'project', projectId: 'q', tab: 'general' })
+    )
+    expect(settingsPageKey({ kind: 'prefs', page: 'appearance' })).not.toBe(
+      settingsPageKey({ kind: 'prefs', page: 'layout' })
+    )
   })
 })

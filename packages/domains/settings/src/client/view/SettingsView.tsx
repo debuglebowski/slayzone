@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, Search } from 'lucide-react'
-import type { SettingsRoute } from '../settings-route'
+import { settingsPageKey, type SettingsRoute } from '../settings-route'
 import { closeSettings, useSettingsViewStore } from '../settings-view-store'
 import { SettingsNav } from './SettingsNav'
 import { SettingsPage, type SettingsPagesProps } from './SettingsPages'
@@ -73,7 +73,7 @@ export function SettingsView(pageProps: SettingsPagesProps) {
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="window-drag-region h-11" />
         <div className="mx-auto w-full max-w-4xl space-y-8 px-10 pb-12">
-          <SettingsPage key={JSON.stringify(route)} route={route} {...pageProps} />
+          <SettingsPage key={settingsPageKey(route)} route={route} {...pageProps} />
         </div>
       </main>
     </div>
