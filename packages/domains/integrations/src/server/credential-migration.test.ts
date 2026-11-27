@@ -11,11 +11,16 @@ import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import {
   migrateStoredCredentials,
   readCredential,
-  RECONNECT_AUTH_ERROR,
   setCredentialKeyRing,
   setLegacyCredentialDecryptor
 } from './credentials.js'
 import { ensureIntegrationSchema } from './handlers-store.js'
+import { encryptHubCredential } from './hub-cipher.js'
+import {
+  CREDENTIAL_KEY_UNAVAILABLE_ERROR,
+  CREDENTIAL_LEGACY_UNREADABLE_ERROR,
+  credentialReconnectReason
+} from '../shared/index.js'
 
 const h = await createTestHarness()
 await ensureIntegrationSchema(h.slayDb)
@@ -129,7 +134,32 @@ describe('credential migration pass', () => {
     const report = await migrateStoredCredentials(h.slayDb)
     expect(report).toMatchObject({ migrated: 0, reconnect: 1, failed: 0 })
     expect(stored('l')).toBe(value)
-    expect(conn(connId)).toEqual({ enabled: 0, auth_error: RECONNECT_AUTH_ERROR })
+    expect(conn(connId)).toEqual({ enabled: 0, auth_error: CREDENTIAL_LEGACY_UNREADABLE_ERROR })
+    expect(credentialReconnectReason(conn(connId).auth_error)).toBe(
+      CREDENTIAL_LEGACY_UNREADABLE_ERROR
+    )
+  })
+
+  test("a row under a key this machine doesn't have: the connection says so", async () => {
+    const other = randomBytes(32)
+    const connId = seed(
+      'k',
+      encryptHubCredential({ current: other }, 'integration:credential:k', 'x')
+    )
+    setCredentialKeyRing({ current: key })
+    await migrateStoredCredentials(h.slayDb)
+    expect(conn(connId)).toEqual({ enabled: 0, auth_error: CREDENTIAL_KEY_UNAVAILABLE_ERROR })
+    expect(CREDENTIAL_KEY_UNAVAILABLE_ERROR).toMatch(/key isn.t available on this machine/)
+    expect(CREDENTIAL_KEY_UNAVAILABLE_ERROR).toMatch(/reconnect/i)
+    // Once the key is back, the mark goes and the connection is enabled again.
+    setCredentialKeyRing({ current: other })
+    await migrateStoredCredentials(h.slayDb)
+    expect(conn(connId)).toEqual({ enabled: 1, auth_error: null })
+  })
+
+  test('a provider error is not a key reason', () => {
+    expect(credentialReconnectReason('401 Unauthorized')).toBeNull()
+    expect(credentialReconnectReason(null)).toBeNull()
   })
 
   test('its own Reconnect mark is cleared once the row reads again', async () => {

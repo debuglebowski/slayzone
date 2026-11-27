@@ -1675,6 +1675,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/projects/src/client/project-settings-reseed.test.tsx \
   packages/domains/projects/src/client/ProjectComputerFolders.test.tsx \
   packages/domains/integrations/src/client/useIntegrationsTab.test.tsx \
+  packages/domains/integrations/src/client/IntegrationCategoryGrid.test.tsx \
   packages/domains/integrations/src/client/ProjectIntegrationConnectionModal.test.tsx \
   packages/domains/integrations/src/client/useStatusSyncLockLookup.test.ts \
   packages/domains/task-artifacts/src/client/useArtifacts.test.tsx \

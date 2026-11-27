@@ -161,6 +161,7 @@ import {
   COMMUNITY_X_URL
 } from './app-shell'
 import type { ProjectSettingsTab, ProjectIntegrationOnboardingProvider } from './app-shell'
+import { credentialReconnectReason } from '@slayzone/integrations/shared'
 
 // Expose the stores for e2e tests. Same escape hatch the fork's HomeView uses:
 // these keys are test-only, so they get an index-signature view of `window`
@@ -169,6 +170,18 @@ const testWindow = window as unknown as Record<string, unknown>
 testWindow.__slayzone_tabStore ??= useTabStore
 testWindow.__slayzone_dialogStore ??= useDialogStore
 testWindow.__slayzone_filterStore ??= useFilterStore
+
+/**
+ * One failed integration in the banner: a credential this hub cannot decrypt says why
+ * (integrations shared credential-reconnect.ts); a provider's own error stays generic.
+ */
+function authFailureText(connection: { provider: string; auth_error: string | null }): string {
+  const provider = connection.provider.charAt(0).toUpperCase() + connection.provider.slice(1)
+  const reason = credentialReconnectReason(connection.auth_error)
+  return reason
+    ? `${provider}: ${reason}`
+    : `${provider} authentication expired — click to reconnect`
+}
 
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
@@ -1661,7 +1674,7 @@ function App(): React.JSX.Element {
                           .join('\n')}
                       >
                         {visibleAuthFailures.length === 1
-                          ? `${visibleAuthFailures[0].connection.provider.charAt(0).toUpperCase() + visibleAuthFailures[0].connection.provider.slice(1)} authentication expired — click to reconnect`
+                          ? authFailureText(visibleAuthFailures[0].connection)
                           : `${visibleAuthFailures.length} integrations need re-authentication — click to reconnect`}
                       </button>
                       <button

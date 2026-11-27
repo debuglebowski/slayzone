@@ -12,6 +12,11 @@ import {
   credentialKeyId,
   isHubCredential
 } from './hub-cipher'
+import {
+  CREDENTIAL_KEY_UNAVAILABLE_ERROR,
+  CREDENTIAL_LEGACY_UNREADABLE_ERROR,
+  CREDENTIAL_RECONNECT_REASONS
+} from '../shared/credential-reconnect'
 
 /**
  * Integration tokens, stored in `settings` under `integration:credential:<ref>`.
@@ -58,7 +63,11 @@ export function setLegacyCredentialDecryptor(d: LegacyCredentialDecryptor | null
 
 export const CREDENTIAL_RECONNECT_REQUIRED = 'CREDENTIAL_RECONNECT_REQUIRED'
 
-/** The stored credential exists but this hub cannot decrypt it. The row is kept. */
+/**
+ * The stored credential exists but this hub cannot decrypt it. The row is kept.
+ * `message` is the user-facing reason (../shared credential-reconnect.ts), set on the
+ * connection so the Integrations UI says why it needs reconnecting.
+ */
 export class CredentialReconnectRequiredError extends Error {
   readonly code = CREDENTIAL_RECONNECT_REQUIRED
   constructor(message: string) {
@@ -67,11 +76,8 @@ export class CredentialReconnectRequiredError extends Error {
   }
 }
 
-/** Shown on the connection (`auth_error`) so the Integrations UI offers Reconnect. */
-export const RECONNECT_AUTH_ERROR =
-  'This hub cannot decrypt the stored credential — reconnect to continue.'
-
 const PLAINTEXT_PREFIX = 'plain:'
+const OWN_REASONS_SQL = CREDENTIAL_RECONNECT_REASONS.map(() => '?').join(', ')
 
 function toSettingKey(ref: string): string {
   return `integration:credential:${ref}`
@@ -112,22 +118,20 @@ async function decryptStored(
   }
   if (isHubCredential(value)) {
     if (!keyRing) {
-      throw new CredentialReconnectRequiredError('This hub has no credential key')
+      throw new CredentialReconnectRequiredError(CREDENTIAL_KEY_UNAVAILABLE_ERROR)
     }
     try {
       const { result, shouldReEncrypt } = decryptHubCredential(keyRing, toSettingKey(ref), value)
       return { secret: result, migrate: shouldReEncrypt }
     } catch (err) {
       if (err instanceof HubCredentialError && err.code === 'wrong-key') {
-        throw new CredentialReconnectRequiredError(err.message)
+        throw new CredentialReconnectRequiredError(CREDENTIAL_KEY_UNAVAILABLE_ERROR)
       }
       throw err
     }
   }
   if (!legacyDecryptor) {
-    throw new CredentialReconnectRequiredError(
-      'Credential was encrypted by the desktop app (safeStorage), which this hub cannot reach'
-    )
+    throw new CredentialReconnectRequiredError(CREDENTIAL_LEGACY_UNREADABLE_ERROR)
   }
   const { result } = await legacyDecryptor.decrypt(Buffer.from(value, 'base64'))
   return { secret: result, migrate: true }
@@ -204,7 +208,7 @@ export interface CredentialMigrationReport {
  * plaintext or safeStorage ciphertext stays at rest (including rows a restored backup
  * brought back). One row's failure never stops the others (`forEachIsolated`, with an
  * optional fault ledger for backoff). A row that cannot be decrypted is kept and its
- * connection marked {@link RECONNECT_AUTH_ERROR}; a mark this pass set is cleared once
+ * connection marked with the reason (../shared credential-reconnect.ts); a mark this pass set is cleared once
  * the row reads again. Inert when integrations are switched off (nothing is read) or
  * the hub has no key (nothing could be written).
  */
@@ -251,14 +255,15 @@ export async function migrateStoredCredentials(
         if (!(err instanceof CredentialReconnectRequiredError)) throw err
         readable = false
         report.reconnect++
+        // Only over no error or a reason of our own: a provider's error stays.
         await db
           .prepare(
             `UPDATE integration_connections
              SET enabled = 0, auth_error = ?, auth_error_at = datetime('now'),
                  updated_at = datetime('now')
-             WHERE credential_ref = ? AND (auth_error IS NULL OR auth_error = ?)`
+             WHERE credential_ref = ? AND (auth_error IS NULL OR auth_error IN (${OWN_REASONS_SQL}))`
           )
-          .run(RECONNECT_AUTH_ERROR, ref, RECONNECT_AUTH_ERROR)
+          .run(err.message, ref, ...CREDENTIAL_RECONNECT_REASONS)
       }
       if (readable) {
         await db
@@ -266,9 +271,9 @@ export async function migrateStoredCredentials(
             `UPDATE integration_connections
              SET enabled = 1, auth_error = NULL, auth_error_at = NULL,
                  updated_at = datetime('now')
-             WHERE credential_ref = ? AND auth_error = ?`
+             WHERE credential_ref = ? AND auth_error IN (${OWN_REASONS_SQL})`
           )
-          .run(ref, RECONNECT_AUTH_ERROR)
+          .run(ref, ...CREDENTIAL_RECONNECT_REASONS)
       }
     }
   )

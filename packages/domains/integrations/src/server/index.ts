@@ -28,7 +28,6 @@ export type { ProviderAdapter, NormalizedIssue, ExternalGroup, ExternalScope } f
 export {
   CREDENTIAL_RECONNECT_REQUIRED,
   migrateStoredCredentials,
-  RECONNECT_AUTH_ERROR,
   setCredentialKeyRing,
   setLegacyCredentialDecryptor
 } from './credentials'

@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { Button, cn } from '@slayzone/ui'
 import type { IntegrationsTabModel } from './useIntegrationsTab'
+import { credentialReconnectReason } from '../shared'
 
 export function IntegrationCategoryGrid({ vm }: { vm: IntegrationsTabModel }) {
   const {
@@ -53,7 +54,8 @@ export function IntegrationCategoryGrid({ vm }: { vm: IntegrationsTabModel }) {
                           className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/25"
                           title={providerConnection.auth_error}
                         >
-                          Authentication expired — click to reconnect
+                          {credentialReconnectReason(providerConnection.auth_error) ??
+                            'Authentication expired — click to reconnect'}
                         </button>
                       ) : (
                         <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
