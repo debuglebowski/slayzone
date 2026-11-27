@@ -89,13 +89,13 @@ describe('getClientHost', () => {
 })
 
 describe('clientHostShortcutBackend', () => {
-  it('loads from the snapshot, saves through the host, and mirrors to the hub', async () => {
+  it('loads from the snapshot, saves through the host, and mirrors a user edit to the hub', async () => {
     install(undefined)
     const host = getClientHost()
     const mirror = vi.fn(async (_json: string) => undefined)
     const b = clientHostShortcutBackend({ host, mirror })
     expect(await b.load()).toEqual({})
-    await b.save({ 'go-home': 'mod+k' })
+    await b.save({ 'go-home': 'mod+k' }, { userEdit: true })
     expect(await b.load()).toEqual({ 'go-home': 'mod+k' })
     expect(mirror).toHaveBeenCalledWith(JSON.stringify({ 'go-home': 'mod+k' }))
   })
@@ -172,5 +172,63 @@ describe('a local shortcut edit is never overwritten by the hub (orders-2 Q1)', 
     const host = getClientHost()
     await clientHostShortcutBackend({ host }).save({}, { userEdit: false })
     expect((await host.call('settings.snapshot')).shortcutsOwnedByDevice).toBe(false)
+  })
+})
+
+describe('review 1 F1: the hub mirror runs on user edits only', () => {
+  it('adoption failed, then a load-time normalization save: nothing is mirrored', async () => {
+    const { adoptShortcutsFromHub } = await import('@slayzone/shortcuts')
+    install(undefined)
+    const host = getClientHost()
+    const mirror = vi.fn(async (_json: string) => undefined)
+    const backend = clientHostShortcutBackend({ host, mirror })
+    expect(
+      await adoptShortcutsFromHub({
+        alreadyAdopted: false,
+        readHub: async () => {
+          throw new Error('hub not connected yet')
+        },
+        write: (o) => host.call('shortcuts.set', o, { adoptedFromHub: true })
+      })
+    ).toBe('failed')
+    // The store normalizes the stale file and writes it back — not the person's edit.
+    await backend.save({ 'global-agent-panel': 'mod+k' }, { userEdit: false })
+    expect(mirror).not.toHaveBeenCalled()
+    // A real edit is mirrored.
+    await backend.save({ 'global-agent-panel': 'mod+l' }, { userEdit: true })
+    expect(mirror).toHaveBeenCalledWith(JSON.stringify({ 'global-agent-panel': 'mod+l' }))
+  })
+})
+
+describe('review 1 F2: only a downloaded update is replayed', () => {
+  it('a later listener gets the last downloaded status, never an error or not-available', () => {
+    const raw = fakeRaw()
+    install(raw)
+    const host = getClientHost()
+    host.on('open-settings', () => undefined)
+    raw.emit('update-status', { type: 'error', message: 'offline' })
+    const a = vi.fn()
+    host.on('update-status', a)
+    expect(a).not.toHaveBeenCalled()
+    raw.emit('update-status', { type: 'not-available' })
+    const b = vi.fn()
+    host.on('update-status', b)
+    expect(b).not.toHaveBeenCalled()
+  })
+
+  it('downloaded survives a later transient error, and a new download clears it', () => {
+    const raw = fakeRaw()
+    install(raw)
+    const host = getClientHost()
+    host.on('open-settings', () => undefined)
+    raw.emit('update-status', { type: 'downloaded', version: '2.0.0' })
+    raw.emit('update-status', { type: 'error', message: 'offline' })
+    const a = vi.fn()
+    host.on('update-status', a)
+    expect(a).toHaveBeenCalledWith({ type: 'downloaded', version: '2.0.0' })
+    raw.emit('update-status', { type: 'downloading', percent: 3 })
+    const b = vi.fn()
+    host.on('update-status', b)
+    expect(b).not.toHaveBeenCalled()
   })
 })

@@ -151,6 +151,8 @@ function wrapNamespace<T extends object>(ns: T, prefix: string): T {
  * This browser's client host (D3, task 557ebb72): theme mode, labs flags and shortcut
  * overrides persist in `localStorage` — the device's own, like the desktop's
  * client.config.json. No native menu, app zoom or updater here: those are inert.
+ * Tabs share the store: a change in one reaches the others (`storage` event), and a
+ * shortcut save merges per key (`createStorageClientHost`).
  */
 function createWebClientHost(): NonNullable<ElectronAPI['clientHost']> {
   return createStorageClientHost({
@@ -173,7 +175,14 @@ function createWebClientHost(): NonNullable<ElectronAPI['clientHost']> {
     systemTheme: () =>
       typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches
         ? 'light'
-        : 'dark'
+        : 'dark',
+    // Another tab of this hub wrote theme / labs / shortcuts: re-read and tell this
+    // tab's windows (the `storage` event fires in every tab but the writer).
+    watch: (onExternalChange) => {
+      window.addEventListener('storage', (e) => {
+        if (e.key === null || e.key.startsWith('slayzone:client:')) onExternalChange()
+      })
+    }
   })
 }
 

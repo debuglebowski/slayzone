@@ -186,6 +186,12 @@ export function createStorageClientHost(opts: {
   kv: ClientHostKv
   /** The OS scheme, for 'system' (`prefers-color-scheme`). */
   systemTheme: () => EffectiveTheme
+  /**
+   * Another page on the same store wrote it (web-shell tabs: the `storage` event).
+   * Called once with the callback to run then; this host re-reads and emits
+   * `settings-changed`.
+   */
+  watch?: (onExternalChange: () => void) => void
 }): ElectronClientHost {
   const { kv } = opts
   const listeners = new Set<(event: string, payload: unknown) => void>()
@@ -193,20 +199,31 @@ export function createStorageClientHost(opts: {
     for (const l of [...listeners]) l(event, payload)
   }
 
-  const snapshot = async (): Promise<ClientSettingsSnapshot> => {
-    const [theme, labs, shortcuts, adopted] = await Promise.all([
-      kv.get(KEY.theme),
-      kv.get(KEY.labs),
-      kv.get(KEY.shortcuts),
-      kv.get(KEY.adopted)
-    ])
-    const pref = asTheme(theme)
-    const l = parseJson(labs)
-    const s = parseJson(shortcuts)
+  // The shortcut map this page last read. Several pages share one store (web-shell
+  // tabs), and the store saves whole maps: a write applies only the keys THIS page
+  // changed relative to what it saw, over the store's current map — so a stale page
+  // never drops another page's edit.
+  let seenShortcuts: ShortcutOverrideMap = {}
+
+  const readShortcuts = async (): Promise<ShortcutOverrideMap> => {
+    const s = parseJson(await kv.get(KEY.shortcuts))
     const map: ShortcutOverrideMap = {}
     if (isRecord(s)) {
       for (const [k, v] of Object.entries(s)) if (typeof v === 'string' || v === null) map[k] = v
     }
+    return map
+  }
+
+  const snapshot = async (): Promise<ClientSettingsSnapshot> => {
+    const [theme, labs, map, adopted] = await Promise.all([
+      kv.get(KEY.theme),
+      kv.get(KEY.labs),
+      readShortcuts(),
+      kv.get(KEY.adopted)
+    ])
+    const pref = asTheme(theme)
+    const l = parseJson(labs)
+    seenShortcuts = map
     return {
       theme: pref,
       effectiveTheme: pref === 'system' ? opts.systemTheme() : pref,
@@ -220,6 +237,9 @@ export function createStorageClientHost(opts: {
   }
 
   const changed = async (): Promise<void> => emit('settings-changed', await snapshot())
+  opts.watch?.(() => {
+    void changed().catch(() => undefined)
+  })
 
   const methods: { [K in ClientHostMethod]: (...args: never[]) => unknown } = {
     'settings.snapshot': () => snapshot(),
@@ -238,7 +258,16 @@ export function createStorageClientHost(opts: {
       overrides: ShortcutOverrideMap,
       o?: { adoptedFromHub?: boolean; localEdit?: boolean }
     ): Promise<void> => {
-      await kv.set(KEY.shortcuts, JSON.stringify(isRecord(overrides) ? overrides : {}))
+      const next = isRecord(overrides) ? overrides : {}
+      const merged = await readShortcuts()
+      for (const k of new Set([...Object.keys(seenShortcuts), ...Object.keys(next)])) {
+        const was = Object.hasOwn(seenShortcuts, k) ? seenShortcuts[k] : undefined
+        const now = Object.hasOwn(next, k) ? next[k] : undefined
+        if (was === now) continue
+        if (now === undefined) delete merged[k]
+        else merged[k] = now
+      }
+      await kv.set(KEY.shortcuts, JSON.stringify(merged))
       if (o?.adoptedFromHub || o?.localEdit) await kv.set(KEY.adopted, '1')
       await changed()
     },

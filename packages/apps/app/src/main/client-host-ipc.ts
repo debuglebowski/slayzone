@@ -21,10 +21,11 @@ import {
  * Two channels, mirrored by the preload's `window.api.clientHost`:
  *   `client-host:invoke` (method, args) → one `ClientHostMethods` call.
  *   `client-host:event`  (event, payload) ← pushed to every subscribed renderer; a
- *                        renderer subscribes once with `client-host:subscribe` and
- *                        first gets the last `update-status`, if any (an update that
- *                        finished downloading before the window subscribed still
- *                        shows its restart button).
+ *                        renderer subscribes with `client-host:subscribe` and first
+ *                        gets the last DOWNLOADED `update-status`, if any (an update
+ *                        that finished before the window subscribed — or before it
+ *                        reloaded — still shows its restart button). Errors and
+ *                        "latest version" are one-off toasts and are not replayed.
  *
  * Senders are checked (`isAllowedSender`: the app's own windows and the floating
  * agent panel — never a browser-panel web view or an extension page), methods are
@@ -96,7 +97,8 @@ export function registerClientHostIpc<S extends ClientHostSender>(
   deps: ClientHostIpcDeps<S>
 ): void {
   const subscribers = new Set<S>()
-  let lastUpdateStatus: UpdateStatus | null = null
+  // Sticky: the last finished download, until a new download supersedes it.
+  let downloadedUpdate: UpdateStatus | null = null
 
   const send = (event: ClientHostEvent, payload: unknown): void => {
     for (const wc of subscribers) {
@@ -110,17 +112,25 @@ export function registerClientHostIpc<S extends ClientHostSender>(
 
   for (const event of CLIENT_HOST_EVENTS) {
     deps.events.on(event, ((payload?: unknown) => {
-      if (event === 'update-status') lastUpdateStatus = payload as UpdateStatus
+      if (event === 'update-status') {
+        const status = payload as UpdateStatus
+        if (status.type === 'downloaded') downloadedUpdate = status
+        else if (status.type === 'downloading') downloadedUpdate = null
+      }
       send(event, payload)
     }) as never)
   }
 
   deps.ipc.on('client-host:subscribe', (e) => {
     const wc = e.sender
-    if (!deps.isAllowedSender(wc) || subscribers.has(wc)) return
-    subscribers.add(wc)
-    wc.once('destroyed', () => subscribers.delete(wc))
-    if (lastUpdateStatus) wc.send('client-host:event', 'update-status', lastUpdateStatus)
+    if (!deps.isAllowedSender(wc)) return
+    // A reload keeps the webContents: its new preload subscribes again. Still one
+    // delivery per event (a Set), but the replay runs again for the fresh page.
+    if (!subscribers.has(wc)) {
+      subscribers.add(wc)
+      wc.once('destroyed', () => subscribers.delete(wc))
+    }
+    if (downloadedUpdate) wc.send('client-host:event', 'update-status', downloadedUpdate)
   })
 
   deps.ipc.handle('client-host:invoke', (e, method: unknown, args: unknown) => {

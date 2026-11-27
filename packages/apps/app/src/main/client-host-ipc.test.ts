@@ -164,3 +164,44 @@ test('test-emit is not registered outside Playwright', () => {
   })
   expect(handlers).not.toContain('client-host:test-emit')
 })
+
+// Review 1 F2: only a downloaded update is sticky — an error or "latest version" toast
+// must not reappear in a window opened later.
+test('error / not-available / checking are not replayed; downloaded survives them', () => {
+  events.emit('update-status', { type: 'error', message: 'offline' })
+  subscribe(app1)
+  // (later live events still reach app1; only the replay at subscribe is checked)
+  expect(app1.send).not.toHaveBeenCalled()
+  events.emit('update-status', { type: 'not-available' })
+  subscribe(app2)
+  expect(app2.send).not.toHaveBeenCalled()
+
+  events.emit('update-status', { type: 'downloaded', version: '2.0.0' })
+  events.emit('update-status', { type: 'error', message: 'offline' })
+  const late = sender(3)
+  subscribe(late)
+  expect(late.send).toHaveBeenCalledWith('client-host:event', 'update-status', {
+    type: 'downloaded',
+    version: '2.0.0'
+  })
+})
+
+test('a new download clears the sticky downloaded status', () => {
+  events.emit('update-status', { type: 'downloaded', version: '2.0.0' })
+  events.emit('update-status', { type: 'downloading', percent: 1 })
+  subscribe(app1)
+  expect(app1.send).not.toHaveBeenCalled()
+})
+
+// Review 1 F3: a reload keeps the same webContents; its new preload subscribes again
+// and must get the downloaded status again (the restart button).
+test('a re-subscribe from the same renderer (reload) replays again, without double delivery', () => {
+  events.emit('update-status', { type: 'downloaded', version: '2.0.0' })
+  subscribe(app1)
+  subscribe(app1)
+  const replays = app1.send.mock.calls.filter((c) => c[1] === 'update-status')
+  expect(replays).toHaveLength(2)
+  app1.send.mockClear()
+  events.emit('go-home')
+  expect(app1.send).toHaveBeenCalledTimes(1)
+})

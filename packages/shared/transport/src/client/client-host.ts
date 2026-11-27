@@ -7,7 +7,8 @@ import {
   type ClientHostMethods,
   type ClientSettingsSnapshot,
   type ElectronClientHost,
-  type ShortcutOverrideMap
+  type ShortcutOverrideMap,
+  type UpdateStatus
 } from '@slayzone/platform/client-host'
 import { electronBootstrap } from './electron-bootstrap'
 import { useStableCallback } from './useStableCallback'
@@ -32,8 +33,16 @@ export interface ClientHost {
   ): () => void
 }
 
-/** Events whose last value a later listener is given first. */
-const STICKY = new Set<ClientHostEvent>(['update-status'])
+/**
+ * The update status a later listener is given first: only a finished download (the
+ * restart button). An error or "you're on the latest version" is a one-off toast and
+ * must not reappear in a window opened later; a new download supersedes it.
+ */
+function nextStickyUpdate(prev: UpdateStatus | null, status: UpdateStatus): UpdateStatus | null {
+  if (status.type === 'downloaded') return status
+  if (status.type === 'downloading') return null
+  return prev
+}
 
 let cached: { raw: ElectronClientHost; client: ClientHost } | null = null
 let fallback: ElectronClientHost | null = null
@@ -59,7 +68,7 @@ function memoryFallback(): ElectronClientHost {
 }
 
 function wrap(raw: ElectronClientHost): ClientHost {
-  const last = new Map<ClientHostEvent, unknown>()
+  let stickyUpdate: UpdateStatus | null = null
   // One raw subscription for the whole renderer, so sticky values are seen even
   // before anyone listens to them.
   const listeners = new Set<(event: string, payload: unknown) => void>()
@@ -68,7 +77,9 @@ function wrap(raw: ElectronClientHost): ClientHost {
     if (subscribed) return
     subscribed = true
     raw.on((event, payload) => {
-      if (STICKY.has(event as ClientHostEvent)) last.set(event as ClientHostEvent, payload)
+      if (event === 'update-status') {
+        stickyUpdate = nextStickyUpdate(stickyUpdate, payload as UpdateStatus)
+      }
       for (const l of [...listeners]) l(event, payload)
     })
   }
@@ -85,7 +96,9 @@ function wrap(raw: ElectronClientHost): ClientHost {
         if (name === event) listener(payload as ClientHostEvents[typeof event])
       }
       listeners.add(l)
-      if (last.has(event)) listener(last.get(event) as ClientHostEvents[typeof event])
+      if (event === 'update-status' && stickyUpdate) {
+        listener(stickyUpdate as ClientHostEvents[typeof event])
+      }
       return () => {
         listeners.delete(l)
       }
@@ -180,9 +193,11 @@ export interface ClientHostShortcutBackend {
 
 /**
  * The shortcut store's persistence on this device's client host (D1). `mirror`
- * copies each save to the default hub as best effort (older app versions on the
+ * copies each USER EDIT to the default hub as best effort (older app versions on the
  * same hub, and a new device's one-time adoption, read it there); its failure is
- * logged, never surfaced. `ready` (the one-time adoption) is awaited before the
+ * logged, never surfaced. Never a load-time normalization write: before the one-time
+ * adoption succeeded, that map is the stale pre-0.36 copy, and mirroring it would
+ * overwrite the hub's real map — which the next boot's adoption would copy back. `ready` (the one-time adoption) is awaited before the
  * first load, so the store never shows the pre-adoption map.
  */
 export function clientHostShortcutBackend(opts: {
@@ -202,7 +217,7 @@ export function clientHostShortcutBackend(opts: {
         overrides,
         saveOpts?.userEdit ? { localEdit: true } : undefined
       )
-      if (opts.mirror) {
+      if (opts.mirror && saveOpts?.userEdit) {
         opts.mirror(JSON.stringify(overrides)).catch((err: unknown) => {
           console.warn('[shortcuts] mirror to the hub failed:', err)
         })

@@ -94,3 +94,27 @@ describe('setupWindowApi', () => {
     expect(await api.app.getHubTokens()).toEqual({})
   })
 })
+
+// Review 1 F4: theme / labs / shortcut changes made in another tab reach this one
+// (one localStorage, the `storage` event fires in every OTHER tab).
+describe('clientHost across tabs', () => {
+  it("another tab's write emits settings-changed here", async () => {
+    const api = setupWindowApi()
+    const seen = vi.fn()
+    api.clientHost!.on(seen)
+    window.localStorage.setItem('slayzone:client:theme', 'light')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'slayzone:client:theme' }))
+    await vi.waitFor(() =>
+      expect(seen).toHaveBeenCalledWith(
+        'settings-changed',
+        expect.objectContaining({ theme: 'light' })
+      )
+    )
+    // Keys outside the client host are ignored.
+    seen.mockClear()
+    window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated' }))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(seen).not.toHaveBeenCalled()
+    window.localStorage.removeItem('slayzone:client:theme')
+  })
+})

@@ -134,3 +134,46 @@ describe('createStorageClientHost (web shell / chromium shell, D3)', () => {
     expect(CLIENT_HOST_METHODS).toContain('shortcuts.set')
   })
 })
+
+// Review 1 F4: web-shell tabs share one localStorage.
+describe('several pages on one store (web-shell tabs)', () => {
+  it("a stale page's shortcut save merges per key instead of dropping the other's edit", async () => {
+    const kv = memoryKv()
+    const a = createStorageClientHost({ kv, systemTheme: () => 'dark' })
+    const b = createStorageClientHost({ kv, systemTheme: () => 'dark' })
+    await call(a, 'settings.snapshot')
+    await call(b, 'settings.snapshot')
+    // Tab A rebinds X; tab B, still showing the old (empty) map, rebinds Y.
+    await call(a, 'shortcuts.set', { x: 'mod+1' }, { localEdit: true })
+    await call(b, 'shortcuts.set', { y: 'mod+2' }, { localEdit: true })
+    expect(await call(a, 'settings.snapshot')).toMatchObject({
+      shortcuts: { x: 'mod+1', y: 'mod+2' }
+    })
+    // B, now current ({x, y}), removes Y: a key it removed goes, the rest stay.
+    await call(b, 'settings.snapshot')
+    await call(b, 'shortcuts.set', { x: 'mod+1' }, { localEdit: true })
+    expect(await call(a, 'settings.snapshot')).toMatchObject({ shortcuts: { x: 'mod+1' } })
+  })
+
+  it("another page's write reaches this page as settings-changed", async () => {
+    let fire: (() => void) | null = null
+    const kv = memoryKv()
+    const a = createStorageClientHost({
+      kv,
+      systemTheme: () => 'dark',
+      watch: (onChange) => {
+        fire = onChange
+      }
+    })
+    const seen = vi.fn()
+    a.on(seen)
+    kv.data.set('slayzone:client:theme', 'light') // tab B wrote it
+    fire!()
+    await vi.waitFor(() =>
+      expect(seen).toHaveBeenCalledWith(
+        'settings-changed',
+        expect.objectContaining({ theme: 'light' })
+      )
+    )
+  })
+})
