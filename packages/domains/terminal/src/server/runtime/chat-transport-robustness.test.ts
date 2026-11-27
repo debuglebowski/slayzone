@@ -285,15 +285,22 @@ test('delivery states come from the CLI: queued → delivered, completed → ans
   line(f, text('hello'))
   line(f, lifecycle('m1', 'completed'))
   line(f, success())
-  await wait(30)
-  const delivery = h.broadcasts.filter((b) => b.kind === 'user-message-delivery')
-  expect(delivery.map((b) => [(b.event as { state: string }).state, b.live !== undefined])).toEqual(
-    [
-      ['sending', true],
-      ['delivered', false],
-      ['answered', false]
-    ]
-  )
+  // `answered` lands once the turn's result is saved: wait for it, not a fixed time
+  // (30 ms was too short on a loaded CI runner). An extra or reordered state still fails.
+  const states = () =>
+    h.broadcasts
+      .filter((b) => b.kind === 'user-message-delivery')
+      .map((b) => [(b.event as { state: string }).state, b.live !== undefined])
+  await vi.waitFor(() => expect(states().length).toBeGreaterThanOrEqual(3), {
+    timeout: 5_000,
+    interval: 5
+  })
+  await wait(30) // a late, unexpected 4th state still shows up below
+  expect(states()).toEqual([
+    ['sending', true],
+    ['delivered', false],
+    ['answered', false]
+  ])
   expect(h.rows.some((r) => r.event.kind === 'command-lifecycle')).toBe(false)
 })
 
