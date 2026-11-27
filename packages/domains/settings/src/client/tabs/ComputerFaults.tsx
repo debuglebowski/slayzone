@@ -38,7 +38,8 @@ const PASS_LABELS: Record<string, string> = {
   'hub-legacy-diagnostics-cleanup': 'Old diagnostics not cleaned yet',
   'hub-legacy-chat-migration': 'Old chat not moved to this computer yet',
   'hub-project-sync': 'Project folder not set on this computer yet',
-  'hub-project-forget': 'Project folder not cleared on this computer yet'
+  'hub-project-forget': 'Project folder not cleared on this computer yet',
+  'hub-restore': 'Backup restore refused — your data was kept'
 }
 
 const label = (fault: ItemFaultView) => PASS_LABELS[fault.pass] ?? fault.pass
@@ -90,11 +91,12 @@ export function ComputerFaults({
         (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
       )
       .finally(refresh)
-  const discard = (fault: ItemFaultView) =>
+  // Dismiss uses the same call: on a notice, the hub removes only the notice.
+  const discard = (fault: ItemFaultView, done = 'Deleted') =>
     discardMutation
       .mutateAsync(refOf(fault))
       .then(
-        () => toast.success('Deleted'),
+        () => toast.success(done),
         (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
       )
       .finally(refresh)
@@ -136,6 +138,17 @@ export function ComputerFaults({
                   data-testid="computer-fault-retry"
                 >
                   Retry
+                </Button>
+              )}
+              {fault.dismissable && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => void discard(fault, 'Dismissed')}
+                  data-testid="computer-fault-dismiss"
+                >
+                  Dismiss
                 </Button>
               )}
               {fault.discardable && (

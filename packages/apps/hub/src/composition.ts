@@ -44,7 +44,7 @@ import {
 } from './computer-task-paths'
 import { type ComputerTaskDataRelay, createComputerTaskDataRelay } from './computer-task-data'
 import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
-import { createItemFaultService } from './item-faults'
+import { createItemFaultService, recordRefusedRestore } from './item-faults'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import { resolveCredentialKeyRing } from './credentials-key'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
@@ -749,6 +749,15 @@ export function composeServer(opts: {
     shellOpenPath: (p) => void (bridge ? bridge.appDeps.shellOpenPath(p) : nativeOpenPath(p))
   })
   setBackupOps(backupOps)
+  // A restore refused at this boot (the old data was kept) stays in the hub's Needs
+  // attention until an admin dismisses it — the toast alone reaches only whoever
+  // happened to be watching.
+  const lastRestore = opts.lastRestore
+  if (lastRestore?.status === 'refused') {
+    bootBestEffort('restore-refused-notice', () =>
+      recordRefusedRestore(db, { backup: lastRestore.backup, error: lastRestore.error })
+    )
+  }
   // Arm the auto-backup timer at boot. v0.35.0 did (`startAutoBackup(db)` in the host's
   // boot); the hub refactor dropped the call, so the timer only started when someone
   // touched the setting — a user with the switch ON silently stopped getting backups.

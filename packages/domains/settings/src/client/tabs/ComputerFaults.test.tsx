@@ -103,3 +103,33 @@ it('lists faults; Retry runs at once, Discard deletes only after confirmation', 
   await waitFor(() => expect(discardSpy).toHaveBeenCalledOnce())
   expect(discardSpy.mock.calls[0][0]).toMatchObject({ source: 'quarantine', key: 'store:abc' })
 })
+
+it('a notice (refused restore) offers Dismiss, at once, with no confirmation and no Retry', async () => {
+  faults = [
+    fault({
+      computerId: null,
+      origin: 'hub',
+      source: 'ledger',
+      pass: 'hub-restore',
+      key: 'b.sqlite',
+      message: 'Backup failed its integrity check',
+      retryable: false,
+      discardable: false,
+      dismissable: true
+    })
+  ]
+  renderFaults()
+  fireEvent.click(await screen.findByTestId('computer-faults-toggle'))
+  expect(screen.getByText('Backup restore refused — your data was kept')).toBeTruthy()
+  expect(screen.queryByTestId('computer-fault-retry')).toBeNull()
+  expect(screen.queryByTestId('computer-fault-discard')).toBeNull()
+  fireEvent.click(screen.getByTestId('computer-fault-dismiss'))
+  await waitFor(() => expect(discardSpy).toHaveBeenCalledOnce())
+  expect(discardSpy.mock.calls[0][0]).toEqual({
+    computerId: null,
+    origin: 'hub',
+    source: 'ledger',
+    pass: 'hub-restore',
+    key: 'b.sqlite'
+  })
+})

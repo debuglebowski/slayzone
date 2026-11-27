@@ -17,7 +17,15 @@
 import { TEST_ISOLATION_ENV } from '../../../shared/test-utils/caller-env.js'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -120,7 +128,20 @@ async function bootHub(root: string): Promise<Hub> {
 }
 
 type Backup = { filename: string; type: string; name: string }
+type Fault = { pass: string; key: string; message: string; dismissable?: boolean }
 type Client = {
+  computers: {
+    listFaults: { query: (i: { computerId: string | null }) => Promise<Fault[]> }
+    discardFault: {
+      mutate: (i: {
+        computerId: string | null
+        origin: 'hub'
+        source: 'ledger'
+        pass: string
+        key: string
+      }) => Promise<unknown>
+    }
+  }
   app: {
     backup: {
       create: { mutate: (i?: { name?: string }) => Promise<Backup> }
@@ -266,4 +287,65 @@ test('standalone restore: staged, exit 75, swapped in at the next start; tokens 
     .filter((f) => f.bytes.includes(token))
     .map((f) => f.path)
   expect(hits).toEqual([join('backups', backup.filename)])
+})
+
+test('a restore refused at boot keeps the data and leaves a notice until dismissed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-restore-refused-'))
+  roots.push(root)
+  const first = await bootHub(root)
+  let backup: Backup
+  try {
+    await createProject(first, 'kept')
+    const { client, close } = hubClient(first)
+    try {
+      backup = await client.app.backup.create.mutate({ name: 'will go bad' })
+      await client.app.backup.restore.mutate({ filename: backup.filename })
+    } finally {
+      close()
+    }
+    expect(
+      await Promise.race([first.exit, new Promise((r) => setTimeout(() => r('alive'), 20_000))])
+    ).toBe(75)
+  } finally {
+    await first.stop()
+  }
+  // The backup goes bad between staging and the next start.
+  writeFileSync(join(root, 'backups', backup.filename), 'no longer a database')
+
+  const second = await bootHub(root)
+  try {
+    expect(await projectNames(second)).toContain('kept')
+    const { client, close } = hubClient(second)
+    try {
+      expect((await client.app.backup.restoreStatus.query()).lastRestore).toMatchObject({
+        status: 'refused',
+        backup: backup.filename
+      })
+      const notice = await poll(
+        async () =>
+          (await client.computers.listFaults.query({ computerId: null })).find(
+            (f) => f.pass === 'hub-restore'
+          ) ?? null,
+        10_000,
+        'refused-restore notice'
+      )
+      expect(notice).toMatchObject({ key: backup.filename, dismissable: true })
+      await client.computers.discardFault.mutate({
+        computerId: null,
+        origin: 'hub',
+        source: 'ledger',
+        pass: 'hub-restore',
+        key: backup.filename
+      })
+      expect(
+        (await client.computers.listFaults.query({ computerId: null })).some(
+          (f) => f.pass === 'hub-restore'
+        )
+      ).toBe(false)
+    } finally {
+      close()
+    }
+  } finally {
+    await second.stop()
+  }
 })

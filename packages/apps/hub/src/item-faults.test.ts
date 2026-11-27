@@ -10,7 +10,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { quarantineMove } from '@slayzone/platform/quarantine'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
-import { createItemFaultService } from './item-faults'
+import { createItemFaultService, recordRefusedRestore } from './item-faults'
 
 const cleanups: Array<() => unknown> = []
 afterEach(async () => {
@@ -142,5 +142,29 @@ test("the hub's own quarantine: listed for the hub, Retry moves it back, Discard
   quarantineMove(f.dir, { pass: 'hub-backup', path: backup, reason: 'not a database' })
   const [again] = await f.service.list({ computerId: null, dataRoot: f.dir })
   await f.service.discard(again, f.dir)
+  expect(await f.service.list({ computerId: null, dataRoot: f.dir })).toEqual([])
+})
+
+test('a refused restore is a notice: listed for the hub, no Retry, Dismiss removes it', async () => {
+  const f = await fixture()
+  await recordRefusedRestore(f.h.slayDb, {
+    backup: 'slayzone.data.2026-11-01T00-00-00-000Z.manual.sqlite',
+    error: 'Backup schema v999 is newer than this hub supports'
+  })
+  const [fault] = await f.service.list({ computerId: null, dataRoot: f.dir })
+  expect(fault).toMatchObject({
+    computerId: null,
+    origin: 'hub',
+    source: 'ledger',
+    pass: 'hub-restore',
+    key: 'slayzone.data.2026-11-01T00-00-00-000Z.manual.sqlite',
+    message: 'Backup schema v999 is newer than this hub supports',
+    retryable: false,
+    discardable: false,
+    dismissable: true
+  })
+  // Stays until dismissed: another boot's notice does not replace or clear it.
+  expect(await f.service.list({ computerId: null, dataRoot: f.dir })).toHaveLength(1)
+  await f.service.discard(fault, f.dir)
   expect(await f.service.list({ computerId: null, dataRoot: f.dir })).toEqual([])
 })

@@ -29,6 +29,12 @@ export interface ItemFaultView extends ItemFaultRef {
   retryable: boolean
   /** Discard permanently deletes the item. Always behind a confirmation. */
   discardable: boolean
+  /**
+   * A notice about a one-shot action (a refused backup restore): nothing to retry and
+   * nothing to delete, it stays until someone dismisses it (`discardFault` removes the
+   * notice only). Absent from hubs older than notices.
+   */
+  dismissable?: boolean
 }
 
 /** What a computer reports of its own faults (`faults.list` chat request). */

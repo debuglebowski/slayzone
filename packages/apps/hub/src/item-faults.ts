@@ -21,6 +21,30 @@ export interface ItemFaultServiceDeps {
   isConnected(computerId: string): boolean
 }
 
+/**
+ * Passes whose rows are NOTICES about a one-shot action, not items a pass retries:
+ * no Retry (nothing runs them again), no Discard (no item to delete) — Dismiss
+ * removes the notice. `hub-restore`: a staged backup restore refused at boot.
+ */
+const NOTICE_PASSES = new Set(['hub-restore'])
+
+/**
+ * A staged restore the hub refused at boot (restore-swap.ts): the old data was kept.
+ * Recorded as a hub notice in Needs attention, so it outlives the toast of whoever
+ * was watching, until an admin dismisses it.
+ */
+export async function recordRefusedRestore(
+  db: SlayzoneDb,
+  refused: { backup: string; error: string },
+  now: number = Date.now()
+): Promise<void> {
+  await db.run(
+    `INSERT OR REPLACE INTO item_faults(origin,computer_id,pass,item_key,task_id,kind,fingerprint,message,attempts,first_at,last_at,next_retry_at)
+      VALUES ('hub','','hub-restore',?,NULL,'structural',NULL,?,1,?,?,NULL)`,
+    [refused.backup, refused.error.slice(0, 2_000), now, now]
+  )
+}
+
 const fromRow = (row: ItemFaultRow, live: boolean): ItemFaultView => ({
   computerId: row.computer_id || null,
   origin: row.origin,
@@ -33,8 +57,9 @@ const fromRow = (row: ItemFaultRow, live: boolean): ItemFaultView => ({
   attempts: row.attempts,
   firstAt: row.first_at,
   lastAt: row.last_at,
-  retryable: live,
-  discardable: false
+  retryable: live && !NOTICE_PASSES.has(row.pass),
+  discardable: false,
+  ...(NOTICE_PASSES.has(row.pass) ? { dismissable: true } : {})
 })
 
 export function createItemFaultService(deps: ItemFaultServiceDeps) {
@@ -154,6 +179,14 @@ export function createItemFaultService(deps: ItemFaultServiceDeps) {
       if (ref.origin === 'computer' && ref.computerId) {
         await deps.requestComputer(ref.computerId, { kind: 'faults.discard', ref })
         await refreshComputer(ref.computerId)
+        return
+      }
+      if (ref.source === 'ledger' && ref.computerId === null && NOTICE_PASSES.has(ref.pass)) {
+        // Dismiss a notice: only the notice goes.
+        await db.run(
+          "DELETE FROM item_faults WHERE origin='hub' AND computer_id='' AND pass=? AND item_key=?",
+          [ref.pass, ref.key]
+        )
         return
       }
       if (ref.source !== 'quarantine' || ref.computerId !== null)
