@@ -84,7 +84,6 @@ function ToolbarOptionPopover({
   // a member-expression default parameter.
   const caption = captionProp ?? action.label
   const [open, setOpen] = useState(false)
-  const caption = captionProp ?? action.label
   const Icon = action.icon
   return (
     <Popover open={open} onOpenChange={setOpen}>
