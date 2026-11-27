@@ -273,9 +273,20 @@ describe('paged direct backfill', () => {
     const pty = createPtyHandlers(ctx)
     const sessionId = 'p-1'
     await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
-    for (let i = 0; i < 40; i++)
-      await pty.handlers['pty.write']({ sessionId, data: `line-${i}-${'x'.repeat(200)}\n` })
-    await waitFor(() => pty.direct.getBufferSince(sessionId, -1).chunks.length >= 10)
+    // One pty read = one buffer chunk, and a loaded box coalesces back-to-back writes
+    // into a few large reads. Writing each line only after the previous one's output
+    // is buffered keeps them in separate reads: >= 40 chunks, ~17 KB, always > 1 page.
+    const text = () =>
+      pty.direct
+        .getBufferSince(sessionId, -1)
+        .chunks.map((c) => c.data)
+        .join('')
+    for (let i = 0; i < 40; i++) {
+      const line = `line-${i}-${'x'.repeat(200)}`
+      await pty.handlers['pty.write']({ sessionId, data: `${line}\n` })
+      // pty echo + cat's copy: the line appears twice once cat has answered.
+      await waitFor(() => text().split(line).length > 2)
+    }
     await new Promise((r) => setTimeout(r, 200))
     const whole = pty.direct.getBufferSince(sessionId, -1)
     expect(whole.more).toBe(false)

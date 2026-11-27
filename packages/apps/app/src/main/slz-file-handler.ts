@@ -3,6 +3,10 @@ import { normalize, posix, sep } from 'node:path'
 import { contentTypeForPath } from '@slayzone/platform/mime-types'
 import { injectForcedHtmlTheme } from '@slayzone/platform/forced-html-theme'
 import {
+  injectArtifactControlsRuntime,
+  readArtifactPreviewMode
+} from '@slayzone/platform/artifact-controls'
+import {
   parseHtmlArtifactPreviewUrl,
   parseSlzFileUrl,
   SLZ_ARTIFACT_SCHEME,
@@ -41,10 +45,72 @@ export interface SlzFileHandlerDeps {
   readFile?: (path: string) => Promise<Buffer<ArrayBuffer>>
 }
 
-/** Bare media type: no charset, so a page's own `<meta charset>` still decides
- *  how it is decoded (the handler never sent one). */
+/** Bare media type: the charset is decided per page (see {@link withHtmlCharset}). */
 function mediaType(path: string): string {
   return contentTypeForPath(path).split(';')[0].trim()
+}
+
+/** How far the browser's encoding prescan reads into a page (HTML spec). */
+const PRESCAN_BYTES = 1024
+/** `<meta charset=…>` or `<meta http-equiv="Content-Type" content="…; charset=…">`. */
+const CHARSET_DECLARATION = /<meta\b[^>]*\bcharset\s*=/i
+
+/** Whether a page decides its own encoding: a byte order mark, or a declaration
+ *  where the browser's prescan finds it. */
+function declaresEncoding(head: Uint8Array): boolean {
+  const [a, b, c] = head
+  if (
+    (a === 0xef && b === 0xbb && c === 0xbf) ||
+    (a === 0xfe && b === 0xff) ||
+    (a === 0xff && b === 0xfe)
+  ) {
+    return true
+  }
+  return CHARSET_DECLARATION.test(Buffer.from(head.subarray(0, PRESCAN_BYTES)).toString('latin1'))
+}
+
+/**
+ * A page that declares no encoding is decoded as UTF-8, not the browser's
+ * windows-1252 fallback that turns `·` into `Â·`. One that does declare one keeps
+ * it: the header would override its `<meta charset>`.
+ */
+function withHtmlCharset(contentType: string, head: Uint8Array): string {
+  return contentType === 'text/html' && !declaresEncoding(head)
+    ? 'text/html; charset=utf-8'
+    : contentType
+}
+
+/** The first `bytes` of a stream, and the whole stream again to send on. */
+async function peekStream(
+  body: ReadableStream<Uint8Array>,
+  bytes: number
+): Promise<{ head: Uint8Array; body: ReadableStream<Uint8Array> }> {
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  while (size < bytes) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    size += value.length
+  }
+  const head = Buffer.concat(chunks)
+  return {
+    head,
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (head.length > 0) controller.enqueue(head)
+      },
+      async pull(controller) {
+        const { done, value } = await reader.read()
+        if (done) controller.close()
+        else controller.enqueue(value)
+      },
+      cancel(reason) {
+        return reader.cancel(reason)
+      }
+    })
+  }
 }
 
 function messagePage(title: string, detail: string): Response {
@@ -59,9 +125,28 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 }
 
 /** Per-artifact forced theme (task-artifacts HTML preview), gated on `?theme=`. */
-function forcedTheme(url: URL, contentType: string): 'light' | 'dark' | null {
+function forcedTheme(url: URL): 'light' | 'dark' | null {
   const theme = url.searchParams.get('theme')
-  return contentType === 'text/html' && (theme === 'dark' || theme === 'light') ? theme : null
+  return theme === 'dark' || theme === 'light' ? theme : null
+}
+
+/**
+ * What the task-artifacts HTML preview adds to a page it serves, from the URL:
+ * the forced theme (`?theme=`) and the `<slay-artifact-controls>` runtime
+ * (`?slayzone-preview=`). Injected as text at parse time: the sandboxed preview
+ * iframe has no webContents to insertCSS into, and the page is never painted
+ * wrong first. Null when there is nothing to add, so every other consumer gets
+ * the untouched bytes.
+ */
+function htmlDoctor(url: URL, contentType: string): ((html: string) => string) | null {
+  if (contentType !== 'text/html') return null
+  const theme = forcedTheme(url)
+  const mode = readArtifactPreviewMode(url)
+  if (!theme && !mode) return null
+  return (html) => {
+    const themed = theme ? injectForcedHtmlTheme(html, theme) : html
+    return mode ? injectArtifactControlsRuntime(themed, mode) : themed
+  }
 }
 
 /** The hub URL that serves a source's bytes. */
@@ -100,13 +185,13 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
       return messagePage('File not found', filePath)
     }
     const contentType = mediaType(filePath)
-    // Injected as text at parse time: the sandboxed preview iframe has no
-    // webContents to insertCSS into, and the page is never painted in the wrong
-    // scheme first. Every other consumer gets the untouched buffer.
-    const theme = forcedTheme(url, contentType)
-    const body = theme ? injectForcedHtmlTheme(data.toString('utf-8'), theme) : data
+    const doctor = htmlDoctor(url, contentType)
+    const body = doctor ? doctor(data.toString('utf-8')) : data
     return new Response(body, {
-      headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
+      headers: {
+        'content-type': withHtmlCharset(contentType, data),
+        'cache-control': 'no-cache'
+      }
     })
   }
 
@@ -164,14 +249,25 @@ export function createSlzFileHandler(deps: SlzFileHandlerDeps) {
       // Apply the sandbox to the document as well as to the preview iframe.
       out.set('content-security-policy', 'sandbox allow-scripts allow-same-origin')
     }
-    const theme = forcedTheme(url, contentType)
-    if (theme && res.status === 200) {
-      const doctored = injectForcedHtmlTheme(await res.text(), theme)
+    // A partial response is not the start of the page: no prescan to mirror.
+    if (contentType !== 'text/html' || res.status !== 200 || !res.body) {
+      return new Response(res.body, { status: res.status, headers: out })
+    }
+    let peeked: Awaited<ReturnType<typeof peekStream>>
+    try {
+      peeked = await peekStream(res.body, PRESCAN_BYTES)
+    } catch {
+      return messagePage("Couldn't load file", `The hub stopped sending ${name}.`)
+    }
+    out.set('content-type', withHtmlCharset(contentType, peeked.head))
+    const doctor = htmlDoctor(url, contentType)
+    if (doctor) {
+      const doctored = doctor(await new Response(peeked.body).text())
       out.delete('content-length')
       out.delete('etag')
       return new Response(doctored, { status: 200, headers: out })
     }
-    return new Response(res.body, { status: res.status, headers: out })
+    return new Response(peeked.body, { status: 200, headers: out })
   }
 
   return async function slzFileHandler(request: Request): Promise<Response> {

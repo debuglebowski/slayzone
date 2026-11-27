@@ -179,6 +179,7 @@ export function AppDialogs({
   const editingTask = useDialogStore((s) => s.editingTask)
   const deletingTask = useDialogStore((s) => s.deletingTask)
   const createProjectOpen = useDialogStore((s) => s.createProjectOpen)
+  const createProjectHubId = useDialogStore((s) => s.createProjectHubId)
   const deletingProject = useDialogStore((s) => s.deletingProject)
   const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
@@ -391,6 +392,7 @@ export function AppDialogs({
         <Suspense fallback={null}>
           <CreateProjectDialog
             open={createProjectOpen}
+            hubId={createProjectHubId}
             onOpenChange={(open) => {
               if (!open) useDialogStore.getState().closeCreateProject()
             }}

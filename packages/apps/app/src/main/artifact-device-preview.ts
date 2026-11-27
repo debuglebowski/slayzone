@@ -6,8 +6,10 @@ import {
   ARTIFACT_DEVICE_TOUCH_MODE,
   MAX_DEVICE_VIEWPORT_SIZE,
   type ArtifactDeviceTouchInput,
-  type DeviceViewport
+  type DeviceViewport,
+  zoomDeviceViewport
 } from '@slayzone/platform/preview-devices'
+import { ZOOM_STEPS } from '@slayzone/task-contracts'
 import { parseHtmlArtifactPreviewUrl, SLZ_ARTIFACT_SCHEME } from '@slayzone/platform/slz-file-url'
 
 const dimension = z.int().min(1).max(MAX_DEVICE_VIEWPORT_SIZE)
@@ -33,6 +35,13 @@ const viewportSchema = z
     const size = displayFeature.orientation === 'vertical' ? width : height
     return displayFeature.offset + displayFeature.maskLength < size
   })
+
+// The artifact zoom control's own range: zoom shrinks the emulated viewport and
+// multiplies its pixel ratio, so it is bounded like the viewport is.
+const zoomSchema = z
+  .number()
+  .min(ZOOM_STEPS[0] / 100)
+  .max(ZOOM_STEPS[ZOOM_STEPS.length - 1] / 100)
 
 const touchInputSchema = z.object({
   type: z.enum(['touchStart', 'touchMove', 'touchEnd', 'touchCancel']),
@@ -188,10 +197,24 @@ export function createArtifactDevicePreviews(
       return true
     },
 
-    configure(owner: WebContents, id: number, url: unknown, input: unknown): Promise<boolean> {
+    /** `zoomInput` zooms the page inside the device; see {@link zoomDeviceViewport}. */
+    configure(
+      owner: WebContents,
+      id: number,
+      url: unknown,
+      input: unknown,
+      zoomInput: unknown
+    ): Promise<boolean> {
       const guest = guests.get(id)
       const viewport = viewportSchema.safeParse(input)
-      if (!guest || guest.owner !== owner || typeof url !== 'string' || !viewport.success) {
+      const zoom = zoomSchema.safeParse(zoomInput)
+      if (
+        !guest ||
+        guest.owner !== owner ||
+        typeof url !== 'string' ||
+        !viewport.success ||
+        !zoom.success
+      ) {
         return Promise.resolve(false)
       }
 
@@ -204,7 +227,7 @@ export function createArtifactDevicePreviews(
           if (guest.url ? guest.url !== url : !(await parseHtmlArtifactPreviewUrl(new URL(url)))) {
             return false
           }
-          await applyDeviceViewport(contents, viewport.data)
+          await applyDeviceViewport(contents, zoomDeviceViewport(viewport.data, zoom.data))
           setTouchMode(guest, viewport.data.mobile)
           if (!guest.url) {
             guest.url = url

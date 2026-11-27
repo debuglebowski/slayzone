@@ -40,16 +40,34 @@ export function HubIssueBanners({ className }: { className?: string }): ReactNod
   )
 }
 
-const HEADLINE: Record<HubIssue['kind'], (label: string) => string> = {
-  unreachable: (label) => `Can't reach ${label}`,
-  signin: (label) => `Signed out of ${label} — nothing there works until you sign in again`,
-  error: (label) => `${label} is connected but not answering`
+function headline(issue: HubIssue, label: string): string {
+  switch (issue.kind) {
+    case 'unreachable':
+      return `Can't reach ${label}`
+    case 'signin':
+      return `Signed out of ${label} — nothing there works until you sign in again`
+    case 'error':
+      return `${label} is connected but not answering`
+    case 'incompatible':
+      return issue.side === 'hub'
+        ? `${label} needs an update to work with this version of SlayZone`
+        : `This version of SlayZone is too old for ${label} — update SlayZone`
+  }
 }
 
-const CAUSE: Record<HubIssue['kind'], string> = {
-  unreachable: 'The connection keeps failing. SlayZone retries on its own.',
-  signin: 'The hub no longer accepts this app’s sign-in (expired, or ended by your organization).',
-  error: 'The hub accepted the connection but could not describe itself.'
+function cause(issue: HubIssue): string {
+  switch (issue.kind) {
+    case 'unreachable':
+      return 'The connection keeps failing. SlayZone retries on its own.'
+    case 'signin':
+      return 'The hub no longer accepts this app’s sign-in (expired, or ended by your organization).'
+    case 'error':
+      return 'The hub accepted the connection but could not describe itself.'
+    case 'incompatible':
+      return issue.side === 'hub'
+        ? `The hub runs ${issue.release ? `SlayZone ${issue.release}` : 'an older SlayZone'}, older than this app supports. Nothing is sent to it until its admin updates it.`
+        : `The hub runs ${issue.release ? `SlayZone ${issue.release}` : 'a newer SlayZone'} and no longer serves this version of the app. Update SlayZone to use it.`
+  }
 }
 
 function openHubSettings(): void {
@@ -74,7 +92,7 @@ function HubIssueBanner({ entry }: { entry: HubIssueEntry }): ReactNode {
     >
       <AlertTriangle className="mr-1 size-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate" title={issue.detail}>
-        {HEADLINE[issue.kind](hub.label)}
+        {headline(issue, hub.label)}
       </span>
       {issue.kind === 'signin' ? (
         <button
@@ -103,7 +121,7 @@ function HubIssueBanner({ entry }: { entry: HubIssueEntry }): ReactNode {
         <PopoverContent align="end" className="w-80 p-0 text-xs">
           <div className="space-y-2 p-3">
             <div className="font-medium text-foreground">{hub.label}</div>
-            <div className="text-muted-foreground">{CAUSE[issue.kind]}</div>
+            <div className="text-muted-foreground">{cause(issue)}</div>
             <div className="rounded bg-muted px-2 py-1.5 font-mono break-words text-foreground">
               {issue.detail}
             </div>

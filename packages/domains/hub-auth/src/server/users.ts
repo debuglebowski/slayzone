@@ -58,6 +58,11 @@ export interface HubUserRow {
   disabledAt: string | null
   /** ISO-8601. `user.createdAt` is a Date from the adapter; normalized here. */
   createdAt: string
+  /**
+   * The break-glass account (./break-glass.ts): listed, but disable, enable and role
+   * changes refuse it (`protected`) — so a UI can say so instead of offering them.
+   */
+  breakGlass: boolean
 }
 
 export interface CreateHubUserInput {
@@ -112,7 +117,23 @@ export type SetHubUserRoleResult =
   | 'idp-managed'
 
 /** Who manages roles on this hub: the IdP-role mode, the Entra app roles, or the hub. */
-function roleAuthority(auth: HubAuth): 'idp' | 'entra-app-roles' | 'hub' {
+export type HubRoleAuthority = 'idp' | 'entra-app-roles' | 'hub'
+
+/**
+ * What account management may do on this hub, for a UI to offer only what will
+ * succeed: role changes need `roleAuthority: 'hub'`; `add` needs password sign-in
+ * (every account it makes is a password account) and, outside `'hub'`, no role.
+ */
+export interface HubUserManagement {
+  roleAuthority: HubRoleAuthority
+  passwordEnabled: boolean
+}
+
+export function describeHubUserManagement(auth: HubAuth): HubUserManagement {
+  return { roleAuthority: roleAuthority(auth), passwordEnabled: isPasswordSignInEnabled(auth) }
+}
+
+function roleAuthority(auth: HubAuth): HubRoleAuthority {
   if (isIdpRolesAuth(auth)) return 'idp'
   return ssoProviderOf(auth)?.roleMode === 'entra-app-roles' ? 'entra-app-roles' : 'hub'
 }
@@ -318,7 +339,8 @@ function toHubUserRow(u: {
     name: u.name,
     role: readRole(row.role),
     disabledAt: isDisabled(row) ? new Date(row.disabledAt as string | Date).toISOString() : null,
-    createdAt: new Date(u.createdAt).toISOString()
+    createdAt: new Date(u.createdAt).toISOString(),
+    breakGlass: isBreakGlassEmail(u.email)
   }
 }
 

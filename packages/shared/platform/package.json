@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/platform",
-  "version": "0.43.0",
+  "version": "0.44.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -13,6 +13,7 @@
     "./pdf-viewer-links": "./src/pdf-viewer-links.ts",
     "./html-preview-links": "./src/html-preview-links.ts",
     "./html-prototype-actions": "./src/html-prototype-actions.ts",
+    "./artifact-controls": "./src/artifact-controls.ts",
     "./preview-devices": "./src/preview-devices.ts",
     "./forced-html-theme": "./src/forced-html-theme.ts",
     "./events": "./src/typed-emitter.ts",

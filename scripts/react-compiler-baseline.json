@@ -41,7 +41,6 @@
   ],
   "packages/domains/settings/src/client/tabs/BackupSettingsTab.tsx": ["BackupSettingsTab"],
   "packages/domains/settings/src/client/tabs/ComputerActions.tsx": ["ComputerActionsProvider"],
-  "packages/domains/settings/src/client/tabs/ComputerRootsDialog.tsx": ["ComputerRootsDialog"],
   "packages/domains/settings/src/client/tabs/DiagnosticsSettingsTab.tsx": [
     "DiagnosticsSettingsTab"
   ],

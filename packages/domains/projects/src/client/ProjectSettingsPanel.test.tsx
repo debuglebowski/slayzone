@@ -8,6 +8,8 @@ import type { Project } from '@slayzone/projects-contracts'
 // Per-project provider whose status sync locks the project (the registered lookup's answer).
 let locks: Record<string, string> = {}
 let isPlaywright = false
+// How many computers the project's hub has (the Computers tab shows only with two+).
+let manyComputers = false
 // Tabs that committed (ran their mount effects), in order.
 let mountedTabs: string[] = []
 function useMountLog(name: string): void {
@@ -59,6 +61,13 @@ vi.mock('./EnvironmentTab', () => ({
     return null
   }
 }))
+vi.mock('./ComputersTab', () => ({
+  ComputersTab: () => {
+    useMountLog('computers')
+    return null
+  },
+  useHubHasManyComputers: () => manyComputers
+}))
 vi.mock('./WorktreesTab', () => ({ WorktreesTab: () => null }))
 vi.mock('./ReposTab', () => ({ ReposTab: () => null }))
 vi.mock('./TasksGeneralTab', () => ({ TasksGeneralTab: () => null }))
@@ -96,6 +105,7 @@ beforeEach(() => {
   mountedTabs = []
   locks = {}
   isPlaywright = false
+  manyComputers = false
   lookup.mockClear()
 })
 
@@ -165,5 +175,19 @@ describe('ProjectSettingsPanel active tab', () => {
   it('an onboarding provider opens straight on Integrations', () => {
     render(panel('environment', 'linear'))
     expect(mountedTabs).toEqual(['integrations'])
+  })
+
+  it('Computers: offered only when the hub has more than one computer', () => {
+    const { unmount } = render(panel('computers'))
+    expect(screen.queryByTestId('project-settings-tab-computers')).toBeNull()
+    // Not routable either: an old link falls back to nothing, never a tab that is hidden.
+    expect(mountedTabs).toEqual([])
+    unmount()
+    manyComputers = true
+    render(panel('computers'))
+    expect(screen.getByTestId('project-settings-tab-computers').getAttribute('aria-selected')).toBe(
+      'true'
+    )
+    expect(mountedTabs).toEqual(['computers'])
   })
 })

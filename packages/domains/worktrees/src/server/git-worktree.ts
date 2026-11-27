@@ -50,6 +50,7 @@ import {
   execGit,
   execGitFileList,
   hubSpawn,
+  loginShellPathReady,
   hubSpawnSync,
   trimOutput,
   gitDiagnostic as recordDiagnosticEvent,
@@ -175,7 +176,7 @@ function setupScriptEnv(
  * Calls onData with stdout/stderr chunks for streaming to a terminal.
  * Returns a promise that resolves when the script completes.
  */
-export function runWorktreeSetupScript(
+export async function runWorktreeSetupScript(
   worktreePath: string,
   repoPath: string,
   sourceBranch?: string | null,
@@ -186,6 +187,7 @@ export function runWorktreeSetupScript(
 
   const startedAt = Date.now()
   const env = setupScriptEnv(worktreePath, repoPath, sourceBranch)
+  await loginShellPathReady()
 
   return new Promise((resolve) => {
     const child = hubSpawn(scriptPath, [], {
@@ -304,7 +306,7 @@ function hasGitmodules(worktreePath: string): boolean {
  * Run `git submodule update --init --recursive` in the new worktree.
  * Streams stdout/stderr via onData. Skipped if .gitmodules absent.
  */
-export function initSubmodules(
+export async function initSubmodules(
   worktreePath: string,
   onData?: (chunk: string) => void
 ): Promise<WorktreeSubmoduleResult> {
@@ -313,6 +315,7 @@ export function initSubmodules(
   }
 
   const startedAt = Date.now()
+  await loginShellPathReady()
 
   return new Promise((resolve) => {
     const child = hubSpawn('git', ['submodule', 'update', '--init', '--recursive'], {
@@ -522,6 +525,7 @@ type IgnoredCopyEntry =
  * Returns false if `relPath` is a tracked path (even if it has ignored children).
  */
 async function isPathFullyIgnored(repoPath: string, relPath: string): Promise<boolean> {
+  await loginShellPathReady()
   return new Promise((resolve) => {
     const child = hubSpawn('git', ['check-ignore', '--quiet', '--', relPath], {
       cwd: repoPath,
@@ -607,6 +611,7 @@ async function getAllIgnoredCopyEntries(repoPath: string): Promise<IgnoredCopyEn
 async function clonefileCopy(src: string, dst: string, isDir: boolean): Promise<void> {
   const useClone = process.platform === 'darwin'
   if (useClone) {
+    await loginShellPathReady()
     const code = await new Promise<number | null>((resolve) => {
       const child = hubSpawn('cp', ['-cR', src, dst], { stdio: 'ignore' })
       child.on('close', (c) => resolve(c))

@@ -35,6 +35,7 @@ export {
 } from './computer-keys'
 export {
   createHubUser,
+  describeHubUserManagement,
   disableHubUser,
   enableHubUser,
   ensureFirstAdmin,
@@ -47,6 +48,8 @@ export {
   type DisableHubUserOptions,
   type DisableHubUserResult,
   type EnableHubUserResult,
+  type HubRoleAuthority,
+  type HubUserManagement,
   type HubUserRow,
   type SetHubUserRoleResult
 } from './users'

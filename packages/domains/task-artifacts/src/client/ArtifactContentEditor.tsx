@@ -41,7 +41,8 @@ import { Download, FileQuestion, Loader2 } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
 import type { ArtifactDevicePreview } from './ArtifactDevicePicker'
 import { HtmlPreviewFrame } from './ArtifactHtmlPreview'
-import { parseHtmlPrototype, type HtmlPrototype } from './html-prototype'
+import type { ArtifactControlsPosition } from '@slayzone/platform/artifact-controls'
+import { parseArtifactControls } from './artifact-controls'
 import { MediaPlayerViewer } from './MediaPlayerViewer'
 import { ArchiveViewer } from './ArchiveViewer'
 import { FontViewer } from './FontViewer'
@@ -269,6 +270,8 @@ export function ArtifactContentEditor({
   htmlTheme,
   devicePreviews,
   showDeviceFrame,
+  displayZoomPct = 100,
+  onDisplayZoomPctChange,
   searchQuery,
   searchActiveIndex,
   searchMatchCase,
@@ -292,6 +295,10 @@ export function ArtifactContentEditor({
   htmlTheme: HtmlArtifactTheme
   devicePreviews?: readonly ArtifactDevicePreview[]
   showDeviceFrame?: boolean
+  /** Device previews only: the page's zoom inside the device; `zoomPct` scales the device. */
+  displayZoomPct?: number
+  /** Absent: the canvas shows no display zoom control. */
+  onDisplayZoomPctChange?: (pct: number) => void
   searchQuery: string
   searchActiveIndex: number
   searchMatchCase: boolean
@@ -360,7 +367,7 @@ export function ArtifactContentEditor({
   //   iframes (HTML/PDF/image) so they refetch from disk.
   const [editorReloadVersion, setEditorReloadVersion] = useState(0)
   const [previewVersion, setPreviewVersion] = useState(0)
-  const [prototype, setPrototype] = useState<HtmlPrototype | null>(null)
+  const [controls, setControls] = useState<readonly ArtifactControlsPosition[]>([])
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const baselineMtimeRef = useRef<number | null>(null)
   // Saves in flight, and whether a change event arrived during one. The watcher
@@ -394,7 +401,7 @@ export function ArtifactContentEditor({
   const refreshTextPreview = useCallback(
     (savedContent: string) => {
       if (renderMode === 'html-preview') {
-        setPrototype(parseHtmlPrototype(savedContent))
+        setControls(parseArtifactControls(savedContent))
       }
       setPreviewVersion((v) => v + 1)
     },
@@ -821,7 +828,7 @@ export function ArtifactContentEditor({
           <ArtifactPreview
             renderMode={renderMode}
             content={content ?? ''}
-            prototype={prototype}
+            controls={controls}
             artifactId={artifact.id}
             contentVersion={previewVersion}
             getFilePath={getFilePath}
@@ -829,6 +836,8 @@ export function ArtifactContentEditor({
             htmlTheme={htmlTheme}
             devicePreviews={devicePreviews}
             showDeviceFrame={showDeviceFrame}
+            displayZoomPct={displayZoomPct}
+            onDisplayZoomPctChange={onDisplayZoomPctChange}
             onOpenLink={handleOpenLink}
           />
         </div>
@@ -859,7 +868,7 @@ export function ArtifactContentEditor({
             <ArtifactPreview
               renderMode={renderMode}
               content={content ?? ''}
-              prototype={prototype}
+              controls={controls}
               artifactId={artifact.id}
               contentVersion={previewVersion}
               getFilePath={getFilePath}
@@ -867,6 +876,8 @@ export function ArtifactContentEditor({
               htmlTheme={htmlTheme}
               devicePreviews={devicePreviews}
               showDeviceFrame={showDeviceFrame}
+              displayZoomPct={displayZoomPct}
+              onDisplayZoomPctChange={onDisplayZoomPctChange}
               onOpenLink={handleOpenLink}
             />
           </div>
@@ -936,7 +947,7 @@ export function ArtifactContentEditor({
 function ArtifactPreview({
   renderMode,
   content,
-  prototype,
+  controls,
   artifactId,
   contentVersion,
   getFilePath,
@@ -944,11 +955,13 @@ function ArtifactPreview({
   htmlTheme,
   devicePreviews,
   showDeviceFrame,
+  displayZoomPct,
+  onDisplayZoomPctChange,
   onOpenLink
 }: {
   renderMode: RenderMode
   content: string
-  prototype: HtmlPrototype | null
+  controls: readonly ArtifactControlsPosition[]
   artifactId: string
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
@@ -956,6 +969,8 @@ function ArtifactPreview({
   htmlTheme: HtmlArtifactTheme
   devicePreviews?: readonly ArtifactDevicePreview[]
   showDeviceFrame?: boolean
+  displayZoomPct: number
+  onDisplayZoomPctChange?: (pct: number) => void
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
   if (renderMode === 'html-preview')
@@ -969,12 +984,14 @@ function ArtifactPreview({
         key={`${artifactId}:${contentVersion}:${htmlTheme}`}
         artifactId={artifactId}
         contentVersion={contentVersion}
-        prototype={prototype}
+        controls={controls}
         getFilePath={getFilePath}
         zoom={zoom}
         htmlTheme={htmlTheme}
         devicePreviews={devicePreviews}
         showDeviceFrame={showDeviceFrame}
+        displayZoomPct={displayZoomPct}
+        onDisplayZoomPctChange={onDisplayZoomPctChange}
         onOpenLink={onOpenLink}
       />
     )

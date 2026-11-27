@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { HubScope, useFederationOrNull } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { FolderOpen } from 'lucide-react'
@@ -20,6 +20,8 @@ export interface ProjectCreationContext {
 
 interface CreateProjectDialogProps {
   open: boolean
+  /** The hub it opens on (a hub's Settings → Projects). Null/omitted = the default hub. */
+  hubId?: string | null
   onOpenChange: (open: boolean) => void
   onCreated: (project: Project, context: ProjectCreationContext) => void
 }
@@ -67,7 +69,12 @@ const emptyDraft = (): Draft => ({
   startMode: 'scratch'
 })
 
-export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreateProjectDialogProps) {
+export function CreateProjectDialog({
+  open,
+  hubId = null,
+  onOpenChange,
+  onCreated
+}: CreateProjectDialogProps) {
   const [draft, setDraft] = useState<Draft>(emptyDraft)
   const patch = (next: Partial<Draft>): void => setDraft((d) => ({ ...d, ...next }))
 
@@ -76,7 +83,20 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   // client is federated (>1 hub). Single-hub → no picker, create hits the one hub.
   const fed = useFederationOrNull()
   const federatedHubs = fed && fed.hubs.length > 1 ? fed.hubs : []
-  const [targetHubId, setTargetHubId] = useState(fed?.defaultHubId ?? 'local')
+  const openingHub = hubId ?? fed?.defaultHubId ?? 'local'
+  const [targetHubId, setTargetHubId] = useState(openingHub)
+  // Each open starts on the hub it was opened for. Adjusted during render (same
+  // trigger as an `[open]` effect), so no frame shows the previous open's hub.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open && openingHub !== targetHubId) {
+      // Another hub has other computers: a computer and folder chosen before mean
+      // nothing there.
+      patch({ computerId: null, path: '' })
+      setTargetHubId(openingHub)
+    }
+  }
 
   const handleCreated = (project: Project): void => {
     onCreated(project, { startMode: draft.startMode })
@@ -167,6 +187,7 @@ interface HubBoundFieldsProps {
 function HubBoundFields({ draft, patch, onCancel, onCreated }: HubBoundFieldsProps) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const [loading, setLoading] = useState(false)
   const [browseOpen, setBrowseOpen] = useState(false)
 
@@ -206,6 +227,8 @@ function HubBoundFields({ draft, patch, onCancel, onCreated }: HubBoundFieldsPro
         ...(targetComputerId ? { computerId: targetComputerId } : {})
       })
       .finally(() => setLoading(false))
+    // Every list of this hub's projects shows it (Settings → hub → Projects).
+    void queryClient.invalidateQueries(trpc.projects.list.queryFilter())
     onCreated(project)
   }
 

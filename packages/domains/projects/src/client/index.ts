@@ -1,4 +1,5 @@
 export { CreateProjectDialog } from './CreateProjectDialog'
+export { openCreateProject } from './open-create-project'
 export type { ProjectCreationContext, ProjectStartMode } from './CreateProjectDialog'
 export {
   ProjectSettingsPanel,
@@ -7,7 +8,12 @@ export {
   type ProjectSettingsPanelProps,
   type ProjectSettingsTab
 } from './ProjectSettingsPanel'
-export { ScopedRelocateProjectDialog } from './RelocateProjectDialog'
+export { RelocateProjectDialog, ScopedRelocateProjectDialog } from './RelocateProjectDialog'
+export {
+  ProjectFolderRow,
+  useProjectFolderEditor,
+  type ProjectFolderRowProps
+} from './ProjectFolderRow'
 export { DeleteProjectDialog } from './DeleteProjectDialog'
 export { GroupSettingsDialog } from './GroupSettingsDialog'
 export { ProjectSelect } from './ProjectSelect'

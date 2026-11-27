@@ -6,15 +6,20 @@
  * `multiHub`: about hubs and computers as such. When the local hub is the only one
  * the Settings view drops those concepts (the nav's Workspace section lists the
  * other tabs as plain pages), so these are not offered there.
+ * `remoteOnly`: about the hub's sign-in accounts. The local hub runs under this app
+ * with no sign-in, so it has none.
  */
 export const HUB_PAGE_TABS: ReadonlyArray<{
   key: string
   label: string
   defaultOnly?: boolean
   multiHub?: boolean
+  remoteOnly?: boolean
 }> = [
   { key: 'overview', label: 'Overview', multiHub: true },
   { key: 'computers', label: 'Computers', multiHub: true },
+  { key: 'projects', label: 'Projects' },
+  { key: 'users', label: 'Users', multiHub: true, remoteOnly: true },
   { key: 'agents', label: 'Agents & providers' },
   { key: 'worktrees', label: 'Worktrees' },
   { key: 'mcp', label: 'MCP', defaultOnly: true },
@@ -25,12 +30,14 @@ export const HUB_PAGE_TABS: ReadonlyArray<{
 /** The tabs a hub's page offers. */
 export function hubPageTabs({
   isDefault,
-  solo
+  solo,
+  isLocal
 }: {
   isDefault: boolean
   solo: boolean
+  isLocal: boolean
 }): Array<[string, string]> {
-  return HUB_PAGE_TABS.filter((t) => (!t.defaultOnly || isDefault) && (!t.multiHub || !solo)).map(
-    (t) => [t.key, t.label]
-  )
+  return HUB_PAGE_TABS.filter(
+    (t) => (!t.defaultOnly || isDefault) && (!t.multiHub || !solo) && (!t.remoteOnly || !isLocal)
+  ).map((t) => [t.key, t.label])
 }

@@ -40,6 +40,8 @@ export interface HubUserListRow {
   /** ISO-8601 when disabled, else null. */
   disabledAt: string | null
   createdAt: string
+  /** The break-glass account: listed, but only `slayzone-hub break-glass` manages it. */
+  breakGlass: boolean
 }
 
 /**

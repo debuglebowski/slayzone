@@ -36,6 +36,17 @@ afterEach(() => {
 })
 
 describe('HubIssueBanners', () => {
+  it('an incompatible hub says which side needs the update', () => {
+    const incompatible = (side: 'hub' | 'app', hub: typeof remote | typeof local) => ({
+      hub: hub as HubIssueEntry['hub'],
+      issue: { kind: 'incompatible' as const, since: T0, detail: 'why', side, release: '0.43.0' }
+    })
+    issues = [incompatible('hub', remote), incompatible('app', local)]
+    render(<HubIssueBanners />)
+    expect(screen.getByText(/slay\.normain\.com needs an update/)).toBeTruthy()
+    expect(screen.getByText(/too old for This computer — update SlayZone/)).toBeTruthy()
+  })
+
   it('shows nothing when every hub is fine', () => {
     render(<HubIssueBanners />)
     expect(screen.queryByTestId('hub-issue-banner')).toBeNull()

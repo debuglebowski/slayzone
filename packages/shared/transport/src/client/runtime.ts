@@ -1,3 +1,4 @@
+import { withClientApi } from '@slayzone/trpc-server/api-version'
 import { createTRPCContext } from '@trpc/tanstack-react-query'
 import {
   createTRPCClient,
@@ -11,7 +12,8 @@ import { behaviorSubject } from '@trpc/server/observable'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { compactBytesLink } from './compactBytesLink'
 import { type ConnectionStateSource, connectDeadlineLink } from './connectDeadlineLink'
-import { hubReadsCompactBytes } from './hubCapabilities'
+import { hubReadsCompactBytes, knownApiIncompatibility } from './hubCapabilities'
+import { hubCompatLink } from './hubCompatLink'
 import { createConnectPacer, getHubConnectProbe } from './connectPacing'
 import { createWatchedWebSocket, type HandshakeTiming } from './connectHandshake'
 import { connectTraceFor } from './connectTrace'
@@ -99,7 +101,9 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
   })
   const wsClient = createWSClient({
     ...(WatchedWebSocket ? { WebSocket: WatchedWebSocket } : {}),
-    url: pacer.url,
+    // Every socket names this client's API version (`clientApi`): a hub that no longer
+    // serves it refuses with CLIENT_TOO_OLD (`@slayzone/trpc-server/api-version`).
+    url: async () => withClientApi(await pacer.url()),
     retryDelayMs: pacer.retryDelayMs,
     onOpen: pacer.onOpen,
     onClose: pacer.onCloseOrError,
@@ -115,6 +119,9 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
   const client = createTRPCClient<AnyTRPCRouter>({
     links: [
       ...(opts.links ?? []),
+      // Nothing but `hub.describe` to a hub known to be API-incompatible, and a missing
+      // procedure on an older hub reads "update the hub" (hubCompatLink.ts).
+      hubCompatLink({ incompatibility: () => (self ? knownApiIncompatibility(self) : null) }),
       // Bytes in an input go as base64 to a hub that reads it (see compactBytesLink).
       // Before the deadline link: its `hub.describe` question is itself guarded.
       compactBytesLink({

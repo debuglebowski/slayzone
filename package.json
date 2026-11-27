@@ -43,6 +43,7 @@
     "check": "biome check --write .",
     "test:unit": "node scripts/ci-lock.mjs test:unit -- bash packages/shared/test-utils/run-all.sh",
     "test:unit:fast": "SLZ_UNIT_WORKERS=all node scripts/ci-lock.mjs test:unit:fast -- bash packages/shared/test-utils/run-all.sh",
+    "check:api-compat": "node scripts/check-api-compat.mjs",
     "test:unit:registered": "SLZ_UNIT_DRY=1 bash packages/shared/test-utils/run-all.sh",
     "test:review-regressions": "node packages/shared/test-utils/review-regressions.mjs",
     "test:chat:perf": "npx tsx packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts",
@@ -85,6 +86,6 @@
     "node": ">=24.22.1",
     "pnpm": ">=12.15.0"
   },
-  "version": "0.43.0",
+  "version": "0.44.0",
   "packageManager": "pnpm@12.15.0+sha512.b3951d6d6ff4a9f13dc7cf56cd28d2b8eb37dbcc9c68e52e1e1191873ea9f82a017287ab50baadc5ccc494f036c67c0e47eb13608c2fa36f47711b61ea128e61"
 }

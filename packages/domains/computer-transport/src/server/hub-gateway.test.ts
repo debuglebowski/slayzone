@@ -643,6 +643,15 @@ describe('heartbeat-loss detection (hub side)', () => {
     vi.useFakeTimers()
     const hub = await startHub({ heartbeatTimeoutMs: 5_000 })
     const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 0 }) // never heartbeats
+    // Silent for real: on resume the hub pings to confirm liveness, and an answer
+    // is proof of life that legitimately buys another window. A dialer that answers
+    // lands that reply at whatever fake-timer yield real I/O reaches — 5_001 when
+    // idle (reaped at 10_001), 7_000 under load (not reaped) — so the outcome
+    // would hinge on machine load instead of the guard under test.
+    vi.spyOn(
+      dialer as unknown as { handleHubRequest(...args: unknown[]): void },
+      'handleHubRequest'
+    ).mockImplementation(() => undefined)
     let lost = false
     hub.gateway.events.on('computer-lost', () => {
       lost = true

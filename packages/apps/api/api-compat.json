@@ -1,0 +1,7 @@
+{
+  "$comment": "Client ↔ hub API breaks accepted on purpose, checked by `pnpm check:api-compat` (scripts/check-api-compat.mjs) against the latest release. Key = the break as the check prints it; value = why it is fine (the client tolerates it, the feature is gated with hubHasFeature, …). oldClient = the release's app on this hub; newClient = this app on the release's hub. `--prune` drops entries nothing needs.",
+  "oldClient": {
+    "sharing.sharedWithMe removed": "Removed on purpose (abd614975: guest sharing reversed). A v0.43 app’s sidebar SharedWithMe renders null when the query has no data, so on a newer hub the section just stays hidden."
+  },
+  "newClient": {}
+}

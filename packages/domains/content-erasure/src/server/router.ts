@@ -1,3 +1,4 @@
+import { ROLES_MANAGED_MESSAGE } from '@normain/idp-role-contract'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { publicProcedure, router, type TrpcContext } from '@slayzone/trpc-server'
@@ -7,6 +8,12 @@ import { getErasureReport, resumeErasure, exportErasureReceipt } from './index'
 import type { ErasureJob } from './manifest'
 
 const user = z.object({ userId: z.string().min(1) })
+/** The internal identity that owns computer API keys — never an operator-made account. */
+const COMPUTER_SERVICE_USER_EMAIL = 'computers@slayzone.internal'
+const SSO_MANAGED_ROLE_MESSAGE =
+  'Roles on this hub come from Entra ID: assign or remove the SlayZone.Admin app role on the ' +
+  'enterprise application. It applies at the account’s next sign-in.'
+const IDP_MANAGED_ROLE_MESSAGE = ROLES_MANAGED_MESSAGE
 function deps() {
   const configured = getHubAdminDeps()
   if (!configured?.users.ready())
@@ -49,17 +56,56 @@ async function adminCall<T>(call: () => Promise<T>): Promise<T> {
 }
 
 export const hubUsersRouter = router({
-  access: publicProcedure.query(({ ctx }) => ({
-    canReviewOwn: !ctx.principal || ctx.principal.scopes.includes('full'),
-    canManage:
+  access: publicProcedure.query(({ ctx }) => {
+    const canManage =
       ctx.principal?.role === 'admin' &&
       ctx.principal.scopes.includes('full') === true &&
       (getHubAdminDeps()?.users.ready() ?? false)
-  })),
+    return {
+      canReviewOwn: !ctx.principal || ctx.principal.scopes.includes('full'),
+      canManage,
+      // Only for an admin: what the Users tab may offer, and which row is the caller.
+      management: canManage ? (getHubAdminDeps()?.users.describe() ?? null) : null,
+      selfUserId: canManage ? (ctx.principal?.userId ?? null) : null
+    }
+  }),
   list: publicProcedure.query(({ ctx }) => {
     actor(ctx)
     return deps().users.list()
   }),
+  /** Creates a password account; its generated password is in the result, ONCE. */
+  create: publicProcedure
+    .input(
+      z.object({
+        email: z.string().trim().min(3).max(320).email(),
+        name: z.string().trim().max(200).optional(),
+        role: z.enum(['admin', 'user']).optional()
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      actor(ctx)
+      if (input.email.toLowerCase() === COMPUTER_SERVICE_USER_EMAIL)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This address is reserved for the internal computer service identity.'
+        })
+      const result = await deps().users.create({
+        email: input.email,
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.role ? { role: input.role } : {})
+      })
+      if (!result.ok)
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message:
+            result.reason === 'exists'
+              ? 'An account with that email already exists.'
+              : result.reason === 'sso-managed'
+                ? SSO_MANAGED_ROLE_MESSAGE
+                : IDP_MANAGED_ROLE_MESSAGE
+        })
+      return result.user
+    }),
   disable: publicProcedure
     .input(z.object({ email: z.string().trim().min(3).max(320) }))
     .mutation(async ({ ctx, input }) => {
@@ -77,6 +123,46 @@ export const hubUsersRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message })
       }
       return { disabled: true as const }
+    }),
+  enable: publicProcedure
+    .input(z.object({ email: z.string().trim().min(3).max(320) }))
+    .mutation(async ({ ctx, input }) => {
+      actor(ctx)
+      const result = await deps().users.enable(input.email)
+      if (result === 'ok') return { enabled: true as const }
+      throw new TRPCError(
+        result === 'not-found'
+          ? { code: 'NOT_FOUND', message: 'User not found.' }
+          : {
+              code: 'CONFLICT',
+              message:
+                result === 'erasure-in-progress'
+                  ? 'This user cannot be enabled while their content is being erased.'
+                  : 'This internal or emergency account cannot be enabled here.'
+            }
+      )
+    }),
+  setRole: publicProcedure
+    .input(z.object({ email: z.string().trim().min(3).max(320), role: z.enum(['admin', 'user']) }))
+    .mutation(async ({ ctx, input }) => {
+      actor(ctx)
+      const result = await deps().users.setRole(input.email, input.role)
+      if (result === 'ok') return { role: input.role }
+      throw new TRPCError(
+        result === 'not-found'
+          ? { code: 'NOT_FOUND', message: 'User not found.' }
+          : {
+              code: 'CONFLICT',
+              message:
+                result === 'last-admin'
+                  ? 'The last enabled admin cannot be demoted. Make another account admin first.'
+                  : result === 'sso-managed'
+                    ? SSO_MANAGED_ROLE_MESSAGE
+                    : result === 'idp-managed'
+                      ? IDP_MANAGED_ROLE_MESSAGE
+                      : 'This internal or emergency account’s role cannot be changed here.'
+            }
+      )
     }),
   previewErasure: publicProcedure
     .input(user)

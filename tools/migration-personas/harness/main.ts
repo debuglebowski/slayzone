@@ -32,7 +32,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { homedir, hostname, uptime } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import Database from 'better-sqlite3'
 import {
@@ -452,15 +452,18 @@ let runStartMs = 0
 let inputValues = new Set<string>()
 
 /**
- * This machine's boot time, as the chat store records it (chat-runtime storage.ts
- * `machineBootedAt`: `Date.now() - uptime()`, per process, so a few ms of jitter). It
- * is the environment's, not the persona's or this run's: a value near it is masked
- * before the run window is checked, so the token does not depend on how long ago the
- * machine (Docker's VM) booted.
+ * The chat store's `store-session` records when the machine had booted
+ * (chat-runtime storage.ts `machineBootedAt`: `Date.now() - uptime()`, per process,
+ * rounded, so a few ms of jitter). It is the environment's (Docker's VM), not the
+ * persona's or this run's, and the product never reads it back (only `clean`). It is
+ * masked by its key, whatever its value, before any other rule: a persona generated
+ * during the same VM boot carries boot times in its input, so this run's value can equal
+ * one of them exactly and would then be kept as the persona's own (`known`), and one
+ * written soon after the VM booted would read as a run time.
  */
-const machineBootMs = Date.now() - uptime() * 1000
-function nearMachineBoot(ms: number): boolean {
-  return Math.abs(ms - machineBootMs) < 60_000
+function maskStoreSessionBoot(s: string): string {
+  if (!s.includes('"id":"store-session"')) return s
+  return s.replace(/(\\?"bootedAt\\?":)\d+(\.\d+)?/g, '$1<machine-boot-ms>')
 }
 
 /** Created by this run: from just before it started, up to a year ahead (expiries). */
@@ -500,7 +503,7 @@ const HOSTNAME_RE = new RegExp(`\\b${hostname().replace(/[.*+?^${}()|[\]\\]/g, '
 function normalize(s: string): string {
   const known = (v: string) => inputValues.has(v) || inputValues.has(v.toLowerCase())
   return maskRunDiagnosticDurations(
-    settleIdleUpgradeCheck(s)
+    maskStoreSessionBoot(settleIdleUpgradeCheck(s))
       .replace(UUID_RE, (u) => (known(u) ? u : '<new-uuid>'))
       // This run's container hostname (a random id; e.g. a shell prompt in saved scrollback).
       .replace(HOSTNAME_RE, '<run-host>')
@@ -524,7 +527,6 @@ function normalize(s: string): string {
         if (known(n)) return n
         const int = n.split('.')[0]
         const ms = int.length === 13 ? Number(n) : Number(n) * 1000
-        if (int.length === 13 && nearMachineBoot(ms)) return '<machine-boot-ms>'
         return inWindow(ms) ? (int.length === 13 ? '<run-ms>' : '<run-s>') : n
       })
   )

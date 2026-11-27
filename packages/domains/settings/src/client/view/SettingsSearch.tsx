@@ -39,10 +39,17 @@ const HUB_TABS: Array<[string, string, string, boolean]> = [
   [
     'overview',
     'Overview',
-    'status sign in login default hub address remove disconnect users summary',
+    'status sign in login default hub address remove disconnect summary',
     false
   ],
   ['computers', 'Computers', 'computers enroll add machine restart disable replace', false],
+  ['projects', 'Projects', 'projects list new create add project', false],
+  [
+    'users',
+    'Users',
+    'users accounts members people add invite admin role disable enable password erase',
+    false
+  ],
   [
     'agents',
     'Agents & providers',
@@ -114,7 +121,10 @@ function HubResults({ hub, query }: { hub: NavHub; query: string }) {
   const entries: Entry[] = [
     ...HUB_TABS.filter(
       ([tab, , , defaultOnly]) =>
-        (!defaultOnly || hub.isDefault) && !(solo && (tab === 'overview' || tab === 'computers'))
+        (!defaultOnly || hub.isDefault) &&
+        !(solo && (tab === 'overview' || tab === 'computers')) &&
+        // The local hub has no sign-in accounts (`hubPageTabs`' `remoteOnly`).
+        !(hub.isLocal && tab === 'users')
     ).map(([tab, label, keywords]) => ({
       label,
       path,
@@ -137,7 +147,7 @@ function HubResults({ hub, query }: { hub: NavHub; query: string }) {
     ...(projects.data ?? []).map((p) => ({
       label: p.name,
       path: `${path} · project`,
-      keywords: 'project',
+      keywords: 'project folder path repository computers',
       route: { kind: 'project', projectId: p.id, tab: 'general' } as SettingsRoute
     }))
   ].filter((e) => matches(query, e))

@@ -12,6 +12,10 @@ fi
 
 VERSION=$(node -p "require('./packages/apps/app/package.json').version")
 
+# A release must not ship an unaccepted client ↔ hub API break against the last one
+# (docs/plans/client-hub-compat.md): its app meets older hubs, its hub older apps.
+node scripts/check-api-compat.mjs --explain
+
 echo "Releasing v$VERSION..."
 
 # Stamp the shared version into every workspace manifest (app is canonical).

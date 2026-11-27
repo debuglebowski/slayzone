@@ -33,16 +33,19 @@ export function ScopedRelocateProjectDialog(
 
 export function RelocateProjectDialog({
   project,
+  computerId: onComputer,
   onClose,
   onUpdated
 }: {
   project: Project
+  /** The computer whose folder moves. Omitted: the one the hub runs the project on. */
+  computerId?: string | null
   onClose(): void
   onUpdated(project: Project): void
 }) {
   const trpc = useTRPC()
   const relocate = useMutation(trpc.projects.relocate.mutationOptions())
-  const computerId = project.resolved_computer_id
+  const computerId = onComputer ?? project.resolved_computer_id
   const sourcePath = placementOn(project, computerId)?.path ?? ''
   const [mode, setMode] = useState<'move' | 'update'>('move')
   const [path, setPath] = useState('')

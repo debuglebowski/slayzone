@@ -139,7 +139,8 @@ base.describe('previews of files on a remote hub', () => {
     )
     expect(res.text).not.toContain('Access denied')
     expect(res.status).toBe(200)
-    expect(res.type).toBe('text/html')
+    // The page declares no charset: decoded as UTF-8, not windows-1252.
+    expect(res.type).toBe('text/html; charset=utf-8')
     expect(res.text).toContain('remote artifact')
     // The forced theme is injected into the page, as for a local artifact.
     expect(res.text.length).toBeGreaterThan(
@@ -151,7 +152,7 @@ base.describe('previews of files on a remote hub', () => {
     const pageUrl = toSlzSourceUrl(workspace(), 'site/index.html')
     const page = await slzFetch(launched!.app, pageUrl)
     expect(page.text).not.toContain('Access denied')
-    expect(page.type).toBe('text/html')
+    expect(page.type).toBe('text/html; charset=utf-8')
     expect(page.text).toBe(PAGE)
 
     // The browser resolves `css/site.css` against the page URL: same source.

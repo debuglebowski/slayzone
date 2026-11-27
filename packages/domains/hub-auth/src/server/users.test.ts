@@ -21,6 +21,7 @@ import { openBreakGlassAccount } from './break-glass'
 import { mintComputerApiKey, COMPUTER_SERVICE_USER_EMAIL } from './computer-keys'
 import {
   createHubUser,
+  describeHubUserManagement,
   disableHubUser,
   enableHubUser,
   findFirstAdmin,
@@ -199,6 +200,25 @@ describe('listHubUsers', () => {
     await create('alice@example.com')
     const [row] = await listHubUsers(auth)
     expect(row!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/)
+  })
+
+  it('flags the break-glass account, which it lists but nothing here may manage', async () => {
+    await create('alice@example.com')
+    await openBreakGlassAccount(auth)
+    const rows = await listHubUsers(auth)
+    expect(rows.map((u) => [u.email === 'alice@example.com', u.breakGlass])).toEqual([
+      [true, false],
+      [false, true]
+    ])
+  })
+})
+
+describe('describeHubUserManagement', () => {
+  it('a password hub with no SSO owns its roles and can add accounts', () => {
+    expect(describeHubUserManagement(auth)).toEqual({
+      roleAuthority: 'hub',
+      passwordEnabled: true
+    })
   })
 })
 

@@ -32,7 +32,9 @@ interface DialogState {
 
   // Create project
   createProjectOpen: boolean
-  openCreateProject: () => void
+  /** The hub the dialog opens on (a hub's Settings → Projects); null = the default hub. */
+  createProjectHubId: string | null
+  openCreateProject: (hubId?: string | null) => void
   closeCreateProject: () => void
 
   // Delete project
@@ -97,8 +99,9 @@ export const useDialogStore = create<DialogState>()((set) => ({
   closeDeleteTask: () => set({ deletingTask: null }),
 
   createProjectOpen: false,
-  openCreateProject: () => set({ createProjectOpen: true }),
-  closeCreateProject: () => set({ createProjectOpen: false }),
+  createProjectHubId: null,
+  openCreateProject: (hubId = null) => set({ createProjectOpen: true, createProjectHubId: hubId }),
+  closeCreateProject: () => set({ createProjectOpen: false, createProjectHubId: null }),
 
   deletingProject: null,
   openDeleteProject: (project) => set({ deletingProject: project }),

@@ -114,7 +114,7 @@ export interface PtyHistoryTracker {
   rewritten(): void
   /** Write now, synchronously (shutdown). */
   flushSync(): void
-  /** Write what is pending, then stop. */
+  /** Write what is pending, then stop. Every call answers the same close. */
   close(): Promise<void>
   /** Stop without writing (the output is being forgotten). */
   cancel(): Promise<void>
@@ -158,6 +158,18 @@ export function ptyHistoryDir(stateDir: string, hubScope: string): string {
     createHash('sha256').update(hubScope).digest('hex').slice(0, 24)
   )
 }
+
+/**
+ * How often a whole write creates its task dir and opens its temp file there. `sweep`
+ * removes a task dir it found empty, and that `rmdir` can land between a write
+ * creating (or finding) the dir and opening the file — the write then fails ENOENT
+ * and, for a session's last write (`close`), its output was lost. Once the temp file
+ * is open the dir is not empty and stays. `forgetTask` removes a dir on purpose only
+ * after stopping its trackers and waiting out their writes, so a retry never brings
+ * a purged task's dir back.
+ */
+const DIR_RACE_ATTEMPTS = 3
+const isEnoent = (err: unknown) => (err as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 
 const appendTo = (fd: number, data: string): Promise<void> =>
   new Promise((resolve, reject) => appendFile(fd, data, (err) => (err ? reject(err) : resolve())))
@@ -213,6 +225,7 @@ export function createPtyHistory(opts: {
       let inFlight = 0
       let disk: OnDisk | undefined
       let wholeNext = false
+      let closing: Promise<void> | undefined
 
       /** What the next write is: the new chunks, or the whole buffer. Null = nothing new. */
       const plan = (): WritePlan | null => {
@@ -281,8 +294,15 @@ export function createPtyHistory(opts: {
             wholeNext = false
             const tmp = tmpOf(file)
             try {
-              await mkdir(taskDir(taskId), { recursive: true, mode: 0o700 })
-              await writeFile(tmp, p.data, { mode: 0o600, flush: true })
+              for (let attempt = 1; ; attempt++) {
+                await mkdir(taskDir(taskId), { recursive: true, mode: 0o700 })
+                try {
+                  await writeFile(tmp, p.data, { mode: 0o600, flush: true })
+                  break
+                } catch (err) {
+                  if (!isEnoent(err) || attempt >= DIR_RACE_ATTEMPTS) throw err
+                }
+              }
             } catch (err) {
               wholeNext = true
               await rm(tmp, { force: true })
@@ -341,10 +361,17 @@ export function createPtyHistory(opts: {
               disk.chars += p.data.length
               return
             }
-            mkdirSync(taskDir(taskId), { recursive: true, mode: 0o700 })
             const tmp = tmpOf(file)
             try {
-              writeFileSync(tmp, p.data, { mode: 0o600, flush: true })
+              for (let attempt = 1; ; attempt++) {
+                mkdirSync(taskDir(taskId), { recursive: true, mode: 0o700 })
+                try {
+                  writeFileSync(tmp, p.data, { mode: 0o600, flush: true })
+                  break
+                } catch (err) {
+                  if (!isEnoent(err) || attempt >= DIR_RACE_ATTEMPTS) throw err
+                }
+              }
             } catch (err) {
               rmSync(tmp, { force: true })
               throw err
@@ -357,14 +384,19 @@ export function createPtyHistory(opts: {
             wholeNext = true
           }
         },
-        async close() {
-          if (stopped) return
+        close() {
+          if (closing) return closing
+          if (stopped) return Promise.resolve()
           if (timer) clearTimeout(timer)
-          await writeAsync().catch(() => {
-            // The previous copy stays; nothing to report to at close.
-          })
-          stopped = true
-          await release()
+          closing = writeAsync()
+            .catch(() => {
+              // The previous copy stays; nothing to report to at close.
+            })
+            .then(() => {
+              stopped = true
+              return release()
+            })
+          return closing
         },
         async cancel() {
           stopped = true

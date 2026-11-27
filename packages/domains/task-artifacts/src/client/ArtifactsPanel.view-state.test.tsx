@@ -122,13 +122,17 @@ vi.mock('./ArtifactContentEditor', () => ({
     viewMode,
     searchQuery,
     devicePreviews,
-    showDeviceFrame
+    showDeviceFrame,
+    displayZoomPct,
+    onDisplayZoomPctChange
   }: {
     artifact: TaskArtifact
     viewMode: string
     searchQuery: string
     devicePreviews?: readonly ArtifactDevicePreview[]
     showDeviceFrame?: boolean
+    displayZoomPct?: number
+    onDisplayZoomPctChange?: (pct: number) => void
   }) => {
     const primary = devicePreviews?.find(({ slot }) => slot === 'primary')
     const format = ({ viewport }: ArtifactDevicePreview) => viewport.width + '×' + viewport.height
@@ -139,9 +143,17 @@ vi.mock('./ArtifactContentEditor', () => ({
         data-view-mode={viewMode}
         data-search={searchQuery}
         data-device-frame={showDeviceFrame ? primary?.frame?.device.id : undefined}
+        data-display-zoom={displayZoomPct}
         data-viewports={devicePreviews?.map(format).join(', ')}
         data-viewport={primary && format(primary)}
-      />
+      >
+        <button type="button" onClick={() => onDisplayZoomPctChange?.(125)}>
+          Display zoom 125%
+        </button>
+        <button type="button" onClick={() => onDisplayZoomPctChange?.(100)}>
+          Display zoom 100%
+        </button>
+      </div>
     )
   }
 }))
@@ -471,6 +483,25 @@ describe('ArtifactsPanel device preview persistence', () => {
     select('a2')
     expect(viewer().dataset.viewport).toBe('540×720')
     expect(viewer().dataset.deviceFrame).toBe('surface-duo')
+  })
+
+  it('keeps a display zoom per artifact, separate from the artifact zoom', async () => {
+    const view = await mountLoaded()
+    fireEvent.click(screen.getByRole('button', { name: 'Device preview' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'iPhone Duo' }))
+    expect(viewer().dataset.displayZoom).toBe('100')
+    fireEvent.click(screen.getByRole('button', { name: 'Display zoom 125%' }))
+    expect(viewer().dataset.displayZoom).toBe('125')
+
+    select('a2')
+    expect(viewer().dataset.displayZoom).toBe('100')
+
+    view.unmount()
+    await mountLoaded()
+    expect(viewer().dataset.displayZoom).toBe('125')
+    fireEvent.click(screen.getByRole('button', { name: 'Display zoom 100%' }))
+    expect(viewer().dataset.displayZoom).toBe('100')
+    expect(localStorage.getItem('slayzone:artifact-device-preview:a1:display-zoom')).toBeNull()
   })
 
   it('restores a rotated custom size and remembers switching back to fit to pane', async () => {

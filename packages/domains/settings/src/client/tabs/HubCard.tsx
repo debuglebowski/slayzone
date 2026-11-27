@@ -22,7 +22,7 @@ import { ComputerName } from './ComputerName'
 import { ComputerFaults } from './ComputerFaults'
 import { ComputerUnattachedSessions } from './ComputerUnattachedSessions'
 import { ComputerTakeovers } from './ComputerTakeovers'
-import { HubUsersSection } from './HubUsersSection'
+import { HubOwnCleanupStatus } from './HubOwnCleanupStatus'
 import { ComputerActionButtons, LOCAL_COMPUTER_STATUS_KEY, useHubComputers } from './hub-computers'
 
 /**
@@ -771,7 +771,7 @@ export function HubCard({
   const hubExtras = (
     <>
       <ComputerFaults computerId={null} title="This hub needs attention" />
-      <HubUsersSection />
+      <HubOwnCleanupStatus />
     </>
   )
   const header = {

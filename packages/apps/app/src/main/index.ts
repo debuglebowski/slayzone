@@ -4053,8 +4053,8 @@ app
     )
     ipcMain.handle(
       'app:configure-artifact-device-preview',
-      (event, id: number, url: unknown, viewport: unknown) =>
-        artifactDevicePreviews?.configure(event.sender, id, url, viewport) ?? false
+      (event, id: number, url: unknown, viewport: unknown, zoom: unknown) =>
+        artifactDevicePreviews?.configure(event.sender, id, url, viewport, zoom) ?? false
     )
     // Downloads land on THIS machine too: the renderer streams the pieces it reads
     // from the hub, main writes them (client-save.ts). A target belongs to the window

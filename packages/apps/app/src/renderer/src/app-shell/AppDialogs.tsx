@@ -177,6 +177,7 @@ export function AppDialogs({
   setUpdateToastDismissed
 }: AppDialogsProps): React.JSX.Element {
   // "Move to hub…" on a project's menu (store-driven, like the sidebar's other menus).
+  const createProjectHubId = useDialogStore((s) => s.createProjectHubId)
   const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
   const relocatingProject = useDialogStore((s) => s.relocatingProject)
@@ -240,6 +241,7 @@ export function AppDialogs({
         <Suspense fallback={null}>
           <CreateProjectDialog
             open={createProjectOpen}
+            hubId={createProjectHubId}
             onOpenChange={(open) => {
               if (!open) useDialogStore.getState().closeCreateProject()
             }}

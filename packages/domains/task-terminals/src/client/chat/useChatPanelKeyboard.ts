@@ -52,10 +52,24 @@ export interface UseChatPanelKeyboardOpts {
 }
 
 /**
+ * A text field has focus whose caret can still move toward `edge` — not yet
+ * collapsed there (a selection counts as movable: the key collapses it).
+ * Content-editable fields and inputs without a selection API never claim it.
+ */
+function caretCanMove(el: Element | null, edge: 'start' | 'end'): boolean {
+  if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return false
+  const { selectionStart: start, selectionEnd: end } = el
+  if (start === null || end === null) return false // input types without a selection
+  if (start !== end) return true
+  return edge === 'start' ? start > 0 : start < el.value.length
+}
+
+/**
  * Window-level keydown handler scoped to the chat panel that owns focus:
  *
  *   - Cmd/Ctrl+F → open in-chat search
- *   - Cmd/Ctrl+↑ / ↓ → jump timeline to top / bottom
+ *   - Cmd/Ctrl+↑ / ↓ → jump timeline to top / bottom (in a text field: once the
+ *     caret already sits at its start / end — before that the caret moves)
  *   - Cmd+Alt+↑ / ↓ (macOS) or Alt+PgUp / PgDn → previous / next user turn
  *     (Ctrl+Alt+arrows is the desktop's workspace switch on Windows / Linux)
  *   - Shift+Tab → cycle agent permission mode (parity with the terminal; skipped
@@ -160,6 +174,11 @@ export function useChatPanelKeyboard({
         search.requestOpen()
         return
       }
+      // In a text field Cmd/Ctrl+↑ / ↓ move the caret to its start / end first
+      // (native); only from there do they jump the timeline. An empty composer
+      // is already at both ends, so it jumps at once.
+      if (mod && e.key === 'ArrowUp' && caretCanMove(document.activeElement, 'start')) return
+      if (mod && e.key === 'ArrowDown' && caretCanMove(document.activeElement, 'end')) return
       if (mod && e.key === 'ArrowUp') {
         e.preventDefault()
         // Not following the end any more: rows loading above (paged history)

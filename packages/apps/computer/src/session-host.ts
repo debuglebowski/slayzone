@@ -38,6 +38,7 @@ import {
 import {
   hostEndpoint,
   hostEndpointDir,
+  isEndpointInUseError,
   prepareEndpointDir,
   probeEndpoint,
   releaseEndpointDir,
@@ -137,7 +138,7 @@ async function bindHostEndpoint(server: Server, root: string): Promise<string> {
       await listen()
       return endpoint
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || attempt >= 2) throw err
+      if (!isEndpointInUseError(err) || attempt >= 2) throw err
       const state = await probeEndpoint(endpoint)
       if (state === 'live') throw new HostSupersededError(endpoint, readHostRecord(root))
       if (state === 'stale') {

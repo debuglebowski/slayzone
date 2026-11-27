@@ -381,6 +381,32 @@ The \`--task\` flag defaults to \`$SLAYZONE_TASK_ID\` for \`create\`, \`upload\`
 
 - \`slay tasks artifacts path <artifactId>\` — print the artifact's absolute file path on disk.
 
+## HTML prototype controls
+
+An HTML artifact can put controls beside its preview: buttons, sliders or toggles that drive the page while it renders inside a device frame. Wrap them in \`<slay-artifact-controls>\`; everything else in the document is the screen.
+
+\`\`\`html
+<slay-artifact-controls position="bottom">
+  <button data-action="next">Next</button>
+  <button data-action="tab" data-value="2">Tab 2</button>
+  <label>Qty <input type="range" name="qty" min="1" max="9" value="3"></label>
+  <label><input type="checkbox" name="error"> Error state</label>
+</slay-artifact-controls>
+<script>
+  addEventListener('slay:action', (e) => {
+    const { action, value } = e.detail // e.g. { action: 'qty', value: 4 }
+  })
+</script>
+\`\`\`
+
+- \`position\`: \`top\`, \`bottom\` (default), \`left\` or \`right\`. Use several elements for several docks; elements with the same position share one dock. They may sit anywhere in the markup.
+- Actions: a click on \`[data-action]\` sends \`{ action, value: data-value }\`; input on a named field sends \`{ action: name, value }\` (checkbox → boolean, number/range → number, else string). For custom widgets, dispatch it yourself from inside the controls: \`el.dispatchEvent(new CustomEvent('slay:action', { bubbles: true, detail: { action, value } }))\`.
+- Action names: letters, digits, \`-\`, \`_\` (max 64). Values: string, number, boolean or null.
+- The screen receives every action as a \`slay:action\` event on \`window\`, in every device shown at once.
+- The page runs once per screen and once per dock, and the dock copy keeps the screen elements (hidden), so scripts must not assume they run once.
+- Plain \`<button>\`, \`<input>\` and \`<select>\` get the app's look; your own CSS for them wins. The dock sizes itself to the controls.
+- Outside SlayZone the controls simply render in the page.
+
 ## Folders
 
 Artifacts can be organized into folders. Folder operations support cycle detection — you can't move a folder into its own child.

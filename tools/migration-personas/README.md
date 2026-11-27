@@ -33,7 +33,9 @@ Local only (Docker, no network). Never part of CI.
 | `p13-v0390-full` | v0.39.0 (schema v214) | p05's setup on v0.39.0 |
 | `p14-v0400-full` | v0.40.0 (schema v217) | p05's setup on v0.40.0 |
 | `p15-v0411-full` | v0.41.1 (schema v219) | p05's setup on v0.41.1 |
-| `p16-v0420-full` | v0.42.0 (schema v223) | p05's setup on v0.42.0, the release current users upgrade from |
+| `p16-v0420-full` | v0.42.0 (schema v223) | p05's setup on v0.42.0 |
+| `p17-v0430-full` | v0.43.0 (schema v224) | p05's setup on v0.43.0 |
+| `p18-v0440-full` | v0.44.0 (schema v227) | p05's setup on v0.44.0, the release current users upgrade from |
 
 The harness image links today's hub/computer bundles at the `.deb` install paths
 (`/opt/SlayZone/resources/...`): v0.38+ computers record that path as the release their

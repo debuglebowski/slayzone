@@ -118,6 +118,8 @@ run_harness packages/domains/terminal/src/server/runtime/chat-data-ops.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers.test.ts
 # Codex chat models through the chat ops: getModels / getModel / setModel against the CLI's model/list (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-handlers-codex.test.ts
+# A local chat start probes the login-shell PATH without blocking the event loop.
+run_harness packages/domains/terminal/src/server/runtime/chat-handlers-login-path.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-data.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-handlers.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-attachment-guard.test.ts
@@ -692,6 +694,9 @@ run_harness scripts/check-task-computer-resolver.test.mjs
 # and typechecked sources' relative imports resolve inside the package or a workspace
 # package it depends on (transitively).
 run_harness scripts/check-tsconfig-hermetic.test.mjs
+# `pnpm check:api-compat` (client ↔ hub API contract): base-release pick, contract
+# parsing, the generated type comparison's verdict, and the policy over it.
+run_harness scripts/api-compat/lib.test.mjs
 # CI's Turborepo typecheck cache keeps only the current run's entries before it is saved.
 run_harness scripts/ci/turbo-cache-prune.test.mjs
 # Machine-wide CI lock around heavy local runs (`pnpm test:e2e`, `test:unit`), shared with
@@ -763,6 +768,8 @@ run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 run_harness packages/domains/worktrees/src/server/git-ops.test.ts
 run_harness packages/domains/worktrees/src/server/git-command.test.ts
+# The first hub git spawn probes the login-shell PATH without blocking the event loop.
+run_harness packages/domains/worktrees/src/server/exec-async-login-path.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
@@ -1522,6 +1529,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/client-host.test.ts \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
+  packages/shared/transport/src/client/hubCompat.test.ts \
   packages/shared/transport/src/client/runtime.test.ts \
   packages/shared/transport/src/client/compactBytes.test.ts \
   packages/shared/transport/src/client/deviceSettingsLink.test.ts \
@@ -1590,6 +1598,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerFaults.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerFolders.test.tsx \
+  packages/domains/settings/src/client/tabs/HubProjectsTab.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerUnattachedSessions.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerChatStorage.test.tsx \
   packages/domains/settings/src/client/HubIssueBanners.test.tsx \
@@ -1761,6 +1771,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/client/useSettingsReopenTab.test.tsx \
   packages/domains/task/src/client/ComputerCard.test.tsx \
   packages/domains/projects/src/client/GeneralTab.test.tsx \
+  packages/domains/projects/src/client/ComputersTab.test.tsx \
+  packages/domains/projects/src/client/CreateProjectDialog.test.tsx \
   packages/shared/settings-core/src/server/service.test.ts \
   packages/shared/settings-core/src/server/scope.test.ts \
   packages/shared/settings-core/src/shared/registry.test.ts \
@@ -1784,6 +1796,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/trpc-server/src/subscription-security-context.test.ts \
   packages/shared/trpc-server/src/computer-refusal.test.ts \
   packages/shared/trpc-server/src/unknown-scope.test.ts \
+  packages/shared/trpc-server/src/api-version.test.ts \
+  packages/shared/trpc-server/src/client-api-gate.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

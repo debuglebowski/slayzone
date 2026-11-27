@@ -115,7 +115,14 @@ export {
   type ClientHost,
   type ClientHostShortcutBackend
 } from './client-host'
-export { hubAllows, hubPermitsTelemetry, hubSupportsToolPreviews } from './hubCapabilities'
+export {
+  hubAllows,
+  hubHasFeature,
+  hubPermitsTelemetry,
+  hubSupportsToolPreviews,
+  knownApiIncompatibility
+} from './hubCapabilities'
+export { incompatibilityMessage } from './hubCompatLink'
 export { useHubRegistryStore, seedHubRegistry } from './hubRegistryStore'
 export {
   useHubOwnershipStore,

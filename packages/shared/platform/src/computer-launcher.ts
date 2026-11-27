@@ -1,7 +1,11 @@
 /** Stable, dependency-free entrypoint pinned by computer service units. */
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { HOST_SUPERSEDED_EXIT_CODE, UNIX_SOCKET_PATH_MAX_BYTES } from './computer-endpoints'
+import {
+  ENDPOINT_IN_USE_LISTEN_ERRORS,
+  HOST_SUPERSEDED_EXIT_CODE,
+  UNIX_SOCKET_PATH_MAX_BYTES
+} from './computer-endpoints'
 export const COMPUTER_LAUNCHER = String.raw`#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path'), cp = require('node:child_process');
 const net = require('node:net'), os = require('node:os'), crypto = require('node:crypto');
@@ -22,6 +26,10 @@ const endpoints = endpointDir
 // Longest Unix socket path Node accepts (computer-endpoints.ts UNIX_SOCKET_PATH_MAX_BYTES):
 // a longer one fails listen/connect with a bare EINVAL, so it is refused by name first.
 const SOCKET_PATH_MAX = ${JSON.stringify(UNIX_SOCKET_PATH_MAX_BYTES)}[process.platform] || 104;
+// listen errors meaning the endpoint path is already held (computer-endpoints.ts
+// ENDPOINT_IN_USE_LISTEN_ERRORS): EADDRINUSE, or EEXIST when macOS sees another
+// launcher bind the same path at the same moment. Either way: probe, never bail.
+const IN_USE_LISTEN_ERRORS = ${JSON.stringify(ENDPOINT_IN_USE_LISTEN_ERRORS)};
 function socketPathError(p) {
   const bytes = Buffer.byteLength(p);
   return bytes <= SOCKET_PATH_MAX ? null : 'computer endpoint ' + p + ' is ' + bytes + ' bytes, over the ' + SOCKET_PATH_MAX + '-byte Unix socket path limit on ' + process.platform + '; point TMPDIR at a shorter directory';
@@ -82,40 +90,50 @@ function serveStatus(socket) {
   });
 }
 function bail(msg) { log(msg + '; stopping'); process.exit(1); }
+// Every bind of the launcher endpoint happens inside one short critical section (an
+// atomic mkdir of the guard). listen() on a Unix socket is bind() then listen(): in
+// between, the file exists but refuses connections, exactly like one whose launcher
+// died. With binds serialized, a refusing socket seen while holding the guard can only
+// be a dead launcher's, so replacing it is safe. (2026-11-27: under full CPU load a
+// launcher probed a winner preempted in that gap, "took over" its live endpoint, and
+// two launchers each ran a host.) Windows: named pipes are exclusive; no guard needed.
+// The guard keeps its old name so an older launcher.cjs still running excludes with it.
+const GUARD_STALE_MS = 10000;
 function acquire(then, attempt) {
   attempt = attempt || 0;
   if (attempt > 50) return bail('cannot take the launcher endpoint ' + endpoints.launcher);
   if (endpointDir) { const tooLong = socketPathError(endpoints.launcher) || socketPathError(endpoints.control); if (tooLong) return bail(tooLong); }
   try { prepareEndpointDir(); } catch (e) { return bail(e.message); }
   const retry = (ms) => setTimeout(() => acquire(then, attempt + 1), ms);
+  const guard = endpointDir ? endpoints.launcher + '.takeover' : null;
+  if (guard) {
+    try { fs.mkdirSync(guard, {mode: 0o700}); } catch (e) {
+      // ENOENT: a launcher exiting just removed the (empty) endpoint directory.
+      if (e.code === 'ENOENT') return retry(0);
+      if (e.code !== 'EEXIST') return bail('cannot take ' + guard + ': ' + e.message);
+      // Held for a bind (milliseconds). Waiting on it is not a failed attempt: it ends
+      // when the holder finishes, or GUARD_STALE_MS after a holder that died holding it.
+      try { if (Date.now() - fs.statSync(guard).mtimeMs > GUARD_STALE_MS) fs.rmdirSync(guard); } catch {}
+      return setTimeout(() => acquire(then, attempt), 25);
+    }
+  }
+  const unguard = () => { if (guard) try { fs.rmdirSync(guard); } catch {} };
+  const won = (server, how) => { unguard(); if (how) log(how); lock = server; then(); };
   const server = net.createServer(serveStatus);
   server.once('error', (err) => {
-    if (err.code !== 'EADDRINUSE') return bail('cannot bind ' + endpoints.launcher + ': ' + err.message);
+    if (!IN_USE_LISTEN_ERRORS.includes(err.code)) { unguard(); return bail('cannot bind ' + endpoints.launcher + ': ' + err.message); }
     probe((state, probeErr) => {
-      if (probeErr) return bail('cannot probe ' + endpoints.launcher + ': ' + (probeErr.code || probeErr.message));
-      if (state === 'live') { log('launcher already running for this root; superseded, stopping'); process.exit(0); }
-      if (state === 'absent' || !endpointDir) return retry(50);
-      // A socket file whose launcher died. Replace it only inside a short critical
-      // section (an atomic mkdir), probing again there: two launchers that both
-      // unlinked and bound would each hold a socket, and both would run.
-      const guard = endpoints.launcher + '.takeover';
-      try { fs.mkdirSync(guard, {mode: 0o700}); } catch (e) {
-        if (e.code !== 'EEXIST') return bail('cannot take over ' + endpoints.launcher + ': ' + e.message);
-        try { if (Date.now() - fs.statSync(guard).mtimeMs > 10000) fs.rmdirSync(guard); } catch {}
-        return retry(100);
-      }
-      const unguard = () => { try { fs.rmdirSync(guard); } catch {} };
-      probe((again, probeErr) => {
-        if (probeErr) { unguard(); return bail('cannot probe ' + endpoints.launcher + ': ' + (probeErr.code || probeErr.message)); }
-        if (again !== 'stale') { unguard(); return retry(0); }
-        try { fs.unlinkSync(endpoints.launcher); } catch {}
-        const taken = net.createServer(serveStatus);
-        taken.once('error', () => { unguard(); retry(0); });
-        taken.listen(endpoints.launcher, () => { unguard(); log('took over a launcher endpoint left by a dead launcher'); lock = taken; then(); });
-      });
+      if (probeErr) { unguard(); return bail('cannot probe ' + endpoints.launcher + ': ' + (probeErr.code || probeErr.message)); }
+      if (state === 'live') { unguard(); log('launcher already running for this root; superseded, stopping'); process.exit(0); }
+      if (state === 'absent' || !guard) { unguard(); return retry(50); }
+      // Stale: its launcher died (no live one binds without the guard this one holds).
+      try { fs.unlinkSync(endpoints.launcher); } catch {}
+      const taken = net.createServer(serveStatus);
+      taken.once('error', () => { unguard(); retry(0); });
+      taken.listen(endpoints.launcher, () => won(taken, 'took over a launcher endpoint left by a dead launcher'));
     });
   });
-  server.listen(endpoints.launcher, () => { lock = server; then(); });
+  server.listen(endpoints.launcher, () => won(server));
 }
 // Ends this launcher: frees its endpoint (and the directory, once empty), then exits.
 function release(code) {

@@ -479,9 +479,10 @@ async function run() {
         return result
       }
       let bootstrapGate: Promise<void> | undefined, onParked: (() => void) | undefined
-      // Holds a public control at its durable step. `parked` resolves once the relay
-      // waits here: its prepare ACK and initial lease renewal have both returned, so
-      // no control frame is in flight on the socket.
+      // Holds a public control at its durable step. `parked(call)` resolves once the
+      // relay waits here: its prepare ACK and initial lease renewal have both returned,
+      // so no control frame is in flight on the socket. It rejects with `call`'s own
+      // failure when the call ends without parking, instead of waiting forever.
       const holdBootstrap = () => {
         let release!: () => void
         bootstrapGate = new Promise<void>((r) => {
@@ -492,7 +493,13 @@ async function run() {
         })
         publicGates.push(release)
         return {
-          parked,
+          parked: (call: Promise<unknown>) =>
+            Promise.race([
+              parked,
+              call.then(() => {
+                throw new Error('held public control settled before parking')
+              })
+            ]),
           resume() {
             bootstrapGate = undefined
             release()
@@ -553,12 +560,13 @@ async function run() {
         principal: { userId: 'native-public', role: 'admin', scopes: ['full'] }
       })
       const opts = { tabId: 'tab', taskId: 't', mode, cwd: root }
+      // Prompts the provider really received (it records each one before answering).
+      const sentCount = () =>
+        existsSync(join(root, 'sent-a'))
+          ? readFileSync(join(root, 'sent-a'), 'utf8').split('sent').length - 1
+          : 0
       if (r1Case) {
         phase = 'r1-' + r1Case
-        const sentCount = () =>
-          existsSync(join(root, 'sent-a'))
-            ? readFileSync(join(root, 'sent-a'), 'utf8').split('sent').length - 1
-            : 0
         const n = sentCount()
         await caller.send({
           tabId: 'tab',
@@ -756,10 +764,15 @@ async function run() {
         return
       }
       // Real public submission and durable queue, before the writer's next FULL.
+      const publicSent = sentCount()
       await caller.send({
         tabId: 'tab',
         message: { id: 'public-user', content: [{ type: 'text', text: 'restore this prompt' }] }
       })
+      // The stop below must meet a live turn: it proves one provider ACK. Accepted is
+      // not delivered, and a prompt the provider has not received yet is popped with
+      // no interrupt at all (seen under load, codex-chat).
+      await until(() => sentCount() > publicSent)
       await caller.queue.push({
         tabId: 'tab',
         id: 'before-stop',
@@ -857,7 +870,7 @@ async function run() {
         cut = wires.length
       const replacing = caller.interrupt(opts)
       void replacing.catch(() => undefined)
-      await replacementHold.parked
+      await replacementHold.parked(replacing)
       assert(wires.slice(cut).some((w) => w.kind === 'ACK'))
       infos[0] = (await a.request(M.chatRequest, {
         kind: 'invoke',
@@ -877,10 +890,6 @@ async function run() {
       // The existing public interrupt, while a real provider burst shares its
       // stdout ACK pipe and the actual canonical FULL writer is blocked.
       phase = 'public-burst'
-      const sentCount = () =>
-        existsSync(join(root, 'sent-a'))
-          ? readFileSync(join(root, 'sent-a'), 'utf8').split('sent').length - 1
-          : 0
       const sentBefore = sentCount()
       await caller.send({
         tabId: 'tab',
@@ -962,7 +971,7 @@ async function run() {
       void reconnecting.catch(() => undefined)
       // Not merely ACKed: a renewal still on the old socket fails as a transport
       // close, before the token can reach the new connection this case proves.
-      await reconnectHold.parked
+      await reconnectHold.parked(reconnecting)
       assert(wires.slice(reconnectCut).some((w) => w.kind === 'ACK'))
       await a.dialer.stop()
       const ready = a.dialer.events.once('connected')
@@ -1042,7 +1051,7 @@ async function run() {
         deleteCut = wires.length
       const deleting = caller.interrupt(deleteOpts)
       void deleting.catch(() => undefined)
-      await deleteHold.parked
+      await deleteHold.parked(deleting)
       assert(wires.slice(deleteCut).some((w) => w.kind === 'ACK'))
       await a.request(M.chatRequest, { kind: 'conversation.delete', identity: deleted })
       await ownership.deleteConversation(deleted.id)
@@ -1052,22 +1061,37 @@ async function run() {
       assert.equal(readFileSync(join(root, 'ack-a'), 'utf8'), deletedAcks)
     }
     control('SELECT block_sync(1) n')
+    // Durable work close must drain. Hub A's writer also commits on its own (timeline
+    // checkpoints): when one of those holds the FULL fence first, this draft's
+    // admission waits behind it, close begins, and close refuses the draft as new
+    // work. Both outcomes are correct; any other draft failure is not.
+    let closingDraft: 'accepted' | 'refused-by-close' | undefined
     pending.push(
-      a.request(
-        M.chatRequest,
-        {
-          kind: 'invoke',
-          value: {
-            route: { id: 'c', epoch: 1 },
-            target: 'ops',
-            method: 'saveTabDraft',
-            operationId: 'closing-draft',
-            args: ['tab', { text: 'closing fence', attachments: [] }]
+      a
+        .request(
+          M.chatRequest,
+          {
+            kind: 'invoke',
+            value: {
+              route: { id: 'c', epoch: 1 },
+              target: 'ops',
+              method: 'saveTabDraft',
+              operationId: 'closing-draft',
+              args: ['tab', { text: 'closing fence', attachments: [] }]
+            }
+          },
+          true,
+          8000
+        )
+        .then(
+          () => {
+            closingDraft = 'accepted'
+          },
+          (error: unknown) => {
+            if (!/shutting down|path authority is unavailable/i.test(String(error))) throw error
+            closingDraft = 'refused-by-close'
           }
-        },
-        true,
-        8000
-      )
+        )
     )
     void pending.at(-1)!.catch(() => undefined)
     await until(() => !!control('SELECT sync_blocked() n'))
@@ -1095,6 +1119,7 @@ async function run() {
     await b.request(M.chatRequest, { ...controlRequest, spawnId: infos[1].spawnId })
     control('SELECT block_sync(0) n')
     await Promise.all(pending)
+    assert(closingDraft, 'the closing draft settled')
     assert.equal(control('SELECT sync_count() n') - startSyncs, 0)
     console.log(
       JSON.stringify({
@@ -1137,12 +1162,17 @@ async function run() {
         unrelatedHubWrite: true,
         closeStoppedBeforeNativeFence: true,
         closeAcknowledgementWaited: true,
+        closingDraft,
         provider: mode,
         losslessEvents: texts.length,
         heartbeats: blockedHeartbeats,
         controlMs
       })
     )
+  } catch (error) {
+    // Reported before cleanup: a cleanup that hangs must not hide the failure.
+    console.error(phase, error)
+    process.exitCode = 1
   } finally {
     for (const resume of publicGates) resume()
     control('SELECT block_sync(0) n')
@@ -1153,6 +1183,6 @@ async function run() {
   }
 }
 void run().catch((error) => {
-  console.error(phase, error)
+  console.error('cleanup', error)
   process.exitCode = 1
 })

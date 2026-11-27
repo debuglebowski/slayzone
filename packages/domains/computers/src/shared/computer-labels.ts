@@ -43,6 +43,45 @@ export function computerStatus(row: ComputerStatusRow): {
   return { label: `Offline · last seen ${new Date(row.lastSeenAt).toLocaleString()}`, tone: 'idle' }
 }
 
+/**
+ * A project's folder on one computer, in words (`project_placements.status`; null =
+ * no folder there). `forgotten` is a folder the user cleared that the computer has
+ * not been told about yet: for every client it is gone, so it reads as "Not set".
+ */
+export function placementStatus(
+  status: 'pending' | 'ready' | 'missing' | 'refused' | 'forgotten' | null
+): { label: string; tone: ComputerStatusTone; detail?: string } {
+  switch (status) {
+    case 'ready':
+      return { label: 'Ready', tone: 'ok' }
+    case 'pending':
+      return {
+        label: 'Waiting for computer',
+        tone: 'idle',
+        detail: 'Saved. The computer confirms the folder when it next connects.'
+      }
+    case 'missing':
+      return {
+        label: 'Folder not found',
+        tone: 'bad',
+        detail: 'The computer has no folder at this path. Pick another, or relocate.'
+      }
+    case 'refused':
+      return {
+        label: 'Not allowed',
+        tone: 'bad',
+        detail: "Outside this computer's allowed folders."
+      }
+    case 'forgotten':
+    case null:
+      return {
+        label: 'Not set',
+        tone: 'idle',
+        detail: "No folder here, so this project's agents cannot run on this computer."
+      }
+  }
+}
+
 /** Every phase a computer's auto-upgrade reports. The status schema is built from this. */
 export const COMPUTER_UPGRADE_PHASES = [
   'checking',

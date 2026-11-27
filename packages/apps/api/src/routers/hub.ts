@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { HUB_SWITCH_DEFAULTS } from '@slayzone/platform'
 import { SettingsService } from '@slayzone/settings-core/server'
 import { router, publicProcedure, openProcedure, getAuthGate } from '@slayzone/trpc-server'
+import { HUB_API_VERSION, HUB_FEATURES, MIN_CLIENT_API } from '@slayzone/trpc-server/api-version'
 import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
 import { hubUsersRouter } from './hub-users'
 import { hubErasureRouter } from '@slayzone/content-erasure/router'
@@ -51,6 +52,14 @@ export const hubRouter = router({
    * client sends them only to a hub that can: `compactBytes` = a `Uint8Array` in an
    * input may come as base64 (`bytes:base64`, `@slayzone/trpc-server/wire`). A hub
    * older than the field sends none, and the client keeps plain superjson for it.
+   * Superseded by `features` (kept while a client that reads only `wire` is in the
+   * support window, i.e. until `MIN_CLIENT_API` passes 1).
+   *
+   * `api` + `features` are the client ↔ hub API contract
+   * (`@slayzone/trpc-server/api-version`): `api.version` is this hub's API version,
+   * `api.minClient` the oldest client API it serves (older ones are refused with
+   * `CLIENT_TOO_OLD`); `features` the optional features a client checks before using.
+   * This procedure itself is the contract's anchor: never remove or retype a field.
    */
   describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
@@ -61,6 +70,8 @@ export const hubRouter = router({
       authRequired: deps?.getAuthRequired() ?? false,
       switches: deps?.getSwitches() ?? { ...HUB_SWITCH_DEFAULTS },
       scopes: getAuthGate() ? (ctx.principal?.scopes ?? null) : null,
+      api: { version: HUB_API_VERSION, minClient: MIN_CLIENT_API },
+      features: [...HUB_FEATURES],
       wire: {
         compactBytes: true as const,
         toolPreviews: true as const,

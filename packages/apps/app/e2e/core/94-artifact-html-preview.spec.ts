@@ -7,7 +7,7 @@ import {
   resetApp,
   TEST_PROJECT_PATH
 } from '../fixtures/electron'
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
 const artifactsPanel = (page: Page) => page.locator('[data-panel-id="artifacts"]:visible')
 const sidebar = (page: Page) => artifactsPanel(page).locator('[data-testid="artifacts-sidebar"]')
@@ -51,6 +51,40 @@ async function waitForPreviewLoaded(page: Page) {
       { timeout: 8_000 }
     )
     .toBe('complete')
+}
+
+/** A screen that shows the last `<slay-artifact-controls>` action, with a top and a bottom dock. */
+const CONTROLS_HTML = `<!DOCTYPE html><html><head></head><body>
+      <div id="state">idle</div>
+      <main><slay-artifact-controls position="top">
+        <button data-action="set" data-value="from-top">Top</button>
+      </slay-artifact-controls></main>
+      <slay-artifact-controls>
+        <label>Qty <input id="qty" type="range" name="qty" min="1" max="9" value="3"></label>
+      </slay-artifact-controls>
+      <script>
+        addEventListener('slay:action', (e) => {
+          document.getElementById('state').textContent = e.detail.action + ':' + e.detail.value;
+        });
+      </script>
+    </body></html>`
+
+/**
+ * Wait until a top/bottom dock is exactly as tall as its controls. Also the point
+ * to click from: until then the dock is still being resized to the size it
+ * reported, and a click sent in that window can land outside the frame.
+ */
+async function dockFitsControls(dock: Locator) {
+  await expect
+    .poll(async () => {
+      const content = await dock
+        .contentFrame()
+        .locator('body')
+        .evaluate((b) => Math.ceil(b.getBoundingClientRect().height))
+      const height = await dock.evaluate((f) => f.getBoundingClientRect().height)
+      return content > 0 && Math.abs(height - content) < 1
+    })
+    .toBe(true)
 }
 
 async function openArtifactsPanel(page: Page) {
@@ -186,6 +220,94 @@ test.describe('HTML artifact preview executes scripts', () => {
     await waitForPreviewLoaded(mainWindow)
     const frame = previewFrame(mainWindow)
     await expect(frame.locator('#ok')).toHaveText('yes', { timeout: 5_000 })
+  })
+
+  test('<slay-artifact-controls> docks drive the screen, which hides them', async ({
+    mainWindow
+  }) => {
+    const html = CONTROLS_HTML
+
+    const s = seed(mainWindow)
+    await s.createArtifact({ taskId, title: 'controls-test.html', content: html })
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'controls-test.html').click()
+    await waitForPreviewLoaded(mainWindow)
+    const screen = previewFrame(mainWindow)
+    await expect(screen.locator('#state')).toHaveText('idle')
+    await expect(screen.locator('slay-artifact-controls').first()).toBeHidden()
+
+    const panel = artifactsPanel(mainWindow)
+    const topDock = panel.locator('iframe[title="Artifact controls — top"]')
+    const bottomDock = panel.locator('iframe[title="Artifact controls — bottom"]')
+    await expect(topDock).toBeVisible()
+    await expect(bottomDock).toBeVisible()
+    const top = topDock.contentFrame()
+    // A dock shows only its own controls, not the screen.
+    await expect(top.locator('#state')).toBeHidden()
+    await expect(top.locator('#qty')).toBeHidden()
+    // …and is exactly as tall as they are.
+    await dockFitsControls(topDock)
+
+    await top.locator('button').click()
+    await expect(screen.locator('#state')).toHaveText('set:from-top')
+    await bottomDock.contentFrame().locator('#qty').fill('7')
+    await expect(screen.locator('#state')).toHaveText('qty:7')
+  })
+
+  test('docks drive every device screen at once, through the device guests', async ({
+    electronApp,
+    mainWindow
+  }) => {
+    const s = seed(mainWindow)
+    const artifact = await s.createArtifact({
+      taskId,
+      title: 'controls-devices.html',
+      content: CONTROLS_HTML
+    })
+    if (!artifact) throw new Error('seed returned no artifact controls-devices.html')
+    // Both screens of the Duo: two Chromium device guests (<webview>), not iframes.
+    await mainWindow.evaluate((id) => {
+      localStorage.setItem(
+        'slayzone:artifact-device-preview:' + id,
+        JSON.stringify({
+          kind: 'preset',
+          deviceId: 'iphone-duo',
+          screen: 0,
+          rotated: false,
+          showBoth: true
+        })
+      )
+      window.dispatchEvent(new Event('slayzone:artifact-device-preview-change'))
+    }, artifact.id)
+    await s.refreshData()
+
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'controls-devices.html').click()
+    const panel = artifactsPanel(mainWindow)
+    await expect(panel.locator('webview[aria-label^="HTML device preview"]')).toHaveCount(2)
+    const screens = () =>
+      electronApp.evaluate(async ({ webContents }) =>
+        Promise.all(
+          webContents
+            .getAllWebContents()
+            .filter(
+              (w) => w.getType() === 'webview' && w.getURL().includes('slayzone-preview=screen')
+            )
+            .map((w) =>
+              w.executeJavaScript(
+                `[document.getElementById('state')?.textContent, getComputedStyle(document.querySelector('slay-artifact-controls')).display].join(' ')`
+              )
+            )
+        )
+      )
+    await expect.poll(screens, { timeout: 10_000 }).toEqual(['idle none', 'idle none'])
+
+    const topDock = panel.locator('iframe[title="Artifact controls — top"]')
+    await dockFitsControls(topDock)
+    await topDock.contentFrame().locator('button').click()
+    await expect.poll(screens).toEqual(['set:from-top none', 'set:from-top none'])
   })
 
   test('storage survives reopening and is private to each sandboxed artifact', async ({

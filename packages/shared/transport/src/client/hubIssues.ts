@@ -1,7 +1,16 @@
 import { useSyncExternalStore } from 'react'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
+import {
+  apiIncompatibility,
+  type ApiIncompatibility,
+  HUB_API_VERSION,
+  hubApiInfoOf,
+  MIN_HUB_API
+} from '@slayzone/trpc-server/api-version'
 import type { ConnectionStateSource } from './connectDeadlineLink'
 import { useFederationOrNull, type ResolvedHub } from './FederationProvider'
+import { rememberDescribe } from './hubCapabilities'
+import { incompatibilityMessage } from './hubCompatLink'
 
 /**
  * What is wrong with a hub connection, for the app-wide banner (one per hub):
@@ -13,6 +22,10 @@ import { useFederationOrNull, type ResolvedHub } from './FederationProvider'
  *   made). Every call there is refused while the socket itself looks healthy.
  * - `error`: the socket is open but the hub cannot answer `hub.describe`, the one
  *   call every hub serves to anyone — something is wrong beyond sign-in.
+ * - `incompatible`: the hub answered, but it and this app cannot work together
+ *   (`@slayzone/trpc-server/api-version`): `side: 'hub'` = the hub is older than this
+ *   app needs (update the hub), `'app'` = the hub no longer serves this app (update
+ *   SlayZone). `hubCompatLink` keeps every other call away from it meanwhile.
  *
  * The answer comes from the socket's own state and the hub's own `hub.describe`,
  * asked again each time the socket opens: the hub resolves a socket's account once,
@@ -23,6 +36,13 @@ export type HubIssue =
   | { kind: 'unreachable'; since: number; detail: string }
   | { kind: 'signin'; since: number; detail: string }
   | { kind: 'error'; since: number; detail: string }
+  | {
+      kind: 'incompatible'
+      since: number
+      detail: string
+      side: ApiIncompatibility['side']
+      release: string | null
+    }
 
 /** How long a socket must keep failing before its hub reads unreachable in the banner:
  *  longer than a reconnect blip or the local hub's boot. */
@@ -42,6 +62,35 @@ export function isSignedOutDescribe(answer: unknown): boolean {
   return d.authRequired === true && 'scopes' in d && d.scopes === null
 }
 
+/** What a `hub.describe` answer on an open socket says about the connection. */
+function healthFromDescribe(answer: unknown): HubHealth {
+  const info = hubApiInfoOf(answer)
+  // Checked first: a hub that cannot work with this app makes sign-in moot.
+  const incompatible = apiIncompatibility(info, {
+    clientApi: HUB_API_VERSION,
+    minHubApi: MIN_HUB_API
+  })
+  if (incompatible)
+    return {
+      kind: 'incompatible',
+      since: Date.now(),
+      detail: incompatibilityMessage(incompatible),
+      side: incompatible.side,
+      release: info.release
+    }
+  if (isSignedOutDescribe(answer))
+    return {
+      kind: 'signin',
+      since: Date.now(),
+      detail: 'The hub requires sign-in and holds none for this app.'
+    }
+  return {
+    kind: 'ok',
+    authRequired: (answer as { authRequired?: unknown } | null)?.authRequired === true,
+    release: info.release
+  }
+}
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -51,7 +100,14 @@ function messageOf(err: unknown): string {
  * `hub.describe` on an open socket (`authRequired`: the hub requires login, so `ok`
  * means it holds this app's sign-in). Null = not known yet (no socket open so far).
  */
-export type HubHealth = { kind: 'ok'; authRequired: boolean } | HubIssue
+export type HubHealth =
+  | {
+      kind: 'ok'
+      authRequired: boolean
+      /** The hub's release (`0.43.0`); null for one too old to say. */
+      release: string | null
+    }
+  | HubIssue
 
 export interface WatchHubHealthOptions {
   source: ConnectionStateSource
@@ -65,9 +121,10 @@ function sameHealth(a: HubHealth | null, b: HubHealth | null): boolean {
   if (!a || !b) return a === b
   if (a.kind === 'ok' || b.kind === 'ok')
     return (
-      a.kind === b.kind &&
-      (a as { authRequired: boolean }).authRequired ===
-        (b as { authRequired: boolean }).authRequired
+      a.kind === 'ok' &&
+      b.kind === 'ok' &&
+      a.authRequired === b.authRequired &&
+      a.release === b.release
     )
   return a.kind === b.kind && a.detail === b.detail
 }
@@ -115,18 +172,7 @@ export function watchHubHealth(opts: WatchHubHealthOptions): () => void {
       opts.describe().then(
         (answer) => {
           if (asked !== generation) return
-          report(
-            isSignedOutDescribe(answer)
-              ? {
-                  kind: 'signin',
-                  since: Date.now(),
-                  detail: 'The hub requires sign-in and holds none for this app.'
-                }
-              : {
-                  kind: 'ok',
-                  authRequired: (answer as { authRequired?: unknown } | null)?.authRequired === true
-                }
-          )
+          report(healthFromDescribe(answer))
         },
         (err: unknown) => {
           if (asked !== generation) return
@@ -218,7 +264,13 @@ function healthFeedOf(ws: ResolvedHub['ws']): HealthFeed {
       if (!stop) {
         stop = watchHubHealth({
           source: ws.wsClient.connectionState,
-          describe: () => client.hub.describe.query(),
+          // Every fresh answer also becomes the one the capability checks and the
+          // compat link read: a hub upgraded behind this socket is seen at its reopen.
+          describe: () =>
+            client.hub.describe.query().then((answer) => {
+              rememberDescribe(ws.client, answer)
+              return answer
+            }),
           onHealth: (health) => {
             value = health
             for (const listener of listeners) listener()

@@ -48,6 +48,7 @@ export function HubOverview({
           </span>
         )}
       </SummaryRow>
+      <UsersRow onOpen={() => openTab('users')} />
       <SummaryRow label="Projects" onOpen={openProjects} testId="hub-overview-projects">
         {projectCount != null && `${projectCount} ${projectCount === 1 ? 'project' : 'projects'}`}
       </SummaryRow>
@@ -69,6 +70,25 @@ export function HubOverview({
       </SummaryRow>
       {isDefault && <LastBackupRow onOpen={() => openTab('backups')} />}
     </div>
+  )
+}
+
+/** Admins only (anyone else has no account list to summarize, and no Users actions). */
+function UsersRow({ onOpen }: { onOpen: () => void }) {
+  const trpc = useTRPC()
+  const access = useQuery(trpc.hub.users.access.queryOptions())
+  const canManage = access.data?.canManage === true
+  const users = useQuery(trpc.hub.users.list.queryOptions(undefined, { enabled: canManage }))
+  if (!canManage) return null
+  const people = (users.data ?? []).filter((u) => !u.breakGlass)
+  const disabled = people.filter((u) => u.disabledAt !== null).length
+  return (
+    <SummaryRow label="Users" onOpen={onOpen} testId="hub-overview-users">
+      {users.data &&
+        `${people.length} ${people.length === 1 ? 'account' : 'accounts'}${
+          disabled ? ` · ${disabled} disabled` : ''
+        }`}
+    </SummaryRow>
   )
 }
 

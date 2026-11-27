@@ -122,6 +122,15 @@ test('createProject open/close', () => {
   expect(store.getState().createProjectOpen, 'closed').toBeFalsy()
 })
 
+test('createProject on a chosen hub; the next plain open is back on the default hub', () => {
+  store.getState().openCreateProject('hub-2')
+  expect(store.getState().createProjectHubId).toBe('hub-2')
+  store.getState().closeCreateProject()
+  expect(store.getState().createProjectHubId).toBeNull()
+  store.getState().openCreateProject()
+  expect(store.getState().createProjectHubId).toBeNull()
+})
+
 test('completeTaskDialog open/close', () => {
   store.getState().openCompleteTaskDialog()
   expect(store.getState().completeTaskDialogOpen, 'open').toBeTruthy()

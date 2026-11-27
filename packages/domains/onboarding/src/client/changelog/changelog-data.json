@@ -1,5 +1,62 @@
 [
   {
+    "version": "0.44.0",
+    "date": "2026-11-27",
+    "tagline": "Prototypes come alive",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Interactive HTML prototypes",
+        "description": "HTML artifacts can define their own controls with <slay-artifact-controls>, docked on any side of the preview, and their buttons reach the page as events."
+      },
+      {
+        "category": "feature",
+        "title": "Richer device previews",
+        "description": "Compare foldable screens side by side, and zoom the display inside a device so the page reflows like browser zoom. Preview settings are saved per artifact."
+      },
+      {
+        "category": "feature",
+        "title": "Pinnable artifact actions",
+        "description": "Pin the artifact actions you use most to the toolbar, and see upload and preview progress at a glance."
+      },
+      {
+        "category": "improvement",
+        "title": "Send while files attach",
+        "description": "Pressing send while a file is still uploading now waits and sends once every file is in, and you can cancel the wait."
+      },
+      {
+        "category": "improvement",
+        "title": "Simpler settings",
+        "description": "Settings has a tidier sidebar, and hub and computer pages stay hidden while your local hub is the only one."
+      },
+      {
+        "category": "fix",
+        "title": "Background service stays connected",
+        "description": "Heavy chat streaming no longer drops terminals and agents offline, and starting the app and the CLI at the same time no longer starts two background services that crash each other."
+      },
+      {
+        "category": "fix",
+        "title": "Chats reopen after sleep",
+        "description": "A chat that was opening during sleep or a dropped connection now shows \"Reconnecting…\" and reopens by itself, instead of getting stuck on \"Couldn't open\"."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal history saved on stop",
+        "description": "A task's last terminal output is now saved before the task stops, so restoring a trashed task brings it back."
+      },
+      {
+        "category": "fix",
+        "title": "Correct characters in HTML previews",
+        "description": "HTML artifacts that don't declare an encoding now show accents and symbols correctly instead of garbled text."
+      },
+      {
+        "category": "fix",
+        "title": "Chat editor polish",
+        "description": "In the message box, Cmd+↑/↓ moves the cursor to the start or end before jumping through the chat, and narrow chat panes waste less space at the sides."
+      }
+    ]
+  },
+  {
     "version": "0.43.0",
     "date": "2026-11-23",
     "tagline": "Snappier chats",
