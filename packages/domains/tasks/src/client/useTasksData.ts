@@ -307,13 +307,14 @@ export function useTasksData(): UseTasksDataReturn {
   // hub; the useState mirrors below stay so the many optimistic mutation
   // handlers keep working unchanged and consumers keep reading synchronous arrays.
   //
-  // No refetch on window focus: every write pushes a `tasks-changed` that patches the
-  // rows (or lists) it names, and a socket that dropped reloads the board when it
-  // reopens (below). Refetching the whole board (MBs) on each focus was most of the
-  // traffic to the hub.
+  // Never stale, never refetched on focus or on a reader's mount: every write pushes
+  // a `tasks-changed` that patches the rows (or lists) it names, one of unknown scope
+  // invalidates the board, and a socket that dropped reloads it when it reopens
+  // (below). Refetching the whole board (MBs) on focus and on each task page's mount
+  // was most of the traffic to the hub.
   const boardQ = useQuery(
     trpc.task.loadBoardData.queryOptions(undefined, {
-      staleTime: 30_000,
+      staleTime: Infinity,
       refetchOnWindowFocus: false
     })
   )

@@ -76,3 +76,23 @@ it('a disabled reader that becomes enabled reads the current board', async () =>
   rerender({ enabled: true })
   await waitFor(() => expect(result.current?.map((t) => t.id)).toEqual(['t1', 't2', 't3']))
 })
+
+it("a reader mounting later never refetches the default hub's board (pushes keep it fresh)", async () => {
+  let loads = 0
+  const t = createTrpcTest({
+    procedures: {
+      'task.loadBoardData': () => {
+        loads++
+        return board([row(1)])
+      }
+    }
+  })
+  const first = renderHook(() => useBoardTasks({ enabled: true }), { wrapper: t.wrapper })
+  await waitFor(() => expect(first.result.current).toHaveLength(1))
+  // Long past any staleTime: a stale query would refetch for the next observer.
+  boardQuery(t.queryClient).setState({ dataUpdatedAt: Date.now() - 10 * 60_000 })
+  const later = renderHook(() => useBoardTasks({ enabled: true }), { wrapper: t.wrapper })
+  await waitFor(() => expect(later.result.current).toHaveLength(1))
+  await new Promise((r) => setTimeout(r, 50))
+  expect(loads).toBe(1)
+})

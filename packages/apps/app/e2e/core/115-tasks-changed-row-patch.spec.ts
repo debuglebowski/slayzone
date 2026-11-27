@@ -195,4 +195,21 @@ test.describe('tasks-changed: row patches + hidden-tab deferral', () => {
     expect(paths.length).toBeGreaterThan(0)
     expect(paths).not.toContain('task.loadBoardData')
   })
+
+  test('opening a task page never reloads the board, even once it is stale', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(60_000) // waits out the board's former 30s staleTime
+    await resetApp(mainWindow)
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Open', color: '#eab308', path: TEST_PROJECT_PATH })
+    const a = await s.createTask({ projectId: p.id, title: 'Open me', status: 'todo' })
+    await s.refreshData()
+    await mainWindow.waitForTimeout(31_000)
+    await recordSends(mainWindow)
+    // Its page reads every task (blockers picker, palette): from the board it holds.
+    await openTaskById(mainWindow, a.id)
+    await mainWindow.waitForTimeout(1_500)
+    expect((await sent(mainWindow)).map((m) => m.path)).not.toContain('task.loadBoardData')
+  })
 })

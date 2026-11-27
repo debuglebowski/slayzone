@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useFederationOrNull, useHubId } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task-contracts'
 import { useTRPC } from './trpc'
 
@@ -20,13 +21,19 @@ import { useTRPC } from './trpc'
  */
 export function useBoardTasks({ enabled }: { enabled: boolean }): Task[] | undefined {
   const trpc = useTRPC()
+  // The default hub's board is kept fresh by `tasks-changed` patches (`useTasksData`):
+  // never stale, so a reader mounting (each task page, the active tab's palette) does
+  // not reload every task. A remote hub's scope holds its own unpatched copy, which
+  // refreshes as before.
+  const hubId = useHubId()
+  const defaultHubId = useFederationOrNull()?.defaultHubId
+  const patched = hubId === null || hubId === defaultHubId
   const { data } = useQuery(
     trpc.task.loadBoardData.queryOptions(undefined, {
       enabled,
       subscribed: enabled,
-      staleTime: 30_000,
-      // Kept fresh by `tasks-changed` patches (`useTasksData`), never by focus.
-      refetchOnWindowFocus: false
+      staleTime: patched ? Infinity : 30_000,
+      refetchOnWindowFocus: !patched
     })
   )
   return data?.tasks
