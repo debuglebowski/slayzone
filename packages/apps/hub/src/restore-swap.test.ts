@@ -5,7 +5,16 @@
  * with nothing changed, so a restore can never leave a hub unable to boot (R1, R2, R8).
  */
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -124,6 +133,7 @@ describe('validateRestoreSource', () => {
 })
 
 const B = 'slayzone.data.2026-01-02T03-04-05-006Z.manual.sqlite'
+const PRE = 'slayzone.data.2026-01-02T03-04-04-000Z.restore.sqlite'
 const exists = (p: string) => existsSync(p)
 const pre = () => `${dbPath}.pre-restore`
 
@@ -148,11 +158,14 @@ describe('stage + apply + confirm / roll back', () => {
     expect(exists(join(backups(), B)), 'the backup itself is kept').toBe(true)
   })
 
-  test('confirm (the restored file opened and migrated): old copy and marker go, new generation', () => {
+  test('confirm (the restored file opened and migrated): old copy and marker go, new generation', async () => {
     makeBackup(B, { marker: 'restored' })
     stageRestore({ dataRoot: root, backupFilename: B })
     apply()
-    expect(confirmRestore({ dataRoot: root, dbPath })).toEqual({ status: 'applied', backup: B })
+    expect(await confirmRestore({ dataRoot: root, dbPath })).toEqual({
+      status: 'applied',
+      backup: B
+    })
     expect(exists(pre())).toBe(false)
     expect(exists(`${pre()}-wal`)).toBe(false)
     expect(exists(join(root, RESTORE_MARKER_FILE))).toBe(false)
@@ -160,7 +173,7 @@ describe('stage + apply + confirm / roll back', () => {
     expect(liveMarker()).toBe('restored')
   })
 
-  test('roll back (the restored file failed to open): the old data is put back, as it was', () => {
+  test('roll back (the restored file failed to open): the old data is put back, as it was', async () => {
     makeBackup(B, { marker: 'restored' })
     stageRestore({ dataRoot: root, backupFilename: B })
     apply()
@@ -186,11 +199,11 @@ describe('stage + apply + confirm / roll back', () => {
     expect(exists(pre())).toBe(false)
   })
 
-  test('an applied restore starts a new data generation; a refused one does not', () => {
+  test('an applied restore starts a new data generation; a refused one does not', async () => {
     makeBackup(B, { marker: 'restored' })
     stageRestore({ dataRoot: root, backupFilename: B })
     apply()
-    confirmRestore({ dataRoot: root, dbPath })
+    await confirmRestore({ dataRoot: root, dbPath })
     const first = readDataGeneration(root)
     expect(first).not.toBe('initial')
     writeFileSync(join(backups(), B), 'broken')
@@ -201,14 +214,14 @@ describe('stage + apply + confirm / roll back', () => {
 
   test.each(['copied', 'staged-recorded', 'sidecars-removed', 'renamed'])(
     'a crash after %s: the next boot finishes the swap',
-    (step) => {
+    async (step) => {
       makeBackup(B, { marker: 'restored' })
       stageRestore({ dataRoot: root, backupFilename: B })
       expect(() => apply(step)).toThrow(/simulated crash/)
       expect(apply()).toEqual({ status: 'applied-unverified', backup: B })
       expect(exists(`${dbPath}-wal`)).toBe(false)
       expect(readFileSync(`${pre()}-wal`, 'utf8')).toBe('stale wal')
-      expect(confirmRestore({ dataRoot: root, dbPath }).status).toBe('applied')
+      expect((await confirmRestore({ dataRoot: root, dbPath })).status).toBe('applied')
       expect(exists(join(root, RESTORE_MARKER_FILE))).toBe(false)
       expect(liveMarker()).toBe('restored')
     }
@@ -278,5 +291,122 @@ describe('stage + apply + confirm / roll back', () => {
     )
     expect(apply().status).toBe('refused')
     expect(liveMarker()).toBe('live')
+  })
+})
+
+/**
+ * The live database with `n` committed rows that exist ONLY in its WAL — what a hub
+ * leaves after an unclean stop (the exit-75 deadline, a SIGKILL). Losing that WAL
+ * loses those rows.
+ */
+function liveWithWalRows(n: number): void {
+  for (const sfx of ['', '-wal', '-shm']) rmSync(`${dbPath}${sfx}`, { force: true })
+  const src = join(root, 'src-live.sqlite')
+  const db = new Database(src)
+  db.pragma('journal_mode = WAL')
+  db.pragma('wal_autocheckpoint = 0')
+  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+  db.prepare('INSERT INTO settings VALUES (?, ?)').run('marker', 'live')
+  db.pragma('wal_checkpoint(TRUNCATE)')
+  db.exec('CREATE TABLE rows (n INTEGER)')
+  const insert = db.prepare('INSERT INTO rows VALUES (?)')
+  for (let i = 0; i < n; i++) insert.run(i)
+  copyFileSync(src, dbPath)
+  copyFileSync(`${src}-wal`, `${dbPath}-wal`)
+  db.close()
+  rmSync(src, { force: true })
+}
+
+function rowsIn(path: string): number {
+  const db = new Database(path)
+  try {
+    return (db.prepare('SELECT COUNT(*) AS n FROM rows').get() as { n: number }).n
+  } finally {
+    db.close()
+  }
+}
+
+describe('M1: a rollback interrupted at ANY step loses nothing', () => {
+  test.each([
+    'rb-recorded',
+    'rb-restored-sidecars-off',
+    'rb-restored-off',
+    'rb-old-sidecars-back',
+    'rb-old-back'
+  ])('crash after %s, then the next boot: every old row is back', (step) => {
+    liveWithWalRows(100)
+    makeBackup(B, { marker: 'restored' })
+    stageRestore({ dataRoot: root, backupFilename: B })
+    expect(apply().status).toBe('applied-unverified')
+    expect(() =>
+      rollbackRestore({ dataRoot: root, dbPath, error: 'migration failed', crashAt: step as never })
+    ).toThrow(/simulated crash/)
+    const resumed = apply()
+    expect(resumed).toMatchObject({ status: 'refused', backup: B })
+    expect(rowsIn(dbPath)).toBe(100)
+    expect(liveMarker()).toBe('live')
+    expect(existsSync(join(root, RESTORE_MARKER_FILE))).toBe(false)
+    expect(
+      readdirSync(root).filter((f) => f.includes('.pre-restore') || f.includes('.restore-failed'))
+    ).toEqual([])
+  })
+})
+
+describe('L1 + L2: confirm is resumable, and the replaced file is the undo point', () => {
+  test.each(['cf-recorded', 'cf-generation', 'cf-kept'])(
+    'crash after %s: the next boot finishes the confirm — applied, never "refused"',
+    async (step) => {
+      liveWithWalRows(10)
+      makeBackup(B, { marker: 'restored' })
+      stageRestore({ dataRoot: root, backupFilename: B, preRestoreBackup: PRE })
+      apply()
+      await expect(
+        confirmRestore({ dataRoot: root, dbPath, crashAt: step as never })
+      ).rejects.toThrow(/simulated crash/)
+      expect(apply()).toEqual({ status: 'applied', backup: B })
+      expect(liveMarker()).toBe('restored')
+      expect(readDataGeneration(root)).not.toBe('initial')
+      expect(existsSync(join(root, RESTORE_MARKER_FILE))).toBe(false)
+    }
+  )
+
+  test('the file that was replaced — with rows written after the stage-time snapshot — is kept as the restore backup', async () => {
+    mkdirSync(backups(), { recursive: true })
+    // The stage-time snapshot (older): no rows yet.
+    makeBackup(PRE, { marker: 'snapshot' })
+    liveWithWalRows(25)
+    makeBackup(B, { marker: 'restored' })
+    stageRestore({ dataRoot: root, backupFilename: B, preRestoreBackup: PRE })
+    apply()
+    expect(await confirmRestore({ dataRoot: root, dbPath })).toEqual({
+      status: 'applied',
+      backup: B
+    })
+    const kept = join(backups(), PRE)
+    expect(rowsIn(kept), 'every row of the replaced file, WAL included').toBe(25)
+    expect(existsSync(`${kept}-wal`), 'checkpointed: self-contained').toBe(false)
+    expect(existsSync(`${dbPath}.pre-restore`)).toBe(false)
+  })
+})
+
+describe('L6: no space left to record the copy → refused once, no loop', () => {
+  test('the copied-marker write fails: tmp removed, live kept, next boot does nothing', () => {
+    makeBackup(B, { marker: 'restored' })
+    stageRestore({ dataRoot: root, backupFilename: B })
+    const r = applyPendingRestore({
+      dataRoot: root,
+      dbPath,
+      latestVersion: LATEST,
+      writeMarkerFile: (_root, marker) => {
+        if (marker.phase === 'copied')
+          throw Object.assign(new Error('ENOSPC: no space left on device, write'), {
+            code: 'ENOSPC'
+          })
+      }
+    })
+    expect(r).toMatchObject({ status: 'refused', backup: B })
+    expect(existsSync(`${dbPath}.restore-tmp`)).toBe(false)
+    expect(liveMarker()).toBe('live')
+    expect(apply()).toEqual({ status: 'none' })
   })
 })

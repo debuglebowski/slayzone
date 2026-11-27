@@ -11,7 +11,7 @@ import {
   rmSync,
   writeSync
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { containedPath } from '@slayzone/platform/safe-path'
 import { startNewDataGeneration } from '@slayzone/platform/hub-data-generation'
@@ -66,8 +66,19 @@ function preRestorePath(dbPath: string): string {
 }
 const SIDECARS = ['-wal', '-shm'] as const
 
-type Phase = 'staged' | 'copied' | 'swapped'
-type Marker = { v: 1; backup: string; phase: Phase; stagedAt?: number }
+type Phase = 'staged' | 'copied' | 'swapped' | 'rolling-back' | 'confirmed'
+type Marker = {
+  v: 1
+  backup: string
+  phase: Phase
+  stagedAt?: number
+  /** The stage-time `restore` backup: replaced at confirm by the file actually replaced. */
+  preRestoreBackup?: string
+  /** Rolling back: whether there was a live file to put back (else none existed). */
+  hadPrevious?: boolean
+  /** Confirming: the new data generation was written. */
+  generationStarted?: boolean
+}
 
 export type RestoreRefusalCode = 'missing' | 'corrupt' | 'too-new' | 'move-in-progress'
 
@@ -82,7 +93,23 @@ export class RestoreRefusedError extends Error {
 }
 
 /** Test seam: throw after a step to prove the next boot finishes the swap. */
-type CrashPoint = 'copied' | 'staged-recorded' | 'sidecars-removed' | 'renamed'
+type CrashPoint =
+  | 'copied'
+  | 'staged-recorded'
+  | 'sidecars-removed'
+  | 'renamed'
+  | 'rb-recorded'
+  | 'rb-restored-sidecars-off'
+  | 'rb-restored-off'
+  | 'rb-old-sidecars-back'
+  | 'rb-old-back'
+  | 'cf-recorded'
+  | 'cf-generation'
+  | 'cf-kept'
+
+function crashAfter(at: CrashPoint | undefined, step: CrashPoint): void {
+  if (at === step) throw new Error(`simulated crash after ${step}`)
+}
 
 function backupsDir(dataRoot: string): string {
   return join(dataRoot, 'backups')
@@ -208,15 +235,22 @@ function checkDatabase(path: string, latestVersion: number): void {
 }
 
 /** Stage a restore of `<dataRoot>/backups/<backupFilename>` for the next boot. */
-export function stageRestore(input: { dataRoot: string; backupFilename: string }): void {
+export function stageRestore(input: {
+  dataRoot: string
+  backupFilename: string
+  /** The `restore` backup taken just before (backup.ts); the confirm replaces it. */
+  preRestoreBackup?: string
+}): void {
   containedPath(backupsDir(input.dataRoot), input.backupFilename)
   assertDataBackupName(input.backupFilename)
+  if (input.preRestoreBackup !== undefined) assertDataBackupName(input.preRestoreBackup)
   mkdirSync(input.dataRoot, { recursive: true })
   writeMarker(input.dataRoot, {
     v: 1,
     backup: input.backupFilename,
     phase: 'staged',
-    stagedAt: Date.now()
+    stagedAt: Date.now(),
+    ...(input.preRestoreBackup ? { preRestoreBackup: input.preRestoreBackup } : {})
   })
 }
 
@@ -256,6 +290,8 @@ export function applyPendingRestore(input: {
   crashAt?: CrashPoint
   /** Test seam (a full disk); default `copyFileSync`. */
   copyFile?: CopyFile
+  /** Test seam (a full disk while recording a phase); default the durable write. */
+  writeMarkerFile?: (dataRoot: string, marker: Marker) => void
 }): ApplyRestoreResult {
   const { dataRoot, dbPath } = input
   const marker = readMarker(dataRoot)
@@ -271,14 +307,19 @@ export function applyPendingRestore(input: {
     return { status: 'refused', backup: marker.backup, error }
   }
 
-  if (marker.phase === 'swapped') {
-    // The boot that swapped it in never confirmed it: that start died on the restored
-    // file. Put the old data back rather than fail every start from here on.
+  if (marker.phase === 'swapped' || marker.phase === 'rolling-back') {
+    // Swapped but never confirmed: the start before died on the restored file. Put
+    // the old data back rather than fail every start from here on. A rollback that was
+    // itself interrupted resumes where it stopped.
     return rollbackRestore({
       dataRoot,
       dbPath,
       error: 'The restored backup did not start (the previous start with it did not finish)'
     })
+  }
+  if (marker.phase === 'confirmed') {
+    // Confirmed — the restored file did start — but the confirm was interrupted.
+    return finishConfirm(dataRoot, dbPath, marker)
   }
 
   if (marker.phase !== 'copied') {
@@ -304,7 +345,18 @@ export function applyPendingRestore(input: {
       return refuse(`copy failed its check: ${(err as Error).message}`)
     }
     crash('copied')
-    writeMarker(dataRoot, { ...marker, phase: 'copied' })
+    try {
+      // Until this is durable the next start would copy again: a failure here (no
+      // space left after a full-size copy, L6) refuses like a failed copy, no loop.
+      ;(input.writeMarkerFile ?? writeMarker)(dataRoot, { ...marker, phase: 'copied' })
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException
+      return refuse(
+        e?.code === 'ENOSPC'
+          ? `Not enough disk space to restore it (${e.message})`
+          : (e?.message ?? String(err))
+      )
+    }
     crash('staged-recorded')
   }
 
@@ -326,43 +378,140 @@ export function applyPendingRestore(input: {
 }
 
 /**
- * The restored file opened and migrated: the swap is final. The old file goes, a new
- * data generation starts (every client reloads), the marker is cleared.
+ * The restored file opened and migrated: the swap is final. Journaled — `confirmed`
+ * is durable before anything is removed, so an interrupted confirm is finished by the
+ * next start ({@link applyPendingRestore}), never mistaken for a failed restore (L1):
+ *   confirmed → new data generation (every client reloads) → the replaced file, WAL
+ *   checkpointed in, becomes the `restore` backup (L2: the real undo point, including
+ *   what was written after the stage-time snapshot) → marker cleared.
  */
-export function confirmRestore(input: { dataRoot: string; dbPath: string }): ApplyRestoreResult {
+export async function confirmRestore(input: {
+  dataRoot: string
+  dbPath: string
+  crashAt?: CrashPoint
+}): Promise<ApplyRestoreResult> {
   const marker = readMarker(input.dataRoot)
-  if (!marker || marker.phase !== 'swapped') return { status: 'none' }
-  const aside = preRestorePath(input.dbPath)
-  // Before the marker goes: a crash in between starts one more generation, harmless.
-  startNewDataGeneration(input.dataRoot)
-  for (const s of ['', ...SIDECARS]) rmSync(`${aside}${s}`, { force: true })
-  clearMarker(input.dataRoot)
+  if (!marker || (marker.phase !== 'swapped' && marker.phase !== 'confirmed')) {
+    return { status: 'none' }
+  }
+  const confirmed: Marker = { ...marker, phase: 'confirmed' }
+  if (marker.phase !== 'confirmed') writeMarker(input.dataRoot, confirmed)
+  crashAfter(input.crashAt, 'cf-recorded')
+  return finishConfirm(input.dataRoot, input.dbPath, confirmed, input.crashAt)
+}
+
+function finishConfirm(
+  dataRoot: string,
+  dbPath: string,
+  marker: Marker,
+  crashAt?: CrashPoint
+): ApplyRestoreResult {
+  if (!marker.generationStarted) {
+    startNewDataGeneration(dataRoot)
+    marker = { ...marker, generationStarted: true }
+    writeMarker(dataRoot, marker)
+  }
+  crashAfter(crashAt, 'cf-generation')
+  keepReplacedFile(dataRoot, dbPath, marker)
+  crashAfter(crashAt, 'cf-kept')
+  clearMarker(dataRoot)
   return { status: 'applied', backup: marker.backup }
 }
 
 /**
+ * Turn `<db>.pre-restore` (+ its WAL) into a self-contained backup in `backups/`,
+ * replacing the stage-time `restore` snapshot. Never deletes it: if that cannot be
+ * done (disk full, damaged file), the file is renamed `<db>.pre-restore.kept-<time>`
+ * and left for the operator — a later restore must not move a live file onto it.
+ */
+function keepReplacedFile(dataRoot: string, dbPath: string, marker: Marker): void {
+  const aside = preRestorePath(dbPath)
+  if (!existsSync(aside)) return
+  const name =
+    marker.preRestoreBackup ??
+    `${basename(dbPath).replace(/\.sqlite$/, '')}.${new Date().toISOString().replace(/[:.]/g, '-')}.restore.sqlite`
+  try {
+    const db = new Database(aside)
+    try {
+      const checkpoint = db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
+      if (checkpoint.some((r) => r.busy)) throw new Error('checkpoint busy')
+      db.pragma('journal_mode = DELETE')
+    } finally {
+      db.close()
+    }
+    for (const sfx of SIDECARS) rmSync(`${aside}${sfx}`, { force: true })
+    fsyncFileSync(aside)
+    mkdirSync(backupsDir(dataRoot), { recursive: true })
+    renameSync(aside, containedPath(backupsDir(dataRoot), name))
+    syncDir(backupsDir(dataRoot))
+    syncDir(dirname(dbPath))
+  } catch (err) {
+    const kept = `${aside}.kept-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    for (const sfx of SIDECARS) moveIfPresent(`${aside}${sfx}`, `${kept}${sfx}`)
+    moveIfPresent(aside, kept)
+    syncDir(dirname(dbPath))
+    console.warn(
+      `[slayzone] restore: could not keep the replaced database as a backup (${String(err)}); it is kept as ${kept}`
+    )
+  }
+}
+
+/**
  * The restored file did not start: put the old one back exactly as it was (with its
- * WAL/SHM) and report the refusal. The restored copy is dropped — the backup it came
- * from is untouched in `backups/`.
+ * WAL/SHM) and report the refusal. Journaled and idempotent (M1): `rolling-back` is
+ * durable first; the restored set moves OFF before the old set moves back, sidecars
+ * before main files, and nothing that already moved is ever deleted — so a crash at
+ * any step resumes at the next start without losing a committed row of the old WAL.
+ *   1. restored `<db>-wal/-shm`, then `<db>`  → `<db>.restore-failed*`
+ *   2. `.pre-restore-wal/-shm`                → `<db>-wal/-shm`
+ *   3. `.pre-restore`                         → `<db>`
+ *   4. drop `.restore-failed*` (the backup it came from stays in backups/), clear.
+ * On re-entry, "`<db>` absent, `.pre-restore` present" means any `<db>-wal` is the old
+ * one, moved back by step 2.
  */
 export function rollbackRestore(input: {
   dataRoot: string
   dbPath: string
   error: string
+  crashAt?: CrashPoint
 }): ApplyRestoreResult {
-  const marker = readMarker(input.dataRoot)
-  const backup = marker?.backup ?? ''
-  const aside = preRestorePath(input.dbPath)
-  if (existsSync(aside)) {
-    for (const s of ['', ...SIDECARS]) rmSync(`${input.dbPath}${s}`, { force: true })
-    for (const s of SIDECARS) moveIfPresent(`${aside}${s}`, `${input.dbPath}${s}`)
-    renameSync(aside, input.dbPath)
-    syncDir(dirname(input.dbPath))
+  const { dataRoot, dbPath } = input
+  const marker = readMarker(dataRoot) ?? { v: 1 as const, backup: '', phase: 'swapped' as Phase }
+  const aside = preRestorePath(dbPath)
+  const failed = `${dbPath}.restore-failed`
+  let journal = marker
+  if (marker.phase !== 'rolling-back') {
+    journal = { ...marker, phase: 'rolling-back', hadPrevious: existsSync(aside) }
+    writeMarker(dataRoot, journal)
   }
-  clearMarker(input.dataRoot)
+  crashAfter(input.crashAt, 'rb-recorded')
+
+  // 1. The restored set off — only while the old one is still aside (or there was none).
+  if (existsSync(dbPath) && (existsSync(aside) || journal.hadPrevious === false)) {
+    for (const sfx of SIDECARS) moveIfPresent(`${dbPath}${sfx}`, `${failed}${sfx}`)
+    crashAfter(input.crashAt, 'rb-restored-sidecars-off')
+    renameSync(dbPath, failed)
+    syncDir(dirname(dbPath))
+  }
+  crashAfter(input.crashAt, 'rb-restored-off')
+  // 2 + 3. The old set back: sidecars first, the main file last.
+  if (existsSync(aside)) {
+    for (const sfx of SIDECARS) {
+      if (existsSync(`${aside}${sfx}`) && !existsSync(`${dbPath}${sfx}`))
+        renameSync(`${aside}${sfx}`, `${dbPath}${sfx}`)
+    }
+    syncDir(dirname(dbPath))
+    crashAfter(input.crashAt, 'rb-old-sidecars-back')
+    renameSync(aside, dbPath)
+    syncDir(dirname(dbPath))
+  }
+  crashAfter(input.crashAt, 'rb-old-back')
+  // 4.
+  for (const sfx of ['', ...SIDECARS]) rmSync(`${failed}${sfx}`, { force: true })
+  clearMarker(dataRoot)
   return {
     status: 'refused',
-    backup,
+    backup: journal.backup,
     error: `${input.error}. Your previous data was put back.`
   }
 }

@@ -154,7 +154,11 @@ test('restore stages: pre-restore backup, marker, restart AFTER the reply; live 
   expect(trace).toContain('restart')
   // Staged, not swapped: the live file is only replaced at the next boot.
   expect(fs.readFileSync(dbPath, 'utf8')).toBe('LIVE-DB')
-  expect(JSON.parse(fs.readFileSync(marker(), 'utf8'))).toMatchObject({ backup: made.filename })
+  expect(JSON.parse(fs.readFileSync(marker(), 'utf8'))).toMatchObject({
+    backup: made.filename,
+    // The confirm replaces this snapshot with the file actually replaced (L2).
+    preRestoreBackup: result.preRestoreBackup
+  })
   // A pre-restore backup of the current data, listed like any other.
   const pre = (await o.list()).find((b) => b.type === 'restore')
   expect(pre?.filename, 'pre-restore backup').toBeDefined()

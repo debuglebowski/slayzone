@@ -183,10 +183,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     db = cfg.db
   } else if (lastRestore.status === 'applied-unverified') {
     const restored = lastRestore.backup
+    let opened: SlayzoneDb | null = null
     try {
-      db = await openServerDatabase()
-      lastRestore = confirmRestore({ dataRoot, dbPath })
+      opened = await openServerDatabase()
     } catch (err) {
+      // A failed open closes its own connection (db-worker): the files are free.
       log(
         `[slayzone] restored backup ${restored} failed to open: ${err instanceof Error ? err.message : String(err)} — putting the previous data back`
       )
@@ -195,6 +196,21 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         dbPath,
         error: `The restored backup could not be opened (${err instanceof Error ? err.message : String(err)})`
       })
+    }
+    if (opened) {
+      db = opened
+      // Outside the open's try (L1): the restored file DID start, so a confirm that
+      // fails is never answered with a rollback under this open connection. Its
+      // journal (`confirmed`) lets the next start finish it.
+      try {
+        lastRestore = await confirmRestore({ dataRoot, dbPath })
+      } catch (err) {
+        log(
+          `[slayzone] restore of ${restored} applied, but confirming it failed: ${err instanceof Error ? err.message : String(err)} — the next start finishes it`
+        )
+        lastRestore = { status: 'applied', backup: restored }
+      }
+    } else {
       db = await openServerDatabase()
     }
   } else {

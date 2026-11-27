@@ -404,7 +404,7 @@ export function buildBackupOps(deps: BackupDeps) {
       await Promise.all(creations)
       const names = await getBackupNames(db)
       pre = await createSnapshot('restore', `Before restoring "${names[filename] || filename}"`)
-      stageRestore({ dataRoot, backupFilename: filename })
+      stageRestore({ dataRoot, backupFilename: filename, preRestoreBackup: pre.filename })
       securityEvent({
         event: 'hub.restore',
         outcome: 'success',
