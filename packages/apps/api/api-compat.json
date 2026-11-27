@@ -8,6 +8,7 @@
   },
   "newClient": {
     "app.backup.restoreStatus added": "Gated: Settings calls it only when the hub has the 'hub-restart-restore' feature (hubHasFeature).",
-    "app.backup.restore output": "Gated: Settings reads the RestoreResult only when the hub has 'hub-restart-restore'; an older hub answers nothing and relaunches the app as before."
+    "app.backup.restore output": "Gated: Settings reads the RestoreResult only when the hub has 'hub-restart-restore'; an older hub answers nothing and relaunches the app as before.",
+    "hub.describe output": "dataGeneration added. The client reads it as unknown (transport hubDataGeneration.ts): a hub older than the field sends none, and the window simply never reloads for it."
   }
 }
