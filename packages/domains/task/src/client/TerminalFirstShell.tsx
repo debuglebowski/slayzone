@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { isFullTaskRow, type Task } from '@slayzone/task-contracts'
 import { Skeleton } from '@slayzone/ui'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { useAgents } from '@slayzone/terminal/client'
@@ -14,6 +16,7 @@ import {
   type TerminalFirstEntry
 } from './terminal-first'
 import { taskDetailCache } from './taskDetailCache'
+import { useTRPC } from './trpc'
 
 export { markTerminalFirst } from './terminal-first'
 
@@ -41,7 +44,30 @@ export function TaskPaneFallback({ taskId }: { taskId: string }): React.JSX.Elem
  * keeps running and the user keeps typing across the swap.
  */
 function TerminalFirstShell({ entry }: { entry: TerminalFirstEntry }): React.JSX.Element {
-  const { task, project, cwd } = entry
+  // The agent launches with its row's provider config: a board card row has none, so
+  // its full row (`task.get`, the query the page reads too) comes first. A fallback
+  // must not suspend, so it shows the shell until then.
+  const full = isFullTaskRow(entry.task)
+  const trpc = useTRPC()
+  const { data } = useQuery(
+    trpc.task.get.queryOptions(
+      { id: entry.task.id },
+      { enabled: !full, staleTime: Infinity, refetchOnWindowFocus: false }
+    )
+  )
+  if (full) return <TerminalFirstTerminal entry={entry} task={entry.task} />
+  if (!data) return <TaskShell />
+  return <TerminalFirstTerminal entry={entry} task={{ ...entry.task, ...(data as Task) }} />
+}
+
+function TerminalFirstTerminal({
+  entry,
+  task
+}: {
+  entry: TerminalFirstEntry
+  task: Task
+}): React.JSX.Element {
+  const { project, cwd } = entry
   const sessionId = `${task.id}:${task.id}`
   const { modes } = useAgents()
   const props = mainTerminalProps(task, project, modes)

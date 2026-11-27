@@ -5,7 +5,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
-import type { Task } from '@slayzone/task-contracts'
+import { isFullTaskRow, type Task } from '@slayzone/task-contracts'
 import { getDefaultStatus } from '@slayzone/projects-contracts'
 import {
   updateTaskSchema,
@@ -30,12 +30,19 @@ interface EditTaskDialogProps {
 }
 
 export function EditTaskDialog({
-  task,
+  task: givenTask,
   open,
   onOpenChange,
   onUpdated
 }: EditTaskDialogProps): React.JSX.Element {
   const trpc = useTRPC()
+  // A board card row carries no description: edit the task's full row, never a
+  // description it lacks (a save would write that blank over the real one).
+  const needsFull = !!givenTask && !isFullTaskRow(givenTask)
+  const fullQuery = useQuery(
+    trpc.task.get.queryOptions({ id: givenTask?.id ?? '' }, { enabled: open && needsFull })
+  )
+  const task = needsFull ? (fullQuery.data ?? null) : givenTask
   const updateMutation = useMutation(trpc.task.update.mutationOptions())
   const projectsQuery = useQuery(trpc.projects.list.queryOptions(undefined, { enabled: open }))
   const projects = projectsQuery.data ?? []

@@ -30,9 +30,12 @@ it('the board row wins for the fields it carries; the full row fills the rest', 
   expect(mergeTaskRows(null, undefined)).toBeNull()
 })
 
-it('a full board row is returned as is (no merge copy)', () => {
-  const row = full()
-  expect(mergeTaskRows(row, full({ title: 'older' }))).toBe(row)
+it('page-only fields come from the full row even when the board row carries them (it may be stale)', () => {
+  const board = full({ title: 'Board', description: 'stale' })
+  expect(mergeTaskRows(board, full({ title: 'older', description: 'fresh' }))).toMatchObject({
+    title: 'Board',
+    description: 'fresh'
+  })
 })
 
 it('reads the task row from task.get, seeded and refreshed by tasks-changed', async () => {

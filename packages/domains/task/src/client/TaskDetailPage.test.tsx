@@ -155,7 +155,10 @@ vi.mock('@slayzone/task-contracts', () => ({
   clearAllConversationIds: vi.fn(),
   normalizeDescription: (d: string | null | undefined) => d ?? '',
   stripMarkdown: (s: string) => s,
-  priorityOptions: [{ value: 3, label: 'Medium' }]
+  priorityOptions: [{ value: 3, label: 'Medium' }],
+  TASK_CARD_OMITTED_FIELDS: new Set(['description', 'provider_config']),
+  CARD_BOARD_INPUT: { rows: 'card' },
+  isFullTaskRow: () => true
 }))
 
 // The real module (pure contracts) with a few fixed values: a hand-listed mock

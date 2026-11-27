@@ -105,6 +105,8 @@ const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
   }
 }
 
+const boardRowsInput = z.object({ rows: z.enum(['full', 'card']).optional() }).optional()
+
 export const taskRouter = router({
   computerMovePreview: publicProcedure
     .input(z.object({ taskId: z.string().min(1), computerId: z.string().nullable() }))
@@ -513,8 +515,10 @@ export const taskRouter = router({
     ),
 
   // --- Board ---
-  loadBoardData: publicProcedure.query(async ({ ctx }) => {
-    const board = await ops().loadBoardDataOp(ctx.db)
+  // `rows: 'card'`: card rows (no page-only fields, `TASK_CARD_OMITTED_FIELDS`), a
+  // fraction of the bytes; absent (older clients): full rows.
+  loadBoardData: publicProcedure.input(boardRowsInput).query(async ({ ctx, input }) => {
+    const board = await ops().loadBoardDataOp(ctx.db, input ?? {})
     return me(ctx)
       ? { ...board, tasks: await overlayWorkspaces(ctx.db, board.tasks, me(ctx)) }
       : board
@@ -523,9 +527,11 @@ export const taskRouter = router({
   // `notify.onTasksChanged` event names the changed tasks. Capped: an event
   // naming more rows than this is cheaper as a full board reload.
   loadBoardRows: publicProcedure
-    .input(z.object({ ids: z.array(z.string()).max(500) }))
+    .input(
+      z.object({ ids: z.array(z.string()).max(500), rows: z.enum(['full', 'card']).optional() })
+    )
     .query(async ({ ctx, input }) => {
-      const rows = await ops().loadBoardRowsOp(ctx.db, input.ids)
+      const rows = await ops().loadBoardRowsOp(ctx.db, input.ids, { rows: input.rows })
       return me(ctx)
         ? { ...rows, tasks: await overlayWorkspaces(ctx.db, rows.tasks, me(ctx)) }
         : rows

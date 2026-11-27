@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useFederationOrNull, useHubId } from '@slayzone/transport/client'
-import type { Task } from '@slayzone/task-contracts'
+import { CARD_BOARD_INPUT, type Task } from '@slayzone/task-contracts'
 import { useTRPC } from './trpc'
 
 /**
@@ -29,7 +29,7 @@ export function useBoardTasks({ enabled }: { enabled: boolean }): Task[] | undef
   const defaultHubId = useFederationOrNull()?.defaultHubId
   const patched = hubId === null || hubId === defaultHubId
   const { data } = useQuery(
-    trpc.task.loadBoardData.queryOptions(undefined, {
+    trpc.task.loadBoardData.queryOptions(CARD_BOARD_INPUT, {
       enabled,
       subscribed: enabled,
       staleTime: patched ? Infinity : 30_000,

@@ -1407,6 +1407,7 @@ run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
 run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 run_harness packages/domains/task/src/server/ops/mutation-scope.test.ts
+run_harness packages/domains/task/src/server/ops/load-board-card-rows.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
 # shared by the desktop task page and the hub's task.startMainAgent.
 run_harness packages/domains/task/src/shared/main-terminal.test.ts

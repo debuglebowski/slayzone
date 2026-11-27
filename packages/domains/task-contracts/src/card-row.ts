@@ -21,7 +21,6 @@ export const TASK_CARD_OMITTED_FIELDS: ReadonlySet<keyof Task> = new Set<keyof T
   'gemini_flags',
   'opencode_flags',
   'dangerously_skip_permissions',
-  'worktree_parent_branch',
   'web_panel_urls',
   'editor_open_files',
   'diff_collapsed_files',
@@ -52,3 +51,10 @@ export function isFullTaskRow(row: Task): boolean {
   for (const key of TASK_CARD_OMITTED_FIELDS) if (!(key in row)) return false
   return true
 }
+
+/**
+ * The board input a client that reads card rows sends (`task.loadBoardData`,
+ * `task.loadBoardRows`). One constant, so every reader of the board query shares
+ * one cache entry (the input is part of its key).
+ */
+export const CARD_BOARD_INPUT = { rows: 'card' } as const

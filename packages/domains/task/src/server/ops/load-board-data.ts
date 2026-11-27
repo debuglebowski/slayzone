@@ -1,6 +1,6 @@
 import { projectNotInTransitSql } from '@slayzone/projects/server'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { Task } from '@slayzone/task-contracts'
+import { toCardRow, type Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { attachPlacements, parseProject } from '@slayzone/projects/server'
 import { NOT_IN_TRANSIT, parseTasks, TASK_ORDER_BY } from './shared.js'
@@ -13,7 +13,22 @@ export interface BoardData {
   blockedTaskIds: string[]
 }
 
-export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
+/**
+ * Which rows a board answers with: `full` (every field — the default, what older
+ * clients read) or `card` (without `TASK_CARD_OMITTED_FIELDS`, the page-only
+ * fields; a client reads those from the task's own row).
+ */
+export interface BoardRowsOptions {
+  rows?: 'full' | 'card'
+}
+
+const shapeRows = (tasks: Task[], opts: BoardRowsOptions): Task[] =>
+  opts.rows === 'card' ? tasks.map((t) => toCardRow(t)) : tasks
+
+export async function loadBoardDataOp(
+  db: SlayzoneDb,
+  opts: BoardRowsOptions = {}
+): Promise<BoardData> {
   const taskRows = await db.all<Record<string, unknown>>(
     `SELECT t.*, el.external_url AS linear_url
       FROM tasks t
@@ -50,7 +65,7 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
   // and no conversation ids:
   // the session ledger is on the agents' computers (robustness plan §9), which
   // resolve every resume at spawn.
-  const tasks = parseTasks(taskRows)
+  const tasks = shapeRows(parseTasks(taskRows), opts)
 
   return {
     tasks,
@@ -85,7 +100,11 @@ export interface BoardRows {
  * into its board instead of reloading every task (multi-MB) on each
  * `tasks-changed` that names its rows.
  */
-export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): Promise<BoardRows> {
+export async function loadBoardRowsOp(
+  db: SlayzoneDb,
+  ids: readonly string[],
+  opts: BoardRowsOptions = {}
+): Promise<BoardRows> {
   const unique = [...new Set(ids)]
   if (unique.length === 0) return { tasks: [], taskTags: {}, blockedTaskIds: [], nextTaskIds: {} }
   const ph = unique.map(() => '?').join(',')
@@ -123,7 +142,7 @@ export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): P
   const nextTaskIds: Record<string, string | null> = {}
   for (const row of nextRows) nextTaskIds[row.id] = row.next_id
   return {
-    tasks: parseTasks(taskRows),
+    tasks: shapeRows(parseTasks(taskRows), opts),
     taskTags,
     blockedTaskIds: blockedRows.map((r) => r.id),
     nextTaskIds

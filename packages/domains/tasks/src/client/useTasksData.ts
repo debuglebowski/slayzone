@@ -14,7 +14,13 @@ import {
   tasksClientOf,
   type TasksTrpcClient
 } from './trpc'
-import type { BoardPart, Task, TaskStatus, TasksChangedEvent } from '@slayzone/task-contracts'
+import {
+  CARD_BOARD_INPUT,
+  type BoardPart,
+  type Task,
+  type TaskStatus,
+  type TasksChangedEvent
+} from '@slayzone/task-contracts'
 import { refreshTaskScopedQueries, settleDeleteTaskResult } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
@@ -314,7 +320,7 @@ export function useTasksData(): UseTasksDataReturn {
   // (below). Refetching the whole board (MBs) on focus and on each task page's mount
   // was most of the traffic to the hub.
   const boardQ = useQuery(
-    trpc.task.loadBoardData.queryOptions(undefined, {
+    trpc.task.loadBoardData.queryOptions(CARD_BOARD_INPUT, {
       staleTime: Infinity,
       refetchOnWindowFocus: false
     })
@@ -419,7 +425,7 @@ export function useTasksData(): UseTasksDataReturn {
     const patched = patchedBoardRef.current
     if (patched === null) return
     patchedBoardRef.current = null
-    if (queryClient.getQueryData(trpc.task.loadBoardData.queryKey()) === patched) {
+    if (queryClient.getQueryData(trpc.task.loadBoardData.queryKey(CARD_BOARD_INPUT)) === patched) {
       recomposeBoards()
     }
   })
@@ -480,7 +486,7 @@ export function useTasksData(): UseTasksDataReturn {
         failedHubIds.add(hubId)
       }
       void client.task.loadBoardData
-        .query()
+        .query(CARD_BOARD_INPUT)
         .then((d) => {
           if (cancelled) return
           extraBoardsRef.current.set(hubId, d as BoardData)
@@ -507,7 +513,10 @@ export function useTasksData(): UseTasksDataReturn {
           ? null
           : change.taskIds.length > MAX_PATCH_ROWS
             ? undefined
-            : ((await client.task.loadBoardRows.query({ ids: change.taskIds })) as BoardRows)
+            : ((await client.task.loadBoardRows.query({
+                ids: change.taskIds,
+                ...CARD_BOARD_INPUT
+              })) as BoardRows)
       if (rows === undefined) return reload('too-many-rows')
       if (cancelled) return
       if (loadingHubIds.has(hubId)) return reload('loading')
@@ -636,7 +645,7 @@ export function useTasksData(): UseTasksDataReturn {
         requests: client
           ? [
               () =>
-                client.task.loadBoardData.query().then((data) => {
+                client.task.loadBoardData.query(CARD_BOARD_INPUT).then((data) => {
                   extraBoardsRef.current.set(hub.id, data as BoardData)
                   recomposeBoards()
                 }),
@@ -699,7 +708,7 @@ export function useTasksData(): UseTasksDataReturn {
   const boardPatchChainRef = useRef<Promise<void>>(Promise.resolve())
   const patchBoardFor = useStableCallback(async (taskIds: string[]): Promise<void> => {
     const boardFilter = trpc.task.loadBoardData.queryFilter()
-    const boardKey = trpc.task.loadBoardData.queryKey()
+    const boardKey = trpc.task.loadBoardData.queryKey(CARD_BOARD_INPUT)
     const before = queryClient.getQueryData<BoardData>(boardKey)
     const reload = (why: string): Promise<void> => {
       reportBoardLoad(trpcClient, 'default', `patch-fallback:${why}`)
@@ -720,7 +729,9 @@ export function useTasksData(): UseTasksDataReturn {
       return
     }
     const startedAt = Date.now()
-    const rows = await trpcClient.task.loadBoardRows.query({ ids: taskIds }).catch(() => null)
+    const rows = await trpcClient.task.loadBoardRows
+      .query({ ids: taskIds, ...CARD_BOARD_INPUT })
+      .catch(() => null)
     if (!rows) {
       await Promise.all([reload('rows-failed'), refreshTabs([])])
       return
@@ -752,7 +763,7 @@ export function useTasksData(): UseTasksDataReturn {
   // Same race rule as a row patch: a full board fetch overlapping it wins.
   const patchBoardPartsFor = useStableCallback(async (parts: BoardPart[]): Promise<void> => {
     const boardFilter = trpc.task.loadBoardData.queryFilter()
-    const boardKey = trpc.task.loadBoardData.queryKey()
+    const boardKey = trpc.task.loadBoardData.queryKey(CARD_BOARD_INPUT)
     const reload = (why: string): Promise<void> => {
       reportBoardLoad(trpcClient, 'default', `parts-fallback:${why}`)
       return queryClient.invalidateQueries(boardFilter)

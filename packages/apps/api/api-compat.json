@@ -4,11 +4,14 @@
     "sharing.sharedWithMe removed": "Removed on purpose (abd614975: guest sharing reversed). A v0.43 app’s sidebar SharedWithMe renders null when the query has no data, so on a newer hub the section just stays hidden.",
     "app.backup.create output": "BackupInfo.type gained 'restore' (the pre-restore copy). An older app's Settings shows the type as a label; an unknown value only loses its badge colour.",
     "app.backup.list output": "Same as app.backup.create: BackupInfo.type gained 'restore'; an older app renders it as plain text.",
-    "app.backup.restore output": "Was void, now a RestoreResult; an older app ignores the value. NOT seamless: a v0.44 app connected to a server hub could not restore before (the hub refused), and now can; afterwards it does not reload (it has no dataGeneration watcher) and keeps showing the old data until the user reloads it. Accepted: it cannot be told apart from a current client (both send clientApi 1), admin-only, and it leaves data correct on the hub."
+    "app.backup.restore output": "Was void, now a RestoreResult; an older app ignores the value. NOT seamless: a v0.44 app connected to a server hub could not restore before (the hub refused), and now can; afterwards it does not reload (it has no dataGeneration watcher) and keeps showing the old data until the user reloads it. Accepted: it cannot be told apart from a current client (both send clientApi 1), admin-only, and it leaves data correct on the hub.",
+    "task.loadBoardData input": "The new input `{ rows?: 'full' | 'card' }` is optional; an older app sends none and gets full rows exactly as before. The break is only `void` vs an optional object in the input type."
   },
   "newClient": {
     "app.backup.restoreStatus added": "Gated: Settings calls it only when the hub has the 'hub-restart-restore' feature (hubHasFeature).",
     "app.backup.restore output": "Gated: Settings reads the RestoreResult only when the hub has 'hub-restart-restore'; an older hub answers nothing and relaunches the app as before.",
-    "hub.describe output": "dataGeneration added. The client reads it as unknown (transport hubDataGeneration.ts): a hub older than the field sends none, and the window simply never reloads for it."
+    "hub.describe output": "dataGeneration added. The client reads it as unknown (transport hubDataGeneration.ts): a hub older than the field sends none, and the window simply never reloads for it.",
+    "task.loadBoardData input": "An older hub's loadBoardData takes no input and ignores this one: it answers full rows, which this app reads as well — rows describe themselves (`isFullTaskRow`); a card row only makes the task page fetch the full one.",
+    "task.loadBoardRows input.rows dropped": "An older hub's zod input strips `rows` and answers full rows; this app reads both (see task.loadBoardData input)."
   }
 }

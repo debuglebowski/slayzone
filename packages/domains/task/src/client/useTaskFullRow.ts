@@ -1,17 +1,18 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { Task } from '@slayzone/task-contracts'
+import { TASK_CARD_OMITTED_FIELDS, type Task } from '@slayzone/task-contracts'
 import { useTRPC } from './trpc'
 
 /**
  * A task's live row as its page reads it: the board row the app holds (patched on
- * every `tasks-changed`, and where optimistic edits land) for every field it
- * carries, and the task's own full row (`task.get`) for the rest.
+ * every `tasks-changed`, and where optimistic edits land) for every card field, and
+ * the task's own full row (`task.get`) for the page-only fields
+ * (`TASK_CARD_OMITTED_FIELDS`).
  *
- * The board may carry only what a card shows (descriptions, provider config and
- * panel state are the page's alone): the full row supplies those. A board row
- * that carries every field is returned as it is — no copy, so memoized readers
- * keep its identity.
+ * The full row is the authority for those even when the board row carries them: a
+ * board of card rows never refreshes them, so a copy that reached the board (an
+ * optimistic upsert of a full row) goes stale, while the full row is refreshed by
+ * every event naming the task and by every write the page makes.
  */
 export function mergeTaskRows(
   board: Task | null | undefined,
@@ -19,10 +20,10 @@ export function mergeTaskRows(
 ): Task | null {
   if (!board) return full ?? null
   if (!full) return board
-  for (const key in full) {
-    if (!(key in board)) return { ...full, ...board }
-  }
-  return board
+  const out = { ...full, ...board } as Record<string, unknown>
+  const fresh = full as unknown as Record<string, unknown>
+  for (const key of TASK_CARD_OMITTED_FIELDS) if (key in full) out[key] = fresh[key]
+  return out as unknown as Task
 }
 
 /**

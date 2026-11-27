@@ -212,4 +212,36 @@ test.describe('tasks-changed: row patches + hidden-tab deferral', () => {
     await mainWindow.waitForTimeout(1_500)
     expect((await sent(mainWindow)).map((m) => m.path)).not.toContain('task.loadBoardData')
   })
+
+  test('the board carries card rows; an opened task still shows its description', async ({
+    mainWindow
+  }) => {
+    await resetApp(mainWindow)
+    const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'Cards', color: '#0ea5e9', path: TEST_PROJECT_PATH })
+    const a = await s.createTask({
+      projectId: p.id,
+      title: 'Card task',
+      status: 'todo',
+      description: 'Only the full row carries this sentence.'
+    })
+    await recordSends(mainWindow)
+    await s.refreshData()
+    // The app asks for card rows…
+    const boardAsks = (await sent(mainWindow)).filter((m) => m.path === 'task.loadBoardData')
+    expect(boardAsks.length).toBeGreaterThan(0)
+    for (const m of boardAsks) expect(m.input).toEqual({ rows: 'card' })
+    // …which carry no description.
+    const boardHasDescription = await mainWindow.evaluate(async (id) => {
+      const rows = (await window
+        .getTrpcVanillaClient()
+        .task.loadBoardData.query({ rows: 'card' })) as { tasks: { id: string }[] }
+      return 'description' in (rows.tasks.find((t) => t.id === id) ?? {})
+    }, a.id)
+    expect(boardHasDescription).toBe(false)
+    await openTaskById(mainWindow, a.id)
+    await expect(
+      mainWindow.getByText('Only the full row carries this sentence.').first()
+    ).toBeVisible({ timeout: 10_000 })
+  })
 })
