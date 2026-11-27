@@ -19,7 +19,8 @@ import {
   getHubIdForProject,
   getHubIdForTask,
   HubScope,
-  useHubOwnershipStore
+  useHubOwnershipStore,
+  useReloadWhenHubDataReplaced
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
 import { useComputerConnectRefetch } from './app-shell/computer-connect-refetch'
@@ -188,6 +189,8 @@ function App(): React.JSX.Element {
   const trpc = useTRPC()
   const { trackTask, trackProject } = useTrack()
   const trpcClient = useTRPCClient()
+  // A backup restore replaced the hub's data: every open view is stale — reload.
+  useReloadWhenHubDataReplaced(trpcClient)
   const shouldMount = useLazyMounted()
   // Core data from domain hook
   const {

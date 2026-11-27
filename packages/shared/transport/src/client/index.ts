@@ -150,3 +150,9 @@ export {
   type DeviceSettingsLinkOpts,
   type DeviceSettingsStorage
 } from './deviceSettingsLink'
+
+export {
+  noteDataGeneration,
+  useReloadWhenHubDataReplaced,
+  watchHubDataGeneration
+} from './hubDataGeneration'

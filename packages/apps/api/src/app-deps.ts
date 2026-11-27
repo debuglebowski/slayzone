@@ -137,11 +137,14 @@ export type HubDescribeDeps = {
    *  `ENABLE_PROCESSES`, `ENABLE_INTEGRATIONS`), so a client can show or hide what
    *  this hub does not offer. */
   getSwitches: () => HubSwitches
+  /** Which data this hub serves (platform hub-data-generation.ts): changes only when a
+   *  restore replaced it, so every client reloads. Opaque; read once at boot. */
+  getDataGeneration?: () => string
 }
 
 let hubDescribeDeps: HubDescribeDeps | null = null
 
-export function setHubDescribeDeps(deps: HubDescribeDeps): void {
+export function setHubDescribeDeps(deps: HubDescribeDeps | null): void {
   hubDescribeDeps = deps
 }
 

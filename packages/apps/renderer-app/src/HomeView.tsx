@@ -61,7 +61,11 @@ import { TabBar } from '@slayzone/tabs'
 import { HomeContainer, type HomeContainerHandle } from '@slayzone/home/client'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
-import { getHubIdForProject, useHubOwnershipStore } from '@slayzone/transport/client'
+import {
+  getHubIdForProject,
+  useHubOwnershipStore,
+  useReloadWhenHubDataReplaced
+} from '@slayzone/transport/client'
 import { useTRPCClient, getClientForHub } from './trpc'
 import { TerminalStatusButton } from '@slayzone/terminal'
 import type { AgentId } from '@slayzone/terminal-contracts'
@@ -133,6 +137,8 @@ export function HomeView({
   const settingsViewOpen = useSettingsViewStore((s) => s.open)
   useEffect(() => installSettingsEventBridge({ projects: true }), [])
   const trpcClient = useTRPCClient()
+  // A backup restore replaced the hub's data: every open view is stale — reload.
+  useReloadWhenHubDataReplaced(trpcClient)
   // Convex backend configured for this host — gates the leaderboard + feedback entry points.
   const convexConfigured = useLeaderboardAuth().configured
 

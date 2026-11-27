@@ -48,8 +48,9 @@ export const HUB_FEATURES = [
   /** Chat history carries tool previews (`chatDisplay` = display version). */
   'tool-previews',
   /** `app.backup.restore` stages the restore and the hub restarts itself (it answers a
-   *  `RestoreResult`); `app.backup.restoreStatus` says when it is back. Older hubs
-   *  relaunched the desktop app and answered nothing. */
+   *  `RestoreResult`); `app.backup.restoreStatus` says when it is back; `hub.describe`
+   *  carries `dataGeneration`. Older hubs relaunched the desktop app and answered
+   *  nothing. */
   'hub-restart-restore'
 ] as const
 export type HubFeature = (typeof HUB_FEATURES)[number]

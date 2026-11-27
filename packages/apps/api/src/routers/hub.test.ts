@@ -55,6 +55,28 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
   expect(d.features).toEqual([...HUB_FEATURES])
 })
 
+test('hub.describe reports the data generation: null unwired, else the wired value', async () => {
+  expect((await caller.describe()).dataGeneration).toBeNull()
+  setHubDescribeDeps({
+    getAuthRequired: () => false,
+    getSwitches: () => defaultSwitches(),
+    getDataGeneration: () => 'gen-after-restore'
+  })
+  expect((await caller.describe()).dataGeneration).toBe('gen-after-restore')
+  setHubDescribeDeps(null)
+})
+
+function defaultSwitches() {
+  return {
+    requireLogin: false,
+    enablePassword: true,
+    enableSso: false,
+    enableProcesses: true,
+    enableIntegrations: true,
+    enableTelemetry: true
+  }
+}
+
 test('hub.setLabel persists a label that describe then reports', async () => {
   await caller.setLabel({ label: '  Prod EU  ' })
   const d = await caller.describe()

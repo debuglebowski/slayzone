@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { readDataGeneration } from '@slayzone/platform/hub-data-generation'
 import {
   applyPendingRestore,
   pendingRestore,
@@ -124,6 +125,23 @@ describe('stage + apply', () => {
   test('no marker: nothing happens', () => {
     expect(apply()).toEqual({ status: 'none' })
     expect(liveMarker()).toBe('live')
+    expect(readDataGeneration(root)).toBe('initial')
+  })
+
+  test('an applied restore starts a new data generation; a refused one does not', () => {
+    const f = makeBackup('b.sqlite', { marker: 'restored' })
+    stageRestore({ dataRoot: root, backupFilename: f })
+    apply()
+    const first = readDataGeneration(root)
+    expect(first).not.toBe('initial')
+    stageRestore({ dataRoot: root, backupFilename: f })
+    apply()
+    const second = readDataGeneration(root)
+    expect(second).not.toBe(first)
+    writeFileSync(join(backups(), f), 'broken')
+    stageRestore({ dataRoot: root, backupFilename: f })
+    expect(apply().status).toBe('refused')
+    expect(readDataGeneration(root)).toBe(second)
   })
 
   test('applies the staged backup: live DB replaced, stale WAL/SHM gone, marker removed', () => {
@@ -146,6 +164,7 @@ describe('stage + apply', () => {
       stageRestore({ dataRoot: root, backupFilename: f })
       expect(() => apply(step)).toThrow(/simulated crash/)
       expect(apply()).toEqual({ status: 'applied', backup: f })
+      expect(readDataGeneration(root)).not.toBe('initial')
       expect(existsSync(`${dbPath}-wal`)).toBe(false)
       expect(existsSync(join(root, RESTORE_MARKER_FILE))).toBe(false)
       expect(liveMarker()).toBe('restored')

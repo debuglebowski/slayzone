@@ -97,6 +97,7 @@ import {
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
 import { LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
 import { type ApplyRestoreResult, applyPendingRestore } from './restore-swap'
+import { readDataGeneration } from '@slayzone/platform/hub-data-generation'
 import { startEventLoopStallDetector } from '@slayzone/platform/event-loop-stall'
 import {
   adoptClientAddress,
@@ -296,9 +297,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     folderHost: getProjectFolderHost() !== null,
     initError: composition.computersInitError
   })
+  // Read once: it changes only at a boot that swapped a restore in (above).
+  const dataGeneration = readDataGeneration(dataRoot)
   setHubDescribeDeps({
     getAuthRequired: () => hubAuthRequired,
-    getSwitches: () => switches
+    getSwitches: () => switches,
+    getDataGeneration: () => dataGeneration
   })
   // Gate all (non-open) tRPC procedures on a verified principal when this hub
   // enforces auth. Off → inert pass-through (byte-identical).

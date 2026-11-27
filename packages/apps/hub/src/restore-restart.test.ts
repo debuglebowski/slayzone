@@ -130,6 +130,7 @@ async function bootHub(root: string): Promise<Hub> {
 type Backup = { filename: string; type: string; name: string }
 type Fault = { pass: string; key: string; message: string; dismissable?: boolean }
 type Client = {
+  hub: { describe: { query: () => Promise<{ dataGeneration: string | null }> } }
   computers: {
     listFaults: { query: (i: { computerId: string | null }) => Promise<Fault[]> }
     discardFault: {
@@ -210,6 +211,7 @@ test('standalone restore: staged, exit 75, swapped in at the next start; tokens 
   const first = await bootHub(root)
   let backup: Backup
   let bootId: string
+  let generationBefore: string | null = null
   try {
     await createProject(first, 'before-backup')
     const { client, close } = hubClient(first)
@@ -227,6 +229,7 @@ test('standalone restore: staged, exit 75, swapped in at the next start; tokens 
       b.close()
 
       bootId = (await client.app.backup.restoreStatus.query()).bootId
+      generationBefore = (await client.hub.describe.query()).dataGeneration
       const result = await client.app.backup.restore.mutate({ filename: backup.filename })
       expect(result).toMatchObject({ restarting: true, respawner: null })
       expect(result.preRestoreBackup).toMatch(/\.restore\.sqlite$/)
@@ -252,6 +255,11 @@ test('standalone restore: staged, exit 75, swapped in at the next start; tokens 
     try {
       const status = await client.app.backup.restoreStatus.query()
       expect(status.bootId).not.toBe(bootId)
+      // Every client (any user, open procedure) sees the data was replaced.
+      expect(generationBefore).toBe('initial')
+      const after = (await client.hub.describe.query()).dataGeneration
+      expect(after).not.toBe(generationBefore)
+      expect(after).toMatch(/^[0-9a-f-]{36}$/)
       expect(status.lastRestore).toEqual({ status: 'applied', backup: backup.filename })
       const listed = await client.app.backup.list.query()
       expect(listed.some((b) => b.type === 'restore')).toBe(true)
@@ -317,6 +325,8 @@ test('a restore refused at boot keeps the data and leaves a notice until dismiss
     expect(await projectNames(second)).toContain('kept')
     const { client, close } = hubClient(second)
     try {
+      // Refused: same data, so no client reloads.
+      expect((await client.hub.describe.query()).dataGeneration).toBe('initial')
       expect((await client.app.backup.restoreStatus.query()).lastRestore).toMatchObject({
         status: 'refused',
         backup: backup.filename

@@ -1536,6 +1536,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/client-host.test.ts \
   packages/shared/transport/src/client/hubClientCache.test.ts \
   packages/shared/transport/src/client/hubCapabilities.test.ts \
+  packages/shared/transport/src/client/hubDataGeneration.test.ts \
   packages/shared/transport/src/client/hubCompat.test.ts \
   packages/shared/transport/src/client/runtime.test.ts \
   packages/shared/transport/src/client/compactBytes.test.ts \

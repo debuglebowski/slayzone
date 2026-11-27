@@ -14,6 +14,7 @@ import {
 import { dirname, join } from 'node:path'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { containedPath } from '@slayzone/platform/safe-path'
+import { startNewDataGeneration } from '@slayzone/platform/hub-data-generation'
 
 /**
  * Restoring a backup, split in two halves so the database is never overwritten under
@@ -260,6 +261,8 @@ export function applyPendingRestore(input: {
     // Renamed before a crash; the restored file has not been opened since.
     for (const suffix of ['-wal', '-shm']) rmSync(`${dbPath}${suffix}`, { force: true })
   }
+  // Before the marker goes: a crash in between starts one more generation, harmless.
+  startNewDataGeneration(dataRoot)
   clearMarker(dataRoot)
   return { status: 'applied', backup: marker.backup }
 }

@@ -60,6 +60,10 @@ export const hubRouter = router({
    * `api.minClient` the oldest client API it serves (older ones are refused with
    * `CLIENT_TOO_OLD`); `features` the optional features a client checks before using.
    * This procedure itself is the contract's anchor: never remove or retype a field.
+   *
+   * `dataGeneration` changes only when a backup restore replaced this hub's data (null
+   * when unwired): every client reloads on a change (transport hubDataGeneration.ts).
+   * Opaque — it says nothing about the restore.
    */
   describe: openProcedure.query(async ({ ctx }) => {
     const deps = getHubDescribeDepsOrNull()
@@ -72,6 +76,7 @@ export const hubRouter = router({
       scopes: getAuthGate() ? (ctx.principal?.scopes ?? null) : null,
       api: { version: HUB_API_VERSION, minClient: MIN_CLIENT_API },
       features: [...HUB_FEATURES],
+      dataGeneration: deps?.getDataGeneration?.() ?? null,
       wire: {
         compactBytes: true as const,
         toolPreviews: true as const,
