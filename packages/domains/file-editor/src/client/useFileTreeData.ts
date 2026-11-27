@@ -253,6 +253,20 @@ export function useFileTreeData({
     loadInitialDirs()
   }, [loadDir, loadInitialDirs])
 
+  // An expanded folder must have its contents: a folder renamed, dragged or cut-pasted
+  // keeps its (remapped) expanded paths, but nothing has read them under their new
+  // names yet — they rendered empty until the 5s poll reached each one. Expanding by
+  // click reads first, so it is already known and skipped. (fetchQuery dedups the
+  // read the mount effect above already started.)
+  const loadMissingExpanded = useStableCallback(() => {
+    for (const dir of expandedFolders) {
+      if (!dirContentsRef.current.has(dir)) refreshDir(dir)
+    }
+  })
+  useEffect(() => {
+    loadMissingExpanded()
+  }, [expandedFolders, loadMissingExpanded])
+
   // Reload expanded dirs on external file changes + clear collapsed folder caches.
   // Stable-callback body: triggered by refreshKey only, reads everything else fresh.
   const reloadOnRefreshKey = useStableCallback(() => {

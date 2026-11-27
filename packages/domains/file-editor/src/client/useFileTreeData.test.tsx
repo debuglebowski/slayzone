@@ -111,3 +111,27 @@ it('coalesces watcher changes into reads of the affected directories only', asyn
     [expect.objectContaining({ dirPath: 'docs' })]
   ])
 })
+
+it('loads a folder that becomes expanded without its contents (a renamed or moved folder)', async () => {
+  const readDir = vi.fn((input: { dirPath: string }) =>
+    input.dirPath === 'newname' ? [{ name: 'sub', path: 'newname/sub', type: 'directory' }] : []
+  )
+  const backend = createTrpcTest({
+    procedures: { 'fileEditor.gitStatus': () => git, 'fileEditor.readDir': readDir },
+    subscriptions: { 'fileEditor.watch': () => () => undefined }
+  })
+  const { result, rerender } = renderHook(
+    ({ expanded }: { expanded: Set<string> }) =>
+      useFileTreeData({ projectPath: '/proj', controlledExpanded: expanded }),
+    { initialProps: { expanded: new Set(['oldname']) }, wrapper: scopedWrapper(backend.wrapper) }
+  )
+  await flush()
+  readDir.mockClear()
+
+  // What a rename of `oldname` → `newname` does to the expanded set.
+  rerender({ expanded: new Set(['newname']) })
+  await flush()
+
+  expect(readDir.mock.calls).toEqual([[expect.objectContaining({ dirPath: 'newname' })]])
+  expect(result.current.dirContents.get('newname')?.map((e) => e.path)).toEqual(['newname/sub'])
+})
