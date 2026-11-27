@@ -1,4 +1,5 @@
-import { closeSync, createReadStream, readSync } from 'node:fs'
+import { closeSync, readSync } from 'node:fs'
+import { Socket } from 'node:net'
 import { HUB_CREDENTIALS_ENV } from '@slayzone/platform/hub-switches'
 
 /**
@@ -99,7 +100,13 @@ export function watchCredentialsUpdates(
     }
   openPipe = null
   let buffered = pipe.rest
-  const stream = createReadStream('', { fd: pipe.fd, autoClose: true, encoding: 'utf8' })
+  // A libuv stream (non-blocking), NOT fs.createReadStream: that parks a threadpool
+  // thread in a blocking read() on a pipe kept open, and process.exit then waits for
+  // that thread forever — the restart (exit 75) never happens. Unref'd: the desktop
+  // holding the pipe open never keeps this process alive.
+  const stream = new Socket({ fd: pipe.fd, readable: true, writable: false })
+  stream.setEncoding('utf8')
+  stream.unref()
   const flush = (): void => {
     for (;;) {
       const nl = buffered.indexOf('\n')
@@ -109,7 +116,7 @@ export function watchCredentialsUpdates(
       if (line.trim()) listener(parseKeys(line))
     }
   }
-  stream.on('data', (chunk) => {
+  stream.on('data', (chunk: string) => {
     buffered += chunk
     flush()
   })

@@ -88,7 +88,11 @@ interface Hub {
 
 async function bootHub(
   root: string,
-  opts: { keysOnPipe?: string; keepPipe?: (write: (line: string) => void) => void } = {}
+  opts: {
+    keysOnPipe?: string
+    keepPipe?: (write: (line: string) => void) => void
+    supervised?: boolean
+  } = {}
 ): Promise<Hub> {
   const logs: string[] = []
   const proc: ChildProcess = spawn(ELECTRON_BIN, [HUB_BIN], {
@@ -98,6 +102,7 @@ async function bootHub(
       SLAYZONE_ROOT: root,
       SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
       ELECTRON_RUN_AS_NODE: '1',
+      ...(opts.supervised ? { SLAYZONE_SUPERVISED: '1' } : {}),
       // As the desktop supervisor does: keys on fd 3, never in the environment.
       ...(opts.keysOnPipe !== undefined ? { SLAYZONE_HUB_CREDENTIALS_FD: '3' } : {})
     },
@@ -586,5 +591,32 @@ test('L7: a second hub on the same root refuses to start; the first keeps servin
     expect((await fetch(`http://127.0.0.1:${first.port}/health`)).ok).toBe(true)
   } finally {
     await first.stop()
+  }
+})
+
+test('as the desktop starts it (supervised, key pipe kept open): the restart still exits 75', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-restore-piped-'))
+  roots.push(root)
+  // The desktop keeps the pipe open for keys unlocked later; it must not hold the exit.
+  const hub = await bootHub(root, {
+    keysOnPipe: JSON.stringify({ current: randomBytes(32).toString('base64url'), previous: [] }),
+    keepPipe: () => {},
+    supervised: true
+  })
+  try {
+    const { client, close } = hubClient(hub)
+    try {
+      const backup = await client.app.backup.create.mutate({ name: 'piped' })
+      await client.app.backup.restore.mutate({ filename: backup.filename })
+    } finally {
+      close()
+    }
+    const code = await Promise.race([
+      hub.exit,
+      new Promise((r) => setTimeout(() => r('still alive after 20s'), 20_000))
+    ])
+    expect(code).toBe(75)
+  } finally {
+    await hub.stop()
   }
 })
