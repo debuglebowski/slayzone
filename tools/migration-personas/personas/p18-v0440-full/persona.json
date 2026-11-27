@@ -4,10 +4,7 @@
   "summary": "v0.44.0 user (schema v227), the release current users upgrade from: desktop hub + local computer, a standalone team hub, build-box on both hubs from one process, gpu-box on the team hub; per-computer project folders, bindings, tags/template/subtask/artifact, Claude chat history on every computer.",
   "topology": {
     "desktop": true,
-    "desktopComputers": [
-      "local-computer",
-      "build-box"
-    ],
+    "desktopComputers": ["local-computer", "build-box"],
     "hubs": [
       {
         "name": "team-hub",
@@ -17,10 +14,7 @@
           "SLAYZONE_HUB_NAME": "team-hub",
           "SLAYZONE_HUB_ENABLE_TELEMETRY": "0"
         },
-        "computers": [
-          "build-box",
-          "gpu-box"
-        ]
+        "computers": ["build-box", "gpu-box"]
       }
     ],
     "computers": [
