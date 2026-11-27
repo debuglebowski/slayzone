@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '../trpc'
+import { useTRPC, useTRPCClient } from '../trpc'
+import { hubHasFeature } from '@slayzone/transport/client'
 import { FolderOpen, Trash2, RotateCcw, Download, Loader2, Pencil, Check, X } from 'lucide-react'
 import {
   Button,
@@ -83,10 +84,19 @@ export function BackupSettingsTab() {
   const createMutation = useMutation(trpc.app.backup.create.mutationOptions())
   const deleteMutation = useMutation(trpc.app.backup.delete.mutationOptions())
   const restoreMutation = useMutation(trpc.app.backup.restore.mutationOptions())
+  // A hub that restarts itself to apply a restore (`hub-restart-restore`). An older
+  // hub relaunched the desktop app instead and has no status to wait on.
+  const trpcClient = useTRPCClient()
+  const restartRestoreQuery = useQuery({
+    queryKey: ['hub-feature', 'hub-restart-restore'],
+    queryFn: () => hubHasFeature(trpcClient, 'hub-restart-restore')
+  })
+  const hubRestartsItself = restartRestoreQuery.data === true
   // The hub restarts itself to apply a restore. While it does, ask it every second
   // which boot it is: a new boot id = it is back (errors = still down, retried).
   const restoreStatusQuery = useQuery({
     ...trpc.app.backup.restoreStatus.queryOptions(),
+    enabled: hubRestartsItself,
     refetchInterval: restartingFrom ? 1_000 : false,
     retry: restartingFrom ? true : 3
   })
@@ -161,6 +171,8 @@ export function BackupSettingsTab() {
       // The hub keeps a copy of the current data first (a `restore` backup), then
       // restarts itself to swap the backup in.
       const result = await restoreMutation.mutateAsync({ filename: restoreTarget.filename })
+      // An older hub answers nothing: it relaunches the desktop app itself.
+      if (!hubRestartsItself || !result) return
       if (!result.restarting) {
         toast.info('Restore staged. Restart the hub to apply it.')
       } else if (result.respawner === null) {

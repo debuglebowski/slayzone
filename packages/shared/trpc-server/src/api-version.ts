@@ -46,7 +46,11 @@ export const HUB_FEATURES = [
   /** A `Uint8Array` in an input may come as base64 (`bytes:base64`, ./wire-bytes). */
   'compact-bytes',
   /** Chat history carries tool previews (`chatDisplay` = display version). */
-  'tool-previews'
+  'tool-previews',
+  /** `app.backup.restore` stages the restore and the hub restarts itself (it answers a
+   *  `RestoreResult`); `app.backup.restoreStatus` says when it is back. Older hubs
+   *  relaunched the desktop app and answered nothing. */
+  'hub-restart-restore'
 ] as const
 export type HubFeature = (typeof HUB_FEATURES)[number]
 
