@@ -54,6 +54,11 @@ export default function TaskRoute() {
     open.open({ hubId, taskId: id }, { segment: segment === 'artifacts' ? 'artifacts' : 'details' })
     router.replace(HOME)
   }, [asTab, hubId, id, segment, open, router])
+  // A task screen of its own (iPhone): open it on the desktop too.
+  const { share } = open
+  useEffect(() => {
+    if (!asTab && hubId) share({ hubId, taskId: id })
+  }, [asTab, hubId, id, share])
   if (asTab) return null
   return (
     <TaskScreen

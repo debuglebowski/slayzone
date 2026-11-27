@@ -14,7 +14,7 @@ import {
   waitFor,
   within
 } from '@testing-library/react-native'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { ActionSheetIOS, Alert, Dimensions, Platform } from 'react-native'
 import { createBoardPrefs } from '../board/board-prefs'
 import type { Rect } from '../board/drag'
@@ -33,7 +33,7 @@ import {
   workHub
 } from '../hubs/testing'
 import { BoardHome, type BoardHomeProps } from './BoardHome'
-import { OpenTasksProvider } from './OpenTasksProvider'
+import { OpenTasksProvider, useOpenTasks } from './OpenTasksProvider'
 
 // A task opened on an iPad: the task page has suites of its own.
 jest.mock('../task/TaskPage', () => ({
@@ -1133,6 +1133,33 @@ describe('BoardHome: hubs', () => {
   })
 })
 
+/** Home keeps the user's open tabs; another client of theirs can change them. */
+function serveShared(initial: string[], board: () => BoardData = homeBoard) {
+  const hub = { list: [...initial], calls: [] as string[], ping: () => {} }
+  serve(homeHub.id, board, undefined, {
+    procedures: {
+      'openTabs.list': () => [...hub.list],
+      'openTabs.open': ({ taskId }: { taskId: string }) => {
+        hub.calls.push(`open ${taskId}`)
+        if (!hub.list.includes(taskId)) hub.list.push(taskId)
+      },
+      'openTabs.close': ({ taskId }: { taskId: string }) => {
+        hub.calls.push(`close ${taskId}`)
+        hub.list = hub.list.filter((id) => id !== taskId)
+      },
+      'pty.killTask': ({ taskId }: { taskId: string }) => {
+        hub.calls.push(`kill ${taskId}`)
+      }
+    },
+    subscriptions: {
+      'openTabs.onChanged': (_: never, emit: (data: unknown) => void) => {
+        hub.ping = () => emit({})
+      }
+    }
+  })
+  return hub
+}
+
 describe('BoardHome: the tabs shared with the desktop (iPad)', () => {
   let padIdiom: jest.SpyInstance | null = null
   beforeEach(() => {
@@ -1147,33 +1174,6 @@ describe('BoardHome: the tabs shared with the desktop (iPad)', () => {
     const window = { width: 390, height: 844, scale: 3, fontScale: 1 }
     Dimensions.set({ window, screen: window })
   })
-
-  /** Home keeps the user's open tabs; another client of theirs can change them. */
-  function serveShared(initial: string[], board: () => BoardData = homeBoard) {
-    const hub = { list: [...initial], calls: [] as string[], ping: () => {} }
-    serve(homeHub.id, board, undefined, {
-      procedures: {
-        'openTabs.list': () => [...hub.list],
-        'openTabs.open': ({ taskId }: { taskId: string }) => {
-          hub.calls.push(`open ${taskId}`)
-          if (!hub.list.includes(taskId)) hub.list.push(taskId)
-        },
-        'openTabs.close': ({ taskId }: { taskId: string }) => {
-          hub.calls.push(`close ${taskId}`)
-          hub.list = hub.list.filter((id) => id !== taskId)
-        },
-        'pty.killTask': ({ taskId }: { taskId: string }) => {
-          hub.calls.push(`kill ${taskId}`)
-        }
-      },
-      subscriptions: {
-        'openTabs.onChanged': (_: never, emit: (data: unknown) => void) => {
-          hub.ping = () => emit({})
-        }
-      }
-    })
-    return hub
-  }
 
   it('shows the tasks open on the desktop, and follows it opening and closing them', async () => {
     const hub = serveShared(['h1'])
@@ -1222,5 +1222,46 @@ describe('BoardHome: the tabs shared with the desktop (iPad)', () => {
     expect(screen.queryByTestId('open-tab-task-s1')).toBeNull()
     await act(async () => {})
     expect(hub.calls.sort()).toEqual(['close s1', 'kill s1'])
+  })
+})
+
+describe('OpenTasksProvider: a task opened on an iPhone opens on the desktop', () => {
+  /** What a task screen does on mount (`task/[hub]/[id].tsx`). */
+  function TaskScreenDouble({ taskId }: { taskId: string }) {
+    const { share } = useOpenTasks()
+    useEffect(() => share({ hubId: homeHub.id, taskId }), [share, taskId])
+    return null
+  }
+
+  it('adds the task to the hub\'s open tabs, once, even before the list loads', async () => {
+    const hub = serveShared(['h0'])
+    await render(
+      <HubConnections sessions={sessions}>
+        <OpenTasksProvider>
+          <TaskScreenDouble taskId="h1" />
+        </OpenTasksProvider>
+      </HubConnections>
+    )
+    await waitFor(() => expect(hub.list).toEqual(['h0', 'h1']))
+    expect(hub.calls).toEqual(['open h1'])
+    // Closed on the desktop while the screen stays: not reopened here.
+    hub.list = ['h0']
+    await act(async () => hub.ping())
+    await act(async () => {})
+    expect(hub.calls).toEqual(['open h1'])
+  })
+
+  it('a task already open is not sent again', async () => {
+    const hub = serveShared(['h1'])
+    await render(
+      <HubConnections sessions={sessions}>
+        <OpenTasksProvider>
+          <TaskScreenDouble taskId="h1" />
+        </OpenTasksProvider>
+      </HubConnections>
+    )
+    await act(async () => {})
+    await act(async () => {})
+    expect(hub.calls).toEqual([])
   })
 })

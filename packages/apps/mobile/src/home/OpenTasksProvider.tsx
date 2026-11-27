@@ -9,8 +9,8 @@
  * on one shows or goes on the other. Per hub (`HubOpenTabs`, in that hub's scope): its
  * list, read again when it changes elsewhere (`openTabs.onChanged`) and when the socket
  * comes back. A hub older than `openTabs` keeps the tabs opened on this device, as
- * before. Which tab is shown stays on the device. Only an iPad window (`useWide`): an
- * iPhone shows no tabs.
+ * before. Which tab is shown stays on the device. An iPhone shows no tabs, but a task
+ * it opens (`share`) is added to the hub's list, so it opens on the desktop too.
  *
  * Closing a temporary task's tab does what desktop does (`useCloseTaskTab`): the task
  * stays, its terminals stop.
@@ -24,11 +24,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from 'react'
 import { findTaskRow, rowKey } from '../hub-board'
 import { useHubFeeds } from '../hub-connections'
-import { useWide } from '../layout'
 import type { TaskSegment } from '../task/TaskPage'
 import { useTRPC, useTRPCClient } from '../trpc'
 import {
@@ -50,6 +50,12 @@ export interface OpenTasksValue extends OpenTasks {
   close: (ref: TaskRef) => void
   /** null = the board. */
   activate: (ref: TaskRef | null) => void
+  /**
+   * A task screen opened outside the tab bar (iPhone): add it to its hub's shared tabs,
+   * so the desktop opens it. Once — a later close elsewhere is not undone. Sent when the
+   * hub's list loads, if it has not yet. Stable.
+   */
+  share: (ref: TaskRef) => void
   viewOf: (ref: TaskRef) => TabView
   setView: (ref: TaskRef, view: Partial<TabView>) => void
 }
@@ -73,15 +79,37 @@ interface HubTabs {
   stopTerminals: (taskId: string) => Promise<unknown>
 }
 
+type LoadedTabs = HubTabs & { list: readonly string[] }
+
+const shareTo = (hub: LoadedTabs, taskId: string): void => {
+  if (!hub.list.includes(taskId)) hub.open(taskId)
+}
+
 type ReportTabs = (hubId: string, tabs: HubTabs | null) => void
 
 export function OpenTasksProvider({ children }: { children: ReactNode }) {
-  const wide = useWide()
   const { feeds, clientFor } = useHubFeeds()
   const [local, setLocal] = useState<OpenTasks>({ tabs: [], active: null })
   const [synced, setSynced] = useState<ReadonlyMap<string, HubTabs>>(new Map())
   const [views, setViews] = useState<Record<string, TabView>>({})
+  // `share` outside render: each hub's latest loaded tabs, and the shares still
+  // waiting for their hub's list.
+  const loaded = useRef(new Map<string, LoadedTabs>())
+  const waiting = useRef<TaskRef[]>([])
+  const share = useCallback((ref: TaskRef) => {
+    const hub = loaded.current.get(ref.hubId)
+    if (hub) shareTo(hub, ref.taskId)
+    else if (!waiting.current.some((w) => sameTask(w, ref))) waiting.current.push(ref)
+  }, [])
   const report = useCallback<ReportTabs>((hubId, tabs) => {
+    const list = tabs?.list
+    if (tabs && list) {
+      const hub = { ...tabs, list }
+      loaded.current.set(hubId, hub)
+      const ready = waiting.current.filter((w) => w.hubId === hubId)
+      waiting.current = waiting.current.filter((w) => w.hubId !== hubId)
+      for (const w of ready) shareTo(hub, w.taskId)
+    } else loaded.current.delete(hubId)
     setSynced((prev) => {
       if (!tabs && !prev.has(hubId)) return prev
       const next = new Map(prev)
@@ -144,18 +172,17 @@ export function OpenTasksProvider({ children }: { children: ReactNode }) {
       }
     },
     activate: (ref) => setLocal((s) => ({ ...s, active: ref })),
+    share,
     viewOf,
     setView
   }
   return (
     <OpenTasksContext.Provider value={value}>
-      {wide
-        ? hubIds.map((hubId) => (
-            <HubScope key={hubId} hubId={hubId}>
-              <HubOpenTabs hubId={hubId} onReport={report} />
-            </HubScope>
-          ))
-        : null}
+      {hubIds.map((hubId) => (
+        <HubScope key={hubId} hubId={hubId}>
+          <HubOpenTabs hubId={hubId} onReport={report} />
+        </HubScope>
+      ))}
       {children}
     </OpenTasksContext.Provider>
   )
@@ -202,7 +229,7 @@ function HubOpenTabs({ hubId, onReport }: { hubId: string; onReport: ReportTabs 
         )
     })
   }, [data, hubId, onReport, queryClient, client, trpc])
-  // Signed out of, or the window narrowed: nothing of this hub stays shared.
+  // Signed out of: nothing of this hub stays shared.
   useEffect(() => () => onReport(hubId, null), [onReport, hubId])
   return null
 }
