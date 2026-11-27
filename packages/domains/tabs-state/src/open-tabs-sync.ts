@@ -129,34 +129,43 @@ export function startOpenTabsSync(
     // Each push on its own: one the hub refuses must not hold back the others. A
     // refused one stays out of the agreed list (open) or in it (close), so the next
     // sync sends it again instead of undoing it here.
-    const failedOpen = new Set<string>()
-    const failedClose: string[] = []
+    // What the hub holds once these pushes land: its list, plus the opens it took,
+    // minus the closes it took.
+    const onHub = new Set(remote)
     for (const id of merge.pushOpen) {
       try {
         await client.openTabs.open.mutate({ taskId: id })
+        onHub.add(id)
       } catch {
-        failedOpen.add(id)
+        // stays off the hub, so out of the agreed list: pushed open again next sync
       }
     }
     for (const id of merge.pushClose) {
       try {
         await client.openTabs.close.mutate({ taskId: id })
+        onHub.delete(id)
       } catch {
-        failedClose.push(id)
+        // stays on the hub, so in the agreed list: pushed closed again next sync
       }
     }
     if (stopped) return
-    // A tab whose hub is not recorded yet (just opened from the hub, or its task not
-    // seen yet) but which this hub lists is this hub's: it counts in this hub's order
-    // and agreed list already, so a close elsewhere still reaches it.
-    const listed = new Set([...remote, ...merge.pushOpen])
+    // The tab bar NOW, after every await above: tabs may have been opened or closed
+    // meanwhile. A tab whose hub is not recorded yet (just opened from the hub, or its
+    // task not seen yet) but which this hub holds is this hub's: it counts in this
+    // hub's order already, so a close elsewhere still reaches it.
     const after = host
       .taskTabs()
-      .filter((t) => t.hubId === hubId || (t.hubId === undefined && listed.has(t.taskId)))
+      .filter((t) => t.hubId === hubId || (t.hubId === undefined && onHub.has(t.taskId)))
       .map((t) => t.taskId)
-    const agreed = [...after.filter((id) => !failedOpen.has(id)), ...failedClose]
+    // Agreed = exactly what the hub holds, in this client's order. Never a tab the hub
+    // was not sent: one opened here mid-sync would read as "closed on the hub" next
+    // sync and close here. Never missing one the hub still holds: one closed here
+    // mid-sync would read as "opened elsewhere" and reopen.
+    const ordered = after.filter((id) => onHub.has(id))
+    const inOrder = new Set(ordered)
+    const agreed = [...ordered, ...[...onHub].filter((id) => !inOrder.has(id))]
     const order = orderToPush(base, agreed)
-    if (order && after.length > 1) await client.openTabs.reorder.mutate({ taskIds: after })
+    if (order && ordered.length > 1) await client.openTabs.reorder.mutate({ taskIds: ordered })
     if (!stopped && order) host.setBase(hubId, agreed)
   }
 
