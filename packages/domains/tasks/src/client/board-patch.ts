@@ -23,6 +23,30 @@ export type BoardRows = {
   nextTaskIds?: Record<string, string | null>
 }
 
+/**
+ * The board lists a `tasks-changed` event named as changed (`parts`), freshly loaded:
+ * tag definitions with which tasks carry them, and/or the project rows.
+ */
+export type BoardParts = {
+  tags?: Tag[]
+  taskTags?: Record<string, string[]>
+  projects?: Project[]
+}
+
+/**
+ * The board with the reloaded lists swapped in. Task rows (and everything not
+ * reloaded) keep their identity: a tag or project change re-renders only what
+ * reads those lists, instead of every card a full board reload would.
+ */
+export function withBoardParts(prev: BoardData, parts: BoardParts): BoardData {
+  return {
+    ...prev,
+    ...(parts.tags ? { tags: parts.tags } : {}),
+    ...(parts.taskTags ? { taskTags: parts.taskTags } : {}),
+    ...(parts.projects ? { projects: parts.projects } : {})
+  }
+}
+
 /** More changed rows than this in one event → reload the board instead. */
 export const MAX_PATCH_ROWS = 200
 

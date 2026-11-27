@@ -358,7 +358,7 @@ export const computersRouter = router({
       )
       // The caller's own workspace on the task (T-100): the task row when they created it.
       await storeSetTaskComputer(ctx.db, input.taskId, input.computerId, me)
-      notifyComputerBindingChanged()
+      notifyComputerBindingChanged({ taskId: input.taskId })
       return { ok: true as const }
     }),
 
@@ -369,7 +369,7 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input }) => {
       await requireBindable(ctx, input.computerId)
       await storeSetProjectDefaultComputer(ctx.db, input.projectId, input.computerId)
-      notifyComputerBindingChanged()
+      notifyComputerBindingChanged({ projects: true })
       return { ok: true as const }
     }),
 

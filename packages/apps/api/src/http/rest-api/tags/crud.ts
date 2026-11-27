@@ -62,7 +62,8 @@ export function registerTagsCrudRoutes(app: Express, deps: RestApiDeps): void {
         color: typeof body.color === 'string' ? body.color : undefined,
         textColor: typeof body.textColor === 'string' ? body.textColor : undefined
       })
-      deps.notifyRenderer()
+      // Tag definitions only: clients reload their tags, not every task.
+      deps.notifyRenderer({ taskIds: [], parts: ['tags'] })
       res.json({ ok: true, data: tag })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -95,7 +96,8 @@ export function registerTagsCrudRoutes(app: Express, deps: RestApiDeps): void {
         textColor: typeof body.textColor === 'string' ? body.textColor : undefined,
         sort_order: typeof body.sort_order === 'number' ? body.sort_order : undefined
       })
-      deps.notifyRenderer()
+      // Tag definitions only: clients reload their tags, not every task.
+      deps.notifyRenderer({ taskIds: [], parts: ['tags'] })
       res.json({ ok: true, data: tag })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -116,7 +118,8 @@ export function registerTagsCrudRoutes(app: Express, deps: RestApiDeps): void {
         return
       }
       await deleteTag(deps.db, resolved.row.id)
-      deps.notifyRenderer()
+      // Tag definitions only: clients reload their tags, not every task.
+      deps.notifyRenderer({ taskIds: [], parts: ['tags'] })
       res.json({ ok: true, data: { id: resolved.row.id, name: resolved.row.name } })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })

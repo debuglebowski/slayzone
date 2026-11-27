@@ -127,3 +127,17 @@ test('tags router: setForTask replace semantics + getForTask + clear', async () 
   await caller.setForTask({ taskId, tagIds: [] })
   expect((await caller.getForTask({ taskId })).length).toBe(0)
 })
+
+test('tags router: a change to tags themselves signals the tags list, never a full board reload', async () => {
+  const { setTagsRouterDeps } = await import('./tags-router-deps.js')
+  const signals: string[] = []
+  setTagsRouterDeps({
+    onTasksChanged: (ids) => signals.push(`rows:${ids.join(',')}`),
+    onTagsChanged: () => signals.push('tags')
+  })
+  const tag = await caller.create({ name: 'signal-me', projectId })
+  await caller.update({ id: tag.id, name: 'renamed' })
+  await caller.reorder({ tagIds: [tag.id] })
+  await caller.delete({ id: tag.id })
+  expect(signals).toEqual(['tags', 'tags', 'tags', 'tags'])
+})

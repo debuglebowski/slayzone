@@ -1395,6 +1395,7 @@ run_harness packages/domains/task/src/server/ops/task-paths-delegate.test.ts
 run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
 run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
+run_harness packages/domains/task/src/server/ops/mutation-scope.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
 # shared by the desktop task page and the hub's task.startMainAgent.
 run_harness packages/domains/task/src/shared/main-terminal.test.ts
@@ -1840,6 +1841,7 @@ run_vitest_files "vitest (swept-in suites)" \
 # shared panel config, and the first-paint theme cache.
 run_vitest_files "vitest (tasks-changed refresh)" \
   packages/shared/notify/src/server/notify-coalescer.test.ts \
+  packages/shared/notify/src/server/notify-router.test.ts \
   packages/domains/tasks/src/client/board-patch.test.ts \
   packages/domains/task/src/client/taskScopedQueries.test.tsx \
   packages/domains/task/src/client/usePanelConfig.test.tsx \

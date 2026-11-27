@@ -44,6 +44,6 @@ export async function setBrowserTabLockedOp(
 
   tab.locked = locked
   await db.run('UPDATE tasks SET browser_tabs = ? WHERE id = ?', [JSON.stringify(state), taskId])
-  deps.onMutation?.()
+  deps.onMutation?.({ taskIds: [taskId] })
   return true
 }

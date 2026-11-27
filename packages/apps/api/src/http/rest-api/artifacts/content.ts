@@ -156,7 +156,7 @@ export async function createArtifactFromStream(
       return
     }
 
-    deps.notifyRenderer()
+    deps.notifyRenderer({ taskIds: [artifact.task_id] })
     res.json({ ok: true, data: artifact })
   } catch (err) {
     if (respondFrameTooLarge(res, err)) return
@@ -359,7 +359,7 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
         return
       }
 
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [artifact.task_id] })
       res.json({ ok: true, data: artifact })
     } catch (err) {
       if (respondFrameTooLarge(res, err)) return

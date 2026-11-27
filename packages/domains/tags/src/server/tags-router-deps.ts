@@ -9,11 +9,12 @@ export type TagsRouterDeps = {
    */
   onTasksChanged: (taskIds: readonly string[]) => void
   /**
-   * Tell every client to reload the whole board — `notify.onTasksChanged` naming no
-   * tasks. For a change to a project's tags themselves (create, rename, recolour,
-   * reorder, delete): they show on every card, filter and picker.
+   * Tell every client to reload its tags — `notify.onTasksChanged` naming the `tags`
+   * board part (tag definitions and which tasks carry them). For a change to a
+   * project's tags themselves (create, rename, recolour, reorder, delete): they show
+   * on every card, filter and picker.
    */
-  onBoardChanged: () => void
+  onTagsChanged: () => void
 }
 
 let deps: TagsRouterDeps | null = null
@@ -28,6 +29,6 @@ export function signalTasksChanged(taskIds: readonly string[]): void {
 }
 
 /** Best-effort, like `signalTasksChanged`. */
-export function signalBoardChanged(): void {
-  deps?.onBoardChanged()
+export function signalTagsChanged(): void {
+  deps?.onTagsChanged()
 }

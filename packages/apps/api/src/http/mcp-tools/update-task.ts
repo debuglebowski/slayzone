@@ -101,7 +101,8 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
             parentId: parent_id,
             assigneeUserId: assignee_user_id
           },
-          { ipcMain: deps.taskBus ?? NOOP_TASK_BUS }
+          // The op names the task's row: clients patch it, no full board reload.
+          { ipcMain: deps.taskBus ?? NOOP_TASK_BUS, onMutation: deps.notifyRenderer }
         )
       } catch (err) {
         return { content: [{ type: 'text' as const, text: (err as Error).message }], isError: true }
@@ -112,7 +113,6 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
           isError: true
         }
       }
-      deps.notifyRenderer()
       if (close) {
         deps.menu?.emit('close-task', task_id)
         deps.legacyBroadcast?.('app:close-task', task_id) // slice 5: drop legacy send

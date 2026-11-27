@@ -7,6 +7,7 @@ import {
   patchMirrorBlocked,
   patchMirrorTaskTags,
   patchMirrorTasks,
+  withBoardParts,
   type BoardData
 } from './board-patch'
 
@@ -257,5 +258,29 @@ describe('patchMirrorTasks (three-way: keep pending optimistic edits)', () => {
     expect(tags.get('b')).toEqual(['y'])
     const blocked = patchMirrorBlocked(new Set(['a']), ['a', 'b'], prev, next)
     expect([...blocked].sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('withBoardParts', () => {
+  it('swaps in the reloaded lists and keeps the task rows themselves', () => {
+    const a = t('a')
+    const prev = board([a], { taskTags: { a: ['old'] }, blockedTaskIds: ['a'] })
+    const tag = { id: 'new', name: 'n' } as BoardData['tags'][number]
+    const next = withBoardParts(prev, { tags: [tag], taskTags: { a: ['new'] } })
+    expect(next.tasks).toBe(prev.tasks)
+    expect(next.tasks[0]).toBe(a)
+    expect(next.tags).toEqual([tag])
+    expect(next.taskTags).toEqual({ a: ['new'] })
+    expect(next.projects).toBe(prev.projects)
+    expect(next.blockedTaskIds).toBe(prev.blockedTaskIds)
+  })
+
+  it('replaces the projects alone when only they were reloaded', () => {
+    const prev = board([t('a')])
+    const project = { id: 'p' } as BoardData['projects'][number]
+    const next = withBoardParts(prev, { projects: [project] })
+    expect(next.projects).toEqual([project])
+    expect(next.tags).toBe(prev.tags)
+    expect(next.taskTags).toBe(prev.taskTags)
   })
 })

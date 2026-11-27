@@ -93,4 +93,49 @@ describe('createNotifyCoalescer', () => {
     c.push({ taskIds: ['c'] })
     expect(delivered).toEqual([['a']])
   })
+
+  describe('named parts (board lists that are not task rows)', () => {
+    type PartsChange = { taskIds: readonly string[]; parts?: readonly string[] }
+    function setupParts() {
+      const delivered: { ids: string[] | null; parts: string[] }[] = []
+      const c = createNotifyCoalescer<PartsChange>(
+        (ids, parts) =>
+          delivered.push({ ids: ids === null ? null : [...ids].sort(), parts: [...parts].sort() }),
+        (change) => change?.taskIds,
+        200,
+        (change) => change?.parts
+      )
+      return { c, delivered }
+    }
+
+    it('a signal naming only a part is scoped: no ids, that part', () => {
+      const { c, delivered } = setupParts()
+      c.push({ taskIds: [], parts: ['tags'] })
+      expect(delivered).toEqual([{ ids: [], parts: ['tags'] }])
+    })
+
+    it('merges parts across a burst with the union of ids', () => {
+      const { c, delivered } = setupParts()
+      c.push({ taskIds: ['a'] })
+      c.push({ taskIds: [], parts: ['tags'] })
+      c.push({ taskIds: ['b'], parts: ['projects', 'tags'] })
+      vi.advanceTimersByTime(200)
+      expect(delivered).toEqual([
+        { ids: ['a'], parts: [] },
+        { ids: ['b'], parts: ['projects', 'tags'] }
+      ])
+    })
+
+    it('an unscoped signal in the window wins: null ids, parts dropped', () => {
+      const { c, delivered } = setupParts()
+      c.push({ taskIds: ['a'] })
+      c.push({ taskIds: [], parts: ['tags'] })
+      c.push()
+      vi.advanceTimersByTime(200)
+      expect(delivered).toEqual([
+        { ids: ['a'], parts: [] },
+        { ids: null, parts: [] }
+      ])
+    })
+  })
 })

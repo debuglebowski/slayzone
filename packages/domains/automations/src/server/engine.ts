@@ -100,7 +100,9 @@ export class AutomationEngine {
 
   constructor(
     private db: SlayzoneDb,
-    private notifyRenderer: () => void
+    /** A run finished: its record changed, and the timeline of the task it ran for
+     *  (`taskId`; null = no task). */
+    private notifyRenderer: (run: { taskId: string | null }) => void
   ) {}
 
   start(bus: AutomationTriggerBus): void {
@@ -551,7 +553,7 @@ export class AutomationEngine {
     })
 
     await this.pruneOldRuns(automation.id)
-    this.notifyRenderer()
+    this.notifyRenderer({ taskId: event.taskId ?? null })
   }
 
   private async resolveAction(

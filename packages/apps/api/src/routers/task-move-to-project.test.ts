@@ -44,7 +44,11 @@ const signals: Array<string[] | null> = []
 setTaskDeps({
   ops: taskOps,
   onMutation: (change?: TasksChange) => {
-    signals.push(change ? [...change.taskIds].sort() : null)
+    signals.push(
+      change
+        ? [...[...change.taskIds].sort(), ...(change.parts ?? []).map((p) => `part:${p}`)]
+        : null
+    )
   }
 })
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-task-move-')) }
@@ -255,8 +259,8 @@ describe('task.moveToProject', () => {
       .get(b) as { n: number }
     expect(uiTagsInB.n).toBe(1)
     expect(bugInB).toBeTruthy()
-    // A tag was created: the board's tag list changed, so a full reload.
-    expect(signals).toEqual([null])
+    // A tag was created: the moved rows, and the tags list alone — no full reload.
+    expect(signals).toEqual([[...[parent.id, child.id].sort(), 'part:tags']])
   })
 
   test('a created tag whose colours the target already uses gets a free pair', async () => {

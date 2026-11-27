@@ -21,7 +21,6 @@ export function registerArchiveManyTaskTool(server: McpServer, deps: McpToolsDep
           isError: true
         }
       }
-      deps.notifyRenderer()
       return {
         content: [
           {

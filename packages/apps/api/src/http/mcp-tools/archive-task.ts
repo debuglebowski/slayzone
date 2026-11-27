@@ -42,7 +42,6 @@ export function registerArchiveTaskTool(server: McpServer, deps: McpToolsDeps): 
           isError: true
         }
       }
-      deps.notifyRenderer()
       return {
         content: [
           {

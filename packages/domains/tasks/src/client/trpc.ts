@@ -4,6 +4,7 @@ import type { ComputersMounts } from '@slayzone/computers/server'
 import type { NotifyMounts } from '@slayzone/notify/server'
 import type { ProjectsMounts } from '@slayzone/projects/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
+import type { TagsMounts } from '@slayzone/tags/server'
 import type { TaskMounts } from '@slayzone/task/server'
 import type { ArtifactsMounts } from '@slayzone/task-artifacts/server'
 import type { PtyMounts } from '@slayzone/terminal/server'
@@ -11,8 +12,9 @@ import type { PtyMounts } from '@slayzone/terminal/server'
 /**
  * This package's typed view of the shared tRPC client (one runtime, one socket per hub),
  * typed against only the routers tasks calls: `task`, `projects` + `projectGroups`,
- * `pty`, `settings`, `notify` and `computers` (the Needs-attention task badge), and
- * `artifacts` (a move between hubs copies their files).
+ * `pty`, `settings`, `notify` and `computers` (the Needs-attention task badge),
+ * `artifacts` (a move between hubs copies their files) and `tags` (a tags-only
+ * change reloads them alone).
  */
 export const { useTRPC, useTRPCClient, getTrpcClient, getClientForHub } = typedTrpc<
   TaskMounts &
@@ -20,6 +22,7 @@ export const { useTRPC, useTRPCClient, getTrpcClient, getClientForHub } = typedT
     PtyMounts &
     SettingsMounts &
     NotifyMounts &
+    TagsMounts &
     ComputersMounts &
     ArtifactsMounts
 >()

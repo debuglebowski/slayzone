@@ -3,7 +3,11 @@ import { taskEvents } from '../events.js'
 import { eraseContent, resumeErasure } from '@slayzone/content-erasure/server'
 import { isErasureDoneOrCompacting, type ErasureReport } from '@slayzone/content-erasure'
 import { cleanupTaskImmediate, getRuntimeAdapters, parseTask, type OpDeps } from './shared.js'
-import { announceSurvivingSubtasks, survivingSubtasks } from './surviving-subtasks.js'
+import {
+  announceSurvivingSubtasks,
+  dependencyNeighbours,
+  survivingSubtasks
+} from './surviving-subtasks.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -51,6 +55,7 @@ export async function deleteTaskOp(
     return isErasureDoneOrCompacting(report) ? true : { incomplete: true, erasure: report }
   }
   const survivors = await survivingSubtasks(db, [id])
+  const neighbours = await dependencyNeighbours(db, [id])
   const report = await eraseContent(
     db,
     adapters.getDataRoot(),
@@ -63,7 +68,9 @@ export async function deleteTaskOp(
     if (previousTask) {
       taskEvents.emit('task:deleted', { taskId: id, projectId: previousTask.project_id })
     }
-    onMutation?.()
+    // The deleted row (absent now: clients drop it), its re-parented subtasks and the
+    // tasks whose blocked state its dependencies decided.
+    onMutation?.({ taskIds: [...new Set([id, ...survivors.map((s) => s.id), ...neighbours])] })
   }
   return isErasureDoneOrCompacting(report) ? true : { incomplete: true, erasure: report }
 }

@@ -24,7 +24,9 @@ export function useBoardTasks({ enabled }: { enabled: boolean }): Task[] | undef
     trpc.task.loadBoardData.queryOptions(undefined, {
       enabled,
       subscribed: enabled,
-      staleTime: 30_000
+      staleTime: 30_000,
+      // Kept fresh by `tasks-changed` patches (`useTasksData`), never by focus.
+      refetchOnWindowFocus: false
     })
   )
   return data?.tasks

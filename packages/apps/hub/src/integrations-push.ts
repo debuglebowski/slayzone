@@ -1,5 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { TasksChange } from '@slayzone/task-contracts'
 import { hubIntegrationsEnabled } from '@slayzone/platform/hub-switch-refusal'
 import {
   pushTaskAfterEdit as defaultPushTaskAfterEdit,
@@ -55,7 +56,7 @@ export function wireIntegrationPush(opts: {
   db: SlayzoneDb
   /** The SAME bus the task ops were handed — not `ipcMain`. */
   taskBus: EventEmitter
-  notifyTasksChanged: () => void
+  notifyTasksChanged: (change?: TasksChange) => void
   pushGithubTask: (taskId: string) => Promise<void>
   fns?: Partial<IntegrationPushFns>
 }): void {
@@ -76,7 +77,8 @@ export function wireIntegrationPush(opts: {
       const hasLink = await opts.db
         .prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1')
         .get(taskId)
-      if (hasLink) opts.notifyTasksChanged()
+      // The new link shows on that task's row (its issue url) only.
+      if (hasLink) opts.notifyTasksChanged({ taskIds: [taskId] })
     })
   }
 

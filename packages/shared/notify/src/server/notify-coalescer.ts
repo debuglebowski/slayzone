@@ -13,7 +13,9 @@ import { currentSecurityContext } from '@slayzone/platform/security-log'
  * most one delivery per window instead of one refetch per write.
  *
  * Merging keeps the scope honest: the union of every named task id, or "unknown
- * scope" (`null`) as soon as any merged signal named none.
+ * scope" (`null`) as soon as any merged signal named none. Named parts (`partsOf`:
+ * lists that are not task rows, e.g. tag definitions) merge the same way; an
+ * unknown scope supersedes them (it refreshes everything anyway).
  *
  * Signals are bucketed by the acting user (`currentSecurityContext().actor`):
  * the owner gate attributes a delivered event to the user on the async context
@@ -35,16 +37,20 @@ interface Bucket {
   /** A merged signal named no ids → deliver unknown scope. */
   unknown: boolean
   ids: Set<string>
+  parts: Set<string>
 }
 
 /**
- * @param deliver called with the merged ids, or `null` for unknown scope.
+ * @param deliver called with the merged ids, or `null` for unknown scope, and the
+ *   merged parts (always empty with `null`).
  * @param idsOf the ids a signal names, or undefined when it names none.
+ * @param partsOf the parts a signal names besides its ids (none by default).
  */
 export function createNotifyCoalescer<T>(
-  deliver: (taskIds: string[] | null) => void,
+  deliver: (taskIds: string[] | null, parts: string[]) => void,
   idsOf: (change: T | undefined) => readonly string[] | undefined,
-  windowMs = NOTIFY_COALESCE_MS
+  windowMs = NOTIFY_COALESCE_MS,
+  partsOf: (change: T | undefined) => readonly string[] | undefined = () => undefined
 ): Coalescer<T> {
   const buckets = new Map<string, Bucket>()
   let disposed = false
@@ -57,11 +63,13 @@ export function createNotifyCoalescer<T>(
         return
       }
       const taskIds = bucket.unknown ? null : [...bucket.ids]
+      const parts = bucket.unknown ? [] : [...bucket.parts]
       bucket.dirty = false
       bucket.unknown = false
       bucket.ids = new Set()
+      bucket.parts = new Set()
       bucket.timer = arm(key, bucket)
-      deliver(taskIds)
+      deliver(taskIds, parts)
     }, windowMs)
 
   return {
@@ -69,22 +77,25 @@ export function createNotifyCoalescer<T>(
       if (disposed) return
       const key = currentSecurityContext()?.actor ?? ''
       const ids = idsOf(change)
+      const parts = partsOf(change) ?? []
       const open = buckets.get(key)
       if (open) {
         open.dirty = true
         if (!ids) open.unknown = true
         else for (const id of ids) open.ids.add(id)
+        for (const part of parts) open.parts.add(part)
         return
       }
       const bucket: Bucket = {
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
         dirty: false,
         unknown: false,
-        ids: new Set()
+        ids: new Set(),
+        parts: new Set()
       }
       bucket.timer = arm(key, bucket)
       buckets.set(key, bucket)
-      deliver(ids ? [...ids] : null)
+      deliver(ids ? [...ids] : null, ids ? [...new Set(parts)] : [])
     },
     dispose() {
       disposed = true

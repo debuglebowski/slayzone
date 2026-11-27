@@ -56,6 +56,6 @@ export async function archiveTaskOp(
   if (projectRow) {
     taskEvents.emit('task:archived', { taskId: id, projectId: projectRow.project_id })
   }
-  onMutation?.()
+  onMutation?.({ taskIds: toArchiveTasks.map((t) => t.id) })
   return archivedTask
 }

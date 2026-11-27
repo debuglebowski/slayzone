@@ -42,17 +42,26 @@ export function getComputersRouterDeps(): ComputersRouterDeps {
 }
 
 /**
- * Called after a task's or project's computer changes. The hub reloads clients'
- * boards: which computer a project uses decides which folder they show, and every
- * other window must see the change too. Unset (tests, a host without clients):
- * nothing to tell.
+ * What a computer-binding change touched: one task's row (`taskId`), the project rows
+ * (`projects`), or — unset — anything (a computer replaced or disabled moves the
+ * bindings of tasks and projects alike).
  */
-let onBindingChanged: () => void = () => undefined
+export type BindingChange = { taskId: string } | { projects: true }
 
-export function setComputerBindingChangedListener(listener: (() => void) | null): void {
+/**
+ * Called after a task's or project's computer changes. The hub tells clients:
+ * which computer a project uses decides which folder they show, and every other
+ * window must see the change too. Unset (tests, a host without clients): nothing
+ * to tell.
+ */
+let onBindingChanged: (change?: BindingChange) => void = () => undefined
+
+export function setComputerBindingChangedListener(
+  listener: ((change?: BindingChange) => void) | null
+): void {
   onBindingChanged = listener ?? (() => undefined)
 }
 
-export function notifyComputerBindingChanged(): void {
-  onBindingChanged()
+export function notifyComputerBindingChanged(change?: BindingChange): void {
+  onBindingChanged(change)
 }

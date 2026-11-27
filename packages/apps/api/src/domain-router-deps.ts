@@ -77,7 +77,10 @@ setWorktreesRouterDeps({
 // notify bus the task ops' own `onMutation` uses, naming the tasks they touched.
 const onTasksChanged = (taskIds: readonly string[]): void => emitTasksChanged({ taskIds })
 
-setTagsRouterDeps({ onTasksChanged, onBoardChanged: () => emitTasksChanged() })
+setTagsRouterDeps({
+  onTasksChanged,
+  onTagsChanged: () => emitTasksChanged({ taskIds: [], parts: ['tags'] })
+})
 
 // `task.startMainAgent` resolves a multi-repo project's child repos the way the
 // `worktrees.detectChildRepos` procedure does — same discovery, same workspace fs —

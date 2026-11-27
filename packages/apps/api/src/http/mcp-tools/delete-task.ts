@@ -68,7 +68,6 @@ export function registerDeleteTaskTool(server: McpServer, deps: McpToolsDeps): v
         }
       }
 
-      deps.notifyRenderer()
       return {
         content: [
           {

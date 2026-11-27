@@ -17,13 +17,14 @@
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import { z } from 'zod'
-import { setSecurityLogSink } from '@slayzone/platform/security-log'
+import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import { TRPCError } from '@trpc/server'
 import { appRouter } from './router'
 import { setAuthGate, type TrpcContext } from '@slayzone/trpc-server'
 import { TRPC_ADMIN_POLICY } from './admin-policy'
 import { checkOwnership, ownedResult } from './owner-gate'
 import {
+  DROP,
   TRPC_OWNER_POLICY,
   isCustomRef,
   isOwnerQuestion,
@@ -388,4 +389,41 @@ test('Trash checks project ownership before listing deleted tasks', async () => 
     })
   await expect(request('other')).rejects.toMatchObject({ code: 'NOT_FOUND' })
   expect(await request('owner')).not.toBeNull()
+})
+
+describe('notify.onTasksChanged event filter (board parts)', () => {
+  const filter = TRPC_OWNER_POLICY['notify.onTasksChanged']!.events!
+  const visible = new Set(['mine'])
+  const scope = {
+    filter: async <T>(rows: readonly T[], to: (row: T) => { id: string } | null) =>
+      rows.filter((r) => visible.has(to(r)?.id ?? ''))
+  } as unknown as Parameters<typeof filter>[1]['scope']
+  const as = (actor: string | null, event: unknown) =>
+    runWithSecurityContext({ ip: null, route: null, actor }, () =>
+      filter(event, { scope, userId: 'u1' })
+    )
+
+  test('a parts-only change reaches the user who made it', async () => {
+    expect(await as('u1', { taskIds: [], parts: ['tags'] })).toEqual({
+      taskIds: [],
+      parts: ['tags']
+    })
+  })
+
+  test("another user's parts-only change is dropped (like an unscoped ping)", async () => {
+    expect(await as('u2', { taskIds: [], parts: ['tags'] })).toBe(DROP)
+  })
+
+  test("another user's change keeps the visible rows but not the parts", async () => {
+    expect(await as('u2', { taskIds: ['mine', 'theirs'], parts: ['tags'] })).toEqual({
+      taskIds: ['mine']
+    })
+  })
+
+  test('own change naming only hidden rows still carries its parts', async () => {
+    expect(await as('u1', { taskIds: ['theirs'], parts: ['projects'] })).toEqual({
+      taskIds: [],
+      parts: ['projects']
+    })
+  })
 })

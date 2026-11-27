@@ -448,10 +448,9 @@ export async function moveTasksToProjectOp(
     })
   }
   if (outcome.changed.length > 0) {
-    // Created tags change every card's tag list: then a full reload, else just these rows.
-    deps.onMutation?.(
-      outcome.createdTags ? undefined : { taskIds: outcome.changed.map((c) => c.id) }
-    )
+    // These rows; created tags change the tags list too.
+    const taskIds = outcome.changed.map((c) => c.id)
+    deps.onMutation?.(outcome.createdTags ? { taskIds, parts: ['tags'] } : { taskIds })
   }
   return outcome
 }

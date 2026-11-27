@@ -3,8 +3,8 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/api/src/http/mcp-tools/update-task.test.ts
  *
  * Note: Wave 5 audit found update-task.ts only passes `{ ipcMain }` to
- * updateTaskOp (no onMutation), then calls deps.notifyRenderer() manually.
- * This means notifyRenderer fires once (not twice like sibling tools).
+ * updateTaskOp with `onMutation: deps.notifyRenderer`: the op names the task's row,
+ * so clients patch it instead of reloading the whole board.
  */
 import { afterAll, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.js'
@@ -28,14 +28,17 @@ h.db
   .run(projectId, 'P', '#000', '/tmp/p')
 
 let notifyCount = 0
+/** Pings naming no rows: each one reloads every client's whole board. */
+let unscopedCount = 0
 /** Session ids the stub reports mid-reply, per task. */
 const midReply = new Map<string, string[]>()
 const stub = captureMcpServer()
 registerUpdateTaskTool(stub.server as never, {
   db: h.slayDb,
   taskBus: ipcMain,
-  notifyRenderer: () => {
+  notifyRenderer: (change?: { taskIds: readonly string[] }) => {
     notifyCount++
+    if (!change) unscopedCount++
   },
   taskAgents: { midReplySessionIds: async (taskId) => midReply.get(taskId) ?? [] }
 })
@@ -110,6 +113,7 @@ describe('mcp update_task', () => {
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:updated')
     notifyCount = 0
+    unscopedCount = 0
     const res = (await stub.invoke('update_task', { task_id: id, title: 'Renamed' })) as {
       content: { text: string }[]
       isError?: boolean
@@ -124,6 +128,7 @@ describe('mcp update_task', () => {
     const updateEmits = __ipcEmitCalls.filter((c) => c[0] === 'db:tasks:update:done')
     expect(updateEmits.length).toBeGreaterThanOrEqual(1)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
+    expect(unscopedCount, 'every ping names its rows').toBe(0)
   })
 
   test('camelCase mapping: due_date → dueDate, parent_id → parentId', async () => {

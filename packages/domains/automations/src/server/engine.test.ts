@@ -51,8 +51,10 @@ h.db
 // Track notifications. Engine runs on the async SlayzoneDb proxy (h.slayDb);
 // fixture setup + run assertions below read the same connection via raw h.db.
 let notifyCount = 0
-const engine = new AutomationEngine(h.slayDb, () => {
+const notified: Array<{ taskId: string | null }> = []
+const engine = new AutomationEngine(h.slayDb, (run) => {
   notifyCount++
+  notified.push(run)
 })
 
 // Create a working ipcMain mock that actually dispatches events
@@ -470,6 +472,18 @@ describe('run lifecycle', () => {
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise((r) => setTimeout(r, 500))
     expect(notifyCount).toBeGreaterThan(0)
+    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
+  })
+
+  test('a finished run names the task it ran for (its timeline changed), nothing else', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    notified.length = 0
+    createAutomation({ actions: [{ type: 'run_command', params: { command: 'echo ok' } }] })
+    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
+    await new Promise((r) => setTimeout(r, 500))
+    expect(notified).toContainEqual({ taskId })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
   })
 })

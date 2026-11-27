@@ -200,7 +200,8 @@ export function registerTaskSubtasksRoutes(app: Express, deps: RestApiDeps): voi
         throw err
       }
 
-      deps.notifyRenderer()
+      // The new row (placed by its board successor) and its parent's.
+      deps.notifyRenderer({ taskIds: [id, parent.id] })
       const created = await db.get<Record<string, unknown>>(
         `SELECT id, project_id, parent_id, title, description, status, priority, created_at, updated_at
          FROM tasks WHERE id = ?`,

@@ -174,7 +174,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         res.status(500).json({ ok: false, error: 'Failed to create artifact' })
         return
       }
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [artifact.task_id] })
       res.json({ ok: true, data: artifact })
     } catch (err) {
       if (respondFrameTooLarge(res, err)) return
@@ -234,7 +234,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         res.status(404).json({ ok: false, error: `Artifact not found: ${req.params.id}` })
         return
       }
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [artifact.task_id] })
       // Echo the RAW row, not the parsed `TaskArtifact`. `slay tasks artifacts
       // update --json` printed its own `SELECT *` verbatim, and `parseArtifact`
       // drops any column it does not model (today: the vestigial pre-render_mode
@@ -273,7 +273,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         res.status(404).json({ ok: false, error: `Artifact not found: ${req.params.id}` })
         return
       }
-      deps.notifyRenderer()
+      deps.notifyRenderer(actual ? { taskIds: [actual.task_id] } : undefined)
       res.json({
         ok: true,
         data: { id: resolved.row.id, title: actual?.title ?? resolved.row.title }
@@ -442,7 +442,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         destTaskId: dest.row.id,
         destFolderId
       })
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [...new Set([sourceTaskId, dest.row.id])] })
       res.json({
         ok: true,
         data: { ...result, destTaskId: dest.row.id, destTaskTitle: dest.row.title }
@@ -485,7 +485,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         res.status(500).json({ ok: false, error: 'Failed to create folder' })
         return
       }
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [task.row.id] })
       res.json({ ok: true, data: folder })
     } catch (err) {
       if (respondFrameTooLarge(res, err)) return
@@ -498,12 +498,16 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       const db = deps.db
       const folder = await resolveFolderPrefix(db, req.params.id, res)
       if (!folder) return
+      const folderTask = await db.get<{ task_id: string }>(
+        'SELECT task_id FROM artifact_folders WHERE id = ?',
+        [folder.id]
+      )
       const ok = await store().deleteFolder(db, folder.id)
       if (!ok) {
         res.status(404).json({ ok: false, error: `Folder not found: ${req.params.id}` })
         return
       }
-      deps.notifyRenderer()
+      deps.notifyRenderer(folderTask ? { taskIds: [folderTask.task_id] } : undefined)
       res.json({ ok: true, data: { id: folder.id, name: folder.name } })
     } catch (err) {
       if (respondFrameTooLarge(res, err)) return
@@ -551,7 +555,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         res.status(404).json({ ok: false, error: `Folder not found: ${req.params.id}` })
         return
       }
-      deps.notifyRenderer()
+      deps.notifyRenderer({ taskIds: [updated.task_id] })
       // `parentName` (null for "root") echoed so the CLI can print `-> <name>`.
       res.json({ ok: true, data: { ...updated, parentName } })
     } catch (err) {

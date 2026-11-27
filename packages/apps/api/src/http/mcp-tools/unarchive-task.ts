@@ -42,7 +42,6 @@ export function registerUnarchiveTaskTool(server: McpServer, deps: McpToolsDeps)
           isError: true
         }
       }
-      deps.notifyRenderer()
       return {
         content: [
           {

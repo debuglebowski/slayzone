@@ -82,6 +82,7 @@ export function registerTaskBlockersRoutes(app: Express, deps: RestApiDeps): voi
 
       const resolved = await resolveBlockerRefs(db, taskId, body.set ?? body.add, res)
       if ('handled' in resolved) return
+      const before = await blockerIdsOf(db, taskId)
 
       const inserts = resolved.ids.map((bid) => ({
         type: 'run' as const,
@@ -101,7 +102,8 @@ export function registerTaskBlockersRoutes(app: Express, deps: RestApiDeps): voi
           : inserts
       )
 
-      deps.notifyRenderer()
+      // The blocked task's row and every blocker that gained or lost it.
+      deps.notifyRenderer({ taskIds: [...new Set([taskId, ...before, ...resolved.ids])] })
       const blockers = await db.all(BLOCKERS_SQL, [taskId])
       res.json({ ok: true, data: blockers })
     } catch (err) {
@@ -124,6 +126,7 @@ export function registerTaskBlockersRoutes(app: Express, deps: RestApiDeps): voi
         return
       }
       const taskId = task.row.id
+      const before = await blockerIdsOf(db, taskId)
 
       if (clear) {
         await db.run(`DELETE FROM task_dependencies WHERE blocks_task_id = ?`, [taskId])
@@ -139,11 +142,21 @@ export function registerTaskBlockersRoutes(app: Express, deps: RestApiDeps): voi
         )
       }
 
-      deps.notifyRenderer()
+      // The blocked task's row and every blocker it had.
+      deps.notifyRenderer({ taskIds: [...new Set([taskId, ...before])] })
       const blockers = await db.all(BLOCKERS_SQL, [taskId])
       res.json({ ok: true, data: blockers })
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
+}
+
+/** The tasks blocking `taskId` now. */
+async function blockerIdsOf(db: SlayzoneDb, taskId: string): Promise<string[]> {
+  const rows = await db.all<{ task_id: string }>(
+    'SELECT task_id FROM task_dependencies WHERE blocks_task_id = ?',
+    [taskId]
+  )
+  return rows.map((r) => r.task_id)
 }
