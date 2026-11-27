@@ -3,7 +3,7 @@ import http from 'node:http'
 import net from 'node:net'
 import { readFileSync, watchFile, unwatchFile } from 'node:fs'
 import { dirname, join, resolve as resolvePath } from 'node:path'
-import { HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
+import { HUB_CREDENTIALS_ENV, HUB_PROCESS_ENV } from '@slayzone/platform/hub-switches'
 import { HUB_DYNAMIC_PORT_RANGE } from '@slayzone/platform/paths'
 import { SUPERVISED_STOP_SIGKILL_GRACE_MS } from '@slayzone/platform/parent-watch'
 import { createChildReaper } from './child-reaper'
@@ -73,6 +73,12 @@ export type SidecarServerOpts = {
   scriptPath: string
   /** Base env for the child (ELECTRON_RUN_AS_NODE + SLAYZONE_* are merged in). */
   env: NodeJS.ProcessEnv
+  /**
+   * Secrets for the hub, written on an inherited pipe (fd 3) at every spawn and never
+   * put in its environment: the integration-credentials keys (JSON). Asked at each
+   * spawn, so a key unlocked late (a keychain prompt) reaches the next one.
+   */
+  secretPayload?: () => string | null
   /**
    * The DB file the side-car will open, DERIVED by the caller (getDatabasePath()
    * — `<ROOT>/storage` + the dev-vs-packaged filename). Diagnostics-only: it is
@@ -501,10 +507,22 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
           SLAYZONE_HUB_REQUIRE_LOGIN: '0',
           ...(opts.convexAddress ? { SLAYZONE_HUB_CONVEX_ADDRESS: opts.convexAddress } : {})
         }
+        // The credentials key goes on an inherited pipe (fd 3), written once and
+        // closed: never in the child's environment, where `ps eww` and every process
+        // the hub spawns (git, its hooks, setup scripts) would see it (review M1).
+        const secret = opts.secretPayload?.() ?? null
+        if (secret !== null) childEnv[HUB_CREDENTIALS_ENV.fd] = '3'
         const proc = spawn(opts.execPath, [opts.scriptPath], {
           env: childEnv,
-          stdio: ['pipe', 'pipe', 'pipe']
+          stdio: secret !== null ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
         })
+        if (secret !== null) {
+          const pipe = proc.stdio[3] as import('node:stream').Writable | null
+          pipe?.on('error', () => {
+            /* the child exited before reading: it boots without a key */
+          })
+          pipe?.end(secret)
+        }
         child = proc
         reaper.track(proc)
         spawnCount += 1

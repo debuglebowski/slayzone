@@ -87,6 +87,8 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // Set by the desktop app (a per-install key, safeStorage-wrapped on disk) or by an
   // operator; otherwise a hub derives it from SLAYZONE_HUB_AUTH_SECRET. Env only.
   SLAYZONE_HUB_CREDENTIALS_SECRET: 'secret',
+  // Which inherited fd carries the desktop's credentials keys (never the keys).
+  SLAYZONE_HUB_CREDENTIALS_FD: 'infra',
   // The pre-rename `SLAYZONE_RUNNER_JOIN_TOKEN` is deliberately UNLISTED: it is
   // retired, not aliased. It never shipped (the published computer betas read
   // `SLAYZONE_JOIN_TOKEN`), so no operator env carries it and there is nothing to

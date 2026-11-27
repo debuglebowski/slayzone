@@ -78,6 +78,7 @@ async function poll<T>(fn: () => Promise<T | null>, timeoutMs: number, label: st
 }
 
 interface Hub {
+  pid: number
   port: number
   logs: string[]
   exit: Promise<number | null>
@@ -85,7 +86,7 @@ interface Hub {
   stop: () => Promise<void>
 }
 
-async function bootHub(root: string): Promise<Hub> {
+async function bootHub(root: string, opts: { keysOnPipe?: string } = {}): Promise<Hub> {
   const logs: string[] = []
   const proc: ChildProcess = spawn(ELECTRON_BIN, [HUB_BIN], {
     cwd: root,
@@ -93,10 +94,15 @@ async function bootHub(root: string): Promise<Hub> {
       ...scrubbedEnv(root),
       SLAYZONE_ROOT: root,
       SLAYZONE_HUB_LISTEN_ADDRESS: '127.0.0.1:0',
-      ELECTRON_RUN_AS_NODE: '1'
+      ELECTRON_RUN_AS_NODE: '1',
+      // As the desktop supervisor does: keys on fd 3, never in the environment.
+      ...(opts.keysOnPipe !== undefined ? { SLAYZONE_HUB_CREDENTIALS_FD: '3' } : {})
     },
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio:
+      opts.keysOnPipe !== undefined ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
   })
+  if (opts.keysOnPipe !== undefined)
+    (proc.stdio[3] as import('node:stream').Writable).end(opts.keysOnPipe)
   const cap = (b: Buffer): void => {
     for (const line of b.toString().split('\n')) if (line.trim()) logs.push(line)
   }
@@ -125,7 +131,7 @@ async function bootHub(root: string): Promise<Hub> {
     15_000,
     'hub /health ok'
   )
-  return { port, logs, exit, dbPath, stop }
+  return { pid: proc.pid ?? -1, port, logs, exit, dbPath, stop }
 }
 
 type Backup = { filename: string; type: string; name: string }
@@ -446,5 +452,52 @@ test('H3: a backup whose migration fails is rolled back at boot: old data, a not
     expect(readdirSync(root).some((n) => n.includes('.pre-restore'))).toBe(false)
   } finally {
     await second.stop()
+  }
+})
+
+test('M1: the key arrives on a pipe, is used, and is in no environment (ps eww)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-cred-pipe-'))
+  roots.push(root)
+  const key = randomBytes(32).toString('base64url')
+  // First start creates the database; the row an older hub stored in plaintext.
+  const first = await bootHub(root)
+  await first.stop()
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+  const seed = new Database(first.dbPath)
+  seed
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run('integration:credential:piped', 'plain:lin_api_piped')
+  seed.close()
+
+  const hub = await bootHub(root, { keysOnPipe: JSON.stringify({ current: key, previous: [] }) })
+  try {
+    const { credentialKeyId } = await import(
+      '../../../domains/integrations/src/server/hub-cipher.js'
+    )
+    const { deriveHubCredentialsKey } = await import('@slayzone/platform/hub-auth-secret')
+    const kid = credentialKeyId(deriveHubCredentialsKey(key))
+    await poll(
+      async () => {
+        const db = new Database(hub.dbPath, { readonly: true })
+        try {
+          const row = db
+            .prepare('SELECT value FROM settings WHERE key = ?')
+            .get('integration:credential:piped') as { value: string }
+          return row.value.startsWith(`hub1:${kid}:`) ? true : null
+        } finally {
+          db.close()
+        }
+      },
+      20_000,
+      'row re-encrypted under the piped key'
+    )
+    if (process.platform !== 'win32') {
+      const ps = execFileSync('ps', ['eww', '-p', String(hub.pid)], { encoding: 'utf8' })
+      expect(ps).toContain('SLAYZONE_ROOT') // the probe does read the environment
+      expect(ps).not.toContain(key)
+      expect(ps).not.toContain('SLAYZONE_HUB_CREDENTIALS_SECRET')
+    }
+  } finally {
+    await hub.stop()
   }
 })

@@ -1,13 +1,16 @@
 import { deriveHubCredentialsKey } from '@slayzone/platform/hub-auth-secret'
 import type { CredentialKeyRing } from '@slayzone/integrations/server'
+import { HUB_CREDENTIALS_ENV } from '@slayzone/platform/hub-switches'
 
 /**
  * The key this hub encrypts integration credentials under (decision D1).
  *
- *   1. `SLAYZONE_HUB_CREDENTIALS_SECRET`, when set. The desktop app always sets it: a
- *      per-install key it keeps wrapped with Electron safeStorage (its hub runs on the
- *      shared dev auth secret, which cannot protect anything). An operator may set it
- *      too, to keep credentials readable across an auth-secret rotation.
+ *   1. An explicit secret (credentials-secret-input.ts). The desktop app always sends
+ *      one, on a pipe: a per-install key it keeps wrapped with Electron safeStorage
+ *      (its hub runs on the shared dev auth secret, which cannot protect anything),
+ *      plus any older key it recovered. An operator may set
+ *      `SLAYZONE_HUB_CREDENTIALS_SECRET`, to keep credentials readable across an
+ *      auth-secret rotation.
  *   2. Otherwise HKDF of the hub auth secret (label `integrationCredentials`), so a
  *      standalone hub needs no new file and no new knob.
  *   3. Otherwise none (the shared dev secret is public, a key derived from it would
@@ -17,11 +20,13 @@ import type { CredentialKeyRing } from '@slayzone/integrations/server'
  * started without the variable keeps reading its rows, and re-encrypts them under
  * the new key as it reads them.
  */
-export const HUB_CREDENTIALS_SECRET_ENV = 'SLAYZONE_HUB_CREDENTIALS_SECRET'
 const MIN_SECRET_LENGTH = 32
 
 export function resolveCredentialKeyRing(input: {
-  env: NodeJS.ProcessEnv
+  /** The desktop's key or an operator's secret (credentials-secret-input.ts). */
+  secret: string | null
+  /** Older keys still to read (a desktop key set aside and recovered, review H2). */
+  previousSecrets: readonly string[]
   hubAuthSecret: string
   devAuthSecret: string
 }): CredentialKeyRing | null {
@@ -29,14 +34,15 @@ export function resolveCredentialKeyRing(input: {
     input.hubAuthSecret && input.hubAuthSecret !== input.devAuthSecret
       ? deriveHubCredentialsKey(input.hubAuthSecret)
       : null
-  const explicit = input.env[HUB_CREDENTIALS_SECRET_ENV]
-  if (explicit !== undefined && explicit !== '') {
-    if (explicit.length < MIN_SECRET_LENGTH) {
+  if (input.secret) {
+    if (input.secret.length < MIN_SECRET_LENGTH) {
       throw new Error(
-        `[slayzone-hub] ${HUB_CREDENTIALS_SECRET_ENV} must be at least ${MIN_SECRET_LENGTH} characters`
+        `[slayzone-hub] ${HUB_CREDENTIALS_ENV.secret} must be at least ${MIN_SECRET_LENGTH} characters`
       )
     }
-    return { current: deriveHubCredentialsKey(explicit), previous: derived ? [derived] : [] }
+    const previous = input.previousSecrets.map((p) => deriveHubCredentialsKey(p))
+    if (derived) previous.push(derived)
+    return { current: deriveHubCredentialsKey(input.secret), previous }
   }
   return derived ? { current: derived } : null
 }

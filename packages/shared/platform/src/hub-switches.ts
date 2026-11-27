@@ -133,6 +133,17 @@ export const HUB_ADDRESS_ENV = {
   authSecret: 'SLAYZONE_HUB_AUTH_SECRET'
 } as const
 
+/**
+ * The hub's integration-credentials key (integrations hub-cipher.ts). `secret`: an
+ * operator's value (env only, read once and removed from the hub's environment).
+ * `fd`: the file descriptor the desktop app writes its keys on — the desktop never
+ * puts them in an environment (`ps eww`, child processes; review M1).
+ */
+export const HUB_CREDENTIALS_ENV = {
+  secret: 'SLAYZONE_HUB_CREDENTIALS_SECRET',
+  fd: 'SLAYZONE_HUB_CREDENTIALS_FD'
+} as const
+
 /** The old hub-side name of {@link HUB_ADDRESS_ENV.listen}. */
 export const LEGACY_HUB_LISTEN_ENV = 'SLAYZONE_HUB_ADDRESS'
 
@@ -219,6 +230,7 @@ export const HUB_PROCESS_ENV: readonly string[] = [
   ...Object.values(IDP_ROLE_ENV),
   RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
   ...Object.values(HUB_ADDRESS_ENV),
+  ...Object.values(HUB_CREDENTIALS_ENV),
   LEGACY_HUB_LISTEN_ENV,
   HUB_ALLOWED_WEB_ORIGINS_ENV,
   HUB_TRUSTED_PROXIES_ENV,

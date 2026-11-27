@@ -132,3 +132,43 @@ it into `<ROOT>`; it never moves or deletes anything there.
   Before that, a v0.35.0 `slay.js` writes into the old database.
 - **Before migrating**, the app saves `backups/*.migration.sqlite` (the last 3 are kept).
 
+
+## Integration credentials and the hub key
+
+A hub encrypts integration tokens (Linear, GitHub, Jira) with its own key
+(`integrations/src/server/hub-cipher.ts`). The database holds only ciphertext, so
+**a backup of `<ROOT>` is not enough to read the tokens back: the key must come
+along too.**
+
+| Hub | The key comes from | Keep / back up |
+|---|---|---|
+| Standalone hub | `SLAYZONE_HUB_CREDENTIALS_SECRET` if set, else derived from `SLAYZONE_HUB_AUTH_SECRET` | The secret(s), with the backup |
+| Desktop app | `<ROOT>/hub.credentials-key.enc`, wrapped with the OS keychain | Comes back with the keychain (same machine and user) |
+
+- **Rotating `SLAYZONE_HUB_AUTH_SECRET` on a standalone hub changes the key it
+  derives.** Every integration then asks to reconnect ("Saved under a different hub
+  key…"). To keep them, set `SLAYZONE_HUB_CREDENTIALS_SECRET` to the OLD auth secret
+  value before rotating: an explicit secret wins, and rows are re-encrypted as they are
+  read. Prefer the derived key otherwise: an environment variable is visible to
+  `ps eww` for the hub's process.
+- **Desktop key on another machine** (a `<ROOT>` restored from Time Machine, a
+  keychain reset, keychain access denied): the app cannot unwrap the key. It keeps
+  the file as `hub.credentials-key.enc.unreadable-<time>` (never deleted), makes a new
+  key, and the integrations ask to reconnect. If the keychain comes back later, the
+  old key is read again at the next start and those integrations work again.
+
+## Restoring a built-in backup (Settings → Backups)
+
+Admins only, on every hub. The hub validates the backup (readable, `quick_check`,
+not newer than this build, no move in progress, a data-DB backup file name), keeps a
+`restore` backup of the current data, and restarts itself (exit 75); systemd, launchd
+or the desktop app start it again. At that start:
+
+- the current DB is moved aside to `slayzone.data.sqlite.pre-restore` (with its WAL),
+  the backup is put in its place, and the hub opens it (migrations run);
+- if that fails — or the start before died on it — the previous DB is put back, the
+  hub starts on it, and Settings → Hubs shows "Backup restore refused — your data was
+  kept" until dismissed;
+- a full disk while copying the backup refuses the restore once (no restart loop).
+
+A hub started by hand (no process manager) stops to apply the restore: start it again.

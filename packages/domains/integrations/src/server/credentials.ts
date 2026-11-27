@@ -13,6 +13,7 @@ import {
   isHubCredential
 } from './hub-cipher'
 import {
+  CREDENTIAL_KEY_CHANGED_ERROR,
   CREDENTIAL_KEY_UNAVAILABLE_ERROR,
   CREDENTIAL_LEGACY_UNREADABLE_ERROR,
   CREDENTIAL_RECONNECT_REASONS
@@ -61,6 +62,31 @@ export function setLegacyCredentialDecryptor(d: LegacyCredentialDecryptor | null
   legacyDecryptor = d
 }
 
+/**
+ * Who holds this hub's key, so a missing or different key is explained in the user's
+ * terms: `desktop` (the app's per-install key in the OS keychain) or `standalone`
+ * (derived from the hub's auth secret / an operator's credentials secret, L5).
+ */
+export type CredentialKeyContext = 'desktop' | 'standalone'
+let keyContext: CredentialKeyContext = 'desktop'
+
+export function setCredentialKeyContext(context: CredentialKeyContext): void {
+  keyContext = context
+}
+
+function wrongKeyReason(): string {
+  return keyContext === 'standalone'
+    ? CREDENTIAL_KEY_CHANGED_ERROR
+    : CREDENTIAL_KEY_UNAVAILABLE_ERROR
+}
+
+/** Why storing refuses with no key at all — the user's next step, not a config var. */
+function noKeyMessage(): string {
+  return keyContext === 'desktop'
+    ? "SlayZone could not unlock this hub's key from the OS keychain. Restart SlayZone and allow keychain access, then reconnect."
+    : 'No credential key on this hub: set SLAYZONE_HUB_CREDENTIALS_SECRET or SLAYZONE_HUB_AUTH_SECRET'
+}
+
 export const CREDENTIAL_RECONNECT_REQUIRED = 'CREDENTIAL_RECONNECT_REQUIRED'
 
 /**
@@ -84,11 +110,7 @@ function toSettingKey(ref: string): string {
 }
 
 function encrypt(ref: string, secret: string): string {
-  if (!keyRing) {
-    throw new Error(
-      'No credential key on this hub: set SLAYZONE_HUB_CREDENTIALS_SECRET or SLAYZONE_HUB_AUTH_SECRET'
-    )
-  }
+  if (!keyRing) throw new Error(noKeyMessage())
   return encryptHubCredential(keyRing, toSettingKey(ref), secret)
 }
 
@@ -118,14 +140,14 @@ async function decryptStored(
   }
   if (isHubCredential(value)) {
     if (!keyRing) {
-      throw new CredentialReconnectRequiredError(CREDENTIAL_KEY_UNAVAILABLE_ERROR)
+      throw new CredentialReconnectRequiredError(wrongKeyReason())
     }
     try {
       const { result, shouldReEncrypt } = decryptHubCredential(keyRing, toSettingKey(ref), value)
       return { secret: result, migrate: shouldReEncrypt }
     } catch (err) {
       if (err instanceof HubCredentialError && err.code === 'wrong-key') {
-        throw new CredentialReconnectRequiredError(CREDENTIAL_KEY_UNAVAILABLE_ERROR)
+        throw new CredentialReconnectRequiredError(wrongKeyReason())
       }
       throw err
     }
@@ -158,6 +180,9 @@ export async function readCredential(db: SlayzoneDb, ref: string): Promise<strin
  */
 async function reEncrypt(db: SlayzoneDb, ref: string, prev: string, secret: string): Promise<void> {
   try {
+    // Plaintext leaves the file only after a compaction (L1): flag it BEFORE the
+    // rewrite, whichever path — a read here or the boot pass — migrates the row.
+    if (prev.startsWith(PLAINTEXT_PREFIX)) await flagCompaction(db)
     await db
       .prepare('UPDATE settings SET value = ? WHERE key = ? AND value = ?')
       .run(encrypt(ref, secret), toSettingKey(ref), prev)
@@ -194,6 +219,12 @@ export function credentialNeedsReconnect(value: string): boolean {
  * the settings registry (settings-core registry.ts).
  */
 const COMPACTION_PENDING_SETTING = 'integration.credentials_compaction_pending'
+
+async function flagCompaction(db: SlayzoneDb): Promise<void> {
+  await db
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run(COMPACTION_PENDING_SETTING, '1')
+}
 
 export interface CredentialMigrationReport {
   /** The pass did not run: integrations are switched off on this hub. */
@@ -240,11 +271,7 @@ export async function migrateStoredCredentials(
       let readable = true
       try {
         const { secret, migrate } = await decryptStored(ref, value)
-        if (migrate && value.startsWith(PLAINTEXT_PREFIX)) {
-          await db
-            .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-            .run(COMPACTION_PENDING_SETTING, '1')
-        }
+        if (migrate && value.startsWith(PLAINTEXT_PREFIX)) await flagCompaction(db)
         if (migrate) {
           await db
             .prepare('UPDATE settings SET value = ? WHERE key = ? AND value = ?')

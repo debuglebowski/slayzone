@@ -10,6 +10,11 @@
 export const CREDENTIAL_KEY_UNAVAILABLE_ERROR =
   "This hub's key isn't available on this machine — reconnect to continue."
 
+/** A standalone hub: the key derives from its auth secret (or an operator's credentials
+ *  secret), so a row under another key means one of those changed (review L5). */
+export const CREDENTIAL_KEY_CHANGED_ERROR =
+  'Saved under a different hub key (SLAYZONE_HUB_AUTH_SECRET or SLAYZONE_HUB_CREDENTIALS_SECRET changed) — reconnect to continue.'
+
 /** A credential an older desktop app encrypted with its OS keychain (safeStorage),
  *  which this hub cannot reach. */
 export const CREDENTIAL_LEGACY_UNREADABLE_ERROR =
@@ -17,6 +22,7 @@ export const CREDENTIAL_LEGACY_UNREADABLE_ERROR =
 
 const REASONS: readonly string[] = [
   CREDENTIAL_KEY_UNAVAILABLE_ERROR,
+  CREDENTIAL_KEY_CHANGED_ERROR,
   CREDENTIAL_LEGACY_UNREADABLE_ERROR
 ]
 

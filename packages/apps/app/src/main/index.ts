@@ -618,7 +618,7 @@ import {
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { setTelemetryEvents } from '@slayzone/telemetry/server'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
-import { loadHubCredentialsSecret } from './hub-credentials-key'
+import { createHubCredentialsKeySource, loadHubCredentialsKeys } from './hub-credentials-key'
 import { sidecarFailureMessage } from './sidecar-failure-message'
 import { resetSyncFlags } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
@@ -2749,20 +2749,19 @@ app
     if (!isRemoteMode)
       setImmediate(() => {
         logBoot('sidecar server supervisor import dispatched')
+        // The hub's integration-credentials keys (hub-credentials-key.ts): per install,
+        // safeStorage-wrapped on disk, handed over on a pipe at each spawn. A keychain
+        // prompt never holds the hub's start (L6): after 10s it starts without a key,
+        // and a key unlocked later reaches the next start.
+        const hubCredentialsKeys = createHubCredentialsKeySource(() =>
+          loadHubCredentialsKeys(getSupervisedRoot('hub'), getSafeStorageCipher())
+        )
         Promise.all([
           import('./sidecar-server-supervisor'),
           desktopBridgeAddressPromise,
-          // The hub's integration-credentials key: per install, safeStorage-wrapped on
-          // disk (hub-credentials-key.ts). Null only when an existing key cannot be
-          // unwrapped — the hub then asks to reconnect instead of losing anything.
-          loadHubCredentialsSecret(getSupervisedRoot('hub'), getSafeStorageCipher()).catch(
-            (err) => {
-              console.error('[hub-credentials-key] failed:', err)
-              return null
-            }
-          )
+          hubCredentialsKeys.ready()
         ])
-          .then(([{ startSidecarServer }, desktopBridge, hubCredentialsSecret]) => {
+          .then(([{ startSidecarServer }, desktopBridge]) => {
             const scriptPath = !app.isPackaged
               ? join(app.getAppPath(), '../hub/dist/bin.cjs')
               : join(process.resourcesPath, 'hub', 'bin.cjs')
@@ -2804,6 +2803,8 @@ app
               // T-99: the Convex deployment THIS app's renderer signs in against. The
               // hub starts GitHub sign-in only against it, never a URL a client names.
               convexAddress: convexAddressFromUrl(APP_CONVEX_URL),
+              // Never in env (review M1): written on an inherited pipe at each spawn.
+              secretPayload: hubCredentialsKeys.payload,
               env: {
                 ...process.env,
                 // The sidecar IS this app's hub, so hand it this app's own
@@ -2827,9 +2828,6 @@ app
                 // desktop-bridge-server.ts's `verifyClient` gate) — secret-scoped
                 // in ENV_MANIFEST so it never reaches a spawned user terminal.
                 SLAYZONE_DESKTOP_BRIDGE_TOKEN: desktopBridge.token,
-                // The key the hub encrypts integration credentials under — secret-scoped
-                // in ENV_MANIFEST, never inherited by a terminal. Unset = no key.
-                SLAYZONE_HUB_CREDENTIALS_SECRET: hubCredentialsSecret ?? undefined,
                 // Packaged resolution: only bin.js is copied to Resources/hub,
                 // so createRequire's walk-up never finds node_modules. Point the
                 // resolver at the unpacked natives (better-sqlite3 and its

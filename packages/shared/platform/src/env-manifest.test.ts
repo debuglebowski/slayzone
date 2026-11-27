@@ -86,6 +86,10 @@ describe('manifest shape', () => {
   test('SLAYZONE_HUB_CREDENTIALS_SECRET is secret', () => {
     expect(ENV_MANIFEST.SLAYZONE_HUB_CREDENTIALS_SECRET).toBe('secret')
   })
+
+  test('SLAYZONE_HUB_CREDENTIALS_FD is infra', () => {
+    expect(ENV_MANIFEST.SLAYZONE_HUB_CREDENTIALS_FD).toBe('infra')
+  })
   // The pre-rename name is RETIRED, not aliased. It never shipped: the published
   // computer betas (0.36.0-beta.2/3) read `SLAYZONE_JOIN_TOKEN`, so there is no
   // operator env anywhere carrying this name to keep working. Unmanifested → the

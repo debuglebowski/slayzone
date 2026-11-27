@@ -28,8 +28,13 @@ export type { ProviderAdapter, NormalizedIssue, ExternalGroup, ExternalScope } f
 export {
   CREDENTIAL_RECONNECT_REQUIRED,
   migrateStoredCredentials,
+  setCredentialKeyContext,
   setCredentialKeyRing,
   setLegacyCredentialDecryptor
 } from './credentials'
-export type { CredentialMigrationReport, LegacyCredentialDecryptor } from './credentials'
+export type {
+  CredentialKeyContext,
+  CredentialMigrationReport,
+  LegacyCredentialDecryptor
+} from './credentials'
 export type { CredentialKeyRing } from './hub-cipher'

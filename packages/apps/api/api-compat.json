@@ -4,7 +4,7 @@
     "sharing.sharedWithMe removed": "Removed on purpose (abd614975: guest sharing reversed). A v0.43 app’s sidebar SharedWithMe renders null when the query has no data, so on a newer hub the section just stays hidden.",
     "app.backup.create output": "BackupInfo.type gained 'restore' (the pre-restore copy). An older app's Settings shows the type as a label; an unknown value only loses its badge colour.",
     "app.backup.list output": "Same as app.backup.create: BackupInfo.type gained 'restore'; an older app renders it as plain text.",
-    "app.backup.restore output": "Was void, now a RestoreResult. An older app awaits the call and ignores the value; the hub restarting reconnects it as after any hub restart."
+    "app.backup.restore output": "Was void, now a RestoreResult; an older app ignores the value. NOT seamless: a v0.44 app connected to a server hub could not restore before (the hub refused), and now can; afterwards it does not reload (it has no dataGeneration watcher) and keeps showing the old data until the user reloads it. Accepted: it cannot be told apart from a current client (both send clientApi 1), admin-only, and it leaves data correct on the hub."
   },
   "newClient": {
     "app.backup.restoreStatus added": "Gated: Settings calls it only when the hub has the 'hub-restart-restore' feature (hubHasFeature).",

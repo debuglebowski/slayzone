@@ -47,6 +47,7 @@ import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
 import { createItemFaultService, recordRefusedRestore } from './item-faults'
 import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import { resolveCredentialKeyRing } from './credentials-key'
+import { takeCredentialsSecretInput } from './credentials-secret-input'
 import { resolveHubName } from '@slayzone/platform/slayzone-config'
 import { detectHubRespawner, hasHubRestartHandler, requestHubRestart } from './hub-restart'
 import type { ApplyRestoreResult } from './restore-swap'
@@ -276,6 +277,7 @@ import {
   ensureIntegrationSchema,
   resetSyncFlags,
   migrateStoredCredentials,
+  setCredentialKeyContext,
   setCredentialKeyRing,
   setLegacyCredentialDecryptor,
   setIntegrationOps
@@ -1648,9 +1650,14 @@ export function composeServer(opts: {
   // bridge to Electron safeStorage is now decrypt-only, for rows an older desktop
   // hub wrote (D4). The boot pass re-encrypts every older row (plaintext,
   // safeStorage, a previous key) — including rows a restored backup brought back.
+  // The secret is read once and removed from this process's env before anything is
+  // spawned (credentials-secret-input.ts, review M1).
+  const credentialsInput = takeCredentialsSecretInput()
+  setCredentialKeyContext(opts.standalone ? 'standalone' : 'desktop')
   setCredentialKeyRing(
     resolveCredentialKeyRing({
-      env: process.env,
+      secret: credentialsInput.secret,
+      previousSecrets: credentialsInput.previous,
       hubAuthSecret,
       devAuthSecret: DEV_HUB_AUTH_SECRET
     })

@@ -12,6 +12,7 @@ import {
   credentialNeedsReconnect,
   type LegacyCredentialDecryptor,
   readCredential,
+  setCredentialKeyContext,
   setCredentialKeyRing,
   setLegacyCredentialDecryptor,
   storeCredential
@@ -93,6 +94,7 @@ const legacy: LegacyCredentialDecryptor = {
 }
 
 afterEach(() => {
+  setCredentialKeyContext('desktop')
   setCredentialKeyRing(null)
   setLegacyCredentialDecryptor(null)
 })
@@ -121,6 +123,20 @@ describe('credential store', () => {
     const ref = newRef()
     await expect(storeCredential(db as never, ref, 'secret')).rejects.toThrow(/key/)
     expect(db.raw(settingKey(ref))).toBeUndefined()
+  })
+
+  test('H2: no key on a desktop hub (keychain locked): storing says why, and what to do', async () => {
+    setCredentialKeyContext('desktop')
+    await expect(storeCredential(db as never, newRef(), 'x')).rejects.toThrow(/keychain.*restart/i)
+  })
+
+  test('L1: a plain: row re-encrypted on READ flags the file for compaction', async () => {
+    const ref = newRef()
+    db.seed(settingKey(ref), 'plain:ghp_read_first')
+    setCredentialKeyRing({ current: k1 })
+    expect(await readCredential(db as never, ref)).toBe('ghp_read_first')
+    expect(db.raw(settingKey(ref))!.startsWith('hub1:')).toBe(true)
+    expect(db.raw('integration.credentials_compaction_pending')).toBe('1')
   })
 
   test('a plain: row is still read once a key exists, and migrated to hub1:', async () => {

@@ -11,12 +11,14 @@ import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import {
   migrateStoredCredentials,
   readCredential,
+  setCredentialKeyContext,
   setCredentialKeyRing,
   setLegacyCredentialDecryptor
 } from './credentials.js'
 import { ensureIntegrationSchema } from './handlers-store.js'
 import { encryptHubCredential } from './hub-cipher.js'
 import {
+  CREDENTIAL_KEY_CHANGED_ERROR,
   CREDENTIAL_KEY_UNAVAILABLE_ERROR,
   CREDENTIAL_LEGACY_UNREADABLE_ERROR,
   credentialReconnectReason
@@ -155,6 +157,23 @@ describe('credential migration pass', () => {
     setCredentialKeyRing({ current: other })
     await migrateStoredCredentials(h.slayDb)
     expect(conn(connId)).toEqual({ enabled: 1, auth_error: null })
+  })
+
+  test("L5: on a standalone hub a row under another key says the hub's key changed", async () => {
+    setCredentialKeyContext('standalone')
+    const other = randomBytes(32)
+    const connId = seed(
+      's',
+      encryptHubCredential({ current: other }, 'integration:credential:s', 'x')
+    )
+    setCredentialKeyRing({ current: key })
+    await migrateStoredCredentials(h.slayDb)
+    expect(conn(connId)).toEqual({ enabled: 0, auth_error: CREDENTIAL_KEY_CHANGED_ERROR })
+    expect(CREDENTIAL_KEY_CHANGED_ERROR).toMatch(/SLAYZONE_HUB_AUTH_SECRET/)
+    expect(credentialReconnectReason(CREDENTIAL_KEY_CHANGED_ERROR)).toBe(
+      CREDENTIAL_KEY_CHANGED_ERROR
+    )
+    setCredentialKeyContext('desktop')
   })
 
   test('a provider error is not a key reason', () => {

@@ -81,6 +81,15 @@ const restartAfterReadyMs = Number(process.env.FAKE_RESTART_AFTER_READY_MS || '0
 
 // Lets a test read back the environment the supervisor actually handed the child.
 const envDumpFile = process.env.FAKE_ENV_DUMP_FILE || ''
+// Lets a test read back what the supervisor wrote on the credentials pipe.
+const fdDumpFile = process.env.FAKE_FD_DUMP_FILE || ''
+if (fdDumpFile && process.env.SLAYZONE_HUB_CREDENTIALS_FD) {
+  try {
+    const fd = Number(process.env.SLAYZONE_HUB_CREDENTIALS_FD)
+    fs.writeFileSync(fdDumpFile, fs.readFileSync(fd, 'utf8'))
+    fs.closeSync(fd)
+  } catch (e) { fs.writeFileSync(fdDumpFile, 'ERR ' + e) }
+}
 if (envDumpFile) {
   try { fs.writeFileSync(envDumpFile, JSON.stringify(process.env)) } catch (e) {}
 }
@@ -293,6 +302,34 @@ test('the child gets the hub env: its LISTEN address, login off, never the dial-
   }
 })
 
+test('M1: the credentials key reaches the hub on an inherited pipe, never in its environment', async () => {
+  const dir = mkTmp()
+  const envDump = path.join(dir, 'child-env.json')
+  const fdDump = path.join(dir, 'child-fd.json')
+  const payload = JSON.stringify({ current: 'k'.repeat(43), previous: [] })
+  const { handle } = makeHarness(
+    dir,
+    {
+      FAKE_ENV_DUMP_FILE: envDump,
+      FAKE_FD_DUMP_FILE: fdDump,
+      // An operator value the app happened to inherit must not reach its hub either.
+      SLAYZONE_HUB_CREDENTIALS_SECRET: 'inherited-credentials-secret-0123456789'
+    },
+    { healthPollIntervalMs: 40 },
+    { secretPayload: () => payload }
+  )
+  try {
+    await handle.waitForReady()
+    const env = JSON.parse(fs.readFileSync(envDump, 'utf8')) as Record<string, string>
+    expect(env.SLAYZONE_HUB_CREDENTIALS_SECRET).toBeUndefined()
+    expect(env.SLAYZONE_HUB_CREDENTIALS_FD).toBe('3')
+    expect(JSON.stringify(env)).not.toContain('k'.repeat(43))
+    expect(fs.readFileSync(fdDump, 'utf8')).toBe(payload)
+  } finally {
+    await handle.stop()
+  }
+})
+
 test('hub-side config the app inherited never reaches the child hub', async () => {
   const dir = mkTmp()
   const dump = path.join(dir, 'child-env.json')
@@ -316,6 +353,10 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     SLAYZONE_HUB_SSO_KEY_PATH: '/inherited/sso-key.pem',
     SLAYZONE_HUB_SSO_REQUIRE_MFA: 'perhaps',
     SLAYZONE_HUB_AUTH_SECRET: 'inherited-auth-secret',
+    // Inherited, the desktop's hub would encrypt integration tokens under someone
+    // else's key (and print it in `ps eww`).
+    SLAYZONE_HUB_CREDENTIALS_SECRET: 'inherited-credentials-secret-0123456789abc',
+    SLAYZONE_HUB_CREDENTIALS_FD: '7',
     SLAYZONE_HUB_ALLOWED_WEB_ORIGINS: 'https://elsewhere.example.com',
     SLAYZONE_HUB_TRUSTED_PROXIES: '0.0.0.0/0',
     // A shared hub's period: inherited, it would delete the desktop user's sessions.

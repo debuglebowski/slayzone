@@ -7,6 +7,7 @@ import { getHubConfigFilePath, loadHubConfigFile } from '@slayzone/platform/slay
 import { bootRefusalRule } from './boot-rules.js'
 import { runBreakGlassCommand } from './break-glass-command.js'
 import { HUB_RESTART_EXIT_CODE, setHubRestartHandler } from './hub-restart.js'
+import { takeCredentialsSecretInput } from './credentials-secret-input.js'
 import { startServer } from './server.js'
 import { applyStandaloneHubConfig } from './standalone-config.js'
 import type { ServerHandle } from './index.js'
@@ -65,6 +66,10 @@ async function main(): Promise<void> {
   // + secret), so the supervised sidecar boot is byte-identical. See
   // ./standalone-config.ts.
   applyStandaloneHubConfig()
+
+  // The integration-credentials key: read now, before anything is spawned, and removed
+  // from this process's environment (credentials-secret-input.ts, review M1).
+  takeCredentialsSecretInput()
 
   const handle: ServerHandle = await startServer()
 
