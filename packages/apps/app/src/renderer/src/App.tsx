@@ -667,18 +667,17 @@ function App(): React.JSX.Element {
     [guardTaskOpen, rawOpenTask, startTransition]
   )
   // A task page's links (chat `slayzone://task/<id>`) may name a task by a short
-  // id prefix; the tab store looks tasks up by exact id only.
-  const openTaskRef = useCallback(
-    (taskRef: string) => {
-      openTask(
-        resolveIdRef(
-          taskRef,
-          tasks.map((t) => t.id)
-        ) ?? taskRef
-      )
-    },
-    [openTask, tasks]
-  )
+  // id prefix; the tab store looks tasks up by exact id only. Stable: it goes to
+  // every open tab's page, and keyed on `tasks` it re-rendered all of them on any
+  // task change (a new temporary task re-rendered 30 hidden pages — 117 e2e).
+  const openTaskRef = useStableCallback((taskRef: string) => {
+    openTask(
+      resolveIdRef(
+        taskRef,
+        tasks.map((t) => t.id)
+      ) ?? taskRef
+    )
+  })
 
   // Tab management (declared early so IPC-listener refs below can close over closeTab).
   // Closing a tab keeps its task; a scratch terminal's processes stop with it.
