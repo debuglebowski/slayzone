@@ -990,7 +990,14 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
           /* ignore */
         }
       }
-      await new Promise<void>((r) => httpServer.close(() => r()))
+      // A client that ignores the reconnect notice (a raw socket, a stuck tab) would
+      // hold `httpServer.close` forever: `wss.close()` on a noServer WSS leaves its
+      // clients open. Drop every socket — the reconnect notice already went out.
+      for (const c of wss.clients) c.terminate()
+      if (computerWss) for (const c of computerWss.clients) c.terminate()
+      const closed = new Promise<void>((r) => httpServer.close(() => r()))
+      httpServer.closeAllConnections()
+      await closed
       if (ownsDb) {
         try {
           await db.close()

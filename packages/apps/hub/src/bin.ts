@@ -87,7 +87,18 @@ async function main(): Promise<void> {
     // deadline (a backstop for a loop too blocked to run it), so the stop gets the
     // full deadline either way. Unref'd: a clean stop still exits the moment it
     // completes.
-    if (supervised) {
+    // A restart (exit 75) is bounded on EVERY hub: a server hub that hung here would
+    // be a live process to systemd/launchd, so nothing would ever start it again and
+    // the staged restore would wait forever. Exiting 75 late is safe — the restore
+    // marker is durable and the database is swapped at the next start anyway.
+    if (exitCode === HUB_RESTART_EXIT_CODE) {
+      setTimeout(() => {
+        process.stderr.write(
+          `[slayzone-server] restart still stopping after ${SUPERVISED_STOP_DEADLINE_MS}ms — exiting ${HUB_RESTART_EXIT_CODE}\n`
+        )
+        process.exit(HUB_RESTART_EXIT_CODE)
+      }, SUPERVISED_STOP_DEADLINE_MS).unref()
+    } else if (supervised) {
       setTimeout(() => {
         process.stderr.write(
           `[slayzone-server] still running ${SUPERVISED_STOP_DEADLINE_MS}ms after stop began — forcing exit\n`

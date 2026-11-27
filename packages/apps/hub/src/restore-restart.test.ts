@@ -32,6 +32,7 @@ import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
+import WebSocket from 'ws'
 import { afterAll, assert, beforeAll, expect, test } from 'vitest'
 
 const require = createRequire(import.meta.url)
@@ -357,5 +358,34 @@ test('a restore refused at boot keeps the data and leaves a notice until dismiss
     }
   } finally {
     await second.stop()
+  }
+})
+
+test('a client socket left open never holds the restart: the hub still exits 75 (H1)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-restore-held-'))
+  roots.push(root)
+  const hub = await bootHub(root)
+  // A client that ignores the reconnect notice and never closes (a raw socket).
+  const raw = new WebSocket(`ws://127.0.0.1:${hub.port}/trpc?windowId=9`)
+  await new Promise<void>((resolve, reject) => {
+    raw.once('open', () => resolve())
+    raw.once('error', reject)
+  })
+  try {
+    const { client, close } = hubClient(hub)
+    try {
+      const backup = await client.app.backup.create.mutate({ name: 'held' })
+      await client.app.backup.restore.mutate({ filename: backup.filename })
+    } finally {
+      close()
+    }
+    const code = await Promise.race([
+      hub.exit,
+      new Promise((r) => setTimeout(() => r('still alive after 25s'), 25_000))
+    ])
+    expect(code).toBe(75)
+  } finally {
+    raw.terminate()
+    await hub.stop()
   }
 })
