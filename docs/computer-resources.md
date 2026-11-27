@@ -59,7 +59,7 @@ them down, but never kills them for it. Each agent and its subprocesses get thei
 own cgroup so stopping an agent reaches every process it started. If an agent's
 cgroup cannot be created or joined, the agent starts without it and the computer
 logs why. Linux hosts without delegation still use admission, idle reclamation, and
-agent OOM score adjustment. Settings → Connections shows the current health report or
+agent OOM score adjustment. Settings (a hub's Computers tab) shows the current health report or
 the last report received before disconnect.
 
 On existing Linux installs, `slay computer restart <name> --upgrade` refreshes the

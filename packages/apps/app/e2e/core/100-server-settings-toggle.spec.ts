@@ -9,7 +9,7 @@ import {
 } from '../fixtures/electron'
 
 /**
- * Connections → Hubs: the "Run a local hub" toggle (replaces the old Server-tab
+ * Settings → Hubs: the "Run a local hub" toggle (replaces the old Server-tab
  * Local/Remote radio). It writes `server_mode` in the pre-boot config FILE (not
  * the DB): local on → `server_mode: 'local'` (spawn embedded backend); local off
  * → `server_mode: 'remote'` (pure client). `Save & relaunch`'s relaunch is a

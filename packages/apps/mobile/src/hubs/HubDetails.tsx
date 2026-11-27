@@ -10,7 +10,7 @@ import { useHubAccount } from './use-hub-account'
 
 /**
  * What a hub card shows beyond its connection: who the app is signed in as there, and
- * the hub's computers with their live state — desktop's Settings → Connections card,
+ * the hub's computers with their live state — desktop's Settings hub card,
  * which lists a hub's computers under it. Scopes itself to that hub.
  */
 export function HubDetails({ session }: { session: HubSession }) {

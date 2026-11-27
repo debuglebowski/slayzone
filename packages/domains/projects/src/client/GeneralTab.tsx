@@ -221,7 +221,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
                     <SelectItem
                       key={computer.id}
                       value={computer.id}
-                      // A DISABLED computer (Settings → Connections) takes no new
+                      // A DISABLED computer (a hub's Computers tab in Settings) takes no new
                       // work, so nothing new may be bound to it; the hub refuses.
                       disabled={computer.disabledAt != null}
                     >

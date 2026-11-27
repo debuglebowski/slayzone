@@ -179,7 +179,7 @@ export function WorkspaceDirPicker({
           // machine has no folders".
           <p className="text-muted-foreground text-xs" data-testid="workspace-dir-picker-no-roots">
             This computer has no allowed folders configured, so it will not open anything. Add one
-            in Settings → Connections, on the computer’s row.
+            on the computer’s row in its hub’s Computers tab in Settings.
           </p>
         ) : (
           <>

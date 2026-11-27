@@ -1,5 +1,5 @@
 /**
- * How every client names a computer and its state: desktop (Settings → Connections,
+ * How every client names a computer and its state: desktop (a hub's Computers tab in Settings,
  * a task's Computer card) and the mobile app use the same words. Pure, no imports:
  * also exported alone as `@slayzone/computers/labels`, so a client that must not load
  * Node or the DOM (the mobile app) can import it.
@@ -227,7 +227,7 @@ export function runsOnLabel(name: string): string {
  */
 export const OFFLINE_MARK = 'offline'
 
-/** Beside a DISABLED computer (Settings → Connections): it takes no new work, so it
+/** Beside a DISABLED computer (a hub's Computers tab in Settings): it takes no new work, so it
  *  cannot be chosen for any. */
 export const DISABLED_MARK = 'disabled'
 

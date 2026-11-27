@@ -12,7 +12,7 @@ store only, no tRPC router yet.
   (Revoked / Disabled / Connected / Not responding / Never connected / Offline · last
   seen), `computerName` (null = Local), `inheritComputerLabel`, `runsOnLabel`,
   `OFFLINE_MARK`, `DISABLED_MARK`, `NO_COMPUTERS_NOTE`. Pure, also exported alone as `@slayzone/computers/labels` (desktop
-  Settings → Connections and a task's Computer card, and the mobile app).
+  Settings → a hub's Computers tab and a computer's page, a task's Computer card, and the mobile app).
 
 ## Server (server/)
 

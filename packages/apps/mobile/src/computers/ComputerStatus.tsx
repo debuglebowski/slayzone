@@ -15,7 +15,7 @@ export function toneColor(theme: ChromeColors, tone: ComputerStatusTone): string
   }
 }
 
-/** A computer's state as desktop's Settings → Connections shows it: a dot and the word. */
+/** A computer's state as desktop Settings shows it (a hub's Computers tab): a dot and the word. */
 export function ComputerStatus({ computer }: { computer: HubComputer }) {
   const theme = useTheme()
   const { label, tone } = computerStatus(computer)

@@ -138,8 +138,8 @@ function FolderPickerBody({
     // to fix it, rather than an empty list that reads as "no folders".
     body = (
       <Text style={styles.note}>
-        This computer has no allowed folders configured, so it will not open anything. Add one in
-        Settings → Connections, on the computer’s row (SlayZone desktop).
+        This computer has no allowed folders configured, so it will not open anything. Add one on
+        the computer’s row in its hub’s Computers tab in Settings (SlayZone desktop).
       </Text>
     )
   } else {

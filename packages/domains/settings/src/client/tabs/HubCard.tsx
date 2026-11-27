@@ -512,10 +512,7 @@ export function HubCard({
                     computer.disabledAt != null && 'opacity-60'
                   )}
                 >
-                  <ComputerName
-                    computer={computer}
-                    renamable={!(isLocalHub && isOwnComputer(computer))}
-                  />
+                  <ComputerName computer={computer} hub={hubComputers} />
                   {/* On a remote hub, which row is this app's own computer — the
                       one it joined there and will not delete. */}
                   {!isLocalHub && isOwnComputer(computer) && (

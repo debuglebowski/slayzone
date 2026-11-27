@@ -1,7 +1,7 @@
 import { test, expect, clickSettings, resetApp, seed } from '../fixtures/electron'
 
 /**
- * Computer settings for the LOCAL hub (nested inside its card, in Connections).
+ * Computer settings for the LOCAL hub (nested inside its card, Settings → Hubs).
  *
  * The local hub is a special case and this spec pins the two ways it differs from
  * a remote one:

@@ -160,8 +160,7 @@ export function CreateProjectDialog({
                   className="text-xs text-destructive"
                   data-testid="create-project-hub-unreachable"
                 >
-                  This hub is not connected. Pick another hub, or reconnect it in Settings →
-                  Connections.
+                  This hub is not connected. Pick another hub, or reconnect it in Settings → Hubs.
                 </p>
               }
             >

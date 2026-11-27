@@ -1926,7 +1926,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
-  base('Connections tab nests computers per hub and mints on the hub they sit under', async () => {
+  base('Settings nests computers per hub and mints on the hub they sit under', async () => {
     base.setTimeout(180_000)
 
     // A computer belongs to exactly ONE hub, and which hub is decided when the token is
@@ -2212,7 +2212,7 @@ base.describe('Multi-hub federation (2 hubs)', () => {
 
       // A pure add reloads the window (no app relaunch): the renderer CSP is
       // fixed per document load, so only a fresh load can admit the new hub's
-      // origin. The app then reopens Settings → Connections to sign in.
+      // origin. The app then reopens the hub's page in Settings to sign in.
       await Promise.all([
         page.waitForEvent('framenavigated', { timeout: 15_000 }),
         page.locator('[data-testid="hubs-save-relaunch"]').click()

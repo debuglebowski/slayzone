@@ -248,11 +248,11 @@ test('an offline owner whose chat another computer holds names that computer and
     expect(chatAvailabilityMessage(status)).toEqual({
       title: 'ci-box is offline',
       detail:
-        'Another computer named ci-box holds this chat, possibly this one enrolled again. If so, replace the offline ci-box with it in Settings → Connections.'
+        'Another computer named ci-box holds this chat, possibly this one enrolled again. If so, replace the offline ci-box with it on the hub’s Computers tab in Settings.'
     })
     holder = 'lap'
     expect(chatAvailabilityMessage(await availability('tab'))?.detail).toBe(
-      'laptop holds this chat. If laptop is ci-box enrolled again, replace ci-box with it in Settings → Connections.'
+      'laptop holds this chat. If laptop is ci-box enrolled again, replace ci-box with it on the hub’s Computers tab in Settings.'
     )
     holder = null
     expect(await availability('tab')).not.toHaveProperty('heldBy')

@@ -1,7 +1,7 @@
 /**
  * The computers of the hub whose `HubScope` this runs in, live: `computers.list`,
  * loaded again whenever the hub says a computer connected or dropped
- * (`computers.onStatusChange` carries only the id) — desktop's Settings → Connections
+ * (`computers.onStatusChange` carries only the id) — desktop's Settings (a hub's Computers tab)
  * rule. Changes of who runs what arrive as `notify.onTasksChanged` (the board).
  */
 import { useSubscription } from '@slayzone/transport/client'

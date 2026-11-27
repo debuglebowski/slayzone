@@ -228,7 +228,7 @@ function ComputerCardControls({
     ...computers.map((computer) => ({
       value: computer.id,
       label: computer.name,
-      // A DISABLED computer (Settings → Connections) takes no new work, so nothing
+      // A DISABLED computer (a hub's Computers tab in Settings) takes no new work, so nothing
       // new may be bound to it; the hub refuses. Offline is WARNED, never disabled:
       // work aimed at an offline computer queues until it returns.
       disabled: computer.disabledAt != null,
