@@ -96,7 +96,13 @@ import {
 } from '@slayzone/diagnostics/server'
 import { routeOf, securityEvent } from '@slayzone/platform/security-log'
 import { LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
-import { type ApplyRestoreResult, applyPendingRestore } from './restore-swap'
+import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  type ApplyRestoreResult,
+  applyPendingRestore,
+  confirmRestore,
+  rollbackRestore
+} from './restore-swap'
 import { readDataGeneration } from '@slayzone/platform/hub-data-generation'
 import { startEventLoopStallDetector } from '@slayzone/platform/event-loop-stall'
 import {
@@ -159,9 +165,41 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // HERE, before anything opens the database. A backup that cannot run is refused and
   // the old database kept; an I/O failure mid-swap fails this boot and the next one
   // resumes from the recorded phase. Only when this process owns the database.
-  const lastRestore: ApplyRestoreResult = cfg.db
+  let lastRestore: ApplyRestoreResult = cfg.db
     ? { status: 'none' }
     : applyPendingRestore({ dataRoot, dbPath, latestVersion: LATEST_MIGRATION_VERSION })
+  // The hub owns the schema however it was started. `supervised` still gates the
+  // sidecar socket and the loopback-bind rule above — but not this: a second
+  // migrator in the Electron host is exactly the two-writers-one-file split being
+  // removed.
+  // Migrations are user_version-gated and individually atomic, so this is a no-op
+  // against an already-current store.
+  //
+  // A restored file must prove it starts (opens + migrates) before the old one goes
+  // (restore-swap.ts confirmRestore). If it does not, the old file is put back and
+  // opened instead: a backup that cannot run never leaves a hub unable to boot.
+  let db: SlayzoneDb
+  if (cfg.db) {
+    db = cfg.db
+  } else if (lastRestore.status === 'applied-unverified') {
+    const restored = lastRestore.backup
+    try {
+      db = await openServerDatabase()
+      lastRestore = confirmRestore({ dataRoot, dbPath })
+    } catch (err) {
+      log(
+        `[slayzone] restored backup ${restored} failed to open: ${err instanceof Error ? err.message : String(err)} — putting the previous data back`
+      )
+      lastRestore = rollbackRestore({
+        dataRoot,
+        dbPath,
+        error: `The restored backup could not be opened (${err instanceof Error ? err.message : String(err)})`
+      })
+      db = await openServerDatabase()
+    }
+  } else {
+    db = await openServerDatabase()
+  }
   if (lastRestore.status !== 'none') {
     log(
       `[slayzone] restore ${lastRestore.status}: ${lastRestore.backup}${
@@ -180,13 +218,6 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       }
     })
   }
-  // The hub owns the schema however it was started. `supervised` still gates the
-  // sidecar socket and the loopback-bind rule above — but not this: a second
-  // migrator in the Electron host is exactly the two-writers-one-file split being
-  // removed.
-  // Migrations are user_version-gated and individually atomic, so this is a no-op
-  // against an already-current store.
-  const db = cfg.db ?? (await openServerDatabase())
   const ownsDb = cfg.db === undefined
   log(`db opened: ${dbPath} (schema bootstrapped)`)
   bootSteps.step('db opened')

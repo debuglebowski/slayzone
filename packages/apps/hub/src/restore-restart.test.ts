@@ -389,3 +389,62 @@ test('a client socket left open never holds the restart: the hub still exits 75 
     await hub.stop()
   }
 })
+
+test('H3: a backup whose migration fails is rolled back at boot: old data, a notice, a hub that starts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'slz-restore-rollback-'))
+  roots.push(root)
+  const first = await bootHub(root)
+  let backup: Backup
+  try {
+    await createProject(first, 'live data')
+    const { client, close } = hubClient(first)
+    try {
+      backup = await client.app.backup.create.mutate({ name: 'migrates badly' })
+      // Valid, passes quick_check, an older schema — but its last migration cannot run
+      // on it (the column that migration adds is already there), like the drifted
+      // schemas migrations.ts repairs elsewhere.
+      const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+      const b = new Database(join(root, 'backups', backup.filename))
+      const v = b.pragma('user_version', { simple: true }) as number
+      b.pragma(`user_version = ${v - 1}`)
+      b.close()
+      await client.app.backup.restore.mutate({ filename: backup.filename })
+    } finally {
+      close()
+    }
+    expect(
+      await Promise.race([first.exit, new Promise((r) => setTimeout(() => r('alive'), 20_000))])
+    ).toBe(75)
+  } finally {
+    await first.stop()
+  }
+
+  const second = await bootHub(root)
+  try {
+    expect(await projectNames(second)).toContain('live data')
+    const { client, close } = hubClient(second)
+    try {
+      const status = await client.app.backup.restoreStatus.query()
+      expect(status.lastRestore).toMatchObject({ status: 'refused', backup: backup.filename })
+      expect((status.lastRestore as unknown as { error: string }).error).toMatch(
+        /previous data was put back/
+      )
+      expect((await client.hub.describe.query()).dataGeneration).toBe('initial')
+      const notice = await poll(
+        async () =>
+          (await client.computers.listFaults.query({ computerId: null })).find(
+            (f) => f.pass === 'hub-restore'
+          ) ?? null,
+        10_000,
+        'rollback notice'
+      )
+      expect(notice).toMatchObject({ key: backup.filename, dismissable: true })
+    } finally {
+      close()
+    }
+    expect(existsSync(join(root, 'restore.pending.json'))).toBe(false)
+    expect(readdirSync(root).some((n) => n.includes('.pre-restore'))).toBe(false)
+  } finally {
+    await second.stop()
+  }
+})

@@ -263,6 +263,19 @@ test('restoreStatus: boot id, respawner, the staged restore and what this boot d
   await booted.close()
 })
 
+test('L3: a SQLite file in backups/ that is not a data backup cannot be restored', async () => {
+  const o = ops()
+  const stray = path.join(dataRoot, 'backups', 'stray.sqlite')
+  const b = new Database(stray)
+  b.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+  b.close()
+  const before = (await o.list()).length
+  await expect(o.restore('stray.sqlite')).rejects.toThrow(/not a backup/)
+  expect(fs.existsSync(marker())).toBe(false)
+  expect((await o.list()).length, 'no pre-restore backup').toBe(before)
+  fs.rmSync(stray)
+})
+
 test('create and list work on any hub', async () => {
   const o = ops()
   const made = await o.create('RemoteOk')

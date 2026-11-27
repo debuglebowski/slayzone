@@ -1532,6 +1532,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/apps/app/src/main/hub-credentials-key.test.ts \
+  packages/apps/app/src/main/sidecar-failure-message.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
   packages/shared/transport/src/client/client-host.test.ts \
   packages/shared/transport/src/client/hubClientCache.test.ts \

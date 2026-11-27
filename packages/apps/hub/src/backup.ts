@@ -15,6 +15,7 @@ import { LATEST_MIGRATION_VERSION } from '@slayzone/db-migrations'
 import type { HubRespawner } from './hub-restart'
 import {
   ACTIVE_MOVE_QUERIES,
+  BACKUP_FILENAME_REGEX,
   type ApplyRestoreResult,
   pendingRestore,
   RestoreRefusedError,
@@ -85,8 +86,8 @@ const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
 // the old prefix are the user's safety net and must keep listing, so `.data` is optional.
 // `slayzone.auth.*` and `slayzone.diagnostics.*` deliberately do not match.
 // `restore` = the copy of the current data taken just before a restore replaced it.
-const BACKUP_REGEX =
-  /^slayzone(?:\.dev)?(?:\.data)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration|restore)\.sqlite$/
+// One regex, shared with the restore path (restore-swap.ts), which restores only such a file.
+const BACKUP_REGEX = BACKUP_FILENAME_REGEX
 
 type BackupType = BackupInfo['type']
 
@@ -379,6 +380,10 @@ export function buildBackupOps(deps: BackupDeps) {
    */
   const restore = async (filename: string): Promise<RestoreResult> => {
     const backupPath = resolveInsideBackups(dataRoot, filename)
+    // Only a backup of this hub's data — never the auth or diagnostics database or any
+    // other SQLite file in backups/ (L3). Checked again at boot (restore-swap.ts).
+    if (!BACKUP_REGEX.test(filename))
+      throw new Error(`${filename} is not a backup of this hub's data`)
     if (restoring) throw new Error('A restore is already in progress on this hub')
     try {
       validateRestoreSource(backupPath, deps.latestVersion ?? LATEST_MIGRATION_VERSION)
@@ -438,7 +443,9 @@ export function buildBackupOps(deps: BackupDeps) {
         bootId: HUB_BOOT_ID,
         respawner: deps.restart.respawner(),
         pending: pending ? { backup: pending.backup } : null,
-        lastRestore: !last || last.status === 'none' ? null : last
+        // `applied-unverified` never reaches here: the boot confirms or rolls back first.
+        lastRestore:
+          !last || last.status === 'none' || last.status === 'applied-unverified' ? null : last
       }
     },
     getSettings: (): Promise<BackupSettings> => getBackupSettings(db),

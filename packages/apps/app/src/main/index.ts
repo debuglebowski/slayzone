@@ -28,7 +28,7 @@ import { pathToFileURL } from 'url'
 import { homedir, hostname } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { readFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
+import { readFileSync, promises as fsp, mkdirSync, appendFileSync, existsSync } from 'fs'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
 
@@ -619,6 +619,7 @@ import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { setTelemetryEvents } from '@slayzone/telemetry/server'
 import { getSafeStorageCipher } from '@slayzone/integrations/electron'
 import { loadHubCredentialsSecret } from './hub-credentials-key'
+import { sidecarFailureMessage } from './sidecar-failure-message'
 import { resetSyncFlags } from '@slayzone/integrations/server'
 import { closeAllWatchers } from '@slayzone/file-editor/electron'
 import { captureBrowserViewScreenshot } from './screenshot'
@@ -2866,16 +2867,17 @@ app
                 // Load-bearing now that the hub owns schema migration: a migration
                 // failure exits the side-car non-zero, and without this it would be
                 // completely silent — a blank window that reads as data loss.
-                // "Not been modified" is literally true: every migration is atomic
-                // with its own user_version bump, so a crash leaves the DB at the
-                // last fully-applied version with a backup beside it.
+                // The text (sidecar-failure-message.ts) says "not modified" only when
+                // no backup restore is involved, and names the previous data otherwise.
                 dialog.showErrorBox(
                   'SlayZone could not start its local server',
-                  `${message}\n\n` +
-                    `Your data has not been modified. A pre-migration backup, if one was needed, ` +
-                    `is in:\n${join(getStorageDir(), 'backups')}\n\n` +
-                    `Log:\n${join(getStorageDir(), 'logs', 'sidecar.log')}\n\n` +
-                    `Attempts: ${info.attempts}`
+                  sidecarFailureMessage({
+                    message,
+                    storageDir: getStorageDir(),
+                    dbPath: getDatabasePath(),
+                    attempts: info.attempts,
+                    exists: existsSync
+                  })
                 )
                 recordDiagnosticEvent({
                   level: 'error',
