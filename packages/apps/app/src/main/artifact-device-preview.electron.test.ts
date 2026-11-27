@@ -37,6 +37,8 @@ interface RunResult {
   zoomedDesktop: [number, number, number]
   zoomedMobile: [number, number, number]
   outOfRangeZoom: boolean
+  /** How long after load the guest started taking input (diagnostic). */
+  routedAfterMs: number
 }
 
 const DRIVER = `
@@ -53,7 +55,7 @@ const GUEST = '<!doctype html><meta name="viewport" content="width=device-width"
 const HOST = '<body style="margin:0"><div style="width:400px;height:400px"></div>' +
   '<webview partition="' + ARTIFACT_DEVICE_PARTITION + '" src="about:blank" ' +
   'style="position:absolute;left:500px;top:0;width:300px;height:500px"></webview>' +
-  '<script>' + LOGGER + '</script></body>'
+  '<script>' + LOGGER + ";window.moves=0;addEventListener('mousemove',()=>moves++,true)</script></body>"
 const MOBILE = { width: 300, height: 500, angle: 0, deviceScaleFactor: 3, mobile: true }
 const DESKTOP = { ...MOBILE, deviceScaleFactor: 1, mobile: false }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -65,6 +67,12 @@ app.whenReady().then(async () => {
     ${JSON.stringify(preloadBundle)}
   )
   const win = new BrowserWindow({ width: 900, height: 600, show: false, webPreferences: { webviewTag: true } })
+  // On X11 a hidden (unmapped) window is barely drawn: a mouse move into the guest
+  // waits ~1 s for its ack (~20 ms once mapped), and on CI clicks at the preview kept
+  // landing on the host page, for one tap or the whole run. The app's window is
+  // mapped; map this one too (inactive: no focus steal; under xvfb-run no one sees
+  // it). macOS hidden windows take input at full speed.
+  if (process.platform === 'linux') win.showInactive()
   const wc = win.webContents
   wc.on('will-attach-webview', (event, prefs, params) => {
     if (!previews.prepare(prefs, params.src)) event.preventDefault()
@@ -78,14 +86,29 @@ app.whenReady().then(async () => {
   const loaded = new Promise((r) => guest.once('did-finish-load', r))
   if (!(await previews.configure(wc, guest.id, ARTIFACT_URL, MOBILE, 1))) throw new Error('configure failed')
   await loaded
-  await sleep(300)
   const cdp = wc.debugger
   cdp.attach()
+  const dispatch = (params) =>
+    cdp.sendCommand('Input.dispatchMouseEvent', { button: 'left', clickCount: 1, ...params })
   // A converted mouse event's CDP ack can hang; never let it stall the run.
-  const mouse = (params) => Promise.race([
-    cdp.sendCommand('Input.dispatchMouseEvent', { button: 'left', clickCount: 1, ...params }).catch(() => {}),
-    sleep(800)
-  ])
+  const mouse = (params) => Promise.race([dispatch(params).catch(() => {}), sleep(800)])
+  // Input at the preview goes to the host page until the compositor routes that spot to
+  // the guest: measured 0.1-0.5 s after load (mapped; past 1.5 s hidden on X11), so a
+  // fixed sleep loses on a slow runner. Move the mouse onto the preview until the host
+  // page no longer sees the move; only an acked move counts (the ack comes once the page
+  // under it handled it). Neither the preload nor the logs act on a buttonless move.
+  const guestTakesInput = async () => {
+    await mouse({ type: 'mouseMoved', x: 100, y: 100, button: 'none' })
+    await wc.executeJavaScript('moves = 0')
+    const acked = await Promise.race([
+      dispatch({ type: 'mouseMoved', x: 550, y: 50, button: 'none' }).then(() => true, () => false),
+      sleep(800).then(() => false)
+    ])
+    return acked && (await wc.executeJavaScript('moves === 0'))
+  }
+  const routeStart = Date.now()
+  while (!(await guestTakesInput()) && Date.now() - routeStart < 15000) await sleep(50)
+  const routedAfterMs = Date.now() - routeStart
   const click = async (x, y) => {
     await mouse({ type: 'mouseMoved', x, y, button: 'none' })
     await mouse({ type: 'mousePressed', x, y, buttons: 1 })
@@ -103,7 +126,7 @@ app.whenReady().then(async () => {
     await settle(contents, "log.some((e) => e.startsWith('click:'))")
     return contents.executeJavaScript('log.splice(0)')
   }
-  const out = {}
+  const out = { routedAfterMs }
   await click(100, 100)
   out.hostMobile = await drain(wc)
   await click(550, 50)
