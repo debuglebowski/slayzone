@@ -93,6 +93,7 @@ import { useTurnOutline } from './useTurnOutline'
 import { turnOutlinePaletteCommands } from './turn-outline-palette'
 import { pinnedMessagePaletteCommands } from './pinned-palette'
 import { usePinnedMessages } from './usePinnedMessages'
+import { useVoiceMode, VoiceModeButton, VoiceSettingsPopover } from '@slayzone/voice/client'
 import { PinnedMessagesPopover } from './PinnedMessagesPopover'
 import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
@@ -232,6 +233,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       prompts,
       submittingPrompts,
       sendMessage,
+      subscribeEvents,
       retryMessage,
       sendToolResult,
       respondPermission,
@@ -255,6 +257,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       restoreQueuedMs,
       display: Object.keys(displaySettings).length ? displaySettings : undefined
     })
+    // Conversation mode: hands-free voice over this chat's own send + event stream.
+    const voice = useVoiceMode({ tabId, sendMessage, subscribeEvents })
     // The whole history's summary: rows here, and for pages not loaded (paged
     // history) what the hub sent — the outline, rewind, files count and budget.
     const historyOfSession = useMemo(() => historySummary(timeline, paging), [timeline, paging])
@@ -1196,12 +1200,24 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                               </>
                             }
                             footerTools={
-                              <PinnedMessagesPopover
-                                pins={pinned.pins}
-                                go={pinned.go}
-                                unpin={pinned.unpin}
-                                inBranchOf={pinned.inBranchOf}
-                              />
+                              <>
+                                <PinnedMessagesPopover
+                                  pins={pinned.pins}
+                                  go={pinned.go}
+                                  unpin={pinned.unpin}
+                                  inBranchOf={pinned.inBranchOf}
+                                />
+                                {voice.available && (
+                                  <>
+                                    <VoiceModeButton
+                                      enabled={voice.enabled}
+                                      status={voice.status}
+                                      onToggle={voice.toggle}
+                                    />
+                                    <VoiceSettingsPopover />
+                                  </>
+                                )}
+                              </>
                             }
                             backgroundJobs={
                               backgroundJobs.length > 0 || backgroundSubAgents.length > 0 ? (

@@ -51,7 +51,9 @@ export const TEST_OPT_IN_ENV: ReadonlySet<string> = new Set([
   // e2e chat/186 (real Codex CLI): opt-in, the codex binary, its fixed work dir.
   'SLAYZONE_E2E_REAL_CODEX_HOME',
   'SLAYZONE_CODEX_BIN_PATH',
-  'SLAYZONE_CODEX_RECORD_DIR'
+  'SLAYZONE_CODEX_RECORD_DIR',
+  // e2e chat/187 (voice mode): the local voice models dir (~800 MB, not in the repo).
+  'SLAYZONE_E2E_VOICE_MODELS_DIR'
 ])
 
 /**

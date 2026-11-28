@@ -3,6 +3,7 @@ import type {
   ArtifactExportResult,
   ElectronBootstrapAPI,
   ElectronBrowserHost,
+  ElectronVoiceHost,
   HostSaveResult,
   SaveTargetOpenResult,
   SaveTargetRequest
@@ -156,5 +157,9 @@ export const electronBootstrap = {
   // events), or null where the shell installed none. `./client-host.ts`'s
   // `getClientHost()` is the only intended reader.
   clientHost: (): ElectronClientHost | null =>
-    (typeof window !== 'undefined' ? window.api?.clientHost : undefined) ?? null
+    (typeof window !== 'undefined' ? window.api?.clientHost : undefined) ?? null,
+  // The client-local voice engine, or null where there is none (web shell).
+  // `@slayzone/voice/client` is the only intended reader.
+  voiceHost: (): ElectronVoiceHost | null =>
+    (typeof window !== 'undefined' ? window.api?.voiceHost : undefined) ?? null
 }

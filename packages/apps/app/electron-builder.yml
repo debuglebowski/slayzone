@@ -29,6 +29,10 @@ asarUnpack:
   - '**/node_modules/bindings/**'
   - '**/node_modules/file-uri-to-path/**'
   - '**/node_modules/node-pty/**'
+  # The voice engine's sherpa-onnx Node-API addon and its per-platform binary package
+  # (the addon loads the platform package's .node + shared libs by relative path).
+  - '**/node_modules/sherpa-onnx-node/**'
+  - '**/node_modules/sherpa-onnx-*/**'
   # The computer's WebRTC runtime (docs/direct-link.md): node-datachannel, its
   # per-platform Node-API binary package, and its one dependency.
   - '**/node_modules/node-datachannel/**'

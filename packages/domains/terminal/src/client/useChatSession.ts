@@ -135,7 +135,14 @@ export interface UseChatSessionResult {
    * delivery state; it never silently disappears — a failure stays on screen
    * with Retry.
    */
-  sendMessage: (input: string | UserContentBlock[]) => Promise<void>
+  sendMessage: (input: string | UserContentBlock[], opts?: SendMessageOptions) => Promise<void>
+  /**
+   * Every agent event this panel applies (live fragments and saved events,
+   * deduplicated, after the initial replay) — the same stream the timeline
+   * reduces. For consumers that react to the reply as it streams (voice mode).
+   * Returns the unsubscribe.
+   */
+  subscribeEvents: (listener: (event: AgentEvent) => void) => () => void
   /** Send a failed message again (same id, so it is never delivered twice). */
   retryMessage: (id: string) => Promise<void>
   /**
@@ -199,6 +206,14 @@ export interface UseChatSessionResult {
   fork: (messageId: string) => Promise<void>
   /** Clear timeline + ended-state immediately (UX). New turn-init refills on next session. */
   reset: () => void
+}
+
+export interface SendMessageOptions {
+  /**
+   * The outbox id to send under (default: a fresh one). The agent's turn for it
+   * carries it as `execution.messageId`, so a caller can tell its reply apart.
+   */
+  id?: string
 }
 
 export interface UseChatSessionOpts {
@@ -520,6 +535,20 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       queryClient.setQueryData(queryKey, event.models)
     })
   })
+  // Event-tap listeners (`subscribeEvents`). Only events applied once hydrated:
+  // the initial replay is history, not something happening now.
+  const tapRef = useRef(new Set<(event: AgentEvent) => void>())
+  const tapEvent = useCallback((event: AgentEvent): void => {
+    if (!hydratedRef.current) return
+    for (const listener of tapRef.current) listener(event)
+  }, [])
+  const subscribeEvents = useCallback((listener: (event: AgentEvent) => void) => {
+    const taps = tapRef.current
+    taps.add(listener)
+    return () => {
+      taps.delete(listener)
+    }
+  }, [])
   const applyLive = useCallback(
     (event: AgentEvent, seq: number, live?: number, at?: number): void => {
       if (live !== undefined) {
@@ -529,6 +558,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         if (verdict === 'resync') resyncRef.current(true)
         if (verdict !== 'apply') return
         applyCliMetadata(event)
+        tapEvent(event)
         pendingLiveRef.current.push(event)
         if (frameRef.current === null) {
           frameRef.current = requestFrame(() => {
@@ -540,9 +570,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       }
       if (positionRef.current.saved(seq) === 'duplicate') return
       flushLive()
+      tapEvent(event)
       dispatch({ type: 'event', event, at, seq })
     },
-    [flushLive, applyCliMetadata]
+    [flushLive, applyCliMetadata, tapEvent]
   )
   // Stable: refs + dispatch only. Saved events in seq order as one batch — the
   // same as applying each through `applyLive` (fragments waiting for a frame
@@ -554,6 +585,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       const seq: number[] = []
       for (const b of saved) {
         if (positionRef.current.saved(b.seq) === 'duplicate') continue
+        tapEvent(b.event)
         events.push(b.event)
         at.push(b.at)
         seq.push(b.seq)
@@ -562,7 +594,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       flushLive()
       dispatch({ type: 'events', events, at, seq })
     },
-    [flushLive]
+    [flushLive, tapEvent]
   )
   useEffect(() => discardPendingLive, [discardPendingLive])
 
@@ -1067,13 +1099,13 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // Stable ref so consumers (autocomplete `sources` useMemo, ChatPanel chatApi)
   // don't reinitialize on every parent render. dispatch is stable from useReducer.
   const sendMessage = useCallback(
-    async (input: string | UserContentBlock[]): Promise<void> => {
+    async (input: string | UserContentBlock[], sendOpts?: SendMessageOptions): Promise<void> => {
       const content: UserContentBlock[] =
         typeof input === 'string' ? [{ type: 'text', text: input }] : input
       // The client mints the id: the optimistic bubble, the server's
       // `user-message`, its delivery states and the CLI's message `uuid` all
       // carry it — and re-sending it can never deliver it twice.
-      const id = safeRandomUUID()
+      const id = sendOpts?.id ?? safeRandomUUID()
       // Optimistic: paint the user-text immediately so the UI doesn't lag the
       // roundtrip. Main still emits the canonical `user-message` event and the
       // reducer confirms it in place by id — single source of truth for replay.
@@ -1239,6 +1271,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     prompts: state.prompts,
     submittingPrompts,
     sendMessage,
+    subscribeEvents,
     retryMessage,
     sendToolResult,
     respondPermission,

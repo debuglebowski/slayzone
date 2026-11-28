@@ -72,6 +72,7 @@ import {
 } from './browser-registry'
 import { isAppRenderer, registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
 import { registerClientHostIpc } from './client-host-ipc'
+import { registerVoiceHostIpc, stopVoiceEngine } from './voice-host'
 import { linkBridgeAllowed, UserGestureTracker, type LinkBridgeKind } from './panel-link-bridge'
 import {
   PanelNetworkPolicy,
@@ -3652,6 +3653,8 @@ app
       webviewEvents,
       impl: browserHostImpl
     })
+    registerVoiceHostIpc(getSafeStorageCipher())
+    app.on('will-quit', stopVoiceEngine)
     if (isPlaywright) {
       // Swap one browser-host method for a fixed result (renderer → main, no hub).
       ipcMain.handle('e2e:stub-browser-host', (_e, method: string, fakeResult: unknown) => {
