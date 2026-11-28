@@ -74,7 +74,8 @@ function defaultSwitches() {
     enableSso: false,
     enableProcesses: true,
     enableIntegrations: true,
-    enableTelemetry: true
+    enableTelemetry: true,
+    enablePush: true
   }
 }
 
