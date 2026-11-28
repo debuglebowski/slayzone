@@ -43,6 +43,7 @@ import {
   HubToComputerMethods,
   JSON_RPC_INTERNAL_ERROR,
   RpcError,
+  chatIdlePolicyResultSchema,
   computerShutdownParamsSchema,
   directRtcOfferParamsSchema,
   projectNotPlacedError,
@@ -84,7 +85,11 @@ import { createWorkspaceMoveHandlers } from './handlers/workspace-move-handlers'
 import { createPtyHandlers } from './handlers/pty'
 import type { SpawnAdmission } from './spawn-admission'
 import { agentLauncher, createAgentIsolation, type AgentLauncher } from './agent-isolation'
-import { createComputerHealth, type ChatInventory } from './computer-health'
+import {
+  createComputerHealth,
+  type ChatInventory,
+  type ChatInventorySource
+} from './computer-health'
 import { COMPUTER_LOG_DIR_NAME } from './file-log'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
@@ -336,7 +341,9 @@ export interface HubRequestDispatch {
   /** Pids of the processes this hub's work runs (ptys, processes, chat agents). */
   ownedPids(): number[]
   inventory(): ChatInventory
-  canHibernate(tabId: string): Promise<boolean>
+  canHibernate: ChatInventorySource['canHibernate']
+  /** This hub's idle-close window for its chats (`chat.idlePolicy`); null = off. */
+  idleCloseMs(): Promise<number | null>
   /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
   directPty: DirectPtyService
   /** This hub's chat, as direct-link clients reach it. */
@@ -755,16 +762,27 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     directChat: chat.direct,
     directTaskData: chat.directTaskData,
     inventory: chat.hibernationInventory,
-    async canHibernate(tabId) {
+    async canHibernate(tabId, check) {
       try {
         const result = await deps.dialer.request?.<{ allowed?: boolean }>(
           ComputerToHubMethods.chatHibernateCheck,
-          { tabId },
+          { tabId, ...check },
           1_500
         )
         return result?.allowed === true
       } catch {
         return false
+      }
+    },
+    async idleCloseMs() {
+      try {
+        const result = chatIdlePolicyResultSchema.safeParse(
+          await deps.dialer.request?.(ComputerToHubMethods.chatIdlePolicy, {}, 1_500)
+        )
+        return result.success ? result.data.idleCloseMs : null
+      } catch {
+        // Offline, or a hub from before idle-close (method not found): off.
+        return null
       }
     },
     dispose,

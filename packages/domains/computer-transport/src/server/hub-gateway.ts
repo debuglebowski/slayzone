@@ -50,6 +50,9 @@ import {
   helloParamsSchema,
   heartbeatParamsSchema,
   chatHibernateCheckParamsSchema,
+  chatIdlePolicyResultSchema,
+  type ChatHibernateCheck,
+  type ChatIdlePolicyResult,
   type ComputerHealth,
   type ProcDataParams,
   type ProcExitParams,
@@ -203,7 +206,22 @@ export interface HubComputerGatewayOptions {
   /** Drop authenticated computers silent for this long. `0` disables. Default 45s. */
   heartbeatTimeoutMs?: number
   onComputerHealth?: (computerId: string, health: ComputerHealth, receivedAt: number) => void
-  canHibernateChat?: (computerId: string, tabId: string) => Promise<boolean>
+  /**
+   * `chat.hibernateCheck`: may this computer hibernate this idle chat now? `check.reason`
+   * is `pressure` (memory / live-agent cap — also what an older computer that sends no
+   * reason means) or `idle` (the hub's idle-close setting, with `idleForMs`). Absent or
+   * throwing → refused.
+   */
+  canHibernateChat?: (
+    computerId: string,
+    tabId: string,
+    check: ChatHibernateCheck
+  ) => Promise<boolean>
+  /**
+   * `chat.idlePolicy`: the hub's idle-close window for this computer's chats, `null`
+   * when off. Absent or throwing → off.
+   */
+  chatIdlePolicy?: (computerId: string) => ChatIdlePolicyResult | Promise<ChatIdlePolicyResult>
   /** Drop sockets that never authenticate. Default 10s. */
   authTimeoutMs?: number
   /** Default timeout for hub→computer requests. Default 30s. */
@@ -1157,10 +1175,34 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
           conn.rpc.respond(id, { allowed: false })
           return
         }
-        void options.canHibernateChat(conn.descriptor.computerId, parsed.data.tabId).then(
+        const { tabId, reason, idleForMs } = parsed.data
+        const check: ChatHibernateCheck =
+          reason === 'idle'
+            ? { reason, ...(idleForMs !== undefined ? { idleForMs } : {}) }
+            : { reason: 'pressure' }
+        void options.canHibernateChat(conn.descriptor.computerId, tabId, check).then(
           (allowed) => conn.rpc.respond(id, { allowed }),
           () => conn.rpc.respond(id, { allowed: false })
         )
+        return
+      }
+      case ComputerToHubMethods.chatIdlePolicy: {
+        const off: ChatIdlePolicyResult = { idleCloseMs: null }
+        const policy = options.chatIdlePolicy
+        const computerId = conn.descriptor.computerId
+        if (!policy) {
+          conn.rpc.respond(id, off)
+          return
+        }
+        void Promise.resolve()
+          .then(() => policy(computerId))
+          .then(
+            (result) => {
+              const parsed = chatIdlePolicyResultSchema.safeParse(result)
+              conn.rpc.respond(id, parsed.success ? parsed.data : off)
+            },
+            () => conn.rpc.respond(id, off)
+          )
         return
       }
       case ComputerToHubMethods.enroll:

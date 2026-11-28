@@ -433,6 +433,7 @@ import { createComputerPlacement, BindComputerError } from './computer-placement
 import { createRemoteMcpEnvProvider } from './remote-mcp-env-provider.js'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 import { wireIdleClose } from './idle-close.js'
+import { chatIdleCloseAllows, idleCloseWindowMs } from './chat-idle-close.js'
 import { startIntegrationPollers } from './integrations-pollers.js'
 import { wireIntegrationPush } from './integrations-push.js'
 import { buildBackupOps } from './backup.js'
@@ -2581,15 +2582,29 @@ export function composeServer(opts: {
           )
           .catch(() => console.error('[computer-health] could not save heartbeat'))
       },
-      canHibernateChat: async (computerId, tabId) => {
+      // Chats live on computers, which sweep them: memory reclamation (`pressure`)
+      // and the user's idle-close setting (`idle`, the window from `chatIdlePolicy`).
+      // Either way the hub has the last word: ownership, pinned tasks, and for idle
+      // its setting / window / engagement as they are NOW (chat-idle-close.ts).
+      canHibernateChat: async (computerId, tabId, check) => {
         const owner = await computerChat.ownership.forTab(tabId)
         if (owner?.computerId !== computerId || owner.state !== 'active') return false
+        if (
+          !chatIdleCloseAllows(
+            check,
+            idleClose.config(),
+            idleClose.engagedAt(owner.taskId),
+            Date.now()
+          )
+        )
+          return false
         const task = await db.get<{ pinned: number | null }>(
           'SELECT pinned FROM tasks WHERE id=?',
           [owner.taskId]
         )
         return task !== undefined && task !== null && !task.pinned
       },
+      chatIdlePolicy: () => ({ idleCloseMs: idleCloseWindowMs(idleClose.config()) }),
       diagnostic: (event, payload) =>
         recordDiagnosticEvent({
           // A refused oversized frame is a request that failed for the user.

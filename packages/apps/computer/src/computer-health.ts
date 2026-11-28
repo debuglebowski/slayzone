@@ -4,7 +4,7 @@ import { cpus, freemem, totalmem } from 'node:os'
 import { promisify } from 'node:util'
 import { collectProcessStats } from '@slayzone/processes/pid-stats'
 import type { ComputerAgentResources } from '@slayzone/platform/slayzone-config'
-import type { ComputerHealth } from '@slayzone/computer-transport/shared'
+import type { ChatHibernateCheck, ComputerHealth } from '@slayzone/computer-transport/shared'
 import type { AgentIsolation } from './agent-isolation'
 import {
   createSpawnAdmission,
@@ -17,6 +17,8 @@ const MIN_AGENT_BYTES = 512 * MIB
 const SAMPLE_INTERVAL_MS = 2_000
 const FOOTPRINT_INTERVAL_MS = 20_000
 const PSI_PRESSURE_PERCENT = 2
+/** How often idle-close looks for chats past the hub's window (the hub's pty sweep runs every 10s too). */
+const IDLE_CLOSE_INTERVAL_MS = 10_000
 const exec = promisify(execFile)
 
 export interface HibernateCandidate {
@@ -31,9 +33,16 @@ export interface ChatInventory {
   candidates: HibernateCandidate[]
 }
 
-interface ChatInventorySource {
+/** One hub's chats on this computer. */
+export interface ChatInventorySource {
   inventory(): ChatInventory
-  canHibernate(tabId: string): Promise<boolean>
+  /** Ask the hub (`chat.hibernateCheck`): ownership, pinned tasks, and for `idle` its setting. */
+  canHibernate(tabId: string, check: ChatHibernateCheck): Promise<boolean>
+  /**
+   * The hub's idle-close window (`chat.idlePolicy`): the user's "Auto-close idle
+   * agents" setting. `null` = off, unknown, or a hub from before idle-close.
+   */
+  idleCloseMs?(): Promise<number | null>
 }
 
 export function parseLinuxMemory(meminfo: string, psi: string) {
@@ -114,9 +123,10 @@ function cpuTimes() {
 export function createComputerHealth(opts: {
   /**
    * Act on what it measures: hold background and warm starts under pressure or at
-   * the cap, bound the warm pool, hibernate idle chats. False (the desktop app's
-   * own computer unless it opts in, `agentMemoryManaged`): starts are admitted as
-   * before, and the health report is measured only.
+   * the cap, bound the warm pool, hibernate idle chats to free memory. False (the
+   * desktop app's own computer unless it opts in, `agentMemoryManaged`): starts are
+   * admitted as before, and the health report is measured only. Idle-close (the
+   * hub's setting, `ChatInventorySource.idleCloseMs`) runs either way.
    */
   managed: boolean
   config: ComputerAgentResources
@@ -144,6 +154,7 @@ export function createComputerHealth(opts: {
   let measuring = false
   let reclaiming = false
   let sampleFootprintAt = 0
+  let idleCloseAt = 0
   let stopped = false
 
   const cap = () => {
@@ -186,6 +197,46 @@ export function createComputerHealth(opts: {
     return pressure || reserved > cap() || (queued > 0 && reserved >= cap())
   }
 
+  /**
+   * Idle-close: hibernate every chat idle past its hub's window, pressure or not —
+   * the user's setting, so it applies whether or not this computer manages memory.
+   * The hub re-checks each one (`reason: 'idle'`). `agentResources.hibernate: false`
+   * and `pinnedTaskIds` still exempt chats on this machine.
+   */
+  async function closeIdleChats(): Promise<void> {
+    for (const chat of [...opts.chats()]) {
+      if (stopped || !chat.idleCloseMs) continue
+      const due = chat
+        .inventory()
+        .candidates.filter((candidate) => !pinned.has(candidate.taskId))
+        .sort((a, b) => a.idleSince - b.idleSince)
+      // No request to a hub with nothing that could hibernate.
+      if (due.length === 0) continue
+      const windowMs = await chat.idleCloseMs()
+      if (windowMs === null) continue
+      for (const candidate of due) {
+        if (stopped) return
+        // Oldest first: the rest are idle for less.
+        if (Date.now() - candidate.idleSince < windowMs) break
+        const hibernated = await candidate.hibernate(
+          async () =>
+            !stopped &&
+            (await chat.canHibernate(candidate.tabId, {
+              reason: 'idle',
+              idleForMs: Date.now() - candidate.idleSince
+            }))
+        )
+        if (hibernated)
+          opts.log('idle chat hibernated (idle-close)', {
+            taskId: candidate.taskId,
+            tabId: candidate.tabId,
+            idleMs: Date.now() - candidate.idleSince,
+            windowMs
+          })
+      }
+    }
+  }
+
   async function reclaimIdleChat(): Promise<void> {
     const now = Date.now()
     const candidates = [...opts.chats()]
@@ -197,7 +248,8 @@ export function createComputerHealth(opts: {
     for (const { chat, candidate } of candidates) {
       if (!needsReclamation()) return
       const hibernated = await candidate.hibernate(
-        async () => (await chat.canHibernate(candidate.tabId)) && needsReclamation()
+        async () =>
+          (await chat.canHibernate(candidate.tabId, { reason: 'pressure' })) && needsReclamation()
       )
       if (hibernated) {
         opts.log('idle chat hibernated', {
@@ -245,10 +297,19 @@ export function createComputerHealth(opts: {
         )
       }
       // Give the warm pool a chance to exit before stopping a real conversation.
+      // One hibernation pass at a time: memory reclamation first, idle-close otherwise.
       if (!reclaiming && load.warm === 0 && needsReclamation()) {
         reclaiming = true
         void reclaimIdleChat()
           .catch((error) => opts.log('idle chat hibernation failed', { error: String(error) }))
+          .finally(() => {
+            reclaiming = false
+          })
+      } else if (!reclaiming && config.hibernate !== false && now >= idleCloseAt) {
+        idleCloseAt = now + IDLE_CLOSE_INTERVAL_MS
+        reclaiming = true
+        void closeIdleChats()
+          .catch((error) => opts.log('idle-close failed', { error: String(error) }))
           .finally(() => {
             reclaiming = false
           })

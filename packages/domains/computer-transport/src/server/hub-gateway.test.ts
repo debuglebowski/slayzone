@@ -1175,3 +1175,63 @@ describe('the hub log explains every computer outage (it used to log only reconn
     expect(up?.meta?.downMs).toBeGreaterThanOrEqual(0)
   })
 })
+
+describe('chat idle-close policy (computer → hub)', () => {
+  it('chat.idlePolicy answers the hub idle-close window for that computer', async () => {
+    const asked: string[] = []
+    const hub = await startHub({
+      chatIdlePolicy: async (computerId) => {
+        asked.push(computerId)
+        return { idleCloseMs: 1_800_000 }
+      }
+    })
+    const dialer = makeDialer(hub.url)
+    dialer.start()
+    await dialer.events.once('connected')
+    await expect(dialer.request('chat.idlePolicy', {})).resolves.toEqual({
+      idleCloseMs: 1_800_000
+    })
+    expect(asked).toEqual(['computer-1'])
+  })
+
+  it('chat.idlePolicy answers off when the hub wires no policy, or the policy fails', async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url)
+    dialer.start()
+    await dialer.events.once('connected')
+    await expect(dialer.request('chat.idlePolicy', {})).resolves.toEqual({ idleCloseMs: null })
+
+    const failing = await startHub({
+      chatIdlePolicy: async () => {
+        throw new Error('settings unavailable')
+      }
+    })
+    const second = makeDialer(failing.url)
+    second.start()
+    await second.events.once('connected')
+    await expect(second.request('chat.idlePolicy', {})).resolves.toEqual({ idleCloseMs: null })
+  })
+
+  it('chat.hibernateCheck hands the reason and idle duration to the hub; an older computer reads as pressure', async () => {
+    const seen: unknown[] = []
+    const hub = await startHub({
+      canHibernateChat: async (computerId, tabId, check) => {
+        seen.push({ computerId, tabId, check })
+        return true
+      }
+    })
+    const dialer = makeDialer(hub.url)
+    dialer.start()
+    await dialer.events.once('connected')
+    await expect(
+      dialer.request('chat.hibernateCheck', { tabId: 't1', reason: 'idle', idleForMs: 90_000 })
+    ).resolves.toEqual({ allowed: true })
+    await expect(dialer.request('chat.hibernateCheck', { tabId: 't2' })).resolves.toEqual({
+      allowed: true
+    })
+    expect(seen).toEqual([
+      { computerId: 'computer-1', tabId: 't1', check: { reason: 'idle', idleForMs: 90_000 } },
+      { computerId: 'computer-1', tabId: 't2', check: { reason: 'pressure' } }
+    ])
+  })
+})

@@ -9,7 +9,8 @@
  * version in the result so the computer can refuse an older hub just as clearly.
  *
  * Direction map (v1):
- *  computer → hub requests:      enroll, hello, heartbeat
+ *  computer → hub requests:      enroll, hello, heartbeat, chat.hibernateCheck,
+ *                              chat.idlePolicy
  *  computer → hub notifications: pty.data, pty.exit, proc.data, proc.exit,
  *                              event, fs.change
  *  hub → computer requests:      pty.spawn, pty.kill, pty.resize, pty.write,
@@ -205,7 +206,10 @@ export const ComputerToHubMethods = {
   enroll: 'enroll',
   hello: 'hello',
   heartbeat: 'heartbeat',
-  chatHibernateCheck: 'chat.hibernateCheck'
+  /** May the computer hibernate this idle chat now? See {@link chatHibernateCheckParamsSchema}. */
+  chatHibernateCheck: 'chat.hibernateCheck',
+  /** The hub's idle-close window for its chats. See {@link chatIdlePolicyResultSchema}. */
+  chatIdlePolicy: 'chat.idlePolicy'
 } as const
 
 /**
@@ -426,9 +430,43 @@ export function parseComputerHealth(json: string | null | undefined): ComputerHe
   }
 }
 
+/**
+ * Why a computer wants to hibernate an idle chat:
+ *  - `pressure` — memory pressure or the live-agent cap (the computer's own
+ *    `agentResources`); the hub checks ownership and pinned tasks.
+ *  - `idle` — the hub's idle-close setting (`chat.idlePolicy`); the hub ALSO
+ *    re-checks that the setting is still on, that `idleForMs` is past its current
+ *    window, and that nobody engaged with the task inside it.
+ * Optional on the wire: a computer from before idle-close sends neither, and is
+ * read as `pressure` — the only reason it ever had.
+ */
+export const chatHibernateReasonSchema = z.enum(['idle', 'pressure'])
+export type ChatHibernateReason = z.infer<typeof chatHibernateReasonSchema>
+
 export const chatHibernateCheckParamsSchema = z.object({
-  tabId: z.string().min(1).max(512)
+  tabId: z.string().min(1).max(512),
+  reason: chatHibernateReasonSchema.optional(),
+  /** How long the chat has been idle on the computer's clock (a duration, so clock skew cannot matter). */
+  idleForMs: z.number().nonnegative().optional()
 })
+
+/** What the hub is asked to decide for one `chat.hibernateCheck` (params without the tab). */
+export interface ChatHibernateCheck {
+  reason: ChatHibernateReason
+  idleForMs?: number
+}
+
+/**
+ * `chat.idlePolicy` (computer → hub, no params): the hub's idle-close window — the
+ * user's "Auto-close idle agents" setting — for chats this computer runs for it.
+ * `null` = off. The computer asks on its idle sweep, so a changed setting reaches it
+ * within one sweep and a reconnect needs no resend. A hub from before idle-close
+ * answers method-not-found, which the computer reads as off.
+ */
+export const chatIdlePolicyResultSchema = z.object({
+  idleCloseMs: z.number().int().positive().nullable()
+})
+export type ChatIdlePolicyResult = z.infer<typeof chatIdlePolicyResultSchema>
 
 /** Liveness probe; also lets the computer detect an unresponsive hub. */
 export const heartbeatParamsSchema = z.object({

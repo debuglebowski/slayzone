@@ -859,3 +859,58 @@ describe('startComputer event-loop stalls', () => {
     expect(stopped).toBe(1)
   })
 })
+
+describe('chat hibernation asks its own hub', () => {
+  function dispatchWith(request: ComputerDialer['request']) {
+    return createHubRequestHandler({
+      shutdown: () => {},
+      dialer: { notify: () => true, request },
+      config: testConfig
+    })
+  }
+
+  it('idleCloseMs reads the hub idle-close window, and is off when the hub cannot say', async () => {
+    const asked: string[] = []
+    const on = dispatchWith(async <T,>(method: string) => {
+      asked.push(method)
+      return { idleCloseMs: 120_000 } as T
+    })
+    const off = dispatchWith(async <T,>() => ({ idleCloseMs: null }) as T)
+    const olderHub = dispatchWith(async () => {
+      throw new RpcError(-32601, 'method not found: chat.idlePolicy')
+    })
+    const malformed = dispatchWith(async <T,>() => ({ idleCloseMs: 'soon' }) as T)
+    try {
+      await expect(on.idleCloseMs()).resolves.toBe(120_000)
+      expect(asked).toEqual(['chat.idlePolicy'])
+      await expect(off.idleCloseMs()).resolves.toBeNull()
+      await expect(olderHub.idleCloseMs()).resolves.toBeNull()
+      await expect(malformed.idleCloseMs()).resolves.toBeNull()
+    } finally {
+      for (const d of [on, off, olderHub, malformed]) await d.dispose()
+    }
+  })
+
+  it('canHibernate sends the reason and idle duration with the tab', async () => {
+    const sent: unknown[] = []
+    const dispatch = dispatchWith(async <T,>(method: string, params?: unknown) => {
+      sent.push({ method, params })
+      return { allowed: true } as T
+    })
+    try {
+      await expect(
+        dispatch.canHibernate('tab-1', { reason: 'idle', idleForMs: 61_000 })
+      ).resolves.toBe(true)
+      await expect(dispatch.canHibernate('tab-2', { reason: 'pressure' })).resolves.toBe(true)
+      expect(sent).toEqual([
+        {
+          method: 'chat.hibernateCheck',
+          params: { tabId: 'tab-1', reason: 'idle', idleForMs: 61_000 }
+        },
+        { method: 'chat.hibernateCheck', params: { tabId: 'tab-2', reason: 'pressure' } }
+      ])
+    } finally {
+      await dispatch.dispose()
+    }
+  })
+})

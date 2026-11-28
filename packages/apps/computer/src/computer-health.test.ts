@@ -206,3 +206,262 @@ test('parses macOS memorystatus: percent free as macOS sees it, and the pressure
   for (const bad of ['', 'x\n1', '101\n1', '-1\n1', '4.5\n1'])
     expect(parseDarwinMemoryStatus(bad)).toBeNull()
 })
+
+// --- Idle-close: the hub's "Auto-close idle agents" setting, applied to chats ---
+
+const NO_PRESSURE = async () => ({
+  memory: { memoryTotal: 100, memoryAvailable: 90, memoryPressure: 0 },
+  nativePressure: false
+})
+
+function idleCloseHub(opts: {
+  idleCloseMs: number | null | (() => number | null)
+  candidates: Array<{ taskId: string; idleFor: number }>
+  refuse?: string[]
+}) {
+  const hibernated: string[] = []
+  const checks: Array<{ tabId: string; check: unknown }> = []
+  const now = Date.now()
+  const candidates: HibernateCandidate[] = opts.candidates.map(({ taskId, idleFor }) => ({
+    tabId: `tab-${taskId}`,
+    taskId,
+    idleSince: now - idleFor,
+    async hibernate(allow) {
+      if (!(await allow())) return false
+      hibernated.push(taskId)
+      return true
+    }
+  }))
+  return {
+    hibernated,
+    checks,
+    source: {
+      inventory: () => ({
+        hibernated: hibernated.length,
+        candidates: candidates.filter((c) => !hibernated.includes(c.taskId))
+      }),
+      canHibernate: async (tabId: string, check?: unknown) => {
+        checks.push({ tabId, check })
+        return !(opts.refuse ?? []).some((taskId) => tabId === `tab-${taskId}`)
+      },
+      idleCloseMs: async () =>
+        typeof opts.idleCloseMs === 'function' ? opts.idleCloseMs() : opts.idleCloseMs
+    }
+  }
+}
+
+test('idle-close: with the hub setting on, every chat idle past the window hibernates without pressure', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const hub = idleCloseHub({
+    idleCloseMs: 30 * 60_000,
+    candidates: [
+      { taskId: 'idle-10h', idleFor: 10 * 60 * 60_000 },
+      { taskId: 'idle-40m', idleFor: 40 * 60_000 },
+      { taskId: 'recent', idleFor: 5 * 60_000 },
+      { taskId: 'device-pinned', idleFor: 60 * 60_000 },
+      { taskId: 'hub-refused', idleFor: 60 * 60_000 }
+    ],
+    refuse: ['hub-refused']
+  })
+  const health = createComputerHealth({
+    managed: true,
+    config: { pinnedTaskIds: ['device-pinned'] },
+    isolation: null,
+    chats: () => [hub.source],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(health.snapshot().pressure).toBe(false)
+    expect(hub.hibernated.sort()).toEqual(['idle-10h', 'idle-40m'])
+    // The hub is asked with the reason and how long the chat has been idle, so it
+    // can re-check its own setting (and engagement) at the moment of hibernation.
+    expect(hub.checks).toContainEqual({
+      tabId: 'tab-idle-40m',
+      check: { reason: 'idle', idleForMs: 40 * 60_000 }
+    })
+    expect(hub.checks.map((c) => c.tabId)).not.toContain('tab-recent')
+    expect(hub.checks.map((c) => c.tabId)).not.toContain('tab-device-pinned')
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('idle-close: a chat hibernates once it crosses the window on a later sweep', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const hub = idleCloseHub({
+    idleCloseMs: 60_000,
+    candidates: [{ taskId: 'soon', idleFor: 30_000 }]
+  })
+  const health = createComputerHealth({
+    managed: true,
+    config: {},
+    isolation: null,
+    chats: () => [hub.source],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(hub.hibernated).toEqual([])
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(hub.hibernated).toEqual(['soon'])
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('idle-close: the window is the hub setting; idleBeforeHibernateMs neither lengthens nor shortens it', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const hub = idleCloseHub({
+    idleCloseMs: 60_000,
+    candidates: [
+      { taskId: 'past-window', idleFor: 2 * 60_000 },
+      { taskId: 'within-window', idleFor: 20_000 }
+    ]
+  })
+  const health = createComputerHealth({
+    managed: true,
+    config: { idleBeforeHibernateMs: 10_000 },
+    isolation: null,
+    chats: () => [hub.source],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(hub.hibernated).toEqual(['past-window'])
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('idle-close: off at the hub (or an older hub) hibernates nothing without pressure', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const off = idleCloseHub({ idleCloseMs: null, candidates: [{ taskId: 'a', idleFor: 3_600_000 }] })
+  const olderHub = idleChat([])
+  const health = createComputerHealth({
+    managed: true,
+    config: {},
+    isolation: null,
+    chats: () => [off.source, olderHub],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(off.hibernated).toEqual([])
+    expect(olderHub.inventory().hibernated).toBe(0)
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('idle-close applies on the desktop app computer too (unmanaged): it is the user setting, not memory management', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const hub = idleCloseHub({ idleCloseMs: 60_000, candidates: [{ taskId: 'a', idleFor: 3_600_000 }] })
+  const health = createComputerHealth({
+    managed: false,
+    config: {},
+    isolation: null,
+    chats: () => [hub.source],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(hub.hibernated).toEqual(['a'])
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('idle-close: agentResources.hibernate=false keeps this computer from hibernating any chat', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const hub = idleCloseHub({ idleCloseMs: 60_000, candidates: [{ taskId: 'a', idleFor: 3_600_000 }] })
+  const health = createComputerHealth({
+    managed: true,
+    config: { hibernate: false },
+    isolation: null,
+    chats: () => [hub.source],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(hub.hibernated).toEqual([])
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('idle-close: the setting turned off between the sweep and the hibernation stops it', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  let window: number | null = 60_000
+  const hub = idleCloseHub({
+    idleCloseMs: () => window,
+    candidates: [{ taskId: 'a', idleFor: 3_600_000 }]
+  })
+  // The hub's own re-check is what refuses; model it turning the setting off.
+  const source = {
+    ...hub.source,
+    canHibernate: async (tabId: string, check?: unknown) => {
+      window = null
+      return hub.source.canHibernate(tabId, check).then(() => false)
+    }
+  }
+  const health = createComputerHealth({
+    managed: true,
+    config: {},
+    isolation: null,
+    chats: () => [source],
+    sampleMemory: NO_PRESSURE,
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(hub.hibernated).toEqual([])
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
+
+test('memory reclamation asks the hub with reason pressure, also with idle-close off', async () => {
+  vi.useFakeTimers().setSystemTime(10 * 60 * 60_000)
+  const hub = idleCloseHub({ idleCloseMs: null, candidates: [{ taskId: 'a', idleFor: 3_600_000 }] })
+  const health = createComputerHealth({
+    managed: true,
+    config: {},
+    isolation: null,
+    chats: () => [hub.source],
+    sampleMemory: async () => ({
+      memory: { memoryTotal: 100, memoryAvailable: 1, memoryPressure: 0 },
+      nativePressure: false
+    }),
+    onAdmissionEvent() {},
+    log() {}
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hub.hibernated).toEqual(['a'])
+    expect(hub.checks).toEqual([{ tabId: 'tab-a', check: { reason: 'pressure' } }])
+  } finally {
+    health.stop()
+    vi.useRealTimers()
+  }
+})
