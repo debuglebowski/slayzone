@@ -18,6 +18,7 @@
     "@slayzone/icons": "workspace:*",
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tabs-state": "workspace:*",
+    "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",

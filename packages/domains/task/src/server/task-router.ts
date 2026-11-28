@@ -5,6 +5,7 @@ import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from './events'
 import {
   boardAsColumns,
+  SEARCH_TASKS_MAX_LIMIT,
   resetConversation,
   switchConversation,
   deleteSession,
@@ -40,6 +41,7 @@ import {
 import {
   getTaskBus,
   getTaskOps,
+  getTaskSearchScope,
   getTaskOnMutation,
   getTaskReserveWarmTaskId
 } from './task-router-deps'
@@ -540,6 +542,23 @@ export const taskRouter = router({
       return me(ctx)
         ? { ...rows, tasks: await overlayWorkspaces(ctx.db, rows.tasks, me(ctx)) }
         : rows
+    }),
+
+  // Title + description search on the hub, archived tasks included (a client's board
+  // may not hold them). Card rows, best match first; scoped to the caller's projects.
+  search: publicProcedure
+    .input(
+      z.object({
+        query: z.string().max(500),
+        projectId: z.string().optional(),
+        limit: z.number().int().min(1).max(SEARCH_TASKS_MAX_LIMIT).optional()
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const result = await ops().searchTasksOp(ctx.db, input, await getTaskSearchScope()(ctx))
+      return me(ctx)
+        ? { ...result, tasks: await overlayWorkspaces(ctx.db, result.tasks, me(ctx)) }
+        : result
     }),
 
   // --- Subscription ---

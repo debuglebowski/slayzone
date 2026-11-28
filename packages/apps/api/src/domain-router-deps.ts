@@ -13,7 +13,7 @@ import { setProjectsRouterDeps, setSharingRouterDeps } from '@slayzone/projects/
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setTagsRouterDeps } from '@slayzone/tags/server'
 import { detectChildRepos, setWorktreesRouterDeps } from '@slayzone/worktrees/hub'
-import { setMainAgentDeps } from '@slayzone/task/server'
+import { setMainAgentDeps, setTaskSearchScope } from '@slayzone/task/server'
 import { setHostCapabilitiesDeps } from '@slayzone/host-capabilities/server'
 import { setUsageRouterDeps } from '@slayzone/terminal/hub'
 import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
@@ -104,6 +104,8 @@ setAgentPanelsRouterDeps({ getHost: () => getAppDeps() })
 // `app.leaderboard` and `usageAnalytics` sum over the caller's projects only (T-17):
 // api's owner gate.
 setUsageAnalyticsRouterDeps({ ownedProjectIds })
+// `task.search` searches the caller's projects only, so its limit counts theirs.
+setTaskSearchScope((ctx) => ownedProjectIds(ctx as Parameters<typeof ownedProjectIds>[0]))
 
 // Who may manage a computer (T-19): api's `computer-access.ts` over the owner gate's
 // request, plus the caller's role, decided once per call (once per subscription for

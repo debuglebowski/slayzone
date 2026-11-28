@@ -22,7 +22,7 @@ export {
   setTaskMoveSessionsDelegate,
   type TaskMoveSessionsDelegate
 } from './ops/task-move-sessions'
-export { setTaskDeps, getTaskOps } from './task-router-deps'
+export { setTaskDeps, getTaskOps, setTaskSearchScope } from './task-router-deps'
 // `task.startMainAgent`'s repo-discovery seam (api wires worktrees' `detectChildRepos`).
 export {
   setMainAgentDeps,

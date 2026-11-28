@@ -65,6 +65,12 @@ export {
   type BoardData,
   type BoardRows
 } from './load-board-data.js'
+export {
+  searchTasksOp,
+  SEARCH_TASKS_MAX_LIMIT,
+  type SearchTasksInput,
+  type SearchTasksResult
+} from './search.js'
 export { resetConversation, switchConversation } from './task-conversations.js'
 // The session ledger lives on the computer running a task's agents (robustness
 // plan §9, P0): the hub reads it through the wired client and keeps only the

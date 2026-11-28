@@ -51,7 +51,9 @@ export const HUB_FEATURES = [
    *  `RestoreResult`); `app.backup.restoreStatus` says when it is back; `hub.describe`
    *  carries `dataGeneration`. Older hubs relaunched the desktop app and answered
    *  nothing. */
-  'hub-restart-restore'
+  'hub-restart-restore',
+  /** `task.search`: title + description search on the hub, archived tasks included. */
+  'task-search'
 ] as const
 export type HubFeature = (typeof HUB_FEATURES)[number]
 

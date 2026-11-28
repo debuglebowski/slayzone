@@ -823,6 +823,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.getSubTasks': 'tasks',
   'task.loadBoardData': 'tasks',
   'task.loadBoardRows': 'tasks',
+  'task.search': 'tasks',
   'task.onChanged': 'tasks',
   'task.onPathsChanged': 'tasks',
   'task.removeBlocker': 'tasks',

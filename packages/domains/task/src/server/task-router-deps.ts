@@ -53,3 +53,19 @@ export function getTaskReserveWarmTaskId(): ReserveWarmTaskId | undefined {
 export function getTaskBus(): TaskBus | undefined {
   return taskBus
 }
+
+/**
+ * The projects a request may search (`task.search`): the caller's own on a hub with
+ * login, null = no restriction. Wired by api (its access scope); unset (a bare router
+ * in a test): no restriction — the owner gate still cuts what the caller may not see.
+ */
+type SearchScope = (ctx: unknown) => Promise<string[] | null>
+let taskSearchScope: SearchScope = async () => null
+
+export function setTaskSearchScope(scope: SearchScope): void {
+  taskSearchScope = scope
+}
+
+export function getTaskSearchScope(): SearchScope {
+  return taskSearchScope
+}

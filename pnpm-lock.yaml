@@ -2438,6 +2438,9 @@ importers:
       '@slayzone/tabs-state':
         specifier: workspace:*
         version: link:../tabs-state
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts

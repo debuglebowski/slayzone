@@ -548,6 +548,12 @@ const OWN_TABS =
 // ── the policy ────────────────────────────────────────────────────────────────
 
 const taskRows = rows('id', 'task')
+/** `task.search`: its `tasks` cut to what the caller may see (the handler already
+ *  searched the caller's projects only; this cuts private tasks in them). */
+const searchHits: OutputFilter = async (data, scope) =>
+  isRecord(data) && Array.isArray(data.tasks)
+    ? { ...data, tasks: await taskRows(data.tasks, scope) }
+    : data
 const chatOpts = checked(tab('tabId'), task('taskId'))
 
 export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
@@ -1494,6 +1500,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.setBlockers': checked(task('taskId'), task('blockerTaskIds[]')),
   'task.loadBoardData': listed(board),
   'task.loadBoardRows': listed(board),
+  'task.search': listed(searchHits),
   'task.onChanged': streamed(on('taskId', 'task')),
   'task.onPathsChanged': streamed(on('taskId', 'taskRunner')),
 

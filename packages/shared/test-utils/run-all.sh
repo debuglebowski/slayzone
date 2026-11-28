@@ -1412,6 +1412,7 @@ run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 run_harness packages/domains/task/src/server/ops/mutation-scope.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-card-rows.test.ts
+run_harness packages/domains/task/src/server/ops/search.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
 # shared by the desktop task page and the hub's task.startMainAgent.
 run_harness packages/domains/task/src/shared/main-terminal.test.ts
@@ -1585,6 +1586,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tasks/src/client/useBoardRefresh.test.tsx \
   packages/domains/tasks/src/client/ProjectTaskLibrary.test.tsx \
   packages/domains/search/src/SearchDialog.algorithm.test.ts \
+  packages/domains/search/src/hub-task-hits.test.ts \
+  packages/domains/search/src/useHubTaskSearch.test.tsx \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/coalesced-invalidate.test.ts \

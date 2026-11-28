@@ -12,6 +12,7 @@
     "app.backup.restore output": "Gated: Settings reads the RestoreResult only when the hub has 'hub-restart-restore'; an older hub answers nothing and relaunches the app as before.",
     "hub.describe output": "dataGeneration added. The client reads it as unknown (transport hubDataGeneration.ts): a hub older than the field sends none, and the window simply never reloads for it.",
     "task.loadBoardData input": "An older hub's loadBoardData takes no input and ignores this one: it answers full rows, which this app reads as well — rows describe themselves (`isFullTaskRow`); a card row only makes the task page fetch the full one.",
-    "task.loadBoardRows input.rows dropped": "An older hub's zod input strips `rows` and answers full rows; this app reads both (see task.loadBoardData input)."
+    "task.loadBoardRows input.rows dropped": "An older hub's zod input strips `rows` and answers full rows; this app reads both (see task.loadBoardData input).",
+    "task.search added": "Gated: the app calls it only when the hub has the 'task-search' feature (hubHasFeature); on an older hub search covers the board it holds, as before."
   }
 }

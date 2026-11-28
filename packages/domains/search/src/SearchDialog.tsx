@@ -14,6 +14,8 @@ import {
 import { ChevronLeft } from 'lucide-react'
 import { useTrack } from '@slayzone/telemetry/client'
 import { useTRPC } from './client/trpc'
+import { appendHubTaskHits } from './hub-task-hits'
+import { useHubTaskSearch } from './useHubTaskSearch'
 import { useDialogStore } from '@slayzone/dialogs'
 import type { ActionId, FilterKind, SearchDialogProps, TaskTab } from './SearchDialog.types'
 import { FILTERS, MAX_RECENT } from './SearchDialog.constants'
@@ -146,7 +148,14 @@ function SearchPalette({
     [fzfLabel, fzfPath, search, items]
   )
 
-  const groupedResults = useMemo(() => groupResults(results), [results])
+  // The hub's search adds what the board search cannot find: a word in a description,
+  // a task the board does not hold (archived).
+  const showTasks = filter === 'all' || filter === 'tasks'
+  const hubTaskHits = useHubTaskSearch(search, showTasks && !page)
+  const groupedResults = useMemo(() => {
+    const grouped = groupResults(results)
+    return { ...grouped, tasks: appendHubTaskHits(grouped.tasks, hubTaskHits, projects) }
+  }, [results, hubTaskHits, projects])
 
   const recentItems = useMemo(() => {
     const taskMap = new Map(tasks.map((t) => [t.id, t]))

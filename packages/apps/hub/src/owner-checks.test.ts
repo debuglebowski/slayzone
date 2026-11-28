@@ -388,7 +388,9 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
     'projectGroups.delete': { id: B.projectGroup },
     'task.getBlockers': { taskId: B.task },
     // Names BOTH users' tasks: each caller must get back only its own row.
-    'task.loadBoardRows': { ids: [A.task, B.task] }
+    'task.loadBoardRows': { ids: [A.task, B.task] },
+    // Matches BOTH users' task titles (`<mark>_TASK_TITLE`): each caller gets its own.
+    'task.search': { query: '_TASK_TITLE' }
   })
   const listPaths = Object.entries(TRPC_OWNER_POLICY)
     .filter(([path, r]) => r.output && typeOf(path) !== 'subscription')
@@ -412,6 +414,7 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
     'task.getAll',
     'task.loadBoardData',
     'task.loadBoardRows',
+    'task.search',
     'tags.list',
     'tags.getAllTaskTagIds',
     'taskTerminals.listHibernatedSessions',
