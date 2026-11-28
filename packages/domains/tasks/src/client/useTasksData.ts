@@ -16,12 +16,18 @@ import {
 } from './trpc'
 import {
   CARD_BOARD_INPUT,
+  CARD_ROWS_INPUT,
+  decodeBoard,
   type BoardPart,
   type Task,
   type TaskStatus,
   type TasksChangedEvent
 } from '@slayzone/task-contracts'
-import { refreshTaskScopedQueries, settleDeleteTaskResult } from '@slayzone/task/client'
+import {
+  withBoardDecoding,
+  refreshTaskScopedQueries,
+  settleDeleteTaskResult
+} from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { useTabStore } from '@slayzone/tabs-state'
@@ -320,10 +326,12 @@ export function useTasksData(): UseTasksDataReturn {
   // (below). Refetching the whole board (MBs) on focus and on each task page's mount
   // was most of the traffic to the hub.
   const boardQ = useQuery(
-    trpc.task.loadBoardData.queryOptions(CARD_BOARD_INPUT, {
-      staleTime: Infinity,
-      refetchOnWindowFocus: false
-    })
+    withBoardDecoding(
+      trpc.task.loadBoardData.queryOptions(CARD_BOARD_INPUT, {
+        staleTime: Infinity,
+        refetchOnWindowFocus: false
+      })
+    )
   )
 
   // Rebuild the merged task/project/tag arrays + origin maps from the default
@@ -489,7 +497,7 @@ export function useTasksData(): UseTasksDataReturn {
         .query(CARD_BOARD_INPUT)
         .then((d) => {
           if (cancelled) return
-          extraBoardsRef.current.set(hubId, d as BoardData)
+          extraBoardsRef.current.set(hubId, decodeBoard(d) as BoardData)
           recomposeBoards()
         })
         .catch(fail)
@@ -515,7 +523,7 @@ export function useTasksData(): UseTasksDataReturn {
             ? undefined
             : ((await client.task.loadBoardRows.query({
                 ids: change.taskIds,
-                ...CARD_BOARD_INPUT
+                ...CARD_ROWS_INPUT
               })) as BoardRows)
       if (rows === undefined) return reload('too-many-rows')
       if (cancelled) return
@@ -646,7 +654,7 @@ export function useTasksData(): UseTasksDataReturn {
           ? [
               () =>
                 client.task.loadBoardData.query(CARD_BOARD_INPUT).then((data) => {
-                  extraBoardsRef.current.set(hub.id, data as BoardData)
+                  extraBoardsRef.current.set(hub.id, decodeBoard(data) as BoardData)
                   recomposeBoards()
                 }),
               () =>
@@ -730,7 +738,7 @@ export function useTasksData(): UseTasksDataReturn {
     }
     const startedAt = Date.now()
     const rows = await trpcClient.task.loadBoardRows
-      .query({ ids: taskIds, ...CARD_BOARD_INPUT })
+      .query({ ids: taskIds, ...CARD_ROWS_INPUT })
       .catch(() => null)
     if (!rows) {
       await Promise.all([reload('rows-failed'), refreshTabs([])])

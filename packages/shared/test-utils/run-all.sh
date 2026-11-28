@@ -1419,6 +1419,7 @@ run_harness packages/domains/task/src/server/agent-sessions-router.test.ts
 run_harness packages/domains/task-contracts/src/api/update.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/card-row.test.ts
+run_harness packages/domains/task-contracts/src/task-columns.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 # Render modes: video is inferred from its extension and stays binary (never read as text).
 run_harness packages/domains/task-contracts/src/render-modes.test.ts

@@ -4,6 +4,7 @@ import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from './events'
 import {
+  boardAsColumns,
   resetConversation,
   switchConversation,
   deleteSession,
@@ -105,7 +106,9 @@ const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
   }
 }
 
-const boardRowsInput = z.object({ rows: z.enum(['full', 'card']).optional() }).optional()
+const boardRowsInput = z
+  .object({ rows: z.enum(['full', 'card']).optional(), encoding: z.enum(['columns']).optional() })
+  .optional()
 
 export const taskRouter = router({
   computerMovePreview: publicProcedure
@@ -517,11 +520,13 @@ export const taskRouter = router({
   // --- Board ---
   // `rows: 'card'`: card rows (no page-only fields, `TASK_CARD_OMITTED_FIELDS`), a
   // fraction of the bytes; absent (older clients): full rows.
+  // `encoding: 'columns'`: the rows as `taskColumns` (each key once), `tasks` empty.
   loadBoardData: publicProcedure.input(boardRowsInput).query(async ({ ctx, input }) => {
-    const board = await ops().loadBoardDataOp(ctx.db, input ?? {})
-    return me(ctx)
-      ? { ...board, tasks: await overlayWorkspaces(ctx.db, board.tasks, me(ctx)) }
-      : board
+    const loaded = await ops().loadBoardDataOp(ctx.db, input ?? {})
+    const board = me(ctx)
+      ? { ...loaded, tasks: await overlayWorkspaces(ctx.db, loaded.tasks, me(ctx)) }
+      : loaded
+    return input?.encoding === 'columns' ? boardAsColumns(board) : board
   }),
   // A few rows of the board — what the renderer patches in when a
   // `notify.onTasksChanged` event names the changed tasks. Capped: an event

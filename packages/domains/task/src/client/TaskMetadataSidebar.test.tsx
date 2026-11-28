@@ -321,6 +321,10 @@ vi.mock('@slayzone/transport/client', () => ({
   useSubscription: () => undefined
 }))
 
+// This file's useQuery runs each queryFn synchronously; the board decoder is async
+// (its rows-from-columns decoding is tested in useBoardTasks.test.tsx).
+vi.mock('./boardQuery', () => ({ withBoardDecoding: <T,>(options: T): T => options }))
+
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (opts: { queryFn: () => unknown; select?: (d: never) => unknown }) => ({
     data: opts.select ? opts.select(opts.queryFn() as never) : opts.queryFn(),

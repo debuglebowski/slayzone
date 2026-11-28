@@ -63,3 +63,5 @@ export {
   type TaskPathView,
   type TaskPathSubject
 } from './useTaskPath'
+
+export { withBoardDecoding } from './boardQuery'

@@ -230,7 +230,7 @@ test.describe('tasks-changed: row patches + hidden-tab deferral', () => {
     // The app asks for card rows…
     const boardAsks = (await sent(mainWindow)).filter((m) => m.path === 'task.loadBoardData')
     expect(boardAsks.length).toBeGreaterThan(0)
-    for (const m of boardAsks) expect(m.input).toEqual({ rows: 'card' })
+    for (const m of boardAsks) expect(m.input).toEqual({ rows: 'card', encoding: 'columns' })
     // …which carry no description.
     const boardHasDescription = await mainWindow.evaluate(async (id) => {
       const rows = (await window

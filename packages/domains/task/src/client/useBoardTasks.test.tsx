@@ -96,3 +96,16 @@ it("a reader mounting later never refetches the default hub's board (pushes keep
   await new Promise((r) => setTimeout(r, 50))
   expect(loads).toBe(1)
 })
+
+it('a board sent as columns reaches readers as rows', async () => {
+  const t = createTrpcTest({
+    procedures: {
+      'task.loadBoardData': () => ({
+        ...board([]),
+        taskColumns: { keys: ['id', 'title', 'status'], values: [['c1', 'Col', 'todo']] }
+      })
+    }
+  })
+  const { result } = renderHook(() => useBoardTasks({ enabled: true }), { wrapper: t.wrapper })
+  await waitFor(() => expect(result.current).toEqual([{ id: 'c1', title: 'Col', status: 'todo' }]))
+})

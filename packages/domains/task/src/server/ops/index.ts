@@ -59,6 +59,7 @@ export { addBlockerOp } from './deps-add-blocker.js'
 export { removeBlockerOp } from './deps-remove-blocker.js'
 export { setBlockersOp } from './deps-set-blockers.js'
 export {
+  boardAsColumns,
   loadBoardDataOp,
   loadBoardRowsOp,
   type BoardData,

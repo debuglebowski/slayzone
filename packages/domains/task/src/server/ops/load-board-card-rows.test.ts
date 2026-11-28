@@ -38,3 +38,15 @@ test('patch rows follow the same choice', async () => {
   expect('description' in card).toBe(false)
   h.cleanup()
 })
+
+test('a columnar board carries the same rows as columns', async () => {
+  const { h, id } = await setup()
+  const { boardAsColumns } = await import('./load-board-data.js')
+  const { decodeTaskColumns } = await import('@slayzone/task-contracts')
+  const board = await loadBoardDataOp(h.slayDb, { rows: 'card' })
+  const cols = boardAsColumns(board)
+  expect(cols.tasks).toEqual([])
+  expect(decodeTaskColumns(cols.taskColumns!)).toEqual(board.tasks)
+  expect(decodeTaskColumns(cols.taskColumns!).find((t) => t.id === id)).toBeTruthy()
+  h.cleanup()
+})

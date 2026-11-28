@@ -53,8 +53,14 @@ export function isFullTaskRow(row: Task): boolean {
 }
 
 /**
- * The board input a client that reads card rows sends (`task.loadBoardData`,
- * `task.loadBoardRows`). One constant, so every reader of the board query shares
- * one cache entry (the input is part of its key).
+ * The `task.loadBoardRows` input of a client that reads card rows (and the row part
+ * of {@link CARD_BOARD_INPUT}).
  */
-export const CARD_BOARD_INPUT = { rows: 'card' } as const
+export const CARD_ROWS_INPUT = { rows: 'card' } as const
+
+/**
+ * The `task.loadBoardData` input of a client that reads card rows as columns
+ * (`decodeBoard` turns them back into rows). One constant, so every reader of the
+ * board query shares one cache entry (the input is part of its key).
+ */
+export const CARD_BOARD_INPUT = { rows: 'card', encoding: 'columns' } as const

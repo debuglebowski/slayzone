@@ -1,12 +1,15 @@
 import { projectNotInTransitSql } from '@slayzone/projects/server'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { toCardRow, type Task } from '@slayzone/task-contracts'
+import { encodeTaskColumns, toCardRow, type Task, type TaskColumns } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { attachPlacements, parseProject } from '@slayzone/projects/server'
 import { NOT_IN_TRANSIT, parseTasks, TASK_ORDER_BY } from './shared.js'
 
 export interface BoardData {
+  /** Empty when the rows came as {@link BoardData.taskColumns}. */
   tasks: Task[]
+  /** The rows as columns (`encoding: 'columns'`); absent: they are in `tasks`. */
+  taskColumns?: TaskColumns
   projects: Project[]
   tags: unknown[]
   taskTags: Record<string, string[]>
@@ -20,6 +23,15 @@ export interface BoardData {
  */
 export interface BoardRowsOptions {
   rows?: 'full' | 'card'
+}
+
+/**
+ * `board` with its rows as columns (`taskColumns`, `tasks` empty) — each key once
+ * instead of per row. Rows whose key sets differ stay as they are.
+ */
+export function boardAsColumns(board: BoardData): BoardData {
+  const taskColumns = encodeTaskColumns(board.tasks)
+  return taskColumns ? { ...board, tasks: [], taskColumns } : board
 }
 
 const shapeRows = (tasks: Task[], opts: BoardRowsOptions): Task[] =>

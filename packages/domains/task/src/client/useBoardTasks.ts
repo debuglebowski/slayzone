@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useFederationOrNull, useHubId } from '@slayzone/transport/client'
-import { CARD_BOARD_INPUT, type Task } from '@slayzone/task-contracts'
+import type { Task } from '@slayzone/task-contracts'
+import { CARD_BOARD_INPUT } from '@slayzone/task-contracts'
+import { withBoardDecoding } from './boardQuery'
 import { useTRPC } from './trpc'
 
 /**
@@ -29,12 +31,14 @@ export function useBoardTasks({ enabled }: { enabled: boolean }): Task[] | undef
   const defaultHubId = useFederationOrNull()?.defaultHubId
   const patched = hubId === null || hubId === defaultHubId
   const { data } = useQuery(
-    trpc.task.loadBoardData.queryOptions(CARD_BOARD_INPUT, {
-      enabled,
-      subscribed: enabled,
-      staleTime: patched ? Infinity : 30_000,
-      refetchOnWindowFocus: !patched
-    })
+    withBoardDecoding(
+      trpc.task.loadBoardData.queryOptions(CARD_BOARD_INPUT, {
+        enabled,
+        subscribed: enabled,
+        staleTime: patched ? Infinity : 30_000,
+        refetchOnWindowFocus: !patched
+      })
+    )
   )
   return data?.tasks
 }
