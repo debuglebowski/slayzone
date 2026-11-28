@@ -3,7 +3,8 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   ENDPOINT_IN_USE_LISTEN_ERRORS,
-  HOST_SUPERSEDED_EXIT_CODE,
+  HOST_SUPERSEDED_NOTICE,
+  LEGACY_HOST_SUPERSEDED_EXIT_CODE,
   UNIX_SOCKET_PATH_MAX_BYTES
 } from './computer-endpoints'
 export const COMPUTER_LAUNCHER = String.raw`#!/usr/bin/env node
@@ -15,8 +16,9 @@ const role = process.argv.includes('--session-host') ? 'host' : 'supervisor';
 const dir = path.join(root, 'computer-runtime'), pointer = path.join(dir, role === 'host' ? 'host-release.json' : 'supervisor.json');
 // Restart delay after consecutive failures: 2s doubling to 60s, reset once a child is healthy.
 const BACKOFF_MIN_MS = 2000, BACKOFF_MAX_MS = 60000, LOG_MAX_BYTES = 5 * 1024 * 1024;
-// A session host that found another live host on its control endpoint (computer-endpoints.ts).
-const SUPERSEDED_EXIT = ${HOST_SUPERSEDED_EXIT_CODE};
+// A session host that found another live host on its control endpoint (computer-endpoints.ts
+// HOST_SUPERSEDED_EXIT_CODE): it says so over IPC, then exits 0. A 0.44.0 host exited 79 instead.
+const SUPERSEDED_NOTICE = ${JSON.stringify(HOST_SUPERSEDED_NOTICE)}, LEGACY_SUPERSEDED_EXIT = ${LEGACY_HOST_SUPERSEDED_EXIT_CODE};
 // This root's endpoints, derived exactly as computer-endpoints.ts derives them.
 const endpointKey = crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 24);
 const endpointDir = process.platform === 'win32' ? null : path.join(os.tmpdir(), 'slay-computer-' + (process.getuid ? process.getuid() : 'user') + '-' + endpointKey);
@@ -146,7 +148,7 @@ function release(code) {
 function launch() {
   if (stopping) return;
   rotateHostLog();
-  const state = read(); let timedOut = false; healthy = false; probation = undefined;
+  const state = read(); let timedOut = false, superseded = false; healthy = false; probation = undefined;
   const startedAt = Date.now();
   child = cp.fork(state.current.entry, [role === 'host' ? '--session-host' : '--supervisor'], {env: {...process.env, SLAYZONE_NONINTERACTIVE:'1'}, stdio:['inherit','inherit','inherit','ipc']});
   status.state = 'running'; status.childPid = child.pid; status.nextLaunchAt = null;
@@ -159,16 +161,25 @@ function launch() {
     if (role === 'supervisor') child.kill('SIGKILL');
     else { child.kill('SIGTERM'); killTimer = setTimeout(() => child.kill('SIGKILL'), 10000); }
   }, 90000);
-  child.on('message', m => { if (m && m.type === 'supervisor-ready') {clearTimeout(timer); if (!probation) probation = setTimeout(() => {healthy = true; failures = 0;}, 60000);} });
+  child.on('message', m => { if (m && m.type === SUPERSEDED_NOTICE) superseded = true; if (m && m.type === 'supervisor-ready') {clearTimeout(timer); if (!probation) probation = setTimeout(() => {healthy = true; failures = 0;}, 60000);} });
   child.on('error', (err) => { log(state.current.version + ' child error: ' + (err && err.message)); });
   child.on('exit', (code, signal) => {
     clearTimeout(timer); clearTimeout(probation); clearTimeout(killTimer);
+    // A clean exit may still have its last IPC message (the superseded notice) unread:
+    // read the channel to its end first, bounded (a grandchild could hold it open).
+    if (code !== 0 || !child.connected) return exited(code, signal);
+    let settled = false;
+    const settle = () => { if (settled) return; settled = true; clearTimeout(drain); exited(code, signal); };
+    const drain = setTimeout(settle, 1000);
+    child.once('disconnect', settle);
+  });
+  function exited(code, signal) {
     const ended = state.current.version + ' pid=' + child.pid + ' exited code=' + code + ' signal=' + signal + ' after ' + (Date.now() - startedAt) + 'ms';
     status.childPid = null; status.lastExit = {version: state.current.version, code, signal, at: Date.now()};
     if (stopping) {log(ended + '; stopping'); release(code || 0); return;}
     // Another live host owns the endpoint: not a failure of this release (no
     // quarantine, no rollback), and nothing to restart. This launcher is redundant.
-    if (role === 'host' && code === SUPERSEDED_EXIT && !timedOut) {log(ended + '; superseded by a live session host, stopping'); stopping = true; release(0); return;}
+    if (role === 'host' && !timedOut && ((superseded && code === 0) || code === LEGACY_SUPERSEDED_EXIT)) {log(ended + '; superseded by a live session host, stopping'); stopping = true; release(0); return;}
     if (code === 75 && !timedOut) {log(ended + '; relaunching (requested)'); launch(); return;}
     const failed = timedOut || code !== 0;
     let rolledBack = '';
@@ -184,7 +195,7 @@ function launch() {
     log(ended + rolledBack + '; restarting in ' + delay + 'ms (failure ' + failures + ')');
     status.state = 'backoff'; status.nextLaunchAt = Date.now() + delay;
     nextTimer = setTimeout(launch, delay);
-  });
+  }
 }
 for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => {
   stopping = true; log('received ' + signal + ', stopping');

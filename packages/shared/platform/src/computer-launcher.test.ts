@@ -15,9 +15,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { ensureComputerLauncher } from './computer-launcher'
+import { PRE_LOCK_COMPUTER_LAUNCHER } from './computer-launcher.pre-lock.fixture'
 import {
   HOST_SUPERSEDED_EXIT_CODE,
+  HOST_SUPERSEDED_NOTICE,
   HostLauncherBusyError,
+  LEGACY_HOST_SUPERSEDED_EXIT_CODE,
   hostEndpointDir,
   hostLauncherEndpoint,
   prepareEndpointDir,
@@ -498,13 +501,59 @@ it.skipIf(process.platform === 'win32')(
   15_000
 )
 
-it('a child exiting superseded stops its launcher: exit 0, no restart, no quarantine, no rollback', async () => {
-  const root = launcherRoot('launcher-superseded-')
-  const host = hostEntry(root, `process.exit(${HOST_SUPERSEDED_EXIT_CODE})`)
+/** What a superseded session host does (cli-main.ts): the notice over IPC, then its exit code. */
+const SUPERSEDED_HOST = `process.send({type:${JSON.stringify(HOST_SUPERSEDED_NOTICE)}},()=>process.exit(${HOST_SUPERSEDED_EXIT_CODE}))`
+
+it.each([
+  ['current', SUPERSEDED_HOST, HOST_SUPERSEDED_EXIT_CODE],
+  ['0.44.0', `process.exit(${LEGACY_HOST_SUPERSEDED_EXIT_CODE})`, LEGACY_HOST_SUPERSEDED_EXIT_CODE]
+])(
+  'a %s child exiting superseded stops its launcher: exit 0, no restart, no quarantine, no rollback',
+  async (_, superseded, code) => {
+    const root = launcherRoot('launcher-superseded-')
+    const host = hostEntry(root, superseded)
+    const good = join(root, 'good.cjs')
+    writeFileSync(good, 'setInterval(()=>{},1000)')
+    ensureComputerLauncher(root, { entry: good, version: '1' })
+    const pointer = join(root, 'computer-runtime', 'host-release.json')
+    writeFileSync(
+      pointer,
+      JSON.stringify({
+        current: { entry: host.entry, version: '2' },
+        previous: { entry: good, version: '1' }
+      })
+    )
+    const launcher = track(hostLauncher(root))
+    expect(await exitOf(launcher)).toBe(0)
+    expect(host.boots()).toHaveLength(1)
+    expect(existsSync(join(root, 'computer-runtime', 'host-quarantine.json'))).toBe(false)
+    expect(JSON.parse(readFileSync(pointer, 'utf8')).current.version).toBe('2')
+    expect(computerLog(root)).toMatch(
+      new RegExp(
+        `host 2 pid=\\d+ exited code=${code} signal=null after \\d+ms; superseded by a live session host, stopping`
+      )
+    )
+    const dir = hostEndpointDir(root)
+    if (dir) expect(existsSync(dir)).toBe(false)
+  },
+  15_000
+)
+
+// 2026-11-28 on a remote computer upgraded from 0.43.0: two redundant launchers from
+// before the lock (pre-lock launch.cjs, still running in memory) restarted their
+// session host every ~2s for hours, each child dying on the live host's endpoint.
+// A superseded host must stop THAT launcher too — not be restarted forever, and
+// never get its release quarantined and rolled back.
+it('a pre-lock launcher (<= 0.43.0) stands down when its child is superseded: no restart, no quarantine, no rollback', async () => {
+  const root = launcherRoot('launcher-pre-lock-superseded-')
+  const host = hostEntry(root, SUPERSEDED_HOST)
   const good = join(root, 'good.cjs')
   writeFileSync(good, 'setInterval(()=>{},1000)')
   ensureComputerLauncher(root, { entry: good, version: '1' })
-  const pointer = join(root, 'computer-runtime', 'host-release.json')
+  const runtime = join(root, 'computer-runtime')
+  writeFileSync(join(runtime, 'launch.cjs'), PRE_LOCK_COMPUTER_LAUNCHER, { mode: 0o700 })
+  // As an upgrade leaves it: the new release current, the live host's previous.
+  const pointer = join(runtime, 'host-release.json')
   writeFileSync(
     pointer,
     JSON.stringify({
@@ -513,17 +562,15 @@ it('a child exiting superseded stops its launcher: exit 0, no restart, no quaran
     })
   )
   const launcher = track(hostLauncher(root))
-  expect(await exitOf(launcher)).toBe(0)
+  // It ends on its own (its fixed restart delay is 2s: well inside this wait).
+  const exited = await Promise.race([
+    exitOf(launcher),
+    new Promise<'running'>((r) => setTimeout(() => r('running'), 5000))
+  ])
+  expect(exited).toBe(0)
   expect(host.boots()).toHaveLength(1)
-  expect(existsSync(join(root, 'computer-runtime', 'host-quarantine.json'))).toBe(false)
+  expect(existsSync(join(runtime, 'host-quarantine.json'))).toBe(false)
   expect(JSON.parse(readFileSync(pointer, 'utf8')).current.version).toBe('2')
-  expect(computerLog(root)).toMatch(
-    new RegExp(
-      `host 2 pid=\\d+ exited code=${HOST_SUPERSEDED_EXIT_CODE} signal=null after \\d+ms; superseded by a live session host, stopping`
-    )
-  )
-  const dir = hostEndpointDir(root)
-  if (dir) expect(existsSync(dir)).toBe(false)
 }, 15_000)
 
 it('the host launcher reports its backoff, and launch-now cuts it short', async () => {

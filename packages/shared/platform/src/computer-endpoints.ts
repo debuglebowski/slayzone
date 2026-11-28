@@ -64,10 +64,25 @@ export function assertUnixSocketPathFits(
 
 /**
  * Exit code of a session host that found another live host on its control
- * endpoint. Its launcher stops (exit 0) instead of restarting it, and does not
- * count it as a failed release (no quarantine, no rollback).
+ * endpoint: 0, the one code EVERY parent it can have reads as "stop, do not restart,
+ * not a failed release" — each generation of launch.cjs (one from 0.43.0 or earlier,
+ * still running in memory on an upgraded computer, restarts any other code after 2s
+ * forever and first quarantines and rolls back the release), and the session-host
+ * service units (systemd `Restart=on-failure`, launchd `SuccessfulExit=false`).
+ * Before exiting it sends `HOST_SUPERSEDED_NOTICE` over IPC, so a current launcher
+ * logs the stop as superseded rather than as a plain exit.
+ *
+ * 2026-11-28: 0.44.0 exited 79 here. On a computer whose redundant pre-lock launchers
+ * restarted their EADDRINUSE-failing 0.42.0 hosts every 2s, an upgrade would have
+ * handed them a host they quarantined and rolled back, and restarted forever.
  */
-export const HOST_SUPERSEDED_EXIT_CODE = 79
+export const HOST_SUPERSEDED_EXIT_CODE = 0
+
+/** IPC message `{ type }` a superseded session host sends its launcher before exiting. */
+export const HOST_SUPERSEDED_NOTICE = 'host-superseded'
+
+/** What a 0.44.0 session host exited with when superseded; its launcher still honours it. */
+export const LEGACY_HOST_SUPERSEDED_EXIT_CODE = 79
 
 function endpointKey(root: string): string {
   return createHash('sha256').update(resolve(root)).digest('hex').slice(0, 24)

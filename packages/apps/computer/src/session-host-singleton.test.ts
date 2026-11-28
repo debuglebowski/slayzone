@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
+import { PRE_LOCK_COMPUTER_LAUNCHER } from '../../../shared/platform/src/computer-launcher.pre-lock.fixture'
 import {
   hostEndpointDir,
   hostLauncherEndpoint,
@@ -259,6 +260,61 @@ it('a host that finds a live host exits superseded before touching shared state'
   const control = await hostControl(root)
   control.close()
 })
+
+// 2026-11-28 on a remote computer upgraded from 0.43.0: two launchers from before the
+// lock kept restarting their session host every ~2s for hours, each child dying with
+// EADDRINUSE on the live host's control endpoint (79k errors, a 113 MB host.log). An
+// upgrade points them at the new release; its host, superseded, must end them —
+// without the old launcher quarantining it and rolling the pointer back.
+it.skipIf(!posix)(
+  'the real session host, superseded under a pre-lock launcher, ends that launcher: no restart loop, no rollback',
+  async () => {
+    const root = tempRoot('singleton-pre-lock-')
+    const live = await startSessionHost(root, config(root))
+    cleanup.push(() => live.stop())
+    const runtime = join(root, 'computer-runtime')
+    writeFileSync(
+      join(root, 'computer.config.json'),
+      JSON.stringify({
+        hubUrl: 'ws://127.0.0.1:1/computers',
+        computerName: 'singleton',
+        allowedRoots: [root]
+      })
+    )
+    const bin = join(import.meta.dirname, '..', 'dist', 'bin.cjs')
+    const previous = join(root, 'previous.cjs')
+    writeFileSync(previous, 'setInterval(()=>{},1000)')
+    writeFileSync(join(runtime, 'launch.cjs'), PRE_LOCK_COMPUTER_LAUNCHER, { mode: 0o700 })
+    const pointer = join(runtime, 'host-release.json')
+    const release = {
+      current: { entry: bin, version: '2.0.0' },
+      previous: { entry: previous, version: '1.0.0' }
+    }
+    writeFileSync(pointer, JSON.stringify(release))
+    // Only the root and the private temp base: never this machine's SlayZone wiring.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !k.startsWith('SLAYZONE_'))
+    )
+    const launcher = spawn(process.execPath, [join(runtime, 'launch.cjs'), '--session-host'], {
+      env: { ...env, SLAYZONE_ROOT: root },
+      stdio: 'ignore'
+    })
+    cleanup.push(() => launcher.kill('SIGKILL'))
+    // Its fixed restart delay is 2s: a launcher still up after 8s is looping.
+    const ended = await Promise.race([
+      once(launcher, 'exit').then(([code]) => code as number | null),
+      new Promise<'running'>((r) => setTimeout(() => r('running'), 8000))
+    ])
+    expect(ended).toBe(0)
+    expect(computerLog(root).match(/superseded by a live session host; exiting/g)).toHaveLength(1)
+    expect(existsSync(join(runtime, 'host-quarantine.json'))).toBe(false)
+    expect(JSON.parse(readFileSync(pointer, 'utf8'))).toEqual(release)
+    // The live host still serves.
+    const control = await hostControl(root)
+    control.close()
+  },
+  30_000
+)
 
 it.skipIf(!posix)(
   'a host that finds a stale control.sock (its owner died) takes it over',

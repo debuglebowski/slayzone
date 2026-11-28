@@ -53,7 +53,10 @@ import {
   sessionHostLog,
   startSessionHost
 } from './session-host'
-import { HOST_SUPERSEDED_EXIT_CODE } from '@slayzone/platform/computer-endpoints'
+import {
+  HOST_SUPERSEDED_EXIT_CODE,
+  HOST_SUPERSEDED_NOTICE
+} from '@slayzone/platform/computer-endpoints'
 import { runMain } from './startup-failure'
 import { startConnector } from './connector'
 import {
@@ -240,12 +243,17 @@ async function main(): Promise<void> {
       host = await startSessionHost(root, config, hostLog)
     } catch (err) {
       if (!(err instanceof HostSupersededError)) throw err
-      // Another host is live on this root: this one started nothing. Its launcher
-      // stops on this code instead of restarting it (no quarantine, no rollback).
+      // Another host is live on this root: this one started nothing. Exit 0 stops
+      // every parent it can have — any launch.cjs generation, a service unit — with
+      // no restart, no quarantine, no rollback; the notice tells a current launcher why.
       hostLog('superseded by a live session host; exiting', {
         endpoint: err.endpoint,
         livePid: err.live.pid,
         liveVersion: err.live.version
+      })
+      await new Promise<void>((resolve) => {
+        if (!process.send || !process.connected) return resolve()
+        process.send({ type: HOST_SUPERSEDED_NOTICE }, () => resolve())
       })
       process.exit(HOST_SUPERSEDED_EXIT_CODE)
     }
