@@ -5,7 +5,7 @@
  *   `<ROOT>/hub.config.json`    — operator-set: listenAddress, publicAddress, hubName,
  *                                 and the per-hub switches (requireLogin, enablePassword,
  *                                 enableSso, ssoTenantId, ssoClientId, enableProcesses,
- *                                 enableIntegrations, enableTelemetry — booleans; secrets
+ *                                 enableIntegrations, enableTelemetry, enablePush — booleans; secrets
  *                                 are env only)
  *   `<ROOT>/hub.state.json`     — system-generated: computerTransportSecret (the hub-auth
  *                                 secret; auto-generated on first boot, never typed in,
@@ -89,6 +89,8 @@ export interface HubConfig {
   enableIntegrations?: boolean
   /** Third-party telemetry (PostHog, Convex) in the web UI and connected apps. Default on. */
   enableTelemetry?: boolean
+  /** Push notifications to signed-in phones (Expo Push Service). Default on. */
+  enablePush?: boolean
   /**
    * STUN servers for WebRTC direct links, `host:port` each (env
    * `SLAYZONE_HUB_STUN_ADDRESSES` wins). Absent = Cloudflare's; `[]` = none.
@@ -103,7 +105,8 @@ export const HUB_CONFIG_SWITCH_KEYS = [
   'enableSso',
   'enableProcesses',
   'enableIntegrations',
-  'enableTelemetry'
+  'enableTelemetry',
+  'enablePush'
 ] as const satisfies ReadonlyArray<keyof HubConfig>
 
 /** Old `hub.config.json` keys that no longer mean anything — boot refuses them (rule B5). */

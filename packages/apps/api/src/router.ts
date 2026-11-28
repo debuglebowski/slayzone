@@ -72,6 +72,7 @@ import {
 import { computersRouter, type ComputersMounts } from '@slayzone/computers/server'
 import { settingsRouter, type SettingsMounts } from '@slayzone/settings-core/server'
 import { openTabsRouter, type OpenTabsMounts } from '@slayzone/tabs-state/server'
+import { pushRouter, type PushMounts } from '@slayzone/push/server'
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import {
   taskRouter,
@@ -111,6 +112,8 @@ export const appRouter = router({
   projects: projectsRouter,
   projectGroups: projectGroupsRouter,
   pty: ptyRouter,
+  // The signed-in user's phones for push notifications (plans/mobile-push-notifications.md).
+  push: pushRouter,
   computers: computersRouter,
   settings: settingsRouter,
   // Who else may reach a project, task or artifact (T-100, projects domain).
@@ -183,6 +186,7 @@ export type DomainRouterSlices = [
   AssertAppSlice<IsAppSlice<ProjectGroupsMounts>>,
   AssertAppSlice<IsAppSlice<ProjectsMounts>>,
   AssertAppSlice<IsAppSlice<PtyMounts>>,
+  AssertAppSlice<IsAppSlice<PushMounts>>,
   AssertAppSlice<IsAppSlice<SettingsMounts>>,
   AssertAppSlice<IsAppSlice<TagsMounts>>,
   AssertAppSlice<IsAppSlice<TaskMounts>>,

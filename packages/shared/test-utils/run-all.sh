@@ -377,6 +377,9 @@ run_harness packages/shared/workflow/src/columns.test.ts
 run_harness packages/domains/tabs-state/src/useTabStore.test.ts
 run_harness packages/domains/tabs-state/src/open-tabs-sync.test.ts
 run_harness packages/domains/tabs-state/src/server/router.test.ts
+run_harness packages/domains/push/src/server/router.test.ts
+run_harness packages/domains/push/src/server/attention-push.test.ts
+run_harness packages/domains/push/src/server/expo-client.test.ts
 # Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
 run_harness packages/domains/app-shell/src/client/explodeLayout.test.ts
 run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
@@ -626,6 +629,7 @@ run_harness packages/shared/db-migrations/src/v211-drop-hub-task-paths-migration
 run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migration.test.ts
 run_harness packages/shared/db-migrations/src/v215-computer-retirement-chains-reason-codes-migration.test.ts
 run_harness packages/shared/db-migrations/src/v226-open-task-tabs-migration.test.ts
+run_harness packages/shared/db-migrations/src/v228-push-devices-migration.test.ts
 run_harness packages/shared/db-migrations/src/v227-sharing-members-only-migration.test.ts
 run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts

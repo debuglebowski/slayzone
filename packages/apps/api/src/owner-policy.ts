@@ -540,6 +540,8 @@ const HUB_HOST = "the hub host's own CLI config (~/.claude, ~/.codex …), not a
 const BACKUP =
   "the hub's database backups (T-101, O-22): files on the hub's disk under its state directory, which no route serves (access.ts refuses that directory as a `path`); this answers their names and sizes only, and restore is refused off the desktop's own hub"
 const IMPORT = 'creates projects owned by the caller from a bundle the hub opens; reads nothing'
+const OWN_PHONES =
+  "the caller's own phones (`push_devices`, keyed by their user id): another user's device id reads and changes nothing"
 const OWN_TABS =
   "the caller's own open-tab rows (`open_task_tabs`, keyed by their user id): an id that is not one of them changes nothing"
 
@@ -1257,6 +1259,13 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     checked(group('groupId'), projOwner('projectIds[]')),
     groups
   ),
+
+  // ── push ── the caller's own phones (user_id = the caller). What a phone is later
+  // told is decided by the hub (the agent's tab owner), never by these calls.
+  'push.status': none(OWN_PHONES),
+  'push.register': none(OWN_PHONES),
+  'push.unregister': none(OWN_PHONES),
+  'push.setPrefs': none(OWN_PHONES),
 
   // ── pty ──
   'pty.agentsList': none(`${HUB_CONFIG}: agents`),

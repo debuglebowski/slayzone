@@ -12,6 +12,7 @@
  *                           B15 trusted proxies are IPs/CIDRs ·
  *                           B16 session retention is a whole number of days ·
  *                           B19 STUN servers are host:port authorities ·
+ *                           B21 the push service is a host[:port] authority ·
  *                           B20 the IdP-role settings parse (even with the mode off)
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
@@ -58,6 +59,7 @@ import {
   RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
   readHubSessionRetentionDays,
   readHubStunAddresses,
+  readHubPushServiceAddress,
   resolveHubSso,
   resolveHubSwitches,
   type HubSsoSettings,
@@ -172,7 +174,7 @@ export interface HubBootInput {
   devSqlEnabled: boolean
 }
 
-/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B19, B2 and B7, in that order. Throws on the first failure. */
+/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B19, B21, B2 and B7, in that order. Throws on the first failure. */
 export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const { env, host, supervised } = input
 
@@ -290,6 +292,11 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   // operator did not choose.
   const stun = readHubStunAddresses(env)
   if (!stun.ok) throw new HubBootRefusal('B19', stun.message)
+
+  // B21 — the push service is a host[:port] authority. A typo must not send
+  // notification text (task titles) to a host the operator did not choose.
+  const push = readHubPushServiceAddress(env)
+  if (!push.ok) throw new HubBootRefusal('B21', push.message)
 
   const sso = resolveHubSso(env)
   if (switches.requireLogin) {

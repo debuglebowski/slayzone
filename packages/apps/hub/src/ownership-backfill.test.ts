@@ -125,7 +125,8 @@ test('login on, no account yet: nothing assigned, nothing lost, logged', async (
     ownerUserId: null,
     projects: 0,
     settings: 0,
-    openTabs: 0
+    openTabs: 0,
+    pushDevices: 0
   })
   expect(owners(h)['p-legacy-1'], 'still unowned').toBe(null)
   expect(settingKeys(h), 'global viewState kept').toContain('viewState')
@@ -150,7 +151,8 @@ test('login on: unowned projects + pre-login user settings → first admin, once
     ownerUserId: admin.id,
     projects: 2,
     settings: 2,
-    openTabs: 1
+    openTabs: 1,
+    pushDevices: 0
   })
   expect(owners(h), 'unowned → admin; an owned project keeps its owner').toEqual({
     'p-legacy-1': admin.id,
@@ -187,7 +189,8 @@ test('login on: unowned projects + pre-login user settings → first admin, once
   expect(line.detail, 'counts in detail').toEqual({
     projectCount: 2,
     settingCount: 2,
-    openTabCount: 1
+    openTabCount: 1,
+    pushDeviceCount: 0
   })
 
   // Second boot: nothing left, nothing logged.
@@ -198,7 +201,8 @@ test('login on: unowned projects + pre-login user settings → first admin, once
     ownerUserId: admin.id,
     projects: 0,
     settings: 0,
-    openTabs: 0
+    openTabs: 0,
+    pushDevices: 0
   })
   expect(again.lines.length, 'no audit line when nothing changed').toBe(0)
 })

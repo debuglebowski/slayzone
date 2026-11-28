@@ -1,6 +1,8 @@
 # Mobile push notifications
 
-Status: plan. Nothing built yet.
+Status: hub side built (`@slayzone/push`, migration v228, switch
+`SLAYZONE_HUB_ENABLE_PUSH`, boot rule B21). EAS project, mobile app, clearing,
+summary extension and redaction not started.
 
 ## Outcome
 
@@ -62,18 +64,21 @@ hub ──POST exp.host/--/api/v2/push/send──▶ Expo ──▶ APNs ──�
      choice.
    - Foreground: no banner if that task is on screen.
 3. **Hub**
-   - Table `push_devices (user_id, device_id, expo_token, prefs, created_at,
-     last_ok_at)` in the auth DB. tRPC `push.register / unregister /
-     updatePrefs`, bearer auth as today.
-   - Recipients: users who can see the task (`user-access.ts`), not every user.
+   - Table `push_devices (user_id, device_id, token, hub_ref, notify_ready,
+     notify_errors, created_at, last_ok_at)` in the data DB (v228). tRPC
+     `push.status / register / unregister / setPrefs`, own rows only. `hub_ref`
+     is the phone's name for the hub, echoed in `data` for tap routing.
+   - Recipients: the agent's owner — `terminal_tabs.owner_user_id`, else the
+     project owner — plus phones registered without login (user '').
    - Sender module beside the attention consumer: build payload, POST to Expo
      (batches of ≤ 100), check receipts later, delete the device on
      `DeviceNotRegistered`. Debounce per task (≥ 30 s).
    - Diagnostics event per send (`push.sent` / `push.failed`), like
      `task.attention_transition`.
    - Hub switch `SLAYZONE_HUB_ENABLE_PUSH` (0/1, `hub.config.json` key,
-     default 1). Expo endpoint as `SLAYZONE_PUSH_SERVICE_ADDRESS` (authority
-     only, env rules 3/5; default `exp.host`) so tests point at a fake.
+     default 1; reported in `hub.describe` switches). Expo endpoint as
+     `SLAYZONE_HUB_PUSH_SERVICE_ADDRESS` (authority only, env rules 3/5; default
+     `exp.host`; malformed refuses boot, B21) so tests point at a fake.
 4. **Clearing**
    - When `needs_attention` clears (opened anywhere, or agent resumes), send a
      data-only push; the app removes the delivered notification for that task

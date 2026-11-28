@@ -35,6 +35,7 @@
     "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings-core": "workspace:*",
+    "@slayzone/push": "workspace:*",
     "@slayzone/tabs-state": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",

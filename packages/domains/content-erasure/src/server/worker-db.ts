@@ -482,13 +482,14 @@ function commit(db: Database, p: { id: string }): ErasureManifest {
     if (m.scope.kind === 'user') {
       db.prepare('DELETE FROM user_settings WHERE user_id=?').run(m.scope.userId)
       // What others shared with them (T-100): the account is gone from every share.
-      // Their open tabs too: per user, like their settings.
+      // Their open tabs and phones too: per user, like their settings.
       for (const table of [
         'project_members',
         'task_grants',
         'artifact_grants',
         'task_workspaces',
-        'open_task_tabs'
+        'open_task_tabs',
+        'push_devices'
       ])
         if (exists(db, table))
           db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(m.scope.userId)

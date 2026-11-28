@@ -142,6 +142,8 @@ export const SECURITY_EVENTS = [
   'automation.run_command',
   /** T-06: hub-local file/git/gh/exec refused ("connect a computer", `NO_COMPUTER_CONNECTED`). */
   'hub.local_exec',
+  /** A phone's push registration refused (`SLAYZONE_HUB_ENABLE_PUSH=0`, `HUB_PUSH_DISABLED`). */
+  'push.register',
   // Reserved for later work — named now so those call sites cannot invent names.
   /** T-07: an integration connect, provider call or sign-in start refused. */
   'integration.connect',

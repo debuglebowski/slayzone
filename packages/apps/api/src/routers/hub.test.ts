@@ -39,7 +39,8 @@ test('hub.describe degrades gracefully with no deps wired (local sidecar)', asyn
     enableSso: false,
     enableProcesses: true,
     enableIntegrations: true,
-    enableTelemetry: true
+    enableTelemetry: true,
+    enablePush: true
   })
   expect(d.label).toBeNull()
   // This hub reads compact (base64) bytes in inputs, so a client may send them so;
@@ -90,7 +91,8 @@ test('hub.describe reflects the wired deps (authRequired + every switch); never 
     enableSso: true,
     enableProcesses: false,
     enableIntegrations: false,
-    enableTelemetry: false
+    enableTelemetry: false,
+    enablePush: false
   }
   setHubDescribeDeps({ getAuthRequired: () => true, getSwitches: () => switches })
   const d = await caller.describe()
@@ -108,7 +110,8 @@ test('hub.describe reflects the wired deps (authRequired + every switch); never 
       enableSso: false,
       enableProcesses: true,
       enableIntegrations: true,
-      enableTelemetry: true
+      enableTelemetry: true,
+      enablePush: true
     })
   })
 })

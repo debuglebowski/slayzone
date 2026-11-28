@@ -90,7 +90,14 @@ import {
   setTaskSessionPromptReader,
   agentSessionsEvents
 } from '@slayzone/task/server'
-import { readHubSessionRetentionDays, readHubStunAddresses } from '@slayzone/platform/hub-switches'
+import {
+  DEFAULT_HUB_PUSH_SERVICE_ADDRESS,
+  readHubPushServiceAddress,
+  readHubSessionRetentionDays,
+  readHubStunAddresses
+} from '@slayzone/platform/hub-switches'
+import { hubPushEnabled } from '@slayzone/platform/hub-switch-refusal'
+import { createAttentionPush, createExpoPushClient } from '@slayzone/push/server'
 import { createChatCompaction } from './chat-compaction'
 import { wireTerminalDisposal } from './terminal-disposal'
 import {
@@ -856,6 +863,25 @@ export function composeServer(opts: {
   // — the host's onGlobalStateChange registers on ITS bundled pty-manager copy,
   // whose session map is empty post-inversion. Transitions fire in THIS process
   // (the pty runtime lives here), so the consumers must listen here too.
+  // Phone notifications on the attention edge below. The address passed boot (B21).
+  const pushService = readHubPushServiceAddress()
+  const attentionPush = createAttentionPush({
+    db,
+    client: createExpoPushClient({
+      address: pushService.ok ? pushService.address : DEFAULT_HUB_PUSH_SERVICE_ADDRESS
+    }),
+    enabled: () => hubPushEnabled(),
+    record: (e) =>
+      recordDiagnosticEvent({
+        level: e.level,
+        source: 'task',
+        event: e.event,
+        taskId: e.taskId ?? null,
+        message: e.message,
+        payload: e.payload
+      })
+  })
+
   onGlobalStateChange(async (sessionId, newState, oldState) => {
     await handleTerminalStateChange(
       db,
@@ -893,6 +919,11 @@ export function composeServer(opts: {
       })
       // `needs_attention` lives on this task's row only.
       if (changed) notifyTasksChanged({ taskIds: [sessionId.split(':')[0]] })
+      // Set (not cleared — that is only `→ running`): the agent's owner's phones are
+      // told (plans/mobile-push-notifications.md). Never throws; recorded below.
+      if (changed && (newState === 'idle' || newState === 'error')) {
+        void attentionPush.onAttentionSet(sessionId, newState)
+      }
     } catch (err) {
       recordDiagnosticEvent({
         level: 'error',

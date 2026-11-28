@@ -64,7 +64,8 @@ function healthState(overrides: Partial<HealthState>): HealthState {
       enableSso: false,
       enableProcesses: true,
       enableIntegrations: true,
-      enableTelemetry: true
+      enableTelemetry: true,
+      enablePush: true
     },
     reachable: false,
     appSignIn: { microsoft: false },

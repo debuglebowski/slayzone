@@ -906,6 +906,25 @@ test('B19: unset, empty and host:port lists boot; anything else refuses, naming 
   }
 })
 
+console.log('\nB21: the push service address')
+console.log('─'.repeat(40))
+
+test('B21: unset and host[:port] boot; a scheme, path or blank refuses, naming the value', () => {
+  for (const v of [undefined, 'exp.host', '127.0.0.1:4100', 'push.example.com:8443']) {
+    assertBoots({ env: v === undefined ? {} : { SLAYZONE_HUB_PUSH_SERVICE_ADDRESS: v } })
+  }
+  for (const v of ['https://exp.host', 'exp.host/--/api', '']) {
+    assertRefuses(
+      { env: { SLAYZONE_HUB_PUSH_SERVICE_ADDRESS: v } },
+      'SLAYZONE_HUB_PUSH_SERVICE_ADDRESS',
+      v
+    )
+    expect(refusedRule({ env: { SLAYZONE_HUB_PUSH_SERVICE_ADDRESS: v } }), `'${v}' is B21`).toBe(
+      'B21'
+    )
+  }
+})
+
 console.log('\nhub boot rules: B7 — a generic OpenID issuer')
 console.log('─'.repeat(40))
 

@@ -120,6 +120,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_ENABLE_PROCESSES: 'infra',
   SLAYZONE_HUB_ENABLE_INTEGRATIONS: 'infra',
   SLAYZONE_HUB_ENABLE_TELEMETRY: 'infra',
+  SLAYZONE_HUB_ENABLE_PUSH: 'infra',
   SLAYZONE_HUB_SSO_TENANT_ID: 'infra',
   SLAYZONE_HUB_SSO_CLIENT_ID: 'infra',
   // Paths to the Entra client certificate and its private key, and the MFA switch.
@@ -146,6 +147,8 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // a client-named one (T-99). Hub process config, set by the desktop app for its hub.
   SLAYZONE_HUB_CONVEX_ADDRESS: 'infra',
   SLAYZONE_HUB_STUN_ADDRESSES: 'infra',
+  // Hub-only; the push service (Expo by default) phone notifications go through.
+  SLAYZONE_HUB_PUSH_SERVICE_ADDRESS: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_COMPUTER_AUTO_UPGRADE: 'infra',
   SLAYZONE_COMPUTER_UPGRADE_WORKER: 'infra',

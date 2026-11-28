@@ -6057,6 +6057,29 @@ export const migrations: Migration[] = [
         ALTER TABLE artifact_grants ADD COLUMN opened_at TEXT;
       `)
     }
+  },
+  {
+    // The phones each user signed in with on this hub, for push notifications
+    // (`@slayzone/push`): the Expo push token, the phone's own name for this hub
+    // (`hub_ref`, echoed back so a tap opens the right hub) and which kinds it wants.
+    // user_id '' = a hub without login. A token belongs to one phone, so one row at
+    // most holds it (a phone that signs in as someone else takes it over).
+    version: 228,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE push_devices (
+          user_id       TEXT NOT NULL,
+          device_id     TEXT NOT NULL,
+          token         TEXT NOT NULL UNIQUE,
+          hub_ref       TEXT NOT NULL,
+          notify_ready  INTEGER NOT NULL DEFAULT 1,
+          notify_errors INTEGER NOT NULL DEFAULT 1,
+          created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          last_ok_at    TEXT,
+          PRIMARY KEY (user_id, device_id)
+        );
+      `)
+    }
   }
 ]
 

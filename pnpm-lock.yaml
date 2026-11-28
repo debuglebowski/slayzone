@@ -306,6 +306,9 @@ importers:
       '@slayzone/projects-contracts':
         specifier: workspace:*
         version: link:../../domains/projects-contracts
+      '@slayzone/push':
+        specifier: workspace:*
+        version: link:../../domains/push
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../../domains/settings
@@ -954,6 +957,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/push':
+        specifier: workspace:*
+        version: link:../../domains/push
       '@slayzone/settings-core':
         specifier: workspace:*
         version: link:../../shared/settings-core
@@ -2395,6 +2401,25 @@ importers:
       '@slayzone/workflow':
         specifier: workspace:*
         version: link:../../shared/workflow
+
+  packages/domains/push:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
+      '@trpc/server':
+        specifier: ^11.24.0
+        version: 11.24.0(patch_hash=692768755fd726c4b994698b0b889c88cf5efd4e20c4b3a27d80fc0b8736465f)(@types/express@5.0.6)(@types/ws@8.18.2)(typescript@7.1.0-dev.20261125.1)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
 
   packages/domains/search:
     dependencies:

@@ -14,6 +14,8 @@
  *                                       no account with a generated password (T-10).
  *   SLAYZONE_HUB_ENABLE_TELEMETRY=0     no Convex sign-in start (the hub's only Convex
  *                                       call), even with a Convex address set.
+ *   SLAYZONE_HUB_ENABLE_PUSH=0          no phone registration for push notifications, and
+ *                                       nothing sent to the push service.
  *
  * ONE SHAPE FOR EVERY REFUSAL. A chokepoint calls `assertHub*Enabled`, which writes one
  * `denied` audit line and throws {@link HubSwitchedOffError}: a stable `code` and one
@@ -43,6 +45,7 @@ export type HubSwitchedOffCode =
   | 'HUB_CONVEX_NOT_CONFIGURED'
   | 'HUB_CONVEX_MISMATCH'
   | 'HUB_TELEMETRY_DISABLED'
+  | 'HUB_PUSH_DISABLED'
 
 const MESSAGES: Record<HubSwitchedOffCode, string> = {
   HUB_PROCESSES_DISABLED:
@@ -59,7 +62,8 @@ const MESSAGES: Record<HubSwitchedOffCode, string> = {
     `(${HUB_CONVEX_ADDRESS_ENV}); the request named another.`,
   HUB_TELEMETRY_DISABLED:
     'GitHub sign-in (leaderboard, feedback) is off on this hub: third-party telemetry is ' +
-    `switched off (${HUB_SWITCH_ENV.enableTelemetry}=0).`
+    `switched off (${HUB_SWITCH_ENV.enableTelemetry}=0).`,
+  HUB_PUSH_DISABLED: `Push notifications are switched off on this hub (${HUB_SWITCH_ENV.enablePush}=0).`
 }
 
 const VARIABLES: Record<HubSwitchedOffCode, string> = {
@@ -69,7 +73,8 @@ const VARIABLES: Record<HubSwitchedOffCode, string> = {
   HUB_PASSWORD_DISABLED: HUB_SWITCH_ENV.enablePassword,
   HUB_CONVEX_NOT_CONFIGURED: HUB_CONVEX_ADDRESS_ENV,
   HUB_CONVEX_MISMATCH: HUB_CONVEX_ADDRESS_ENV,
-  HUB_TELEMETRY_DISABLED: HUB_SWITCH_ENV.enableTelemetry
+  HUB_TELEMETRY_DISABLED: HUB_SWITCH_ENV.enableTelemetry,
+  HUB_PUSH_DISABLED: HUB_SWITCH_ENV.enablePush
 }
 
 /** Work refused because a hub switch is `0`. */
@@ -113,6 +118,11 @@ export function hubTelemetryEnabled(env: NodeJS.ProcessEnv = process.env): boole
   return resolveHubSwitches(env).enableTelemetry
 }
 
+/** `SLAYZONE_HUB_ENABLE_PUSH` — may this hub send push notifications to phones? */
+export function hubPushEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveHubSwitches(env).enablePush
+}
+
 /** `SLAYZONE_HUB_ENABLE_PASSWORD` — may anyone sign in, or get an account, with a password? */
 export function hubPasswordEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveHubSwitches(env).enablePassword
@@ -131,6 +141,7 @@ function refuse(
     | 'automation.run_command'
     | 'integration.connect'
     | 'hub.local_exec'
+    | 'push.register'
     | HubPasswordEvent,
   code: HubSwitchedOffCode,
   refusal: HubRefusal
@@ -162,6 +173,14 @@ export function assertHubProcessesEnabled(
  */
 export function assertHubIntegrationsEnabled(refusal: HubRefusal): void {
   if (!hubIntegrationsEnabled()) refuse('integration.connect', 'HUB_INTEGRATIONS_DISABLED', refusal)
+}
+
+/**
+ * Throw {@link HubSwitchedOffError} (`HUB_PUSH_DISABLED`) after one `push.register`
+ * audit line when `SLAYZONE_HUB_ENABLE_PUSH=0`.
+ */
+export function assertHubPushEnabled(refusal: HubRefusal): void {
+  if (!hubPushEnabled()) refuse('push.register', 'HUB_PUSH_DISABLED', refusal)
 }
 
 /**

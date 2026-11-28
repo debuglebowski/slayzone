@@ -44,7 +44,8 @@ export const HUB_SWITCH_ENV = {
   enableSso: 'SLAYZONE_HUB_ENABLE_SSO',
   enableProcesses: 'SLAYZONE_HUB_ENABLE_PROCESSES',
   enableIntegrations: 'SLAYZONE_HUB_ENABLE_INTEGRATIONS',
-  enableTelemetry: 'SLAYZONE_HUB_ENABLE_TELEMETRY'
+  enableTelemetry: 'SLAYZONE_HUB_ENABLE_TELEMETRY',
+  enablePush: 'SLAYZONE_HUB_ENABLE_PUSH'
 } as const
 
 export type HubSwitchKey = keyof typeof HUB_SWITCH_ENV
@@ -59,7 +60,8 @@ export const HUB_SWITCH_DEFAULTS: Readonly<HubSwitches> = {
   enableSso: false,
   enableProcesses: true,
   enableIntegrations: true,
-  enableTelemetry: true
+  enableTelemetry: true,
+  enablePush: true
 }
 
 /**
@@ -181,6 +183,34 @@ export const HUB_CONVEX_ADDRESS_ENV = 'SLAYZONE_HUB_CONVEX_ADDRESS'
  */
 export const HUB_STUN_ADDRESSES_ENV = 'SLAYZONE_HUB_STUN_ADDRESSES'
 
+/**
+ * The push service the hub sends phone notifications through (`host[:port]`, no
+ * scheme — loopback → http, else https): the Expo Push Service by default. Only tests
+ * and a self-run Expo-compatible relay set it. A malformed value refuses boot (rule
+ * B21): a typo must not send notification text to a host nobody chose.
+ */
+export const HUB_PUSH_SERVICE_ADDRESS_ENV = 'SLAYZONE_HUB_PUSH_SERVICE_ADDRESS'
+
+/** Expo's push service. */
+export const DEFAULT_HUB_PUSH_SERVICE_ADDRESS = 'exp.host'
+
+export function readHubPushServiceAddress(
+  env: NodeJS.ProcessEnv = process.env
+): { ok: true; address: string } | { ok: false; message: string } {
+  const raw = env[HUB_PUSH_SERVICE_ADDRESS_ENV]
+  if (raw === undefined) return { ok: true, address: DEFAULT_HUB_PUSH_SERVICE_ADDRESS }
+  const address = raw.trim()
+  if (!isBareAuthority(address)) {
+    return {
+      ok: false,
+      message:
+        `[slayzone] ${HUB_PUSH_SERVICE_ADDRESS_ENV} must be a host[:port] authority ` +
+        `(no scheme, no path), got '${raw}'.`
+    }
+  }
+  return { ok: true, address }
+}
+
 /** Cloudflare's public STUN server. */
 export const DEFAULT_HUB_STUN_ADDRESSES: readonly string[] = ['stun.cloudflare.com:3478']
 
@@ -236,7 +266,8 @@ export const HUB_PROCESS_ENV: readonly string[] = [
   HUB_TRUSTED_PROXIES_ENV,
   HUB_SESSION_RETENTION_DAYS_ENV,
   HUB_CONVEX_ADDRESS_ENV,
-  HUB_STUN_ADDRESSES_ENV
+  HUB_STUN_ADDRESSES_ENV,
+  HUB_PUSH_SERVICE_ADDRESS_ENV
 ]
 
 /** Thrown for a malformed switch value (rule B4). */

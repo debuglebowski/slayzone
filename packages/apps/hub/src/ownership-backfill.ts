@@ -31,6 +31,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
 import { assignUnownedProjects } from '@slayzone/projects/server'
 import { adoptLegacyUserSettings } from '@slayzone/settings-core/server'
+import { adoptLegacyPushDevices } from '@slayzone/push/server'
 import { adoptLegacyOpenTabs } from '@slayzone/tabs-state/server'
 
 export interface OwnershipBackfillResult {
@@ -42,6 +43,8 @@ export interface OwnershipBackfillResult {
   settings: number
   /** Open task tabs moved from the no-login user ('') to the owner. */
   openTabs: number
+  /** Phones registered for push without login ('') moved to the owner. */
+  pushDevices: number
 }
 
 export async function backfillOwnership(opts: {
@@ -83,24 +86,30 @@ export async function backfillOwnership(opts: {
           'they go to the first admin at the next boot that has one'
       )
     }
-    return { ownerUserId: null, projects: 0, settings: 0, openTabs: 0 }
+    return { ownerUserId: null, projects: 0, settings: 0, openTabs: 0, pushDevices: 0 }
   }
 
   const projects = await assignUnownedProjects(db, owner)
   const settings = await adoptLegacyUserSettings(db, owner)
   const openTabs = await adoptLegacyOpenTabs(db, owner)
-  if (projects > 0 || settings > 0 || openTabs > 0) {
+  const pushDevices = await adoptLegacyPushDevices(db, owner)
+  if (projects > 0 || settings > 0 || openTabs > 0 || pushDevices > 0) {
     securityEvent({
       event: 'project.owner.backfill',
       outcome: 'success',
       actor: null,
       targetKind: 'user',
       targetId: owner,
-      detail: { projectCount: projects, settingCount: settings, openTabCount: openTabs }
+      detail: {
+        projectCount: projects,
+        settingCount: settings,
+        openTabCount: openTabs,
+        pushDeviceCount: pushDevices
+      }
     })
     log?.(
-      `[ownership] assigned ${projects} unowned project(s), ${settings} setting(s) and ${openTabs} open tab(s) to the first admin`
+      `[ownership] assigned ${projects} unowned project(s), ${settings} setting(s), ${openTabs} open tab(s) and ${pushDevices} phone(s) to the first admin`
     )
   }
-  return { ownerUserId: owner, projects, settings, openTabs }
+  return { ownerUserId: owner, projects, settings, openTabs, pushDevices }
 }

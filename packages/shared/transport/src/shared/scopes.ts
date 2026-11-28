@@ -698,6 +698,13 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'projects.relocate': 'never',
   'projects.cloneFolder': 'never',
   'projects.uploadIcon': 'tasks',
+  // The caller's own phones for push notifications. Registering one makes the hub
+  // send it the titles of tasks whose agents are the caller's — what a read session
+  // already sees — so every call is `read`.
+  'push.register': 'read',
+  'push.setPrefs': 'read',
+  'push.status': 'read',
+  'push.unregister': 'read',
   'pty.ackEnsureAlive': 'agent',
   'pty.agentsCreate': 'never',
   'pty.agentsDelete': 'never',
